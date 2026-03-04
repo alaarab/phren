@@ -14,9 +14,7 @@
 
 <br>
 
-A git repo that gives Claude persistent context across sessions and machines.<br>
-Project knowledge, lessons learned, slash commands, task queues, all in markdown files you own.<br>
-Fork it, clone it to `~/.cortex`, install the package. Claude knows your projects from session one.
+A git repo that gives Claude persistent context across sessions and machines. Project knowledge, lessons learned, slash commands, task queues: all in markdown files you own. Clone it to `~/.cortex`, install the package, and Claude knows your projects from session one.
 
 <br>
 </div>
@@ -33,7 +31,7 @@ With the MCP server, Claude starts lean. It searches your knowledge base when it
 
 ### Each machine only sees what it needs to
 
-Cortex uses git sparse-checkout under the hood. Each machine has a profile that lists which projects it should see — work machine gets work projects, everything else stays off disk. No leakage between environments.
+Cortex uses git sparse-checkout under the hood. Each machine has a profile that lists which projects it should see: the work machine gets work projects, everything else stays off disk. No leakage between environments.
 
 ### You stop losing what you learned
 
@@ -61,7 +59,7 @@ Push to GitHub to sync across machines. On a new machine, clone and run link.sh.
 
 ```bash
 # 1. Use the starter template to create your knowledge base
-#    → github.com/alaarab/cortex-starter — click "Use this template"
+#    → github.com/alaarab/cortex-starter (click "Use this template")
 #    → then clone your copy to ~/.cortex
 git clone git@github.com:YOUR_USERNAME/cortex-starter.git ~/.cortex
 
@@ -105,7 +103,7 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 | `backlog.md` | Task queue that persists across sessions |
 | `.claude/skills/` | Project-specific slash commands |
 
-`summary.md` is the always-on card, five lines that keep Claude oriented. `CLAUDE.md` is loaded when you're actively working in that project. With the MCP server, everything else is retrieved on demand.
+`summary.md` is always loaded, five lines that keep Claude oriented without cost. `CLAUDE.md` is loaded when you're actively working in that project. With the MCP server, everything else is retrieved on demand.
 
 ---
 

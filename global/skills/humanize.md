@@ -163,7 +163,16 @@ AI averages 18.7 chars per identifier. Humans average 8.3. If you see `activeReg
 - Excessive interface/type definitions for one-off use
 
 ### Commit messages
-Don't write "Updated files" or "Refactored code for better maintainability." Say what you actually did: "fix: checkbox click triggers row selection."
+Conventional Commits format (`feat:`, `chore:`, `fix:`, `refactor:`) is an AI tell. Real commits just say what happened.
+
+| AI | Human |
+|----|-------|
+| `feat: add user authentication system` | `add login with JWT` |
+| `chore: update dependencies` | `bump express to 5.1` |
+| `fix: resolve null pointer exception in user service` | `fix crash when user has no profile` |
+| `refactor: extract helper functions for better maintainability` | `pull search logic into its own function` |
+
+No colons after a category prefix. No passive constructions. Say the actual thing that changed.
 
 ## Phase 5: Formatting and Unicode
 
