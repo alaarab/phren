@@ -39,11 +39,10 @@ If it doesn't exist, tell the user:
 Try the profile-aware path first, fall back to scanning all directories:
 
 ```bash
-# Profile-aware: get active profile's project list
 MACHINE=$(cat ~/.cortex-machine 2>/dev/null || hostname)
-# Look up profile in machines.yaml, get project list
+# look up profile in machines.yaml to get the project list
 
-# Fallback: scan all project directories
+# fallback: scan all project directories
 LEARNINGS_FILES=()
 for dir in "$CORTEX_DIR"/*/; do
   if [ -f "$dir/LEARNINGS.md" ]; then
@@ -133,7 +132,7 @@ Updated: $CORTEX_DIR/global/LEARNINGS.md
 ```bash
 cd "$CORTEX_DIR"
 git add global/LEARNINGS.md
-git commit -m "consolidate: cross-project learnings update"
+git commit -m "update global learnings"
 git push  # only if remote exists
 ```
 

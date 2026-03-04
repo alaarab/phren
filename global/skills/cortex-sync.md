@@ -37,7 +37,6 @@ When the user says "get my skills", "sync my config", "pull from cortex", or jus
 ### 1. Find the cortex directory
 
 ```bash
-# Check common locations
 CORTEX_DIR="${CORTEX_DIR:-$HOME/cortex}"
 ls "$CORTEX_DIR" 2>/dev/null
 ```
@@ -48,8 +47,7 @@ If the directory doesn't exist, tell the user:
 ### 2. Figure out which machine this is
 
 ```bash
-cat ~/.cortex-machine 2>/dev/null
-hostname  # fallback
+cat ~/.cortex-machine 2>/dev/null || hostname
 ```
 
 If `~/.cortex-machine` doesn't exist, ask the user to pick a name:
@@ -64,7 +62,6 @@ echo "work-laptop" > ~/.cortex-machine
 
 ```bash
 cat "$CORTEX_DIR/machines.yaml"
-# Format: machine-name: profile-name
 ```
 
 If the machine name isn't in `machines.yaml`, tell the user:
@@ -198,7 +195,7 @@ cp <changed-file> "$CORTEX_DIR/<project>/<corresponding-path>"
 ```bash
 cd "$CORTEX_DIR"
 git add -A
-git commit -m "sync: <project> updates from <machine-name>"
+git commit -m "<project> updates from <machine-name>"
 git push
 ```
 

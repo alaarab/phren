@@ -24,9 +24,7 @@ Post-session learning capture. Pulls out patterns, gotchas, and decisions from w
 Check cwd against known project paths. If ambiguous, ask.
 
 ```bash
-# What directory are we in?
 pwd
-# Does it match a known project?
 basename $(git rev-parse --show-toplevel 2>/dev/null || pwd)
 ```
 
@@ -89,7 +87,7 @@ If the learnings file is inside a git repo (either cortex or the project itself)
 ```bash
 cd <repo-root>
 git add <path-to>/LEARNINGS.md
-git commit -m "learn: <project>: <one-line summary of what was learned>"
+git commit -m "<project>: <one-line summary of what was learned>"
 git push  # only if remote exists
 ```
 
@@ -106,7 +104,7 @@ Extracted 3 learnings:
 - Graph client mocking strategy
 
 Saved to: <path>/LEARNINGS.md
-Committed: learn: myapp: signal detection, build cache, graph mocking
+Committed: myapp: signal detection, build cache, graph mocking
 ```
 
 ## What makes a good learning
