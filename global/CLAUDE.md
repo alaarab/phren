@@ -18,12 +18,11 @@ These skills are available as a full set via cortex, or individually from the Cl
 
 | Skill | What it does |
 |-------|-------------|
-| `/cortex-sync` | Profile-aware sync: pull skills to this machine or push changes back to cortex |
-| `/cortex-learn` | Extract session learnings into LEARNINGS.md (standalone) |
-| `/cortex-update` | End-of-day wrap: capture learnings, commit, push across all active projects |
+| `/cortex-update` | Save what you learned: captures learnings, commits, pushes. Run at the end of any session. |
+| `/cortex-sync` | Pull cortex to a new machine or push config changes back to the repo |
 | `/cortex-init` | Scaffold a new project with summary, CLAUDE.md, backlog |
-| `/cortex-consolidate` | Cross-project synthesis: find patterns across LEARNINGS.md files |
-| `/cortex-discover` | Research gaps and opportunities in the current project (standalone) |
+| `/cortex-discover` | Research what's missing in a project and surface gaps and opportunities |
+| `/cortex-consolidate` | Find patterns across all project LEARNINGS.md files |
 
 ### Your own skills
 
