@@ -116,6 +116,19 @@
       border-color: rgba(58, 123, 174, 0.4);
     }
 
+    /* --- HERO BRAIN --- */
+    .hero-brain {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -48%);
+      width: 680px;
+      max-width: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+    @media (max-width: 768px) { .hero-brain { display: none; } }
+
     /* --- HERO --- */
     .hero {
       position: relative;
@@ -1047,6 +1060,111 @@
   <section class="hero">
     <canvas id="hero-canvas"></canvas>
     <div class="hero-glow"></div>
+
+    <!-- Brain background -->
+    <div class="hero-brain">
+      <svg viewBox="0 0 560 480" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="bn-hot" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#F5C840" stop-opacity="0.9"/>
+            <stop offset="60%" stop-color="#D4892E" stop-opacity="0.4"/>
+            <stop offset="100%" stop-color="#8B4A12" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="bn-warm" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#D4892E" stop-opacity="0.7"/>
+            <stop offset="100%" stop-color="#8B4A12" stop-opacity="0"/>
+          </radialGradient>
+          <filter id="bn-glow" x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur stdDeviation="5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="bn-soften" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.5"/>
+          </filter>
+        </defs>
+
+        <!-- Outer brain silhouette -->
+        <path d="M 115,242 C 94,208 96,162 118,122 C 140,82 178,56 222,42 C 264,28 310,30 350,50 C 390,70 416,104 422,144 C 428,180 416,216 408,242 C 398,268 396,285 410,310 C 422,332 440,350 432,374 C 424,394 400,404 372,400 C 344,396 318,380 292,372 C 268,364 244,358 220,364 C 196,370 175,382 154,380 C 132,378 114,364 108,344 C 102,324 108,300 115,278 C 122,258 120,250 115,242 Z"
+              stroke="#2B5F8E" stroke-width="1.5" stroke-opacity="0.22" fill="none"/>
+
+        <!-- Cerebellum -->
+        <path d="M 415,312 C 434,322 448,345 440,366 C 432,384 412,390 394,382 C 376,374 368,356 374,340 C 380,324 400,304 415,312 Z"
+              stroke="#1E4A6E" stroke-width="1" stroke-opacity="0.18" fill="none"/>
+
+        <!-- Central sulcus -->
+        <path d="M 306,46 C 300,80 296,118 300,156 C 304,190 316,218 312,248"
+              stroke="#1C3D5E" stroke-width="0.9" stroke-opacity="0.2" fill="none"/>
+
+        <!-- Lateral sulcus (Sylvian fissure) -->
+        <path d="M 118,244 C 162,234 208,228 255,230 C 300,232 342,242 380,250"
+              stroke="#1C3D5E" stroke-width="0.9" stroke-opacity="0.18" fill="none"/>
+
+        <!-- Superior frontal sulcus -->
+        <path d="M 172,74 C 180,102 184,135 178,166 C 172,194 160,215 162,242"
+              stroke="#1C3D5E" stroke-width="0.7" stroke-opacity="0.15" fill="none"/>
+
+        <!-- Postcentral sulcus -->
+        <path d="M 336,54 C 346,86 350,120 346,154 C 342,184 330,208 334,238"
+              stroke="#1C3D5E" stroke-width="0.7" stroke-opacity="0.15" fill="none"/>
+
+        <!-- Parieto-occipital sulcus -->
+        <path d="M 392,110 C 406,138 414,170 410,202"
+              stroke="#1C3D5E" stroke-width="0.7" stroke-opacity="0.14" fill="none"/>
+
+        <!-- Neural connections — dim (indigo) -->
+        <line x1="200" y1="138" x2="268" y2="82" stroke="#1E4A6E" stroke-width="0.8" stroke-opacity="0.28"/>
+        <line x1="200" y1="138" x2="152" y2="234" stroke="#1E4A6E" stroke-width="0.8" stroke-opacity="0.25"/>
+        <line x1="200" y1="138" x2="244" y2="198" stroke="#1E4A6E" stroke-width="0.7" stroke-opacity="0.22"/>
+        <line x1="268" y1="82" x2="344" y2="112" stroke="#1E4A6E" stroke-width="0.8" stroke-opacity="0.26"/>
+        <line x1="344" y1="112" x2="394" y2="172" stroke="#1E4A6E" stroke-width="0.7" stroke-opacity="0.22"/>
+        <line x1="394" y1="172" x2="378" y2="254" stroke="#1E4A6E" stroke-width="0.6" stroke-opacity="0.2"/>
+        <line x1="244" y1="198" x2="314" y2="262" stroke="#1E4A6E" stroke-width="0.6" stroke-opacity="0.2"/>
+        <line x1="152" y1="234" x2="244" y2="198" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.18"/>
+        <line x1="152" y1="234" x2="210" y2="308" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.17"/>
+        <line x1="314" y1="262" x2="378" y2="254" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.18"/>
+        <line x1="314" y1="262" x2="260" y2="350" stroke="#1C3D5E" stroke-width="0.5" stroke-opacity="0.15"/>
+        <line x1="210" y1="308" x2="260" y2="350" stroke="#1C3D5E" stroke-width="0.5" stroke-opacity="0.15"/>
+        <line x1="378" y1="254" x2="425" y2="295" stroke="#1C3D5E" stroke-width="0.5" stroke-opacity="0.14"/>
+
+        <!-- Neural connections — active (copper) -->
+        <line x1="268" y1="82" x2="152" y2="234" stroke="#8B5A1A" stroke-width="0.9" stroke-opacity="0.32"/>
+        <line x1="268" y1="82" x2="344" y2="112" stroke="#C4762A" stroke-width="1.1" stroke-opacity="0.35"/>
+        <line x1="200" y1="138" x2="344" y2="112" stroke="#8B5A1A" stroke-width="0.8" stroke-opacity="0.28"/>
+        <line x1="268" y1="82" x2="314" y2="262" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.2"/>
+
+        <!-- Dim nodes (indigo) -->
+        <circle cx="244" cy="198" r="2.5" fill="#3A7BAE" fill-opacity="0.55"/>
+        <circle cx="394" cy="172" r="2.5" fill="#3A7BAE" fill-opacity="0.5"/>
+        <circle cx="378" cy="254" r="2.2" fill="#3A7BAE" fill-opacity="0.48"/>
+        <circle cx="314" cy="262" r="2.5" fill="#3A7BAE" fill-opacity="0.5"/>
+        <circle cx="210" cy="308" r="2" fill="#3A7BAE" fill-opacity="0.42"/>
+        <circle cx="260" cy="350" r="2" fill="#3A7BAE" fill-opacity="0.38"/>
+        <circle cx="425" cy="295" r="2" fill="#3A7BAE" fill-opacity="0.4"/>
+        <circle cx="152" cy="340" r="1.8" fill="#3A7BAE" fill-opacity="0.35"/>
+
+        <!-- Active nodes (copper glow) -->
+        <!-- Frontal active -->
+        <circle cx="268" cy="82" r="20" fill="#C4762A" fill-opacity="0.05" filter="url(#bn-soften)"/>
+        <circle cx="268" cy="82" r="4.5" fill="url(#bn-hot)" filter="url(#bn-glow)"/>
+        <circle cx="268" cy="82" r="2.2" fill="#F5C840" fill-opacity="0.75"/>
+
+        <!-- Prefrontal active -->
+        <circle cx="200" cy="138" r="16" fill="#C4762A" fill-opacity="0.05" filter="url(#bn-soften)"/>
+        <circle cx="200" cy="138" r="3.8" fill="url(#bn-warm)" filter="url(#bn-glow)"/>
+        <circle cx="200" cy="138" r="1.8" fill="#F5C840" fill-opacity="0.65"/>
+
+        <!-- Parietal active -->
+        <circle cx="344" cy="112" r="18" fill="#C4762A" fill-opacity="0.05" filter="url(#bn-soften)"/>
+        <circle cx="344" cy="112" r="4.2" fill="url(#bn-hot)" filter="url(#bn-glow)"/>
+        <circle cx="344" cy="112" r="2" fill="#F5C840" fill-opacity="0.7"/>
+
+        <!-- Language area active -->
+        <circle cx="152" cy="234" r="14" fill="#C4762A" fill-opacity="0.04" filter="url(#bn-soften)"/>
+        <circle cx="152" cy="234" r="3.5" fill="url(#bn-warm)" filter="url(#bn-glow)"/>
+        <circle cx="152" cy="234" r="1.6" fill="#F5C840" fill-opacity="0.6"/>
+      </svg>
+    </div>
+
     <div class="hero-content">
       <div class="hero-icon-wrap">
         <svg width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1267,7 +1385,6 @@
           <p class="bento-card-desc">No app. No account. No cloud service with a pricing page. Open a file and edit it. It's markdown all the way down.</p>
           <div class="bento-file-list">
             <div class="bento-file"><div class="bento-file-dot"></div>~/.cortex/my-app/MEMORY.md</div>
-            <div class="bento-file"><div class="bento-file-dot"></div>~/.cortex/global/skills/swarm.md</div>
             <div class="bento-file"><div class="bento-file-dot"></div>~/.cortex/backend/backlog.md</div>
           </div>
         </div>
@@ -1293,55 +1410,26 @@
     <div class="container">
       <div class="install-header reveal">
         <div class="section-label">Get started</div>
-        <h2 class="section-title">Up in three commands.</h2>
-        <p class="section-sub" style="margin-top:12px">No config files. No accounts. Add the MCP, install the plugin, and you're done.</p>
+        <h2 class="section-title">Up and running fast.</h2>
+        <p class="section-sub" style="margin-top:12px">No config files. No accounts. Run these and you're done.</p>
       </div>
 
       <div class="install-steps">
-        <div class="install-step reveal">
-          <div class="install-step-header">
-            <div class="install-step-num">1</div>
-            <div>
-              <div class="install-step-title">Add the MCP server</div>
-              <div class="install-step-desc">Registers cortex with Claude Code and gives it the search tools.</div>
-            </div>
-          </div>
+        <div class="install-step reveal" style="max-width:600px;margin:0 auto">
           <div class="install-step-body">
-            <div class="code-block">
-              <div><span class="code-prompt">$</span> claude mcp add cortex -- npx @alaarab/cortex</div>
-              <button class="copy-btn" data-cmd="claude mcp add cortex -- npx @alaarab/cortex">copy</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="install-step reveal reveal-delay-1">
-          <div class="install-step-header">
-            <div class="install-step-num">2</div>
-            <div>
-              <div class="install-step-title">Install from the plugin marketplace</div>
-              <div class="install-step-desc">Adds the skills package: <code style="font-size:12px;color:var(--indigo)">/cortex:learn</code>, <code style="font-size:12px;color:var(--indigo)">/cortex:sync</code>, and more.</div>
-            </div>
-          </div>
-          <div class="install-step-body">
-            <div class="code-block">
-              <div><span class="code-prompt">$</span> /plugin marketplace add alaarab/cortex</div>
-              <button class="copy-btn" data-cmd="/plugin marketplace add alaarab/cortex">copy</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="install-step reveal reveal-delay-2">
-          <div class="install-step-header">
-            <div class="install-step-num">3</div>
-            <div>
-              <div class="install-step-title">Install the cortex plugin</div>
-              <div class="install-step-desc">Activates the plugin. Run this inside a Claude Code session.</div>
-            </div>
-          </div>
-          <div class="install-step-body">
-            <div class="code-block">
-              <div><span class="code-prompt">$</span> /plugin install cortex@cortex</div>
-              <button class="copy-btn" data-cmd="/plugin install cortex@cortex">copy</button>
+            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
+              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+                <div><span class="code-prompt">$</span> claude mcp add cortex -- npx @alaarab/cortex</div>
+                <button class="copy-btn" data-cmd="claude mcp add cortex -- npx @alaarab/cortex">copy</button>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:center">
+                <div><span class="code-prompt">$</span> /plugin marketplace add alaarab/cortex</div>
+                <button class="copy-btn" data-cmd="/plugin marketplace add alaarab/cortex">copy</button>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:center">
+                <div><span class="code-prompt">$</span> /plugin install cortex@cortex</div>
+                <button class="copy-btn" data-cmd="/plugin install cortex@cortex">copy</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1402,6 +1490,10 @@
         <div class="skill-card reveal reveal-delay-1">
           <div class="skill-name">/creative</div>
           <div class="skill-desc">Design pass that asks what a good designer would: spacing, typography hierarchy, does it look made or filled in from a template.</div>
+        </div>
+        <div class="skill-card reveal reveal-delay-2">
+          <div class="skill-name">/cortex:update</div>
+          <div class="skill-desc">End-of-day wrap. Captures what you learned, commits to your knowledge base, pushes. Say "update my cortex" and it runs.</div>
         </div>
       </div>
     </div>
