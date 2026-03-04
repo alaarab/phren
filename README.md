@@ -168,6 +168,17 @@ npm run build
 
 Run `link.sh` after building and it patches your Claude settings automatically — for both Claude Code and VS Code.
 
+### Without the MCP server
+
+Not everyone runs the MCP server. Some work in restricted environments, use web Claude, or haven't set it up yet. Cortex still works through MEMORY.md and explicit file reads:
+
+- Claude reads `~/.cortex-context.md` at session start for machine context
+- `MEMORY.md` in `~/.claude/projects/` has a pointer table with one line per project
+- Per-project `MEMORY-{name}.md` files have the full summary and notes
+- For any project detail, Claude reads the file directly from `~/.cortex/project-name/`
+
+This gives roughly equivalent context. MCP just makes retrieval faster and more targeted. Instead of loading everything, Claude searches for what it needs.
+
 ---
 
 ## Works with Claude Code and GitHub Copilot
