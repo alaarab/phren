@@ -15,14 +15,22 @@ const require = createRequire(import.meta.url);
 const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<any>;
 
 // Resolve the cortex root directory
+// Priority: CLI arg > CORTEX_PATH env > ~/cortex > ~/.cortex > ~/my-cortex
 function findCortexPath(): string {
+  const arg = process.argv[2];
+  if (arg) {
+    const resolved = arg.replace(/^~/, process.env.HOME || process.env.USERPROFILE || "");
+    if (fs.existsSync(resolved)) return resolved;
+    console.error(`cortex path not found: ${resolved}`);
+    process.exit(1);
+  }
   if (process.env.CORTEX_PATH) return process.env.CORTEX_PATH;
   const home = process.env.HOME || process.env.USERPROFILE || "";
-  for (const name of ["cortex", "my-cortex"]) {
+  for (const name of ["cortex", ".cortex", "my-cortex"]) {
     const candidate = path.join(home, name);
     if (fs.existsSync(candidate)) return candidate;
   }
-  console.error("No cortex found. Set CORTEX_PATH or create ~/cortex");
+  console.error("No cortex found. Pass a path, set CORTEX_PATH, or create ~/cortex");
   process.exit(1);
 }
 
