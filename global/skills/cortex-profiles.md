@@ -6,10 +6,10 @@ Manage which projects appear on which machines by editing your profile definitio
 
 ## Prerequisites
 
-You need a cortex repo. The profiles live in `~/cortex/profiles/` and machine mappings live in `~/cortex/machines.yaml`.
+You need a cortex repo. The profiles live in `~/.cortex/profiles/` and machine mappings live in `~/.cortex/machines.yaml`.
 
 ```
-~/cortex/
+~/.cortex/
   profiles/
     work.yaml
     personal.yaml
@@ -39,7 +39,7 @@ When you sync on a machine mapped to this profile, only those projects appear. P
 
 User says: "add my-project to my work profile"
 
-1. Find the profile file: `~/cortex/profiles/work.yaml`
+1. Find the profile file: `~/.cortex/profiles/work.yaml`
 2. Read it and find the `projects:` list
 3. Add the project name if it's not already there
 4. Commit the change
@@ -48,7 +48,7 @@ User says: "add my-project to my work profile"
 
 User says: "create a new profile called staging"
 
-1. Create a new file: `~/cortex/profiles/staging.yaml`
+1. Create a new file: `~/.cortex/profiles/staging.yaml`
 2. Fill it with the required structure:
 
 ```yaml
@@ -65,15 +65,15 @@ projects:
 
 User says: "what's in my personal profile?"
 
-1. Find `~/cortex/profiles/personal.yaml`
+1. Find `~/.cortex/profiles/personal.yaml`
 2. Read it and display the projects list
 
 ### "Move a project between profiles"
 
 User says: "move my-project from personal to work"
 
-1. Find `~/cortex/profiles/personal.yaml` and remove the project
-2. Find `~/cortex/profiles/work.yaml` and add the project
+1. Find `~/.cortex/profiles/personal.yaml` and remove the project
+2. Find `~/.cortex/profiles/work.yaml` and add the project
 3. Commit both changes
 
 ### "Set this machine's profile"
@@ -81,8 +81,8 @@ User says: "move my-project from personal to work"
 User says: "this machine is my work laptop"
 
 1. Get the current machine name: `cat ~/.cortex-machine` or `hostname`
-2. Ask which profile to use (show available profiles from `~/cortex/profiles/`)
-3. Add/update the line in `~/cortex/machines.yaml`: `work-laptop: work`
+2. Ask which profile to use (show available profiles from `~/.cortex/profiles/`)
+3. Add/update the line in `~/.cortex/machines.yaml`: `work-laptop: work`
 4. Commit the change
 5. Run `/cortex-sync` to activate
 
@@ -90,7 +90,7 @@ User says: "this machine is my work laptop"
 
 If the user asks what profiles exist:
 
-1. List all files in `~/cortex/profiles/`
+1. List all files in `~/.cortex/profiles/`
 2. For each one, read the name and description fields
 3. Show which machine is mapped to each profile (from `machines.yaml`)
 
@@ -99,7 +99,7 @@ If the user asks what profiles exist:
 Always commit to the cortex git repo:
 
 ```bash
-cd ~/cortex
+cd ~/.cortex
 git add profiles/ machines.yaml
 git commit -m "update profiles"
 git push  # only if remote exists
