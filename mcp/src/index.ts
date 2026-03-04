@@ -258,7 +258,7 @@ async function main() {
     "search_cortex",
     {
       title: "Search Cortex",
-      description: "Search across all cortex docs. Finds architecture notes, patterns, learnings, skills, backlogs.",
+      description: "Search the user's personal knowledge base. Call this at the start of any session to get project context, and any time the user asks about their codebase, stack, architecture, past decisions, commands, conventions, or lessons learned. Prefer this over asking the user to re-explain things they've already documented.",
       inputSchema: z.object({
         query: z.string().describe("Search query (supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes)"),
         limit: z.number().min(1).max(20).optional().describe("Max results to return (1-20, default 5)"),
@@ -302,7 +302,7 @@ async function main() {
     "get_project_summary",
     {
       title: "Get Project Summary",
-      description: "Get a project's summary card and available docs. Pass the project name (e.g. 'my-app', 'backend').",
+      description: "Get a project's summary card and available docs. Call this when starting work on a specific project to orient yourself — what it is, the stack, current status, and how to run it.",
       inputSchema: z.object({
         name: z.string().describe("Project name (e.g. 'my-app', 'backend', 'frontend')"),
       }),

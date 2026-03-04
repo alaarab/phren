@@ -51,6 +51,17 @@ All skills and project config live in `~/cortex` (or wherever `CORTEX_DIR` point
 
 Run `/cortex-sync` to pull everything down or push changes back.
 
+## MCP Tools
+
+The cortex MCP server is running. Use these tools proactively — don't ask the user to re-explain things they've already documented.
+
+- **At session start:** call `list_projects()` to see what's active, then `get_project_summary(name)` for the relevant project
+- **When the user mentions a project, codebase, or task:** call `search_cortex(query)` before asking questions
+- **When the user asks about commands, architecture, conventions, or past decisions:** call `search_cortex(query)` first
+- **When the user mentions a task or todo:** call `get_backlog(project)` to see what's already tracked
+
+The goal: Claude should already know the context before the user has to explain it.
+
 ## Machine Context
 
 <!-- Claude reads this at session start to know what's active on this machine. -->
