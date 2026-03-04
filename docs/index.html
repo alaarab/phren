@@ -1248,12 +1248,12 @@
 
       <div class="hero-badge">
         <span class="hero-badge-dot"></span>
-        MCP Server + Skills
+        Claude Code · GitHub Copilot · MCP
       </div>
 
       <h1 class="hero-title">Long-term memory<br>for <em>Claude Code.</em></h1>
 
-      <p class="hero-sub">Your knowledge base. Git-backed. Available to Claude on every machine, without burning tokens loading it upfront.</p>
+      <p class="hero-sub">Your knowledge base. Git-backed. Works with Claude Code and GitHub Copilot. Available on every machine, without burning tokens loading it upfront.</p>
 
       <div class="hero-actions">
         <a href="#install" class="btn-primary">
@@ -1415,7 +1415,11 @@
       </div>
 
       <div class="install-steps">
-        <div class="install-step reveal" style="max-width:600px;margin:0 auto">
+        <div class="install-step reveal" style="max-width:660px;margin:0 auto">
+          <div class="install-step-header" style="display:flex;gap:16px;margin-bottom:16px">
+            <div style="font-size:12px;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;font-weight:500">Claude Code</div>
+            <div style="font-size:12px;color:var(--text-dim);letter-spacing:0.05em;text-transform:uppercase;font-weight:500;border-left:1px solid var(--border);padding-left:16px">VS Code / Copilot</div>
+          </div>
           <div class="install-step-body">
             <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
               <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
@@ -1431,6 +1435,11 @@
                 <button class="copy-btn" data-cmd="/plugin install cortex@cortex">copy</button>
               </div>
             </div>
+          </div>
+          <div style="margin-top:16px;padding:14px 16px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text-muted);line-height:1.6">
+            <span style="color:var(--text-dim)">VS Code:</span> add to <code style="color:var(--indigo);font-size:12px">~/.config/Code/User/mcp.json</code> (Linux) or <code style="color:var(--indigo);font-size:12px">~/Library/Application Support/Code/User/mcp.json</code> (macOS):
+            <div style="margin-top:8px;font-family:monospace;font-size:12px;color:var(--text);white-space:pre;line-height:1.6">{"servers": {"cortex": {"command": "npx", "args": ["@alaarab/cortex"]}}}</div>
+            <div style="margin-top:8px;color:var(--text-dim);font-size:12px">Running <code style="color:var(--text-muted)">link.sh</code> after building from source writes this automatically.</div>
           </div>
         </div>
       </div>
