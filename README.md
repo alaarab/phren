@@ -43,7 +43,7 @@ Claude figures out a tricky bug, discovers a non-obvious pattern in your codebas
 
 ### It's just files
 
-No app. No account. No cloud service that might disappear. Everything lives in markdown files in a git repo you own. `git log` shows how your project knowledge evolved. `git diff` shows what changed. If Claude's context is wrong, you open a file and fix it.
+Everything lives in markdown files in a git repo you own. `git log` shows how your project knowledge evolved. `git diff` shows what changed. If Claude's context is wrong, you open a file and fix it. No account required, nothing to break.
 
 ---
 
