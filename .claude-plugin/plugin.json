@@ -1,0 +1,10 @@
+{
+  "name": "cortex",
+  "description": "Long-term memory for Claude Code. Project context, lessons learned, slash commands, task queues.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Ala Arab",
+    "url": "https://github.com/alaarab"
+  },
+  "repository": "https://github.com/alaarab/cortex"
+}

@@ -1,0 +1,7 @@
+name: personal
+description: Personal machine profile — all projects
+projects:
+  - global
+  # Add your projects here:
+  # - my-project
+  # - side-project
