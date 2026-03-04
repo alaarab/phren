@@ -26,7 +26,7 @@ function findCortexPath(): string {
   }
   if (process.env.CORTEX_PATH) return process.env.CORTEX_PATH;
   const home = process.env.HOME || process.env.USERPROFILE || "";
-  for (const name of [".cortex", "cortex", "my-cortex"]) {
+  for (const name of [".cortex", "cortex"]) {
     const candidate = path.join(home, name);
     if (fs.existsSync(candidate)) return candidate;
   }
