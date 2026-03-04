@@ -25,16 +25,14 @@ These skills are available as a full set via cortex, or individually from the Cl
 | `/cortex-consolidate` | Cross-project synthesis: find patterns across LEARNINGS.md files |
 | `/cortex-discover` | Research gaps and opportunities in the current project (standalone) |
 
-### Workflow skills (work anywhere, no cortex required)
+### Your own skills
 
-| Skill | What it does |
-|-------|-------------|
-| `/swarm` | Spawn team agents (2-5) with model selection based on task complexity |
-| `/backlog` | Persistent project task queue: add, prioritize, work items, or swarm them |
-| `/humanize` | Kill the AI voice: word lists, structural patterns, code tells, self-audit |
-| `/creative` | Creative director pass: elevate UI from functional to distinctive |
-| `/pipeline` | Status check: detect where you are in the dev workflow right now |
-| `/release` | Ship a version: version bump, changelog, tag, publish to npm or PyPI |
+Put personal workflow skills in `~/.cortex/global/skills/` and list them here. See [cortex-starter](https://github.com/alaarab/cortex-starter) for examples.
+
+<!-- Example:
+| `/humanize` | Strip AI language from writing and code |
+| `/release`  | Version bump, changelog, tag, publish |
+-->
 
 ## Agent Coordination
 
