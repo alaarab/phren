@@ -1,0 +1,32 @@
+{
+  "name": "@alaarab/cortex",
+  "version": "1.0.2",
+  "description": "Long-term memory for Claude Code",
+  "type": "module",
+  "bin": {
+    "cortex": "mcp/dist/index.js"
+  },
+  "files": [
+    "mcp/dist",
+    ".claude-plugin",
+    "skills"
+  ],
+  "scripts": {
+    "build": "cd mcp && npm run build",
+    "prepublishOnly": "cd mcp && npm install && npm run build"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "mcp",
+    "memory",
+    "knowledge"
+  ],
+  "author": "Ala Arab",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alaarab/cortex.git"
+  },
+  "homepage": "https://github.com/alaarab/cortex#readme"
+}
