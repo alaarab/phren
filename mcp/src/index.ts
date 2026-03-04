@@ -26,11 +26,11 @@ function findCortexPath(): string {
   }
   if (process.env.CORTEX_PATH) return process.env.CORTEX_PATH;
   const home = process.env.HOME || process.env.USERPROFILE || "";
-  for (const name of ["cortex", ".cortex", "my-cortex"]) {
+  for (const name of [".cortex", "cortex", "my-cortex"]) {
     const candidate = path.join(home, name);
     if (fs.existsSync(candidate)) return candidate;
   }
-  console.error("No cortex found. Pass a path, set CORTEX_PATH, or create ~/cortex");
+  console.error("No cortex found. Pass a path, set CORTEX_PATH, or create ~/.cortex");
   process.exit(1);
 }
 
