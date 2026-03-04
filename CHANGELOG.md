@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.0] - 2026-03-04
+
+### Added
+- `npx @alaarab/cortex init` — one-command setup that clones cortex-starter to `~/.cortex`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
+- link.sh symlinks `CLAUDE-*.md` split files alongside `CLAUDE.md` for `@import` support
+
 ## [1.1.4] - 2026-03-04
 
 ### Added
