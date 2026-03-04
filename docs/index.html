@@ -1498,10 +1498,24 @@
         </div>
 
         <div id="vscode" class="install-tab-panel">
-          <div style="padding:20px 24px;font-size:13px;color:var(--text-muted);line-height:1.6">
-            <span style="color:var(--text-dim)">Add to:</span> <code style="color:var(--indigo);font-size:12px">~/.config/Code/User/mcp.json</code> (Linux) or <code style="color:var(--indigo);font-size:12px">~/Library/Application Support/Code/User/mcp.json</code> (macOS):
-            <div style="margin-top:14px;padding:12px 14px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;font-family:monospace;font-size:12px;color:var(--text);overflow-x:auto;white-space:pre;line-height:1.6">{"servers": {"cortex": {"command": "npx", "args": ["@alaarab/cortex"]}}}</div>
-            <div style="margin-top:14px;color:var(--text-dim);font-size:12px">Running <code style="color:var(--text-muted)">link.sh</code> after building from source writes this automatically.</div>
+          <div class="install-step-body">
+            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
+              <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px">Add to <code style="color:var(--indigo)">~/.config/Code/User/mcp.json</code> (Linux) or <code style="color:var(--indigo)">~/Library/Application Support/Code/User/mcp.json</code> (macOS):</div>
+              <div style="display:flex;justify-content:space-between;width:100%;align-items:flex-start">
+                <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
+  "servers": {
+    "cortex": {
+      "command": "npx",
+      "args": ["@alaarab/cortex"]
+    }
+  }
+}</pre>
+                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex"]}}}'>copy</button>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                If you're self-hosting: run <code style="color:var(--text-muted)">link.sh</code> after building and it writes this file automatically.
+              </div>
+            </div>
           </div>
         </div>
       </div>
