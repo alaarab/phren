@@ -55,15 +55,23 @@ Push to GitHub to sync across machines. On a new machine, clone and run link.sh.
 
 ## Getting started
 
-### Option A: npm (recommended)
+### Option A: one command (recommended)
 
 ```bash
-# 1. Use the starter template to create your knowledge base
-#    → github.com/alaarab/cortex-starter (click "Use this template")
-#    → then clone your copy to ~/.cortex
+npx @alaarab/cortex init
+```
+
+This clones the [starter template](https://github.com/alaarab/cortex-starter) to `~/.cortex`, registers your machine, and configures the MCP server in Claude Code and VS Code automatically.
+
+Then restart Claude Code and your context is live.
+
+### Option B: manual
+
+```bash
+# 1. Fork cortex-starter on GitHub, then clone your fork
 git clone git@github.com:YOUR_USERNAME/cortex-starter.git ~/.cortex
 
-# 2. Add the MCP server
+# 2. Add the MCP server to Claude Code
 claude mcp add cortex -- npx @alaarab/cortex
 
 # 3. Install skills
@@ -71,19 +79,12 @@ claude mcp add cortex -- npx @alaarab/cortex
 /plugin install cortex@cortex
 ```
 
-### Option B: self-hosted (fork and own it)
+### Option C: self-hosted (fork the whole framework)
 
 ```bash
-# 1. Fork this repo on GitHub, then clone your fork
+# Fork this repo, clone it, then run link.sh
 git clone git@github.com:YOUR_USERNAME/cortex.git ~/cortex
-cd ~/cortex
-
-# 2. Register this machine and activate your profile
-./link.sh
-
-# 3. Build the MCP server (optional but recommended)
-cd mcp && npm install && npm run build && cd ..
-./link.sh  # auto-configures MCP in your Claude settings
+cd ~/cortex && ./link.sh
 ```
 
 Open any project with Claude Code and your context is already there.

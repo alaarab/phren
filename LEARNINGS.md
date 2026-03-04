@@ -1,0 +1,1 @@
+/home/alaarab/.cortex/cortex-framework/LEARNINGS.md
