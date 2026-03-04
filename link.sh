@@ -429,6 +429,44 @@ configure_mcp() {
   echo "installed"
 }
 
+configure_vscode_mcp() {
+  local mcp_dist="$SCRIPT_DIR/mcp/dist/index.js"
+  [ -f "$mcp_dist" ] || { echo "not_built"; return 0; }
+
+  # Find VS Code user config directory (Linux, macOS)
+  local vscode_dir=""
+  for d in "$HOME/.config/Code/User" "$HOME/Library/Application Support/Code/User"; do
+    [ -d "$d" ] && vscode_dir="$d" && break
+  done
+  [ -z "$vscode_dir" ] && { echo "no_vscode"; return 0; }
+
+  local mcp_file="$vscode_dir/mcp.json"
+
+  if [ -f "$mcp_file" ] && grep -q '"cortex"' "$mcp_file" 2>/dev/null; then
+    echo "already_configured"
+    return 0
+  fi
+
+  if command -v jq &>/dev/null; then
+    local tmp_file
+    tmp_file="$(mktemp)"
+    if [ -f "$mcp_file" ]; then
+      jq --arg dist "$mcp_dist" '.servers.cortex = {"command": "node", "args": [$dist]}' "$mcp_file" > "$tmp_file"
+    else
+      jq -n --arg dist "$mcp_dist" '{"servers": {"cortex": {"command": "node", "args": [$dist]}}}' > "$tmp_file"
+    fi
+    mv "$tmp_file" "$mcp_file"
+  else
+    if [ ! -f "$mcp_file" ]; then
+      printf '{\n  "servers": {\n    "cortex": {"command": "node", "args": ["%s"]}\n  }\n}\n' "$mcp_dist" > "$mcp_file"
+    else
+      echo "no_jq"
+      return 0
+    fi
+  fi
+  echo "installed"
+}
+
 # ── Task-mode context ────────────────────────────────────────────────
 
 write_context_debugging() {
@@ -600,10 +638,19 @@ main() {
   local mcp_status
   mcp_status="$(configure_mcp)"
   case "$mcp_status" in
-    installed)       echo "  installed cortex MCP server into Claude settings" ;;
-    already_configured) echo "  cortex MCP already configured" ;;
-    not_built)       echo "  MCP not built (skipping)" ;;
-    no_settings)     echo "  no Claude settings file found (skipping MCP)" ;;
+    installed)          echo "  Claude: installed cortex MCP server" ;;
+    already_configured) echo "  Claude: cortex MCP already configured" ;;
+    not_built)          echo "  MCP not built — run: cd mcp && npm install && npm run build" ;;
+    no_settings)        echo "  Claude settings not found (skipping)" ;;
+  esac
+
+  local vscode_status
+  vscode_status="$(configure_vscode_mcp)"
+  case "$vscode_status" in
+    installed)          echo "  VS Code: installed cortex MCP server" ;;
+    already_configured) echo "  VS Code: cortex MCP already configured" ;;
+    no_vscode)          ;; # VS Code not installed, skip silently
+    no_jq)              echo "  VS Code: mcp.json exists but jq not available to patch it" ;;
   esac
   echo ""
 
