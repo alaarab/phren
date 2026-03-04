@@ -37,7 +37,7 @@ Cortex uses git sparse-checkout under the hood. Each machine has a profile that 
 
 ### You stop losing what you learned
 
-Claude figures out a tricky bug, discovers a non-obvious pattern in your codebase, then the session ends and that knowledge is gone. `/cortex-learn` captures it: a few bullet points, committed to your cortex repo, available in every future session on every machine. Over time your LEARNINGS.md files become a project history worth more than any ticket system.
+Claude figures out a tricky bug, discovers a non-obvious pattern in your codebase, then the session ends and that knowledge is gone. `/cortex:learn` captures it: a few bullet points, committed to your cortex repo, available in every future session on every machine. Over time your LEARNINGS.md files become a project history worth more than any ticket system.
 
 ### It's just files
 
@@ -169,11 +169,11 @@ These are the skills I use in my own workflow. They're included as a starting po
 
 | Skill | What it does |
 |-------|-------------|
-| `/cortex-sync` | Pull the latest from your cortex repo and re-link everything on this machine |
-| `/cortex-learn` | At the end of a session, extract what was figured out and commit it to LEARNINGS.md |
-| `/cortex-init` | Scaffold a new project: summary card, CLAUDE.md, backlog, skills directory |
-| `/cortex-consolidate` | Read LEARNINGS.md files across all projects and surface patterns that repeat across codebases |
-| `/cortex-discover` | Audit your cortex: missing files, stale content, skill gaps, stuck backlog items |
+| `/cortex:sync` | Pull the latest from your cortex repo and re-link everything on this machine |
+| `/cortex:learn` | At the end of a session, extract what was figured out and commit it to LEARNINGS.md |
+| `/cortex:init` | Scaffold a new project: summary card, CLAUDE.md, backlog, skills directory |
+| `/cortex:consolidate` | Read LEARNINGS.md files across all projects and surface patterns that repeat across codebases |
+| `/cortex:discover` | Audit your cortex: missing files, stale content, skill gaps, stuck backlog items |
 
 ### Workflow skills
 
@@ -230,7 +230,7 @@ cp -r templates/project/ my-new-project/
 ./link.sh
 ```
 
-Or let Claude do it: `/cortex-init my-new-project` scaffolds the files, asks which profile to add it to, and commits everything.
+Or let Claude do it: `/cortex:init my-new-project` scaffolds the files, asks which profile to add it to, and commits everything.
 
 ---
 
