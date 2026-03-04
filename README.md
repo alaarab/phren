@@ -172,40 +172,27 @@ Run `link.sh` after building and it patches your Claude settings automatically.
 
 ## Skills
 
-These are the skills I use in my own workflow. They're included as a starting point, not a requirement. Replace them with your own, add project-specific ones, delete what you don't use. Skills are just markdown files in `~/.claude/skills/`.
-
-### Cortex skills
+Cortex ships six skills for managing your knowledge base. They're the only ones included in this package. Add project-specific ones in `.claude/skills/` inside any project, or put global workflow skills in `~/.cortex/global/skills/` so they're available everywhere.
 
 | Skill | What it does |
 |-------|-------------|
 | `/cortex:sync` | Pull the latest from your cortex repo and re-link everything on this machine |
 | `/cortex:learn` | At the end of a session, extract what was figured out and commit it to LEARNINGS.md |
 | `/cortex:init` | Scaffold a new project: summary card, CLAUDE.md, backlog, skills directory |
-| `/cortex:consolidate` | Read LEARNINGS.md files across all projects and surface patterns that repeat across codebases |
 | `/cortex:discover` | Audit your cortex: missing files, stale content, skill gaps, stuck backlog items |
+| `/cortex:consolidate` | Read LEARNINGS.md files across all projects and surface patterns that repeat across codebases |
+| `/cortex:update` | End-of-day wrap: capture what you learned, commit to your knowledge base, push |
 
-### Workflow skills
+### Your own workflow skills
 
-General-purpose skills that work with or without cortex. I include them because I reach for them constantly.
+Skills like `/humanize`, `/swarm`, `/pipeline`, `/release`, and `/creative` are personal. They're not part of the cortex package because everyone's workflow is different.
 
-`/humanize` sweeps your code and prose for AI tells before you ship. If it sounds like a language model wrote it, this finds it.
-
-`/creative` is a design pass. It looks at UI work and asks the questions a good designer would: is the spacing consistent, does the typography have a real hierarchy, does this look like something someone made or something someone filled in from a template.
-
-`/swarm` spins up a team of Claude agents and splits work across them. Frontend, backend, tests in parallel. They coordinate through a shared task list and report back when done.
-
-`/backlog` manages a persistent task queue in a `backlog.md` file. Tasks survive across sessions, can be prioritized, and can be handed off to a swarm.
-
-`/pipeline` checks where you are in the dev workflow right now. Git status, recent commits, test results, open PRs. It gives you a "here's what state things are in and what the obvious next step is" summary.
-
-`/release` handles shipping: version bump, changelog update, git tag, publish to npm or PyPI. Projects can override with their own `/publish` skill for custom release flows.
-
-Every skill is a self-contained markdown file. You can copy one to `~/.claude/skills/` and use it without any of the rest of cortex.
+Put your own skills in `~/.cortex/global/skills/`. The `link.sh` script symlinks them to `~/.claude/skills/` so Claude picks them up in every session. The [cortex-starter](https://github.com/alaarab/cortex-starter) template has examples you can copy and adapt.
 
 ```bash
-# grab just the skill you want
-curl -o ~/.claude/skills/humanize.md \
-  https://raw.githubusercontent.com/YOUR_USERNAME/cortex/main/global/skills/humanize.md
+# add a skill to your cortex
+cp my-skill.md ~/.cortex/global/skills/
+cd ~/.cortex && ./link.sh
 ```
 
 ---

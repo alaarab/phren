@@ -1442,8 +1442,8 @@
     <div class="container">
       <div class="skills-header reveal">
         <div class="section-label">Skills</div>
-        <h2 class="section-title">Skills for the<br>whole workflow.</h2>
-        <p class="section-sub" style="margin-top:12px">Run any skill inside a Claude Code session. They're markdown files in your cortex, so you can read them, tweak them, or swap them out entirely.</p>
+        <h2 class="section-title">Six skills.<br>Yours to extend.</h2>
+        <p class="section-sub" style="margin-top:12px">These are the six skills that ship with cortex. Your own workflow skills go in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code> and get symlinked into every session.</p>
       </div>
 
       <div class="skills-grid">
@@ -1471,29 +1471,9 @@
           <div class="skill-name">/cortex:update</div>
           <div class="skill-desc">End-of-day wrap. Captures what you learned, commits to your knowledge base, pushes. Say "update my cortex" and it runs.</div>
         </div>
-        <div class="skill-card reveal">
-          <div class="skill-name">/humanize</div>
-          <div class="skill-desc">Kill the AI voice. Checks word lists, structural patterns, and code tells in one pass.</div>
-        </div>
-        <div class="skill-card reveal">
-          <div class="skill-name">/swarm</div>
-          <div class="skill-desc">Split work across 2–5 agents running in parallel. Frontend, backend, tests: they coordinate through a shared task list and report back when done.</div>
-        </div>
-        <div class="skill-card reveal reveal-delay-1">
-          <div class="skill-name">/backlog</div>
-          <div class="skill-desc">Persistent project task queue. Add items, prioritize, or swarm the backlog with team agents.</div>
-        </div>
-        <div class="skill-card reveal reveal-delay-2">
-          <div class="skill-name">/pipeline</div>
-          <div class="skill-desc">Git status, recent commits, test results, open PRs. A quick read of where things actually stand.</div>
-        </div>
-        <div class="skill-card reveal">
-          <div class="skill-name">/release</div>
-          <div class="skill-desc">Ship a version. Version bump, changelog, tag, publish to npm or PyPI.</div>
-        </div>
-        <div class="skill-card reveal reveal-delay-1">
-          <div class="skill-name">/creative</div>
-          <div class="skill-desc">Design pass that asks what a good designer would: spacing, typography hierarchy, does it look made or filled in from a template.</div>
+        <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6;">
+          <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
+          <div class="skill-desc">Workflow skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/swarm</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code> are personal. Drop them in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and link.sh wires them up. See <a href="https://github.com/alaarab/cortex-starter" target="_blank" rel="noopener" style="color:var(--indigo)">cortex-starter</a> for examples.</div>
         </div>
       </div>
     </div>
