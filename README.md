@@ -169,7 +169,7 @@ npm install
 npm run build
 ```
 
-Run `link.sh` after building and it patches your Claude settings automatically — for both Claude Code and VS Code.
+Run `link.sh` after building and it patches your Claude settings automatically, for both Claude Code and VS Code.
 
 ### Without the MCP server
 
@@ -188,9 +188,9 @@ This gives roughly equivalent context. MCP just makes retrieval faster and more 
 
 Cortex is MCP-native, so it works wherever MCP is supported.
 
-**Claude Code** — `link.sh` writes the server config into `~/.claude/settings.json` automatically when you build the MCP server. Nothing else to do.
+**Claude Code:** `link.sh` writes the server config into `~/.claude/settings.json` automatically when you build the MCP server. Nothing else to do.
 
-**VS Code / GitHub Copilot** — `link.sh` also writes `~/.config/Code/User/mcp.json` automatically. Once configured, Copilot Chat has access to all the same tools: `search_cortex`, `get_project_summary`, `list_projects`, `get_backlog`, `add_backlog_item`, `complete_backlog_item`.
+**VS Code / GitHub Copilot:** `link.sh` also writes `~/.config/Code/User/mcp.json` automatically. Once configured, Copilot Chat has access to all the same tools: `search_cortex`, `get_project_summary`, `list_projects`, `get_backlog`, `add_backlog_item`, `complete_backlog_item`.
 
 If you want to set it up manually:
 
@@ -214,7 +214,7 @@ Or use the npm package (no build required):
   "servers": {
     "cortex": {
       "command": "npx",
-      "args": ["@alaarab/cortex"]
+      "args": ["@alaarab/cortex", "~/.cortex"]
     }
   }
 }
