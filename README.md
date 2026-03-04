@@ -146,11 +146,17 @@ First run on a new machine, link.sh asks for a machine name and profile. After t
 
 ## The MCP server
 
-The server indexes every markdown file in your cortex into a local SQLite FTS database and exposes three tools to Claude:
+The server indexes every markdown file in your cortex into a local SQLite FTS database and exposes these tools to Claude:
 
+**Search and browse:**
 - `search_cortex(query)` searches across all your project docs, learnings, backlogs, and skills
 - `get_project_summary(name)` pulls up a specific project's summary card and file list
 - `list_projects()` shows everything in your active profile with a one-line description of each
+
+**Backlog management:**
+- `get_backlog(project?)` reads the backlog for one project or all of them
+- `add_backlog_item(project, item)` appends a task to the Queue section of a project's backlog.md
+- `complete_backlog_item(project, item)` matches the item by text and moves it to Done
 
 Instead of loading context upfront, Claude calls `search_cortex` when it needs to know something. A project with 3k tokens of architecture notes? Claude fetches the relevant 300 tokens for the current task instead of the whole file.
 
