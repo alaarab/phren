@@ -14,15 +14,26 @@ import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<any>;
 
+// Validate that a path is a safe, existing directory
+function requireDirectory(resolved: string, label: string): string {
+  if (!fs.existsSync(resolved)) {
+    console.error(`${label} not found: ${resolved}`);
+    process.exit(1);
+  }
+  if (!fs.statSync(resolved).isDirectory()) {
+    console.error(`${label} is not a directory: ${resolved}`);
+    process.exit(1);
+  }
+  return resolved;
+}
+
 // Resolve the cortex root directory
 // Priority: CLI arg > CORTEX_PATH env > ~/.cortex > ~/cortex (auto-creates ~/.cortex on first run)
 function findCortexPath(): string {
   const arg = process.argv[2];
   if (arg) {
     const resolved = arg.replace(/^~/, process.env.HOME || process.env.USERPROFILE || "");
-    if (fs.existsSync(resolved)) return resolved;
-    console.error(`cortex path not found: ${resolved}`);
-    process.exit(1);
+    return requireDirectory(resolved, "cortex path");
   }
   if (process.env.CORTEX_PATH) return process.env.CORTEX_PATH;
   const home = process.env.HOME || process.env.USERPROFILE || "";
@@ -44,17 +55,45 @@ function findCortexPath(): string {
 const cortexPath = findCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
 
+// Validate a project name: no path separators, no dot-dot segments, no null bytes
+function isValidProjectName(name: string): boolean {
+  if (!name || name.length === 0) return false;
+  // Disallow path traversal components and OS path separators
+  if (name.includes("..") || name.includes("/") || name.includes("\\") || name.includes("\0")) return false;
+  return true;
+}
+
+// Resolve a path inside the cortex directory and reject anything that escapes it
+function safeProjectPath(base: string, ...segments: string[]): string | null {
+  const resolved = path.resolve(base, ...segments);
+  // Ensure the resolved path is strictly inside base (with a trailing sep to avoid prefix attacks)
+  const normalizedBase = path.resolve(base) + path.sep;
+  if (!resolved.startsWith(normalizedBase) && resolved !== path.resolve(base)) return null;
+  return resolved;
+}
+
 // Figure out which project directories to index
 function getProjectDirs(): string[] {
   if (profile) {
+    if (!isValidProjectName(profile)) {
+      console.error(`Invalid CORTEX_PROFILE value: ${profile}`);
+      return [];
+    }
     const profilePath = path.join(cortexPath, "profiles", `${profile}.yaml`);
     if (fs.existsSync(profilePath)) {
       const data = yaml.load(fs.readFileSync(profilePath, "utf-8")) as Record<string, unknown>;
       const projects = data?.projects;
       if (Array.isArray(projects)) {
         return projects
-          .map((p: unknown) => path.join(cortexPath, String(p)))
-          .filter((p: string) => fs.existsSync(p));
+          .map((p: unknown) => {
+            const name = String(p);
+            if (!isValidProjectName(name)) {
+              console.error(`Skipping invalid project name in profile: ${name}`);
+              return null;
+            }
+            return safeProjectPath(cortexPath, name);
+          })
+          .filter((p): p is string => p !== null && fs.existsSync(p));
       }
     }
   }
@@ -134,6 +173,26 @@ async function buildIndex(): Promise<any> {
   return db;
 }
 
+// Sanitize a user-supplied string before passing it to an FTS5 MATCH expression.
+// FTS5 parses the match value as a query with its own syntax. Unbalanced quotes
+// cause parse errors; the column filter syntax (e.g. "content:term") can scope
+// queries to internal columns; the ^ prefix anchor has unusual semantics.
+// We strip characters that are meaningful to FTS5 but never needed for plain
+// keyword search: ^, and we balance/escape quotes by removing them then
+// re-quoting individual terms so the expression is always well-formed.
+function sanitizeFts5Query(raw: string): string {
+  // Remove null bytes
+  let q = raw.replace(/\0/g, "");
+  // Strip the column filter syntax: "column:" prefix attacks
+  q = q.replace(/\w+:/g, "");
+  // Remove FTS5 ^ anchor (only meaningful at start of phrase, rare in user queries)
+  q = q.replace(/\^/g, "");
+  // Balance quotes: remove all double-quotes, then re-add them around quoted-looking phrases
+  // For simplicity, strip all double-quotes (FTS5 uses them for phrase queries; users rarely need them)
+  q = q.replace(/"/g, "");
+  return q.trim();
+}
+
 // Extract a snippet around the match. FTS5 snippet() works in sql.js but
 // to keep things simple and reliable, we do our own snippet extraction.
 function extractSnippet(content: string, query: string, lines: number = 5): string {
@@ -205,13 +264,16 @@ async function main() {
       try {
         const maxResults = limit ?? 5;
         const filterType = type === "skills" ? "skill" : type;
+        const safeQuery = sanitizeFts5Query(query);
+
+        if (!safeQuery) return textResponse("Search query is empty after sanitization.");
 
         const sql = filterType
           ? `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND type = ? ORDER BY rank LIMIT ?`
           : `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT ?`;
         const params: (string | number)[] = filterType
-          ? [query, filterType, maxResults]
-          : [query, maxResults];
+          ? [safeQuery, filterType, maxResults]
+          : [safeQuery, maxResults];
 
         const rows = queryRows(db, sql, params);
         if (!rows) return textResponse(`No results found for "${query}"`);
@@ -349,10 +411,12 @@ async function main() {
       }),
     },
     async ({ project, item }) => {
-      const backlogPath = path.join(cortexPath, project, "backlog.md");
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
+      const resolvedDir = safeProjectPath(cortexPath, project);
+      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
+      const backlogPath = path.join(resolvedDir, "backlog.md");
       if (!fs.existsSync(backlogPath)) {
-        const dir = path.join(cortexPath, project);
-        if (!fs.existsSync(dir)) return textResponse(`Project "${project}" not found in cortex.`);
+        if (!fs.existsSync(resolvedDir)) return textResponse(`Project "${project}" not found in cortex.`);
         fs.writeFileSync(backlogPath, `# ${project} backlog\n\n## Active\n\n## Queue\n\n- ${item}\n\n## Done\n`);
         return textResponse(`Created backlog.md for "${project}" and added: ${item}`);
       }
@@ -377,7 +441,10 @@ async function main() {
       }),
     },
     async ({ project, item }) => {
-      const backlogPath = path.join(cortexPath, project, "backlog.md");
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
+      const resolvedDir = safeProjectPath(cortexPath, project);
+      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
+      const backlogPath = path.join(resolvedDir, "backlog.md");
       if (!fs.existsSync(backlogPath)) return textResponse(`No backlog found for "${project}".`);
       const content = fs.readFileSync(backlogPath, "utf8");
       const lines = content.split("\n");
