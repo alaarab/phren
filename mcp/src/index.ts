@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 
+import { runInit } from "./init.js";
+
+if (process.argv[2] === "init") {
+  await runInit();
+  process.exit(0);
+}
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
