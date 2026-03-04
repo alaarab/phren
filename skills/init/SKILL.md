@@ -138,8 +138,33 @@ git commit -m "init: <project-name>"
 git push  # only if remote exists
 ```
 
-If cortex isn't a git repo yet, suggest initializing one:
-> "Your cortex directory isn't a git repo. Want me to run `git init`? You can add a remote later to sync across machines."
+If cortex isn't a git repo yet, walk them through the full setup:
+
+```bash
+cd "$CORTEX_DIR"
+git init && git add -A && git commit -m "init: cortex"
+```
+
+Then check if `gh` is available:
+
+```bash
+which gh && gh auth status
+```
+
+If yes, offer to create the GitHub repo:
+> "Your cortex isn't on GitHub yet. Want me to create a private repo and push it? That's what lets you sync across machines."
+
+If they say yes:
+```bash
+gh repo create my-cortex --private --source=. --push
+```
+
+If `gh` isn't available, show the manual steps:
+> "Create a private repo at github.com/new, then:
+>   git remote add origin git@github.com:YOU/my-cortex.git
+>   git push -u origin main
+>
+> Once it's on GitHub, clone it on any machine and run `/cortex:sync` to activate."
 
 ### 9. Report
 
