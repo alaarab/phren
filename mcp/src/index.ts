@@ -461,6 +461,93 @@ async function main() {
     }
   );
 
+  server.registerTool(
+    "update_backlog_item",
+    {
+      title: "Update Backlog Item",
+      description: "Update a backlog item's priority, context, or section by matching text.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial text to match against existing backlog items."),
+        updates: z.object({
+          priority: z.string().optional().describe("New priority tag: high, medium, or low."),
+          context: z.string().optional().describe("Text to append to (or create) the Context: line below the item."),
+          section: z.string().optional().describe("Move item to this section: Queue, Active, or Done."),
+        }).describe("Fields to update. All are optional."),
+      }),
+    },
+    async ({ project, item, updates }) => {
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
+      const resolvedDir = safeProjectPath(cortexPath, project);
+      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
+      const backlogPath = path.join(resolvedDir, "backlog.md");
+      if (!fs.existsSync(backlogPath)) return textResponse(`No backlog found for "${project}".`);
+
+      let lines = fs.readFileSync(backlogPath, "utf8").split("\n");
+
+      // Find the item line
+      const idx = lines.findIndex(l => l.match(/^- /) && l.toLowerCase().includes(item.toLowerCase()));
+      if (idx === -1) return textResponse(`No item matching "${item}" found in ${project} backlog.`);
+
+      const changes: string[] = [];
+
+      // Apply priority update
+      if (updates.priority) {
+        const before = lines[idx];
+        // Remove any existing [high], [medium], [low] tag then add the new one
+        lines[idx] = lines[idx].replace(/\s*\[(high|medium|low)\]/gi, "").trimEnd() + ` [${updates.priority}]`;
+        if (lines[idx] !== before) changes.push(`priority -> ${updates.priority}`);
+      }
+
+      // Apply context update
+      if (updates.context) {
+        const contextLineIdx = idx + 1;
+        const hasContext = contextLineIdx < lines.length && lines[contextLineIdx].trim().startsWith("Context:");
+        if (hasContext) {
+          lines[contextLineIdx] = lines[contextLineIdx].trimEnd() + "; " + updates.context;
+        } else {
+          lines.splice(contextLineIdx, 0, `  Context: ${updates.context}`);
+        }
+        changes.push(`context updated`);
+      }
+
+      // Apply section move
+      if (updates.section) {
+        const targetSection = updates.section;
+        const sectionPattern = new RegExp(`^## ${targetSection}\\s*$`, "i");
+
+        // Collect the item and its context line (if any)
+        const itemLine = lines[idx];
+        const contextIdx = idx + 1;
+        const hasContext = contextIdx < lines.length && lines[contextIdx].trim().startsWith("Context:");
+        const extraLine = hasContext ? lines[contextIdx] : null;
+
+        // Remove item (and context if present) from current location
+        const removeCount = extraLine !== null ? 2 : 1;
+        lines.splice(idx, removeCount);
+
+        // Find target section header
+        const targetIdx = lines.findIndex(l => sectionPattern.test(l));
+        if (targetIdx === -1) {
+          // Section not found: append it
+          lines.push(`\n## ${targetSection}\n`, itemLine);
+          if (extraLine) lines.push(extraLine);
+        } else {
+          // Insert after the section header (and any blank line right after it)
+          let insertAt = targetIdx + 1;
+          if (insertAt < lines.length && lines[insertAt].trim() === "") insertAt++;
+          const toInsert = extraLine !== null ? [itemLine, extraLine] : [itemLine];
+          lines.splice(insertAt, 0, ...toInsert);
+        }
+
+        changes.push(`moved to ${targetSection}`);
+      }
+
+      fs.writeFileSync(backlogPath, lines.join("\n"));
+      return textResponse(`Updated item in ${project}: ${changes.join(", ")}`);
+    }
+  );
+
   // Start the server
   const transport = new StdioServerTransport();
   await server.connect(transport);
