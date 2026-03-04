@@ -228,6 +228,11 @@ link_project() {
     fi
   done
 
+  # Symlink CLAUDE-*.md split files (for @import support)
+  for f in "$SCRIPT_DIR/$project"/CLAUDE-*.md; do
+    [ -f "$f" ] && ln -sf "$f" "$target/$(basename "$f")"
+  done
+
   # Add token budget annotation to CLAUDE.md if it's large
   local claude_file="$SCRIPT_DIR/$project/CLAUDE.md"
   if [ -f "$claude_file" ]; then
