@@ -228,6 +228,34 @@ link_project() {
     fi
   done
 
+  # Add token budget annotation to CLAUDE.md if it's large
+  local claude_file="$SCRIPT_DIR/$project/CLAUDE.md"
+  if [ -f "$claude_file" ]; then
+    local file_size
+    file_size=$(wc -c < "$claude_file")
+    local estimated_tokens
+    estimated_tokens=$((file_size / 4))
+
+    if [ "$estimated_tokens" -gt 500 ]; then
+      # Check if annotation already exists
+      if ! head -1 "$claude_file" | grep -q "<!-- tokens:"; then
+        # Round to nearest 100
+        local rounded
+        rounded=$(( ((estimated_tokens + 50) / 100) * 100 ))
+        local annotation="<!-- tokens: ~$rounded -->"
+
+        # Read file, prepend annotation, write back
+        local tmp_file
+        tmp_file="$(mktemp)"
+        {
+          echo "$annotation"
+          cat "$claude_file"
+        } > "$tmp_file"
+        mv "$tmp_file" "$claude_file"
+      fi
+    fi
+  fi
+
   # Symlink project-level skills
   if [ -d "$SCRIPT_DIR/$project/.claude/skills" ]; then
     mkdir -p "$target/.claude/skills"
