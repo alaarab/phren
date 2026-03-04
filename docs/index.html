@@ -1336,7 +1336,7 @@
           <div class="terminal-line">
             <span class="terminal-prompt">$</span>
             <div class="terminal-cmd-wrap">
-              <span class="terminal-cmd" id="terminal-cmd">claude mcp add cortex -- npx @alaarab/cortex</span>
+              <span class="terminal-cmd" id="terminal-cmd">npx @alaarab/cortex init</span>
             </div>
           </div>
         </div>
@@ -1468,30 +1468,25 @@
     <div class="container">
       <div class="install-header reveal">
         <div class="section-label">Get started</div>
-        <h2 class="section-title">Up and running fast.</h2>
-        <p class="section-sub" style="margin-top:12px">No config files. No accounts. Run these and you're done.</p>
+        <h2 class="section-title">One command.</h2>
+        <p class="section-sub" style="margin-top:12px">Sets up your knowledge base, configures the MCP server, and wires up Claude Code and VS Code automatically.</p>
       </div>
 
       <div class="install-tabs-container">
         <div class="install-tab-buttons">
           <button class="install-tab-btn active" data-tab="claude-code">Claude Code</button>
-          <button class="install-tab-btn" data-tab="vscode">VS Code</button>
+          <button class="install-tab-btn" data-tab="vscode">VS Code / Copilot</button>
         </div>
 
         <div id="claude-code" class="install-tab-panel active">
           <div class="install-step-body">
             <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
               <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> claude mcp add cortex -- npx @alaarab/cortex</div>
-                <button class="copy-btn" data-cmd="claude mcp add cortex -- npx @alaarab/cortex">copy</button>
+                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
               </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> /plugin marketplace add alaarab/cortex</div>
-                <button class="copy-btn" data-cmd="/plugin marketplace add alaarab/cortex">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> /plugin install cortex@cortex</div>
-                <button class="copy-btn" data-cmd="/plugin install cortex@cortex">copy</button>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                Clones the starter template to <code style="color:var(--indigo)">~/.cortex</code>, registers your machine, and configures the MCP server. Then restart Claude Code.
               </div>
             </div>
           </div>
@@ -1500,20 +1495,23 @@
         <div id="vscode" class="install-tab-panel">
           <div class="install-step-body">
             <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px">Add to <code style="color:var(--indigo)">~/.config/Code/User/mcp.json</code> (Linux) or <code style="color:var(--indigo)">~/Library/Application Support/Code/User/mcp.json</code> (macOS):</div>
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:flex-start">
+              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                Detects VS Code automatically and writes <code style="color:var(--indigo)">mcp.json</code> for you. Or add it manually:
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:flex-start">
                 <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
   "servers": {
     "cortex": {
       "command": "npx",
-      "args": ["@alaarab/cortex"]
+      "args": ["@alaarab/cortex", "~/.cortex"]
     }
   }
 }</pre>
-                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex"]}}}'>copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                If you're self-hosting: run <code style="color:var(--text-muted)">link.sh</code> after building and it writes this file automatically.
+                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
               </div>
             </div>
           </div>
@@ -1696,9 +1694,9 @@
     (function() {
       const steps = [
         {
-          cmd: 'claude mcp add cortex -- npx @alaarab/cortex',
+          cmd: 'npx @alaarab/cortex init',
           prefix: 'One time:',
-          label: 'set it up',
+          label: 'set everything up',
         },
         {
           cmd: 'hey claude, update my cortex',
