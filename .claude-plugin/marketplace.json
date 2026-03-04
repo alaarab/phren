@@ -1,0 +1,21 @@
+{
+  "name": "cortex",
+  "owner": {
+    "name": "Ala Arab"
+  },
+  "plugins": [
+    {
+      "name": "cortex",
+      "source": "./",
+      "description": "Long-term memory for Claude Code. Project context, lessons learned, slash commands, task queues.",
+      "version": "1.0.1",
+      "author": {
+        "name": "Ala Arab"
+      },
+      "homepage": "https://github.com/alaarab/cortex",
+      "repository": "https://github.com/alaarab/cortex",
+      "license": "MIT",
+      "keywords": ["claude", "claude-code", "mcp", "memory", "knowledge"]
+    }
+  ]
+}

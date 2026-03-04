@@ -1,0 +1,7 @@
+name: work
+description: Work machine profile — professional projects only
+projects:
+  - global
+  # Add your work projects here:
+  # - my-work-project
+  # - another-project

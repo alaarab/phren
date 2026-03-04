@@ -1,0 +1,5 @@
+.DS_Store
+*.local.yaml
+node_modules/
+mcp/dist/
+mcp/node_modules/
