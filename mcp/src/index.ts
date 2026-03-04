@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url);
 const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<any>;
 
 // Resolve the cortex root directory
-// Priority: CLI arg > CORTEX_PATH env > ~/cortex > ~/.cortex > ~/my-cortex
+// Priority: CLI arg > CORTEX_PATH env > ~/.cortex > ~/cortex (auto-creates ~/.cortex on first run)
 function findCortexPath(): string {
   const arg = process.argv[2];
   if (arg) {
@@ -30,8 +30,15 @@ function findCortexPath(): string {
     const candidate = path.join(home, name);
     if (fs.existsSync(candidate)) return candidate;
   }
-  console.error("No cortex found. Pass a path, set CORTEX_PATH, or create ~/.cortex");
-  process.exit(1);
+  // First run: bootstrap ~/.cortex with a starter README
+  const defaultPath = path.join(home, ".cortex");
+  fs.mkdirSync(defaultPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(defaultPath, "README.md"),
+    `# My Cortex\n\nThis is your personal knowledge base. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md LEARNINGS.md backlog.md\n\`\`\`\n\nOr run \`/cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
+  );
+  console.error(`Created ~/.cortex — add project directories to get started`);
+  return defaultPath;
 }
 
 const cortexPath = findCortexPath();
