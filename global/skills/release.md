@@ -7,7 +7,6 @@ Run this after `/done` passes and you've committed your changes. This is the "ma
 ## 1. Detect Project Type
 
 ```bash
-# What are we dealing with?
 ls package.json pyproject.toml 2>/dev/null
 ```
 
@@ -22,7 +21,6 @@ Check if the project has its own `/publish` skill. If it does, defer to that for
 ## 2. Pre-Release Gate
 
 ```bash
-# Has /done been run? Is the tree clean?
 git status
 git log --oneline -3
 ```
@@ -42,26 +40,22 @@ If there are uncommitted changes, stop. Run `/done` first. Don't publish dirty.
 
 **npm projects:**
 ```bash
-# Single package
 npm version patch  # or minor, major, prepatch, preminor, premajor
 
-# Monorepo
-npm run version:bump X.Y.Z   # updates "version" fields AND all internal dep refs
-npm install                   # regenerate package-lock.json
+# monorepo: updates "version" fields AND all internal dep refs
+npm run version:bump X.Y.Z
+npm install
 ```
 
 **PyPI projects:**
-```bash
-# Update version in pyproject.toml manually
-# Look for: version = "X.Y.Z"
-```
+
+Edit `version = "X.Y.Z"` in pyproject.toml manually.
 
 After bumping, verify all internal dependencies resolve:
 ```bash
-# npm: confirm no stale refs (should be empty)
+# npm: should return nothing if refs are up to date
 grep -r '"@<your-scope>/' packages/*/package.json | grep -v node_modules | grep -v '"X.Y.Z"'
 
-# PyPI
 grep -r 'requires' pyproject.toml
 ```
 
@@ -91,7 +85,7 @@ Format:
 
 ```bash
 git add -A
-git commit -m "release: vX.Y.Z"
+git commit -m "vX.Y.Z"
 git tag vX.Y.Z
 ```
 
