@@ -18,7 +18,7 @@ Add a new project to your cortex instance, or bootstrap cortex itself if you're 
 ## First: find or create the cortex directory
 
 ```bash
-CORTEX_DIR="${CORTEX_DIR:-$HOME/cortex}"
+CORTEX_DIR="${CORTEX_DIR:-$HOME/.cortex}"
 ls "$CORTEX_DIR" 2>/dev/null
 ```
 
