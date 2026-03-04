@@ -1164,7 +1164,7 @@
             </div>
           </div>
         </div>
-        <div class="terminal-step-label" id="terminal-label">Step <span id="step-num">1</span> of 3: Add the MCP server</div>
+        <div class="terminal-step-label" id="terminal-label">One time: <span id="step-num">set it up</span></div>
         <div class="terminal-progress">
           <div class="terminal-progress-dot active" id="dot-0"></div>
           <div class="terminal-progress-dot" id="dot-1"></div>
@@ -1540,15 +1540,18 @@
       const steps = [
         {
           cmd: 'claude mcp add cortex -- npx @alaarab/cortex',
-          label: 'Add the MCP server',
+          prefix: 'One time:',
+          label: 'set it up',
         },
         {
-          cmd: '/plugin marketplace add alaarab/cortex',
-          label: 'Install from the plugin marketplace',
+          cmd: 'hey claude, update my cortex',
+          prefix: 'End of day:',
+          label: 'Claude captures what you learned, commits, pushes',
         },
         {
-          cmd: '/plugin install cortex@cortex',
-          label: 'Activate the cortex plugin',
+          cmd: '/cortex-sync',
+          prefix: 'Next machine:',
+          label: 'full context, already there',
         },
       ];
 
@@ -1571,8 +1574,8 @@
           cmdEl.textContent = steps[current].cmd;
           cmdEl.classList.remove('fade-out');
           cmdEl.classList.add('fade-in');
-          stepNumEl.textContent = current + 1;
-          labelEl.innerHTML = `Step <span id="step-num">${current + 1}</span> of 3: ${steps[current].label}`;
+          stepNumEl.textContent = steps[current].label;
+          labelEl.innerHTML = `${steps[current].prefix} <span id="step-num">${steps[current].label}</span>`;
 
           dots.forEach((d, i) => d.classList.toggle('active', i === current));
 
