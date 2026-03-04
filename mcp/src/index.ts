@@ -37,7 +37,7 @@ function findCortexPath(): string {
     path.join(defaultPath, "README.md"),
     `# My Cortex\n\nThis is your personal knowledge base. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md LEARNINGS.md backlog.md\n\`\`\`\n\nOr run \`/cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
   );
-  console.error(`Created ~/.cortex — add project directories to get started`);
+  console.error(`Created ~/.cortex — see github.com/alaarab/cortex-starter to populate it`);
   return defaultPath;
 }
 

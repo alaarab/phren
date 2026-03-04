@@ -60,10 +60,15 @@ Push to GitHub to sync across machines. On a new machine, clone and run link.sh.
 ### Option A: npm (recommended)
 
 ```bash
-# Add the MCP server
+# 1. Use the starter template to create your knowledge base
+#    → github.com/alaarab/cortex-starter — click "Use this template"
+#    → then clone your copy to ~/.cortex
+git clone git@github.com:YOUR_USERNAME/cortex-starter.git ~/.cortex
+
+# 2. Add the MCP server
 claude mcp add cortex -- npx @alaarab/cortex
 
-# Add cortex as a plugin marketplace, then install skills
+# 3. Install skills
 /plugin marketplace add alaarab/cortex
 /plugin install cortex@cortex
 ```
