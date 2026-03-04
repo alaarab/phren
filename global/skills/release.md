@@ -17,7 +17,7 @@ ls package.json pyproject.toml 2>/dev/null
 | `pyproject.toml` | PyPI | `uv build && uv publish` |
 | Both | Decide based on project CLAUDE.md | |
 
-Check if the project has its own `/publish` skill. If it does, defer to that for project-specific steps (e.g., livemcp needs to test with Ableton, OGrid has a GitHub Actions workflow). The steps below are the universal baseline.
+Check if the project has its own `/publish` skill. If it does, defer to that for project-specific steps (e.g., some projects have pre-publish test requirements, others use a GitHub Actions workflow). The steps below are the universal baseline.
 
 ## 2. Pre-Release Gate
 

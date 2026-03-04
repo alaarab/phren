@@ -99,24 +99,24 @@ Projects without core files:
 ## Section 2: Stale Content
 
 Files not updated in 30+ days:
-- ogrid/LEARNINGS.md: last updated 45 days ago
+- my-app/LEARNINGS.md: last updated 45 days ago
 - frontend/CLAUDE.md: last updated 62 days ago
 
 ## Section 3: Skill Gaps
 
 Things you do repeatedly that could be skills:
 - "Update changelog before release" appears in 3 project backlogs. Consider a `/changelog` skill.
-- ogrid LEARNINGS.md mentions "always run parity check" 4 times. Already have `/parity`, but it's not in the workflow skill.
+- my-app LEARNINGS.md mentions "always run parity check" 4 times. Already have `/parity`, but it's not in the workflow skill.
 
 ## Section 4: Backlog Health
 
-- ogrid: 12 items (3 completed, 2 stale > 60 days)
-- api-server: 5 items (0 completed, all stale)
+- my-app: 12 items (3 completed, 2 stale > 60 days)
+- backend: 5 items (0 completed, all stale)
 - frontend: 8 items (6 completed, healthy)
 
 Stuck items:
-- api-server#2: "Add rate limiting" (added 90 days ago, no progress)
-- ogrid#7: "Column virtualization perf" (added 75 days ago, no progress)
+- backend#2: "Add rate limiting" (added 90 days ago, no progress)
+- my-app#7: "Improve query performance" (added 75 days ago, no progress)
 
 ## Top 3 Things to Work On Next
 

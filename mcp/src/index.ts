@@ -233,9 +233,9 @@ async function main() {
     "get_project_summary",
     {
       title: "Get Project Summary",
-      description: "Get a project's summary card and available docs. Pass the project name (e.g. 'ogrid', 'AlphaLens').",
+      description: "Get a project's summary card and available docs. Pass the project name (e.g. 'my-app', 'backend').",
       inputSchema: z.object({
-        name: z.string().describe("Project name (e.g. 'ogrid', 'AlphaLens', 'livemcp')"),
+        name: z.string().describe("Project name (e.g. 'my-app', 'backend', 'frontend')"),
       }),
     },
     async ({ name }) => {

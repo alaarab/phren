@@ -65,7 +65,7 @@ If only one project has a LEARNINGS.md, tell the user:
 
 Compare learnings across all projects. A pattern counts as cross-cutting when the **same insight, technique, or gotcha** appears in 2+ projects. Don't just look for keyword overlap; look for conceptual overlap.
 
-Be specific. Not "testing is important" but "mocking at service boundaries instead of HTTP layer caught integration bugs in both ogrid and intranet."
+Be specific. Not "testing is important" but "mocking at service boundaries instead of HTTP layer caught integration bugs in both my-app and backend."
 
 Common categories (use only the ones that have actual matches):
 
@@ -95,12 +95,12 @@ Last consolidated: <date>
 Sources: <list of project names scanned>
 
 ## Build and tooling
-- Clear dist/ after any tsconfig change, the build cache doesn't invalidate (ogrid, api-server)
-- Lock file conflicts: delete and regenerate, don't try to merge (ogrid, frontend)
+- Clear dist/ after any tsconfig change, the build cache doesn't invalidate (my-app, backend)
+- Lock file conflicts: delete and regenerate, don't try to merge (my-app, frontend)
 
 ## Testing
-- Mock at the service boundary, not the HTTP layer (api-server, frontend)
-- Session-scoped fixtures cause flaky parallel tests (api-server, intranet)
+- Mock at the service boundary, not the HTTP layer (backend, frontend)
+- Session-scoped fixtures cause flaky parallel tests (backend, my-app)
 ```
 
 Rules for each entry:
@@ -114,7 +114,7 @@ Rules for each entry:
 ```
 /cortex-consolidate
 
-Scanned: ogrid (12 learnings), api-server (8 learnings), frontend (5 learnings)
+Scanned: my-app (12 learnings), backend (8 learnings), frontend (5 learnings)
 
 Found 6 cross-cutting patterns:
   Build: 2 patterns (cache invalidation, lock file handling)

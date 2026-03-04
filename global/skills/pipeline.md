@@ -86,4 +86,4 @@ Don't list every possible action. Pick the one thing that makes sense right now:
 
 Don't just describe the pipeline steps in general. Read the actual repo state first, then tell the user where they are in it. The output should be specific to this moment, not a template.
 
-If the project has its own CLAUDE.md, check it for project-specific pipeline steps (e.g., OGrid has its own build/test/publish flow).
+If the project has its own CLAUDE.md, check it for project-specific pipeline steps (e.g., a monorepo might have its own build/test/publish flow).

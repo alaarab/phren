@@ -40,7 +40,7 @@ type?: string     - Filter: "claude", "learnings", "knowledge", "summary", "back
 Returns a project's summary.md content, path to its CLAUDE.md, and a list of indexed files.
 
 ```
-name: string      - Project name (e.g. "ogrid", "AlphaLens")
+name: string      - Project name (e.g. "my-app", "backend")
 ```
 
 ### list_projects
