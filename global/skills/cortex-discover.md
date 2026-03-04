@@ -81,7 +81,31 @@ For each project with a backlog.md:
 - Flag backlogs where nothing has been completed recently
 - Flag backlogs with items older than 60 days that haven't moved
 
-### 6. Output the report
+### 6. Scaffold missing summary.md files
+
+For each project with a missing summary.md, output the template and offer to create it:
+
+```
+Project: myapp
+MISSING: summary.md
+
+Template:
+```
+# myapp
+
+What:
+Stack:
+Status: active
+Run:
+Gotcha:
+```
+
+Want me to fill this in for myapp?
+```
+
+If yes, gather the 5 fields from the user and write the file to `$CORTEX_DIR/myapp/summary.md`.
+
+### 7. Output the report
 
 ```
 /cortex-discover
