@@ -34,7 +34,6 @@ for dir in "$CORTEX_DIR"/*/; do
   PROJECT=$(basename "$dir")
   [ "$PROJECT" = "global" ] || [ "$PROJECT" = "profiles" ] && continue
 
-  # Check what exists
   [ -f "$dir/CLAUDE.md" ]    && echo "$PROJECT: has CLAUDE.md"    || echo "$PROJECT: MISSING CLAUDE.md"
   [ -f "$dir/summary.md" ]   && echo "$PROJECT: has summary.md"   || echo "$PROJECT: MISSING summary.md"
   [ -f "$dir/LEARNINGS.md" ] && echo "$PROJECT: has LEARNINGS.md" || echo "$PROJECT: MISSING LEARNINGS.md"

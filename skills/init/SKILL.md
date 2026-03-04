@@ -134,7 +134,7 @@ Then add the project name to the chosen profile's `projects` list.
 cd "$CORTEX_DIR"
 git add <project-name>/
 git add profiles/  # if modified
-git commit -m "init: <project-name>"
+git commit -m "add <project-name>"
 git push  # only if remote exists
 ```
 
@@ -142,7 +142,7 @@ If cortex isn't a git repo yet, walk them through the full setup:
 
 ```bash
 cd "$CORTEX_DIR"
-git init && git add -A && git commit -m "init: cortex"
+git init && git add -A && git commit -m "initial cortex setup"
 ```
 
 Then check if `gh` is available:
@@ -159,7 +159,7 @@ If they say yes:
 gh repo create my-cortex --private --source=. --push
 ```
 
-If `gh` isn't available, show the manual steps:
+If `gh` isn't available, give them the manual steps:
 > "Create a private repo at github.com/new, then:
 >   git remote add origin git@github.com:YOU/my-cortex.git
 >   git push -u origin main

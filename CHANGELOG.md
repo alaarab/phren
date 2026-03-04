@@ -11,7 +11,7 @@
 
 ### Added
 - GitHub Pages landing site (`docs/`)
-- Auto-creates `~/.cortex` with starter README on first run — no error on fresh install
+- Auto-creates `~/.cortex` with starter README on first run (no error on fresh install)
 - CLI path argument: `claude mcp add cortex -- npx @alaarab/cortex ~/custom/path`
 - Plugin marketplace support: `.claude-plugin/marketplace.json`
 - Skills installable via `/plugin marketplace add alaarab/cortex` + `/plugin install cortex@cortex`

@@ -13,9 +13,7 @@ It's a status check, not a guide. Read the actual state of the repo and report i
 **1. Project identity**
 
 ```bash
-# Name and what kind of project it is
 cat package.json | grep '"name"'
-# Or check for CLAUDE.md
 cat CLAUDE.md | head -5
 ```
 
