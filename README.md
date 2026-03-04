@@ -192,16 +192,14 @@ Cortex is MCP-native, so it works wherever MCP is supported.
 
 **VS Code / GitHub Copilot:** `link.sh` also writes `~/.config/Code/User/mcp.json` automatically. Once configured, Copilot Chat has access to all the same tools: `search_cortex`, `get_project_summary`, `list_projects`, `get_backlog`, `add_backlog_item`, `complete_backlog_item`.
 
-If you want to set it up manually:
+If you want to set it up manually, add to `~/.config/Code/User/mcp.json` (Linux) or `~/Library/Application Support/Code/User/mcp.json` (macOS):
 
 ```json
-// ~/.config/Code/User/mcp.json  (Linux)
-// ~/Library/Application Support/Code/User/mcp.json  (macOS)
 {
   "servers": {
     "cortex": {
-      "command": "node",
-      "args": ["/path/to/cortex-framework/mcp/dist/index.js"]
+      "command": "npx",
+      "args": ["@alaarab/cortex", "~/.cortex"]
     }
   }
 }
