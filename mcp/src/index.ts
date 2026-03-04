@@ -317,6 +317,83 @@ async function main() {
     }
   );
 
+  server.registerTool(
+    "get_backlog",
+    {
+      title: "Get Backlog",
+      description: "Get the backlog for a project, or all projects if no name given. Returns active and queued items.",
+      inputSchema: z.object({
+        project: z.string().optional().describe("Project name. Omit to get all projects."),
+      }),
+    },
+    async ({ project }) => {
+      const sql = project
+        ? "SELECT project, content, path FROM docs WHERE project = ? AND type = 'backlog'"
+        : "SELECT project, content, path FROM docs WHERE type = 'backlog' ORDER BY project";
+      const params = project ? [project] : [];
+      const rows = queryRows(db, sql, params);
+      if (!rows) return textResponse(project ? `No backlog found for "${project}".` : "No backlogs found.");
+      const parts = rows.map((r) => `## ${r[0]}\n${r[1]}`);
+      return textResponse(parts.join("\n\n"));
+    }
+  );
+
+  server.registerTool(
+    "add_backlog_item",
+    {
+      title: "Add Backlog Item",
+      description: "Append a task to a project's backlog.md. Adds to the Queue section.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name (must match a directory in your cortex)."),
+        item: z.string().describe("The task to add."),
+      }),
+    },
+    async ({ project, item }) => {
+      const backlogPath = path.join(cortexPath, project, "backlog.md");
+      if (!fs.existsSync(backlogPath)) {
+        const dir = path.join(cortexPath, project);
+        if (!fs.existsSync(dir)) return textResponse(`Project "${project}" not found in cortex.`);
+        fs.writeFileSync(backlogPath, `# ${project} backlog\n\n## Active\n\n## Queue\n\n- ${item}\n\n## Done\n`);
+        return textResponse(`Created backlog.md for "${project}" and added: ${item}`);
+      }
+      const content = fs.readFileSync(backlogPath, "utf8");
+      const queueMatch = content.match(/^(## Queue\s*\n)/m);
+      const updated = queueMatch
+        ? content.replace(queueMatch[0], `${queueMatch[0]}\n- ${item}\n`)
+        : content + `\n- ${item}\n`;
+      fs.writeFileSync(backlogPath, updated);
+      return textResponse(`Added to ${project} backlog: ${item}`);
+    }
+  );
+
+  server.registerTool(
+    "complete_backlog_item",
+    {
+      title: "Complete Backlog Item",
+      description: "Move a backlog item to the Done section by matching text.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Exact or partial text of the item to complete."),
+      }),
+    },
+    async ({ project, item }) => {
+      const backlogPath = path.join(cortexPath, project, "backlog.md");
+      if (!fs.existsSync(backlogPath)) return textResponse(`No backlog found for "${project}".`);
+      const content = fs.readFileSync(backlogPath, "utf8");
+      const lines = content.split("\n");
+      const idx = lines.findIndex(l => l.match(/^- /) && l.toLowerCase().includes(item.toLowerCase()));
+      if (idx === -1) return textResponse(`No item matching "${item}" found in ${project} backlog.`);
+      const matched = lines[idx];
+      const removed = lines.filter((_, i) => i !== idx).join("\n");
+      const doneMatch = removed.match(/^(## Done\s*\n)/m);
+      const updated = doneMatch
+        ? removed.replace(doneMatch[0], `${doneMatch[0]}\n${matched}\n`)
+        : removed + `\n## Done\n\n${matched}\n`;
+      fs.writeFileSync(backlogPath, updated);
+      return textResponse(`Marked done in ${project}: ${matched.replace(/^- /, "")}`);
+    }
+  );
+
   // Start the server
   const transport = new StdioServerTransport();
   await server.connect(transport);
