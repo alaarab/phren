@@ -16,7 +16,7 @@
 
 A git repo that gives Claude persistent context across sessions and machines.<br>
 Project knowledge, lessons learned, slash commands, task queues, all in markdown files you own.<br>
-Fork it, clone it, run one script. Claude knows your projects from session one.
+Fork it, clone it to `~/.cortex`, install the package. Claude knows your projects from session one.
 
 <br>
 </div>
@@ -33,9 +33,7 @@ With the MCP server, Claude starts lean. It searches your knowledge base when it
 
 ### Each machine only sees what it needs to
 
-Cortex uses git sparse-checkout under the hood. Each machine gets a profile listing which projects it should know about. Work machine gets work projects. Home machine gets whatever you configure. Projects outside the profile don't exist on that machine's filesystem.
-
-No project leakage across environments. One repo, many machines, each scoped to its role.
+Cortex uses git sparse-checkout under the hood. Each machine has a profile that lists which projects it should see — work machine gets work projects, everything else stays off disk. No leakage between environments.
 
 ### You stop losing what you learned
 
@@ -49,7 +47,7 @@ Everything lives in markdown files in a git repo you own. `git log` shows how yo
 
 ## How it works
 
-Fork this repo and clone it to `~/cortex`. This is your knowledge base: project files, profiles, history.
+Fork this repo and clone it to `~/cortex`. This is your knowledge base.
 
 Run `link.sh`. It registers your machine, applies your profile, and symlinks everything into place. CLAUDE.md files land in your project directories, skills land in `~/.claude/skills/`. Claude picks them up next time it starts.
 
@@ -181,11 +179,11 @@ These are the skills I use in my own workflow. They're included as a starting po
 
 General-purpose skills that work with or without cortex. I include them because I reach for them constantly.
 
-`/humanize` runs a sweep on everything you're about to ship. It has a word kill list (delve, leverage, robust, seamless, the words that show up 10x more in AI text than human text), a structural pattern check (rule of three, bolded bullet lists, uniform paragraph length), and a code check for comments that restate the code instead of explaining why.
+`/humanize` sweeps your code and prose for AI tells before you ship. If it sounds like a language model wrote it, this finds it.
 
 `/creative` is a design pass. It looks at UI work and asks the questions a good designer would: is the spacing consistent, does the typography have a real hierarchy, does this look like something someone made or something someone filled in from a template.
 
-`/swarm` spins up a team of Claude agents (typically 3-5) and splits work across them. One agent handles frontend, one handles backend, one handles tests. They coordinate through a shared task list and report back when done.
+`/swarm` spins up a team of Claude agents and splits work across them. Frontend, backend, tests in parallel. They coordinate through a shared task list and report back when done.
 
 `/backlog` manages a persistent task queue in a `backlog.md` file. Tasks survive across sessions, can be prioritized, and can be handed off to a swarm.
 
