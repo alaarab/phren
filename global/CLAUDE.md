@@ -60,8 +60,10 @@ The cortex MCP server is running. Use these tools proactively — don't ask the 
 - **When the user mentions a project, codebase, or task:** call `search_cortex(query)` before asking questions
 - **When the user asks about commands, architecture, conventions, or past decisions:** call `search_cortex(query)` first
 - **When the user mentions a task or todo:** call `get_backlog(project)` to see what's already tracked
+- **When the user says they want to do something later:** call `add_backlog_item(project, item)` instead of listing it in chat
+- **When a task is finished:** offer to add any follow-ups to the backlog rather than leaving them in the conversation
 
-The goal: Claude should already know the context before the user has to explain it.
+The goal: Claude should already know the context before the user has to explain it. Backlogs stay in files, not buried in chat history.
 
 ## Machine Context
 
