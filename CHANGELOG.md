@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.0] - 2026-03-04
+
+### Changed
+- Merged `/cortex-learn` into `/cortex-update` — one skill for saving session learnings, works standalone or with full cortex setup
+- Simplified from 6 skills to 5: update, sync, init, discover, consolidate
+- MCP tool descriptions now tell Claude when to call them proactively
+- global CLAUDE.md instructs Claude to use MCP tools and backlog without being asked
+- Landing page: replaced misleading token savings card with honest "search not load" framing
+- Skill names consistent everywhere with dashes (not colons)
+- Framework boilerplate no longer lists personal workflow skills
+
+### Fixed
+- cortex-sync path references used `~/cortex` instead of `~/.cortex`
+- VS Code manual config missing `~/.cortex` path argument
+
 ## [1.2.0] - 2026-03-04
 
 ### Added
