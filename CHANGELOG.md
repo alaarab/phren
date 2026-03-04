@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.4] - 2026-03-04
+
+### Added
+- MCP tools for backlog management: `get_backlog`, `add_backlog_item`, `complete_backlog_item`
+- Conventional Commits format added to `/humanize` as an AI tell
+- README documents all six MCP tools
+
 ## [1.1.0] - 2026-03-04
 
 ### Added
