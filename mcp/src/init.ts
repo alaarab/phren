@@ -193,7 +193,7 @@ export async function runInit() {
     );
     fs.writeFileSync(
       path.join(cortexPath, "my-first-project", "LEARNINGS.md"),
-      `# my-first-project LEARNINGS\n\n<!-- Add session learnings here, or run /cortex-learn in Claude Code -->\n`
+      `# my-first-project LEARNINGS\n\n<!-- Learnings are captured automatically during sessions and committed on exit -->\n`
     );
     fs.writeFileSync(
       path.join(cortexPath, "my-first-project", "backlog.md"),

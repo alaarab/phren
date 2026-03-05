@@ -18,7 +18,6 @@ These skills are available as a full set via cortex, or individually from the Cl
 
 | Skill | What it does |
 |-------|-------------|
-| `/cortex-update` | Save what you learned: captures learnings, commits, pushes. Run at the end of any session. |
 | `/cortex-sync` | Pull cortex to a new machine or push config changes back to the repo |
 | `/cortex-init` | Scaffold a new project with summary, CLAUDE.md, backlog |
 | `/cortex-discover` | Research what's missing in a project and surface gaps and opportunities |
