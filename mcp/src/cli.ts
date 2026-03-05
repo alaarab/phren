@@ -1,4 +1,4 @@
-import { findCortexPath, buildIndex, extractSnippet, queryRows, detectProject, addLearningToFile } from "./shared.js";
+import { findCortexPath, buildIndex, extractSnippet, queryRows, detectProject, addLearningToFile, checkConsolidationNeeded } from "./shared.js";
 import { sanitizeFts5Query, expandSynonyms, extractKeywords } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -69,10 +69,12 @@ async function handleHookPrompt() {
 
   let prompt: string;
   let cwd: string | undefined;
+  let sessionId: string | undefined;
   try {
     const data = JSON.parse(input);
     prompt = data.prompt || "";
     cwd = data.cwd;
+    sessionId = data.session_id;
   } catch {
     process.exit(0);
   }
@@ -122,6 +124,39 @@ async function handleHookPrompt() {
       parts.push("");
     }
     parts.push("</cortex-context>");
+
+    // Check for consolidation needs once per session
+    const noticeFile = sessionId ? path.join(cortexPath, `.noticed-${sessionId}`) : null;
+    const alreadyNoticed = noticeFile ? fs.existsSync(noticeFile) : false;
+
+    if (!alreadyNoticed) {
+      // Clean up stale notice files (older than 24h)
+      try {
+        const cutoff = Date.now() - 86400000;
+        for (const f of fs.readdirSync(cortexPath)) {
+          if (!f.startsWith(".noticed-")) continue;
+          const fp = path.join(cortexPath, f);
+          if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
+        }
+      } catch { /* best effort */ }
+
+      const needed = checkConsolidationNeeded(cortexPath, profile);
+      if (needed.length > 0) {
+        const notices = needed.map(n => {
+          const since = n.lastConsolidated ? ` since ${n.lastConsolidated}` : "";
+          return `  ${n.project}: ${n.entriesSince} new learnings${since}`;
+        });
+        parts.push(`<cortex-notice>`);
+        parts.push(`Learnings ready for consolidation:`);
+        parts.push(notices.join("\n"));
+        parts.push(`Run /cortex-consolidate when ready.`);
+        parts.push(`</cortex-notice>`);
+      }
+
+      if (noticeFile) {
+        try { fs.writeFileSync(noticeFile, ""); } catch { /* best effort */ }
+      }
+    }
 
     console.log(parts.join("\n"));
   } catch {

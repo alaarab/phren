@@ -135,7 +135,9 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
       const type = classifyFile(filename, relFile);
 
       try {
-        const content = fs.readFileSync(fullPath, "utf-8");
+        const raw = fs.readFileSync(fullPath, "utf-8");
+        // Strip <details> archive blocks so consolidated entries don't pollute search
+        const content = raw.replace(/<details>[\s\S]*?<\/details>/gi, "");
         db.run(
           "INSERT INTO docs (project, filename, type, content, path) VALUES (?, ?, ?, ?, ?)",
           [projectName, filename, type, content, fullPath]
@@ -242,6 +244,63 @@ export function detectProject(cortexPath: string, cwd: string, profile?: string)
     if (cwdSegments.includes(projectName)) return path.basename(dir);
   }
   return null;
+}
+
+export interface ConsolidationNeeded {
+  project: string;
+  entriesSince: number;
+  daysSince: number | null;
+  lastConsolidated: string | null;
+}
+
+// Check which projects have enough new learnings to warrant consolidation
+export function checkConsolidationNeeded(cortexPath: string, profile?: string): ConsolidationNeeded[] {
+  const ENTRY_THRESHOLD = 25;
+  const TIME_THRESHOLD_DAYS = 60;
+  const MIN_FOR_TIME_CHECK = 10;
+
+  const projectDirs = getProjectDirs(cortexPath, profile);
+  const results: ConsolidationNeeded[] = [];
+  const today = new Date();
+
+  for (const dir of projectDirs) {
+    const learningsPath = path.join(dir, "LEARNINGS.md");
+    if (!fs.existsSync(learningsPath)) continue;
+
+    const content = fs.readFileSync(learningsPath, "utf8");
+    const lines = content.split("\n");
+
+    const markerMatch = content.match(/<!--\s*consolidated:\s*(\d{4}-\d{2}-\d{2})/);
+    const lastConsolidated = markerMatch ? markerMatch[1] : null;
+
+    let startLine = 0;
+    if (markerMatch) {
+      startLine = lines.findIndex(l => l.includes("consolidated:")) + 1;
+    }
+
+    let inDetails = false;
+    let entriesSince = 0;
+    for (let i = startLine; i < lines.length; i++) {
+      if (lines[i].includes("<details>")) { inDetails = true; continue; }
+      if (lines[i].includes("</details>")) { inDetails = false; continue; }
+      if (!inDetails && lines[i].match(/^- /)) entriesSince++;
+    }
+
+    let daysSince: number | null = null;
+    if (lastConsolidated) {
+      daysSince = Math.floor((today.getTime() - new Date(lastConsolidated).getTime()) / 86400000);
+    }
+
+    const needsByCount = entriesSince >= ENTRY_THRESHOLD;
+    const needsByTime = daysSince !== null && daysSince >= TIME_THRESHOLD_DAYS && entriesSince >= MIN_FOR_TIME_CHECK;
+    const needsFirst = lastConsolidated === null && entriesSince >= ENTRY_THRESHOLD;
+
+    if (needsByCount || needsByTime || needsFirst) {
+      results.push({ project: path.basename(dir), entriesSince, daysSince, lastConsolidated });
+    }
+  }
+
+  return results;
 }
 
 // Add a learning to a project's LEARNINGS.md
