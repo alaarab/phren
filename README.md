@@ -62,8 +62,6 @@ That's it. This:
 
 Restart Claude Code. Your next prompt will already have context.
 
-Already have cortex? Run init again to pick up the v1.7.0 hooks.
-
 ### Sync across machines
 
 ```bash
