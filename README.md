@@ -17,7 +17,7 @@
 
 <br>
 
-Project knowledge, lessons learned, task queues: all in markdown files you own. One command to set up. Zero commands to use after that. Claude gets your context automatically on every prompt.
+Project knowledge, lessons learned, task queues: all in markdown files you own. One command to set up. Zero commands to use after that. When your prompt mentions something cortex knows about, the context is there before Claude starts thinking.
 
 <br>
 </div>
@@ -28,7 +28,7 @@ Project knowledge, lessons learned, task queues: all in markdown files you own. 
 
 ### It runs itself
 
-Other memory tools need Claude to remember to call them. Cortex hooks into Claude Code's lifecycle directly. Every prompt you type, the hook searches your knowledge base and injects the relevant context before Claude even starts thinking. When the session ends, anything Claude wrote down gets committed and pushed. You never do either of those things manually.
+Other memory tools need Claude to remember to call them. Cortex hooks into Claude Code's lifecycle directly. Every prompt you type, the hook searches your knowledge base. If it finds something relevant, it injects that context before Claude starts thinking. If not, nothing gets added. When the session ends, anything Claude wrote down gets committed and pushed. You never do either of those things manually.
 
 ### It's just files
 
@@ -92,7 +92,7 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 
 ## How it runs itself
 
-**On every prompt** — before Claude sees your message, a hook extracts keywords, detects your current project from the working directory, searches your cortex with synonym expansion, and injects the top results as context. Takes about 250ms. Claude starts every response knowing what project you're in and what's relevant.
+**On relevant prompts** — before Claude sees your message, a hook extracts keywords, searches your cortex with synonym expansion, and injects matching results as context. If nothing relevant is found — generic replies, short acks, unrelated questions — nothing gets added. When something does match, it's the top 3 results (~400 tokens). Takes about 250ms. Zero bloat on prompts where cortex has nothing useful to say.
 
 **After every response** — a hook checks for cortex changes. If anything new got written (a learning, a backlog update), it commits and pushes. You don't save manually.
 
