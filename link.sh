@@ -37,14 +37,22 @@ die() { echo "error: $*" >&2; exit 1; }
 # Usage: yaml_value file key
 yaml_value() {
   local file="$1" key="$2"
-  grep -E "^${key}:" "$file" 2>/dev/null | sed "s/^${key}:[[:space:]]*//" | sed 's/[[:space:]]*$//'
+  if command -v yq &>/dev/null; then
+    yq -r ".\"${key}\" // \"\"" "$file" 2>/dev/null
+  else
+    grep -E "^${key}:" "$file" 2>/dev/null | sed "s/^${key}:[[:space:]]*//" | sed 's/[[:space:]]*$//'
+  fi
 }
 
 # Read a YAML list into a bash array. Handles "  - item" format.
 # Usage: yaml_list file key -> prints one item per line
 yaml_list() {
   local file="$1" key="$2"
-  sed -n "/^${key}:/,/^[^ #-]/p" "$file" | grep -E '^\s*-' | sed 's/^[[:space:]]*-[[:space:]]*//'
+  if command -v yq &>/dev/null; then
+    yq -r ".\"${key}\"[]? // empty" "$file" 2>/dev/null
+  else
+    sed -n "/^${key}:/,/^[^ #-]/p" "$file" | grep -E '^\s*-' | sed 's/^[[:space:]]*-[[:space:]]*//'
+  fi
 }
 
 # Collect all known project names across every profile
@@ -161,8 +169,14 @@ register_machine() {
   # Write machine file
   echo "$machine" > "$MACHINE_FILE"
 
-  # Append to machines.yaml
-  echo "${machine}: ${profile}" >> "$MACHINES_FILE"
+  # Append to machines.yaml (atomic write to avoid partial updates)
+  local tmp
+  tmp="$(mktemp "${MACHINES_FILE}.XXXXXX")"
+  if [ -f "$MACHINES_FILE" ]; then
+    cp "$MACHINES_FILE" "$tmp"
+  fi
+  echo "${machine}: ${profile}" >> "$tmp"
+  mv "$tmp" "$MACHINES_FILE"
 
   # Commit machines.yaml if we're in a git repo
   if git -C "$SCRIPT_DIR" rev-parse --git-dir &>/dev/null; then
@@ -273,6 +287,34 @@ link_project() {
 
 # ── Context file ─────────────────────────────────────────────────────────
 
+# Write managed content to the context file, preserving any user content
+# outside the <!-- cortex-managed --> markers.
+write_context_file() {
+  local managed_content="$1"
+  local wrapped=""
+  wrapped+="<!-- cortex-managed -->"$'\n'
+  wrapped+="$managed_content"$'\n'
+  wrapped+="<!-- /cortex-managed -->"
+
+  if [ -f "$CONTEXT_FILE" ] && grep -q '<!-- cortex-managed -->' "$CONTEXT_FILE" 2>/dev/null; then
+    # Preserve user content before and after the managed block
+    local before after
+    before="$(sed -n '1,/<!-- cortex-managed -->/{ /<!-- cortex-managed -->/d; p; }' "$CONTEXT_FILE")"
+    after="$(sed -n '/<!-- \/cortex-managed -->/,${  /<!-- \/cortex-managed -->/d; p; }' "$CONTEXT_FILE")"
+
+    local tmp
+    tmp="$(mktemp "${CONTEXT_FILE}.XXXXXX")"
+    {
+      [ -n "$before" ] && printf '%s\n' "$before"
+      printf '%s\n' "$wrapped"
+      [ -n "$after" ] && printf '%s\n' "$after"
+    } > "$tmp"
+    mv "$tmp" "$CONTEXT_FILE"
+  else
+    printf '%s\n' "$wrapped" > "$CONTEXT_FILE"
+  fi
+}
+
 write_context_default() {
   local machine="$1" profile="$2" mcp_status="$3"
   shift 3
@@ -306,15 +348,16 @@ write_context_default() {
   local mcp_line
   mcp_line="$(format_mcp_status "$mcp_status")"
 
-  {
-    echo "# cortex context"
-    echo "Machine: $machine"
-    echo "Profile: $profile"
-    echo "Active projects: $active_str"
-    echo "Not on this machine: $inactive_str"
-    [ -n "$mcp_line" ] && echo "$mcp_line"
-    echo "Last synced: $(date +%Y-%m-%d)"
-  } > "$CONTEXT_FILE"
+  local managed=""
+  managed+="# cortex context"$'\n'
+  managed+="Machine: $machine"$'\n'
+  managed+="Profile: $profile"$'\n'
+  managed+="Active projects: $active_str"$'\n'
+  managed+="Not on this machine: $inactive_str"
+  [ -n "$mcp_line" ] && managed+=$'\n'"$mcp_line"
+  managed+=$'\n'"Last synced: $(date +%Y-%m-%d)"
+
+  write_context_file "$managed"
 
   echo "  wrote $CONTEXT_FILE"
 }
@@ -448,16 +491,16 @@ configure_mcp() {
     jq --arg dist "$mcp_dist" '.mcpServers.cortex = {"command": "node", "args": [$dist]}' "$settings_file" > "$tmp_file"
     mv "$tmp_file" "$settings_file"
   else
-    # Fallback: sed-based patching when jq isn't available
-    local tmp_file
-    tmp_file="$(mktemp)"
-    if grep -q '"mcpServers"' "$settings_file" 2>/dev/null; then
-      sed '/"mcpServers"[[:space:]]*:[[:space:]]*{/a\
-    "cortex": {"command": "node", "args": ["'"$mcp_dist"'"]},' "$settings_file" > "$tmp_file"
-    else
-      sed '$s/}$/,\n  "mcpServers": {\n    "cortex": {"command": "node", "args": ["'"$mcp_dist"'"]}\n  }\n}/' "$settings_file" > "$tmp_file"
-    fi
-    mv "$tmp_file" "$settings_file"
+    echo ""
+    echo "WARNING: jq is not installed. Cannot safely patch $settings_file."
+    echo "Install jq (brew install jq / apt install jq) and re-run, or add this manually:"
+    echo ""
+    echo '  "mcpServers": {'
+    echo "    \"cortex\": {\"command\": \"node\", \"args\": [\"$mcp_dist\"]}"
+    echo '  }'
+    echo ""
+    echo "no_jq"
+    return 0
   fi
   echo "installed"
 }
@@ -521,7 +564,7 @@ write_context_debugging() {
     fi
   done
 
-  printf '%s' "$content" > "$CONTEXT_FILE"
+  write_context_file "$content"
   echo "  wrote $CONTEXT_FILE (debugging mode)"
 }
 
@@ -551,7 +594,7 @@ write_context_planning() {
     fi
   done
 
-  printf '%s' "$content" > "$CONTEXT_FILE"
+  write_context_file "$content"
   echo "  wrote $CONTEXT_FILE (planning mode)"
 }
 
@@ -571,7 +614,7 @@ write_context_clean() {
   mcp_line="$(format_mcp_status "$mcp_status")"
   [ -n "$mcp_line" ] && content+="$mcp_line"$'\n'
 
-  printf '%s' "$content" > "$CONTEXT_FILE"
+  write_context_file "$content"
   echo "  wrote $CONTEXT_FILE (clean mode)"
 }
 
@@ -673,8 +716,9 @@ main() {
   case "$mcp_status" in
     installed)          echo "  Claude: installed cortex MCP server" ;;
     already_configured) echo "  Claude: cortex MCP already configured" ;;
-    not_built)          echo "  MCP not built — run: cd mcp && npm install && npm run build" ;;
+    not_built)          echo "  MCP not built, run: cd mcp && npm install && npm run build" ;;
     no_settings)        echo "  Claude settings not found (skipping)" ;;
+    no_jq)              echo "  Claude: skipped (install jq to auto-configure)" ;;
   esac
 
   local vscode_status

@@ -119,32 +119,38 @@ export async function runInit() {
     fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
     fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
     fs.mkdirSync(path.join(cortexPath, "my-first-project"), { recursive: true });
-    fs.writeFileSync(
+
+    // Only write files that don't already exist to avoid clobbering user content
+    const safeWrite = (filePath: string, content: string) => {
+      if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, content);
+    };
+
+    safeWrite(
       path.join(cortexPath, "global", "CLAUDE.md"),
       `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`
     );
-    fs.writeFileSync(
+    safeWrite(
       path.join(cortexPath, "my-first-project", "summary.md"),
       `# my-first-project\n\nWhat: Replace this with one sentence about what the project does\nStack: The key tech\nStatus: active\nRun: the command you use most\nGotcha: the one thing that will bite you if you forget\n`
     );
-    fs.writeFileSync(
+    safeWrite(
       path.join(cortexPath, "my-first-project", "CLAUDE.md"),
       `# my-first-project\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
     );
-    fs.writeFileSync(
+    safeWrite(
       path.join(cortexPath, "my-first-project", "LEARNINGS.md"),
       `# my-first-project LEARNINGS\n\n<!-- Add session learnings here, or run /cortex-learn in Claude Code -->\n`
     );
-    fs.writeFileSync(
+    safeWrite(
       path.join(cortexPath, "my-first-project", "backlog.md"),
       `# my-first-project backlog\n\n## Active\n\n## Queue\n\n## Done\n`
     );
     const hostname = os.hostname();
-    fs.writeFileSync(
+    safeWrite(
       path.join(cortexPath, "machines.yaml"),
       `# Maps machine hostnames to profiles.\n# Run \`hostname\` to find your machine name.\n${hostname}: personal\n`
     );
-    fs.writeFileSync(
+    safeWrite(
       path.join(cortexPath, "profiles", "personal.yaml"),
       `name: personal\ndescription: Default profile\nprojects:\n  - global\n  - my-first-project\n`
     );

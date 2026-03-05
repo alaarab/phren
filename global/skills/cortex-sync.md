@@ -231,6 +231,20 @@ echo "my-machine-name" > ~/.cortex-machine
 
 If you don't have a cortex repo yet, start with `/cortex-init` to create one from scratch.
 
+## Conflict Resolution
+
+When two machines edit the same cortex file before syncing, `git pull` will hit a merge conflict. Here's how to handle each file type:
+
+**backlog.md**: Take both changes. Backlog items from both machines are valid. Concat them, deduplicate if needed, commit.
+
+**LEARNINGS.md**: Take both changes. Keep entries in chronological order. If both machines added entries on the same date, interleave or group them under the same date heading.
+
+**CLAUDE.md**: Manual merge. Ask the user which version they want, or show both and let them pick. These files contain preferences and instructions where intent matters, so don't auto-resolve.
+
+**skills/ files**: If the same skill was edited on both machines, show the user a diff and let them choose. If different skills were edited, git handles this automatically (no conflict).
+
+**General approach**: Run `git pull --rebase` during sync. If conflicts appear, tell the user which files conflict and apply the rules above. Don't silently drop changes from either side.
+
 ## Related skills
 
 - `/cortex-init`: create a new project or set up cortex from scratch

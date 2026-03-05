@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import * as yaml from "js-yaml";
 import { globSync } from "glob";
 import { createRequire } from "module";
+import { isValidProjectName, safeProjectPath, sanitizeFts5Query } from "./utils.js";
 
 // sql.js-fts5 is CJS only, use createRequire for ESM compat
 const require = createRequire(import.meta.url);
@@ -62,22 +63,6 @@ function findCortexPath(): string {
 const cortexPath = findCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
 
-// Validate a project name: no path separators, no dot-dot segments, no null bytes
-function isValidProjectName(name: string): boolean {
-  if (!name || name.length === 0) return false;
-  // Disallow path traversal components and OS path separators
-  if (name.includes("..") || name.includes("/") || name.includes("\\") || name.includes("\0")) return false;
-  return true;
-}
-
-// Resolve a path inside the cortex directory and reject anything that escapes it
-function safeProjectPath(base: string, ...segments: string[]): string | null {
-  const resolved = path.resolve(base, ...segments);
-  // Ensure the resolved path is strictly inside base (with a trailing sep to avoid prefix attacks)
-  const normalizedBase = path.resolve(base) + path.sep;
-  if (!resolved.startsWith(normalizedBase) && resolved !== path.resolve(base)) return null;
-  return resolved;
-}
 
 // Figure out which project directories to index
 function getProjectDirs(): string[] {
@@ -180,25 +165,6 @@ async function buildIndex(): Promise<any> {
   return db;
 }
 
-// Sanitize a user-supplied string before passing it to an FTS5 MATCH expression.
-// FTS5 parses the match value as a query with its own syntax. Unbalanced quotes
-// cause parse errors; the column filter syntax (e.g. "content:term") can scope
-// queries to internal columns; the ^ prefix anchor has unusual semantics.
-// We strip characters that are meaningful to FTS5 but never needed for plain
-// keyword search: ^, and we balance/escape quotes by removing them then
-// re-quoting individual terms so the expression is always well-formed.
-function sanitizeFts5Query(raw: string): string {
-  // Remove null bytes
-  let q = raw.replace(/\0/g, "");
-  // Strip the column filter syntax: "column:" prefix attacks
-  q = q.replace(/\w+:/g, "");
-  // Remove FTS5 ^ anchor (only meaningful at start of phrase, rare in user queries)
-  q = q.replace(/\^/g, "");
-  // Balance quotes: remove all double-quotes, then re-add them around quoted-looking phrases
-  // For simplicity, strip all double-quotes (FTS5 uses them for phrase queries; users rarely need them)
-  q = q.replace(/"/g, "");
-  return q.trim();
-}
 
 // Extract a snippet around the match. FTS5 snippet() works in sql.js but
 // to keep things simple and reliable, we do our own snippet extraction.
@@ -214,8 +180,37 @@ function extractSnippet(content: string, query: string, lines: number = 5): stri
   }
 
   const contentLines = content.split("\n");
+
+  // Find heading positions and section boundaries
+  const headingIndices: number[] = [];
+  for (let i = 0; i < contentLines.length; i++) {
+    if (contentLines[i].trimStart().startsWith("#")) headingIndices.push(i);
+  }
+
+  // For each line, find its section (between two headings) and distance to nearest heading
+  function nearestHeadingDist(idx: number): number {
+    let min = Infinity;
+    for (const h of headingIndices) {
+      const d = Math.abs(idx - h);
+      if (d < min) min = d;
+    }
+    return min;
+  }
+
+  function sectionMiddle(idx: number): number {
+    let sectionStart = 0;
+    let sectionEnd = contentLines.length;
+    for (const h of headingIndices) {
+      if (h <= idx) sectionStart = h;
+      else { sectionEnd = h; break; }
+    }
+    return (sectionStart + sectionEnd) / 2;
+  }
+
   let bestIdx = 0;
   let bestScore = 0;
+  let bestHeadingDist = Infinity;
+  let bestMidDist = Infinity;
 
   for (let i = 0; i < contentLines.length; i++) {
     const lineLower = contentLines[i].toLowerCase();
@@ -223,9 +218,23 @@ function extractSnippet(content: string, query: string, lines: number = 5): stri
     for (const term of terms) {
       if (lineLower.includes(term)) score++;
     }
-    if (score > bestScore) {
+    if (score === 0) continue;
+
+    const hDist = nearestHeadingDist(i);
+    const nearHeading = hDist <= 3;
+    const mDist = Math.abs(i - sectionMiddle(i));
+
+    // Prefer: higher term count, then near a heading, then closer to section middle
+    const better =
+      score > bestScore ||
+      (score === bestScore && nearHeading && bestHeadingDist > 3) ||
+      (score === bestScore && nearHeading === (bestHeadingDist <= 3) && mDist < bestMidDist);
+
+    if (better) {
       bestScore = score;
       bestIdx = i;
+      bestHeadingDist = hDist;
+      bestMidDist = mDist;
     }
   }
 

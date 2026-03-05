@@ -13,20 +13,22 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "sql.js-fts5": "^1.4.0",
     "glob": "^12.0.0",
     "js-yaml": "^4.1.0",
+    "sql.js-fts5": "^1.4.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.0",
     "@types/node": "^22.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
   },
   "scripts": {
     "build": "tsc -p mcp/tsconfig.json",
     "dev": "tsx mcp/src/index.ts",
+    "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
