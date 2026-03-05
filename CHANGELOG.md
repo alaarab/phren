@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3] - 2026-03-04
+
+### Added
+- Consolidation detection: `hook-prompt` now scans LEARNINGS.md files for entries since the last `<!-- consolidated: -->` marker and injects a `<cortex-notice>` when a project has 25+ new entries or 60+ days without consolidation — once per session, not every prompt
+- `<details>` stripping in FTS5 indexer: archived entries in consolidation blocks are excluded from search so old superseded learnings don't pollute results
+- Updated `/cortex-consolidate` skill: marker-aware consolidation, archive to `<details>` block, global promotion rules, chain of `prev:` dates for history
+
 ## [1.7.2] - 2026-03-04
 
 ### Added
