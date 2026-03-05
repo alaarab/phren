@@ -172,9 +172,9 @@ describe("extractKeywords", () => {
     expect(extractKeywords("the is a an")).toBe("");
   });
 
-  it("limits to 8 keywords", () => {
+  it("limits to 10 terms (words + bigrams)", () => {
     const result = extractKeywords("one two three four five six seven eight nine ten eleven");
-    expect(result.split(" ").length).toBeLessThanOrEqual(8);
+    expect(result.split(" ").length).toBeLessThanOrEqual(10);
   });
 
   it("strips punctuation", () => {
