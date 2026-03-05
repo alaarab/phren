@@ -176,8 +176,13 @@ export async function runInit() {
 
   log(`\nDone. Your knowledge base is at ${cortexPath}\n`);
   log(`Next steps:`);
-  log(`  1. Push ${cortexPath} to a private GitHub repo`);
-  log(`     (so it syncs across your machines)`);
+  log(`  1. Create a private GitHub repo and push your cortex:`);
+  log(`     cd ${cortexPath}`);
+  log(`     git init`);
+  log(`     git add .`);
+  log(`     git commit -m "Initial cortex setup"`);
+  log(`     git remote add origin git@github.com:YOUR_USERNAME/cortex-personal.git`);
+  log(`     git push -u origin main`);
   log(`  2. Restart Claude Code to activate the MCP server`);
   log(`  3. Open a project and run /cortex-init <name> to add it\n`);
 }
