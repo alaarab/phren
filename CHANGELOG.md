@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.6.2] - 2026-03-04
+
+### Fixed
+- configure_mcp smoke-tests the server with `--health` before writing any config, instead of trusting the entry exists
+- configure_mcp also patches `~/.claude.json` (project-scoped, used by Claude CLI) alongside `settings.json` (global)
+
+### Added
+- `--health` flag on MCP server: exits 0 immediately, used by link.sh to verify the server starts correctly
+
+## [1.6.1] - 2026-03-04
+
+### Changed
+- Humanized all user-facing text across skills, docs, and starter templates
+- Creative polish pass on landing page copy
+
 ## [1.6.0] - 2026-03-04
 
 ### Changed

@@ -478,6 +478,12 @@ configure_mcp() {
     return 0
   fi
 
+  # Verify the server actually starts before touching any config
+  if ! node "$mcp_dist" --health 2>/dev/null; then
+    echo "health_failed"
+    return 0
+  fi
+
   # Check if cortex MCP entry already exists
   if grep -q '"cortex"' "$settings_file" 2>/dev/null; then
     echo "already_configured"
@@ -502,6 +508,18 @@ configure_mcp() {
     echo "no_jq"
     return 0
   fi
+
+  # Also patch ~/.claude.json (project-scoped, used by newer Claude CLI)
+  local claude_json="$HOME/.claude.json"
+  if [ -f "$claude_json" ] && command -v jq &>/dev/null; then
+    local tmp_file2
+    tmp_file2="$(mktemp)"
+    jq --arg home "$HOME" --arg dist "$mcp_dist" \
+      '.projects[$home].mcpServers.cortex = {"type": "stdio", "command": "node", "args": [$dist], "env": {}}' \
+      "$claude_json" > "$tmp_file2"
+    mv "$tmp_file2" "$claude_json"
+  fi
+
   echo "installed"
 }
 
@@ -719,6 +737,7 @@ main() {
     not_built)          echo "  MCP not built, run: cd mcp && npm install && npm run build" ;;
     no_settings)        echo "  Claude settings not found (skipping)" ;;
     no_jq)              echo "  Claude: skipped (install jq to auto-configure)" ;;
+    health_failed)      echo "  WARNING: MCP server built but failed health check — run: node mcp/dist/index.js --health" ;;
   esac
 
   local vscode_status
