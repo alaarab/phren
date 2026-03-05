@@ -102,12 +102,14 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Ten tools available to Claude:
+The server indexes your cortex into a local SQLite FTS5 database. Twelve tools available to Claude:
 
 **Search and browse:**
 - `search_cortex(query, type?, limit?)` with automatic synonym expansion
 - `get_project_summary(name)` for a project's summary card and file list
 - `list_projects()` for everything in your active profile
+- `list_machines()` shows registered machines and their profiles
+- `list_profiles()` shows all profiles and which projects each includes
 
 **Backlog management:**
 - `get_backlog(project?)` reads tasks for one or all projects

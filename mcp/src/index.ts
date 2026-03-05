@@ -24,6 +24,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import * as yaml from "js-yaml";
 import { isValidProjectName, safeProjectPath, sanitizeFts5Query, expandSynonyms } from "./utils.js";
 import { findCortexPathWithArg, buildIndex, extractSnippet, queryRows, addLearningToFile } from "./shared.js";
 
@@ -41,7 +42,7 @@ async function main() {
 
   const server = new McpServer({
     name: "cortex-mcp",
-    version: "1.7.0",
+    version: "1.7.2",
   });
 
   server.registerTool(
@@ -172,6 +173,47 @@ async function main() {
       }
 
       return textResponse(lines.join("\n"));
+    }
+  );
+
+  server.registerTool(
+    "list_machines",
+    {
+      title: "List Machines",
+      description: "Show which machines are registered and which profile each uses. Useful for understanding the multi-machine setup.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const machinesPath = path.join(cortexPath, "machines.yaml");
+      if (!fs.existsSync(machinesPath)) return textResponse("No machines.yaml found. Run `./link.sh` to register this machine.");
+      const raw = fs.readFileSync(machinesPath, "utf8");
+      const data = yaml.load(raw) as Record<string, string> | null;
+      if (!data || typeof data !== "object") return textResponse("machines.yaml is empty or invalid.");
+      const lines = Object.entries(data).map(([machine, prof]) => `- ${machine}: ${prof}`);
+      return textResponse(`# Registered Machines\n\n${lines.join("\n")}`);
+    }
+  );
+
+  server.registerTool(
+    "list_profiles",
+    {
+      title: "List Profiles",
+      description: "Show all profiles and which projects each includes. Profiles control which projects are visible on each machine.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const profilesDir = path.join(cortexPath, "profiles");
+      if (!fs.existsSync(profilesDir)) return textResponse("No profiles directory found.");
+      const files = fs.readdirSync(profilesDir).filter(f => f.endsWith(".yaml"));
+      if (!files.length) return textResponse("No profiles found.");
+      const parts = files.map(file => {
+        const raw = fs.readFileSync(path.join(profilesDir, file), "utf8");
+        const data = yaml.load(raw) as Record<string, unknown> | null;
+        const name = (data?.name as string) || file.replace(".yaml", "");
+        const projects = Array.isArray(data?.projects) ? (data.projects as string[]) : [];
+        return `## ${name}\n${projects.map(p => `- ${p}`).join("\n") || "(no projects)"}`;
+      });
+      return textResponse(`# Profiles\n\n${parts.join("\n\n")}`);
     }
   );
 
