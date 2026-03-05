@@ -1,6 +1,6 @@
 ---
 name: consolidate
-description: Consolidate a project's LEARNINGS.md — deduplicate, archive old entries, promote cross-project patterns to global.
+description: Consolidate a project's LEARNINGS.md: deduplicate, archive old entries, promote cross-project patterns to global.
 ---
 # /cortex-consolidate
 
@@ -8,11 +8,11 @@ Consolidate accumulated learnings. Deduplicates, archives, and promotes cross-pr
 
 ## What "consolidate" means
 
-1. **Deduplicate** — merge entries that say the same thing differently
-2. **Distill** — rewrite scattered bullets into clear, actionable insights
-3. **Archive** — move all pre-consolidation entries into a `<details>` block (preserved, not deleted)
-4. **Promote** — patterns that appear in 3+ projects go to `global/LEARNINGS.md`
-5. **Mark** — write a `<!-- consolidated: -->` marker so detection knows where you left off
+1. **Deduplicate:** merge entries that say the same thing differently
+2. **Distill:** rewrite scattered bullets into clear, actionable insights
+3. **Archive:** move all pre-consolidation entries into a `<details>` block (preserved, not deleted)
+4. **Promote:** patterns that appear in 3+ projects go to `global/LEARNINGS.md`
+5. **Mark:** write a `<!-- consolidated: -->` marker so detection knows where you left off
 
 ## Step 1: Pick which projects to consolidate
 
@@ -22,7 +22,7 @@ Read each target project's full LEARNINGS.md.
 
 ## Step 2: Find the marker
 
-Look for `<!-- consolidated: YYYY-MM-DD -->` near the top of the file. Entries **after** that line are the new ones to consolidate. Entries **before** it (or inside `<details>`) are already archived — leave them alone.
+Look for `<!-- consolidated: YYYY-MM-DD -->` near the top of the file. Entries **after** that line are the new ones to consolidate. Entries **before** it (or inside `<details>`) are already archived: leave them alone.
 
 If there's no marker, consolidate the entire file.
 
@@ -37,7 +37,7 @@ Read all new entries (after the marker, outside any `<details>` block). For each
 
 Target: reduce by 40-70%. If you started with 40 entries, aim for 12-25 distilled ones.
 
-**Good entry:** "Angular signals don't trigger change detection in zone-less mode — call `markForCheck()` after updates"
+**Good entry:** "Angular signals don't trigger change detection in zone-less mode: call `markForCheck()` after updates"
 **Bad entry:** "Be careful with state"
 
 ## Step 4: Write the consolidated file
@@ -59,7 +59,7 @@ Keep all existing content before the first heading or marker. Then write:
 - ...
 
 <details>
-<summary>Archive — entries before YYYY-MM-DD (N entries)</summary>
+<summary>Archive: entries before YYYY-MM-DD (N entries)</summary>
 
 [paste every pre-consolidation bullet point verbatim here, unedited]
 
@@ -69,7 +69,7 @@ Keep all existing content before the first heading or marker. Then write:
 Rules:
 - The `<!-- consolidated: -->` marker goes right after the title line
 - `prev:` should be the date from the previous marker (chain them so history is traceable)
-- The `<details>` block contains ALL entries that existed before this consolidation run — both the ones you just distilled AND any from previous `<details>` blocks (merge them)
+- The `<details>` block contains ALL entries that existed before this consolidation run: both the ones you just distilled AND any from previous `<details>` blocks (merge them)
 - Never delete entries, only move them to the archive
 
 ## Step 5: Check global promotion
@@ -92,7 +92,7 @@ git push 2>/dev/null || true
 ## Step 7: Report
 
 ```
-/cortex-consolidate — ogrid
+/cortex-consolidate: ogrid
 
 Before: 97 entries (since 2025-12-01)
 After:  28 active entries
@@ -109,8 +109,8 @@ Committed: ogrid: consolidate learnings (97 → 28 entries)
 
 ## What not to do
 
-- Don't delete entries — archive them in `<details>`
+- Don't delete entries: archive them in `<details>`
 - Don't consolidate CLAUDE.md, summary.md, or backlog.md
-- Don't invent patterns — if two entries use the same word but describe different problems, they're not a pattern
+- Don't invent patterns: if two entries use the same word but describe different problems, they're not a pattern
 - Don't promote to global unless 3+ projects confirm it
 - Don't touch entries already inside a `<details>` block
