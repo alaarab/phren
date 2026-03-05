@@ -82,7 +82,7 @@ function configureClaude(cortexPath: string) {
     // SessionStart hook: auto-pull cortex on session start
     const startHook = {
       type: "command",
-      command: "cd ~/.cortex && git pull --ff-only --quiet 2>/dev/null || true",
+      command: "cd ~/.cortex && git pull --rebase --quiet 2>/dev/null || true",
     };
     const existingStart = data.hooks.SessionStart as any[] | undefined;
     const hasCortexStartHook = existingStart?.some(
