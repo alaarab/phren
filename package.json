@@ -1,6 +1,6 @@
 {
   "name": "@alaarab/cortex",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Long-term memory for Claude Code",
   "type": "module",
   "bin": {
@@ -14,13 +14,20 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "sql.js-fts5": "^1.4.0",
-    "glob": "^11.0.0",
+    "glob": "^11.1.0",
     "js-yaml": "^4.1.0",
     "zod": "^3.25.0"
   },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  },
   "scripts": {
-    "build": "cd mcp && npm run build",
-    "prepublishOnly": "cd mcp && npm install && npm run build"
+    "build": "tsc -p mcp/tsconfig.json",
+    "dev": "tsx mcp/src/index.ts",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "claude",
