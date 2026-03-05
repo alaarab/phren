@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.5.0] - 2026-03-04
+
+### Fixed
+- FTS5 query sanitizer no longer strips URLs (only targets actual column prefixes)
+- Broken CLAUDE.md and LEARNINGS.md symlinks replaced with real files
+- Init fallback no longer overwrites existing user files
+- Atomic writes for machines.yaml registration (no more race conditions)
+- Context file overwrites now preserve user content outside managed markers
+
+### Added
+- Automated tests: 28 vitest cases for FTS5 injection, path traversal, project name validation
+- Conflict resolution guide in cortex-sync skill
+- yq support for YAML parsing in link.sh (falls back to grep/sed)
+- Clear manual instructions when jq is missing (instead of fragile sed patching)
+
+### Changed
+- Upgraded glob from ^11.1.0 to ^12.0.0 (removes deprecation warning)
+- Improved snippet extraction with heading proximity and section scoring
+- Extracted utility functions to utils.ts for testability
+- Init setup instructions now show actual git commands
+
 ## [1.3.0] - 2026-03-04
 
 ### Changed
