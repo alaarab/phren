@@ -1,4 +1,4 @@
-import { findCortexPath, buildIndex, extractSnippet, queryRows, detectProject, addLearningToFile, checkConsolidationNeeded } from "./shared.js";
+import { findCortexPath, buildIndex, extractSnippet, queryRows, detectProject, addLearningToFile, checkConsolidationNeeded, debugLog } from "./shared.js";
 import { sanitizeFts5Query, expandSynonyms, extractKeywords } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -84,10 +84,13 @@ async function handleHookPrompt() {
   const keywords = extractKeywords(prompt);
   if (!keywords) process.exit(0);
 
+  debugLog(`hook-prompt keywords: "${keywords}"`);
+
   const db = await buildIndex(cortexPath, profile);
 
   // Detect project from cwd to boost relevant results
   const detectedProject = cwd ? detectProject(cortexPath, cwd, profile) : null;
+  if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
 
   const safeQuery = expandSynonyms(sanitizeFts5Query(keywords));
   if (!safeQuery) process.exit(0);
@@ -99,7 +102,7 @@ async function handleHookPrompt() {
     if (detectedProject) {
       rows = queryRows(
         db,
-        "SELECT project, filename, type, content FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 3",
+        "SELECT project, filename, type, content FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 5",
         [safeQuery, detectedProject]
       );
     }
@@ -108,12 +111,37 @@ async function handleHookPrompt() {
     if (!rows) {
       rows = queryRows(
         db,
-        "SELECT project, filename, type, content FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 3",
+        "SELECT project, filename, type, content FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 5",
         [safeQuery]
       );
     }
 
     if (!rows) process.exit(0);
+
+    // Recency boost: for learnings rows, extract the most recent date header and sort newer first.
+    // Non-learnings rows keep their FTS5 rank order at the front.
+    function mostRecentDate(content: string): string {
+      const matches = content.match(/^## (\d{4}-\d{2}-\d{2})/mg);
+      if (!matches || matches.length === 0) return "0000-00-00";
+      return matches.map(m => m.slice(3)).sort().reverse()[0];
+    }
+
+    rows = [...rows].sort((a, b) => {
+      const [, , typeA, contentA] = a as string[];
+      const [, , typeB, contentB] = b as string[];
+      const isLearningsA = typeA === "learnings";
+      const isLearningsB = typeB === "learnings";
+      // Non-learnings rank above learnings when scores are equal
+      if (isLearningsA !== isLearningsB) return isLearningsA ? 1 : -1;
+      // Both learnings: sort by most recent date descending
+      if (isLearningsA && isLearningsB) {
+        return mostRecentDate(contentB).localeCompare(mostRecentDate(contentA));
+      }
+      return 0; // Preserve FTS5 rank order for non-learnings
+    });
+
+    // Show top 3 after recency sort
+    rows = rows.slice(0, 3);
 
     const projectLabel = detectedProject ? ` · ${detectedProject}` : "";
     const resultLabel = rows.length === 1 ? "1 result" : `${rows.length} results`;
