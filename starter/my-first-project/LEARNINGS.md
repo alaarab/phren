@@ -1,6 +1,6 @@
 # my-first-project learnings
 
-Lessons accumulated over time. Run `/cortex:learn` at the end of a session to add entries.
+Lessons accumulated over time. Captured automatically during sessions and committed on exit.
 
 <!-- Example entry:
 ## 2026-03-04

@@ -64,7 +64,7 @@ After installation, cortex needs project knowledge to surface. The starter templ
 
 In Claude Code, run `/cortex-init <project-name>` to scaffold a new project entry.
 
-Run `/cortex-update` at the end of a session to capture what you learned.
+Learnings are captured automatically during the session and committed when the session ends.
 
 ## Hooks (auto-inject, v1.7.0+)
 

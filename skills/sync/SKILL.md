@@ -122,7 +122,7 @@ Last synced: <date>
 - api-server: Description from summary.md
 
 ## Global skills
-/cortex-sync, /cortex-learn, /cortex-init, /cortex-consolidate, /cortex-discover
+/cortex-sync, /cortex-init, /cortex-consolidate, /cortex-discover
 ```
 
 Pull project descriptions from each project's `summary.md` if it exists.
@@ -238,5 +238,4 @@ If you don't have a cortex repo yet, start with `/cortex-init` to create one fro
 ## Related skills
 
 - `/cortex-init`: create a new project or set up cortex from scratch
-- `/cortex-learn`: capture learnings that get synced across machines
 - `/cortex-consolidate`: synthesize learnings across projects
