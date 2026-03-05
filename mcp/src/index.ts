@@ -2,8 +2,65 @@
 
 import { runInit } from "./init.js";
 
+if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
+  console.log(`cortex - Long-term memory for Claude Code
+
+Usage:
+  npx @alaarab/cortex init [--machine <name>] [--profile <name>]
+                                                 Set up cortex in ~/.cortex
+  npx @alaarab/cortex uninstall                  Remove cortex MCP config and hooks
+  npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean] [--all-tools]
+                                                 Sync profile, symlinks, hooks, and context (replaces link.sh)
+                                                 --all-tools: configure hooks for all agents (default: auto-detect)
+  npx @alaarab/cortex search <query>             Search your knowledge base
+  npx @alaarab/cortex add-learning <project> "<insight>"
+                                                 Add a learning to a project
+  npx @alaarab/cortex hook-prompt                (used by Claude Code UserPromptSubmit hook)
+  npx @alaarab/cortex hook-context               (used by Claude Code SessionStart hook)
+
+MCP server mode (used by Claude Code automatically):
+  npx @alaarab/cortex [cortex-path]
+
+Environment variables:
+  CORTEX_PATH     Override cortex directory (default: ~/.cortex)
+  CORTEX_PROFILE  Active profile name (filters which projects are indexed)
+  CORTEX_DEBUG    Set to 1 to enable debug logging to ~/.cortex/debug.log
+`);
+  process.exit(0);
+}
+
 if (process.argv[2] === "init") {
-  await runInit();
+  const initArgs = process.argv.slice(3);
+  const machineIdx = initArgs.indexOf("--machine");
+  const profileIdx = initArgs.indexOf("--profile");
+  await runInit({
+    machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
+    profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
+  });
+  process.exit(0);
+}
+
+if (process.argv[2] === "uninstall") {
+  const { runUninstall } = await import("./init.js");
+  await runUninstall();
+  process.exit(0);
+}
+
+if (process.argv[2] === "link") {
+  const { runLink } = await import("./link.js");
+  const linkArgs = process.argv.slice(3);
+  const getFlag = (flag: string) => {
+    const idx = linkArgs.indexOf(flag);
+    return idx !== -1 ? linkArgs[idx + 1] : undefined;
+  };
+  const taskArg = getFlag("--task") as "debugging" | "planning" | "clean" | undefined;
+  await runLink(process.env.CORTEX_PATH || require("os").homedir() + "/.cortex", {
+    machine: getFlag("--machine"),
+    profile: getFlag("--profile"),
+    register: linkArgs.includes("--register"),
+    task: taskArg,
+    allTools: linkArgs.includes("--all-tools"),
+  });
   process.exit(0);
 }
 
@@ -26,7 +83,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { isValidProjectName, safeProjectPath, sanitizeFts5Query, expandSynonyms } from "./utils.js";
-import { findCortexPathWithArg, buildIndex, extractSnippet, queryRows, addLearningToFile } from "./shared.js";
+import { findCortexPathWithArg, buildIndex, extractSnippet, queryRows, addLearningToFile, validateBacklogFormat, autoMergeConflicts, debugLog } from "./shared.js";
 
 // MCP mode: first non-flag arg is the cortex path
 const cortexArg = process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
@@ -259,6 +316,13 @@ async function main() {
         return textResponse(`Created backlog.md for "${project}" and added: ${item}`);
       }
       const content = fs.readFileSync(backlogPath, "utf8");
+
+      // Soft-validate format before writing
+      const issues = validateBacklogFormat(content);
+      if (issues.length > 0) {
+        debugLog(`backlog.md format warnings for "${project}": ${issues.join("; ")}`);
+      }
+
       const queueMatch = content.match(/^(## Queue\s*\n)/m);
       const updated = queueMatch
         ? content.replace(queueMatch[0], `${queueMatch[0]}\n- ${item}\n`)
@@ -449,16 +513,75 @@ async function main() {
         execSync("git add -A", { cwd: cortexPath, encoding: "utf8" });
         execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cortexPath, encoding: "utf8" });
 
-        let pushed = false;
+        // Check if remote exists
+        let hasRemote = false;
         try {
-          execSync("git push", { cwd: cortexPath, encoding: "utf8", timeout: 15000 });
-          pushed = true;
-        } catch {
-          // No remote or push failed
+          const remotes = execSync("git remote", { cwd: cortexPath, encoding: "utf8" }).trim();
+          hasRemote = remotes.length > 0;
+        } catch { /* no remote */ }
+
+        if (!hasRemote) {
+          const changedFiles = status.split("\n").length;
+          return textResponse(`Saved ${changedFiles} changed file(s). (No remote configured — skipping push.)`);
+        }
+
+        // Push with retry: on failure, pull --rebase then retry up to 3 times
+        let pushed = false;
+        let lastPushError = "";
+        const delays = [2000, 4000, 8000];
+
+        for (let attempt = 0; attempt <= 3; attempt++) {
+          try {
+            execSync("git push", { cwd: cortexPath, encoding: "utf8", timeout: 15000 });
+            pushed = true;
+            break;
+          } catch (pushErr: any) {
+            lastPushError = pushErr.message ?? String(pushErr);
+            debugLog(`Push attempt ${attempt + 1} failed: ${lastPushError}`);
+
+            if (attempt < 3) {
+              // Pull --rebase to incorporate remote changes
+              try {
+                execSync("git pull --rebase --quiet", {
+                  cwd: cortexPath,
+                  encoding: "utf8",
+                  timeout: 15000,
+                });
+              } catch {
+                // Rebase hit conflicts — try auto-merge for LEARNINGS.md / backlog.md
+                const resolved = autoMergeConflicts(cortexPath);
+                if (resolved) {
+                  try {
+                    execSync("git rebase --continue", {
+                      cwd: cortexPath,
+                      encoding: "utf8",
+                      timeout: 10000,
+                      env: { ...process.env, GIT_EDITOR: "true" },
+                    });
+                  } catch {
+                    // Rebase continue failed, abort and give up
+                    try { execSync("git rebase --abort", { cwd: cortexPath }); } catch { /* ignore */ }
+                    break;
+                  }
+                } else {
+                  // Unresolvable conflicts — abort rebase
+                  try { execSync("git rebase --abort", { cwd: cortexPath }); } catch { /* ignore */ }
+                  break;
+                }
+              }
+
+              // Exponential backoff before retry
+              await new Promise(r => setTimeout(r, delays[attempt]));
+            }
+          }
         }
 
         const changedFiles = status.split("\n").length;
-        return textResponse(`Saved ${changedFiles} changed file(s).${pushed ? " Pushed to remote." : ""}`);
+        if (pushed) {
+          return textResponse(`Saved ${changedFiles} changed file(s). Pushed to remote.`);
+        } else {
+          return textResponse(`Saved ${changedFiles} changed file(s) locally. Push failed: ${lastPushError}`);
+        }
       } catch (err: any) {
         return textResponse(`Save failed: ${err.message}`);
       }

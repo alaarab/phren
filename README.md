@@ -7,17 +7,19 @@
 
 # cortex
 
-**Long-term memory for Claude Code.**
+**Long-term memory for AI coding agents.**
 
 [![MIT License](https://img.shields.io/badge/license-MIT-7C3AED?style=flat&labelColor=0D0D0D)](LICENSE)
 [![npm](https://img.shields.io/npm/v/@alaarab/cortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
 [![Claude Code](https://img.shields.io/badge/works_with-Claude_Code-A78BFA?style=flat&labelColor=0D0D0D)](https://claude.ai)
-[![VS Code](https://img.shields.io/badge/works_with-GitHub_Copilot-A78BFA?style=flat&labelColor=0D0D0D)](https://github.com/features/copilot)
+[![Copilot](https://img.shields.io/badge/works_with-GitHub_Copilot-A78BFA?style=flat&labelColor=0D0D0D)](https://github.com/features/copilot)
+[![Cursor](https://img.shields.io/badge/works_with-Cursor-A78BFA?style=flat&labelColor=0D0D0D)](https://cursor.com)
+[![Codex](https://img.shields.io/badge/works_with-Codex-A78BFA?style=flat&labelColor=0D0D0D)](https://openai.com/codex)
 [![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fcortex-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/)
 
 <br>
 
-Project knowledge, lessons learned, task queues: all in markdown files you own. One command to set up. Zero commands to use after that. When your prompt mentions something cortex knows about, the context is there before Claude starts thinking.
+Project knowledge, lessons learned, task queues: all in markdown files you own. One command to set up. Zero commands to use after that. When your prompt mentions something cortex knows about, the context is there before the agent starts thinking.
 
 <br>
 </div>
@@ -28,7 +30,7 @@ Project knowledge, lessons learned, task queues: all in markdown files you own. 
 
 ### It runs itself
 
-Other memory tools need Claude to remember to call them. Cortex hooks into Claude Code's lifecycle directly. Every prompt you type, the hook searches your knowledge base. If it finds something relevant, it injects that context before Claude starts thinking. If not, nothing gets added. When the session ends, anything Claude wrote down gets committed and pushed. You never do either of those things manually.
+Other memory tools need the agent to remember to call them. Cortex hooks into the agent's lifecycle directly. Every prompt you type, the hook searches your knowledge base. If it finds something relevant, it injects that context before the agent starts thinking. If not, nothing gets added. When the session ends, anything written down gets committed and pushed. You never do either of those things manually.
 
 ### It's just files
 
@@ -44,7 +46,7 @@ Push your cortex to a private repo. Clone it on a new machine, run init, done. P
 
 ### Builds over time
 
-When Claude figures out a tricky pattern or hits a subtle bug, it writes that down. Next session, next week, next machine: that knowledge is there. The longer you use it, the more useful it gets.
+When the agent figures out a tricky pattern or hits a subtle bug, it writes that down. Next session, next week, next machine: that knowledge is there. The longer you use it, the more useful it gets.
 
 ---
 
@@ -58,9 +60,10 @@ That's it. This:
 - Creates `~/.cortex` with starter templates
 - Registers the MCP server in Claude Code and VS Code
 - Sets up hooks for automatic context injection and auto-save
+- Configures hooks for any other detected agents (Copilot CLI, Cursor, Codex)
 - Registers your machine
 
-Restart Claude Code. Your next prompt will already have context.
+Restart your agent. Your next prompt will already have context.
 
 ### Sync across machines
 
@@ -92,17 +95,17 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 
 ## How it runs itself
 
-Before Claude sees your message, a hook extracts keywords, searches your cortex, and injects matching results as context. Generic replies, short acks, unrelated questions: nothing gets added. When something matches, it's the top 3 results, roughly 400 tokens. Runs in about 250ms.
+Before the agent sees your message, a hook extracts keywords, searches your cortex, and injects matching results as context. Generic replies, short acks, unrelated questions: nothing gets added. When something matches, it's the top 3 results, roughly 400 tokens. Runs in about 250ms.
 
 After each response, a hook checks for cortex changes. Anything new (a learning, a backlog update) gets committed and pushed. You don't save manually.
 
-When Claude's context window fills and resets, a hook re-injects your project summary, recent learnings, and active backlog so Claude doesn't lose the thread.
+When the context window fills and resets, a hook re-injects your project summary, recent learnings, and active backlog so the agent doesn't lose the thread.
 
 ---
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Twelve tools available to Claude:
+The server indexes your cortex into a local SQLite FTS5 database. Twelve tools available:
 
 **Search and browse:**
 - `search_cortex(query, type?, limit?)` with automatic synonym expansion
@@ -135,6 +138,30 @@ cortex add-learning <project> "..."  # append a learning from the terminal
 
 ---
 
+## Works with every major agent
+
+Cortex hooks are plain shell commands. Init auto-detects which tools you have and registers them all. Use `cortex link --all-tools` to configure everything regardless of detection.
+
+| Agent | Context injection | Auto-save | MCP tools | Instruction files |
+|-------|:-----------------:|:---------:|:---------:|:-----------------:|
+| Claude Code | ✓ | ✓ | ✓ | `CLAUDE.md` |
+| GitHub Copilot CLI | ✓ | ✓ | ✓ | `copilot-instructions.md` |
+| Cursor | ✓ (no session start) | ✓ | ✓ | — |
+| OpenAI Codex | ✓ | ✓ | — | `AGENTS.md` |
+| Any agentskills tool | ✓ | ✓ | — | via `cortex.SKILL.md` |
+
+**Claude Code** — full hook support plus MCP. Init writes `~/.claude/settings.json`.
+
+**GitHub Copilot CLI** — hooks written to `~/.github/hooks/cortex.json`. Global `CLAUDE.md` is also symlinked as `~/.github/copilot-instructions.md`. Per-project `CLAUDE.md` is also symlinked as `.github/copilot-instructions.md` in each project.
+
+**Cursor** — hooks written to `~/.cursor/hooks.json`. Cursor has no session-start hook, so context re-injection after compaction isn't available, but prompt injection and auto-save both work.
+
+**OpenAI Codex** — hooks written to `codex.json` in your cortex directory. Per-project `CLAUDE.md` is also symlinked as `AGENTS.md` in each project.
+
+**Any agentskills-compatible tool** — `cortex link` writes `cortex.SKILL.md` to your cortex root with hook frontmatter. Any tool following the [Agent Skills spec](https://agentskills.io/specification) picks this up automatically.
+
+---
+
 ## Multiple machines, one repo
 
 `machines.yaml` maps each hostname to a profile:
@@ -156,29 +183,12 @@ projects:
   - side-project
 ```
 
-`link.sh` applies the profile. Sparse-checkout keeps only the listed projects on disk. First run asks for a machine name and profile. After that, zero config.
+`cortex link` applies the profile. Sparse-checkout keeps only the listed projects on disk. First run asks for a machine name and profile. After that, zero config.
 
----
-
-## Works with Claude Code and GitHub Copilot
-
-**Claude Code:** `npx @alaarab/cortex init` configures everything automatically. Manual setup:
+For CI or unattended setup:
 
 ```bash
-claude mcp add cortex -- npx -y @alaarab/cortex ~/.cortex
-```
-
-**VS Code / GitHub Copilot:** Init detects VS Code and writes `mcp.json` automatically. Manual setup in `~/.config/Code/User/mcp.json`:
-
-```json
-{
-  "servers": {
-    "cortex": {
-      "command": "npx",
-      "args": ["-y", "@alaarab/cortex", "~/.cortex"]
-    }
-  }
-}
+npx @alaarab/cortex init --machine ci-runner --profile work
 ```
 
 ---
@@ -194,17 +204,17 @@ Four skills for the things that can't be automatic:
 | `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
 | `/cortex-consolidate` | Read learnings across all projects and surface patterns that repeat. Needs human judgment about which patterns matter. |
 
-Put personal workflow skills in `~/.cortex/global/skills/`. The `link.sh` script symlinks them to `~/.claude/skills/` so they're available everywhere.
+Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlinks them to `~/.claude/skills/` so they're available everywhere.
 
 ---
 
 ## Building your own
 
-Fork this repo. The split is clean: framework (`link.sh`, `mcp/`, `global/skills/`) on one side, your data (project directories, `machines.yaml`, `profiles/`) on the other.
+Fork this repo. The split is clean: framework (`cortex link`, `mcp/`, `global/skills/`) on one side, your data (project directories, `machines.yaml`, `profiles/`) on the other.
 
 ```bash
 git clone git@github.com:YOU/cortex.git ~/cortex
-cd ~/cortex && ./link.sh
+cd ~/cortex && npx @alaarab/cortex link
 ```
 
 Or let Claude scaffold a project: `/cortex-init my-project` creates the files, asks which profile to add it to, and commits.

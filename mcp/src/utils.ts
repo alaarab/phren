@@ -73,15 +73,33 @@ export function expandSynonyms(query: string): string {
   return parts.map(p => p.includes(" ") ? `"${p}"` : p).join(" OR ");
 }
 
-// Extract meaningful keywords from a prompt by removing stop words
+// Extract meaningful keywords from a prompt, including bigrams (2-word noun phrases).
+// Bigrams capture intent better than isolated words (e.g., "rate limit" vs "rate" + "limit").
 export function extractKeywords(text: string): string {
-  return text
+  const words = text
     .toLowerCase()
     .replace(/[^\w\s-]/g, " ")
     .split(/\s+/)
-    .filter(w => w.length > 1 && !STOP_WORDS.has(w))
-    .slice(0, 8)
-    .join(" ");
+    .filter(w => w.length > 1 && !STOP_WORDS.has(w));
+
+  // Build bigrams from adjacent non-stop-words
+  const bigrams: string[] = [];
+  for (let i = 0; i < words.length - 1; i++) {
+    bigrams.push(`${words[i]} ${words[i + 1]}`);
+  }
+
+  // Deduplicate and limit: prefer individual words first, then bigrams add extra signal
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const w of [...words, ...bigrams]) {
+    if (!seen.has(w)) {
+      seen.add(w);
+      result.push(w);
+    }
+    if (result.length >= 10) break;
+  }
+
+  return result.join(" ");
 }
 
 // Validate a project name: no path separators, no dot-dot segments, no null bytes
