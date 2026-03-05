@@ -3,8 +3,15 @@ import * as path from "path";
 import * as os from "os";
 import * as readline from "readline";
 import * as yaml from "js-yaml";
-import { execSync } from "child_process";
-import { configureClaude, configureVSCode } from "./init.js";
+import { execFileSync } from "child_process";
+import {
+  configureClaude,
+  configureVSCode,
+  ensureGovernanceFiles,
+  getMcpEnabledPreference,
+  setMcpEnabledPreference,
+  type McpMode,
+} from "./init.js";
 import { configureAllHooks, detectInstalledTools } from "./hooks.js";
 
 const MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
@@ -114,8 +121,8 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
 
   // Commit if in git repo
   try {
-    execSync(`git add machines.yaml`, { cwd: cortexPath, stdio: "ignore" });
-    execSync(`git commit -m "Register machine: ${machine} (${profile})" --allow-empty`, {
+    execFileSync("git", ["add", "machines.yaml"], { cwd: cortexPath, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", `Register machine: ${machine} (${profile})`, "--allow-empty"], {
       cwd: cortexPath, stdio: "ignore",
     });
   } catch { /* best effort */ }
@@ -126,14 +133,14 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
 
 function setupSparseCheckout(cortexPath: string, projects: string[]) {
   try {
-    execSync("git rev-parse --git-dir", { cwd: cortexPath, stdio: "ignore" });
+    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: cortexPath, stdio: "ignore" });
   } catch { return; } // Not a git repo
 
   const alwaysInclude = ["profiles", "machines.yaml", "global", "link.sh", "README.md", ".gitignore"];
   const paths = [...alwaysInclude, ...projects];
   try {
-    execSync(`git sparse-checkout set ${paths.join(" ")}`, { cwd: cortexPath, stdio: "ignore" });
-    execSync("git pull --ff-only", { cwd: cortexPath, stdio: "ignore" });
+    execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: cortexPath, stdio: "ignore" });
+    execFileSync("git", ["pull", "--ff-only"], { cwd: cortexPath, stdio: "ignore" });
   } catch { /* best effort */ }
 }
 
@@ -148,7 +155,7 @@ function symlinkFile(src: string, dest: string) {
 
 function writeSkillMd(cortexPath: string) {
   const cortexPathEscaped = cortexPath.replace(/"/g, '\\"');
-  const pullCmd = `cd "${cortexPathEscaped}" && git pull --rebase --quiet 2>/dev/null || true`;
+  const pullCmd = `cd "${cortexPathEscaped}" && (git pull --rebase --quiet 2>/dev/null || true) && (npx @alaarab/cortex doctor --fix >/dev/null 2>&1 || true)`;
   const stopCmd = `cd "${cortexPathEscaped}" && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)`;
 
   const content = `---
@@ -179,7 +186,7 @@ context at the start of each prompt and saves learnings at session end via git.
 
 ## What it does
 
-- **SessionStart**: pulls latest cortex knowledge from remote
+- **SessionStart**: pulls latest cortex knowledge and self-heals hook/symlink drift
 - **UserPromptSubmit**: injects relevant project context, learnings, and backlog items
 - **Stop**: commits and pushes any new learnings to remote
 
@@ -300,6 +307,9 @@ function writeContextFile(managedContent: string) {
 function formatMcpStatus(status: string): string {
   if (status === "installed" || status === "already_configured") {
     return "MCP: active (search_cortex, get_project_summary, list_projects)";
+  }
+  if (status === "disabled" || status === "already_disabled") {
+    return "MCP: disabled (hooks-only fallback active)";
   }
   if (status === "not_built") return "MCP: not built. Run: cd mcp && npm install && npm run build";
   return "";
@@ -427,10 +437,19 @@ export interface LinkOptions {
   register?: boolean;
   task?: "debugging" | "planning" | "clean";
   allTools?: boolean;   // configure hooks for all tools regardless of detection
+  mcp?: McpMode;
+}
+
+export interface DoctorResult {
+  ok: boolean;
+  machine?: string;
+  profile?: string;
+  checks: Array<{ name: string; ok: boolean; detail: string }>;
 }
 
 export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   log("cortex link\n");
+  ensureGovernanceFiles(cortexPath);
 
   // Step 1: Identify machine + profile
   let machine = opts.machine ?? getMachineName();
@@ -484,12 +503,17 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   // Step 6: Configure MCP
   log("Configuring MCP...");
+  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
+  setMcpEnabledPreference(cortexPath, mcpEnabled);
+  log(`  MCP mode: ${mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)"}`);
   let mcpStatus = "no_settings";
-  try { mcpStatus = configureClaude(cortexPath) ?? "installed"; } catch { /* best effort */ }
+  try { mcpStatus = configureClaude(cortexPath, { mcpEnabled }) ?? "installed"; } catch { /* best effort */ }
 
   const mcpMessages: Record<string, string> = {
     installed: "  Claude: installed cortex MCP server",
     already_configured: "  Claude: cortex MCP already configured",
+    disabled: "  Claude: cortex MCP disabled (hooks still active)",
+    already_disabled: "  Claude: cortex MCP already disabled",
     not_built: "  MCP: no local dist found and npx not available.",
     no_settings: "  Claude settings not found (skipping)",
     no_jq: "  Claude: skipped (install jq to auto-configure)",
@@ -497,11 +521,13 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   if (mcpMessages[mcpStatus]) log(mcpMessages[mcpStatus]);
 
   let vsStatus = "no_vscode";
-  try { vsStatus = configureVSCode(cortexPath) ?? "no_vscode"; } catch { /* best effort */ }
+  try { vsStatus = configureVSCode(cortexPath, { mcpEnabled }) ?? "no_vscode"; } catch { /* best effort */ }
 
   const vsMessages: Record<string, string> = {
     installed: "  VS Code: installed cortex MCP server",
     already_configured: "  VS Code: cortex MCP already configured",
+    disabled: "  VS Code: cortex MCP disabled",
+    already_disabled: "  VS Code: cortex MCP already disabled",
     no_jq: "  VS Code: mcp.json exists but jq not available",
   };
   if (vsMessages[vsStatus]) log(vsMessages[vsStatus]);
@@ -533,4 +559,162 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   log(`\nDone. Profile '${profile}' is active.`);
   if (opts.task) log(`Task mode: ${opts.task}`);
+}
+
+export async function runDoctor(cortexPath: string, fix: boolean = false): Promise<DoctorResult> {
+  const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+  const machine = getMachineName();
+  const profile = lookupProfile(cortexPath, machine);
+
+  checks.push({
+    name: "machine-registered",
+    ok: Boolean(profile),
+    detail: profile
+      ? `machine=${machine} profile=${profile}`
+      : `no profile mapping for machine=${machine} in machines.yaml`,
+  });
+
+  const profileFile = profile ? findProfileFile(cortexPath, profile) : null;
+  checks.push({
+    name: "profile-exists",
+    ok: Boolean(profileFile),
+    detail: profileFile ? `profile file found: ${profileFile}` : "profile file missing",
+  });
+
+  const projects = profileFile ? getProfileProjects(profileFile) : [];
+  checks.push({
+    name: "profile-projects",
+    ok: projects.length > 0,
+    detail: projects.length ? `${projects.length} projects in profile` : "no projects listed",
+  });
+
+  const contextFile = path.join(os.homedir(), ".cortex-context.md");
+  checks.push({
+    name: "context-file",
+    ok: fs.existsSync(contextFile),
+    detail: fs.existsSync(contextFile) ? contextFile : "missing ~/.cortex-context.md",
+  });
+
+  const memoryFile = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    `-home-${os.userInfo().username}`,
+    "memory",
+    "MEMORY.md"
+  );
+  checks.push({
+    name: "root-memory",
+    ok: fs.existsSync(memoryFile),
+    detail: fs.existsSync(memoryFile) ? memoryFile : "missing generated MEMORY.md",
+  });
+
+  const globalClaudeSrc = path.join(cortexPath, "global", "CLAUDE.md");
+  const globalClaudeDest = path.join(os.homedir(), ".claude", "CLAUDE.md");
+  let globalLinkOk = false;
+  try {
+    globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
+  } catch {
+    globalLinkOk = false;
+  }
+  checks.push({
+    name: "global-link",
+    ok: globalLinkOk,
+    detail: globalLinkOk ? "global CLAUDE.md symlink ok" : "global CLAUDE.md link drifted/missing",
+  });
+
+  for (const project of projects) {
+    if (project === "global") continue;
+    const target = findProjectDir(project);
+    if (!target) {
+      checks.push({ name: `project-path:${project}`, ok: false, detail: "project directory not found on disk" });
+      continue;
+    }
+    for (const f of ["CLAUDE.md", "KNOWLEDGE.md", "LEARNINGS.md"]) {
+      const src = path.join(cortexPath, project, f);
+      if (!fs.existsSync(src)) continue;
+      const dest = path.join(target, f);
+      let ok = false;
+      try {
+        ok = fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(src);
+      } catch {
+        ok = false;
+      }
+      checks.push({
+        name: `symlink:${project}/${f}`,
+        ok,
+        detail: ok ? "ok" : `missing/drifted link at ${dest}`,
+      });
+    }
+  }
+
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  let hookOk = false;
+  let doctorOk = false;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const hooks = cfg?.hooks || {};
+    const promptHooks = JSON.stringify(hooks.UserPromptSubmit || []);
+    const stopHooks = JSON.stringify(hooks.Stop || []);
+    const startHooks = JSON.stringify(hooks.SessionStart || []);
+    hookOk = promptHooks.includes("hook-prompt") && stopHooks.includes("auto-save");
+    doctorOk = startHooks.includes("doctor --fix");
+  } catch {
+    hookOk = false;
+    doctorOk = false;
+  }
+  checks.push({
+    name: "claude-hooks",
+    ok: hookOk,
+    detail: hookOk ? "prompt + stop hooks configured" : "missing prompt/stop hooks in ~/.claude/settings.json",
+  });
+  checks.push({
+    name: "doctor-background",
+    ok: doctorOk,
+    detail: doctorOk ? "doctor --fix is wired in SessionStart hook" : "doctor --fix missing from SessionStart",
+  });
+
+  const detected = detectInstalledTools();
+  if (detected.has("copilot")) {
+    const copilotHooks = path.join(os.homedir(), ".github", "hooks", "cortex.json");
+    checks.push({
+      name: "copilot-hooks",
+      ok: fs.existsSync(copilotHooks),
+      detail: fs.existsSync(copilotHooks) ? "copilot hooks config present" : "missing ~/.github/hooks/cortex.json",
+    });
+  }
+  if (detected.has("cursor")) {
+    const cursorHooks = path.join(os.homedir(), ".cursor", "hooks.json");
+    checks.push({
+      name: "cursor-hooks",
+      ok: fs.existsSync(cursorHooks),
+      detail: fs.existsSync(cursorHooks) ? "cursor hooks config present" : "missing ~/.cursor/hooks.json",
+    });
+  }
+  if (detected.has("codex")) {
+    const codexHooks = path.join(cortexPath, "codex.json");
+    checks.push({
+      name: "codex-hooks",
+      ok: fs.existsSync(codexHooks),
+      detail: fs.existsSync(codexHooks) ? "codex hooks config present" : "missing codex.json in cortex root",
+    });
+  }
+
+  if (fix && profile && profileFile) {
+    await runLink(cortexPath, { machine, profile });
+    checks.push({ name: "self-heal", ok: true, detail: "relinked hooks, symlinks, context, memory pointers" });
+  } else if (fix) {
+    checks.push({ name: "self-heal", ok: false, detail: "blocked: machine/profile not fully configured" });
+  } else {
+    const detectedTools = detectInstalledTools();
+    const hooked = configureAllHooks(cortexPath, detectedTools);
+    checks.push({
+      name: "hooks",
+      ok: hooked.length > 0 || detectedTools.size === 0,
+      detail: hooked.length ? `hook configs present for: ${hooked.join(", ")}` : "no external tools detected",
+    });
+  }
+
+  const ok = checks.every((c) => c.ok);
+  return { ok, machine, profile: profile || undefined, checks };
 }
