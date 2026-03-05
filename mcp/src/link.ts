@@ -143,6 +143,120 @@ function symlinkFile(src: string, dest: string) {
   fs.symlinkSync(src, dest);
 }
 
+// ── Cross-tool hooks ──────────────────────────────────────────────────────────
+
+function configureAllHooks(cortexPath: string): string[] {
+  const configured: string[] = [];
+
+  const pullCmd = `cd "${cortexPath}" && git pull --rebase --quiet 2>/dev/null || true`;
+  const promptCmd = `npx @alaarab/cortex hook-prompt`;
+  const stopCmd = `cd "${cortexPath}" && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)`;
+
+  // ── GitHub Copilot CLI (user-level: ~/.github/hooks/cortex.json) ──────────
+  const copilotHooksDir = path.join(os.homedir(), ".github", "hooks");
+  const copilotFile = path.join(copilotHooksDir, "cortex.json");
+  try {
+    fs.mkdirSync(copilotHooksDir, { recursive: true });
+    const config = {
+      version: 1,
+      hooks: {
+        sessionStart: [{ type: "command", bash: pullCmd }],
+        userPromptSubmitted: [{ type: "command", bash: promptCmd }],
+        sessionEnd: [{ type: "command", bash: stopCmd }],
+      },
+    };
+    fs.writeFileSync(copilotFile, JSON.stringify(config, null, 2));
+    configured.push("Copilot CLI");
+  } catch { /* best effort */ }
+
+  // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
+  const cursorFile = path.join(os.homedir(), ".cursor", "hooks.json");
+  try {
+    fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
+    let existing: any = {};
+    try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch { /* new file */ }
+    const config = {
+      ...existing,
+      version: 1,
+      // Cursor has no sessionStart hook; best effort is beforeSubmitPrompt + stop
+      beforeSubmitPrompt: { command: promptCmd },
+      stop: { command: stopCmd },
+    };
+    fs.writeFileSync(cursorFile, JSON.stringify(config, null, 2));
+    configured.push("Cursor");
+  } catch { /* best effort */ }
+
+  // ── Codex (codex.json in cortex path) ────────────────────────────────────
+  const codexFile = path.join(cortexPath, "codex.json");
+  try {
+    let existing: any = {};
+    try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch { /* new file */ }
+    const config = {
+      ...existing,
+      hooks: {
+        SessionStart: [{ type: "command", command: pullCmd }],
+        UserPromptSubmit: [{ type: "command", command: promptCmd }],
+        Stop: [{ type: "command", command: stopCmd }],
+      },
+    };
+    fs.writeFileSync(codexFile, JSON.stringify(config, null, 2));
+    configured.push("Codex");
+  } catch { /* best effort */ }
+
+  return configured;
+}
+
+// ── SKILL.md ──────────────────────────────────────────────────────────────────
+
+function writeSkillMd(cortexPath: string) {
+  const cortexPathEscaped = cortexPath.replace(/"/g, '\\"');
+  const pullCmd = `cd "${cortexPathEscaped}" && git pull --rebase --quiet 2>/dev/null || true`;
+  const stopCmd = `cd "${cortexPathEscaped}" && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)`;
+
+  const content = `---
+name: cortex
+description: Long-term memory system — injects project context and saves learnings across sessions
+version: "1.0"
+license: MIT
+hooks:
+  SessionStart:
+    - hooks:
+        - type: command
+          command: "${pullCmd}"
+  UserPromptSubmit:
+    - hooks:
+        - type: command
+          command: "npx @alaarab/cortex hook-prompt"
+          timeout: 3
+  Stop:
+    - hooks:
+        - type: command
+          command: "${stopCmd}"
+---
+
+# cortex
+
+Cortex is a long-term memory system for AI coding agents. It injects relevant project
+context at the start of each prompt and saves learnings at session end via git.
+
+## What it does
+
+- **SessionStart**: pulls latest cortex knowledge from remote
+- **UserPromptSubmit**: injects relevant project context, learnings, and backlog items
+- **Stop**: commits and pushes any new learnings to remote
+
+## MCP tools (when cortex MCP server is running)
+
+- \`search_cortex\` — semantic search across all project knowledge
+- \`get_project_summary\` — get summary + CLAUDE.md for a project
+- \`list_projects\` — list all known projects
+- \`save_learnings\` — save a new learning to a project
+`;
+
+  const dest = path.join(cortexPath, "cortex.SKILL.md");
+  fs.writeFileSync(dest, content);
+}
+
 function linkGlobal(cortexPath: string) {
   log("  global skills -> ~/.claude/skills/");
   const skillsDir = path.join(os.homedir(), ".claude", "skills");
@@ -159,6 +273,12 @@ function linkGlobal(cortexPath: string) {
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
     symlinkFile(globalClaude, path.join(os.homedir(), ".claude", "CLAUDE.md"));
+    // Copilot reads ~/.github/copilot-instructions.md for global instructions
+    try {
+      const copilotInstrDir = path.join(os.homedir(), ".github");
+      fs.mkdirSync(copilotInstrDir, { recursive: true });
+      symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"));
+    } catch { /* best effort */ }
   }
 }
 
@@ -178,7 +298,18 @@ function linkProject(cortexPath: string, project: string) {
 
   for (const f of ["CLAUDE.md", "KNOWLEDGE.md", "LEARNINGS.md"]) {
     const src = path.join(cortexPath, project, f);
-    if (fs.existsSync(src)) symlinkFile(src, path.join(target, f));
+    if (fs.existsSync(src)) {
+      symlinkFile(src, path.join(target, f));
+      // AGENTS.md (Codex) and .github/copilot-instructions.md (Copilot) point at same source
+      if (f === "CLAUDE.md") {
+        try { symlinkFile(src, path.join(target, "AGENTS.md")); } catch { /* best effort */ }
+        try {
+          const copilotDir = path.join(target, ".github");
+          fs.mkdirSync(copilotDir, { recursive: true });
+          symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"));
+        } catch { /* best effort */ }
+      }
+    }
   }
 
   // CLAUDE-*.md split files
@@ -426,6 +557,16 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
     no_jq: "  VS Code: mcp.json exists but jq not available",
   };
   if (vsMessages[vsStatus]) log(vsMessages[vsStatus]);
+
+  // Register hooks for Copilot CLI, Cursor, Codex
+  const hookedTools = configureAllHooks(cortexPath);
+  if (hookedTools.length) log(`  Hooks registered: ${hookedTools.join(", ")}`);
+
+  // Write cortex.SKILL.md for agentskills-compatible tools
+  try {
+    writeSkillMd(cortexPath);
+    log(`  cortex.SKILL.md written (agentskills-compatible tools)`);
+  } catch { /* best effort */ }
   log("");
 
   // Step 7: Context file
