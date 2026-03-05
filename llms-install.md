@@ -8,7 +8,7 @@ cortex is an MCP server that gives Claude persistent memory across sessions and 
 npx @alaarab/cortex init
 ```
 
-This clones the [cortex-starter](https://github.com/alaarab/cortex-starter) template to `~/.cortex`, registers the current machine, and configures the MCP server in Claude Code and VS Code automatically.
+This creates `~/.cortex` with starter templates (bundled in the package), registers the current machine, and configures the MCP server in Claude Code and VS Code automatically.
 
 Restart your editor after running it.
 
