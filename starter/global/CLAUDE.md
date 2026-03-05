@@ -64,7 +64,7 @@ The cortex MCP server is running. Use these tools proactively. Don't ask the use
 - Credentials, API keys, tokens, passwords, or anything that looks like a secret
 - Personal or sensitive data: SSNs, financial info, health info, PII of any kind
 - One-off facts that won't apply next session ("the server was down today")
-- Narration of what happened ("fixed the login bug") — only save the actual insight
+- Narration of what happened ("fixed the login bug"): only save the actual insight
 - Things obvious from reading the code or docs
 
 If you're unsure whether something is worth saving, skip it. High-signal entries beat volume.
