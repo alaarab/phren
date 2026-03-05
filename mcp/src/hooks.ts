@@ -32,7 +32,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
     tools ? new Set(["copilot", "cursor", "codex"]) :
     detectInstalledTools();
 
-  const pullCmd = `cd "${cortexPath}" && git pull --rebase --quiet 2>/dev/null || true`;
+  const pullCmd = `cd "${cortexPath}" && (git pull --rebase --quiet 2>/dev/null || true) && (npx @alaarab/cortex doctor --fix >/dev/null 2>&1 || true)`;
   const promptCmd = `npx @alaarab/cortex hook-prompt`;
   const stopCmd = `cd "${cortexPath}" && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)`;
 
