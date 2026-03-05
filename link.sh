@@ -456,8 +456,20 @@ rebuild_memory() {
 # ── MCP auto-install ─────────────────────────────────────────────────
 
 configure_mcp() {
-  local mcp_dist="$SCRIPT_DIR/mcp/dist/index.js"
+  local mcp_dist=""
   local settings_file=""
+
+  # Find the MCP dist: check script dir first, then common framework locations
+  for candidate in \
+    "$SCRIPT_DIR/mcp/dist/index.js" \
+    "$HOME/cortex/mcp/dist/index.js" \
+    "$HOME/Projects/cortex/mcp/dist/index.js" \
+    "$HOME/Code/cortex/mcp/dist/index.js"; do
+    if [ -f "$candidate" ]; then
+      mcp_dist="$candidate"
+      break
+    fi
+  done
 
   # Find the settings file
   if [ -f "$HOME/.claude/settings.json" ]; then
@@ -467,7 +479,7 @@ configure_mcp() {
   fi
 
   # If MCP isn't built, return status for context file
-  if [ ! -f "$mcp_dist" ]; then
+  if [ -z "$mcp_dist" ]; then
     echo "not_built"
     return 0
   fi
@@ -524,8 +536,18 @@ configure_mcp() {
 }
 
 configure_vscode_mcp() {
-  local mcp_dist="$SCRIPT_DIR/mcp/dist/index.js"
-  [ -f "$mcp_dist" ] || { echo "not_built"; return 0; }
+  local mcp_dist=""
+  for candidate in \
+    "$SCRIPT_DIR/mcp/dist/index.js" \
+    "$HOME/cortex/mcp/dist/index.js" \
+    "$HOME/Projects/cortex/mcp/dist/index.js" \
+    "$HOME/Code/cortex/mcp/dist/index.js"; do
+    if [ -f "$candidate" ]; then
+      mcp_dist="$candidate"
+      break
+    fi
+  done
+  [ -z "$mcp_dist" ] && { echo "not_built"; return 0; }
 
   # Find VS Code user config directory (Linux, macOS)
   local vscode_dir=""
