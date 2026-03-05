@@ -1389,7 +1389,7 @@
         </div>
         <div class="terminal-body">
           <div class="terminal-line">
-            <span class="terminal-prompt">$</span>
+            <span class="terminal-prompt" id="terminal-prompt">$</span>
             <div class="terminal-cmd-wrap">
               <span class="terminal-cmd" id="terminal-cmd">npx @alaarab/cortex init</span>
             </div>
@@ -1399,7 +1399,6 @@
         <div class="terminal-progress">
           <div class="terminal-progress-dot active" id="dot-0"></div>
           <div class="terminal-progress-dot" id="dot-1"></div>
-          <div class="terminal-progress-dot" id="dot-2"></div>
         </div>
       </div>
 
@@ -1746,24 +1745,20 @@
           label: 'set everything up',
         },
         {
-          cmd: '# nothing',
-          prefix: 'After that:',
-          label: 'context injects, learnings save — automatically',
-        },
-        {
-          cmd: '/cortex-init my-project',
-          prefix: 'New project:',
-          label: 'scaffold it and start building',
+          cmd: '✓ context injected  ✓ learnings saved',
+          prefix: 'Every session:',
+          label: 'hooks handle it — you just code',
+          output: true,
         },
       ];
 
       const cmdEl = document.getElementById('terminal-cmd');
+      const promptEl = document.getElementById('terminal-prompt');
       const labelEl = document.getElementById('terminal-label');
       const stepNumEl = document.getElementById('step-num');
       const dots = [
         document.getElementById('dot-0'),
         document.getElementById('dot-1'),
-        document.getElementById('dot-2'),
       ];
 
       let current = 0;
@@ -1773,11 +1768,13 @@
 
         setTimeout(() => {
           current = (current + 1) % steps.length;
-          cmdEl.textContent = steps[current].cmd;
+          const step = steps[current];
+          cmdEl.textContent = step.cmd;
+          cmdEl.style.color = step.output ? 'var(--indigo)' : '';
+          promptEl.style.display = step.output ? 'none' : '';
           cmdEl.classList.remove('fade-out');
           cmdEl.classList.add('fade-in');
-          stepNumEl.textContent = steps[current].label;
-          labelEl.innerHTML = `${steps[current].prefix} <span id="step-num">${steps[current].label}</span>`;
+          labelEl.innerHTML = `${step.prefix} <span id="step-num">${step.label}</span>`;
 
           dots.forEach((d, i) => d.classList.toggle('active', i === current));
 
