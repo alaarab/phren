@@ -17,79 +17,63 @@
 
 <br>
 
-A git repo that gives Claude persistent context across sessions and machines. Project knowledge, lessons learned, slash commands, task queues: all in markdown files you own. Run `npx @alaarab/cortex init`, and Claude knows your projects from session one.
+Project knowledge, lessons learned, task queues: all in markdown files you own. One command to set up. Zero commands to use after that. Claude gets your context automatically on every prompt.
 
 <br>
 </div>
 
 ---
 
-## Why this is worth setting up
+## What makes this different
 
-### Claude stops burning tokens on things it already knows
+### It runs itself
 
-Without cortex, Claude reads your project files upfront. Every session. A complex project burns 3-4k tokens before you've typed a word.
-
-With the MCP server, Claude starts lean. It searches your knowledge base when it needs something instead of loading everything upfront. Ask about the auth flow, it fetches just that section. Ask about deployment, it pulls the deployment notes. Same answers, fraction of the context cost.
-
-### Each machine only sees what it needs to
-
-Cortex uses git sparse-checkout under the hood. Each machine has a profile that lists which projects it should see: the work machine gets work projects, everything else stays off disk. No leakage between environments.
-
-### You stop losing what you learned
-
-Claude figures out a tricky bug, discovers a non-obvious pattern in your codebase, then the session ends and that knowledge is gone. `/cortex-update` captures it: a few bullet points, committed to your cortex repo, available in every future session on every machine. Over time your LEARNINGS.md files become a project history worth more than any ticket system.
+Other memory tools need Claude to remember to call them. Cortex hooks into Claude Code's lifecycle directly. Every prompt you type, the hook searches your knowledge base and injects the relevant context before Claude even starts thinking. Learnings auto-commit when the session ends. You never have to remember to save or search.
 
 ### It's just files
 
-Everything lives in markdown files in a git repo you own. `git log` shows how your project knowledge evolved. `git diff` shows what changed. If Claude's context is wrong, you open a file and fix it. No account required, nothing to break.
+No database service. No vector store running on a port. No account or API key. Your knowledge lives in markdown files in a git repo. `git log` shows how it evolved. `git diff` shows what changed. If something is wrong, you open a file and fix it.
 
----
+### Search understands what you mean
 
-## How it works
+Type "throttling" and it also finds "rate limit", "429", and "too many requests." The synonym engine covers common dev terms: auth matches login and oauth, deploy matches release and ship, db matches database and postgres. You don't need to guess the exact word you used six months ago.
 
-Run `npx @alaarab/cortex init`. This creates `~/.cortex` with starter templates, registers your machine, and configures the MCP server automatically.
+### Every machine, same brain
 
-Push `~/.cortex` to a private GitHub repo to sync across machines. On a new machine, clone it and run `npx @alaarab/cortex init` again. It reads the profile for that machine and configures itself.
+Push your cortex to a private repo. Clone it on another machine, run init, done. Profiles control which projects each machine sees: the work laptop gets work projects, the home setup gets everything. Git sparse-checkout keeps the boundaries clean.
+
+### Claude gets smarter over time
+
+When Claude figures out a tricky pattern or hits a subtle bug, it writes that down in your LEARNINGS.md. Next session, next week, next machine: that knowledge is there. Over time your learnings files become a project history worth more than any ticket system.
 
 ---
 
 ## Getting started
 
-### Option A: one command (recommended)
-
 ```bash
 npx @alaarab/cortex init
 ```
 
-This creates `~/.cortex` with starter templates, registers your machine, and configures the MCP server in Claude Code and VS Code automatically.
+That's it. This:
+- Creates `~/.cortex` with starter templates
+- Registers the MCP server in Claude Code and VS Code
+- Sets up hooks for automatic context injection and auto-save
+- Registers your machine
 
-Then restart Claude Code and your context is live.
+Restart Claude Code. Your next prompt will already have context.
 
-### Option B: manual
+Already have cortex? Run init again to pick up the v1.7.0 hooks.
+
+### Sync across machines
 
 ```bash
-# 1. Create your cortex directory
-npx @alaarab/cortex init
-
-# 2. Push to a private repo for syncing across machines
 cd ~/.cortex
-git init
-git add .
-git commit -m "Initial cortex setup"
-git remote add origin git@github.com:YOUR_USERNAME/cortex.git
+git init && git add . && git commit -m "Initial cortex"
+git remote add origin git@github.com:YOU/my-cortex.git
 git push -u origin main
 ```
 
-### Option C: self-hosted (fork the whole framework)
-
-```bash
-# Fork this repo, clone it, then run link.sh
-git clone git@github.com:YOUR_USERNAME/cortex.git ~/cortex
-cd ~/cortex && ./link.sh
-```
-
-Open any project with Claude Code and your context is already there.
+On a new machine: clone, run init, done.
 
 ---
 
@@ -99,36 +83,84 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 
 | File | What it's for |
 |------|--------------|
-| `summary.md` | Five-line card: what the project is, the stack, current status, how to run it, the one thing that trips people up |
-| `CLAUDE.md` | Full context: architecture, commands, conventions, gotchas. Claude reads this at the start of every session. |
+| `summary.md` | Five-line card: what, stack, status, how to run, the gotcha |
+| `CLAUDE.md` | Full context: architecture, commands, conventions |
 | `KNOWLEDGE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
-| `LEARNINGS.md` | Lessons accumulated over time: bugs hit, patterns discovered, things to avoid next time |
+| `LEARNINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
 | `backlog.md` | Task queue that persists across sessions |
 | `.claude/skills/` | Project-specific slash commands |
 
-`summary.md` is always loaded, five lines that keep Claude oriented without cost. `CLAUDE.md` is loaded when you're actively working in that project. With the MCP server, everything else is retrieved on demand.
+---
+
+## How the automatic context works
+
+### On every prompt (UserPromptSubmit hook)
+
+When you type a message, the hook:
+1. Extracts keywords from your prompt (strips filler words)
+2. Detects which project you're in from your working directory
+3. Searches your cortex with synonym expansion
+4. Injects the top results as context before Claude sees the prompt
+
+This takes ~250ms. Claude starts every response knowing what project you're in and what's relevant to your question.
+
+### When the session ends (Stop hook)
+
+Any changes to your cortex (new learnings, backlog updates) are automatically committed and pushed. Nothing gets lost even if you forget to save.
+
+### After context compaction
+
+When Claude's context window fills up and gets compacted, it loses previously injected context. The `hook-context` command re-injects your project summary, recent learnings, and active backlog so Claude stays oriented.
+
+---
+
+## The MCP server
+
+The server indexes your cortex into a local SQLite FTS5 database. Ten tools available to Claude:
+
+**Search and browse:**
+- `search_cortex(query, type?, limit?)` with automatic synonym expansion
+- `get_project_summary(name)` for a project's summary card and file list
+- `list_projects()` for everything in your active profile
+
+**Backlog management:**
+- `get_backlog(project?)` reads tasks for one or all projects
+- `add_backlog_item(project, item)` adds to the Queue section
+- `complete_backlog_item(project, item)` matches by text, moves to Done
+- `update_backlog_item(project, item, updates)` changes priority, context, or section
+
+**Learning capture:**
+- `add_learning(project, insight)` appends under today's date
+- `remove_learning(project, text)` removes by matching text
+- `save_learnings(message?)` commits and pushes all changes
+
+### CLI subcommands
+
+For scripting, hooks, and quick lookups:
+
+```bash
+cortex search "rate limiting"        # FTS5 search with synonym expansion
+cortex hook-prompt                   # reads stdin JSON, outputs context block
+cortex hook-context                  # project context for current directory
+cortex add-learning <project> "..."  # append a learning from the terminal
+```
+
+### Without the MCP server
+
+Cortex still works through MEMORY.md and direct file reads. Claude reads `~/.cortex-context.md` at session start, and per-project MEMORY files point to the right cortex directories. MCP makes retrieval faster and more targeted, but it's not required.
 
 ---
 
 ## Multiple machines, one repo
 
-Every machine maps to a profile. `machines.yaml` in your cortex repo holds the mapping:
+`machines.yaml` maps each hostname to a profile:
 
 ```yaml
 work-desktop: work
 home-laptop: personal
 ```
 
-Each profile lists what that machine should know about:
-
-```yaml
-# profiles/work.yaml
-name: work
-projects:
-  - global
-  - my-api
-  - my-frontend
-```
+Each profile lists its projects:
 
 ```yaml
 # profiles/personal.yaml
@@ -137,64 +169,22 @@ projects:
   - global
   - my-api
   - my-frontend
-  - side-project-1
-  - side-project-2
+  - side-project
 ```
 
-When you run `link.sh` on your work machine, it applies the `work` profile. Sparse-checkout keeps only those project directories on disk (personal projects don't exist on the filesystem), and symlinks wire everything up. On your personal machine: same repo, different profile, full access.
-
-First run on a new machine, link.sh asks for a machine name and profile. After that, zero config.
-
----
-
-## The MCP server
-
-The server indexes every markdown file in your cortex into a local SQLite FTS database and exposes these tools to Claude:
-
-**Search and browse:**
-- `search_cortex(query, type?, limit?)` searches across all your project docs, learnings, backlogs, and skills. The optional `type` filter narrows results to a specific document type: `claude`, `learnings`, `knowledge`, `summary`, `backlog`, or `skill`.
-- `get_project_summary(name)` pulls up a specific project's summary card and file list
-- `list_projects()` shows everything in your active profile with a one-line description of each
-
-**Backlog management:**
-- `get_backlog(project?)` reads the backlog for one project or all of them
-- `add_backlog_item(project, item)` appends a task to the Queue section of a project's backlog.md
-- `complete_backlog_item(project, item)` matches the item by text and moves it to Done
-- `update_backlog_item(project, item, updates)` updates an item's priority, context, or moves it between sections
-
-**Learning capture:**
-- `add_learning(project, insight)` appends a bullet to a project's LEARNINGS.md under today's date. Claude calls this the moment it discovers something worth remembering, not at the end of the session.
-- `remove_learning(project, text)` removes a learning that turned out to be wrong or outdated by matching text
-- `save_learnings(message?)` commits and pushes all cortex changes. Call at end of session or after a burst of updates.
-
-Instead of loading context upfront, Claude calls `search_cortex` when it needs to know something. A project with 3k tokens of architecture notes? Claude fetches the relevant 300 tokens for the current task instead of the whole file.
-
-The MCP server is installed automatically when you run `npx @alaarab/cortex init`. No separate build step needed.
-
-### Without the MCP server
-
-Not everyone runs the MCP server. Some work in restricted environments, use web Claude, or haven't set it up yet. Cortex still works through MEMORY.md and explicit file reads:
-
-- Claude reads `~/.cortex-context.md` at session start for machine context
-- `MEMORY.md` in `~/.claude/projects/` has a pointer table with one line per project
-- Per-project `MEMORY-{name}.md` files have the full summary and notes
-- For any project detail, Claude reads the file directly from `~/.cortex/project-name/`
-
-This gives roughly equivalent context. MCP just makes retrieval faster and more targeted. Instead of loading everything, Claude searches for what it needs.
+`link.sh` applies the profile. Sparse-checkout keeps only the listed projects on disk. First run asks for a machine name and profile. After that, zero config.
 
 ---
 
 ## Works with Claude Code and GitHub Copilot
 
-Cortex is MCP-native, so it works wherever MCP is supported.
-
-**Claude Code:** `npx @alaarab/cortex init` writes the server config into `~/.claude/settings.json` automatically. You can also add it manually:
+**Claude Code:** `npx @alaarab/cortex init` configures everything automatically. Manual setup:
 
 ```bash
 claude mcp add cortex -- npx -y @alaarab/cortex ~/.cortex
 ```
 
-**VS Code / GitHub Copilot:** `npx @alaarab/cortex init` detects VS Code and writes `~/.config/Code/User/mcp.json` automatically. To set it up manually, add to `~/.config/Code/User/mcp.json` (Linux) or `~/Library/Application Support/Code/User/mcp.json` (macOS):
+**VS Code / GitHub Copilot:** Init detects VS Code and writes `mcp.json` automatically. Manual setup in `~/.config/Code/User/mcp.json`:
 
 ```json
 {
@@ -211,60 +201,30 @@ claude mcp add cortex -- npx -y @alaarab/cortex ~/.cortex
 
 ## Skills
 
-Cortex ships five skills for managing your knowledge base. They're the only ones included in this package. Add project-specific ones in `.claude/skills/` inside any project, or put global workflow skills in `~/.cortex/global/skills/` so they're available everywhere.
+Five skills for the things that can't be automatic:
 
 | Skill | What it does |
 |-------|-------------|
-| `/cortex-update` | End-of-session wrap: capture what you learned, commit to your knowledge base, push |
-| `/cortex-sync` | Pull the latest from your cortex repo and re-link everything on this machine |
-| `/cortex-init` | Scaffold a new project: summary card, CLAUDE.md, backlog, skills directory |
-| `/cortex-discover` | Audit your cortex: missing files, stale content, skill gaps, stuck backlog items |
-| `/cortex-consolidate` | Read LEARNINGS.md files across all projects and surface patterns that repeat across codebases |
+| `/cortex-update` | Deep end-of-session reflection. The hooks handle auto-commit, but this is for when you want Claude to actively think about what it learned and write it down well. Optional now, but worth running after big sessions. |
+| `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. The hooks can't replace this because multi-machine sync needs a manual trigger. |
+| `/cortex-init` | Scaffold a new project. Creates summary.md, CLAUDE.md, backlog, adds to your profile. |
+| `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items, skill gaps. |
+| `/cortex-consolidate` | Read learnings across all projects and surface patterns that repeat. Needs human judgment about which patterns matter. |
 
-### Your own workflow skills
-
-Skills like `/humanize`, `/swarm`, `/pipeline`, `/release`, and `/creative` are personal. They're not part of the cortex package because everyone's workflow is different.
-
-Put your own skills in `~/.cortex/global/skills/`. The `link.sh` script symlinks them to `~/.claude/skills/` so Claude picks them up in every session. The starter template (included in the package) has examples you can copy and adapt.
-
-```bash
-# add a skill to your cortex
-cp my-skill.md ~/.cortex/global/skills/
-cd ~/.cortex && ./link.sh
-```
-
----
-
-## Splitting large context files
-
-If a CLAUDE.md grows past around 100 lines, Claude Code's `@file` import syntax lets you split it without losing anything:
-
-```markdown
-# CLAUDE.md
-
-@CLAUDE-architecture.md
-@CLAUDE-commands.md
-@CLAUDE-conventions.md
-```
-
-Each section is a separate file. Claude loads them all at session start, but you can remove an import line to stop loading a section. Useful when you're doing focused work and don't need the full architecture notes loaded for a quick bug fix.
+Put personal workflow skills in `~/.cortex/global/skills/`. The `link.sh` script symlinks them to `~/.claude/skills/` so they're available everywhere.
 
 ---
 
 ## Building your own
 
-Fork this repo. The split is clean: framework on one side (`link.sh`, `mcp/`, `global/skills/`, `templates/`), your data on the other (project directories, `machines.yaml`, `profiles/`). The framework is the machinery you don't touch much. Your data is yours to edit freely and commit often.
-
-Add a new project:
+Fork this repo. The split is clean: framework (`link.sh`, `mcp/`, `global/skills/`) on one side, your data (project directories, `machines.yaml`, `profiles/`) on the other.
 
 ```bash
-cp -r templates/project/ my-new-project/
-# fill in my-new-project/CLAUDE.md and summary.md
-# add "my-new-project" to your profile
-./link.sh
+git clone git@github.com:YOU/cortex.git ~/cortex
+cd ~/cortex && ./link.sh
 ```
 
-Or let Claude do it: `/cortex-init my-new-project` scaffolds the files, asks which profile to add it to, and commits everything.
+Or let Claude scaffold a project: `/cortex-init my-project` creates the files, asks which profile to add it to, and commits.
 
 ---
 

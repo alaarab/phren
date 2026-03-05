@@ -28,15 +28,56 @@ function patchJsonFile(filePath: string, patch: (data: Record<string, any>) => v
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n");
 }
 
+function resolveEntryScript(): string {
+  // Find the actual index.js path so hooks can use `node <path>` instead of npx
+  return path.join(ROOT, "mcp", "dist", "index.js");
+}
+
 function configureClaude(cortexPath: string) {
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  const entryScript = resolveEntryScript();
+
   patchJsonFile(settingsPath, (data) => {
+    // MCP server
     if (!data.mcpServers) data.mcpServers = {};
-    if (data.mcpServers.cortex) return; // already configured
-    data.mcpServers.cortex = {
-      command: "npx",
-      args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
+    if (!data.mcpServers.cortex) {
+      data.mcpServers.cortex = {
+        command: "npx",
+        args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
+      };
+    }
+
+    // Hooks: always update to latest version
+    if (!data.hooks) data.hooks = {};
+
+    // UserPromptSubmit hook: auto-inject cortex context into every prompt
+    const promptHook = {
+      type: "command",
+      command: `node ${entryScript} hook-prompt`,
+      timeout: 3,
     };
+    const existingPrompt = data.hooks.UserPromptSubmit as any[] | undefined;
+    const hasCortexPromptHook = existingPrompt?.some(
+      (h: any) => h.hooks?.some((hook: any) => hook.command?.includes("cortex") && hook.command?.includes("hook-prompt"))
+    );
+    if (!hasCortexPromptHook) {
+      if (!data.hooks.UserPromptSubmit) data.hooks.UserPromptSubmit = [];
+      data.hooks.UserPromptSubmit.push({ matcher: "", hooks: [promptHook] });
+    }
+
+    // Stop hook: auto-commit cortex changes
+    const stopHook = {
+      type: "command",
+      command: "cd ~/.cortex && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)",
+    };
+    const existingStop = data.hooks.Stop as any[] | undefined;
+    const hasCortexStopHook = existingStop?.some(
+      (h: any) => h.hooks?.some((hook: any) => hook.command?.includes(".cortex") && hook.command?.includes("auto-save"))
+    );
+    if (!hasCortexStopHook) {
+      if (!data.hooks.Stop) data.hooks.Stop = [];
+      data.hooks.Stop.push({ matcher: "", hooks: [stopHook] });
+    }
   });
   return !JSON.parse(fs.readFileSync(settingsPath, "utf8")).mcpServers?.cortex
     ? "skipped"
@@ -94,8 +135,22 @@ export async function runInit() {
     const entries = fs.readdirSync(cortexPath);
     if (entries.length > 0) {
       log(`\ncortex already exists at ${cortexPath}`);
-      log(`To add a project: run /cortex-init <name> in Claude Code`);
-      log(`To reconfigure MCP, delete ${cortexPath} and run init again.\n`);
+      log(`Updating MCP + hook configuration...\n`);
+
+      // Always reconfigure MCP and hooks (picks up new features on upgrade)
+      try {
+        configureClaude(cortexPath);
+        log(`  Updated Claude Code MCP + hooks`);
+      } catch (e) {
+        log(`  Could not configure Claude Code MCP (${e}), add manually`);
+      }
+
+      try {
+        const vscodeResult = configureVSCode(cortexPath);
+        if (vscodeResult === "installed") log(`  Updated VS Code MCP`);
+      } catch {}
+
+      log(`\nDone. Restart Claude Code to pick up changes.\n`);
       process.exit(0);
     }
   }
@@ -157,7 +212,7 @@ export async function runInit() {
   // Configure Claude Code
   try {
     configureClaude(cortexPath);
-    log(`  Configured Claude Code MCP`);
+    log(`  Configured Claude Code MCP + hooks`);
   } catch (e) {
     log(`  Could not configure Claude Code MCP (${e}), add manually`);
   }

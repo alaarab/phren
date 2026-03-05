@@ -66,6 +66,22 @@ In Claude Code, run `/cortex-init <project-name>` to scaffold a new project entr
 
 Run `/cortex-update` at the end of a session to capture what you learned.
 
+## Hooks (auto-inject, v1.7.0+)
+
+Running `npx @alaarab/cortex init` also registers Claude Code hooks:
+
+- **UserPromptSubmit**: Injects relevant cortex context into every prompt automatically
+- **Stop**: Auto-commits and pushes cortex changes when a session ends
+
+## CLI subcommands
+
+```bash
+cortex search "query"                # FTS5 search with synonym expansion
+cortex hook-prompt                   # stdin JSON -> context block (used by hooks)
+cortex hook-context                  # project context for cwd (used after compaction)
+cortex add-learning <project> "..."  # append a learning via CLI
+```
+
 ## Available MCP tools
 
 - `search_cortex(query, type?, limit?)`: full-text search across all project knowledge. `type` filter: `claude`, `learnings`, `knowledge`, `summary`, `backlog`, `skill`.

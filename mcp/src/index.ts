@@ -11,260 +11,37 @@ if (process.argv[2] === "--health") {
   process.exit(0);
 }
 
+// CLI subcommands (run before MCP server starts)
+const CLI_COMMANDS = ["search", "hook-prompt", "hook-context", "add-learning"];
+if (CLI_COMMANDS.includes(process.argv[2])) {
+  const { runCliCommand } = await import("./cli.js");
+  await runCliCommand(process.argv[2], process.argv.slice(3));
+  process.exit(0);
+}
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { fileURLToPath } from "url";
-import * as yaml from "js-yaml";
-import { globSync } from "glob";
-import { createRequire } from "module";
-import { isValidProjectName, safeProjectPath, sanitizeFts5Query } from "./utils.js";
+import { isValidProjectName, safeProjectPath, sanitizeFts5Query, expandSynonyms } from "./utils.js";
+import { findCortexPathWithArg, buildIndex, extractSnippet, queryRows, addLearningToFile } from "./shared.js";
 
-// sql.js-fts5 is CJS only, use createRequire for ESM compat
-const require = createRequire(import.meta.url);
-const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<any>;
-
-// Validate that a path is a safe, existing directory
-function requireDirectory(resolved: string, label: string): string {
-  if (!fs.existsSync(resolved)) {
-    console.error(`${label} not found: ${resolved}`);
-    process.exit(1);
-  }
-  if (!fs.statSync(resolved).isDirectory()) {
-    console.error(`${label} is not a directory: ${resolved}`);
-    process.exit(1);
-  }
-  return resolved;
-}
-
-// Resolve the cortex root directory
-// Priority: CLI arg > CORTEX_PATH env > ~/.cortex > ~/cortex (auto-creates ~/.cortex on first run)
-function findCortexPath(): string {
-  const arg = process.argv[2];
-  if (arg) {
-    const resolved = arg.replace(/^~/, process.env.HOME || process.env.USERPROFILE || "");
-    return requireDirectory(resolved, "cortex path");
-  }
-  if (process.env.CORTEX_PATH) return process.env.CORTEX_PATH;
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-  for (const name of [".cortex", "cortex"]) {
-    const candidate = path.join(home, name);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  // First run: bootstrap ~/.cortex with a starter README
-  const defaultPath = path.join(home, ".cortex");
-  fs.mkdirSync(defaultPath, { recursive: true });
-  fs.writeFileSync(
-    path.join(defaultPath, "README.md"),
-    `# My Cortex\n\nThis is your personal knowledge base. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md LEARNINGS.md backlog.md\n\`\`\`\n\nOr run \`/cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
-  );
-  console.error(`Created ~/.cortex — see github.com/alaarab/cortex-starter to populate it`);
-  return defaultPath;
-}
-
-const cortexPath = findCortexPath();
+// MCP mode: first non-flag arg is the cortex path
+const cortexArg = process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
+const cortexPath = findCortexPathWithArg(cortexArg);
 const profile = process.env.CORTEX_PROFILE || "";
 
-
-// Figure out which project directories to index
-function getProjectDirs(): string[] {
-  if (profile) {
-    if (!isValidProjectName(profile)) {
-      console.error(`Invalid CORTEX_PROFILE value: ${profile}`);
-      return [];
-    }
-    const profilePath = path.join(cortexPath, "profiles", `${profile}.yaml`);
-    if (fs.existsSync(profilePath)) {
-      const data = yaml.load(fs.readFileSync(profilePath, "utf-8")) as Record<string, unknown>;
-      const projects = data?.projects;
-      if (Array.isArray(projects)) {
-        return projects
-          .map((p: unknown) => {
-            const name = String(p);
-            if (!isValidProjectName(name)) {
-              console.error(`Skipping invalid project name in profile: ${name}`);
-              return null;
-            }
-            return safeProjectPath(cortexPath, name);
-          })
-          .filter((p): p is string => p !== null && fs.existsSync(p));
-      }
-    }
-  }
-
-  // No profile or profile not found: index all top-level directories
-  return fs.readdirSync(cortexPath, { withFileTypes: true })
-    .filter(d => d.isDirectory() && !d.name.startsWith(".") && d.name !== "profiles" && d.name !== "templates")
-    .map(d => path.join(cortexPath, d.name));
-}
-
-// Classify a file by its name and path
-const FILE_TYPE_MAP: Record<string, string> = {
-  "claude.md": "claude",
-  "summary.md": "summary",
-  "learnings.md": "learnings",
-  "knowledge.md": "knowledge",
-  "backlog.md": "backlog",
-  "changelog.md": "changelog",
-};
-
-function classifyFile(filename: string, relPath: string): string {
-  const mapped = FILE_TYPE_MAP[filename.toLowerCase()];
-  if (mapped) return mapped;
-  if (relPath.includes("skills/") || relPath.includes("skills\\")) return "skill";
-  return "other";
-}
-
-// Find and load the WASM binary for sql.js-fts5
-function findWasmBinary(): Buffer | undefined {
-  const __filename = fileURLToPath(import.meta.url);
-  let dir = path.dirname(__filename);
-  for (let i = 0; i < 5; i++) {
-    const candidate = path.join(dir, "node_modules", "sql.js-fts5", "dist", "sql-wasm.wasm");
-    if (fs.existsSync(candidate)) return fs.readFileSync(candidate);
-    dir = path.dirname(dir);
-  }
-  return undefined;
-}
-
-async function buildIndex(): Promise<any> {
-  const wasmBinary = findWasmBinary();
-  const SQL = await initSqlJs(wasmBinary ? { wasmBinary } : {});
-  const db = new SQL.Database();
-
-  db.run(`
-    CREATE VIRTUAL TABLE docs USING fts5(
-      project, filename, type, content, path
-    );
-  `);
-
-  const projectDirs = getProjectDirs();
-  let fileCount = 0;
-
-  for (const dir of projectDirs) {
-    const projectName = path.basename(dir);
-    const mdFiles = globSync("**/*.md", { cwd: dir, nodir: true });
-
-    for (const relFile of mdFiles) {
-      const fullPath = path.join(dir, relFile);
-      const filename = path.basename(relFile);
-      const type = classifyFile(filename, relFile);
-
-      try {
-        const content = fs.readFileSync(fullPath, "utf-8");
-        db.run(
-          "INSERT INTO docs (project, filename, type, content, path) VALUES (?, ?, ?, ?, ?)",
-          [projectName, filename, type, content, fullPath]
-        );
-        fileCount++;
-      } catch {
-        // Skip files we can't read
-      }
-    }
-  }
-
-  console.error(`Indexed ${fileCount} files from ${projectDirs.length} projects`);
-  return db;
-}
-
-
-// Extract a snippet around the match. FTS5 snippet() works in sql.js but
-// to keep things simple and reliable, we do our own snippet extraction.
-function extractSnippet(content: string, query: string, lines: number = 5): string {
-  const terms = query.replace(/\b(AND|OR|NOT|NEAR)\b/gi, "")
-    .replace(/['"]/g, "")
-    .split(/\s+/)
-    .filter(t => t.length > 1)
-    .map(t => t.toLowerCase());
-
-  if (terms.length === 0) {
-    return content.split("\n").slice(0, lines).join("\n");
-  }
-
-  const contentLines = content.split("\n");
-
-  // Find heading positions and section boundaries
-  const headingIndices: number[] = [];
-  for (let i = 0; i < contentLines.length; i++) {
-    if (contentLines[i].trimStart().startsWith("#")) headingIndices.push(i);
-  }
-
-  // For each line, find its section (between two headings) and distance to nearest heading
-  function nearestHeadingDist(idx: number): number {
-    let min = Infinity;
-    for (const h of headingIndices) {
-      const d = Math.abs(idx - h);
-      if (d < min) min = d;
-    }
-    return min;
-  }
-
-  function sectionMiddle(idx: number): number {
-    let sectionStart = 0;
-    let sectionEnd = contentLines.length;
-    for (const h of headingIndices) {
-      if (h <= idx) sectionStart = h;
-      else { sectionEnd = h; break; }
-    }
-    return (sectionStart + sectionEnd) / 2;
-  }
-
-  let bestIdx = 0;
-  let bestScore = 0;
-  let bestHeadingDist = Infinity;
-  let bestMidDist = Infinity;
-
-  for (let i = 0; i < contentLines.length; i++) {
-    const lineLower = contentLines[i].toLowerCase();
-    let score = 0;
-    for (const term of terms) {
-      if (lineLower.includes(term)) score++;
-    }
-    if (score === 0) continue;
-
-    const hDist = nearestHeadingDist(i);
-    const nearHeading = hDist <= 3;
-    const mDist = Math.abs(i - sectionMiddle(i));
-
-    // Prefer: higher term count, then near a heading, then closer to section middle
-    const better =
-      score > bestScore ||
-      (score === bestScore && nearHeading && bestHeadingDist > 3) ||
-      (score === bestScore && nearHeading === (bestHeadingDist <= 3) && mDist < bestMidDist);
-
-    if (better) {
-      bestScore = score;
-      bestIdx = i;
-      bestHeadingDist = hDist;
-      bestMidDist = mDist;
-    }
-  }
-
-  const start = Math.max(0, bestIdx - 1);
-  const end = Math.min(contentLines.length, bestIdx + lines - 1);
-  return contentLines.slice(start, end).join("\n");
-}
-
-// Build a standard MCP text response
 function textResponse(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
-// Extract rows from a db.exec result, or null if empty
-function queryRows(db: any, sql: string, params: (string | number)[]): any[][] | null {
-  const results = db.exec(sql, params);
-  if (!results.length || !results[0].values.length) return null;
-  return results[0].values;
-}
-
 async function main() {
-  const db = await buildIndex();
+  const db = await buildIndex(cortexPath, profile);
 
   const server = new McpServer({
     name: "cortex-mcp",
-    version: "0.1.0",
+    version: "1.7.0",
   });
 
   server.registerTool(
@@ -284,7 +61,7 @@ async function main() {
       try {
         const maxResults = limit ?? 5;
         const filterType = type === "skills" ? "skill" : type;
-        const safeQuery = sanitizeFts5Query(query);
+        const safeQuery = expandSynonyms(sanitizeFts5Query(query));
 
         if (!safeQuery) return textResponse("Search query is empty after sanitization.");
 
@@ -315,7 +92,7 @@ async function main() {
     "get_project_summary",
     {
       title: "Get Project Summary",
-      description: "Get a project's summary card and available docs. Call this when starting work on a specific project to orient yourself — what it is, the stack, current status, and how to run it.",
+      description: "Get a project's summary card and available docs. Call this when starting work on a specific project to orient yourself: what it is, the stack, current status, and how to run it.",
       inputSchema: z.object({
         name: z.string().describe("Project name (e.g. 'my-app', 'backend', 'frontend')"),
       }),
@@ -378,7 +155,6 @@ async function main() {
 
         const types = rows.map((r) => r[1] as string);
 
-        // Pull brief from summary first, then fall back to claude doc
         const summaryRow = rows.find((r) => r[1] === "summary");
         const claudeRow = rows.find((r) => r[1] === "claude");
         const source = (summaryRow ?? claudeRow)?.[2] as string | undefined;
@@ -505,21 +281,17 @@ async function main() {
 
       let lines = fs.readFileSync(backlogPath, "utf8").split("\n");
 
-      // Find the item line
       const idx = lines.findIndex(l => l.match(/^- /) && l.toLowerCase().includes(item.toLowerCase()));
       if (idx === -1) return textResponse(`No item matching "${item}" found in ${project} backlog.`);
 
       const changes: string[] = [];
 
-      // Apply priority update
       if (updates.priority) {
         const before = lines[idx];
-        // Remove any existing [high], [medium], [low] tag then add the new one
         lines[idx] = lines[idx].replace(/\s*\[(high|medium|low)\]/gi, "").trimEnd() + ` [${updates.priority}]`;
         if (lines[idx] !== before) changes.push(`priority -> ${updates.priority}`);
       }
 
-      // Apply context update
       if (updates.context) {
         const contextLineIdx = idx + 1;
         const hasContext = contextLineIdx < lines.length && lines[contextLineIdx].trim().startsWith("Context:");
@@ -531,29 +303,23 @@ async function main() {
         changes.push(`context updated`);
       }
 
-      // Apply section move
       if (updates.section) {
         const targetSection = updates.section;
         const sectionPattern = new RegExp(`^## ${targetSection}\\s*$`, "i");
 
-        // Collect the item and its context line (if any)
         const itemLine = lines[idx];
         const contextIdx = idx + 1;
         const hasContext = contextIdx < lines.length && lines[contextIdx].trim().startsWith("Context:");
         const extraLine = hasContext ? lines[contextIdx] : null;
 
-        // Remove item (and context if present) from current location
         const removeCount = extraLine !== null ? 2 : 1;
         lines.splice(idx, removeCount);
 
-        // Find target section header
         const targetIdx = lines.findIndex(l => sectionPattern.test(l));
         if (targetIdx === -1) {
-          // Section not found: append it
           lines.push(`\n## ${targetSection}\n`, itemLine);
           if (extraLine) lines.push(extraLine);
         } else {
-          // Insert after the section header (and any blank line right after it)
           let insertAt = targetIdx + 1;
           if (insertAt < lines.length && lines[insertAt].trim() === "") insertAt++;
           const toInsert = extraLine !== null ? [itemLine, extraLine] : [itemLine];
@@ -582,41 +348,8 @@ async function main() {
       }),
     },
     async ({ project, learning }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
-      const resolvedDir = safeProjectPath(cortexPath, project);
-      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
-      const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
-
-      const today = new Date().toISOString().slice(0, 10);
-      const bullet = learning.startsWith("- ") ? learning : `- ${learning}`;
-
-      if (!fs.existsSync(learningsPath)) {
-        if (!fs.existsSync(resolvedDir)) return textResponse(`Project "${project}" not found in cortex.`);
-        fs.writeFileSync(learningsPath, `# ${project} LEARNINGS\n\n## ${today}\n\n${bullet}\n`);
-        return textResponse(`Created LEARNINGS.md for "${project}" and added insight.`);
-      }
-
-      const content = fs.readFileSync(learningsPath, "utf8");
-
-      // Check if today's date section exists
-      const todayHeader = `## ${today}`;
-      if (content.includes(todayHeader)) {
-        // Append under the existing date section
-        const updated = content.replace(todayHeader, `${todayHeader}\n\n${bullet}`);
-        fs.writeFileSync(learningsPath, updated);
-      } else {
-        // Find the first ## heading and insert the new date section before it
-        const firstHeading = content.match(/^(## \d{4}-\d{2}-\d{2})/m);
-        if (firstHeading) {
-          const updated = content.replace(firstHeading[0], `${todayHeader}\n\n${bullet}\n\n${firstHeading[0]}`);
-          fs.writeFileSync(learningsPath, updated);
-        } else {
-          // No date sections yet, append at the end
-          fs.writeFileSync(learningsPath, content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n`);
-        }
-      }
-
-      return textResponse(`Added learning to ${project}: ${bullet}`);
+      const result = addLearningToFile(cortexPath, project, learning);
+      return textResponse(result);
     }
   );
 
@@ -668,23 +401,18 @@ async function main() {
       const commitMsg = message || "update cortex";
 
       try {
-        // Check if there are changes to commit
         const status = execSync("git status --porcelain", { cwd: cortexPath, encoding: "utf8" }).trim();
         if (!status) return textResponse("Nothing to save. Cortex is up to date.");
 
-        // Stage all changes (use -f for files that might be in global gitignore)
         execSync("git add -A", { cwd: cortexPath, encoding: "utf8" });
-
-        // Commit
         execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cortexPath, encoding: "utf8" });
 
-        // Try to push (ignore failure if no remote)
         let pushed = false;
         try {
           execSync("git push", { cwd: cortexPath, encoding: "utf8", timeout: 15000 });
           pushed = true;
         } catch {
-          // No remote or push failed, that's fine
+          // No remote or push failed
         }
 
         const changedFiles = status.split("\n").length;
@@ -695,7 +423,6 @@ async function main() {
     }
   );
 
-  // Start the server
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`cortex-mcp running (${cortexPath})`);

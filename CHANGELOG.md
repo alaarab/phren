@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.7.0] - 2026-03-04
+
+### Added
+- **Auto-inject context**: UserPromptSubmit hook automatically injects relevant cortex context into every prompt. Claude gets project context without needing to call MCP tools first.
+- **Post-compaction context**: hook-context CLI subcommand re-injects project summary, learnings, and backlog after context compaction so Claude stays oriented.
+- **Synonym search**: FTS5 queries now expand synonyms automatically. Searching "throttling" also finds "rate limit", "429", and related terms. Works in both MCP tools and CLI.
+- **CLI subcommands**: `cortex search`, `cortex hook-prompt`, `cortex hook-context`, `cortex add-learning` for use by hooks and scripts.
+- `npx @alaarab/cortex init` now registers UserPromptSubmit and Stop hooks in `~/.claude/settings.json` alongside the MCP server.
+- New shared module (`shared.ts`) extracts reusable infrastructure (buildIndex, queryRows, extractSnippet, addLearningToFile) for both MCP and CLI use.
+
+### Changed
+- MCP server version bumped to 1.7.0
+- `search_cortex` MCP tool now expands synonyms before searching
+- Refactored index.ts: shared logic moved to shared.ts, CLI commands to cli.ts
+- `findCortexPath` split into two variants: one for CLI (env/default) and one for MCP (accepts arg)
+
 ## [1.6.4] - 2026-03-04
 
 ### Added
