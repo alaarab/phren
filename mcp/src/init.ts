@@ -53,7 +53,7 @@ function configureClaude(cortexPath: string) {
     // UserPromptSubmit hook: auto-inject cortex context into every prompt
     const promptHook = {
       type: "command",
-      command: `node ${entryScript} hook-prompt`,
+      command: `node "${entryScript}" hook-prompt`,
       timeout: 3,
     };
     const existingPrompt = data.hooks.UserPromptSubmit as any[] | undefined;
@@ -68,7 +68,7 @@ function configureClaude(cortexPath: string) {
     // Stop hook: auto-commit cortex changes
     const stopHook = {
       type: "command",
-      command: "cd ~/.cortex && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)",
+      command: `cd "${cortexPath}" && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)`,
     };
     const existingStop = data.hooks.Stop as any[] | undefined;
     const hasCortexStopHook = existingStop?.some(
@@ -82,7 +82,7 @@ function configureClaude(cortexPath: string) {
     // SessionStart hook: auto-pull cortex on session start
     const startHook = {
       type: "command",
-      command: "cd ~/.cortex && git pull --rebase --quiet 2>/dev/null || true",
+      command: `cd "${cortexPath}" && git pull --rebase --quiet 2>/dev/null || true`,
     };
     const existingStart = data.hooks.SessionStart as any[] | undefined;
     const hasCortexStartHook = existingStart?.some(
@@ -252,4 +252,65 @@ export async function runInit() {
   log(`     git push -u origin main`);
   log(`  2. Restart Claude Code to activate the MCP server`);
   log(`  3. Open a project and run /cortex-init <name> to add it\n`);
+}
+
+export async function runUninstall() {
+  log("\nUninstalling cortex...\n");
+
+  const home = os.homedir();
+  const settingsPath = path.join(home, ".claude", "settings.json");
+
+  // Remove from Claude Code settings.json
+  if (fs.existsSync(settingsPath)) {
+    try {
+      patchJsonFile(settingsPath, (data) => {
+        // Remove MCP server
+        if (data.mcpServers?.cortex) {
+          delete data.mcpServers.cortex;
+          log(`  Removed cortex MCP server from Claude Code settings`);
+        }
+
+        // Remove hooks containing cortex references
+        for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart"] as const) {
+          const hooks = data.hooks?.[hookEvent] as any[] | undefined;
+          if (!Array.isArray(hooks)) continue;
+          const before = hooks.length;
+          data.hooks[hookEvent] = hooks.filter(
+            (h: any) => !h.hooks?.some(
+              (hook: any) => typeof hook.command === "string" && hook.command.includes("cortex")
+            )
+          );
+          const removed = before - data.hooks[hookEvent].length;
+          if (removed > 0) log(`  Removed ${removed} cortex hook(s) from ${hookEvent}`);
+        }
+      });
+    } catch (e) {
+      log(`  Warning: could not update Claude Code settings (${e})`);
+    }
+  } else {
+    log(`  Claude Code settings not found at ${settingsPath} — skipping`);
+  }
+
+  // Remove from VS Code mcp.json
+  const vsCandidates = [
+    path.join(home, ".config", "Code", "User", "mcp.json"),
+    path.join(home, "Library", "Application Support", "Code", "User", "mcp.json"),
+    path.join(home, "AppData", "Roaming", "Code", "User", "mcp.json"),
+  ];
+  for (const mcpFile of vsCandidates) {
+    if (!fs.existsSync(mcpFile)) continue;
+    try {
+      patchJsonFile(mcpFile, (data) => {
+        if (data.servers?.cortex) {
+          delete data.servers.cortex;
+          log(`  Removed cortex from VS Code MCP config (${mcpFile})`);
+        }
+      });
+    } catch { /* skip */ }
+  }
+
+  log(`\nCortex hooks and MCP config removed.`);
+  log(`\nYour knowledge base at ~/.cortex was NOT deleted.`);
+  log(`To fully remove it, run: rm -rf ~/.cortex\n`);
+  log(`Restart Claude Code to apply changes.\n`);
 }
