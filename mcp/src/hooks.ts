@@ -24,9 +24,13 @@ export function detectInstalledTools(): Set<string> {
   return tools;
 }
 
-export function configureAllHooks(cortexPath: string, allTools = false): string[] {
+// tools param accepts either a pre-computed Set (from link) or a boolean (from init)
+export function configureAllHooks(cortexPath: string, tools: Set<string> | boolean = false): string[] {
   const configured: string[] = [];
-  const detected = allTools ? new Set(["copilot", "cursor", "codex"]) : detectInstalledTools();
+  const detected: Set<string> =
+    tools instanceof Set ? tools :
+    tools ? new Set(["copilot", "cursor", "codex"]) :
+    detectInstalledTools();
 
   const pullCmd = `cd "${cortexPath}" && git pull --rebase --quiet 2>/dev/null || true`;
   const promptCmd = `npx @alaarab/cortex hook-prompt`;

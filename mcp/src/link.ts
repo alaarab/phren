@@ -5,7 +5,7 @@ import * as readline from "readline";
 import * as yaml from "js-yaml";
 import { execSync } from "child_process";
 import { configureClaude, configureVSCode } from "./init.js";
-import { configureAllHooks } from "./hooks.js";
+import { configureAllHooks, detectInstalledTools } from "./hooks.js";
 
 const MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
 const CONTEXT_FILE = path.join(os.homedir(), ".cortex-context.md");
@@ -195,7 +195,7 @@ context at the start of each prompt and saves learnings at session end via git.
   fs.writeFileSync(dest, content);
 }
 
-function linkGlobal(cortexPath: string) {
+function linkGlobal(cortexPath: string, tools: Set<string>) {
   log("  global skills -> ~/.claude/skills/");
   const skillsDir = path.join(os.homedir(), ".claude", "skills");
   fs.mkdirSync(skillsDir, { recursive: true });
@@ -211,12 +211,13 @@ function linkGlobal(cortexPath: string) {
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
     symlinkFile(globalClaude, path.join(os.homedir(), ".claude", "CLAUDE.md"));
-    // Copilot reads ~/.github/copilot-instructions.md for global instructions
-    try {
-      const copilotInstrDir = path.join(os.homedir(), ".github");
-      fs.mkdirSync(copilotInstrDir, { recursive: true });
-      symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"));
-    } catch { /* best effort */ }
+    if (tools.has("copilot")) {
+      try {
+        const copilotInstrDir = path.join(os.homedir(), ".github");
+        fs.mkdirSync(copilotInstrDir, { recursive: true });
+        symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"));
+      } catch { /* best effort */ }
+    }
   }
 }
 
@@ -229,7 +230,7 @@ function addTokenAnnotation(filePath: string) {
   fs.writeFileSync(filePath, `<!-- tokens: ~${rounded} -->\n${content}`);
 }
 
-function linkProject(cortexPath: string, project: string) {
+function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   const target = findProjectDir(project);
   if (!target) { log(`  skip ${project} (not found on disk)`); return; }
   log(`  ${project} -> ${target}`);
@@ -238,14 +239,17 @@ function linkProject(cortexPath: string, project: string) {
     const src = path.join(cortexPath, project, f);
     if (fs.existsSync(src)) {
       symlinkFile(src, path.join(target, f));
-      // AGENTS.md (Codex) and .github/copilot-instructions.md (Copilot) point at same source
       if (f === "CLAUDE.md") {
-        try { symlinkFile(src, path.join(target, "AGENTS.md")); } catch { /* best effort */ }
-        try {
-          const copilotDir = path.join(target, ".github");
-          fs.mkdirSync(copilotDir, { recursive: true });
-          symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"));
-        } catch { /* best effort */ }
+        if (tools.has("codex")) {
+          try { symlinkFile(src, path.join(target, "AGENTS.md")); } catch { /* best effort */ }
+        }
+        if (tools.has("copilot")) {
+          try {
+            const copilotDir = path.join(target, ".github");
+            fs.mkdirSync(copilotDir, { recursive: true });
+            symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"));
+          } catch { /* best effort */ }
+        }
       }
     }
   }
@@ -465,11 +469,16 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   setupSparseCheckout(cortexPath, projects);
   log("");
 
+  // Detect installed tools once — used for symlinks and hook registration
+  const detectedTools = opts.allTools
+    ? new Set(["copilot", "cursor", "codex"])
+    : detectInstalledTools();
+
   // Step 5: Symlink
   log("Linking...");
-  linkGlobal(cortexPath);
+  linkGlobal(cortexPath, detectedTools);
   for (const p of projects) {
-    if (p !== "global") linkProject(cortexPath, p);
+    if (p !== "global") linkProject(cortexPath, p, detectedTools);
   }
   log("");
 
@@ -497,8 +506,8 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   };
   if (vsMessages[vsStatus]) log(vsMessages[vsStatus]);
 
-  // Register hooks for Copilot CLI, Cursor, Codex
-  const hookedTools = configureAllHooks(cortexPath, opts.allTools);
+  // Register hooks for Copilot CLI, Cursor, Codex (reuse same detected set)
+  const hookedTools = configureAllHooks(cortexPath, detectedTools);
   if (hookedTools.length) log(`  Hooks registered: ${hookedTools.join(", ")}`);
 
   // Write cortex.SKILL.md for agentskills-compatible tools

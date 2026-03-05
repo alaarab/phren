@@ -1523,13 +1523,15 @@
       <div class="install-header reveal">
         <div class="section-label">Get started</div>
         <h2 class="section-title">One command.</h2>
-        <p class="section-sub" style="margin-top:12px">Sets up your knowledge base, configures the MCP server, registers context hooks, and wires up Claude Code and VS Code automatically.</p>
+        <p class="section-sub" style="margin-top:12px">Sets up your knowledge base, configures the MCP server, and registers context hooks for every detected agent — Claude Code, Copilot CLI, Cursor, and Codex — automatically.</p>
       </div>
 
       <div class="install-tabs-container">
         <div class="install-tab-buttons">
           <button class="install-tab-btn active" data-tab="claude-code">Claude Code</button>
           <button class="install-tab-btn" data-tab="vscode">VS Code / Copilot</button>
+          <button class="install-tab-btn" data-tab="cursor">Cursor</button>
+          <button class="install-tab-btn" data-tab="codex">Codex</button>
         </div>
 
         <div id="claude-code" class="install-tab-panel active">
@@ -1540,7 +1542,7 @@
                 <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
               </div>
               <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, and configures the MCP server. Then restart Claude Code.
+                Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures the MCP server, and wires up hooks for every detected agent. Restart your agent and you're done.
               </div>
             </div>
           </div>
@@ -1566,6 +1568,51 @@
   }
 }</pre>
                 <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="cursor" class="install-tab-panel">
+          <div class="install-step-body">
+            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
+              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                Detects Cursor automatically and writes hooks to <code style="color:var(--indigo)">~/.cursor/hooks.json</code>. Prompt injection and auto-save both work. Note: Cursor has no session-start hook, so context re-injection after compaction isn't available.
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                For MCP, add to your Cursor settings:
+              </div>
+              <div style="display:flex;justify-content:space-between;width:100%;align-items:flex-start">
+                <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
+  "mcpServers": {
+    "cortex": {
+      "command": "npx",
+      "args": ["@alaarab/cortex", "~/.cortex"]
+    }
+  }
+}</pre>
+                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"mcpServers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="codex" class="install-tab-panel">
+          <div class="install-step-body">
+            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
+              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                Detects Codex automatically and writes hooks to <code style="color:var(--indigo)">codex.json</code> in your cortex directory. Per-project <code style="color:var(--indigo)">CLAUDE.md</code> is also symlinked as <code style="color:var(--indigo)">AGENTS.md</code> in each project for full instruction file support.
+              </div>
+              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                Context injection, auto-save, and session start/end hooks all work with Codex out of the box.
               </div>
             </div>
           </div>
@@ -1602,7 +1649,7 @@
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Workflow skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/swarm</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code> are personal. Drop them in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and link.sh wires them up. The starter template (bundled in the package) has examples.</div>
+          <div class="skill-desc">Workflow skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/swarm</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code> are personal. Drop them in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex link</code> wires them up. The starter template (bundled in the package) has examples.</div>
         </div>
       </div>
     </div>
