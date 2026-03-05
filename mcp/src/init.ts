@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { fileURLToPath } from "url";
+import { configureAllHooks } from "./hooks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..", "..");
@@ -170,6 +171,11 @@ export async function runInit(opts: InitOptions = {}) {
         if (vscodeResult === "installed") log(`  Updated VS Code MCP`);
       } catch {}
 
+      try {
+        const hooked = configureAllHooks(cortexPath);
+        if (hooked.length) log(`  Updated hooks: ${hooked.join(", ")}`);
+      } catch { /* best effort */ }
+
       log(`\nDone. Restart Claude Code to pick up changes.\n`);
       process.exit(0);
     }
@@ -247,6 +253,12 @@ export async function runInit(opts: InitOptions = {}) {
   } catch {
     // skip
   }
+
+  // Configure hooks for other detected AI coding tools (Copilot CLI, Cursor, Codex)
+  try {
+    const hooked = configureAllHooks(cortexPath);
+    if (hooked.length) log(`  Configured hooks: ${hooked.join(", ")}`);
+  } catch { /* best effort */ }
 
   log(`\nDone. Your knowledge base is at ${cortexPath}\n`);
   log(`Next steps:`);
