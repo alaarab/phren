@@ -456,20 +456,40 @@ rebuild_memory() {
 # ── MCP auto-install ─────────────────────────────────────────────────
 
 configure_mcp() {
-  local mcp_dist=""
+  local mcp_dist="" mcp_cmd="" mcp_args=""
   local settings_file=""
 
-  # Find the MCP dist: check script dir first, then common framework locations
+  # Check for a local dist first (if you cloned the framework)
   for candidate in \
     "$SCRIPT_DIR/mcp/dist/index.js" \
     "$HOME/cortex/mcp/dist/index.js" \
-    "$HOME/Projects/cortex/mcp/dist/index.js" \
-    "$HOME/Code/cortex/mcp/dist/index.js"; do
+    "$HOME/Projects/cortex/mcp/dist/index.js"; do
     if [ -f "$candidate" ]; then
       mcp_dist="$candidate"
+      mcp_cmd="node"
+      mcp_args="$candidate"
       break
     fi
   done
+
+  # No local dist? Fall back to npx
+  if [ -z "$mcp_dist" ]; then
+    if command -v npx &>/dev/null; then
+      mcp_cmd="npx"
+      mcp_args="-y @alaarab/cortex $SCRIPT_DIR"
+    else
+      echo "not_built"
+      return 0
+    fi
+  fi
+
+  # Smoke test the server if we have a local dist
+  if [ -n "$mcp_dist" ]; then
+    if ! node "$mcp_dist" --health 2>/dev/null; then
+      echo "health_failed"
+      return 0
+    fi
+  fi
 
   # Find the settings file
   if [ -f "$HOME/.claude/settings.json" ]; then
@@ -478,21 +498,8 @@ configure_mcp() {
     settings_file="$HOME/.config/claude/settings.json"
   fi
 
-  # If MCP isn't built, return status for context file
-  if [ -z "$mcp_dist" ]; then
-    echo "not_built"
-    return 0
-  fi
-
-  # No settings file found, nothing to patch
   if [ -z "$settings_file" ]; then
     echo "no_settings"
-    return 0
-  fi
-
-  # Verify the server actually starts before touching any config
-  if ! node "$mcp_dist" --health 2>/dev/null; then
-    echo "health_failed"
     return 0
   fi
 
@@ -502,52 +509,63 @@ configure_mcp() {
     return 0
   fi
 
-  # Patch settings.json to add mcpServers.cortex
+  # Build the args array for jq
+  local jq_args_expr
+  if [ "$mcp_cmd" = "npx" ]; then
+    jq_args_expr='["-y", "@alaarab/cortex", $dir]'
+  else
+    jq_args_expr='[$dist]'
+  fi
+
+  # Patch settings.json
   if command -v jq &>/dev/null; then
     local tmp_file
     tmp_file="$(mktemp)"
-    jq --arg dist "$mcp_dist" '.mcpServers.cortex = {"command": "node", "args": [$dist]}' "$settings_file" > "$tmp_file"
+    jq --arg cmd "$mcp_cmd" --arg dist "${mcp_dist:-}" --arg dir "$SCRIPT_DIR" \
+      ".mcpServers.cortex = {\"command\": \$cmd, \"args\": $jq_args_expr}" \
+      "$settings_file" > "$tmp_file"
     mv "$tmp_file" "$settings_file"
   else
     echo ""
-    echo "WARNING: jq is not installed. Cannot safely patch $settings_file."
-    echo "Install jq (brew install jq / apt install jq) and re-run, or add this manually:"
+    echo "WARNING: jq is not installed. Add this to $settings_file manually:"
     echo ""
-    echo '  "mcpServers": {'
-    echo "    \"cortex\": {\"command\": \"node\", \"args\": [\"$mcp_dist\"]}"
-    echo '  }'
+    echo "  \"mcpServers\": {"
+    echo "    \"cortex\": {\"command\": \"$mcp_cmd\", \"args\": [$(echo "$mcp_args" | sed 's/ /", "/g; s/^/"/; s/$/"/' )]}"
+    echo "  }"
     echo ""
     echo "no_jq"
     return 0
-  fi
-
-  # Also patch ~/.claude.json (project-scoped, used by newer Claude CLI)
-  local claude_json="$HOME/.claude.json"
-  if [ -f "$claude_json" ] && command -v jq &>/dev/null; then
-    local tmp_file2
-    tmp_file2="$(mktemp)"
-    jq --arg home "$HOME" --arg dist "$mcp_dist" \
-      '.projects[$home].mcpServers.cortex = {"type": "stdio", "command": "node", "args": [$dist], "env": {}}' \
-      "$claude_json" > "$tmp_file2"
-    mv "$tmp_file2" "$claude_json"
   fi
 
   echo "installed"
 }
 
 configure_vscode_mcp() {
-  local mcp_dist=""
+  local mcp_dist="" mcp_cmd="" jq_args_expr=""
+
+  # Check for a local dist first
   for candidate in \
     "$SCRIPT_DIR/mcp/dist/index.js" \
     "$HOME/cortex/mcp/dist/index.js" \
-    "$HOME/Projects/cortex/mcp/dist/index.js" \
-    "$HOME/Code/cortex/mcp/dist/index.js"; do
+    "$HOME/Projects/cortex/mcp/dist/index.js"; do
     if [ -f "$candidate" ]; then
       mcp_dist="$candidate"
+      mcp_cmd="node"
+      jq_args_expr='[$dist]'
       break
     fi
   done
-  [ -z "$mcp_dist" ] && { echo "not_built"; return 0; }
+
+  # No local dist? Fall back to npx
+  if [ -z "$mcp_dist" ]; then
+    if command -v npx &>/dev/null; then
+      mcp_cmd="npx"
+      jq_args_expr='["-y", "@alaarab/cortex", $dir]'
+    else
+      echo "not_built"
+      return 0
+    fi
+  fi
 
   # Find VS Code user config directory (Linux, macOS)
   local vscode_dir=""
@@ -567,14 +585,21 @@ configure_vscode_mcp() {
     local tmp_file
     tmp_file="$(mktemp)"
     if [ -f "$mcp_file" ]; then
-      jq --arg dist "$mcp_dist" '.servers.cortex = {"command": "node", "args": [$dist]}' "$mcp_file" > "$tmp_file"
+      jq --arg cmd "$mcp_cmd" --arg dist "${mcp_dist:-}" --arg dir "$SCRIPT_DIR" \
+        ".servers.cortex = {\"command\": \$cmd, \"args\": $jq_args_expr}" \
+        "$mcp_file" > "$tmp_file"
     else
-      jq -n --arg dist "$mcp_dist" '{"servers": {"cortex": {"command": "node", "args": [$dist]}}}' > "$tmp_file"
+      jq -n --arg cmd "$mcp_cmd" --arg dist "${mcp_dist:-}" --arg dir "$SCRIPT_DIR" \
+        "{\"servers\": {\"cortex\": {\"command\": \$cmd, \"args\": $jq_args_expr}}}" > "$tmp_file"
     fi
     mv "$tmp_file" "$mcp_file"
   else
     if [ ! -f "$mcp_file" ]; then
-      printf '{\n  "servers": {\n    "cortex": {"command": "node", "args": ["%s"]}\n  }\n}\n' "$mcp_dist" > "$mcp_file"
+      if [ "$mcp_cmd" = "npx" ]; then
+        printf '{\n  "servers": {\n    "cortex": {"command": "npx", "args": ["-y", "@alaarab/cortex", "%s"]}\n  }\n}\n' "$SCRIPT_DIR" > "$mcp_file"
+      else
+        printf '{\n  "servers": {\n    "cortex": {"command": "node", "args": ["%s"]}\n  }\n}\n' "$mcp_dist" > "$mcp_file"
+      fi
     else
       echo "no_jq"
       return 0
@@ -756,10 +781,10 @@ main() {
   case "$mcp_status" in
     installed)          echo "  Claude: installed cortex MCP server" ;;
     already_configured) echo "  Claude: cortex MCP already configured" ;;
-    not_built)          echo "  MCP not built, run: cd mcp && npm install && npm run build" ;;
+    not_built)          echo "  MCP: no local dist found and npx not available. Install Node.js or build from source." ;;
     no_settings)        echo "  Claude settings not found (skipping)" ;;
     no_jq)              echo "  Claude: skipped (install jq to auto-configure)" ;;
-    health_failed)      echo "  WARNING: MCP server built but failed health check — run: node mcp/dist/index.js --health" ;;
+    health_failed)      echo "  WARNING: MCP dist found but failed health check. Try rebuilding: cd mcp && npm run build" ;;
   esac
 
   local vscode_status
