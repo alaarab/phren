@@ -33,7 +33,7 @@ function resolveEntryScript(): string {
   return path.join(ROOT, "mcp", "dist", "index.js");
 }
 
-function configureClaude(cortexPath: string) {
+export function configureClaude(cortexPath: string) {
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   const entryScript = resolveEntryScript();
 
@@ -98,7 +98,7 @@ function configureClaude(cortexPath: string) {
     : "installed";
 }
 
-function configureVSCode(cortexPath: string) {
+export function configureVSCode(cortexPath: string) {
   const candidates = [
     path.join(os.homedir(), ".config", "Code", "User"),
     path.join(os.homedir(), "Library", "Application Support", "Code", "User"),
@@ -125,10 +125,11 @@ function configureVSCode(cortexPath: string) {
   return "installed";
 }
 
-function updateMachinesYaml(cortexPath: string) {
+function updateMachinesYaml(cortexPath: string, machine?: string, profile?: string) {
   const machinesFile = path.join(cortexPath, "machines.yaml");
   if (!fs.existsSync(machinesFile)) return;
-  const hostname = os.hostname();
+  const hostname = machine || os.hostname();
+  const profileName = profile || "personal";
   let content = fs.readFileSync(machinesFile, "utf8");
   // Replace placeholder comment block with actual hostname entry
   if (!content.includes(hostname)) {
@@ -136,12 +137,17 @@ function updateMachinesYaml(cortexPath: string) {
       /^#.*\n/gm,
       ""
     ).trim();
-    content = `${hostname}: personal\n\n` + content;
+    content = `${hostname}: ${profileName}\n\n` + content;
     fs.writeFileSync(machinesFile, content);
   }
 }
 
-export async function runInit() {
+export interface InitOptions {
+  machine?: string;
+  profile?: string;
+}
+
+export async function runInit(opts: InitOptions = {}) {
   const home = os.homedir();
   const cortexPath = path.join(home, ".cortex");
 
@@ -219,9 +225,10 @@ export async function runInit() {
     );
   }
 
-  // Update machines.yaml with real hostname
-  updateMachinesYaml(cortexPath);
-  log(`  Updated machines.yaml with hostname "${os.hostname()}"`);
+  // Update machines.yaml with hostname (--machine overrides auto-detected hostname)
+  const effectiveMachine = opts.machine || os.hostname();
+  updateMachinesYaml(cortexPath, opts.machine, opts.profile);
+  log(`  Updated machines.yaml with hostname "${effectiveMachine}"`);
 
   // Configure Claude Code
   try {
