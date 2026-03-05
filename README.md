@@ -28,23 +28,23 @@ Project knowledge, lessons learned, task queues: all in markdown files you own. 
 
 ### It runs itself
 
-Other memory tools need Claude to remember to call them. Cortex hooks into Claude Code's lifecycle directly. Every prompt you type, the hook searches your knowledge base and injects the relevant context before Claude even starts thinking. Learnings auto-commit when the session ends. You never have to remember to save or search.
+Other memory tools need Claude to remember to call them. Cortex hooks into Claude Code's lifecycle directly. Every prompt you type, the hook searches your knowledge base and injects the relevant context before Claude even starts thinking. When the session ends, anything Claude wrote down gets committed and pushed. You never do either of those things manually.
 
 ### It's just files
 
-No database service. No vector store running on a port. No account or API key. Your knowledge lives in markdown files in a git repo. `git log` shows how it evolved. `git diff` shows what changed. If something is wrong, you open a file and fix it.
+No database service. No vector store. No account or API key. Your knowledge lives in markdown files in a git repo you own. `git log` shows how it grew. `git diff` shows what changed. If something is wrong, open a file and fix it.
 
-### Search understands what you mean
+### Search that doesn't need exact words
 
-Type "throttling" and it also finds "rate limit", "429", and "too many requests." The synonym engine covers common dev terms: auth matches login and oauth, deploy matches release and ship, db matches database and postgres. You don't need to guess the exact word you used six months ago.
+Type "throttling" and it also finds "rate limit", "429", and "too many requests." Type "auth" and it finds "login" and "oauth". You don't need to remember the exact phrase you used six months ago.
 
 ### Every machine, same brain
 
-Push your cortex to a private repo. Clone it on another machine, run init, done. Profiles control which projects each machine sees: the work laptop gets work projects, the home setup gets everything. Git sparse-checkout keeps the boundaries clean.
+Push your cortex to a private repo. Clone it on a new machine, run init, done. Profiles control which projects each machine sees. The work laptop gets work projects. Home gets everything.
 
-### Claude gets smarter over time
+### Builds over time
 
-When Claude figures out a tricky pattern or hits a subtle bug, it writes that down in your LEARNINGS.md. Next session, next week, next machine: that knowledge is there. Over time your learnings files become a project history worth more than any ticket system.
+When Claude figures out a tricky pattern or hits a subtle bug, it writes that down. Next session, next week, next machine: that knowledge is there. The longer you use it, the more useful it gets.
 
 ---
 
@@ -92,25 +92,13 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 
 ---
 
-## How the automatic context works
+## How it runs itself
 
-### On every prompt (UserPromptSubmit hook)
+**On every prompt** — before Claude sees your message, a hook extracts keywords, detects your current project from the working directory, searches your cortex with synonym expansion, and injects the top results as context. Takes about 250ms. Claude starts every response knowing what project you're in and what's relevant.
 
-When you type a message, the hook:
-1. Extracts keywords from your prompt (strips filler words)
-2. Detects which project you're in from your working directory
-3. Searches your cortex with synonym expansion
-4. Injects the top results as context before Claude sees the prompt
+**After every response** — a hook checks for cortex changes. If anything new got written (a learning, a backlog update), it commits and pushes. You don't save manually.
 
-This takes ~250ms. Claude starts every response knowing what project you're in and what's relevant to your question.
-
-### When the session ends (Stop hook)
-
-Any changes to your cortex (new learnings, backlog updates) are automatically committed and pushed. Nothing gets lost even if you forget to save.
-
-### After context compaction
-
-When Claude's context window fills up and gets compacted, it loses previously injected context. The `hook-context` command re-injects your project summary, recent learnings, and active backlog so Claude stays oriented.
+**After context compaction** — when Claude's context window fills and resets, a hook re-injects your project summary, recent learnings, and active backlog so Claude doesn't lose the thread.
 
 ---
 
@@ -144,10 +132,6 @@ cortex hook-prompt                   # reads stdin JSON, outputs context block
 cortex hook-context                  # project context for current directory
 cortex add-learning <project> "..."  # append a learning from the terminal
 ```
-
-### Without the MCP server
-
-Cortex still works through MEMORY.md and direct file reads. Claude reads `~/.cortex-context.md` at session start, and per-project MEMORY files point to the right cortex directories. MCP makes retrieval faster and more targeted, but it's not required.
 
 ---
 
@@ -227,4 +211,4 @@ Or let Claude scaffold a project: `/cortex-init my-project` creates the files, a
 
 ---
 
-MIT License. Created by [Ala Arab](https://github.com/alaarab).
+MIT License. Made by [Ala Arab](https://github.com/alaarab). Contributions welcome.
