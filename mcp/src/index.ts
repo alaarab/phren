@@ -9,8 +9,9 @@ Usage:
   npx @alaarab/cortex init [--machine <name>] [--profile <name>]
                                                  Set up cortex in ~/.cortex
   npx @alaarab/cortex uninstall                  Remove cortex MCP config and hooks
-  npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean]
-                                                 Sync profile, symlinks, and context (replaces link.sh)
+  npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean] [--all-tools]
+                                                 Sync profile, symlinks, hooks, and context (replaces link.sh)
+                                                 --all-tools: configure hooks for all agents (default: auto-detect)
   npx @alaarab/cortex search <query>             Search your knowledge base
   npx @alaarab/cortex add-learning <project> "<insight>"
                                                  Add a learning to a project
@@ -58,6 +59,7 @@ if (process.argv[2] === "link") {
     profile: getFlag("--profile"),
     register: linkArgs.includes("--register"),
     task: taskArg,
+    allTools: linkArgs.includes("--all-tools"),
   });
   process.exit(0);
 }
