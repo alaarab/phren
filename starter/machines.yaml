@@ -1,7 +1,7 @@
 # Maps machine hostnames to profiles.
 # Run `hostname` to find your machine's name, then add it here.
 #
-# Examples — replace with your actual hostnames:
+# Examples: replace with your actual hostnames:
 #   work-laptop: work
 #   home-desktop: personal
 #
