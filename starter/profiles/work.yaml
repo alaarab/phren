@@ -1,0 +1,6 @@
+name: work
+description: Work machine — API and frontend projects only
+projects:
+  - global
+  - my-api
+  - my-frontend

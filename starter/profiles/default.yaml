@@ -1,0 +1,7 @@
+name: default
+description: Default profile — all projects
+projects:
+  - global
+  - my-api
+  - my-frontend
+  - my-first-project

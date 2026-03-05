@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.6.0] - 2026-03-04
+
+### Changed
+- Starter is now bundled in the npm package (no more git clone from cortex-starter repo)
+- Init copies from bundled starter directory, works offline and without git
+- Synced all starter templates to match 1.5.0 conventions (bold labels, project skills, key patterns, full global CLAUDE.md)
+- Init output says "Created cortex v1.6.0" instead of "Cloned cortex-starter"
+
+### Removed
+- Git clone dependency during init (cortex-starter repo is now a mirror, not the source of truth)
+
 ## [1.5.0] - 2026-03-04
 
 ### Fixed

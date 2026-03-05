@@ -1,14 +1,13 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 
-const STARTER_REPO = "https://github.com/alaarab/cortex-starter.git";
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8"));
+const ROOT = path.join(__dirname, "..", "..");
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 const VERSION = pkg.version as string;
+const STARTER_DIR = path.join(ROOT, "starter");
 
 function log(msg: string) {
   process.stdout.write(msg + "\n");
@@ -103,64 +102,57 @@ export async function runInit() {
 
   log("\nSetting up cortex...\n");
 
-  // Clone cortex-starter
-  let cloned = false;
-  try {
-    execSync(`git clone --depth 1 ${STARTER_REPO} "${cortexPath}" 2>&1`, {
-      stdio: "pipe",
-    });
-    // Remove .git so user starts fresh
-    fs.rmSync(path.join(cortexPath, ".git"), { recursive: true, force: true });
-    log(`  Cloned cortex-starter → ${cortexPath}`);
-    cloned = true;
-  } catch {
-    // Fallback: scaffold minimal structure inline
-    log(`  Could not clone cortex-starter, scaffolding minimal structure...`);
+  // Copy bundled starter to ~/.cortex
+  function copyDir(src: string, dest: string) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        copyDir(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+
+  if (fs.existsSync(STARTER_DIR)) {
+    copyDir(STARTER_DIR, cortexPath);
+    log(`  Created cortex v${VERSION} → ${cortexPath}`);
+  } else {
+    log(`  Starter not found in package, creating minimal structure...`);
     fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
     fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
     fs.mkdirSync(path.join(cortexPath, "my-first-project"), { recursive: true });
-
-    // Only write files that don't already exist to avoid clobbering user content
-    const safeWrite = (filePath: string, content: string) => {
-      if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, content);
-    };
-
-    safeWrite(
+    fs.writeFileSync(
       path.join(cortexPath, "global", "CLAUDE.md"),
       `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`
     );
-    safeWrite(
+    fs.writeFileSync(
       path.join(cortexPath, "my-first-project", "summary.md"),
-      `# my-first-project\n\nWhat: Replace this with one sentence about what the project does\nStack: The key tech\nStatus: active\nRun: the command you use most\nGotcha: the one thing that will bite you if you forget\n`
+      `# my-first-project\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Gotcha:** the one thing that will bite you if you forget\n`
     );
-    safeWrite(
+    fs.writeFileSync(
       path.join(cortexPath, "my-first-project", "CLAUDE.md"),
       `# my-first-project\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
     );
-    safeWrite(
+    fs.writeFileSync(
       path.join(cortexPath, "my-first-project", "LEARNINGS.md"),
       `# my-first-project LEARNINGS\n\n<!-- Add session learnings here, or run /cortex-learn in Claude Code -->\n`
     );
-    safeWrite(
+    fs.writeFileSync(
       path.join(cortexPath, "my-first-project", "backlog.md"),
       `# my-first-project backlog\n\n## Active\n\n## Queue\n\n## Done\n`
     );
-    const hostname = os.hostname();
-    safeWrite(
-      path.join(cortexPath, "machines.yaml"),
-      `# Maps machine hostnames to profiles.\n# Run \`hostname\` to find your machine name.\n${hostname}: personal\n`
-    );
-    safeWrite(
+    fs.writeFileSync(
       path.join(cortexPath, "profiles", "personal.yaml"),
       `name: personal\ndescription: Default profile\nprojects:\n  - global\n  - my-first-project\n`
     );
   }
 
   // Update machines.yaml with real hostname
-  if (cloned) {
-    updateMachinesYaml(cortexPath);
-    log(`  Updated machines.yaml with hostname "${os.hostname()}"`);
-  }
+  updateMachinesYaml(cortexPath);
+  log(`  Updated machines.yaml with hostname "${os.hostname()}"`);
 
   // Configure Claude Code
   try {

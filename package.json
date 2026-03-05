@@ -1,6 +1,6 @@
 {
   "name": "@alaarab/cortex",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Long-term memory for Claude Code",
   "type": "module",
   "bin": {
@@ -8,6 +8,7 @@
   },
   "files": [
     "mcp/dist",
+    "starter",
     ".claude-plugin",
     "skills"
   ],

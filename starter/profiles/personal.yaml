@@ -1,0 +1,7 @@
+name: personal
+description: Personal machine — full access including side projects
+projects:
+  - global
+  - my-api
+  - my-frontend
+  - my-first-project
