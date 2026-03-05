@@ -147,6 +147,7 @@ function computeCortexHash(cortexPath: string, profile?: string): string {
 }
 
 export async function buildIndex(cortexPath: string, profile?: string): Promise<any> {
+  const t0 = Date.now();
   const cacheDir = path.join(os.tmpdir(), "cortex-fts-cache");
   const hash = computeCortexHash(cortexPath, profile);
   const cacheFile = path.join(cacheDir, `${hash}.db`);
@@ -159,7 +160,7 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
     try {
       const cached = fs.readFileSync(cacheFile);
       const db = new SQL.Database(cached);
-      debugLog(`Loaded FTS index from cache (${hash.slice(0, 8)})`);
+      debugLog(`Loaded FTS index from cache (${hash.slice(0, 8)}) in ${Date.now() - t0}ms`);
       return db;
     } catch {
       debugLog(`Cache load failed, rebuilding index`);
@@ -201,7 +202,8 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
     }
   }
 
-  debugLog(`Built FTS index: ${fileCount} files from ${projectDirs.length} projects`);
+  const buildMs = Date.now() - t0;
+  debugLog(`Built FTS index: ${fileCount} files from ${projectDirs.length} projects in ${buildMs}ms`);
   console.error(`Indexed ${fileCount} files from ${projectDirs.length} projects`);
 
   // Persist cache to disk for future fast loads
@@ -213,7 +215,7 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
       if (!f.endsWith(".db") || f === `${hash}.db`) continue;
       try { fs.unlinkSync(path.join(cacheDir, f)); } catch { /* best effort */ }
     }
-    debugLog(`Saved FTS index cache (${hash.slice(0, 8)})`);
+    debugLog(`Saved FTS index cache (${hash.slice(0, 8)}) — total ${Date.now() - t0}ms`);
   } catch {
     debugLog(`Failed to save FTS index cache`);
   }
@@ -418,7 +420,7 @@ export function validateBacklogFormat(content: string): string[] {
 // --- Git conflict auto-merge ---
 
 // Extract ours/theirs from a file containing git conflict markers
-function extractConflictVersions(content: string): { ours: string; theirs: string } | null {
+export function extractConflictVersions(content: string): { ours: string; theirs: string } | null {
   if (!content.includes("<<<<<<<")) return null;
 
   const oursLines: string[] = [];
@@ -464,7 +466,7 @@ function parseLearningsEntries(content: string): Map<string, string[]> {
 }
 
 // Merge two LEARNINGS.md versions: union entries per date, newest date first
-function mergeLearnings(ours: string, theirs: string): string {
+export function mergeLearnings(ours: string, theirs: string): string {
   const ourEntries = parseLearningsEntries(ours);
   const theirEntries = parseLearningsEntries(theirs);
 
@@ -504,7 +506,7 @@ function parseBacklogSections(content: string): Map<string, string[]> {
 }
 
 // Merge two backlog.md versions: union items per section, deduplicated
-function mergeBacklog(ours: string, theirs: string): string {
+export function mergeBacklog(ours: string, theirs: string): string {
   const ourSections = parseBacklogSections(ours);
   const theirSections = parseBacklogSections(theirs);
 

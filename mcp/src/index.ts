@@ -6,8 +6,11 @@ if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] 
   console.log(`cortex - Long-term memory for Claude Code
 
 Usage:
-  npx @alaarab/cortex init                       Set up cortex in ~/.cortex
+  npx @alaarab/cortex init [--machine <name>] [--profile <name>]
+                                                 Set up cortex in ~/.cortex
   npx @alaarab/cortex uninstall                  Remove cortex MCP config and hooks
+  npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean]
+                                                 Sync profile, symlinks, and context (replaces link.sh)
   npx @alaarab/cortex search <query>             Search your knowledge base
   npx @alaarab/cortex add-learning <project> "<insight>"
                                                  Add a learning to a project
@@ -26,13 +29,36 @@ Environment variables:
 }
 
 if (process.argv[2] === "init") {
-  await runInit();
+  const initArgs = process.argv.slice(3);
+  const machineIdx = initArgs.indexOf("--machine");
+  const profileIdx = initArgs.indexOf("--profile");
+  await runInit({
+    machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
+    profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
+  });
   process.exit(0);
 }
 
 if (process.argv[2] === "uninstall") {
   const { runUninstall } = await import("./init.js");
   await runUninstall();
+  process.exit(0);
+}
+
+if (process.argv[2] === "link") {
+  const { runLink } = await import("./link.js");
+  const linkArgs = process.argv.slice(3);
+  const getFlag = (flag: string) => {
+    const idx = linkArgs.indexOf(flag);
+    return idx !== -1 ? linkArgs[idx + 1] : undefined;
+  };
+  const taskArg = getFlag("--task") as "debugging" | "planning" | "clean" | undefined;
+  await runLink(process.env.CORTEX_PATH || require("os").homedir() + "/.cortex", {
+    machine: getFlag("--machine"),
+    profile: getFlag("--profile"),
+    register: linkArgs.includes("--register"),
+    task: taskArg,
+  });
   process.exit(0);
 }
 
