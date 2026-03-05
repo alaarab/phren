@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.3] - 2026-03-04
+
+### Fixed
+- README: removed duplicate JSON config blocks, fixed skill count (5 not 6), updated `/cortex:learn` references to `/cortex-update`
+- README: added `update_backlog_item` tool and `search_cortex` type filter to MCP docs
+- README: replaced outdated `cd mcp && npm run build` instructions with `npx @alaarab/cortex init`
+- Site: fixed `MEMORY.md` reference to `CLAUDE.md` in bento card, `/cortex-learn` to `/cortex-update`
+- Site: updated "Clones the starter" to "Creates" (bundled since v1.6.0)
+- llms-install.md: fixed tool parameter signatures to match actual MCP server, added `-y` to npx commands
+
 ## [1.6.2] - 2026-03-04
 
 ### Fixed
