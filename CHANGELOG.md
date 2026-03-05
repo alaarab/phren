@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2] - 2026-03-04
+
+### Added
+- `list_machines()` MCP tool: reads machines.yaml and returns registered machines with their profiles
+- `list_profiles()` MCP tool: reads profiles directory and returns each profile's project list
+- SessionStart hook: auto-pulls cortex on session start (uses `--rebase` to handle diverged histories cleanly)
+
 ## [1.7.1] - 2026-03-04
 
 ### Removed
