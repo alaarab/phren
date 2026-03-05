@@ -2,8 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { execSync } from "child_process";
+import { fileURLToPath } from "url";
 
 const STARTER_REPO = "https://github.com/alaarab/cortex-starter.git";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8"));
+const VERSION = pkg.version as string;
 
 function log(msg: string) {
   process.stdout.write(msg + "\n");
@@ -15,7 +20,7 @@ function patchJsonFile(filePath: string, patch: (data: Record<string, any>) => v
     try {
       data = JSON.parse(fs.readFileSync(filePath, "utf8"));
     } catch {
-      // malformed json — start fresh
+      // malformed json, start fresh
     }
   } else {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -31,7 +36,7 @@ function configureClaude(cortexPath: string) {
     if (data.mcpServers.cortex) return; // already configured
     data.mcpServers.cortex = {
       command: "npx",
-      args: ["@alaarab/cortex", cortexPath],
+      args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
     };
   });
   return !JSON.parse(fs.readFileSync(settingsPath, "utf8")).mcpServers?.cortex
@@ -60,7 +65,7 @@ function configureVSCode(cortexPath: string) {
     if (!data.servers) data.servers = {};
     data.servers.cortex = {
       command: "npx",
-      args: ["@alaarab/cortex", cortexPath],
+      args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
     };
   });
   return "installed";
@@ -156,7 +161,7 @@ export async function runInit() {
     configureClaude(cortexPath);
     log(`  Configured Claude Code MCP`);
   } catch (e) {
-    log(`  Could not configure Claude Code MCP (${e}) — add manually`);
+    log(`  Could not configure Claude Code MCP (${e}), add manually`);
   }
 
   // Configure VS Code
