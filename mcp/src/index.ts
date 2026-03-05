@@ -42,13 +42,13 @@ async function main() {
 
   const server = new McpServer({
     name: "cortex-mcp",
-    version: "1.7.3",
+    version: "1.7.4",
   });
 
   server.registerTool(
     "search_cortex",
     {
-      title: "Search Cortex",
+      title: "◆ cortex · search",
       description: "Search the user's personal knowledge base. Call this at the start of any session to get project context, and any time the user asks about their codebase, stack, architecture, past decisions, commands, conventions, or lessons learned. Prefer this over asking the user to re-explain things they've already documented.",
       inputSchema: z.object({
         query: z.string().describe("Search query (supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes)"),
@@ -92,7 +92,7 @@ async function main() {
   server.registerTool(
     "get_project_summary",
     {
-      title: "Get Project Summary",
+      title: "◆ cortex · project",
       description: "Get a project's summary card and available docs. Call this when starting work on a specific project to orient yourself: what it is, the stack, current status, and how to run it.",
       inputSchema: z.object({
         name: z.string().describe("Project name (e.g. 'my-app', 'backend', 'frontend')"),
@@ -132,7 +132,7 @@ async function main() {
   server.registerTool(
     "list_projects",
     {
-      title: "List Projects",
+      title: "◆ cortex · projects",
       description:
         "List all projects in the active cortex profile with a brief summary of each. " +
         "Shows which documentation files exist per project.",
@@ -179,7 +179,7 @@ async function main() {
   server.registerTool(
     "list_machines",
     {
-      title: "List Machines",
+      title: "◆ cortex · machines",
       description: "Show which machines are registered and which profile each uses. Useful for understanding the multi-machine setup.",
       inputSchema: z.object({}),
     },
@@ -197,7 +197,7 @@ async function main() {
   server.registerTool(
     "list_profiles",
     {
-      title: "List Profiles",
+      title: "◆ cortex · profiles",
       description: "Show all profiles and which projects each includes. Profiles control which projects are visible on each machine.",
       inputSchema: z.object({}),
     },
@@ -220,7 +220,7 @@ async function main() {
   server.registerTool(
     "get_backlog",
     {
-      title: "Get Backlog",
+      title: "◆ cortex · backlog",
       description: "Get the backlog for a project, or all projects if no name given. Returns active and queued items.",
       inputSchema: z.object({
         project: z.string().optional().describe("Project name. Omit to get all projects."),
@@ -241,7 +241,7 @@ async function main() {
   server.registerTool(
     "add_backlog_item",
     {
-      title: "Add Backlog Item",
+      title: "◆ cortex · add task",
       description: "Append a task to a project's backlog.md. Adds to the Queue section.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your cortex)."),
@@ -271,7 +271,7 @@ async function main() {
   server.registerTool(
     "complete_backlog_item",
     {
-      title: "Complete Backlog Item",
+      title: "◆ cortex · done",
       description: "Move a backlog item to the Done section by matching text.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -302,7 +302,7 @@ async function main() {
   server.registerTool(
     "update_backlog_item",
     {
-      title: "Update Backlog Item",
+      title: "◆ cortex · update task",
       description: "Update a backlog item's priority, context, or section by matching text.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -379,7 +379,7 @@ async function main() {
   server.registerTool(
     "add_learning",
     {
-      title: "Add Learning",
+      title: "◆ cortex · save learning",
       description:
         "Record a single insight to a project's LEARNINGS.md. Call this the moment you discover " +
         "a non-obvious pattern, hit a subtle bug, find a workaround, or learn something that would " +
@@ -398,7 +398,7 @@ async function main() {
   server.registerTool(
     "remove_learning",
     {
-      title: "Remove Learning",
+      title: "◆ cortex · remove learning",
       description:
         "Remove a learning from a project's LEARNINGS.md by matching text. Use this when a " +
         "previously captured insight turns out to be wrong, outdated, or no longer relevant.",
@@ -429,7 +429,7 @@ async function main() {
   server.registerTool(
     "save_learnings",
     {
-      title: "Save Learnings",
+      title: "◆ cortex · push",
       description:
         "Commit and push any changes in the cortex repo. Call this at the end of a session " +
         "or after adding multiple learnings/backlog items. Commits all modified files in the " +

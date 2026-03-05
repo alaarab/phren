@@ -115,7 +115,11 @@ async function handleHookPrompt() {
 
     if (!rows) process.exit(0);
 
-    const parts: string[] = ["<cortex-context>"];
+    const projectLabel = detectedProject ? ` · ${detectedProject}` : "";
+    const resultLabel = rows.length === 1 ? "1 result" : `${rows.length} results`;
+    const statusLine = `◆ cortex${projectLabel} · ${resultLabel}`;
+
+    const parts: string[] = [statusLine, "<cortex-context>"];
     for (const row of rows) {
       const [project, filename, docType, content] = row as string[];
       const snippet = extractSnippet(content, keywords, 8);
@@ -146,6 +150,7 @@ async function handleHookPrompt() {
           const since = n.lastConsolidated ? ` since ${n.lastConsolidated}` : "";
           return `  ${n.project}: ${n.entriesSince} new learnings${since}`;
         });
+        parts.push(`◈ cortex · consolidation ready`);
         parts.push(`<cortex-notice>`);
         parts.push(`Learnings ready for consolidation:`);
         parts.push(notices.join("\n"));
@@ -178,7 +183,8 @@ async function handleHookContext() {
   const project = detectProject(cortexPath, cwd, profile);
 
   const db = await buildIndex(cortexPath, profile);
-  const parts: string[] = ["<cortex-context>"];
+  const contextLabel = project ? `◆ cortex · ${project} · context` : `◆ cortex · context`;
+  const parts: string[] = [contextLabel, "<cortex-context>"];
 
   if (project) {
     // Project-specific context

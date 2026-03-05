@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.4] - 2026-03-04
+
+### Changed
+- MCP tool titles now use `◆ cortex ·` prefix for consistent branding in Claude Code's UI (e.g., "◆ cortex · search", "◆ cortex · save learning", "◆ cortex · push")
+- Hook output now includes a status line before injected context: `◆ cortex · {project} · {n} results`
+- Consolidation notice prefixed with `◈ cortex · consolidation ready` for visibility
+- hook-context output labeled with `◆ cortex · {project} · context`
+
 ## [1.7.3] - 2026-03-04
 
 ### Added
