@@ -63,22 +63,23 @@ Push to GitHub to sync across machines. On a new machine, clone and run link.sh.
 npx @alaarab/cortex init
 ```
 
-This clones the [starter template](https://github.com/alaarab/cortex-starter) to `~/.cortex`, registers your machine, and configures the MCP server in Claude Code and VS Code automatically.
+This creates `~/.cortex` with starter templates, registers your machine, and configures the MCP server in Claude Code and VS Code automatically. No git clone needed.
 
 Then restart Claude Code and your context is live.
 
 ### Option B: manual
 
 ```bash
-# 1. Fork cortex-starter on GitHub, then clone your fork
-git clone git@github.com:YOUR_USERNAME/cortex-starter.git ~/.cortex
+# 1. Create your cortex directory
+npx @alaarab/cortex init
 
-# 2. Add the MCP server to Claude Code
-claude mcp add cortex -- npx @alaarab/cortex
-
-# 3. Install skills
-/plugin marketplace add alaarab/cortex
-/plugin install cortex@cortex
+# 2. Push to a private repo for syncing across machines
+cd ~/.cortex
+git init
+git add .
+git commit -m "Initial cortex setup"
+git remote add origin git@github.com:YOUR_USERNAME/cortex.git
+git push -u origin main
 ```
 
 ### Option C: self-hosted (fork the whole framework)
@@ -237,7 +238,7 @@ Cortex ships six skills for managing your knowledge base. They're the only ones 
 
 Skills like `/humanize`, `/swarm`, `/pipeline`, `/release`, and `/creative` are personal. They're not part of the cortex package because everyone's workflow is different.
 
-Put your own skills in `~/.cortex/global/skills/`. The `link.sh` script symlinks them to `~/.claude/skills/` so Claude picks them up in every session. The [cortex-starter](https://github.com/alaarab/cortex-starter) template has examples you can copy and adapt.
+Put your own skills in `~/.cortex/global/skills/`. The `link.sh` script symlinks them to `~/.claude/skills/` so Claude picks them up in every session. The starter template (included in the package) has examples you can copy and adapt.
 
 ```bash
 # add a skill to your cortex
