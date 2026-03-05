@@ -9,6 +9,63 @@ const ROOT = path.join(__dirname, "..", "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 const VERSION = pkg.version as string;
 const STARTER_DIR = path.join(ROOT, "starter");
+const DEFAULT_CORTEX_PATH = path.join(os.homedir(), ".cortex");
+
+export type McpMode = "on" | "off";
+
+interface InstallPreferences {
+  mcpEnabled?: boolean;
+  updatedAt?: string;
+}
+
+function preferencesFile(cortexPath: string): string {
+  return path.join(cortexPath, ".governance", "install-preferences.json");
+}
+
+function readInstallPreferences(cortexPath: string): InstallPreferences {
+  const file = preferencesFile(cortexPath);
+  if (!fs.existsSync(file)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as InstallPreferences;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeInstallPreferences(cortexPath: string, patch: Partial<InstallPreferences>) {
+  const file = preferencesFile(cortexPath);
+  const current = readInstallPreferences(cortexPath);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    JSON.stringify(
+      {
+        ...current,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      },
+      null,
+      2
+    ) + "\n"
+  );
+}
+
+export function parseMcpMode(raw?: string): McpMode | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "on" || normalized === "off") return normalized;
+  return undefined;
+}
+
+export function getMcpEnabledPreference(cortexPath: string): boolean {
+  const prefs = readInstallPreferences(cortexPath);
+  return prefs.mcpEnabled !== false;
+}
+
+export function setMcpEnabledPreference(cortexPath: string, enabled: boolean): void {
+  writeInstallPreferences(cortexPath, { mcpEnabled: enabled });
+}
 
 function log(msg: string) {
   process.stdout.write(msg + "\n");
@@ -34,18 +91,57 @@ function resolveEntryScript(): string {
   return path.join(ROOT, "mcp", "dist", "index.js");
 }
 
-export function configureClaude(cortexPath: string) {
+export function ensureGovernanceFiles(cortexPath: string) {
+  const govDir = path.join(cortexPath, ".governance");
+  fs.mkdirSync(govDir, { recursive: true });
+  const policy = path.join(govDir, "memory-policy.json");
+  const access = path.join(govDir, "access-control.json");
+
+  if (!fs.existsSync(policy)) {
+    fs.writeFileSync(
+      policy,
+      JSON.stringify({
+        ttlDays: 120,
+        retentionDays: 365,
+        autoAcceptThreshold: 0.75,
+        minInjectConfidence: 0.35,
+        decay: { d30: 1.0, d60: 0.85, d90: 0.65, d120: 0.45 },
+      }, null, 2) + "\n"
+    );
+  }
+  if (!fs.existsSync(access)) {
+    const user = process.env.USER || process.env.USERNAME || "owner";
+    fs.writeFileSync(
+      access,
+      JSON.stringify({
+        admins: [user],
+        maintainers: [],
+        contributors: [],
+        viewers: [],
+      }, null, 2) + "\n"
+    );
+  }
+}
+
+export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean } = {}) {
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   const entryScript = resolveEntryScript();
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  let status: "installed" | "already_configured" | "disabled" | "already_disabled" = "already_disabled";
 
   patchJsonFile(settingsPath, (data) => {
     // MCP server
     if (!data.mcpServers) data.mcpServers = {};
-    if (!data.mcpServers.cortex) {
+    const hadMcp = Boolean(data.mcpServers.cortex);
+    if (mcpEnabled) {
       data.mcpServers.cortex = {
         command: "npx",
         args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
       };
+      status = hadMcp ? "already_configured" : "installed";
+    } else {
+      if (hadMcp) delete data.mcpServers.cortex;
+      status = hadMcp ? "disabled" : "already_disabled";
     }
 
     // Hooks: always update to latest version
@@ -83,7 +179,7 @@ export function configureClaude(cortexPath: string) {
     // SessionStart hook: auto-pull cortex on session start
     const startHook = {
       type: "command",
-      command: `cd "${cortexPath}" && git pull --rebase --quiet 2>/dev/null || true`,
+      command: `cd "${cortexPath}" && (git pull --rebase --quiet 2>/dev/null || true) && (npx @alaarab/cortex doctor --fix >/dev/null 2>&1 || true)`,
     };
     const existingStart = data.hooks.SessionStart as any[] | undefined;
     const hasCortexStartHook = existingStart?.some(
@@ -94,12 +190,11 @@ export function configureClaude(cortexPath: string) {
       data.hooks.SessionStart.push({ matcher: "", hooks: [startHook] });
     }
   });
-  return !JSON.parse(fs.readFileSync(settingsPath, "utf8")).mcpServers?.cortex
-    ? "skipped"
-    : "installed";
+  return status;
 }
 
-export function configureVSCode(cortexPath: string) {
+export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean } = {}) {
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
   const candidates = [
     path.join(os.homedir(), ".config", "Code", "User"),
     path.join(os.homedir(), "Library", "Application Support", "Code", "User"),
@@ -109,21 +204,23 @@ export function configureVSCode(cortexPath: string) {
   if (!vscodeDir) return "no_vscode";
 
   const mcp_file = path.join(vscodeDir, "mcp.json");
-  if (fs.existsSync(mcp_file)) {
-    try {
-      const existing = JSON.parse(fs.readFileSync(mcp_file, "utf8"));
-      if (existing?.servers?.cortex) return "already_configured";
-    } catch {}
-  }
-
+  if (!mcpEnabled && !fs.existsSync(mcp_file)) return "already_disabled";
+  let status: "installed" | "already_configured" | "disabled" | "already_disabled" = "already_disabled";
   patchJsonFile(mcp_file, (data) => {
     if (!data.servers) data.servers = {};
-    data.servers.cortex = {
-      command: "npx",
-      args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
-    };
+    const hadMcp = Boolean(data.servers.cortex);
+    if (mcpEnabled) {
+      data.servers.cortex = {
+        command: "npx",
+        args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
+      };
+      status = hadMcp ? "already_configured" : "installed";
+    } else {
+      if (hadMcp) delete data.servers.cortex;
+      status = hadMcp ? "disabled" : "already_disabled";
+    }
   });
-  return "installed";
+  return status;
 }
 
 function updateMachinesYaml(cortexPath: string, machine?: string, profile?: string) {
@@ -146,35 +243,46 @@ function updateMachinesYaml(cortexPath: string, machine?: string, profile?: stri
 export interface InitOptions {
   machine?: string;
   profile?: string;
+  mcp?: McpMode;
 }
 
 export async function runInit(opts: InitOptions = {}) {
-  const home = os.homedir();
-  const cortexPath = path.join(home, ".cortex");
+  const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
+  const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
 
   if (fs.existsSync(cortexPath)) {
     const entries = fs.readdirSync(cortexPath);
     if (entries.length > 0) {
       log(`\ncortex already exists at ${cortexPath}`);
-      log(`Updating MCP + hook configuration...\n`);
+      log(`Updating configuration...\n`);
+      log(`  MCP mode: ${mcpLabel}`);
 
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
       try {
-        configureClaude(cortexPath);
-        log(`  Updated Claude Code MCP + hooks`);
+        const status = configureClaude(cortexPath, { mcpEnabled });
+        if (status === "disabled" || status === "already_disabled") {
+          log(`  Updated Claude Code hooks (MCP disabled)`);
+        } else {
+          log(`  Updated Claude Code MCP + hooks`);
+        }
       } catch (e) {
-        log(`  Could not configure Claude Code MCP (${e}), add manually`);
+        log(`  Could not configure Claude Code settings (${e}), add manually`);
       }
 
       try {
-        const vscodeResult = configureVSCode(cortexPath);
+        const vscodeResult = configureVSCode(cortexPath, { mcpEnabled });
         if (vscodeResult === "installed") log(`  Updated VS Code MCP`);
+        if (vscodeResult === "disabled") log(`  Disabled VS Code MCP`);
       } catch {}
 
       try {
         const hooked = configureAllHooks(cortexPath);
         if (hooked.length) log(`  Updated hooks: ${hooked.join(", ")}`);
       } catch { /* best effort */ }
+
+      ensureGovernanceFiles(cortexPath);
+      setMcpEnabledPreference(cortexPath, mcpEnabled);
 
       log(`\nDone. Restart Claude Code to pick up changes.\n`);
       process.exit(0);
@@ -235,20 +343,26 @@ export async function runInit(opts: InitOptions = {}) {
   const effectiveMachine = opts.machine || os.hostname();
   updateMachinesYaml(cortexPath, opts.machine, opts.profile);
   log(`  Updated machines.yaml with hostname "${effectiveMachine}"`);
+  log(`  MCP mode: ${mcpLabel}`);
 
   // Configure Claude Code
   try {
-    configureClaude(cortexPath);
-    log(`  Configured Claude Code MCP + hooks`);
+    const status = configureClaude(cortexPath, { mcpEnabled });
+    if (status === "disabled" || status === "already_disabled") {
+      log(`  Configured Claude Code hooks (MCP disabled)`);
+    } else {
+      log(`  Configured Claude Code MCP + hooks`);
+    }
   } catch (e) {
-    log(`  Could not configure Claude Code MCP (${e}), add manually`);
+    log(`  Could not configure Claude Code settings (${e}), add manually`);
   }
 
   // Configure VS Code
   try {
-    const vscodeResult = configureVSCode(cortexPath);
+    const vscodeResult = configureVSCode(cortexPath, { mcpEnabled });
     if (vscodeResult === "installed") log(`  Configured VS Code MCP`);
     else if (vscodeResult === "already_configured") log(`  VS Code MCP already configured`);
+    else if (vscodeResult === "disabled") log(`  VS Code MCP disabled`);
     // no_vscode: skip silently
   } catch {
     // skip
@@ -260,6 +374,9 @@ export async function runInit(opts: InitOptions = {}) {
     if (hooked.length) log(`  Configured hooks: ${hooked.join(", ")}`);
   } catch { /* best effort */ }
 
+  ensureGovernanceFiles(cortexPath);
+  setMcpEnabledPreference(cortexPath, mcpEnabled);
+
   log(`\nDone. Your knowledge base is at ${cortexPath}\n`);
   log(`Next steps:`);
   log(`  1. Create a private GitHub repo and push your cortex:`);
@@ -269,8 +386,41 @@ export async function runInit(opts: InitOptions = {}) {
   log(`     git commit -m "Initial cortex setup"`);
   log(`     git remote add origin git@github.com:YOUR_USERNAME/cortex.git`);
   log(`     git push -u origin main`);
-  log(`  2. Restart Claude Code to activate the MCP server`);
+  if (mcpEnabled) {
+    log(`  2. Restart Claude Code to activate the MCP server`);
+  } else {
+    log(`  2. Restart Claude Code to use hooks-only mode (no MCP tools)`);
+    log(`     Turn MCP on later: npx @alaarab/cortex mcp-mode on`);
+  }
   log(`  3. Open a project and run /cortex-init <name> to add it\n`);
+}
+
+export async function runMcpMode(modeArg?: string) {
+  const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const normalizedArg = modeArg?.trim().toLowerCase();
+  if (!normalizedArg || normalizedArg === "status") {
+    const current = getMcpEnabledPreference(cortexPath);
+    log(`MCP mode: ${current ? "on (recommended)" : "off (hooks-only fallback)"}`);
+    log(`Change mode: npx @alaarab/cortex mcp-mode on|off`);
+    return;
+  }
+  const mode = parseMcpMode(normalizedArg);
+  if (!mode) {
+    log(`Invalid mode "${modeArg}". Use: on | off | status`);
+    process.exit(1);
+  }
+  const enabled = mode === "on";
+  setMcpEnabledPreference(cortexPath, enabled);
+
+  let claudeStatus = "no_settings";
+  let vscodeStatus = "no_vscode";
+  try { claudeStatus = configureClaude(cortexPath, { mcpEnabled: enabled }) ?? claudeStatus; } catch { /* best effort */ }
+  try { vscodeStatus = configureVSCode(cortexPath, { mcpEnabled: enabled }) ?? vscodeStatus; } catch { /* best effort */ }
+
+  log(`MCP mode set to ${mode}.`);
+  log(`Claude status: ${claudeStatus}`);
+  log(`VS Code status: ${vscodeStatus}`);
+  log(`Restart your agent to apply changes.`);
 }
 
 export async function runUninstall() {
