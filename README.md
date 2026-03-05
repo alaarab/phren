@@ -92,11 +92,11 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 
 ## How it runs itself
 
-**On relevant prompts** — before Claude sees your message, a hook extracts keywords, searches your cortex with synonym expansion, and injects matching results as context. If nothing relevant is found — generic replies, short acks, unrelated questions — nothing gets added. When something does match, it's the top 3 results (~400 tokens). Takes about 250ms. Zero bloat on prompts where cortex has nothing useful to say.
+Before Claude sees your message, a hook extracts keywords, searches your cortex, and injects matching results as context. Generic replies, short acks, unrelated questions: nothing gets added. When something matches, it's the top 3 results, roughly 400 tokens. Runs in about 250ms.
 
-**After every response** — a hook checks for cortex changes. If anything new got written (a learning, a backlog update), it commits and pushes. You don't save manually.
+After each response, a hook checks for cortex changes. Anything new (a learning, a backlog update) gets committed and pushed. You don't save manually.
 
-**After context compaction** — when Claude's context window fills and resets, a hook re-injects your project summary, recent learnings, and active backlog so Claude doesn't lose the thread.
+When Claude's context window fills and resets, a hook re-injects your project summary, recent learnings, and active backlog so Claude doesn't lose the thread.
 
 ---
 
