@@ -1,10 +1,10 @@
-# /humanize - Kill the AI Voice
+# /humanize - Kill the AI voice
 
 Strip out artificial language and make your writing sound like you actually talk.
 
 ## Rules
 
-- No em dashes. Use a colon, comma, or rewrite: "AI wrote this—badly" becomes "AI wrote this, badly" or "AI wrote this: poorly."
+- No em dashes. Use a colon, comma, or rewrite. "AI wrote this, badly" or "AI wrote this: poorly."
 - No double hyphens used as dashes: "hard--won" should be "hard-won" or rewritten.
 - Banned words: robust, seamless, leverage, comprehensive, utilize, synergize, perplexing, meticulous. Don't use them.
 - No filler comments that restate code: bad: `// increment i`, good: `// only count non-zero`, or just delete it.

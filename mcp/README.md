@@ -14,7 +14,7 @@ claude mcp add cortex -- npx @cortex/mcp
 npx @cortex/mcp
 ```
 
-## Environment Variables
+## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|

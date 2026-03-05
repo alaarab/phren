@@ -1,4 +1,4 @@
-# my-frontend — Learnings
+# my-frontend learnings
 
 Lessons accumulated over time. Run `/cortex:learn` at the end of a session to add entries.
 

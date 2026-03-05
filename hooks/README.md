@@ -1,4 +1,4 @@
-# Cortex Hooks
+# Cortex hooks
 
 Shell scripts that plug into Claude Code's hook system. These run automatically at specific lifecycle points in a Claude session.
 

@@ -35,7 +35,7 @@
 ## [1.3.0] - 2026-03-04
 
 ### Changed
-- Merged `/cortex-learn` into `/cortex-update` — one skill for saving session learnings, works standalone or with full cortex setup
+- Merged `/cortex-learn` into `/cortex-update`: one skill for saving session learnings, works standalone or with full cortex setup
 - Simplified from 6 skills to 5: update, sync, init, discover, consolidate
 - MCP tool descriptions now tell Claude when to call them proactively
 - global CLAUDE.md instructs Claude to use MCP tools and backlog without being asked
@@ -50,7 +50,7 @@
 ## [1.2.0] - 2026-03-04
 
 ### Added
-- `npx @alaarab/cortex init` — one-command setup that clones cortex-starter to `~/.cortex`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
+- `npx @alaarab/cortex init`: one-command setup that clones cortex-starter to `~/.cortex`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
 - link.sh symlinks `CLAUDE-*.md` split files alongside `CLAUDE.md` for `@import` support
 
 ## [1.1.4] - 2026-03-04

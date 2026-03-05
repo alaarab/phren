@@ -1,4 +1,4 @@
-# /cortex-init - Scaffold a New Project
+# /cortex-init - Scaffold a new project
 
 > Set up a new project in cortex with summary, CLAUDE.md, backlog, and skill templates.
 

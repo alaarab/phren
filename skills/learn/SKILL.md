@@ -2,7 +2,7 @@
 name: learn
 description: Capture session learnings as durable project-specific notes that persist across conversations.
 ---
-# /cortex-learn - Extract What You Learned
+# /cortex-learn - Extract what you learned
 
 > Capture session learnings as durable, project-specific notes that persist across conversations.
 

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-## Project Overview
+## Project overview
 
 **Purpose**: What this does
 **Stack**: Tech stack
@@ -16,7 +16,7 @@
 # Build
 ```
 
-## Project Skills
+## Project skills
 
 Skills in `.claude/skills/` directory: (list them here as you add them)
 
@@ -24,7 +24,7 @@ Skills in `.claude/skills/` directory: (list them here as you add them)
 
 (Describe the structure here)
 
-## Key Patterns
+## Key patterns
 
 (Document important patterns, gotchas, non-obvious things here)
 

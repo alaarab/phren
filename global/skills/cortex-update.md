@@ -1,8 +1,8 @@
-# /cortex:update - End of Day
+# /cortex:update - End of day
 
 Wrap up the session. Capture what you learned, commit it, push it.
 
-Run this when you're done for the day, switching machines, or just want to save state. Say "update my cortex", "wrap it up", "done for today", or "save what we learned" — they all trigger this.
+Run this when you're done for the day, switching machines, or just want to save state. Say "update my cortex", "wrap it up", "done for today", or "save what we learned": they all trigger this.
 
 ## What it does
 

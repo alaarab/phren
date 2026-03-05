@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-## Project Overview
+## Project overview
 
 **Purpose**: Backend API. Replace this with a real description of what the service does.
 **Stack**: Node.js, Express, PostgreSQL (or whatever you're using)
@@ -16,7 +16,7 @@
 # Build:     npm run build
 ```
 
-## Project Skills
+## Project skills
 
 Skills in `.claude/skills/` directory: (list them here as you add them)
 
@@ -24,7 +24,7 @@ Skills in `.claude/skills/` directory: (list them here as you add them)
 
 <!-- How routes, middleware, and services are organized -->
 
-## Key Patterns
+## Key patterns
 
 <!-- Naming rules, error handling patterns, things to never do -->
 

@@ -1,4 +1,4 @@
-# /release - Ship a Version
+# /release - Ship a version
 
 Get from "code is ready" to "users have it" with a checklist.
 

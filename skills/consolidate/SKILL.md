@@ -2,7 +2,7 @@
 name: consolidate
 description: Find patterns across project learnings and surface insights that apply everywhere.
 ---
-# /cortex-consolidate - Cross-Project Synthesis
+# /cortex-consolidate - Cross-project synthesis
 
 > Find patterns across project learnings and surface insights that apply everywhere.
 
@@ -88,7 +88,7 @@ Before writing, read `$CORTEX_DIR/global/LEARNINGS.md` if it exists. Don't dupli
 File: `$CORTEX_DIR/global/LEARNINGS.md`
 
 ```markdown
-# Cross-Project Learnings
+# Cross-project learnings
 
 Last consolidated: <date>
 Sources: <list of project names scanned>

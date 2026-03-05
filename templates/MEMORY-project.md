@@ -12,7 +12,7 @@
 # test:
 ```
 
-## Key Facts
+## Key facts
 - Version: x.x.x
 - Consumes / consumed by: (dependencies)
 - Gotcha: one thing that will bite you

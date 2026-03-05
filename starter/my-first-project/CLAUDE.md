@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-## Project Overview
+## Project overview
 
 **Purpose**: One paragraph about what this project is and what it does
 **Stack**: Replace with your tech stack
@@ -16,7 +16,7 @@
 # Build:
 ```
 
-## Project Skills
+## Project skills
 
 Skills in `.claude/skills/` directory: (list them here as you add them)
 
@@ -24,7 +24,7 @@ Skills in `.claude/skills/` directory: (list them here as you add them)
 
 <!-- How the codebase is structured -->
 
-## Key Patterns
+## Key patterns
 
 <!-- Project-specific patterns, naming rules, things to never do -->
 

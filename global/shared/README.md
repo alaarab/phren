@@ -1,4 +1,4 @@
-# Shared Context
+# Shared context
 
 Files in this directory contain knowledge that applies to multiple projects. Instead of duplicating the same information in each project's CLAUDE.md, put it here and `@import` it.
 
@@ -18,7 +18,7 @@ Claude will load the shared file alongside your project config, giving it the cr
 - Shared API patterns or integration contracts
 - Cross-project type definitions or interface shapes
 
-## What does NOT go here
+## What doesn't go here
 
 - Project-specific config (that stays in `<project>/CLAUDE.md`)
 - Learnings (those go in LEARNINGS.md files and get consolidated by `/cortex-consolidate`)

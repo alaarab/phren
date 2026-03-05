@@ -116,6 +116,10 @@
       border-color: rgba(58, 123, 174, 0.4);
     }
 
+    .nav-cta:active {
+      background: rgba(58, 123, 174, 0.25);
+    }
+
     /* --- HERO BRAIN --- */
     .hero-brain {
       position: absolute;
@@ -265,6 +269,11 @@
       box-shadow: 0 4px 24px rgba(58,123,174,0.35);
     }
 
+    .btn-primary:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 8px rgba(58,123,174,0.2);
+    }
+
     .btn-ghost {
       display: inline-flex;
       align-items: center;
@@ -284,6 +293,11 @@
       color: var(--text);
       border-color: rgba(255,255,255,0.1);
       background: rgba(255,255,255,0.03);
+    }
+
+    .btn-ghost:active {
+      transform: translateY(0);
+      background: rgba(255,255,255,0.05);
     }
 
     /* Rotating install command */
@@ -448,10 +462,13 @@
       background: var(--bg);
       padding: 40px 36px;
       position: relative;
-      transition: background 0.3s;
+      transition: background 0.3s ease-out, box-shadow 0.3s ease-out;
     }
 
-    .step:hover { background: var(--bg-1); }
+    .step:hover {
+      background: var(--bg-1);
+      box-shadow: inset 0 1px 0 rgba(58,123,174,0.1), inset 0 0 40px rgba(58,123,174,0.02);
+    }
 
     .step-num {
       font-size: 11px;
@@ -525,7 +542,7 @@
       display: grid;
       grid-template-columns: repeat(12, 1fr);
       grid-template-rows: auto auto;
-      gap: 12px;
+      gap: 16px;
     }
 
     .bento-card {
@@ -535,12 +552,13 @@
       padding: 36px;
       position: relative;
       overflow: hidden;
-      transition: border-color 0.3s, transform 0.2s;
+      transition: border-color 0.3s ease-out, transform 0.25s ease-out, box-shadow 0.3s ease-out;
     }
 
     .bento-card:hover {
-      border-color: rgba(58,123,174,0.2);
+      border-color: rgba(58,123,174,0.25);
       transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(58,123,174,0.08), inset 0 1px 0 rgba(255,255,255,0.03);
     }
 
     .bento-card-1 { grid-column: span 7; }
@@ -674,10 +692,13 @@
       border: 1px solid var(--border);
       border-radius: 14px;
       overflow: hidden;
-      transition: border-color 0.3s;
+      transition: border-color 0.3s ease-out, box-shadow 0.3s ease-out;
     }
 
-    .install-step:hover { border-color: rgba(58,123,174,0.2); }
+    .install-step:hover {
+      border-color: rgba(58,123,174,0.2);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
 
     .install-step-header {
       display: flex;
@@ -836,11 +857,14 @@
     .skill-card {
       background: var(--bg);
       padding: 24px 28px;
-      transition: background 0.2s;
+      transition: background 0.2s ease-out, box-shadow 0.2s ease-out;
       cursor: default;
     }
 
-    .skill-card:hover { background: var(--bg-1); }
+    .skill-card:hover {
+      background: var(--bg-1);
+      box-shadow: inset 0 1px 0 rgba(245,200,64,0.06);
+    }
 
     .skill-name {
       font-family: 'SF Mono', 'Fira Code', monospace;
@@ -914,11 +938,22 @@
     }
 
     .footer-bar {
+      position: relative;
       border-top: 1px solid var(--border);
-      padding: 28px 32px;
+      padding: 40px 32px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+    }
+
+    .footer-bar::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 10%;
+      right: 10%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(58,123,174,0.15), transparent);
     }
 
     .footer-left {
@@ -927,6 +962,7 @@
       gap: 10px;
       color: var(--text-dim);
       font-size: 13px;
+      letter-spacing: -0.01em;
     }
 
     .footer-right {
@@ -937,6 +973,7 @@
     .footer-right a {
       color: var(--text-muted);
       text-decoration: none;
+      transition: color 0.15s ease-out;
     }
 
     .footer-right a:hover { color: var(--text); }
@@ -1060,6 +1097,24 @@
 
     .bento-card.in-view .token-bar-fill-before { width: 100%; }
     .bento-card.in-view .token-bar-fill-after { width: 10%; }
+
+    /* --- SELECTION --- */
+    ::selection {
+      background: rgba(58, 123, 174, 0.3);
+      color: var(--text);
+    }
+
+    /* --- FOCUS VISIBLE --- */
+    :focus-visible {
+      outline: 2px solid rgba(58, 123, 174, 0.5);
+      outline-offset: 2px;
+    }
+
+    a:focus-visible, button:focus-visible {
+      outline: 2px solid rgba(58, 123, 174, 0.5);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -1169,7 +1224,7 @@
         <path d="M 392,110 C 406,138 414,170 410,202"
               stroke="#1C3D5E" stroke-width="0.7" stroke-opacity="0.14" fill="none"/>
 
-        <!-- Neural connections — dim (indigo) -->
+        <!-- Neural connections: dim (indigo) -->
         <line x1="200" y1="138" x2="268" y2="82" stroke="#1E4A6E" stroke-width="0.8" stroke-opacity="0.28"/>
         <line x1="200" y1="138" x2="152" y2="234" stroke="#1E4A6E" stroke-width="0.8" stroke-opacity="0.25"/>
         <line x1="200" y1="138" x2="244" y2="198" stroke="#1E4A6E" stroke-width="0.7" stroke-opacity="0.22"/>
@@ -1184,7 +1239,7 @@
         <line x1="210" y1="308" x2="260" y2="350" stroke="#1C3D5E" stroke-width="0.5" stroke-opacity="0.15"/>
         <line x1="378" y1="254" x2="425" y2="295" stroke="#1C3D5E" stroke-width="0.5" stroke-opacity="0.14"/>
 
-        <!-- Neural connections — active (copper) -->
+        <!-- Neural connections: active (copper) -->
         <line x1="268" y1="82" x2="152" y2="234" stroke="#8B5A1A" stroke-width="0.9" stroke-opacity="0.32"/>
         <line x1="268" y1="82" x2="344" y2="112" stroke="#C4762A" stroke-width="1.1" stroke-opacity="0.35"/>
         <line x1="200" y1="138" x2="344" y2="112" stroke="#8B5A1A" stroke-width="0.8" stroke-opacity="0.28"/>

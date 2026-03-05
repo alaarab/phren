@@ -68,10 +68,10 @@ Run `/cortex-learn` at the end of a session to capture what you learned.
 
 ## Available MCP tools
 
-- `search_cortex(query)` — full-text search across all project knowledge
-- `get_project_summary(project)` — fetch the summary for a specific project
-- `list_projects()` — list all projects in your knowledge base
-- `get_backlog(project)` — fetch open tasks for a project
-- `add_backlog_item(project, title, priority?, context?)` — add a task
-- `complete_backlog_item(project, item_number)` — mark a task done
-- `update_backlog_item(project, item_number, ...)` — update task details
+- `search_cortex(query)`: full-text search across all project knowledge
+- `get_project_summary(project)`: fetch the summary for a specific project
+- `list_projects()`: list all projects in your knowledge base
+- `get_backlog(project)`: fetch open tasks for a project
+- `add_backlog_item(project, title, priority?, context?)`: add a task
+- `complete_backlog_item(project, item_number)`: mark a task done
+- `update_backlog_item(project, item_number, ...)`: update task details

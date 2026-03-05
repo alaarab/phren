@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-## Project Overview
+## Project overview
 
 **Purpose**: Frontend app. Replace this with a real description of what it does.
 **Stack**: React, TypeScript, Vite (or whatever you're using)
@@ -16,7 +16,7 @@
 # Build:     npm run build
 ```
 
-## Project Skills
+## Project skills
 
 Skills in `.claude/skills/` directory: (list them here as you add them)
 
@@ -24,7 +24,7 @@ Skills in `.claude/skills/` directory: (list them here as you add them)
 
 <!-- Component structure, routing, state management approach -->
 
-## Key Patterns
+## Key patterns
 
 <!-- Naming rules, component patterns, things to never do -->
 

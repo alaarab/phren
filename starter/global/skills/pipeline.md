@@ -1,4 +1,4 @@
-# /pipeline - Where Am I in the Workflow
+# /pipeline - Where am I in the workflow
 
 Tell Claude which stage of development you're in, and get guidance on what to focus on next.
 

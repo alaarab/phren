@@ -2,7 +2,7 @@
 name: discover
 description: Audit your cortex repo and tell you exactly what needs attention.
 ---
-# /cortex-discover - Cortex Health Check
+# /cortex-discover - Cortex health check
 
 > Audit your cortex repo and tell you exactly what needs attention.
 
@@ -90,7 +90,7 @@ For each project with a backlog.md:
 ```
 /cortex-discover
 
-## Section 1: Missing Files
+## Section 1: Missing files
 
 Projects without core files:
 
@@ -99,19 +99,19 @@ Projects without core files:
 | myapp   | ok        | MISSING    | MISSING      | ok         |
 | api     | ok        | ok         | ok           | MISSING    |
 
-## Section 2: Stale Content
+## Section 2: Stale content
 
 Files not updated in 30+ days:
 - my-app/LEARNINGS.md: last updated 45 days ago
 - frontend/CLAUDE.md: last updated 62 days ago
 
-## Section 3: Skill Gaps
+## Section 3: Skill gaps
 
 Things you do repeatedly that could be skills:
 - "Update changelog before release" appears in 3 project backlogs. Consider a `/changelog` skill.
 - my-app LEARNINGS.md mentions "always run parity check" 4 times. Already have `/parity`, but it's not in the workflow skill.
 
-## Section 4: Backlog Health
+## Section 4: Backlog health
 
 - my-app: 12 items (3 completed, 2 stale > 60 days)
 - backend: 5 items (0 completed, all stale)
@@ -121,7 +121,7 @@ Stuck items:
 - backend#2: "Add rate limiting" (added 90 days ago, no progress)
 - my-app#7: "Improve query performance" (added 75 days ago, no progress)
 
-## Top 3 Things to Work On Next
+## Top 3 things to work on next
 
 1. **Add LEARNINGS.md to myapp.** You've been working on it actively but capturing nothing. Run `/cortex-learn` after your next session.
 2. **Unstick api-server backlog.** 5 items, 0 completed. Either work them or trim them. Stale backlogs are worse than no backlog.

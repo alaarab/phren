@@ -2,7 +2,7 @@
 name: sync
 description: Sync your Claude skills and project config across machines using profiles.
 ---
-# /cortex-sync - Profile-Aware Sync
+# /cortex-sync - Profile-aware sync
 
 > Sync your Claude skills and project config across machines using profiles that control what goes where.
 
@@ -34,7 +34,7 @@ If any of these are missing, the skill will tell you what to create and how.
 
 Cortex uses profiles to decide what goes where. A profile is a list of projects. A machine is mapped to a profile. When you sync, only the projects in your machine's profile get linked.
 
-## Sync Down (pull to this machine)
+## Sync down (pull to this machine)
 
 When the user says "get my skills", "sync my config", "pull from cortex", or just "/cortex-sync":
 
@@ -111,7 +111,7 @@ Create `.claude/skills/` directories if they don't exist. Don't overwrite real f
 Write `~/.cortex-context.md` with a summary of what's active on this machine:
 
 ```markdown
-# Cortex Context: <machine-name> (<profile-name>)
+# Cortex context: <machine-name> (<profile-name>)
 
 Machine: <machine-name>
 Profile: <profile-name>
@@ -176,7 +176,7 @@ Project health:
 Context: ~/.cortex-context.md updated
 ```
 
-## Sync Up (push changes back)
+## Sync up (push changes back)
 
 When the user says "sync this back", "push to cortex", "save this to my cortex":
 

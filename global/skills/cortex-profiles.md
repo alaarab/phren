@@ -1,4 +1,4 @@
-# /cortex-profiles - Manage Your Profiles
+# /cortex-profiles - Manage your profiles
 
 > Add projects to profiles, move projects between profiles, create new profiles, and check what's in each one.
 
