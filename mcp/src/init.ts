@@ -78,6 +78,20 @@ function configureClaude(cortexPath: string) {
       if (!data.hooks.Stop) data.hooks.Stop = [];
       data.hooks.Stop.push({ matcher: "", hooks: [stopHook] });
     }
+
+    // SessionStart hook: auto-pull cortex on session start
+    const startHook = {
+      type: "command",
+      command: "cd ~/.cortex && git pull --ff-only --quiet 2>/dev/null || true",
+    };
+    const existingStart = data.hooks.SessionStart as any[] | undefined;
+    const hasCortexStartHook = existingStart?.some(
+      (h: any) => h.hooks?.some((hook: any) => hook.command?.includes(".cortex") && hook.command?.includes("git pull"))
+    );
+    if (!hasCortexStartHook) {
+      if (!data.hooks.SessionStart) data.hooks.SessionStart = [];
+      data.hooks.SessionStart.push({ matcher: "", hooks: [startHook] });
+    }
   });
   return !JSON.parse(fs.readFileSync(settingsPath, "utf8")).mcpServers?.cortex
     ? "skipped"
