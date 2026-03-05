@@ -1438,8 +1438,8 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
           <div class="step-title">Knowledge compounds</div>
-          <p class="step-desc">Run <code style="font-size:12px;color:var(--copper-mid)">/cortex-update</code> after a session and Claude writes what it figured out into your knowledge base, commits it, and it's there next time. On every machine.</p>
-          <span class="step-code">/cortex-update</span>
+          <p class="step-desc">Claude captures learnings as it works. When the session ends, a hook commits and pushes everything automatically. Next session, next machine: it's all there.</p>
+          <span class="step-code">automatic</span>
         </div>
       </div>
     </div>
@@ -1580,16 +1580,12 @@
     <div class="container">
       <div class="skills-header reveal">
         <div class="section-label">Skills</div>
-        <h2 class="section-title">Five skills.<br>Yours to extend.</h2>
-        <p class="section-sub" style="margin-top:12px">These are the five skills that ship with cortex. Your own workflow skills go in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code> and get symlinked into every session.</p>
+        <h2 class="section-title">Four skills.<br>Yours to extend.</h2>
+        <p class="section-sub" style="margin-top:12px">Hooks handle saving and context automatically. These four skills cover the things that need a human trigger. Your own workflow skills go in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code> and get symlinked into every session.</p>
       </div>
 
       <div class="skills-grid">
         <div class="skill-card reveal">
-          <div class="skill-name">/cortex-update</div>
-          <div class="skill-desc">Save what you learned. Captures learnings from the session, commits, pushes. Say "update my cortex" and it runs.</div>
-        </div>
-        <div class="skill-card reveal reveal-delay-1">
           <div class="skill-name">/cortex-sync</div>
           <div class="skill-desc">Pull cortex to a new machine or push config changes back. Run this on first setup or after switching machines.</div>
         </div>

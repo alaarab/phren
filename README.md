@@ -201,14 +201,13 @@ claude mcp add cortex -- npx -y @alaarab/cortex ~/.cortex
 
 ## Skills
 
-Five skills for the things that can't be automatic:
+Four skills for the things that can't be automatic:
 
 | Skill | What it does |
 |-------|-------------|
-| `/cortex-update` | Deep end-of-session reflection. The hooks handle auto-commit, but this is for when you want Claude to actively think about what it learned and write it down well. Optional now, but worth running after big sessions. |
-| `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. The hooks can't replace this because multi-machine sync needs a manual trigger. |
+| `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. Multi-machine sync needs a manual trigger. |
 | `/cortex-init` | Scaffold a new project. Creates summary.md, CLAUDE.md, backlog, adds to your profile. |
-| `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items, skill gaps. |
+| `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
 | `/cortex-consolidate` | Read learnings across all projects and surface patterns that repeat. Needs human judgment about which patterns matter. |
 
 Put personal workflow skills in `~/.cortex/global/skills/`. The `link.sh` script symlinks them to `~/.claude/skills/` so they're available everywhere.

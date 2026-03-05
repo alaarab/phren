@@ -12,7 +12,7 @@ The point: something you learned on one project probably applies elsewhere. This
 
 ## Prerequisites
 
-This skill needs at least two projects with LEARNINGS.md files to be useful. If you haven't used `/cortex-learn` yet, start there.
+This skill needs at least two projects with LEARNINGS.md files to be useful. If you haven't used ``add_learning()`` yet, start there.
 
 **Works with or without profiles.** If profiles are set up, it scans projects in the active profile. If not, it scans all project directories in the cortex repo.
 
@@ -55,10 +55,10 @@ done
 Read **every** LEARNINGS.md file found. Don't sample or skip any. For each file, track which project it came from.
 
 If no LEARNINGS.md files exist anywhere, tell the user:
-> "No LEARNINGS.md files found in any project. Run `/cortex-learn` after a work session to start capturing learnings."
+> "No LEARNINGS.md files found in any project. Run ``add_learning()`` after a work session to start capturing learnings."
 
 If only one project has a LEARNINGS.md, tell the user:
-> "Only found learnings for <project>. Need at least two projects to find cross-cutting patterns. Run `/cortex-learn` in other projects first."
+> "Only found learnings for <project>. Need at least two projects to find cross-cutting patterns. Run ``add_learning()`` in other projects first."
 
 ### 3. Find cross-cutting patterns
 
@@ -146,5 +146,5 @@ git push  # only if remote exists
 
 ## Related skills
 
-- `/cortex-learn`: capture learnings from a single session
+- ``add_learning()``: capture learnings from a single session
 - `/cortex-sync`: sync the consolidated learnings to other machines

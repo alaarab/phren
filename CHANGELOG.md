@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.7.1] - 2026-03-04
+
+### Removed
+- `/cortex-update` and `/cortex-learn` skills: redundant now that hooks auto-commit and CLAUDE.md instructions tell Claude to call `add_learning()` during sessions
+
+### Changed
+- Skills count: 5 to 4 (sync, init, discover, consolidate)
+- Updated all cross-references in skills, starter templates, docs site, and llms-install.md
+
 ## [1.7.0] - 2026-03-04
 
 ### Added
