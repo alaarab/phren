@@ -56,8 +56,18 @@ The cortex MCP server is running. Use these tools proactively. Don't ask the use
 - **When the user mentions a project, codebase, or task:** call `search_cortex(query)` before asking questions
 - **When the user asks about commands, architecture, conventions, or past decisions:** call `search_cortex(query)` first
 - **When the user mentions a task or todo:** call `get_backlog(project)` to see what's already tracked
+- **When you discover a non-obvious pattern, bug, or workaround:** call `add_learning(project, insight)` immediately
 - **When the user says they want to do something later:** call `add_backlog_item(project, item)` instead of listing it in chat
-- **When a task is finished:** offer to add any follow-ups to the backlog rather than leaving them in the conversation
+- **When a task is finished:** call `complete_backlog_item(project, item)` without being asked
+
+**What NOT to store as a learning:**
+- Credentials, API keys, tokens, passwords, or anything that looks like a secret
+- Personal or sensitive data: SSNs, financial info, health info, PII of any kind
+- One-off facts that won't apply next session ("the server was down today")
+- Narration of what happened ("fixed the login bug") — only save the actual insight
+- Things obvious from reading the code or docs
+
+If you're unsure whether something is worth saving, skip it. High-signal entries beat volume.
 
 The goal: Claude should already know the context before the user has to explain it. Backlogs stay in files, not buried in chat history.
 
