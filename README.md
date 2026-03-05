@@ -58,12 +58,25 @@ npx @alaarab/cortex init
 
 That's it. This:
 - Creates `~/.cortex` with starter templates
-- Registers the MCP server in Claude Code and VS Code
+- Registers the MCP server in Claude Code and VS Code (default, recommended)
 - Sets up hooks for automatic context injection and auto-save
 - Configures hooks for any other detected agents (Copilot CLI, Cursor, Codex)
 - Registers your machine
 
 Restart your agent. Your next prompt will already have context.
+
+If you want hooks-only mode (no MCP tools), install with:
+
+```bash
+npx @alaarab/cortex init --mcp off
+```
+
+You can toggle later anytime:
+
+```bash
+npx @alaarab/cortex mcp-mode on    # recommended
+npx @alaarab/cortex mcp-mode off   # hooks-only fallback
+```
 
 ### Sync across machines
 
@@ -105,7 +118,7 @@ When the context window fills and resets, a hook re-injects your project summary
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Twelve tools available:
+The server indexes your cortex into a local SQLite FTS5 database. Nineteen tools available:
 
 **Search and browse:**
 - `search_cortex(query, type?, limit?)` with automatic synonym expansion
@@ -121,9 +134,18 @@ The server indexes your cortex into a local SQLite FTS5 database. Twelve tools a
 - `update_backlog_item(project, item, updates)` changes priority, context, or section
 
 **Learning capture:**
-- `add_learning(project, insight)` appends under today's date
-- `remove_learning(project, text)` removes by matching text
+- `add_learning(project, learning, citation_file?, citation_line?, citation_repo?, citation_commit?)` appends under today's date with optional citation metadata
+- `remove_learning(project, learning)` removes by matching text
 - `save_learnings(message?)` commits and pushes all changes
+- `pin_memory(project, memory)` writes canonical/pinned memory entries
+
+**Memory governance and quality:**
+- `govern_memories(project?)` queues stale/conflicting/low-value entries for review
+- `memory_policy(mode, ...)` gets/sets retention, ttl, decay, and confidence thresholds
+- `memory_access(mode, ...)` gets/sets role-based permissions
+- `prune_memories(project?)` deletes expired entries by retention policy
+- `consolidate_memories(project?)` deduplicates and rewrites LEARNINGS.md
+- `memory_feedback(key, feedback)` records helpful/reprompt/regression outcomes
 
 ### CLI subcommands
 
@@ -134,6 +156,13 @@ cortex search "rate limiting"        # FTS5 search with synonym expansion
 cortex hook-prompt                   # reads stdin JSON, outputs context block
 cortex hook-context                  # project context for current directory
 cortex add-learning <project> "..."  # append a learning from the terminal
+cortex extract-memories [project]    # mine git + GitHub signals into candidates
+cortex govern-memories [project]     # queue stale/conflicting/low-value memories
+cortex doctor [--fix]                # health checks + optional self-heal
+cortex memory-ui [--port=3499]       # lightweight review UI
+cortex memory-policy get|set ...     # retention/decay/confidence tuning
+cortex memory-access get|set ...     # role permissions
+cortex mcp-mode on|off|status        # toggle MCP integration anytime
 ```
 
 ---
