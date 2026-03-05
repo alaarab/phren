@@ -7,6 +7,10 @@ if (process.argv[2] === "init") {
   process.exit(0);
 }
 
+if (process.argv[2] === "--health") {
+  process.exit(0);
+}
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
