@@ -14,7 +14,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "sql.js-fts5": "^1.4.0",
-    "glob": "^11.1.0",
+    "glob": "^12.0.0",
     "js-yaml": "^4.1.0",
     "zod": "^3.25.0"
   },
