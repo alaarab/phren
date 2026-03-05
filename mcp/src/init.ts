@@ -181,7 +181,7 @@ export async function runInit() {
   log(`     git init`);
   log(`     git add .`);
   log(`     git commit -m "Initial cortex setup"`);
-  log(`     git remote add origin git@github.com:YOUR_USERNAME/cortex-personal.git`);
+  log(`     git remote add origin git@github.com:YOUR_USERNAME/cortex.git`);
   log(`     git push -u origin main`);
   log(`  2. Restart Claude Code to activate the MCP server`);
   log(`  3. Open a project and run /cortex-init <name> to add it\n`);
