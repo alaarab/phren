@@ -162,6 +162,11 @@ The server indexes every markdown file in your cortex into a local SQLite FTS da
 - `complete_backlog_item(project, item)` matches the item by text and moves it to Done
 - `update_backlog_item(project, item, updates)` updates an item's priority, context, or moves it between sections
 
+**Learning capture:**
+- `add_learning(project, insight)` appends a bullet to a project's LEARNINGS.md under today's date. Claude calls this the moment it discovers something worth remembering, not at the end of the session.
+- `remove_learning(project, text)` removes a learning that turned out to be wrong or outdated by matching text
+- `save_learnings(message?)` commits and pushes all cortex changes. Call at end of session or after a burst of updates.
+
 Instead of loading context upfront, Claude calls `search_cortex` when it needs to know something. A project with 3k tokens of architecture notes? Claude fetches the relevant 300 tokens for the current task instead of the whole file.
 
 The MCP server is installed automatically when you run `npx @alaarab/cortex init`. No separate build step needed.

@@ -75,3 +75,6 @@ Run `/cortex-update` at the end of a session to capture what you learned.
 - `add_backlog_item(project, item)`: add a task to a project's backlog queue
 - `complete_backlog_item(project, item)`: match a task by text and move it to Done
 - `update_backlog_item(project, item, updates)`: update a task's priority, context, or section
+- `add_learning(project, insight)`: append a learning to LEARNINGS.md under today's date
+- `remove_learning(project, text)`: remove a learning by matching text
+- `save_learnings(message?)`: commit and push all cortex changes

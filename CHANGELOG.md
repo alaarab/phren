@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.4] - 2026-03-04
+
+### Added
+- `add_learning(project, insight)` MCP tool: record a learning to LEARNINGS.md the moment you discover it, grouped by date
+- `remove_learning(project, text)` MCP tool: remove a learning that turned out to be wrong or outdated
+- `save_learnings(message?)` MCP tool: commit and push all cortex changes (git add, commit, push)
+- Global CLAUDE.md now instructs Claude to use learning tools proactively during the session, not just at the end
+
+### Changed
+- MCP tool count: 7 -> 10 (added add_learning, remove_learning, save_learnings)
+- Global CLAUDE.md: split MCP instructions into Reading and Writing sections with clear triggers for each
+
 ## [1.6.3] - 2026-03-04
 
 ### Fixed

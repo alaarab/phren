@@ -568,6 +568,133 @@ async function main() {
     }
   );
 
+  server.registerTool(
+    "add_learning",
+    {
+      title: "Add Learning",
+      description:
+        "Record a single insight to a project's LEARNINGS.md. Call this the moment you discover " +
+        "a non-obvious pattern, hit a subtle bug, find a workaround, or learn something that would " +
+        "save time in a future session. Do not wait until the end of the session.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name (must match a directory in your cortex)."),
+        learning: z.string().describe("The insight, written as a single bullet point. Be specific enough that someone could act on it without extra context."),
+      }),
+    },
+    async ({ project, learning }) => {
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
+      const resolvedDir = safeProjectPath(cortexPath, project);
+      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
+      const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
+
+      const today = new Date().toISOString().slice(0, 10);
+      const bullet = learning.startsWith("- ") ? learning : `- ${learning}`;
+
+      if (!fs.existsSync(learningsPath)) {
+        if (!fs.existsSync(resolvedDir)) return textResponse(`Project "${project}" not found in cortex.`);
+        fs.writeFileSync(learningsPath, `# ${project} LEARNINGS\n\n## ${today}\n\n${bullet}\n`);
+        return textResponse(`Created LEARNINGS.md for "${project}" and added insight.`);
+      }
+
+      const content = fs.readFileSync(learningsPath, "utf8");
+
+      // Check if today's date section exists
+      const todayHeader = `## ${today}`;
+      if (content.includes(todayHeader)) {
+        // Append under the existing date section
+        const updated = content.replace(todayHeader, `${todayHeader}\n\n${bullet}`);
+        fs.writeFileSync(learningsPath, updated);
+      } else {
+        // Find the first ## heading and insert the new date section before it
+        const firstHeading = content.match(/^(## \d{4}-\d{2}-\d{2})/m);
+        if (firstHeading) {
+          const updated = content.replace(firstHeading[0], `${todayHeader}\n\n${bullet}\n\n${firstHeading[0]}`);
+          fs.writeFileSync(learningsPath, updated);
+        } else {
+          // No date sections yet, append at the end
+          fs.writeFileSync(learningsPath, content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n`);
+        }
+      }
+
+      return textResponse(`Added learning to ${project}: ${bullet}`);
+    }
+  );
+
+  server.registerTool(
+    "remove_learning",
+    {
+      title: "Remove Learning",
+      description:
+        "Remove a learning from a project's LEARNINGS.md by matching text. Use this when a " +
+        "previously captured insight turns out to be wrong, outdated, or no longer relevant.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        learning: z.string().describe("Partial text to match against existing learnings."),
+      }),
+    },
+    async ({ project, learning }) => {
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
+      const resolvedDir = safeProjectPath(cortexPath, project);
+      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
+      const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
+      if (!fs.existsSync(learningsPath)) return textResponse(`No LEARNINGS.md found for "${project}".`);
+
+      const content = fs.readFileSync(learningsPath, "utf8");
+      const lines = content.split("\n");
+      const idx = lines.findIndex(l => l.startsWith("- ") && l.toLowerCase().includes(learning.toLowerCase()));
+      if (idx === -1) return textResponse(`No learning matching "${learning}" found in ${project}.`);
+
+      const matched = lines[idx];
+      lines.splice(idx, 1);
+      fs.writeFileSync(learningsPath, lines.join("\n"));
+      return textResponse(`Removed from ${project}: ${matched}`);
+    }
+  );
+
+  server.registerTool(
+    "save_learnings",
+    {
+      title: "Save Learnings",
+      description:
+        "Commit and push any changes in the cortex repo. Call this at the end of a session " +
+        "or after adding multiple learnings/backlog items. Commits all modified files in the " +
+        "cortex directory and pushes if a remote is configured.",
+      inputSchema: z.object({
+        message: z.string().optional().describe("Commit message. Defaults to 'update cortex'."),
+      }),
+    },
+    async ({ message }) => {
+      const { execSync } = await import("child_process");
+      const commitMsg = message || "update cortex";
+
+      try {
+        // Check if there are changes to commit
+        const status = execSync("git status --porcelain", { cwd: cortexPath, encoding: "utf8" }).trim();
+        if (!status) return textResponse("Nothing to save. Cortex is up to date.");
+
+        // Stage all changes (use -f for files that might be in global gitignore)
+        execSync("git add -A", { cwd: cortexPath, encoding: "utf8" });
+
+        // Commit
+        execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cortexPath, encoding: "utf8" });
+
+        // Try to push (ignore failure if no remote)
+        let pushed = false;
+        try {
+          execSync("git push", { cwd: cortexPath, encoding: "utf8", timeout: 15000 });
+          pushed = true;
+        } catch {
+          // No remote or push failed, that's fine
+        }
+
+        const changedFiles = status.split("\n").length;
+        return textResponse(`Saved ${changedFiles} changed file(s).${pushed ? " Pushed to remote." : ""}`);
+      } catch (err: any) {
+        return textResponse(`Save failed: ${err.message}`);
+      }
+    }
+  );
+
   // Start the server
   const transport = new StdioServerTransport();
   await server.connect(transport);
