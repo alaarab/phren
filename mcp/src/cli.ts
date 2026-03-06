@@ -897,11 +897,19 @@ async function handleHookPrompt() {
     // Keep a wider candidate set before applying token-budget selection.
     rows = rows.slice(0, 8);
 
+    // Skip backlog results unless the user's intent is task/build-related (#167).
+    // Backlogs are large and rarely relevant to general prompts. Users can still
+    // access them explicitly via get_backlog().
+    if (intent !== "build") {
+      rows = rows.filter((r) => (r as string[])[2] !== "backlog");
+      if (!rows.length) process.exit(0);
+    }
+
     // If we have changed files, drop unrelated rows except high-priority docs.
     if (gitCtx && gitCtx.changedFiles.size > 0) {
       rows = rows.filter((r) => {
         const [, , type, , file] = r as string[];
-        if (["summary", "canonical", "backlog", "claude"].includes(type)) return true;
+        if (["summary", "canonical", "claude"].includes(type)) return true;
         return fileRelevanceBoost(file, gitCtx.changedFiles) > 0 || branchMatchBoost((r as string[])[3], gitCtx.branch) > 0;
       });
       if (!rows.length) process.exit(0);

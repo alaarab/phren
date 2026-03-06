@@ -1300,7 +1300,11 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
       try {
         const raw = fs.readFileSync(fullPath, "utf-8");
         // Strip <details> archive blocks so consolidated entries don't pollute search
-        const content = raw.replace(/<details>[\s\S]*?<\/details>/gi, "");
+        let content = raw.replace(/<details>[\s\S]*?<\/details>/gi, "");
+        // For backlogs, strip the Done section to avoid indexing completed items
+        if (type === "backlog") {
+          content = stripBacklogDoneSection(content);
+        }
         db.run(
           "INSERT INTO docs (project, filename, type, content, path) VALUES (?, ?, ?, ?, ?)",
           [projectName, filename, type, content, fullPath]
@@ -1535,6 +1539,15 @@ export function validateLearningsFormat(content: string): string[] {
   }
 
   return issues;
+}
+
+// Strip the ## Done section from backlog content to reduce index bloat.
+// Keeps title, Active, and Queue sections which are the actionable parts.
+export function stripBacklogDoneSection(content: string): string {
+  const donePattern = /^## Done\b.*$/im;
+  const match = content.match(donePattern);
+  if (!match || match.index === undefined) return content;
+  return content.slice(0, match.index).trimEnd() + "\n";
 }
 
 // Validate backlog.md format. Returns array of issue strings (empty = valid).
