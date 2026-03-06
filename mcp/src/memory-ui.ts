@@ -3,7 +3,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as querystring from "querystring";
 import {
+  checkMemoryPermission,
   getProjectDirs,
+  getMemoryWorkflowPolicy,
   addLearningToFile,
   appendAuditLog,
 } from "./shared.js";
@@ -42,6 +44,19 @@ function parseQueueItems(cortexPath: string, project: string): QueueItem[] {
   }
 
   return items;
+}
+
+function findQueueItem(cortexPath: string, project: string, line: string): QueueItem | null {
+  return parseQueueItems(cortexPath, project).find((i) => i.line === line) || null;
+}
+
+function isRiskyQueueItem(cortexPath: string, item: QueueItem | null): boolean {
+  if (!item) return false;
+  const workflow = getMemoryWorkflowPolicy(cortexPath);
+  const riskyBySection = workflow.riskySections.includes(item.section);
+  const confidence = item.text.match(/\[confidence\s+([01](?:\.\d+)?)\]/i);
+  const riskyByConfidence = confidence ? Number.parseFloat(confidence[1]) < workflow.lowConfidenceThreshold : false;
+  return riskyBySection || riskyByConfidence;
 }
 
 function rewriteQueue(cortexPath: string, project: string, items: QueueItem[]) {
@@ -230,6 +245,18 @@ export async function startMemoryUi(cortexPath: string, port: number): Promise<v
         }
 
         if (url === "/approve") {
+          const item = findQueueItem(cortexPath, project, line);
+          const workflow = getMemoryWorkflowPolicy(cortexPath);
+          if (workflow.requireMaintainerApproval && isRiskyQueueItem(cortexPath, item)) {
+            const denial = checkMemoryPermission(cortexPath, "pin");
+            if (denial) {
+              appendAuditLog(cortexPath, "approve_memory_denied", `project=${project} reason=${JSON.stringify(denial)}`);
+              res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
+              res.end("Approval requires maintainer/admin role for risky memory entries.");
+              return;
+            }
+          }
+
           const m = line.match(/^- \[\d{4}-\d{2}-\d{2}\]\s*(.+)$/);
           const text = m ? m[1] : line.replace(/^- /, "");
           addLearningToFile(cortexPath, project, text);

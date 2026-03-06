@@ -6,6 +6,9 @@ import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
 import {
   configureClaude,
+  configureCodexMcp,
+  configureCopilotMcp,
+  configureCursorMcp,
   configureVSCode,
   ensureGovernanceFiles,
   getMcpEnabledPreference,
@@ -26,6 +29,21 @@ const DEFAULT_SEARCH_PATHS = [
 ];
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
+
+function logMcpStatus(tool: string, status: string) {
+  const text: Record<string, string> = {
+    installed: `${tool}: installed cortex MCP server`,
+    already_configured: `${tool}: cortex MCP already configured`,
+    disabled: `${tool}: cortex MCP disabled`,
+    already_disabled: `${tool}: cortex MCP already disabled`,
+    no_settings: `${tool}: settings not found (skipping)`,
+    no_vscode: `${tool}: not detected`,
+    no_cursor: `${tool}: not detected`,
+    no_copilot: `${tool}: not detected`,
+    no_codex: `${tool}: not detected`,
+  };
+  if (text[status]) log(`  ${text[status]}`);
+}
 
 function getMachineName(): string {
   if (fs.existsSync(MACHINE_FILE)) return fs.readFileSync(MACHINE_FILE, "utf8").trim();
@@ -508,29 +526,32 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   log(`  MCP mode: ${mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)"}`);
   let mcpStatus = "no_settings";
   try { mcpStatus = configureClaude(cortexPath, { mcpEnabled }) ?? "installed"; } catch { /* best effort */ }
-
-  const mcpMessages: Record<string, string> = {
-    installed: "  Claude: installed cortex MCP server",
-    already_configured: "  Claude: cortex MCP already configured",
-    disabled: "  Claude: cortex MCP disabled (hooks still active)",
-    already_disabled: "  Claude: cortex MCP already disabled",
-    not_built: "  MCP: no local dist found and npx not available.",
-    no_settings: "  Claude settings not found (skipping)",
-    no_jq: "  Claude: skipped (install jq to auto-configure)",
-  };
-  if (mcpMessages[mcpStatus]) log(mcpMessages[mcpStatus]);
+  logMcpStatus("Claude", mcpStatus);
 
   let vsStatus = "no_vscode";
   try { vsStatus = configureVSCode(cortexPath, { mcpEnabled }) ?? "no_vscode"; } catch { /* best effort */ }
+  logMcpStatus("VS Code", vsStatus);
 
-  const vsMessages: Record<string, string> = {
-    installed: "  VS Code: installed cortex MCP server",
-    already_configured: "  VS Code: cortex MCP already configured",
-    disabled: "  VS Code: cortex MCP disabled",
-    already_disabled: "  VS Code: cortex MCP already disabled",
-    no_jq: "  VS Code: mcp.json exists but jq not available",
-  };
-  if (vsMessages[vsStatus]) log(vsMessages[vsStatus]);
+  let cursorStatus = "no_cursor";
+  try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled }) ?? "no_cursor"; } catch { /* best effort */ }
+  logMcpStatus("Cursor", cursorStatus);
+
+  let copilotStatus = "no_copilot";
+  try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled }) ?? "no_copilot"; } catch { /* best effort */ }
+  logMcpStatus("Copilot CLI", copilotStatus);
+
+  let codexStatus = "no_codex";
+  try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled }) ?? "no_codex"; } catch { /* best effort */ }
+  logMcpStatus("Codex", codexStatus);
+  const mcpStatusForContext = [mcpStatus, vsStatus, cursorStatus, copilotStatus, codexStatus].some(
+    (s) => s === "installed" || s === "already_configured"
+  )
+    ? "installed"
+    : [mcpStatus, vsStatus, cursorStatus, copilotStatus, codexStatus].some(
+      (s) => s === "disabled" || s === "already_disabled"
+    )
+      ? "disabled"
+      : mcpStatus;
 
   // Register hooks for Copilot CLI, Cursor, Codex (reuse same detected set)
   const hookedTools = configureAllHooks(cortexPath, detectedTools);
@@ -545,13 +566,13 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   // Step 7: Context file
   if (opts.task === "debugging") {
-    writeContextDebugging(machine, profile, mcpStatus, projects, cortexPath);
+    writeContextDebugging(machine, profile, mcpStatusForContext, projects, cortexPath);
   } else if (opts.task === "planning") {
-    writeContextPlanning(machine, profile, mcpStatus, projects, cortexPath);
+    writeContextPlanning(machine, profile, mcpStatusForContext, projects, cortexPath);
   } else if (opts.task === "clean") {
-    writeContextClean(machine, profile, mcpStatus, projects);
+    writeContextClean(machine, profile, mcpStatusForContext, projects);
   } else {
-    writeContextDefault(machine, profile, mcpStatus, projects, cortexPath);
+    writeContextDefault(machine, profile, mcpStatusForContext, projects, cortexPath);
   }
 
   // Step 8: Memory

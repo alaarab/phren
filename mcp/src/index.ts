@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { parseMcpMode, runInit } from "./init.js";
+import * as os from "os";
 
 if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
   console.log(`cortex - Long-term memory for Claude Code
@@ -32,6 +33,8 @@ Usage:
                                                  Deduplicate and consolidate LEARNINGS.md bullets
   npx @alaarab/cortex memory-policy [get|set ...]
                                                  Read/update retention and scoring policy
+  npx @alaarab/cortex memory-workflow [get|set ...]
+                                                 Read/update risky-memory approval workflow policy
   npx @alaarab/cortex memory-access [get|set ...]
                                                  Read/update role-based memory access control
 
@@ -42,6 +45,9 @@ Environment variables:
   CORTEX_PATH     Override cortex directory (default: ~/.cortex)
   CORTEX_PROFILE  Active profile name (filters which projects are indexed)
   CORTEX_DEBUG    Set to 1 to enable debug logging to ~/.cortex/debug.log
+  CORTEX_CONTEXT_TOKEN_BUDGET   Max approx tokens injected by hook-prompt (default: 550)
+  CORTEX_CONTEXT_SNIPPET_LINES  Max lines per injected snippet (default: 6)
+  CORTEX_CONTEXT_SNIPPET_CHARS  Max chars per injected snippet (default: 520)
 `);
   process.exit(0);
 }
@@ -90,7 +96,7 @@ if (process.argv[2] === "link") {
     console.error(`Invalid --mcp value "${mcpArg}". Use "on" or "off".`);
     process.exit(1);
   }
-  await runLink(process.env.CORTEX_PATH || require("os").homedir() + "/.cortex", {
+  await runLink(process.env.CORTEX_PATH || os.homedir() + "/.cortex", {
     machine: getFlag("--machine"),
     profile: getFlag("--profile"),
     register: linkArgs.includes("--register"),
@@ -120,6 +126,7 @@ const CLI_COMMANDS = [
   "prune-memories",
   "consolidate-memories",
   "memory-policy",
+  "memory-workflow",
   "memory-access",
   "background-maintenance",
 ];
@@ -150,7 +157,9 @@ import {
   appendMemoryQueue,
   appendAuditLog,
   getMemoryPolicy,
+  getMemoryWorkflowPolicy,
   updateMemoryPolicy,
+  updateMemoryWorkflowPolicy,
   getAccessControl,
   updateAccessControl,
   pruneDeadMemories,
@@ -267,17 +276,44 @@ async function main() {
       if (mode === "get") {
         return textResponse(JSON.stringify(getMemoryPolicy(cortexPath), null, 2));
       }
+      const decayPatch: Record<string, number> = {};
+      if (decay_d30 !== undefined) decayPatch.d30 = decay_d30;
+      if (decay_d60 !== undefined) decayPatch.d60 = decay_d60;
+      if (decay_d90 !== undefined) decayPatch.d90 = decay_d90;
+      if (decay_d120 !== undefined) decayPatch.d120 = decay_d120;
       const result = updateMemoryPolicy(cortexPath, {
         ttlDays,
         retentionDays,
         autoAcceptThreshold,
         minInjectConfidence,
-        decay: {
-          d30: decay_d30,
-          d60: decay_d60,
-          d90: decay_d90,
-          d120: decay_d120,
-        },
+        decay: Object.keys(decayPatch).length ? (decayPatch as any) : undefined,
+      });
+      if (typeof result === "string") return textResponse(result);
+      return textResponse(JSON.stringify(result, null, 2));
+    }
+  );
+
+  server.registerTool(
+    "memory_workflow",
+    {
+      title: "◆ cortex · workflow",
+      description:
+        "Read or update risky-memory approval workflow policy (approval gate, confidence threshold, risky sections).",
+      inputSchema: z.object({
+        mode: z.enum(["get", "set"]).describe("get returns workflow policy, set applies provided fields."),
+        requireMaintainerApproval: z.boolean().optional(),
+        lowConfidenceThreshold: z.number().optional(),
+        riskySections: z.array(z.enum(["Review", "Stale", "Conflicts"])).optional(),
+      }),
+    },
+    async ({ mode, requireMaintainerApproval, lowConfidenceThreshold, riskySections }) => {
+      if (mode === "get") {
+        return textResponse(JSON.stringify(getMemoryWorkflowPolicy(cortexPath), null, 2));
+      }
+      const result = updateMemoryWorkflowPolicy(cortexPath, {
+        requireMaintainerApproval,
+        lowConfidenceThreshold,
+        riskySections,
       });
       if (typeof result === "string") return textResponse(result);
       return textResponse(JSON.stringify(result, null, 2));

@@ -3,6 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
 import { fileURLToPath } from "url";
+import { execFileSync } from "child_process";
 import * as yaml from "js-yaml";
 import { globSync } from "glob";
 import { createRequire } from "module";
@@ -52,6 +53,12 @@ export interface MemoryPolicy {
   };
 }
 
+export interface MemoryWorkflowPolicy {
+  requireMaintainerApproval: boolean;
+  lowConfidenceThreshold: number;
+  riskySections: Array<"Review" | "Stale" | "Conflicts">;
+}
+
 export interface MemoryScore {
   impressions: number;
   helpful: number;
@@ -77,6 +84,12 @@ const DEFAULT_POLICY: MemoryPolicy = {
     d90: 0.65,
     d120: 0.45,
   },
+};
+
+const DEFAULT_WORKFLOW_POLICY: MemoryWorkflowPolicy = {
+  requireMaintainerApproval: true,
+  lowConfidenceThreshold: 0.7,
+  riskySections: ["Stale", "Conflicts"],
 };
 
 const DEFAULT_ACCESS: AccessControl = {
@@ -121,6 +134,10 @@ function accessFile(cortexPath: string): string {
 
 function policyFile(cortexPath: string): string {
   return path.join(governanceDir(cortexPath), "memory-policy.json");
+}
+
+function workflowPolicyFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "memory-workflow-policy.json");
 }
 
 function scoreFile(cortexPath: string): string {
@@ -207,6 +224,38 @@ export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPoli
   };
   writeJsonFile(policyFile(cortexPath), next);
   appendAuditLog(cortexPath, "update_policy", JSON.stringify(next));
+  return next;
+}
+
+export function getMemoryWorkflowPolicy(cortexPath: string): MemoryWorkflowPolicy {
+  const parsed = readJsonFile<Partial<MemoryWorkflowPolicy>>(workflowPolicyFile(cortexPath), {});
+  const riskySections = Array.isArray(parsed.riskySections)
+    ? parsed.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(s)))
+    : DEFAULT_WORKFLOW_POLICY.riskySections;
+  return {
+    requireMaintainerApproval: parsed.requireMaintainerApproval ?? DEFAULT_WORKFLOW_POLICY.requireMaintainerApproval,
+    lowConfidenceThreshold: parsed.lowConfidenceThreshold ?? DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold,
+    riskySections: riskySections.length ? riskySections : DEFAULT_WORKFLOW_POLICY.riskySections,
+  };
+}
+
+export function updateMemoryWorkflowPolicy(
+  cortexPath: string,
+  patch: Partial<MemoryWorkflowPolicy>
+): MemoryWorkflowPolicy | string {
+  const denial = checkMemoryPermission(cortexPath, "policy");
+  if (denial) return denial;
+  const current = getMemoryWorkflowPolicy(cortexPath);
+  const riskySections = Array.isArray(patch.riskySections)
+    ? patch.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(s)))
+    : current.riskySections;
+  const next: MemoryWorkflowPolicy = {
+    requireMaintainerApproval: patch.requireMaintainerApproval ?? current.requireMaintainerApproval,
+    lowConfidenceThreshold: patch.lowConfidenceThreshold ?? current.lowConfidenceThreshold,
+    riskySections: riskySections.length ? riskySections : current.riskySections,
+  };
+  writeJsonFile(workflowPolicyFile(cortexPath), next);
+  appendAuditLog(cortexPath, "update_workflow_policy", JSON.stringify(next));
   return next;
 }
 
@@ -965,13 +1014,12 @@ export function mergeBacklog(ours: string, theirs: string): string {
 // Attempt to auto-resolve git conflicts in LEARNINGS.md and backlog.md files.
 // Returns true if all conflicts were resolved, false if any remain.
 export function autoMergeConflicts(cortexPath: string): boolean {
-  const { execSync } = require("child_process") as typeof import("child_process");
-
   let conflictedFiles: string[];
   try {
-    const out = execSync("git diff --name-only --diff-filter=U", {
+    const out = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
       cwd: cortexPath,
       encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     conflictedFiles = out ? out.split("\n") : [];
   } catch {
@@ -1003,7 +1051,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
         : mergeBacklog(versions.ours, versions.theirs);
 
       fs.writeFileSync(fullPath, merged);
-      execSync(`git add "${relFile}"`, { cwd: cortexPath });
+      execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"] });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: any) {
       debugLog(`Failed to auto-merge ${relFile}: ${err.message}`);
@@ -1015,9 +1063,8 @@ export function autoMergeConflicts(cortexPath: string): boolean {
 }
 
 function getHeadCommit(cwd: string): string | undefined {
-  const { execSync } = require("child_process") as typeof import("child_process");
   try {
-    const commit = execSync("git rev-parse HEAD", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     return commit || undefined;
   } catch {
     return undefined;
@@ -1025,9 +1072,8 @@ function getHeadCommit(cwd: string): string | undefined {
 }
 
 function getRepoRoot(cwd: string): string | undefined {
-  const { execSync } = require("child_process") as typeof import("child_process");
   try {
-    const root = execSync("git rev-parse --show-toplevel", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     return root || undefined;
   } catch {
     return undefined;
@@ -1035,7 +1081,6 @@ function getRepoRoot(cwd: string): string | undefined {
 }
 
 function inferCitationLocation(repoPath: string, commit: string): { file?: string; line?: number } {
-  const { execFileSync } = require("child_process") as typeof import("child_process");
   try {
     const raw = execFileSync(
       "git",
@@ -1084,7 +1129,6 @@ function resolveCitationFile(citation: LearningCitation): string | null {
 }
 
 function commitExists(repoPath: string, commit: string): boolean {
-  const { execFileSync } = require("child_process") as typeof import("child_process");
   try {
     execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], {
       cwd: repoPath,
@@ -1112,7 +1156,6 @@ function isCitationValid(citation: LearningCitation): boolean {
         const relFile = path.isAbsolute(resolvedFile)
           ? path.relative(citation.repo, resolvedFile)
           : resolvedFile;
-        const { execFileSync } = require("child_process") as typeof import("child_process");
         try {
           const out = execFileSync(
             "git",
