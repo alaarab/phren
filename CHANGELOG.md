@@ -64,6 +64,17 @@
 - Harden GitHub mining for large repos and API failures (pagination, timeouts, rate-limit backoff).
 - Expand docs/README with governance model, role setup, policy tuning examples, and operator runbook.
 
+## [1.8.6] - 2026-03-06
+
+### Changed
+- Docs site command coverage expanded:
+  - Added a dedicated Commands section with day-to-day CLI flows (`init`, `doctor`, memory capture, governance, policy tuning).
+  - Added direct nav link to the new Commands section.
+- Docs install snippets now use `@latest` for manual MCP JSON examples to reduce stale copy/paste config.
+
+### Fixed
+- MCP server metadata version now matches package release (`1.8.6`), removing version drift in tool metadata.
+
 ## [1.7.4] - 2026-03-04
 
 ### Changed
