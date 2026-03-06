@@ -5,7 +5,7 @@ import * as os from "os";
 import { configureAllHooks } from "./hooks.js";
 import { configureClaude } from "./init.js";
 
-describe.sequential("v1.9 release hardening gates", () => {
+describe.sequential("v1.10 release hardening gates", () => {
   let tmpRoot: string;
   let homeDir: string;
   let cortexPath: string;

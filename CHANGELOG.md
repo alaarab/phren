@@ -64,6 +64,17 @@
 - Harden GitHub mining for large repos and API failures (pagination, timeouts, rate-limit backoff).
 - Expand docs/README with governance model, role setup, policy tuning examples, and operator runbook.
 
+## [1.10.0] - 2026-03-06
+
+### Changed
+- Minor version bump to `1.10.0` for ongoing shell and memory workflow updates (no 2.0 breaking changes).
+- MCP server metadata version aligned to `1.10.0`.
+
+### Fixed
+- Publish/install CLI executable reliability:
+  - Build now explicitly applies executable mode to `mcp/dist/index.js`.
+  - Fresh global installs now consistently expose a runnable `cortex` binary in new shells.
+
 ## [1.9.0] - 2026-03-06
 
 ### Added

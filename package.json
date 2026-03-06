@@ -1,6 +1,6 @@
 {
   "name": "@alaarab/cortex",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Long-term memory for Claude Code",
   "type": "module",
   "bin": {
@@ -27,7 +27,7 @@
     "vitest": "^4.0.18"
   },
   "scripts": {
-    "build": "tsc -p mcp/tsconfig.json",
+    "build": "tsc -p mcp/tsconfig.json && node -e \"require('fs').chmodSync('mcp/dist/index.js', 0o755)\"",
     "dev": "tsx mcp/src/index.ts",
     "test": "vitest run",
     "prepublishOnly": "npm run build"

@@ -2,8 +2,9 @@
 
 Whitepaper deliverables are now intentionally minimal:
 
-- `docs/long-term-memory-report.tex` (source)
-- `docs/long-term-memory-report.pdf` (compiled report)
+- `docs/whitepaper.tex` (source)
+- `docs/whitepaper.pdf` (compiled report)
+- Docs-site PDF link: `https://alaarab.github.io/cortex/whitepaper.pdf`
 
 ## Other docs in this folder
 

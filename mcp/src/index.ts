@@ -219,7 +219,7 @@ async function main() {
 
   const server = new McpServer({
     name: "cortex-mcp",
-    version: "1.9.0",
+    version: "1.10.0",
   });
 
   server.registerTool(
