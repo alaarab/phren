@@ -1,3 +1,9 @@
+// --- Demo cursor: only blink on the last typed element ---
+(function() {
+  const typed = document.querySelectorAll('.demo-typed');
+  if (typed.length) typed[typed.length - 1].classList.add('active-cursor');
+})();
+
 // --- NAV scroll state ---
 const nav = document.getElementById('nav');
 window.addEventListener('scroll', () => {

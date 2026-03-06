@@ -1007,6 +1007,10 @@ section {
   display: inline-block;
   overflow: hidden;
   white-space: pre-wrap;
+  animation: demoFadeIn 0.4s ease forwards;
+}
+
+.demo-typed.active-cursor {
   border-right: 2px solid var(--text-dim);
   animation: demoFadeIn 0.4s ease forwards, demoBlink 0.8s step-end infinite;
 }
