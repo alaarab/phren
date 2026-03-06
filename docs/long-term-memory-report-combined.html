@@ -1,0 +1,797 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Long-Term Memory Report (Combined)</title>
+  <style>
+    :root {
+      --bg: #f8f9fb;
+      --paper: #ffffff;
+      --ink: #1f2937;
+      --muted: #6b7280;
+      --line: #d1d5db;
+      --accent: #0f766e;
+    }
+    body { margin: 0; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: linear-gradient(180deg,#eef2f7,#f8f9fb 220px); color: var(--ink); }
+    .wrap { max-width: 1040px; margin: 24px auto 64px; padding: 0 20px; }
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 26px 30px; box-shadow: 0 8px 24px rgba(15,23,42,0.06); }
+    h1,h2,h3,h4,h5,h6 { color: #0b1324; margin: 20px 0 10px; }
+    h1 { font-size: 34px; border-bottom: 2px solid var(--line); padding-bottom: 10px; }
+    h2 { font-size: 26px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+    h3 { font-size: 20px; }
+    p { line-height: 1.62; margin: 9px 0; }
+    li { margin: 6px 0; line-height: 1.5; }
+    code { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 1px 6px; font-size: .92em; }
+    pre { background: #0f172a; color: #e5e7eb; border-radius: 10px; padding: 14px 16px; overflow: auto; border: 1px solid #1f2937; }
+    pre code { background: transparent; border: none; padding: 0; color: inherit; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+    th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .spacer { height: 7px; }
+    .banner { color: var(--muted); margin-bottom: 10px; font-size: 14px; }
+    @media (max-width: 820px) { .card { padding: 18px; } h1 { font-size: 28px; } h2 { font-size: 22px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="banner">Combined report generated from docs sources in this repository.</div>
+    <article class="card">
+<h1>Long-Term Memory Report (Combined Package)</h1>
+<div class="spacer"></div>
+<p>Generated: 2026-03-06</p>
+<div class="spacer"></div>
+<p>This document combines the whitepaper and all benchmark appendices into one place.</p>
+<div class="spacer"></div>
+<p>---</p>
+<div class="spacer"></div>
+<h1>Long-Term Memory For Coding Agents: Architecture, Tradeoffs, and Evaluation</h1>
+<div class="spacer"></div>
+<p>Version: 1.0  </p>
+<p>Date: March 6, 2026  </p>
+<p>Scope: Cortex design justification + comparative analysis against selected alternatives</p>
+<div class="spacer"></div>
+<h2>Abstract</h2>
+<p>Long-term memory for coding agents is no longer optional for multi-session software work. Without persistent memory, agents repeatedly consume tokens reconstructing architecture, conventions, and prior decisions, while humans shoulder context management overhead. This whitepaper formalizes the design rationale behind Cortex’s memory architecture, compares it with three relevant alternatives (Supermemory, claude-mem, and GitHub Copilot Memory), and defines a reproducible evaluation protocol for quality, cost, latency, governance, and operational burden.</p>
+<div class="spacer"></div>
+<p>Cortex adopts a markdown-native, git-backed memory substrate with hook-driven lifecycle automation and local FTS5 indexing. The central design claim is that memory systems for engineering workflows should optimize for auditability, portability, and controllable token overhead, not just retrieval quality. The analysis argues that this choice dominates when teams value ownership and low lock-in, while managed memory platforms can dominate when cross-system ingestion and hosted operations are primary requirements.</p>
+<div class="spacer"></div>
+<h2>1. Problem Definition</h2>
+<p>Coding-agent memory must solve four distinct problems simultaneously:</p>
+<div class="spacer"></div>
+<ol>
+<li>Persistence: preserve high-value context across sessions and machines.</li>
+<li>Retrieval: deliver relevant context at prompt time under token constraints.</li>
+<li>Governance: prevent stale/incorrect memory from degrading behavior.</li>
+<li>Operability: keep maintenance and integration costs acceptable.</li>
+</ol>
+<div class="spacer"></div>
+<p>Most failures come from optimizing one axis in isolation (for example, strong recall with weak provenance, or rich capture with uncontrolled prompt overhead).</p>
+<div class="spacer"></div>
+<h2>2. Requirements For A Production Memory Layer</h2>
+<p>A production memory system for coding agents should satisfy:</p>
+<div class="spacer"></div>
+<ul>
+<li>Deterministic scope boundaries (project/repo/user/tenant).</li>
+<li>Provenance and inspectability of stored memory.</li>
+<li>Explicit forgetting/retention semantics.</li>
+<li>Bounded prompt-time token injection.</li>
+<li>Failure isolation: memory subsystem failures should not block core coding flow.</li>
+<li>Cross-machine reproducibility.</li>
+<li>Minimal platform lock-in.</li>
+</ul>
+<div class="spacer"></div>
+<h2>3. Methodological Lens</h2>
+<p>This paper evaluates systems using six dimensions:</p>
+<div class="spacer"></div>
+<ol>
+<li>Representation: how memory is stored (files, SQL, vector store, managed service).</li>
+<li>Capture Path: when/how memory is created (hooks, agent actions, asynchronous workers).</li>
+<li>Retrieval Path: how context is selected and injected.</li>
+<li>Governance and Forgetting: staleness handling, validation, TTL/expiry, manual controls.</li>
+<li>Economics: token overhead, compute/storage, and human maintenance time.</li>
+<li>Portability and Control: migration risk, vendor dependence, and auditability.</li>
+</ol>
+<div class="spacer"></div>
+<h3>3.1 Research Grounding</h3>
+<p>The evaluation framework is informed by retrieval and memory literature:</p>
+<div class="spacer"></div>
+<ul>
+<li>RAG formalizes parametric + non-parametric memory composition [1].</li>
+<li>Self-RAG highlights adaptive retrieval over fixed retrieval for factuality/citation quality [2].</li>
+<li>MemoryBank emphasizes forgetting/refresh dynamics for long-horizon interaction [3].</li>
+<li>MemGPT frames hierarchical memory management under bounded context windows [4].</li>
+</ul>
+<div class="spacer"></div>
+<p>These are not one-to-one implementations of developer tooling, but they provide stable principles for practical system design.</p>
+<div class="spacer"></div>
+<h2>4. Cortex Architecture (Current)</h2>
+<h3>4.1 Storage and Ownership Model</h3>
+<p>Cortex stores memory in project markdown files (<code>CLAUDE.md</code>, <code>summary.md</code>, <code>LEARNINGS.md</code>, <code>backlog.md</code>) under user-controlled git repositories, then builds a local SQLite FTS5 index for retrieval (<a href="/home/alaarab/cortex/README.md">README.md</a>, <a href="/home/alaarab/cortex/mcp/src/shared.ts">shared.ts</a>).</p>
+<div class="spacer"></div>
+<p>Rationale:</p>
+<ul>
+<li>Files are inspectable, diffable, and mergeable.</li>
+<li>Git history provides provenance and rollback.</li>
+<li>No mandatory external memory service or vector DB dependency.</li>
+</ul>
+<div class="spacer"></div>
+<h3>4.2 Capture and Lifecycle</h3>
+<p>Cortex uses lifecycle hooks (<code>hook-prompt</code>, <code>hook-session-start</code>, <code>hook-stop</code>) to automate context injection and persistence (<a href="/home/alaarab/cortex/mcp/src/cli.ts">cli.ts</a>, <a href="/home/alaarab/cortex/mcp/src/hooks.ts">hooks.ts</a>).</p>
+<div class="spacer"></div>
+<p>Rationale:</p>
+<ul>
+<li>Reduces reliance on agent self-discipline to call memory tools.</li>
+<li>Aligns memory actions to natural session lifecycle.</li>
+<li>Supports graceful degradation (best-effort operations, non-blocking wrapper behavior).</li>
+</ul>
+<div class="spacer"></div>
+<h3>4.3 Retrieval and Token Budgeting</h3>
+<p>Cortex retrieval is bounded by explicit defaults:</p>
+<div class="spacer"></div>
+<ul>
+<li>Prompt injection token budget default: ~550 tokens.</li>
+<li>Snippet line budget default: 6 lines.</li>
+<li>Snippet character budget default: 520 chars.</li>
+<li>Candidate narrowing and top-k capped before injection.</li>
+</ul>
+<div class="spacer"></div>
+<p>These limits are configurable via environment variables (<code>CORTEX_CONTEXT_TOKEN_BUDGET</code>, <code>CORTEX_CONTEXT_SNIPPET_LINES</code>, <code>CORTEX_CONTEXT_SNIPPET_CHARS</code>) (<a href="/home/alaarab/cortex/mcp/src/cli.ts">cli.ts</a>, <a href="/home/alaarab/cortex/mcp/src/index.ts">index.ts</a>).</p>
+<div class="spacer"></div>
+<p>Rationale:</p>
+<ul>
+<li>Makes prompt overhead predictable.</li>
+<li>Enforces budget-aware relevance selection.</li>
+<li>Avoids silent context bloat.</li>
+</ul>
+<div class="spacer"></div>
+<h3>4.4 Governance and Forgetting</h3>
+<p>Cortex includes policy defaults for TTL, retention, confidence thresholds, and decay:</p>
+<div class="spacer"></div>
+<ul>
+<li><code>ttlDays=120</code>, <code>retentionDays=365</code></li>
+<li><code>autoAcceptThreshold=0.75</code></li>
+<li><code>minInjectConfidence=0.35</code></li>
+<li>decay factors (<code>d30</code>, <code>d60</code>, <code>d90</code>, <code>d120</code>)</li>
+</ul>
+<div class="spacer"></div>
+<p>(<a href="/home/alaarab/cortex/mcp/src/shared.ts">shared.ts</a>).</p>
+<div class="spacer"></div>
+<p>It also supports queueing suspicious memory (<code>MEMORY_QUEUE.md</code>) and role-based access controls.</p>
+<div class="spacer"></div>
+<p>Rationale:</p>
+<ul>
+<li>Memory quality degrades without active forgetting/governance.</li>
+<li>Role controls reduce accidental policy drift in team use.</li>
+</ul>
+<div class="spacer"></div>
+<h2>5. Comparative Analysis</h2>
+<p>Data in this section is based on publicly documented behavior as of March 6, 2026.</p>
+<div class="spacer"></div>
+<h3>5.1 Supermemory</h3>
+<p>Observed design characteristics:</p>
+<div class="spacer"></div>
+<ul>
+<li>Managed Memory API and SDK-centric integration model [5].</li>
+<li>API creation flow supports metadata + <code>containerTags</code> partitioning and asynchronous status [6][7].</li>
+<li>Explicit filtering concepts (<code>containerTags</code>, metadata filters) and graph-centric semantics [8][9].</li>
+<li>Graph-memory model includes update/extends/derives relationships and automatic forgetting behavior [9].</li>
+<li>Public benchmark tooling (MemoryBench) exists for comparative provider runs [10].</li>
+</ul>
+<div class="spacer"></div>
+<p>Implications:</p>
+<ul>
+<li>Strong for hosted multi-tenant apps needing ingestion and provider-level benchmarking.</li>
+<li>Faster time-to-market for API-native products.</li>
+<li>Higher platform dependency relative to file-native approaches.</li>
+</ul>
+<div class="spacer"></div>
+<h3>5.2 claude-mem</h3>
+<p>Observed design characteristics:</p>
+<div class="spacer"></div>
+<ul>
+<li>Hook-driven architecture with multiple lifecycle stages (<code>SessionStart</code>, <code>UserPromptSubmit</code>, <code>PostToolUse</code>, <code>Stop</code>, <code>SessionEnd</code>) [11][12].</li>
+<li>SQLite + FTS5 core storage and optional ChromaDB semantic layer [11][13][14].</li>
+<li>Hybrid search path combining FTS5 queries with semantic similarity [14].</li>
+<li>Worker-based asynchronous processing and queueing patterns [12].</li>
+</ul>
+<div class="spacer"></div>
+<p>Implications:</p>
+<ul>
+<li>Architecturally close to Cortex in hook-first philosophy.</li>
+<li>Strong local control and extensibility for Claude-centric workflows.</li>
+<li>Added runtime complexity from worker processes and optional vector stack.</li>
+</ul>
+<div class="spacer"></div>
+<h3>5.3 GitHub Copilot Memory</h3>
+<p>Observed design characteristics:</p>
+<div class="spacer"></div>
+<ul>
+<li>Repository-scoped memories, validated against current codebase before use [15][16].</li>
+<li>Automatic expiry after 28 days [15][16].</li>
+<li>Cross-surface use across coding agent, code review, and CLI [15].</li>
+<li>Repository owners can review/delete memories; enterprise/organization policies control enablement [16].</li>
+<li>Rollout changed materially in early 2026 (public preview to default-on for Pro/Pro+) [15][17].</li>
+</ul>
+<div class="spacer"></div>
+<p>Implications:</p>
+<ul>
+<li>Tight integration for GitHub-native workflows.</li>
+<li>Low setup overhead where Copilot is already standard.</li>
+<li>Limited portability/audit granularity versus explicit file-native memory repos.</li>
+</ul>
+<div class="spacer"></div>
+<h3>5.4 Comparative Matrix</h3>
+<div class="spacer"></div>
+<table><thead><tr><th>Dimension</th><th>Cortex</th><th>Supermemory</th><th>claude-mem</th><th>Copilot Memory</th></tr></thead><tbody><tr><td>Primary substrate</td><td>Markdown + git + local FTS5</td><td>Managed API/service + metadata/tag model</td><td>SQLite/FTS5 (+ optional ChromaDB)</td><td>Managed GitHub-native repository memory</td></tr><tr><td>Capture trigger</td><td>Lifecycle hooks + tools</td><td>API calls / connectors</td><td>Lifecycle hooks + worker queue</td><td>Copilot feature actions in repo</td></tr><tr><td>Retrieval control</td><td>Explicit token/line/char budgets</td><td>API-level retrieval tuning</td><td>Hybrid FTS + semantic retrieval</td><td>Managed by Copilot policy/feature behavior</td></tr><tr><td>Forgetting model</td><td>Configurable TTL/retention/decay</td><td>Graph updates + automatic forgetting semantics</td><td>Hook/worker + DB lifecycle</td><td>28-day automatic expiry</td></tr><tr><td>Auditability</td><td>High (file diffs + git history)</td><td>Medium (API records, service-centric)</td><td>Medium-high (local DB)</td><td>Medium (UI + platform logs/settings)</td></tr><tr><td>Lock-in risk</td><td>Low</td><td>Medium-high</td><td>Low-medium</td><td>Medium-high (platform scoped)</td></tr><tr><td>Operational overhead</td><td>Medium (self-managed files/hooks)</td><td>Low-medium (managed service)</td><td>Medium-high (worker + DB ops)</td><td>Low (managed)</td></tr></tbody></table>
+<div class="spacer"></div>
+<h2>6. Cost Model (Tokens, Time, Money)</h2>
+<h3>6.1 Token Overhead Model</h3>
+<p>Let:</p>
+<div class="spacer"></div>
+<ul>
+<li><code>N</code> = number of prompts per month</li>
+<li><code>T_i</code> = injected context tokens per prompt</li>
+<li><code>T_b</code> = configured budget cap (Cortex default ~550)</li>
+<li><code>p_in</code> = input token price (model/provider specific)</li>
+</ul>
+<div class="spacer"></div>
+<p>Then monthly memory-injection token cost upper bound is:</p>
+<div class="spacer"></div>
+<p><code>Cost_injection &lt;= N <em> T_b </em> p_in</code></p>
+<div class="spacer"></div>
+<p>Expected cost is lower with sparse retrieval:</p>
+<div class="spacer"></div>
+<p><code>Expected_Cost_injection = N <em> E[T_i] </em> p_in</code>, with <code>E[T_i] &lt;&lt; T_b</code> when relevance filtering skips injection.</p>
+<div class="spacer"></div>
+<p>Cortex’s explicit budget makes this analyzable before deployment; systems without a clear cap can drift upward unpredictably.</p>
+<div class="spacer"></div>
+<h3>6.2 Human-Time Cost Model</h3>
+<p>Total operating cost includes human maintenance time:</p>
+<div class="spacer"></div>
+<p><code>Total_Cost = Token_Cost + Compute_Cost + Storage_Cost + (Engineer_Hours * Loaded_Rate)</code></p>
+<div class="spacer"></div>
+<p>In practice, teams often underestimate <code>Engineer_Hours</code> from drift cleanup, staleness triage, and integration breakage. File-native systems may have slightly higher setup cost but lower migration risk and better forensic debugging.</p>
+<div class="spacer"></div>
+<h2>7. Why Cortex Chose This Path</h2>
+<p>The Cortex path is justified by the following design priorities:</p>
+<div class="spacer"></div>
+<ol>
+<li>Ownership-first memory: Memory is plain files under user control, not opaque service state.</li>
+<li>Auditability: Every memory mutation is inspectable through git diff/history.</li>
+<li>Bounded context economics: Injection is explicitly budgeted and configurable.</li>
+<li>Lifecycle automation: Hooks reduce behavioral variance across agents/sessions.</li>
+<li>Governance primitives: TTL, retention, workflow approvals, and queue triage are first-class.</li>
+<li>Interoperability: MCP tools and CLI offer the same operational core.</li>
+</ol>
+<div class="spacer"></div>
+<p>This is a deliberate tradeoff: Cortex favors transparency and control over maximum managed convenience.</p>
+<div class="spacer"></div>
+<h2>8. Where Alternatives Can Be Better</h2>
+<p>Cortex is not universally dominant.</p>
+<div class="spacer"></div>
+<ul>
+<li>Choose Supermemory when you need rapid hosted deployment, external ingestion/connectors, and API-native product embedding.</li>
+<li>Choose Copilot Memory when your workflow is deeply GitHub-native and you want minimal setup/operations.</li>
+<li>Choose claude-mem when you want local hook-driven memory with richer in-process worker pipelines tailored to Claude workflows.</li>
+</ul>
+<div class="spacer"></div>
+<h2>9. Evaluation Protocol For Future Benchmarks</h2>
+<p>To evaluate objectively against alternatives, run a controlled benchmark with fixed task suites and equal model settings.</p>
+<div class="spacer"></div>
+<h3>9.1 Task Categories</h3>
+<ul>
+<li>Long-horizon debugging (multi-session dependency tracing)</li>
+<li>Architecture-constrained feature implementation</li>
+<li>Regression triage with stale-memory distractors</li>
+<li>Cross-file convention adherence</li>
+<li>Long-form explanation with citation correctness</li>
+</ul>
+<div class="spacer"></div>
+<h3>9.2 Metrics</h3>
+<ul>
+<li>Retrieval relevance: Precision@k, Recall@k</li>
+<li>Grounding quality: citation validity rate</li>
+<li>Behavioral quality: task success rate, defect rate</li>
+<li>Efficiency: average injected tokens/prompt, latency p50/p95</li>
+<li>Robustness: stale-memory contamination rate</li>
+<li>Governance burden: manual interventions per 100 tasks</li>
+</ul>
+<div class="spacer"></div>
+<h3>9.3 Controls</h3>
+<ul>
+<li>Same base model family/version</li>
+<li>Same repositories and branch states</li>
+<li>Same task prompts and acceptance criteria</li>
+<li>Fixed run count with randomized task order</li>
+</ul>
+<div class="spacer"></div>
+<h3>9.4 Threats To Validity</h3>
+<ul>
+<li>Feature rollouts can change behavior quickly (especially preview features).</li>
+<li>Vendor-side hidden heuristics may confound attribution.</li>
+<li>Benchmarks can overfit to particular repositories or coding styles.</li>
+</ul>
+<div class="spacer"></div>
+<h2>10. Reproducibility Package (Included)</h2>
+<p>To move from conceptual comparison to publishable empirical evidence, this whitepaper now includes a benchmark artifact pack in:</p>
+<div class="spacer"></div>
+<ul>
+<li><code>docs/whitepaper-artifacts/benchmark-protocol.md</code></li>
+<li><code>docs/whitepaper-artifacts/trials-template.csv</code></li>
+<li><code>docs/whitepaper-artifacts/summary-template.csv</code></li>
+<li><code>docs/whitepaper-artifacts/cost-model-template.csv</code></li>
+<li><code>docs/whitepaper-artifacts/failures-template.csv</code></li>
+<li><code>docs/whitepaper-artifacts/report-template.md</code></li>
+<li><code>docs/whitepaper-artifacts/analysis-guide.md</code></li>
+</ul>
+<div class="spacer"></div>
+<h3>10.1 Minimum Sample Guidance</h3>
+<ul>
+<li>Baseline recommendation: &gt;= 40 tasks, paired across compared systems.</li>
+<li>Prefer &gt;= 3 repositories to avoid single-repo bias.</li>
+<li>Preserve randomization seeds and manifest all version identifiers.</li>
+</ul>
+<div class="spacer"></div>
+<h3>10.2 Publication Readiness Checklist</h3>
+<p>A results set is publication-ready when it includes:</p>
+<div class="spacer"></div>
+<ol>
+<li>raw per-trial data</li>
+<li>endpoint summary table with confidence intervals</li>
+<li>pairwise significance/effect-size table</li>
+<li>failure taxonomy counts</li>
+<li>explicit threats-to-validity section</li>
+<li>reproducibility metadata (model versions, SHAs, seeds)</li>
+</ol>
+<div class="spacer"></div>
+<h2>11. Risks and Mitigations</h2>
+<ul>
+<li>Risk: Context over-injection increases cost and distracts generation.  </li>
+</ul>
+<p>  Mitigation: strict budgeting + top-k capping + snippet compaction.</p>
+<div class="spacer"></div>
+<ul>
+<li>Risk: Stale memory degrades output quality.  </li>
+</ul>
+<p>  Mitigation: validation/queueing/expiry and manual curation paths.</p>
+<div class="spacer"></div>
+<ul>
+<li>Risk: Hidden platform behavior changes.  </li>
+</ul>
+<p>  Mitigation: explicit changelog tracking and regression benchmark runs.</p>
+<div class="spacer"></div>
+<ul>
+<li>Risk: Operational fragility from hooks.  </li>
+</ul>
+<p>  Mitigation: timeouts, best-effort execution, and fallback commands.</p>
+<div class="spacer"></div>
+<h2>12. Conclusion</h2>
+<p>The core design decision in Cortex is not merely “store memory.” It is to optimize memory for engineering accountability: inspectable state, deterministic budgets, and governance-ready lifecycle automation. This makes Cortex a strong default for teams that prioritize controllability, reproducibility, and low lock-in.</p>
+<div class="spacer"></div>
+<p>Managed alternatives can outperform on convenience and service-level capabilities, but often at the cost of portability and transparent control. A rigorous benchmark program should therefore compare not only answer quality, but also operational economics and governance resilience over time.</p>
+<div class="spacer"></div>
+<h2>References</h2>
+<p>[1] Lewis et al., <em>Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks</em>, arXiv:2005.11401, 2020/2021. https://arxiv.org/abs/2005.11401</p>
+<div class="spacer"></div>
+<p>[2] Asai et al., <em>Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection</em>, arXiv:2310.11511, 2023. https://arxiv.org/abs/2310.11511</p>
+<div class="spacer"></div>
+<p>[3] Zhong et al., <em>MemoryBank: Enhancing Large Language Models with Long-Term Memory</em>, arXiv:2305.10250, 2023. https://arxiv.org/abs/2305.10250</p>
+<div class="spacer"></div>
+<p>[4] Packer et al., <em>MemGPT: Towards LLMs as Operating Systems</em>, arXiv:2310.08560, 2023/2024. https://arxiv.org/abs/2310.08560</p>
+<div class="spacer"></div>
+<p>[5] Supermemory docs introduction. https://supermemory.ai/docs/introduction</p>
+<div class="spacer"></div>
+<p>[6] Supermemory memory creation APIs (<code>/v3/memories</code>/<code>/v3/documents</code>), metadata/container tags, async status. https://supermemory.ai/docs/memory-api/creation/adding-memories</p>
+<div class="spacer"></div>
+<p>[7] Supermemory auto multi-modal detection and API processing notes. https://supermemory.ai/docs/memory-api/features/auto-multi-modal</p>
+<div class="spacer"></div>
+<p>[8] Supermemory filtering/container-tags concepts. https://supermemory.ai/docs/memory-api/features/filtering</p>
+<div class="spacer"></div>
+<p>[9] Supermemory graph memory concepts (updates/extends/derives, automatic forgetting). https://supermemory.ai/docs/concepts/graph-memory</p>
+<div class="spacer"></div>
+<p>[10] Supermemory MemoryBench quickstart/repository. https://supermemory.ai/docs/memorybench/quickstart and https://github.com/supermemoryai/memorybench</p>
+<div class="spacer"></div>
+<p>[11] Claude-mem architecture overview (hooks, SQLite/FTS5, optional ChromaDB). https://docs.claude-mem.ai/architecture/overview</p>
+<div class="spacer"></div>
+<p>[12] Claude-mem hooks architecture/lifecycle stages. https://docs.claude-mem.ai/hooks-architecture</p>
+<div class="spacer"></div>
+<p>[13] Claude-mem database architecture (SQLite, FTS5, WAL). https://docs.claude-mem.ai/architecture/database</p>
+<div class="spacer"></div>
+<p>[14] Claude-mem search architecture (FTS5 queries, hybrid ChromaDB similarity). https://docs.claude-mem.ai/architecture/search-architecture</p>
+<div class="spacer"></div>
+<p>[15] GitHub Changelog (March 4, 2026): Copilot Memory default-on for Pro/Pro+ public preview; repo scope; validation; 28-day expiry. https://github.blog/changelog/2026-03-04-copilot-memory-now-on-by-default-for-pro-and-pro-users-in-public-preview/</p>
+<div class="spacer"></div>
+<p>[16] GitHub Docs: Managing and curating Copilot Memory (policy controls, enablement, deletion, 28-day deletion note). https://docs.github.com/en/copilot/how-tos/use-copilot-agents/copilot-memory</p>
+<div class="spacer"></div>
+<p>[17] GitHub Changelog (Jan 15, 2026): Agentic memory public preview announcement and behavior summary. https://github.blog/changelog/2026-01-15-agentic-memory-for-github-copilot-is-in-public-preview/</p>
+<div class="spacer"></div>
+<p>[18] Cortex repository references: <a href="/home/alaarab/cortex/README.md">README.md</a>, <a href="/home/alaarab/cortex/mcp/src/cli.ts">mcp/src/cli.ts</a>, <a href="/home/alaarab/cortex/mcp/src/shared.ts">mcp/src/shared.ts</a>, <a href="/home/alaarab/cortex/mcp/src/hooks.ts">mcp/src/hooks.ts</a>, <a href="/home/alaarab/cortex/mcp/src/index.ts">mcp/src/index.ts</a>.</p>
+<div class="spacer"></div>
+<p>---</p>
+<div class="spacer"></div>
+<h2>Appendix A: Benchmark Protocol</h2>
+<div class="spacer"></div>
+<h1>Long-Term Memory Benchmark Protocol (v1.0)</h1>
+<div class="spacer"></div>
+<h2>Purpose</h2>
+<p>This protocol operationalizes the whitepaper into a reproducible benchmark for comparing coding-agent memory systems (for example: Cortex, Supermemory-backed stack, claude-mem, Copilot Memory workflows).</p>
+<div class="spacer"></div>
+<h2>1. Experimental Unit</h2>
+<p>One <strong>trial</strong> is a single model run on a single task with one memory system configuration.</p>
+<div class="spacer"></div>
+<ul>
+<li>Unit of randomization: <code>task_id</code></li>
+<li>Unit of analysis: <code>trial_id</code></li>
+<li>Blocking factor: repository/project (<code>repo_id</code>)</li>
+</ul>
+<div class="spacer"></div>
+<h2>2. Fixed Controls</h2>
+<p>Hold these constant across systems:</p>
+<div class="spacer"></div>
+<ul>
+<li>Base model family/version</li>
+<li>Temperature/top_p/max_tokens</li>
+<li>Repository commit SHA at trial start</li>
+<li>Tool permissions and network policies</li>
+<li>Prompt text and acceptance criteria</li>
+<li>Runtime timeout limits</li>
+</ul>
+<div class="spacer"></div>
+<p>If a variable cannot be held constant, record it explicitly in metadata and treat as a covariate.</p>
+<div class="spacer"></div>
+<h2>3. Task Set Design</h2>
+<p>Use at least 40 tasks, balanced across categories:</p>
+<div class="spacer"></div>
+<ol>
+<li>Long-horizon debugging</li>
+<li>Feature implementation with architecture constraints</li>
+<li>Regression triage with stale-memory distractors</li>
+<li>Convention/style adherence</li>
+<li>Documentation synthesis with citation checks</li>
+</ol>
+<div class="spacer"></div>
+<p>Each task card must include:</p>
+<div class="spacer"></div>
+<ul>
+<li><code>task_id</code></li>
+<li>objective</li>
+<li>required files/areas</li>
+<li>acceptance tests/checklist</li>
+<li>expected memory utility (high/medium/low)</li>
+<li>estimated complexity (1-5)</li>
+</ul>
+<div class="spacer"></div>
+<h2>4. Assignment Strategy</h2>
+<p>Use blocked randomization per repo:</p>
+<div class="spacer"></div>
+<ul>
+<li>For each <code>repo_id</code>, shuffle tasks with fixed seed.</li>
+<li>Assign each task to every system (paired design) when feasible.</li>
+<li>Randomize run order to reduce temporal effects.</li>
+</ul>
+<div class="spacer"></div>
+<p>Recommended seeds:</p>
+<div class="spacer"></div>
+<ul>
+<li>Assignment seed: <code>20260306</code></li>
+<li>Prompt-order seed: <code>20260307</code></li>
+</ul>
+<div class="spacer"></div>
+<h2>5. Data Collection Schema</h2>
+<p>Capture a row per trial with at least:</p>
+<div class="spacer"></div>
+<ul>
+<li>IDs: <code>trial_id</code>, <code>task_id</code>, <code>repo_id</code>, <code>system_name</code>, <code>run_timestamp</code></li>
+<li>Quality: <code>task_success</code> (0/1), <code>defect_count</code>, <code>citation_valid_rate</code></li>
+<li>Retrieval: <code>retrieved_items</code>, <code>relevant_items</code>, <code>precision_at_k</code>, <code>recall_at_k</code></li>
+<li>Efficiency: <code>injected_tokens</code>, <code>prompt_tokens_total</code>, <code>completion_tokens_total</code></li>
+<li>Performance: <code>latency_ms_p50</code>, <code>latency_ms_p95</code></li>
+<li>Governance: <code>stale_memory_incidents</code>, <code>manual_interventions</code></li>
+<li>Ops: <code>setup_minutes</code>, <code>maintenance_minutes_weekly</code></li>
+</ul>
+<div class="spacer"></div>
+<p>Use the provided CSV templates in this folder.</p>
+<div class="spacer"></div>
+<h2>6. Metric Definitions</h2>
+<h3>6.1 Task Success</h3>
+<p><code>task_success = 1</code> only if all acceptance criteria pass (tests/checklist/manual validation).</p>
+<div class="spacer"></div>
+<h3>6.2 Defect Count</h3>
+<p>Number of post-run defects found in produced changes.</p>
+<div class="spacer"></div>
+<h3>6.3 Citation Valid Rate</h3>
+<p><code>valid_citations / total_citations</code></p>
+<div class="spacer"></div>
+<h3>6.4 Retrieval Precision@k</h3>
+<p><code>precision_at_k = relevant_retrieved_at_k / k</code></p>
+<div class="spacer"></div>
+<h3>6.5 Retrieval Recall@k</h3>
+<p><code>recall_at_k = relevant_retrieved_at_k / total_relevant_available</code></p>
+<div class="spacer"></div>
+<h3>6.6 Token Overhead Ratio</h3>
+<p><code>token_overhead_ratio = injected_tokens / prompt_tokens_total</code></p>
+<div class="spacer"></div>
+<h3>6.7 Governance Load</h3>
+<p><code>governance_load = manual_interventions / trials</code></p>
+<div class="spacer"></div>
+<h2>7. Statistical Analysis Plan</h2>
+<h3>7.1 Primary Endpoints</h3>
+<ul>
+<li><code>task_success_rate</code></li>
+<li><code>injected_tokens_mean</code></li>
+<li><code>latency_ms_p95</code></li>
+<li><code>citation_valid_rate_mean</code></li>
+</ul>
+<div class="spacer"></div>
+<h3>7.2 Secondary Endpoints</h3>
+<ul>
+<li><code>defect_count_mean</code></li>
+<li><code>precision_at_k_mean</code></li>
+<li><code>recall_at_k_mean</code></li>
+<li><code>governance_load</code></li>
+</ul>
+<div class="spacer"></div>
+<h3>7.3 Tests</h3>
+<p>For paired task-level comparisons:</p>
+<div class="spacer"></div>
+<ul>
+<li>Binary outcomes (<code>task_success</code>): McNemar test or paired bootstrap CI.</li>
+<li>Continuous skewed outcomes (<code>injected_tokens</code>, <code>latency</code>): Wilcoxon signed-rank + bootstrap CIs.</li>
+<li>Effect size: Cliff's delta (or paired standardized difference).</li>
+</ul>
+<div class="spacer"></div>
+<h3>7.4 Confidence Intervals</h3>
+<p>Use non-parametric bootstrap (10,000 resamples) for key mean/median differences.</p>
+<div class="spacer"></div>
+<p>Report:</p>
+<div class="spacer"></div>
+<ul>
+<li>point estimate</li>
+<li>95% CI</li>
+<li>p-value (when applicable)</li>
+<li>effect size</li>
+</ul>
+<div class="spacer"></div>
+<h3>7.5 Multiple Comparisons</h3>
+<p>If comparing &gt;2 systems, control false discovery (Holm-Bonferroni) on primary endpoints.</p>
+<div class="spacer"></div>
+<h2>8. Bias and Validity Controls</h2>
+<ul>
+<li>Blind evaluators to <code>system_name</code> when scoring outputs where possible.</li>
+<li>Use a holdout task split not touched during protocol tuning.</li>
+<li>Track and report dropped/failed trials with reasons.</li>
+<li>Run inter-rater agreement on at least 20% of manually scored trials.</li>
+</ul>
+<div class="spacer"></div>
+<h2>9. Failure Taxonomy</h2>
+<p>Classify each failure into one dominant class:</p>
+<div class="spacer"></div>
+<ol>
+<li>Retrieval miss (relevant memory not injected)</li>
+<li>Retrieval noise (irrelevant memory injected)</li>
+<li>Stale memory contamination</li>
+<li>Governance/policy failure</li>
+<li>Tooling/runtime failure</li>
+<li>Model reasoning failure (memory-independent)</li>
+</ol>
+<div class="spacer"></div>
+<h2>10. Reporting Requirements</h2>
+<p>A benchmark report is complete only if it contains:</p>
+<div class="spacer"></div>
+<ul>
+<li>full environment manifest</li>
+<li>protocol version and seeds</li>
+<li>endpoint tables with CIs</li>
+<li>threats-to-validity section</li>
+<li>raw artifact links (CSV + logs)</li>
+</ul>
+<div class="spacer"></div>
+<h2>11. Minimal Reproducibility Bundle</h2>
+<p>Store these artifacts per benchmark run:</p>
+<div class="spacer"></div>
+<ul>
+<li><code>manifest.json</code> (model/tool versions, git SHAs)</li>
+<li><code>trials.csv</code> (per-trial rows)</li>
+<li><code>summary.csv</code> (aggregates)</li>
+<li><code>failures.csv</code> (taxonomy)</li>
+<li><code>report.md</code> (human-readable conclusions)</li>
+</ul>
+<div class="spacer"></div>
+<div class="spacer"></div>
+<p>---</p>
+<div class="spacer"></div>
+<h2>Appendix B: Analysis Guide</h2>
+<div class="spacer"></div>
+<h1>Analysis Guide For Benchmark Artifacts</h1>
+<div class="spacer"></div>
+<h2>Inputs</h2>
+<ul>
+<li><code>trials-template.csv</code> (filled with trial rows)</li>
+<li><code>summary-template.csv</code> (derived)</li>
+<li><code>failures-template.csv</code> (filled with failure taxonomy)</li>
+<li><code>cost-model-template.csv</code> (filled with economics parameters)</li>
+</ul>
+<div class="spacer"></div>
+<h2>1. Derived Per-Trial Fields</h2>
+<p>Compute when missing:</p>
+<div class="spacer"></div>
+<ul>
+<li><code>citation_valid_rate = citations_valid / citations_total</code> (if <code>citations_total &gt; 0</code>, else blank)</li>
+<li><code>precision_at_k = relevant_retrieved_at_k / k</code> (if <code>k &gt; 0</code>)</li>
+<li><code>recall_at_k = relevant_retrieved_at_k / relevant_items</code> (if <code>relevant_items &gt; 0</code>)</li>
+<li><code>token_overhead_ratio = injected_tokens / prompt_tokens_total</code> (if <code>prompt_tokens_total &gt; 0</code>)</li>
+</ul>
+<div class="spacer"></div>
+<h2>2. System-Level Aggregates</h2>
+<p>For each <code>system_name</code>:</p>
+<div class="spacer"></div>
+<ul>
+<li><code>task_success_rate_mean = mean(task_success)</code></li>
+<li><code>defect_count_mean = mean(defect_count)</code></li>
+<li><code>citation_valid_rate_mean = mean(citation_valid_rate)</code></li>
+<li><code>precision_at_k_mean = mean(precision_at_k)</code></li>
+<li><code>recall_at_k_mean = mean(recall_at_k)</code></li>
+<li><code>injected_tokens_mean = mean(injected_tokens)</code></li>
+<li><code>latency_ms_p95_mean = mean(latency_ms_p95)</code></li>
+</ul>
+<div class="spacer"></div>
+<h2>3. Bootstrap CI Procedure</h2>
+<p>For each endpoint and system:</p>
+<div class="spacer"></div>
+<ol>
+<li>Resample trial rows with replacement (size = n).</li>
+<li>Compute endpoint mean for resample.</li>
+<li>Repeat 10,000 times.</li>
+<li>CI = 2.5th and 97.5th percentiles.</li>
+</ol>
+<div class="spacer"></div>
+<p>For pairwise differences:</p>
+<div class="spacer"></div>
+<ol>
+<li>Pair by <code>task_id</code> where both systems have runs.</li>
+<li>Resample paired rows.</li>
+<li>Compute difference in endpoint means.</li>
+<li>Take percentile CI.</li>
+</ol>
+<div class="spacer"></div>
+<h2>4. Effect Size (Cliff's Delta)</h2>
+<p>For two systems A and B on endpoint x:</p>
+<div class="spacer"></div>
+<p><code>delta = (count(a &gt; b) - count(a &lt; b)) / (n_a * n_b)</code></p>
+<div class="spacer"></div>
+<p>Interpretation (rule-of-thumb):</p>
+<ul>
+<li>|delta| &lt; 0.147: negligible</li>
+<li>&lt; 0.33: small</li>
+<li>&lt; 0.474: medium</li>
+<li>&gt;= 0.474: large</li>
+</ul>
+<div class="spacer"></div>
+<h2>5. Monthly Cost Estimation</h2>
+<p>For each system row in <code>cost-model-template.csv</code>:</p>
+<div class="spacer"></div>
+<p><code>token_cost_estimate_usd = ((n_prompts <em> avg_prompt_tokens_total)/1000 </em> input_token_price_per_1k) + ((n_prompts <em> avg_completion_tokens)/1000 </em> output_token_price_per_1k)</code></p>
+<div class="spacer"></div>
+<p><code>human_cost_estimate_usd = (setup_hours + maintenance_hours_month) * loaded_rate_usd_hour</code></p>
+<div class="spacer"></div>
+<p><code>total_cost_estimate_usd = token_cost_estimate_usd + human_cost_estimate_usd</code></p>
+<div class="spacer"></div>
+<h2>6. Minimal QA Checks</h2>
+<ul>
+<li>No duplicate <code>trial_id</code> values.</li>
+<li><code>task_success</code> in {0,1}.</li>
+<li><code>citations_valid &lt;= citations_total</code>.</li>
+<li><code>relevant_retrieved_at_k &lt;= min(k, relevant_items)</code>.</li>
+<li>Missing values documented in report.</li>
+</ul>
+<div class="spacer"></div>
+<h2>7. Reproducibility Checklist</h2>
+<ul>
+<li>Save analysis code hash/commit in report.</li>
+<li>Save random seeds.</li>
+<li>Save exact model/version identifiers.</li>
+<li>Archive raw and processed files together.</li>
+</ul>
+<div class="spacer"></div>
+<div class="spacer"></div>
+<p>---</p>
+<div class="spacer"></div>
+<h2>Appendix C: Report Template</h2>
+<div class="spacer"></div>
+<h1>Long-Term Memory Benchmark Report</h1>
+<div class="spacer"></div>
+<p>Date: YYYY-MM-DD  </p>
+<p>Protocol Version: v1.0  </p>
+<p>Run ID: &lt;run-id&gt;</p>
+<div class="spacer"></div>
+<h2>1. Executive Summary</h2>
+<ul>
+<li>Best system on task success:</li>
+<li>Best system on token efficiency:</li>
+<li>Best system on governance load:</li>
+<li>Decision recommendation:</li>
+</ul>
+<div class="spacer"></div>
+<h2>2. Experimental Configuration</h2>
+<ul>
+<li>Repositories:</li>
+<li>Models:</li>
+<li>Systems compared:</li>
+<li>Number of tasks:</li>
+<li>Number of trials:</li>
+<li>Randomization seeds:</li>
+</ul>
+<div class="spacer"></div>
+<h2>3. Primary Results</h2>
+<table><thead><tr><th>System</th><th>Task Success Rate</th><th>95% CI</th><th>Mean Injected Tokens</th><th>95% CI</th><th>Latency p95 (ms)</th><th>Citation Valid Rate</th></tr></thead><tbody><tr><td>Cortex</td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>System B</td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>System C</td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tbody></table>
+<div class="spacer"></div>
+<h2>4. Secondary Results</h2>
+<table><thead><tr><th>System</th><th>Defect Count (mean)</th><th>Precision@k</th><th>Recall@k</th><th>Stale Incidents</th><th>Manual Interventions</th></tr></thead><tbody><tr><td>Cortex</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>System B</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>System C</td><td></td><td></td><td></td><td></td><td></td></tr></tbody></table>
+<div class="spacer"></div>
+<h2>5. Pairwise Statistical Comparisons</h2>
+<table><thead><tr><th>Comparison</th><th>Endpoint</th><th>Effect Size</th><th>95% CI</th><th>p-value</th><th>Significant (Y/N)</th></tr></thead><tbody><tr><td>Cortex vs System B</td><td>Task Success</td><td></td><td></td><td></td><td></td></tr><tr><td>Cortex vs System B</td><td>Injected Tokens</td><td></td><td></td><td></td><td></td></tr><tr><td>Cortex vs System C</td><td>Task Success</td><td></td><td></td><td></td><td></td></tr><tr><td>Cortex vs System C</td><td>Injected Tokens</td><td></td><td></td><td></td><td></td></tr></tbody></table>
+<div class="spacer"></div>
+<h2>6. Cost Analysis</h2>
+<table><thead><tr><th>System</th><th>Token Cost (USD/month)</th><th>Human Cost (USD/month)</th><th>Total Cost (USD/month)</th></tr></thead><tbody><tr><td>Cortex</td><td></td><td></td><td></td></tr><tr><td>System B</td><td></td><td></td><td></td></tr><tr><td>System C</td><td></td><td></td><td></td></tr></tbody></table>
+<div class="spacer"></div>
+<h2>7. Failure Taxonomy</h2>
+<table><thead><tr><th>Failure Class</th><th>Cortex</th><th>System B</th><th>System C</th></tr></thead><tbody><tr><td>Retrieval miss</td><td></td><td></td><td></td></tr><tr><td>Retrieval noise</td><td></td><td></td><td></td></tr><tr><td>Stale contamination</td><td></td><td></td><td></td></tr><tr><td>Governance failure</td><td></td><td></td><td></td></tr><tr><td>Tool/runtime failure</td><td></td><td></td><td></td></tr><tr><td>Model reasoning failure</td><td></td><td></td><td></td></tr></tbody></table>
+<div class="spacer"></div>
+<h2>8. Threats To Validity</h2>
+<ul>
+<li>Internal validity:</li>
+<li>External validity:</li>
+<li>Construct validity:</li>
+<li>Statistical conclusion validity:</li>
+</ul>
+<div class="spacer"></div>
+<h2>9. Recommendation</h2>
+<ul>
+<li>Preferred default:</li>
+<li>Exceptions / when to choose alternatives:</li>
+<li>Required mitigations before rollout:</li>
+</ul>
+<div class="spacer"></div>
+<h2>10. Artifact Links</h2>
+<ul>
+<li><code>manifest.json</code>:</li>
+<li><code>trials.csv</code>:</li>
+<li><code>summary.csv</code>:</li>
+<li><code>failures.csv</code>:</li>
+<li><code>analysis notebook/script</code>:</li>
+</ul>
+<div class="spacer"></div>
+<div class="spacer"></div>
+<p>---</p>
+<div class="spacer"></div>
+<h2>Appendix D: CSV Schemas</h2>
+<div class="spacer"></div>
+<h3>cost-model-template.csv</h3>
+<div class="spacer"></div>
+<pre><code class="lang-csv">system_name,period_month,n_prompts,avg_injected_tokens,avg_prompt_tokens_total,input_token_price_per_1k,output_token_price_per_1k,avg_completion_tokens,token_cost_estimate_usd,setup_hours,maintenance_hours_month,loaded_rate_usd_hour,human_cost_estimate_usd,total_cost_estimate_usd
+</code></pre>
+<div class="spacer"></div>
+<h3>failures-template.csv</h3>
+<div class="spacer"></div>
+<pre><code class="lang-csv">trial_id,system_name,task_id,failure_class,severity,description,root_cause,memory_related,preventable,next_action
+</code></pre>
+<div class="spacer"></div>
+<h3>summary-template.csv</h3>
+<div class="spacer"></div>
+<pre><code class="lang-csv">system_name,n_trials,task_success_rate_mean,task_success_rate_ci_low,task_success_rate_ci_high,defect_count_mean,defect_count_ci_low,defect_count_ci_high,citation_valid_rate_mean,citation_valid_rate_ci_low,citation_valid_rate_ci_high,precision_at_k_mean,recall_at_k_mean,injected_tokens_mean,injected_tokens_ci_low,injected_tokens_ci_high,token_overhead_ratio_mean,latency_ms_p50_mean,latency_ms_p95_mean,stale_memory_incidents_total,manual_interventions_total,setup_minutes_mean,maintenance_minutes_weekly_mean
+</code></pre>
+<div class="spacer"></div>
+<h3>trials-template.csv</h3>
+<div class="spacer"></div>
+<pre><code class="lang-csv">trial_id,run_timestamp,repo_id,task_id,system_name,model_name,model_version,commit_sha,task_category,task_complexity,task_success,defect_count,citations_total,citations_valid,citation_valid_rate,retrieved_items,relevant_items,relevant_retrieved_at_k,k,precision_at_k,recall_at_k,injected_tokens,prompt_tokens_total,completion_tokens_total,token_overhead_ratio,latency_ms_p50,latency_ms_p95,stale_memory_incidents,manual_interventions,setup_minutes,maintenance_minutes_weekly,notes
+</code></pre>
+<div class="spacer"></div>
+<div class="spacer"></div>
+
+    </article>
+  </div>
+</body>
+</html>
