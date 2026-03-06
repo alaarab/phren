@@ -1,7 +1,38 @@
-import { findCortexPath, buildIndex, extractSnippet, queryRows, detectProject, addLearningToFile, checkConsolidationNeeded, debugLog } from "./shared.js";
+import {
+  findCortexPath,
+  buildIndex,
+  extractSnippet,
+  queryRows,
+  detectProject,
+  addLearningToFile,
+  checkConsolidationNeeded,
+  debugLog,
+  filterTrustedLearningsDetailed,
+  appendMemoryQueue,
+  appendAuditLog,
+  upsertCanonicalMemory,
+  getProjectDirs,
+  getMemoryPolicy,
+  getMemoryWorkflowPolicy,
+  updateMemoryPolicy,
+  updateMemoryWorkflowPolicy,
+  getAccessControl,
+  updateAccessControl,
+  recordMemoryInjection,
+  recordMemoryFeedback,
+  getMemoryQualityMultiplier,
+  memoryScoreKey,
+  pruneDeadMemories,
+  consolidateProjectLearnings,
+  enforceCanonicalLocks,
+} from "./shared.js";
 import { sanitizeFts5Query, expandSynonyms, extractKeywords } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
+import { execFileSync, execSync, spawn } from "child_process";
+import { fileURLToPath } from "url";
+import { runDoctor } from "./link.js";
+import { startMemoryUi } from "./memory-ui.js";
 
 const cortexPath = findCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
@@ -16,9 +47,326 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleHookContext();
     case "add-learning":
       return handleAddLearning(args[0], args.slice(1).join(" "));
+    case "extract-memories":
+      return handleExtractMemories(args[0]);
+    case "govern-memories":
+      return handleGovernMemories(args[0]);
+    case "pin-memory":
+      return handlePinMemory(args[0], args.slice(1).join(" "));
+    case "doctor":
+      return handleDoctor(args);
+    case "quality-feedback":
+      return handleQualityFeedback(args);
+    case "prune-memories":
+      return handlePruneMemories(args[0]);
+    case "consolidate-memories":
+      return handleConsolidateMemories(args[0]);
+    case "memory-policy":
+      return handleMemoryPolicy(args);
+    case "memory-workflow":
+      return handleMemoryWorkflow(args);
+    case "memory-access":
+      return handleMemoryAccess(args);
+    case "memory-ui":
+      return handleMemoryUi(args);
+    case "background-maintenance":
+      return handleBackgroundMaintenance(args[0]);
     default:
       console.error(`Unknown command: ${command}`);
       process.exit(1);
+  }
+}
+
+interface GitContext {
+  branch: string;
+  changedFiles: Set<string>;
+}
+
+function runGit(cwd: string, cmd: string): string | null {
+  try {
+    return execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function commandExists(cmd: string): boolean {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runGhJson<T>(cwd: string, args: string[]): T | null {
+  if (!commandExists("gh")) return null;
+  try {
+    const out = execFileSync("gh", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!out) return null;
+    return JSON.parse(out) as T;
+  } catch {
+    return null;
+  }
+}
+
+function getGitContext(cwd?: string): GitContext | null {
+  if (!cwd) return null;
+  const branch = runGit(cwd, "git rev-parse --abbrev-ref HEAD");
+  if (!branch) return null;
+  const changedFiles = new Set<string>();
+  for (const changed of [
+    runGit(cwd, "git diff --name-only"),
+    runGit(cwd, "git diff --name-only --cached"),
+  ]) {
+    if (!changed) continue;
+    for (const line of changed.split("\n").map((s) => s.trim()).filter(Boolean)) {
+      changedFiles.add(line);
+      const basename = path.basename(line);
+      if (basename) changedFiles.add(basename);
+    }
+  }
+  return { branch, changedFiles };
+}
+
+function branchTokens(branch: string): string[] {
+  return branch
+    .split(/[\/._-]/g)
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 2 && !["main", "master", "feature", "fix", "bugfix", "hotfix"].includes(s));
+}
+
+function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "general" {
+  const p = prompt.toLowerCase();
+  if (/(bug|error|fix|broken|regression|fail|stack trace)/.test(p)) return "debug";
+  if (/(review|audit|pr|pull request|nit|refactor)/.test(p)) return "review";
+  if (/(build|deploy|release|ci|workflow|pipeline|test)/.test(p)) return "build";
+  if (/(doc|readme|explain|guide|instruction)/.test(p)) return "docs";
+  return "general";
+}
+
+function intentBoost(intent: string, docType: string): number {
+  if (intent === "debug" && (docType === "learnings" || docType === "knowledge")) return 3;
+  if (intent === "review" && (docType === "canonical" || docType === "changelog")) return 3;
+  if (intent === "build" && (docType === "backlog" || docType === "knowledge")) return 2;
+  if (intent === "docs" && (docType === "summary" || docType === "claude")) return 2;
+  if (docType === "canonical") return 2;
+  return 0;
+}
+
+function fileRelevanceBoost(filePath: string, changedFiles: Set<string>): number {
+  if (changedFiles.size === 0) return 0;
+  const normalized = filePath.replace(/\\/g, "/");
+  for (const cf of changedFiles) {
+    const n = cf.replace(/\\/g, "/");
+    if (normalized.endsWith(n) || normalized.includes(`/${n}`)) return 3;
+  }
+  return 0;
+}
+
+function branchMatchBoost(content: string, branch: string | undefined): number {
+  if (!branch) return 0;
+  const text = content.toLowerCase();
+  const tokens = branchTokens(branch);
+  let score = 0;
+  for (const t of tokens) {
+    if (text.includes(t)) score += 1;
+  }
+  return Math.min(3, score);
+}
+
+function lowValuePenalty(content: string, docType: string): number {
+  if (docType !== "learnings") return 0;
+  const bullets = content.split("\n").filter((l) => l.startsWith("- "));
+  if (bullets.length === 0) return 0;
+  const low = bullets.filter((b) => /(fixed stuff|updated things|misc|temp|wip)/i.test(b) || b.length < 16).length;
+  return low >= Math.ceil(bullets.length * 0.5) ? 2 : 0;
+}
+
+const RETRIEVAL_STOP_WORDS = new Set([
+  "the", "is", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+  "with", "by", "from", "it", "this", "that", "are", "was", "were", "be", "been",
+  "being", "have", "has", "had", "do", "does", "did", "will", "would", "could",
+  "should", "may", "might", "can", "shall", "not", "no", "if", "then", "than",
+  "too", "very", "just", "about", "your", "our", "they", "them", "their", "what",
+  "which", "who", "when", "where", "how", "why", "use", "using", "used", "need",
+  "want", "look", "help", "please",
+]);
+
+function normalizeToken(token: string): string {
+  let t = token.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  if (t.length > 4 && t.endsWith("ing")) t = t.slice(0, -3);
+  else if (t.length > 3 && t.endsWith("ed")) t = t.slice(0, -2);
+  else if (t.length > 3 && t.endsWith("es")) t = t.slice(0, -2);
+  else if (t.length > 2 && t.endsWith("s")) t = t.slice(0, -1);
+  return t;
+}
+
+function tokenizeForOverlap(text: string): string[] {
+  const tokens = text
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-\s]/g, " ")
+    .split(/\s+/)
+    .map(normalizeToken)
+    .filter((t) => t.length > 1 && !RETRIEVAL_STOP_WORDS.has(t));
+  return [...new Set(tokens)].slice(0, 24);
+}
+
+function overlapScore(queryTokens: string[], content: string): number {
+  if (!queryTokens.length) return 0;
+  const contentTokens = new Set(tokenizeForOverlap(content));
+  if (!contentTokens.size) return 0;
+  let matched = 0;
+  for (const t of queryTokens) {
+    if (contentTokens.has(t)) matched += 1;
+  }
+  return matched / Math.max(1, Math.min(queryTokens.length, 10));
+}
+
+function mergeUniqueRows(primary: any[][] | null, secondary: any[][]): any[][] | null {
+  if (!primary || !primary.length) return secondary.length ? secondary : null;
+  const seen = new Set(primary.map((r) => String((r as string[])[4] || `${(r as string[])[0]}/${(r as string[])[1]}`)));
+  for (const row of secondary) {
+    const key = String((row as string[])[4] || `${(row as string[])[0]}/${(row as string[])[1]}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    primary.push(row);
+  }
+  return primary;
+}
+
+function semanticFallbackRows(db: any, prompt: string, project?: string | null): any[][] {
+  const queryTokens = tokenizeForOverlap(prompt);
+  if (!queryTokens.length) return [];
+  const sampleLimit = project ? 180 : 260;
+  const rows = project
+    ? queryRows(
+      db,
+      "SELECT project, filename, type, content, path FROM docs WHERE project = ? LIMIT ?",
+      [project, sampleLimit]
+    ) || []
+    : queryRows(
+      db,
+      "SELECT project, filename, type, content, path FROM docs LIMIT ?",
+      [sampleLimit]
+    ) || [];
+
+  const scored = rows
+    .map((row) => {
+      const [proj, file, docType, content, filePath] = row as string[];
+      const corpus = `${proj} ${file} ${docType} ${filePath}\n${content.slice(0, 5000)}`;
+      const score = overlapScore(queryTokens, corpus);
+      return { row, score };
+    })
+    .filter((x) => x.score >= 0.15)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((x) => x.row);
+
+  return scored;
+}
+
+function approximateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+function compactSnippet(snippet: string, maxLines: number, maxChars: number): string {
+  const lines = snippet
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim().length > 0)
+    .slice(0, Math.max(1, maxLines));
+  let out = lines.join("\n");
+  if (out.length > maxChars) out = out.slice(0, Math.max(24, maxChars - 1)).trimEnd() + "…";
+  return out;
+}
+
+interface SessionMetric {
+  prompts: number;
+  keys: Record<string, number>;
+  lastChangedCount: number;
+  lastKeys: string[];
+}
+
+function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMetric> {
+  const file = path.join(cortexPathLocal, ".governance", "session-metrics.json");
+  if (!fs.existsSync(file)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, SessionMetric>;
+  } catch {
+    return {};
+  }
+}
+
+function writeSessionMetrics(cortexPathLocal: string, data: Record<string, SessionMetric>) {
+  const file = path.join(cortexPathLocal, ".governance", "session-metrics.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+}
+
+function qualityMarkers(cortexPathLocal: string): { done: string; lock: string } {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    done: path.join(cortexPathLocal, `.quality-${today}`),
+    lock: path.join(cortexPathLocal, `.quality-${today}.lock`),
+  };
+}
+
+function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string): boolean {
+  const markers = qualityMarkers(cortexPathLocal);
+  if (fs.existsSync(markers.done)) return false;
+  if (fs.existsSync(markers.lock)) {
+    try {
+      const ageMs = Date.now() - fs.statSync(markers.lock).mtimeMs;
+      if (ageMs <= 2 * 60 * 60 * 1000) return false;
+      fs.unlinkSync(markers.lock);
+    } catch {
+      return false;
+    }
+  }
+
+  const distEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+  let spawnArgs: string[] | null = null;
+  if (fs.existsSync(distEntry)) {
+    spawnArgs = [distEntry, "background-maintenance"];
+  } else {
+    const sourceEntry = process.argv.find((a) => /[\\/]index\.(ts|js)$/.test(a) && fs.existsSync(a));
+    const runner = process.argv[1];
+    if (sourceEntry && runner) {
+      spawnArgs = [runner, sourceEntry, "background-maintenance"];
+    }
+  }
+  if (!spawnArgs) return false;
+
+  try {
+    fs.writeFileSync(
+      markers.lock,
+      JSON.stringify({
+        startedAt: new Date().toISOString(),
+        project: project || "all",
+        pid: process.pid,
+      }) + "\n"
+    );
+    if (project) spawnArgs.push(project);
+    const child = spawn(process.execPath, spawnArgs, {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        CORTEX_PATH: cortexPathLocal,
+        CORTEX_PROFILE: profile,
+      },
+    });
+    child.unref();
+    return true;
+  } catch {
+    try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
+    return false;
   }
 }
 
@@ -87,6 +435,8 @@ async function handleHookPrompt() {
   debugLog(`hook-prompt keywords: "${keywords}"`);
 
   const db = await buildIndex(cortexPath, profile);
+  const gitCtx = getGitContext(cwd);
+  const intent = detectTaskIntent(prompt);
 
   // Detect project from cwd to boost relevant results
   const detectedProject = cwd ? detectProject(cortexPath, cwd, profile) : null;
@@ -102,21 +452,98 @@ async function handleHookPrompt() {
     if (detectedProject) {
       rows = queryRows(
         db,
-        "SELECT project, filename, type, content FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 5",
+        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 7",
         [safeQuery, detectedProject]
       );
     }
 
-    // Fall back to global search if no project-specific results
-    if (!rows) {
-      rows = queryRows(
+    // Fall back to global search if no project-specific results or we got too few.
+    if (!rows || rows.length < 3) {
+      const globalRows = queryRows(
         db,
-        "SELECT project, filename, type, content FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 5",
+        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10",
         [safeQuery]
       );
+      rows = mergeUniqueRows(rows, globalRows || []);
     }
 
-    if (!rows) process.exit(0);
+    // Fallback: overlap-based retrieval when FTS misses paraphrases.
+    if (!rows || rows.length < 2) {
+      const semanticRows = semanticFallbackRows(db, `${prompt}\n${keywords}`, detectedProject);
+      rows = mergeUniqueRows(rows, semanticRows);
+    }
+
+    if (!rows || !rows.length) process.exit(0);
+
+    const policy = getMemoryPolicy(cortexPath);
+    const memoryTtlDays = Number.parseInt(
+      process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays),
+      10
+    );
+    rows = rows.map((row) => {
+      const [project, filename, docType, content, filePath] = row as string[];
+      if (docType !== "learnings") return row;
+      const trust = filterTrustedLearningsDetailed(content, {
+        ttlDays: Number.isNaN(memoryTtlDays) ? policy.ttlDays : memoryTtlDays,
+        minConfidence: policy.minInjectConfidence,
+        decay: policy.decay,
+      });
+      if (trust.issues.length > 0) {
+        const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
+        const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);
+        if (stale.length) appendMemoryQueue(cortexPath, project, "Stale", stale);
+        if (conflicts.length) appendMemoryQueue(cortexPath, project, "Conflicts", conflicts);
+        appendAuditLog(
+          cortexPath,
+          "trust_filter",
+          `project=${project} stale=${stale.length} invalid_citation=${conflicts.length}`
+        );
+      }
+      const trusted = trust.content;
+      return [project, filename, docType, trusted, filePath];
+    }).filter((row) => {
+      const [, , docType, content] = row as string[];
+      return docType !== "learnings" || Boolean((content as string).trim());
+    });
+
+    if (!rows.length) process.exit(0);
+
+    // Keep retrieval branch/project-local whenever possible.
+    if (detectedProject) {
+      const localByType = new Set(
+        rows
+          .filter((r) => (r as string[])[0] === detectedProject)
+          .map((r) => (r as string[])[2])
+      );
+      rows = rows.filter((r) => {
+        const [project, , type] = r as string[];
+        if (project === detectedProject) return true;
+        return !localByType.has(type);
+      });
+    }
+
+    // Bring canonical memories from detected project into ranking pool.
+    if (detectedProject) {
+      const canonicalRows = queryRows(
+        db,
+        "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND type = 'canonical' LIMIT 1",
+        [detectedProject]
+      );
+      if (canonicalRows) rows = [...canonicalRows, ...rows];
+    }
+
+    // Automatic extraction from PR/review/CI/issues once per session+project.
+    if (sessionId && detectedProject && cwd) {
+      const marker = path.join(cortexPath, `.extracted-${sessionId}-${detectedProject}`);
+      if (!fs.existsSync(marker)) {
+        try {
+          await handleExtractMemories(detectedProject, cwd, true);
+          fs.writeFileSync(marker, "");
+        } catch {
+          // best effort
+        }
+      }
+    }
 
     // Recency boost: for learnings rows, extract the most recent date header and sort newer first.
     // Non-learnings rows keep their FTS5 rank order at the front.
@@ -127,35 +554,131 @@ async function handleHookPrompt() {
     }
 
     rows = [...rows].sort((a, b) => {
-      const [, , typeA, contentA] = a as string[];
-      const [, , typeB, contentB] = b as string[];
+      const [, , typeA, contentA, pathA] = a as string[];
+      const [, , typeB, contentB, pathB] = b as string[];
       const isLearningsA = typeA === "learnings";
       const isLearningsB = typeB === "learnings";
       // Non-learnings rank above learnings when scores are equal
       if (isLearningsA !== isLearningsB) return isLearningsA ? 1 : -1;
       // Both learnings: sort by most recent date descending
       if (isLearningsA && isLearningsB) {
-        return mostRecentDate(contentB).localeCompare(mostRecentDate(contentA));
+        const byDate = mostRecentDate(contentB).localeCompare(mostRecentDate(contentA));
+        if (byDate !== 0) return byDate;
       }
-      return 0; // Preserve FTS5 rank order for non-learnings
+
+      const intentDelta = intentBoost(intent, typeB) - intentBoost(intent, typeA);
+      if (intentDelta !== 0) return intentDelta;
+
+      const changedFiles = gitCtx?.changedFiles || new Set<string>();
+      const fileDelta = fileRelevanceBoost(pathB, changedFiles) - fileRelevanceBoost(pathA, changedFiles);
+      if (fileDelta !== 0) return fileDelta;
+
+      const branchDelta = branchMatchBoost(contentB, gitCtx?.branch) - branchMatchBoost(contentA, gitCtx?.branch);
+      if (branchDelta !== 0) return branchDelta;
+
+      const keyA = memoryScoreKey((a as string[])[0], (a as string[])[1], contentA);
+      const keyB = memoryScoreKey((b as string[])[0], (b as string[])[1], contentB);
+      const qualityDelta = getMemoryQualityMultiplier(cortexPath, keyB) - getMemoryQualityMultiplier(cortexPath, keyA);
+      if (qualityDelta !== 0) return qualityDelta;
+
+      const penaltyDelta = lowValuePenalty(contentA, typeA) - lowValuePenalty(contentB, typeB);
+      if (penaltyDelta !== 0) return penaltyDelta;
+
+      return 0;
     });
 
-    // Show top 3 after recency sort
-    rows = rows.slice(0, 3);
+    // Keep a wider candidate set before applying token-budget selection.
+    rows = rows.slice(0, 8);
+
+    // If we have changed files, drop unrelated rows except high-priority docs.
+    if (gitCtx && gitCtx.changedFiles.size > 0) {
+      rows = rows.filter((r) => {
+        const [, , type, , file] = r as string[];
+        if (["summary", "canonical", "backlog", "claude"].includes(type)) return true;
+        return fileRelevanceBoost(file, gitCtx.changedFiles) > 0 || branchMatchBoost((r as string[])[3], gitCtx.branch) > 0;
+      });
+      if (!rows.length) process.exit(0);
+    }
+
+    const tokenBudget = Number.parseInt(process.env.CORTEX_CONTEXT_TOKEN_BUDGET || "550", 10);
+    const snippetLineBudget = Number.parseInt(process.env.CORTEX_CONTEXT_SNIPPET_LINES || "6", 10);
+    const snippetCharBudget = Number.parseInt(process.env.CORTEX_CONTEXT_SNIPPET_CHARS || "520", 10);
+    const safeTokenBudget = Number.isNaN(tokenBudget) ? 550 : Math.max(180, tokenBudget);
+    const safeLineBudget = Number.isNaN(snippetLineBudget) ? 6 : Math.max(2, snippetLineBudget);
+    const safeCharBudget = Number.isNaN(snippetCharBudget) ? 520 : Math.max(120, snippetCharBudget);
+
+    const selected: Array<{ row: any[]; snippet: string; key: string }> = [];
+    let usedTokens = 36; // status and wrapper overhead
+    for (const row of rows) {
+      const [project, filename, , content] = row as string[];
+      let snippet = compactSnippet(extractSnippet(content, keywords, 8), safeLineBudget, safeCharBudget);
+      if (!snippet.trim()) continue;
+      let est = approximateTokens(snippet) + 14;
+      if (selected.length > 0 && usedTokens + est > safeTokenBudget) continue;
+      if (selected.length === 0 && usedTokens + est > safeTokenBudget) {
+        snippet = compactSnippet(snippet, 3, Math.floor(safeCharBudget * 0.55));
+        est = approximateTokens(snippet) + 14;
+      }
+      const key = memoryScoreKey(project, filename, snippet);
+      selected.push({ row, snippet, key });
+      usedTokens += est;
+      if (selected.length >= 3) break;
+    }
+    if (!selected.length) process.exit(0);
 
     const projectLabel = detectedProject ? ` · ${detectedProject}` : "";
-    const resultLabel = rows.length === 1 ? "1 result" : `${rows.length} results`;
+    const resultLabel = selected.length === 1 ? "1 result" : `${selected.length} results`;
     const statusLine = `◆ cortex${projectLabel} · ${resultLabel}`;
 
     const parts: string[] = [statusLine, "<cortex-context>"];
-    for (const row of rows) {
-      const [project, filename, docType, content] = row as string[];
-      const snippet = extractSnippet(content, keywords, 8);
+    for (const injected of selected) {
+      const [project, filename, docType] = injected.row as string[];
+      const { snippet, key } = injected;
+      recordMemoryInjection(cortexPath, key, sessionId);
       parts.push(`[${project}/${filename}] (${docType})`);
       parts.push(snippet);
       parts.push("");
     }
     parts.push("</cortex-context>");
+    if (gitCtx) {
+      const changedCount = gitCtx.changedFiles.size;
+      const fileHits = selected.filter((r) => fileRelevanceBoost((r.row as string[])[4], gitCtx.changedFiles) > 0).length;
+      const branchHits = selected.filter((r) => branchMatchBoost((r.row as string[])[3], gitCtx.branch) > 0).length;
+      parts.push(
+        `◆ cortex · trace: intent=${intent}; reasons=file:${fileHits},branch:${branchHits}; branch=${gitCtx.branch}; changed_files=${changedCount}; tokens≈${usedTokens}/${safeTokenBudget}`
+      );
+    } else {
+      parts.push(`◆ cortex · trace: intent=${intent}; reasons=intent-only; tokens≈${usedTokens}/${safeTokenBudget}`);
+    }
+
+    if (sessionId) {
+      const metrics = parseSessionMetrics(cortexPath);
+      if (!metrics[sessionId]) metrics[sessionId] = { prompts: 0, keys: {}, lastChangedCount: 0, lastKeys: [] };
+      metrics[sessionId].prompts += 1;
+      const injectedKeys: string[] = [];
+      for (const injected of selected) {
+        injectedKeys.push(injected.key);
+        const key = injected.key;
+        const seen = metrics[sessionId].keys[key] || 0;
+        metrics[sessionId].keys[key] = seen + 1;
+        if (seen >= 1) recordMemoryFeedback(cortexPath, key, "reprompt");
+      }
+
+      const changedCount = gitCtx?.changedFiles.size ?? 0;
+      const prevChanged = metrics[sessionId].lastChangedCount || 0;
+      const prevKeys = metrics[sessionId].lastKeys || [];
+      if (changedCount > prevChanged) {
+        for (const prevKey of prevKeys) {
+          recordMemoryFeedback(cortexPath, prevKey, "helpful");
+        }
+      }
+      metrics[sessionId].lastChangedCount = changedCount;
+      metrics[sessionId].lastKeys = injectedKeys;
+      writeSessionMetrics(cortexPath, metrics);
+    }
+
+    // Periodic quality maintenance (once/day) runs in detached background mode.
+    scheduleBackgroundMaintenance(cortexPath);
 
     // Check for consolidation needs once per session
     const noticeFile = sessionId ? path.join(cortexPath, `.noticed-${sessionId}`) : null;
@@ -279,4 +802,419 @@ async function handleAddLearning(project: string, learning: string) {
 
   const result = addLearningToFile(cortexPath, project, learning);
   console.log(result);
+}
+
+function inferProject(arg?: string): string | null {
+  if (arg) return arg;
+  return detectProject(cortexPath, process.cwd(), profile);
+}
+
+function parseGitLogRecords(cwd: string, days: number): Array<{ hash: string; subject: string; body: string }> {
+  const fmt = "%H%x1f%s%x1f%b%x1e";
+  const raw = runGit(cwd, `git log --since="${days} days ago" --first-parent --pretty=format:${fmt}`) || "";
+  const records: Array<{ hash: string; subject: string; body: string }> = [];
+  for (const rec of raw.split("\x1e")) {
+    const trimmed = rec.trim();
+    if (!trimmed) continue;
+    const [hash, subject, body] = trimmed.split("\x1f");
+    if (!hash || !subject) continue;
+    records.push({ hash, subject, body: body || "" });
+  }
+  return records;
+}
+
+interface GhPr {
+  number: number;
+  title: string;
+  body?: string;
+  mergeCommit?: { oid?: string };
+  files?: Array<{ path?: string }>;
+  comments?: Array<{ body?: string }>;
+  reviews?: Array<{ body?: string; state?: string }>;
+}
+
+interface GhRun {
+  databaseId?: number;
+  displayTitle?: string;
+  workflowName?: string;
+  headSha?: string;
+}
+
+interface GhIssue {
+  number: number;
+  title: string;
+  body?: string;
+}
+
+interface Candidate {
+  text: string;
+  score: number;
+  commit?: string;
+  file?: string;
+}
+
+function mineGithubCandidates(repoRoot: string): Candidate[] {
+  const candidates: Candidate[] = [];
+
+  const prs = runGhJson<GhPr[]>(repoRoot, [
+    "pr",
+    "list",
+    "--state",
+    "merged",
+    "--limit",
+    "40",
+    "--json",
+    "number,title,body,mergeCommit,files,comments,reviews",
+  ]) || [];
+  for (const pr of prs) {
+    const text = `PR #${pr.number}: ${pr.title}`;
+    const body = (pr.body || "").toLowerCase();
+    const commentBlob = [
+      ...(pr.comments || []).map((c) => c.body || ""),
+      ...(pr.reviews || []).map((r) => r.body || ""),
+    ].join("\n").toLowerCase();
+    let score = 0.65;
+    if (/(fix|workaround|must|avoid|regression|incident|root cause|migration)/.test(body)) score += 0.2;
+    if (/(review|comment|nit|requested changes)/.test(body + "\n" + commentBlob)) score += 0.1;
+    if (/(must|should|avoid|required|don't|do not)/.test(commentBlob)) score += 0.08;
+    candidates.push({
+      text,
+      score: Math.min(0.98, score),
+      commit: pr.mergeCommit?.oid,
+      file: pr.files?.find((f) => f.path)?.path,
+    });
+  }
+
+  const runs = runGhJson<GhRun[]>(repoRoot, [
+    "run",
+    "list",
+    "--status",
+    "failure",
+    "--limit",
+    "25",
+    "--json",
+    "databaseId,displayTitle,workflowName,headSha",
+  ]) || [];
+  for (const run of runs) {
+    const title = run.displayTitle || run.workflowName || "CI failure";
+    const text = `CI failure pattern: ${title}`;
+    candidates.push({
+      text,
+      score: 0.62,
+      commit: run.headSha,
+    });
+  }
+
+  const issues = runGhJson<GhIssue[]>(repoRoot, [
+    "issue",
+    "list",
+    "--state",
+    "all",
+    "--limit",
+    "25",
+    "--json",
+    "number,title,body",
+  ]) || [];
+  for (const issue of issues) {
+    const body = (issue.body || "").toLowerCase();
+    if (!/(bug|regression|incident|outage|postmortem|fix)/.test(body) && !/(bug|regression|incident)/.test(issue.title.toLowerCase())) {
+      continue;
+    }
+    const text = `Issue #${issue.number}: ${issue.title}`;
+    let issueScore = 0.58;
+    const comments = runGhJson<Array<{ body?: string }>>(
+      repoRoot,
+      ["issue", "view", String(issue.number), "--json", "comments"]
+    ) as any;
+    if (comments && Array.isArray((comments as any).comments)) {
+      const blob = (comments as any).comments.map((c: any) => c.body || "").join("\n").toLowerCase();
+      if (/(workaround|root cause|regression|postmortem|must|avoid)/.test(blob)) issueScore += 0.1;
+    }
+    candidates.push({ text, score: Math.min(0.9, issueScore) });
+  }
+
+  return candidates;
+}
+
+function scoreMemoryCandidate(subject: string, body: string): { score: number; text: string } | null {
+  const s = `${subject}\n${body}`.toLowerCase();
+  const mergedPr = /merge pull request #\d+/.test(s);
+  const ci = /(ci|workflow|pipeline|flake|test fail|build fail)/.test(s);
+  const review = /(review|requested changes|address comments|nit|follow-up)/.test(s);
+  const learningSignal = /(fix|workaround|must|avoid|regression|root cause|postmortem|incident|retry|timeout)/.test(s);
+
+  let score = 0.35;
+  if (mergedPr) score += 0.2;
+  if (ci) score += 0.2;
+  if (review) score += 0.1;
+  if (learningSignal) score += 0.25;
+  if (subject.length > 20) score += 0.05;
+  if (score < 0.5) return null;
+
+  const cleaned = subject
+    .replace(/^merge pull request #\d+\s*from\s+\S+\s*/i, "")
+    .replace(/^fix:\s*/i, "")
+    .trim();
+  const text = cleaned ? cleaned[0].toUpperCase() + cleaned.slice(1) : subject;
+  return { score: Math.min(score, 0.99), text };
+}
+
+async function handleExtractMemories(projectArg?: string, cwdArg?: string, silent: boolean = false) {
+  const project = inferProject(projectArg);
+  if (!project) {
+    if (!silent) console.error("Usage: cortex extract-memories <project>");
+    if (!silent) process.exit(1);
+    return;
+  }
+
+  const repoRoot = runGit(cwdArg || process.cwd(), "git rev-parse --show-toplevel");
+  if (!repoRoot) {
+    if (!silent) console.error("extract-memories must run from inside a git repository.");
+    if (!silent) process.exit(1);
+    return;
+  }
+
+  const days = Number.parseInt(process.env.CORTEX_MEMORY_EXTRACT_WINDOW_DAYS || "30", 10);
+  const threshold = Number.parseFloat(process.env.CORTEX_MEMORY_AUTO_ACCEPT || String(getMemoryPolicy(cortexPath).autoAcceptThreshold));
+  const records = parseGitLogRecords(repoRoot, Number.isNaN(days) ? 30 : days);
+  const ghCandidates = mineGithubCandidates(repoRoot);
+
+  let accepted = 0;
+  let queued = 0;
+  for (const rec of records) {
+    const candidate = scoreMemoryCandidate(rec.subject, rec.body);
+    if (!candidate) continue;
+    const line = `${candidate.text} (source commit ${rec.hash.slice(0, 8)})`;
+    if (candidate.score >= threshold) {
+      addLearningToFile(cortexPath, project, line, {
+        repo: repoRoot,
+        commit: rec.hash,
+      });
+      accepted++;
+    } else {
+      queued += appendMemoryQueue(cortexPath, project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
+    }
+  }
+
+  for (const c of ghCandidates) {
+    const line = `${c.text}${c.commit ? ` (source commit ${c.commit.slice(0, 8)})` : ""}`;
+    if (c.text.startsWith("CI failure pattern:")) {
+      const key = memoryScoreKey(project, "LEARNINGS.md", line);
+      recordMemoryFeedback(cortexPath, key, "regression");
+    }
+    if (c.score >= threshold) {
+      addLearningToFile(cortexPath, project, line, {
+        repo: repoRoot,
+        commit: c.commit,
+        file: c.file,
+      });
+      accepted++;
+    } else {
+      queued += appendMemoryQueue(cortexPath, project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
+    }
+  }
+
+  appendAuditLog(cortexPath, "extract_memories", `project=${project} accepted=${accepted} queued=${queued} window_days=${days}`);
+  if (!silent) console.log(`Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, window=${days}d`);
+}
+
+async function handleGovernMemories(projectArg?: string, silent: boolean = false) {
+  const policy = getMemoryPolicy(cortexPath);
+  const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
+  const projects = projectArg
+    ? [projectArg]
+    : getProjectDirs(cortexPath, profile).map((p) => path.basename(p)).filter((p) => p !== "global");
+
+  let staleCount = 0;
+  let conflictCount = 0;
+  let reviewCount = 0;
+
+  for (const project of projects) {
+    const learningsPath = path.join(cortexPath, project, "LEARNINGS.md");
+    if (!fs.existsSync(learningsPath)) continue;
+    const content = fs.readFileSync(learningsPath, "utf8");
+    const trust = filterTrustedLearningsDetailed(content, {
+      ttlDays: Number.isNaN(ttlDays) ? policy.ttlDays : ttlDays,
+      minConfidence: policy.minInjectConfidence,
+      decay: policy.decay,
+    });
+
+    const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
+    const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);
+    staleCount += appendMemoryQueue(cortexPath, project, "Stale", stale);
+    conflictCount += appendMemoryQueue(cortexPath, project, "Conflicts", conflicts);
+
+    const lowValue = content.split("\n")
+      .filter((l) => l.startsWith("- "))
+      .filter((l) => /(fixed stuff|updated things|misc|temp|wip|quick note)/i.test(l) || l.length < 16);
+    reviewCount += appendMemoryQueue(cortexPath, project, "Review", lowValue);
+  }
+
+  appendAuditLog(
+    cortexPath,
+    "govern_memories",
+    `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
+  );
+  for (const project of projects) {
+    consolidateProjectLearnings(cortexPath, project);
+  }
+  enforceCanonicalLocks(cortexPath, projectArg);
+  if (!silent) console.log(`Governed memories: stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`);
+}
+
+async function handlePinMemory(project: string, memory: string) {
+  if (!project || !memory) {
+    console.error('Usage: cortex pin-memory <project> "<memory>"');
+    process.exit(1);
+  }
+  const result = upsertCanonicalMemory(cortexPath, project, memory);
+  console.log(result);
+}
+
+async function handleDoctor(args: string[]) {
+  const fix = args.includes("--fix");
+  const result = await runDoctor(cortexPath, fix);
+  console.log(`cortex doctor: ${result.ok ? "ok" : "issues found"}`);
+  if (result.machine) console.log(`machine: ${result.machine}`);
+  if (result.profile) console.log(`profile: ${result.profile}`);
+  for (const check of result.checks) {
+    console.log(`- ${check.ok ? "ok" : "fail"} ${check.name}: ${check.detail}`);
+  }
+  process.exit(result.ok ? 0 : 1);
+}
+
+async function handleQualityFeedback(args: string[]) {
+  const key = args.find((a) => a.startsWith("--key="))?.slice("--key=".length);
+  const feedback = args.find((a) => a.startsWith("--type="))?.slice("--type=".length) as "helpful" | "reprompt" | "regression" | undefined;
+  if (!key || !feedback || !["helpful", "reprompt", "regression"].includes(feedback)) {
+    console.error("Usage: cortex quality-feedback --key=<memory-key> --type=helpful|reprompt|regression");
+    process.exit(1);
+  }
+  recordMemoryFeedback(cortexPath, key, feedback);
+  console.log(`Recorded feedback: ${feedback} for ${key}`);
+}
+
+async function handlePruneMemories(projectArg?: string) {
+  const result = pruneDeadMemories(cortexPath, projectArg);
+  console.log(result);
+}
+
+async function handleConsolidateMemories(projectArg?: string) {
+  const projects = projectArg
+    ? [projectArg]
+    : getProjectDirs(cortexPath, profile).map((p) => path.basename(p)).filter((p) => p !== "global");
+  const results = projects.map((p) => consolidateProjectLearnings(cortexPath, p));
+  console.log(results.join("\n"));
+}
+
+async function handleMemoryPolicy(args: string[]) {
+  if (!args.length || args[0] === "get") {
+    console.log(JSON.stringify(getMemoryPolicy(cortexPath), null, 2));
+    return;
+  }
+  if (args[0] === "set") {
+    const patch: any = {};
+    for (const arg of args.slice(1)) {
+      if (!arg.startsWith("--")) continue;
+      const [k, v] = arg.slice(2).split("=");
+      if (!k || v === undefined) continue;
+      const num = Number(v);
+      const value = Number.isNaN(num) ? v : num;
+      if (k.startsWith("decay.")) {
+        patch.decay = patch.decay || {};
+        patch.decay[k.slice("decay.".length)] = value;
+      } else {
+        patch[k] = value;
+      }
+    }
+    const result = updateMemoryPolicy(cortexPath, patch);
+    if (typeof result === "string") {
+      console.log(result);
+      if (result.startsWith("Permission denied")) process.exit(1);
+      return;
+    }
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.error("Usage: cortex memory-policy [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45]");
+  process.exit(1);
+}
+
+async function handleMemoryWorkflow(args: string[]) {
+  if (!args.length || args[0] === "get") {
+    console.log(JSON.stringify(getMemoryWorkflowPolicy(cortexPath), null, 2));
+    return;
+  }
+  if (args[0] === "set") {
+    const patch: any = {};
+    for (const arg of args.slice(1)) {
+      if (!arg.startsWith("--")) continue;
+      const [k, v] = arg.slice(2).split("=");
+      if (!k || v === undefined) continue;
+      if (k === "requireMaintainerApproval") {
+        patch.requireMaintainerApproval = /^(1|true|yes|on)$/i.test(v);
+      } else if (k === "riskySections") {
+        patch.riskySections = v.split(",").map((s) => s.trim()).filter(Boolean);
+      } else {
+        const num = Number(v);
+        patch[k] = Number.isNaN(num) ? v : num;
+      }
+    }
+    const result = updateMemoryWorkflowPolicy(cortexPath, patch);
+    if (typeof result === "string") {
+      console.log(result);
+      if (result.startsWith("Permission denied")) process.exit(1);
+      return;
+    }
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.error("Usage: cortex memory-workflow [get|set --requireMaintainerApproval=true --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts]");
+  process.exit(1);
+}
+
+async function handleMemoryAccess(args: string[]) {
+  if (!args.length || args[0] === "get") {
+    console.log(JSON.stringify(getAccessControl(cortexPath), null, 2));
+    return;
+  }
+  if (args[0] === "set") {
+    const patch: any = {};
+    for (const arg of args.slice(1)) {
+      if (!arg.startsWith("--")) continue;
+      const [k, v] = arg.slice(2).split("=");
+      if (!k || v === undefined) continue;
+      patch[k] = v.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    const result = updateAccessControl(cortexPath, patch);
+    if (typeof result === "string") {
+      console.log(result);
+      if (result.startsWith("Permission denied")) process.exit(1);
+      return;
+    }
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.error("Usage: cortex memory-access [get|set --admins=u1,u2 --maintainers=u3 --contributors=u4 --viewers=u5]");
+  process.exit(1);
+}
+
+async function handleMemoryUi(args: string[]) {
+  const portArg = args.find((a) => a.startsWith("--port="));
+  const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
+  const safePort = Number.isNaN(port) ? 3499 : port;
+  await startMemoryUi(cortexPath, safePort);
+}
+
+async function handleBackgroundMaintenance(projectArg?: string) {
+  const markers = qualityMarkers(cortexPath);
+  try {
+    await handleGovernMemories(projectArg, true);
+    pruneDeadMemories(cortexPath, projectArg);
+    fs.writeFileSync(markers.done, new Date().toISOString() + "\n");
+  } catch (err: any) {
+    appendAuditLog(cortexPath, "background_maintenance_failed", `error=${err?.message || String(err)}`);
+  } finally {
+    try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
+  }
 }
