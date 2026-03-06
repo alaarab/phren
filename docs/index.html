@@ -1542,7 +1542,7 @@
                 <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
               </div>
               <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures the MCP server, and wires up hooks for every detected agent. Restart your agent and you're done.
+                Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures MCP, and wires up hooks for detected agents. Restart your agent and you're done. Optional: <code style="color:var(--indigo)">--mcp off</code> for hooks-only mode.
               </div>
             </div>
           </div>
@@ -1563,11 +1563,11 @@
   "servers": {
     "cortex": {
       "command": "npx",
-      "args": ["@alaarab/cortex", "~/.cortex"]
+      "args": ["-y", "@alaarab/cortex@1.8.4", "~/.cortex"]
     }
   }
 }</pre>
-                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
+                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["-y","@alaarab/cortex@1.8.4","~/.cortex"]}}}'>copy</button>
               </div>
             </div>
           </div>
@@ -1591,11 +1591,11 @@
   "mcpServers": {
     "cortex": {
       "command": "npx",
-      "args": ["@alaarab/cortex", "~/.cortex"]
+      "args": ["-y", "@alaarab/cortex@1.8.4", "~/.cortex"]
     }
   }
 }</pre>
-                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"mcpServers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
+                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"mcpServers":{"cortex":{"command":"npx","args":["-y","@alaarab/cortex@1.8.4","~/.cortex"]}}}'>copy</button>
               </div>
             </div>
           </div>
@@ -1609,7 +1609,7 @@
                 <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
               </div>
               <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Detects Codex automatically and writes hooks to <code style="color:var(--indigo)">codex.json</code> in your cortex directory. Per-project <code style="color:var(--indigo)">CLAUDE.md</code> is also symlinked as <code style="color:var(--indigo)">AGENTS.md</code> in each project for full instruction file support.
+                Detects Codex automatically, configures MCP, and writes hooks to <code style="color:var(--indigo)">codex.json</code> in your cortex directory. Per-project <code style="color:var(--indigo)">CLAUDE.md</code> is also symlinked as <code style="color:var(--indigo)">AGENTS.md</code> in each project for full instruction file support.
               </div>
               <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
                 Context injection, auto-save, and session start/end hooks all work with Codex out of the box.

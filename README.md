@@ -58,7 +58,7 @@ npx @alaarab/cortex init
 
 That's it. This:
 - Creates `~/.cortex` with starter templates
-- Registers the MCP server in Claude Code and VS Code (default, recommended)
+- Registers MCP for detected tools (Claude Code, VS Code, Copilot CLI, Cursor, Codex)
 - Sets up hooks for automatic context injection and auto-save
 - Configures hooks for any other detected agents (Copilot CLI, Cursor, Codex)
 - Registers your machine
@@ -108,7 +108,7 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 
 ## How it runs itself
 
-Before the agent sees your message, a hook extracts keywords, searches your cortex, and injects matching results as context. Generic replies, short acks, unrelated questions: nothing gets added. When something matches, it's the top 3 results, roughly 400 tokens. Runs in about 250ms.
+Before the agent sees your message, a hook extracts keywords, searches your cortex, and injects matching results as context. Generic replies, short acks, unrelated questions: nothing gets added. When something matches, it's up to the top 3 results, constrained by a prompt token budget (default ~550 tokens).
 
 After each response, a hook checks for cortex changes. Anything new (a learning, a backlog update) gets committed and pushed. You don't save manually.
 
@@ -118,7 +118,7 @@ When the context window fills and resets, a hook re-injects your project summary
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Nineteen tools available:
+The server indexes your cortex into a local SQLite FTS5 database. Twenty tools available:
 
 **Search and browse:**
 - `search_cortex(query, type?, limit?)` with automatic synonym expansion
@@ -142,6 +142,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Nineteen tools
 **Memory governance and quality:**
 - `govern_memories(project?)` queues stale/conflicting/low-value entries for review
 - `memory_policy(mode, ...)` gets/sets retention, ttl, decay, and confidence thresholds
+- `memory_workflow(mode, ...)` gets/sets risky-memory approval workflow settings
 - `memory_access(mode, ...)` gets/sets role-based permissions
 - `prune_memories(project?)` deletes expired entries by retention policy
 - `consolidate_memories(project?)` deduplicates and rewrites LEARNINGS.md
@@ -156,11 +157,16 @@ cortex search "rate limiting"        # FTS5 search with synonym expansion
 cortex hook-prompt                   # reads stdin JSON, outputs context block
 cortex hook-context                  # project context for current directory
 cortex add-learning <project> "..."  # append a learning from the terminal
+cortex pin-memory <project> "..."    # promote canonical memory
 cortex extract-memories [project]    # mine git + GitHub signals into candidates
 cortex govern-memories [project]     # queue stale/conflicting/low-value memories
 cortex doctor [--fix]                # health checks + optional self-heal
 cortex memory-ui [--port=3499]       # lightweight review UI
+cortex quality-feedback --key=<k> --type=helpful|reprompt|regression
+cortex prune-memories [project]      # delete stale memory entries
+cortex consolidate-memories [project]
 cortex memory-policy get|set ...     # retention/decay/confidence tuning
+cortex memory-workflow get|set ...   # approval workflow tuning
 cortex memory-access get|set ...     # role permissions
 cortex mcp-mode on|off|status        # toggle MCP integration anytime
 ```
@@ -176,7 +182,7 @@ Cortex hooks are plain shell commands. Init auto-detects which tools you have an
 | Claude Code | ✓ | ✓ | ✓ | `CLAUDE.md` |
 | GitHub Copilot CLI | ✓ | ✓ | ✓ | `copilot-instructions.md` |
 | Cursor | ✓ (no session start) | ✓ | ✓ | — |
-| OpenAI Codex | ✓ | ✓ | — | `AGENTS.md` |
+| OpenAI Codex | ✓ | ✓ | ✓ | `AGENTS.md` |
 | Any agentskills tool | ✓ | ✓ | — | via `cortex.SKILL.md` |
 
 **Claude Code** — full hook support plus MCP. Init writes `~/.claude/settings.json`.
