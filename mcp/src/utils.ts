@@ -95,6 +95,15 @@ export function safeProjectPath(base: string, ...segments: string[]): string | n
   return resolved;
 }
 
+// Memory queue section types and file path helper, shared by data-access.ts and shared.ts.
+export type QueueSection = "Review" | "Stale" | "Conflicts";
+export const QUEUE_SECTIONS: QueueSection[] = ["Review", "Stale", "Conflicts"];
+export const QUEUE_FILENAME = "MEMORY_QUEUE.md";
+
+export function queueFilePath(cortexPath: string, project: string): string {
+  return path.join(cortexPath, project, QUEUE_FILENAME);
+}
+
 // Sanitize user input before passing it to an FTS5 MATCH expression.
 // Strips FTS5-specific syntax that could cause injection or parse errors.
 export function sanitizeFts5Query(raw: string): string {
@@ -111,22 +120,30 @@ export function sanitizeFts5Query(raw: string): string {
 // - expands known synonyms
 // - quotes each term/phrase to avoid syntax surprises
 export function buildRobustFtsQuery(raw: string): string {
+  const MAX_TERMS = 16;
+  const MAX_SYNONYM_GROUPS = 3;
   const safe = sanitizeFts5Query(raw);
   if (!safe) return "";
 
   const terms = new Set<string>();
   const baseTerms = safe.split(/\s+/).filter((t) => t.length > 1);
-  for (const t of baseTerms) terms.add(t);
+  for (const t of baseTerms) {
+    if (terms.size >= MAX_TERMS) break;
+    terms.add(t);
+  }
 
   const lowered = safe.toLowerCase();
+  let groupsExpanded = 0;
   for (const [term, synonyms] of Object.entries(SYNONYMS)) {
     if (!lowered.includes(term)) continue;
-    terms.add(term);
+    if (groupsExpanded >= MAX_SYNONYM_GROUPS) break;
+    if (terms.size < MAX_TERMS) terms.add(term);
     for (const syn of synonyms) {
-      if (terms.size >= 20) break;
+      if (terms.size >= MAX_TERMS) break;
       terms.add(syn);
     }
-    if (terms.size >= 20) break;
+    groupsExpanded++;
+    if (terms.size >= MAX_TERMS) break;
   }
 
   return [...terms]

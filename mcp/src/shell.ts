@@ -33,6 +33,12 @@ import {
 } from "./data-access.js";
 import { runDoctor, runLink } from "./link.js";
 import { runCortexUpdate } from "./update.js";
+import { type CortexResult, EXEC_TIMEOUT_MS } from "./shared.js";
+
+// Extract the user-facing message from a CortexResult<string>.
+function resultMsg(r: CortexResult<string>): string {
+  return r.ok ? r.data : r.error;
+}
 
 // ── ANSI color utilities ────────────────────────────────────────────────────
 
@@ -110,6 +116,22 @@ interface DoctorResultLike {
   checks: DoctorCheck[];
 }
 
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
 function tokenize(input: string): string[] {
   const out: string[] = [];
   let current = "";
@@ -158,6 +180,25 @@ function perPageSlice<T>(items: T[], page: number, perPage: number): { pageItems
   };
 }
 
+function expandIds(input: string): string[] {
+  const parts = input.split(",").map((s) => s.trim()).filter(Boolean);
+  const result: string[] = [];
+  for (const part of parts) {
+    const rangeMatch = part.match(/^([AQD])(\d+)-\1?(\d+)$/i);
+    if (rangeMatch) {
+      const prefix = rangeMatch[1].toUpperCase();
+      const start = Number.parseInt(rangeMatch[2], 10);
+      const end = Number.parseInt(rangeMatch[3], 10);
+      for (let i = Math.min(start, end); i <= Math.max(start, end); i++) {
+        result.push(`${prefix}${i}`);
+      }
+    } else {
+      result.push(part);
+    }
+  }
+  return result;
+}
+
 function normalizeSection(sectionRaw: string): "Active" | "Queue" | "Done" | null {
   const normalized = sectionRaw.toLowerCase();
   if (["active", "a"].includes(normalized)) return "Active";
@@ -198,7 +239,13 @@ function shellHelpText(): string {
     `  ${cmd(":govern")}                                      ${desc("scan and queue stale/low-value memories")}`,
     `  ${cmd(":consolidate")}                                  ${desc("deduplicate LEARNINGS.md")}`,
     "",
+    hdr("Undo / Diff / Conflicts"),
+    `  ${cmd(":undo")}                                      ${desc("undo last destructive action")}`,
+    `  ${cmd(":diff")}                                      ${desc("show uncommitted changes for project")}`,
+    `  ${cmd(":conflicts")}                                  ${desc("show merge conflicts and auto-merge history")}`,
+    "",
     hdr("Infrastructure"),
+    `  ${cmd(":search <query>")}                              ${desc("run FTS search in selected project")}`,
     `  ${cmd(":machine map <hostname> <profile>")}            ${desc("safely edit machines.yaml")}`,
     `  ${cmd(":profile add-project <profile> <project>")}     ${desc("safely edit profile projects")}`,
     `  ${cmd(":profile remove-project <profile> <project>")}`,
@@ -225,12 +272,12 @@ async function defaultRunHooks(cortexPath: string): Promise<string> {
   execFileSync(process.execPath, [entry, "hook-session-start"], {
     cwd: cortexPath,
     stdio: "ignore",
-    timeout: 30_000,
+    timeout: EXEC_TIMEOUT_MS,
   });
   execFileSync(process.execPath, [entry, "hook-stop"], {
     cwd: cortexPath,
     stdio: "ignore",
-    timeout: 30_000,
+    timeout: EXEC_TIMEOUT_MS,
   });
   return "Lifecycle hooks rerun (session-start + stop).";
 }
@@ -247,6 +294,14 @@ async function defaultRunRelink(cortexPath: string): Promise<string> {
   return "Relink completed for detected tools.";
 }
 
+interface UndoEntry {
+  label: string;
+  file: string;
+  content: string;
+}
+
+const MAX_UNDO_STACK = 10;
+
 export class CortexShell {
   private state: ShellState;
   private message = `Type ${style.boldCyan(":help")} for keyboard map and palette commands.`;
@@ -254,6 +309,7 @@ export class CortexShell {
   private showHelp = false;
   private pages: Partial<Record<ShellView, number>> = {};
   private pendingConfirm?: { label: string; action: () => void };
+  private undoStack: UndoEntry[] = [];
 
   constructor(
     private readonly cortexPath: string,
@@ -265,12 +321,17 @@ export class CortexShell {
       runUpdate: defaultRunUpdate,
     }
   ) {
+    const firstRun = !shellStateExists(cortexPath);
     this.state = loadShellState(cortexPath);
     const cards = listProjectCards(cortexPath, profile);
     if (!this.state.project && cards.length > 0) this.state.project = cards[0].name;
     if (!this.state.perPage) this.state.perPage = 40;
     if (!this.state.page) this.state.page = 1;
     this.pages[this.state.view] = this.state.page;
+    if (firstRun) {
+      const projectHint = this.state.project ? `, try ${style.boldCyan(`:open ${this.state.project}`)}` : "";
+      this.message = `First run: press ${style.boldCyan(":help")} for commands${projectHint}.`;
+    }
   }
 
   close(): void {
@@ -291,6 +352,27 @@ export class CortexShell {
     this.state.view = view;
     this.state.page = this.pages[view] || 1;
     saveShellState(this.cortexPath, this.state);
+  }
+
+  private snapshotForUndo(label: string, file: string): void {
+    try {
+      if (fs.existsSync(file)) {
+        const content = fs.readFileSync(file, "utf8");
+        this.undoStack.push({ label, file, content });
+        if (this.undoStack.length > MAX_UNDO_STACK) this.undoStack.shift();
+      }
+    } catch { /* best effort */ }
+  }
+
+  private popUndo(): string {
+    const entry = this.undoStack.pop();
+    if (!entry) return "Nothing to undo.";
+    try {
+      fs.writeFileSync(entry.file, entry.content);
+      return `Undid: ${entry.label}`;
+    } catch (err: any) {
+      return `Undo failed: ${err?.message || err}`;
+    }
   }
 
   private ensureProjectSelected(): string | null {
@@ -431,11 +513,12 @@ export class CortexShell {
       return lines;
     }
 
-    const parsed = readBacklog(this.cortexPath, project);
-    if (typeof parsed === "string") {
-      lines.push(parsed);
+    const result = readBacklog(this.cortexPath, project);
+    if (!result.ok) {
+      lines.push(result.error);
       return lines;
     }
+    const parsed = result.data;
 
     if (parsed.issues.length) {
       lines.push(`${style.yellow("Warnings:")} ${parsed.issues.join("; ")}`, "");
@@ -458,11 +541,12 @@ export class CortexShell {
       return lines;
     }
 
-    const learnings = readLearnings(this.cortexPath, project);
-    if (typeof learnings === "string") {
-      lines.push(learnings);
+    const learningsResult = readLearnings(this.cortexPath, project);
+    if (!learningsResult.ok) {
+      lines.push(learningsResult.error);
       return lines;
     }
+    const learnings = learningsResult.data;
 
     if (!learnings.length) {
       lines.push(style.dim("No learning entries yet."));
@@ -503,11 +587,12 @@ export class CortexShell {
       return lines;
     }
 
-    const items = readMemoryQueue(this.cortexPath, project);
-    if (typeof items === "string") {
-      lines.push(items);
+    const itemsResult = readMemoryQueue(this.cortexPath, project);
+    if (!itemsResult.ok) {
+      lines.push(itemsResult.error);
       return lines;
     }
+    const items = itemsResult.data;
 
     if (!items.length) {
       lines.push(style.dim("No queued memory items."));
@@ -546,20 +631,20 @@ export class CortexShell {
     const profiles = listProfiles(this.cortexPath);
 
     lines.push(style.bold("Machines:"));
-    if (typeof machines === "string") {
-      lines.push(`  ${style.dim(machines)}`);
+    if (!machines.ok) {
+      lines.push(`  ${style.dim(machines.error)}`);
     } else {
-      const entries = Object.entries(machines);
+      const entries = Object.entries(machines.data);
       if (!entries.length) lines.push(`  ${style.dim("(none)")}`);
       for (const [machine, profile] of entries) lines.push(`  ${style.bold(machine)} ${style.dim("→")} ${style.cyan(profile as string)}`);
     }
 
     lines.push("", style.bold("Profiles:"));
-    if (typeof profiles === "string") {
-      lines.push(`  ${style.dim(profiles)}`);
+    if (!profiles.ok) {
+      lines.push(`  ${style.dim(profiles.error)}`);
     } else {
-      if (!profiles.length) lines.push(`  ${style.dim("(none)")}`);
-      for (const profile of profiles) {
+      if (!profiles.data.length) lines.push(`  ${style.dim("(none)")}`);
+      for (const profile of profiles.data) {
         lines.push(`  ${style.cyan(profile.name)}: ${profile.projects.join(", ") || style.dim("(no projects)")}`);
       }
     }
@@ -722,6 +807,32 @@ export class CortexShell {
       return;
     }
 
+    if (command === "search") {
+      const query = trimmed.slice("search".length).trim();
+      if (!query) {
+        this.setMessage("Usage: :search <query>");
+        return;
+      }
+      this.setMessage("Running search...");
+      try {
+        const entry = resolveEntryScript();
+        const args = [entry, "search", query, "--limit", "6"];
+        const project = this.state.project;
+        if (project) args.push("--project", project);
+        const out = execFileSync(process.execPath, args, {
+          cwd: this.cortexPath,
+          encoding: "utf8",
+          timeout: 60_000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        const clipped = out.split("\n").slice(0, 14).join("\n");
+        this.setMessage(clipped || "No search results.");
+      } catch (err: any) {
+        this.setMessage(`Search failed: ${err?.message || err}`);
+      }
+      return;
+    }
+
     if (command === "add") {
       const project = this.ensureProjectSelected();
       if (!project) return;
@@ -730,7 +841,7 @@ export class CortexShell {
         this.setMessage("Usage: :add <task>");
         return;
       }
-      this.setMessage(addBacklogItem(this.cortexPath, project, text));
+      this.setMessage(resultMsg(addBacklogItem(this.cortexPath, project, text)));
       return;
     }
 
@@ -739,12 +850,27 @@ export class CortexShell {
       if (!project) return;
       const match = parts.slice(1).join(" ").trim();
       if (!match) {
-        this.setMessage("Usage: :complete <task-id|match>");
+        this.setMessage("Usage: :complete <task-id|match> (comma-separated or range A1-A3)");
         return;
       }
-      this.confirmThen(`Complete "${match}"?`, () => {
-        this.setMessage(completeBacklogItem(this.cortexPath, project, match));
-      });
+      const ids = expandIds(match);
+      if (ids.length > 1) {
+        this.confirmThen(`Complete ${ids.length} items (${ids.join(", ")})?`, () => {
+          const backlogFile = path.join(this.cortexPath, project, "backlog.md");
+          this.snapshotForUndo(`complete ${ids.length} items`, backlogFile);
+          const results: string[] = [];
+          for (const id of ids) {
+            results.push(resultMsg(completeBacklogItem(this.cortexPath, project, id)));
+          }
+          this.setMessage(results.join("; "));
+        });
+      } else {
+        this.confirmThen(`Complete "${match}"?`, () => {
+          const backlogFile = path.join(this.cortexPath, project, "backlog.md");
+          this.snapshotForUndo(`complete "${match}"`, backlogFile);
+          this.setMessage(resultMsg(completeBacklogItem(this.cortexPath, project, match)));
+        });
+      }
       return;
     }
 
@@ -752,7 +878,7 @@ export class CortexShell {
       const project = this.ensureProjectSelected();
       if (!project) return;
       if (parts.length < 3) {
-        this.setMessage("Usage: :move <task-id|match> <active|queue|done>");
+        this.setMessage("Usage: :move <task-id|match> <active|queue|done> (comma-separated or range)");
         return;
       }
       const section = normalizeSection(parts[parts.length - 1]);
@@ -761,7 +887,18 @@ export class CortexShell {
         return;
       }
       const match = parts.slice(1, -1).join(" ");
-      this.setMessage(updateBacklogItem(this.cortexPath, project, match, { section }));
+      const ids = expandIds(match);
+      if (ids.length > 1) {
+        const backlogFile = path.join(this.cortexPath, project, "backlog.md");
+        this.snapshotForUndo(`move ${ids.length} items to ${section}`, backlogFile);
+        const results: string[] = [];
+        for (const id of ids) {
+          results.push(resultMsg(updateBacklogItem(this.cortexPath, project, id, { section })));
+        }
+        this.setMessage(results.join("; "));
+      } else {
+        this.setMessage(resultMsg(updateBacklogItem(this.cortexPath, project, match, { section })));
+      }
       return;
     }
 
@@ -778,7 +915,7 @@ export class CortexShell {
         return;
       }
       const match = parts.slice(1, -1).join(" ");
-      this.setMessage(updateBacklogItem(this.cortexPath, project, match, { priority }));
+      this.setMessage(resultMsg(updateBacklogItem(this.cortexPath, project, match, { priority })));
       return;
     }
 
@@ -791,14 +928,14 @@ export class CortexShell {
       }
       const match = parts[1];
       const context = parts.slice(2).join(" ");
-      this.setMessage(updateBacklogItem(this.cortexPath, project, match, { context }));
+      this.setMessage(resultMsg(updateBacklogItem(this.cortexPath, project, match, { context })));
       return;
     }
 
     if (command === "work" && parts[1]?.toLowerCase() === "next") {
       const project = this.ensureProjectSelected();
       if (!project) return;
-      this.setMessage(workNextBacklogItem(this.cortexPath, project));
+      this.setMessage(resultMsg(workNextBacklogItem(this.cortexPath, project)));
       return;
     }
 
@@ -806,7 +943,9 @@ export class CortexShell {
       const project = this.ensureProjectSelected();
       if (!project) return;
       const keep = parts[1] ? Number.parseInt(parts[1], 10) : 30;
-      this.setMessage(tidyBacklogDone(this.cortexPath, project, Number.isNaN(keep) ? 30 : keep));
+      const backlogFile = path.join(this.cortexPath, project, "backlog.md");
+      this.snapshotForUndo("tidy", backlogFile);
+      this.setMessage(resultMsg(tidyBacklogDone(this.cortexPath, project, Number.isNaN(keep) ? 30 : keep)));
       return;
     }
 
@@ -820,7 +959,7 @@ export class CortexShell {
           this.setMessage("Usage: :learn add <text>");
           return;
         }
-        this.setMessage(addLearning(this.cortexPath, project, text));
+        this.setMessage(resultMsg(addLearning(this.cortexPath, project, text)));
         return;
       }
       if (action === "remove") {
@@ -830,7 +969,9 @@ export class CortexShell {
           return;
         }
         this.confirmThen(`Remove learning "${match}"?`, () => {
-          this.setMessage(removeLearning(this.cortexPath, project!, match));
+          const learningsFile = path.join(this.cortexPath, project!, "LEARNINGS.md");
+          this.snapshotForUndo(`learn remove "${match}"`, learningsFile);
+          this.setMessage(resultMsg(removeLearning(this.cortexPath, project!, match)));
         });
         return;
       }
@@ -845,21 +986,45 @@ export class CortexShell {
       if (action === "approve") {
         const match = parts.slice(2).join(" ").trim();
         if (!match) {
-          this.setMessage("Usage: :mq approve <queue-id|match>");
+          this.setMessage("Usage: :mq approve <queue-id|match> (comma-separated)");
           return;
         }
-        this.setMessage(approveMemoryQueueItem(this.cortexPath, project, match));
+        const ids = expandIds(match);
+        if (ids.length > 1) {
+          const results: string[] = [];
+          for (const id of ids) {
+            results.push(resultMsg(approveMemoryQueueItem(this.cortexPath, project, id)));
+          }
+          this.setMessage(results.join("; "));
+        } else {
+          this.setMessage(resultMsg(approveMemoryQueueItem(this.cortexPath, project, match)));
+        }
         return;
       }
       if (action === "reject") {
         const match = parts.slice(2).join(" ").trim();
         if (!match) {
-          this.setMessage("Usage: :mq reject <queue-id|match>");
+          this.setMessage("Usage: :mq reject <queue-id|match> (comma-separated)");
           return;
         }
-        this.confirmThen(`Reject "${match}"?`, () => {
-          this.setMessage(rejectMemoryQueueItem(this.cortexPath, project!, match));
-        });
+        const ids = expandIds(match);
+        if (ids.length > 1) {
+          this.confirmThen(`Reject ${ids.length} items (${ids.join(", ")})?`, () => {
+            const queueFile = path.join(this.cortexPath, project!, "MEMORY_QUEUE.md");
+            this.snapshotForUndo(`mq reject ${ids.length} items`, queueFile);
+            const results: string[] = [];
+            for (const id of ids) {
+              results.push(resultMsg(rejectMemoryQueueItem(this.cortexPath, project!, id)));
+            }
+            this.setMessage(results.join("; "));
+          });
+        } else {
+          this.confirmThen(`Reject "${match}"?`, () => {
+            const queueFile = path.join(this.cortexPath, project!, "MEMORY_QUEUE.md");
+            this.snapshotForUndo(`mq reject "${match}"`, queueFile);
+            this.setMessage(resultMsg(rejectMemoryQueueItem(this.cortexPath, project!, match)));
+          });
+        }
         return;
       }
       if (action === "edit") {
@@ -869,7 +1034,7 @@ export class CortexShell {
         }
         const match = parts[2];
         const text = parts.slice(3).join(" ");
-        this.setMessage(editMemoryQueueItem(this.cortexPath, project, match, text));
+        this.setMessage(resultMsg(editMemoryQueueItem(this.cortexPath, project, match, text)));
         return;
       }
       this.setMessage("Usage: :mq approve|reject|edit ...");
@@ -881,7 +1046,7 @@ export class CortexShell {
         this.setMessage("Usage: :machine map <hostname> <profile>");
         return;
       }
-      this.setMessage(setMachineProfile(this.cortexPath, parts[2], parts[3]));
+      this.setMessage(resultMsg(setMachineProfile(this.cortexPath, parts[2], parts[3])));
       return;
     }
 
@@ -894,11 +1059,11 @@ export class CortexShell {
         return;
       }
       if (action === "add-project") {
-        this.setMessage(addProjectToProfile(this.cortexPath, profile, project));
+        this.setMessage(resultMsg(addProjectToProfile(this.cortexPath, profile, project)));
         return;
       }
       if (action === "remove-project") {
-        this.setMessage(removeProjectFromProfile(this.cortexPath, profile, project));
+        this.setMessage(resultMsg(removeProjectFromProfile(this.cortexPath, profile, project)));
         return;
       }
       this.setMessage("Usage: :profile add-project|remove-project <profile> <project>");
@@ -906,37 +1071,44 @@ export class CortexShell {
     }
 
     if (command === "run" && parts[1]?.toLowerCase() === "fix") {
-      this.setMessage("Running doctor --fix...");
+      const t0 = Date.now();
       const doctor = await this.deps.runDoctor(this.cortexPath, true);
       this.healthCache = undefined;
-      this.setMessage(`doctor --fix completed: ${doctor.ok ? "ok" : "issues remain"}`);
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      this.setMessage(`doctor --fix completed: ${doctor.ok ? "ok" : "issues remain"} (${elapsed}s)`);
       return;
     }
 
     if (command === "relink") {
-      this.setMessage("Running relink...");
-      this.setMessage(await this.deps.runRelink(this.cortexPath));
+      const t0 = Date.now();
+      const result = await this.deps.runRelink(this.cortexPath);
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      this.setMessage(`${result} (${elapsed}s)`);
       return;
     }
 
     if (command === "rerun" && parts[1]?.toLowerCase() === "hooks") {
-      this.setMessage("Running lifecycle hooks...");
-      this.setMessage(await this.deps.runHooks(this.cortexPath));
+      const t0 = Date.now();
+      const result = await this.deps.runHooks(this.cortexPath);
       this.healthCache = undefined;
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      this.setMessage(`${result} (${elapsed}s)`);
       return;
     }
 
     if (command === "update") {
-      this.setMessage("Checking for updates...");
-      this.setMessage(await this.deps.runUpdate());
+      const t0 = Date.now();
+      const result = await this.deps.runUpdate();
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      this.setMessage(`${result} (${elapsed}s)`);
       return;
     }
 
     if (command === "govern") {
       const project = this.ensureProjectSelected();
       if (!project) return;
-      this.setMessage("Running governance scan...");
       try {
+        const t0 = Date.now();
         const entry = resolveEntryScript();
         const out = execFileSync(process.execPath, [entry, "govern-memories", project], {
           cwd: this.cortexPath,
@@ -944,7 +1116,8 @@ export class CortexShell {
           timeout: 60_000,
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
-        this.setMessage(out || "Governance scan completed.");
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+        this.setMessage((out || "Governance scan completed.") + ` (${elapsed}s)`);
       } catch (err: any) {
         this.setMessage(`Governance failed: ${err?.message || err}`);
       }
@@ -954,8 +1127,8 @@ export class CortexShell {
     if (command === "consolidate") {
       const project = this.ensureProjectSelected();
       if (!project) return;
-      this.setMessage("Consolidating learnings...");
       try {
+        const t0 = Date.now();
         const entry = resolveEntryScript();
         const out = execFileSync(process.execPath, [entry, "consolidate-memories", project], {
           cwd: this.cortexPath,
@@ -963,15 +1136,105 @@ export class CortexShell {
           timeout: 60_000,
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
-        this.setMessage(out || "Consolidation completed.");
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+        this.setMessage((out || "Consolidation completed.") + ` (${elapsed}s)`);
       } catch (err: any) {
         this.setMessage(`Consolidation failed: ${err?.message || err}`);
       }
       return;
     }
 
+    if (command === "conflicts") {
+      try {
+        const lines: string[] = [];
+        // Check for current git conflicts
+        try {
+          const conflicted = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+            cwd: this.cortexPath,
+            encoding: "utf8",
+            timeout: 10_000,
+            stdio: ["ignore", "pipe", "ignore"],
+          }).trim();
+          if (conflicted) {
+            lines.push(style.boldRed("Unresolved conflicts:"));
+            for (const f of conflicted.split("\n").filter(Boolean)) {
+              lines.push(`  ${style.red("!")} ${f}`);
+            }
+            lines.push("");
+          }
+        } catch { /* not a git repo */ }
+
+        // Show recent auto-merge entries from audit log
+        const auditPath = path.join(this.cortexPath, ".governance", "audit.log");
+        if (fs.existsSync(auditPath)) {
+          const auditLines = fs.readFileSync(auditPath, "utf8").split("\n")
+            .filter((l) => l.includes("auto_merge"))
+            .slice(-10);
+          if (auditLines.length) {
+            lines.push(style.bold("Recent auto-merges:"));
+            for (const l of auditLines) {
+              lines.push(`  ${style.dim(l)}`);
+            }
+          }
+        }
+
+        // Point to memory queue for review
+        const project = this.state.project;
+        if (project) {
+          const queueResult = readMemoryQueue(this.cortexPath, project);
+          if (queueResult.ok) {
+            const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
+            if (conflictItems.length) {
+              lines.push("");
+              lines.push(`${style.yellow(`${conflictItems.length} conflict(s) in memory queue.`)} Review with :mq approve|reject`);
+            }
+          }
+        }
+
+        this.setMessage(lines.length ? lines.join("\n") : "No conflicts found.");
+      } catch (err: any) {
+        this.setMessage(`Conflict check failed: ${err?.message || err}`);
+      }
+      return;
+    }
+
+    if (command === "undo") {
+      this.setMessage(this.popUndo());
+      return;
+    }
+
+    if (command === "diff") {
+      const project = this.ensureProjectSelected();
+      if (!project) return;
+      try {
+        const projectDir = path.join(this.cortexPath, project);
+        const diff = execFileSync("git", ["diff", "--no-color", "--", projectDir], {
+          cwd: this.cortexPath,
+          encoding: "utf8",
+          timeout: 10_000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        if (!diff) {
+          const staged = execFileSync("git", ["diff", "--cached", "--no-color", "--", projectDir], {
+            cwd: this.cortexPath,
+            encoding: "utf8",
+            timeout: 10_000,
+            stdio: ["ignore", "pipe", "ignore"],
+          }).trim();
+          this.setMessage(staged || "No uncommitted changes.");
+        } else {
+          const lines = diff.split("\n").slice(0, 30);
+          if (diff.split("\n").length > 30) lines.push(style.dim(`... (${diff.split("\n").length - 30} more lines)`));
+          this.setMessage(lines.join("\n"));
+        }
+      } catch {
+        this.setMessage("Not a git repository or git not available.");
+      }
+      return;
+    }
+
     if (command === "reset") {
-      this.setMessage(resetShellState(this.cortexPath));
+      this.setMessage(resultMsg(resetShellState(this.cortexPath)));
       this.state = loadShellState(this.cortexPath);
       const cards = listProjectCards(this.cortexPath, this.profile);
       this.state.project = cards[0]?.name;
@@ -1006,7 +1269,33 @@ export class CortexShell {
       return;
     }
 
-    this.setMessage(`Unknown command: ${trimmed}`);
+    const suggestion = this.suggestCommand(command);
+    if (suggestion) {
+      this.setMessage(`Unknown command: ${trimmed}. Did you mean :${suggestion}?`);
+    } else {
+      this.setMessage(`Unknown command: ${trimmed}. Type :help to see available commands.`);
+    }
+  }
+
+  private suggestCommand(input: string): string | undefined {
+    const known = [
+      "help", "projects", "backlog", "learnings", "memory", "machines", "health",
+      "open", "search", "add", "complete", "move", "reprioritize", "context",
+      "work next", "tidy", "learn add", "learn remove", "mq approve", "mq reject",
+      "mq edit", "machine map", "profile add-project", "profile remove-project",
+      "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
+      "undo", "diff", "conflicts", "reset", "page", "per-page",
+    ];
+    let best: string | undefined;
+    let bestDist = Infinity;
+    for (const cmd of known) {
+      const d = editDistance(input.toLowerCase(), cmd);
+      if (d < bestDist && d <= 2) {
+        bestDist = d;
+        best = cmd;
+      }
+    }
+    return best;
   }
 
   async handleInput(raw: string): Promise<boolean> {
@@ -1072,11 +1361,107 @@ export class CortexShell {
     await this.executePalette(input);
     return true;
   }
+
+  private backlogIdCompletions(): string[] {
+    const project = this.state.project;
+    if (!project) return [];
+    const result = readBacklog(this.cortexPath, project);
+    if (!result.ok) return [];
+    return [...result.data.items.Active, ...result.data.items.Queue, ...result.data.items.Done].map((item) => item.id);
+  }
+
+  private queueIdCompletions(): string[] {
+    const project = this.state.project;
+    if (!project) return [];
+    const result = readMemoryQueue(this.cortexPath, project);
+    if (!result.ok) return [];
+    return result.data.map((item) => item.id);
+  }
+
+  completeInput(line: string): string[] {
+    const commands = [
+      ":help",
+      ":projects",
+      ":backlog",
+      ":learnings",
+      ":memory",
+      ":machines",
+      ":health",
+      ":open",
+      ":search",
+      ":add",
+      ":complete",
+      ":move",
+      ":reprioritize",
+      ":context",
+      ":work next",
+      ":tidy",
+      ":learn add",
+      ":learn remove",
+      ":mq approve",
+      ":mq reject",
+      ":mq edit",
+      ":machine map",
+      ":profile add-project",
+      ":profile remove-project",
+      ":run fix",
+      ":relink",
+      ":rerun hooks",
+      ":update",
+      ":govern",
+      ":consolidate",
+      ":undo",
+      ":diff",
+      ":conflicts",
+      ":reset",
+      ":page",
+      ":per-page",
+    ];
+
+    const trimmed = line.trimLeft();
+    if (!trimmed.startsWith(":")) return [];
+    const after = trimmed.slice(1);
+    const parts = tokenize(after);
+    const endsWithSpace = /\s$/.test(trimmed);
+
+    if (parts.length === 0) return commands;
+    if (parts.length === 1 && !endsWithSpace) {
+      const prefix = `:${parts[0].toLowerCase()}`;
+      return commands.filter((c) => c.startsWith(prefix));
+    }
+
+    const cmd = parts[0].toLowerCase();
+    if (cmd === "open") {
+      return listProjectCards(this.cortexPath, this.profile).map((card) => `:open ${card.name}`);
+    }
+    if (cmd === "complete" || cmd === "move" || cmd === "reprioritize" || cmd === "context") {
+      return this.backlogIdCompletions().map((id) => `:${cmd} ${id}`);
+    }
+    if (cmd === "mq" && ["approve", "reject", "edit"].includes((parts[1] || "").toLowerCase())) {
+      const action = parts[1].toLowerCase();
+      return this.queueIdCompletions().map((id) => `:mq ${action} ${id}`);
+    }
+    if (cmd === "learn" && (parts[1] || "").toLowerCase() === "remove") {
+      const project = this.state.project;
+      if (!project) return [];
+      const learningsResult = readLearnings(this.cortexPath, project);
+      if (!learningsResult.ok) return [];
+      return learningsResult.data.map((item) => `:learn remove ${item.id}`);
+    }
+    if (cmd === "profile" && (parts[1] || "").toLowerCase() === "add-project") {
+      return listProjectCards(this.cortexPath, this.profile).map((card) => `:profile add-project ${parts[2] || this.profile} ${card.name}`);
+    }
+
+    return commands;
+  }
 }
 
 function clearScreen(): void {
   if (process.stdout.isTTY) {
+    // Prefer RIS reset; also send explicit clear+home as a fallback for terminals
+    // that don't honor RIS.
     process.stdout.write("\u001Bc");
+    process.stdout.write("\x1b[2J\x1b[H");
   }
 }
 
@@ -1086,6 +1471,12 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
     input: process.stdin,
     output: process.stdout,
     terminal: true,
+    completer: (line: string) => {
+      const candidates = shell.completeInput(line);
+      if (!candidates.length) return [[], line];
+      const hits = candidates.filter((c) => c.startsWith(line));
+      return [hits.length ? hits : candidates, line];
+    },
   });
 
   const repaint = async () => {

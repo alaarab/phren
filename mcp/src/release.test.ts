@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -7,6 +8,7 @@ import { configureClaude } from "./init.js";
 
 describe.sequential("1.10.x release hardening gates", () => {
   let tmpRoot: string;
+  let tmpCleanup: () => void;
   let homeDir: string;
   let cortexPath: string;
   const origHome = process.env.HOME;
@@ -14,7 +16,7 @@ describe.sequential("1.10.x release hardening gates", () => {
   const origPath = process.env.PATH;
 
   beforeEach(() => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-release-gates-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-release-gates-"));
     homeDir = path.join(tmpRoot, "home");
     cortexPath = path.join(tmpRoot, "cortex");
     fs.mkdirSync(homeDir, { recursive: true });
@@ -27,7 +29,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     process.env.HOME = origHome;
     process.env.USERPROFILE = origUserProfile;
     process.env.PATH = origPath;
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    tmpCleanup();
   });
 
   it("keeps package and MCP server versions consistent", () => {
@@ -50,7 +52,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     }
     process.env.PATH = `${fakeBin}:${origPath || ""}`;
 
-    const configured = configureAllHooks(cortexPath, new Set(["copilot", "cursor", "codex"]));
+    const configured = configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
     expect(configured).toContain("Copilot CLI");
     expect(configured).toContain("Cursor");
     expect(configured).toContain("Codex");

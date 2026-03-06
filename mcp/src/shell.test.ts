@@ -4,15 +4,11 @@ import * as os from "os";
 import * as path from "path";
 import { CortexShell } from "./shell.js";
 import { readBacklog, readLearnings, readMemoryQueue, loadShellState } from "./data-access.js";
+import { writeFile as write, makeTempDir } from "./test-helpers.js";
 
 interface TempContext {
   root: string;
   project: string;
-}
-
-function write(file: string, content: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, content);
 }
 
 function seedCortex(root: string): TempContext {
@@ -103,10 +99,11 @@ function createShell(cortexPath: string) {
 
 describe("CortexShell", () => {
   let dir: string;
+  let dirCleanup: () => void;
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-shell-test-"));
+    ({ path: dir, cleanup: dirCleanup } = makeTempDir("cortex-shell-test-"));
     seedCortex(dir);
     process.env.CORTEX_ACTOR = "shell-test-admin";
     write(
@@ -123,7 +120,7 @@ describe("CortexShell", () => {
   afterEach(() => {
     if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
     else process.env.CORTEX_ACTOR = priorActor;
-    fs.rmSync(dir, { recursive: true, force: true });
+    dirCleanup();
   });
 
   it("navigates between views and preserves selected project context", async () => {
@@ -153,9 +150,9 @@ describe("CortexShell", () => {
     await shell.handleInput("y");
 
     const parsedInitial = readBacklog(dir, "demo");
-    expect(typeof parsedInitial).not.toBe("string");
-    if (typeof parsedInitial === "string") throw new Error(parsedInitial);
-    expect(parsedInitial.items.Done.some((item) => item.line.includes("write shell tests"))).toBe(true);
+    expect(parsedInitial.ok).toBe(true);
+    if (!parsedInitial.ok) throw new Error(parsedInitial.error);
+    expect(parsedInitial.data.items.Done.some((item) => item.line.includes("write shell tests"))).toBe(true);
 
     // Force multiple done entries and archive old ones.
     await shell.handleInput(":add prune this task");
@@ -164,9 +161,9 @@ describe("CortexShell", () => {
     await shell.handleInput(":tidy 1");
 
     const parsedAfterTidy = readBacklog(dir, "demo");
-    expect(typeof parsedAfterTidy).not.toBe("string");
-    if (typeof parsedAfterTidy === "string") throw new Error(parsedAfterTidy);
-    expect(parsedAfterTidy.items.Done.length).toBe(1);
+    expect(parsedAfterTidy.ok).toBe(true);
+    if (!parsedAfterTidy.ok) throw new Error(parsedAfterTidy.error);
+    expect(parsedAfterTidy.data.items.Done.length).toBe(1);
     const archiveFile = path.join(dir, ".governance", "backlog-archive", "demo.md");
     expect(fs.existsSync(archiveFile)).toBe(true);
   });
@@ -177,13 +174,13 @@ describe("CortexShell", () => {
     await shell.handleInput(":learn add Shell can write learnings");
 
     let learnings = readLearnings(dir, "demo");
-    expect(typeof learnings).not.toBe("string");
-    expect((learnings as any[]).some((entry) => entry.text.includes("Shell can write learnings"))).toBe(true);
+    expect(learnings.ok).toBe(true);
+    if (learnings.ok) expect(learnings.data.some((entry) => entry.text.includes("Shell can write learnings"))).toBe(true);
 
     await shell.handleInput(":learn remove Shell can write learnings");
     await shell.handleInput("y");
     learnings = readLearnings(dir, "demo");
-    expect((learnings as any[]).some((entry) => entry.text.includes("Shell can write learnings"))).toBe(false);
+    if (learnings.ok) expect(learnings.data.some((entry) => entry.text.includes("Shell can write learnings"))).toBe(false);
   });
 
   it("triages memory queue entries with approve/reject/edit", async () => {
@@ -195,11 +192,11 @@ describe("CortexShell", () => {
     await shell.handleInput("y");
 
     const queue = readMemoryQueue(dir, "demo");
-    expect(typeof queue).not.toBe("string");
-    expect((queue as any[]).length).toBe(0);
+    expect(queue.ok).toBe(true);
+    if (queue.ok) expect(queue.data.length).toBe(0);
 
-    const learnings = readLearnings(dir, "demo") as any[];
-    expect(learnings.some((entry) => entry.text.includes("keep this memory updated"))).toBe(true);
+    const learnings = readLearnings(dir, "demo");
+    if (learnings.ok) expect(learnings.data.some((entry) => entry.text.includes("keep this memory updated"))).toBe(true);
   });
 
   it("renders health dashboard and supports remediation commands", async () => {
@@ -261,9 +258,9 @@ describe("CortexShell", () => {
   });
 
   it(":govern and :consolidate require a selected project", async () => {
-    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-shell-empty-"));
+    const tmp = makeTempDir("cortex-shell-empty-");
     try {
-      const shell = new CortexShell(emptyDir, "", {
+      const shell = new CortexShell(tmp.path, "", {
         runDoctor: async () => ({ ok: true, checks: [] }) as any,
         runRelink: async () => "ok",
         runHooks: async () => "ok",
@@ -278,7 +275,7 @@ describe("CortexShell", () => {
       output = await shell.render();
       expect(output).toContain("Select a project first");
     } finally {
-      fs.rmSync(emptyDir, { recursive: true, force: true });
+      tmp.cleanup();
     }
   });
 
@@ -313,5 +310,67 @@ describe("CortexShell", () => {
     expect(output).toContain("Review");
     expect(output).toContain("Stale");
     expect(output).toMatch(/─{10,}/);
+  });
+
+  it(":undo restores file after destructive :complete action", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+
+    const backlogBefore = fs.readFileSync(path.join(dir, "demo", "backlog.md"), "utf8");
+    await shell.handleInput(":complete active item");
+    await shell.handleInput("y");
+
+    const parsedAfter = readBacklog(dir, "demo");
+    expect(parsedAfter.ok).toBe(true);
+    if (parsedAfter.ok) {
+      expect(parsedAfter.data.items.Done.some((i) => i.line.includes("active item"))).toBe(true);
+    }
+
+    await shell.handleInput(":undo");
+    const backlogAfterUndo = fs.readFileSync(path.join(dir, "demo", "backlog.md"), "utf8");
+    expect(backlogAfterUndo).toBe(backlogBefore);
+  });
+
+  it(":undo reports nothing when stack is empty", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":undo");
+    const output = await shell.render();
+    expect(output).toContain("Nothing to undo");
+  });
+
+  it("bulk :complete with comma-separated text matches completes multiple items", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput(":add first bulk task");
+    await shell.handleInput(":add second bulk task");
+
+    await shell.handleInput(":complete first bulk task,second bulk task");
+    await shell.handleInput("y");
+
+    const parsed = readBacklog(dir, "demo");
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      const doneLines = parsed.data.items.Done.map((i) => i.line);
+      expect(doneLines.some((l) => l.includes("first bulk task"))).toBe(true);
+      expect(doneLines.some((l) => l.includes("second bulk task"))).toBe(true);
+    }
+  });
+
+  it("long-running commands include timing in status message", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput(":relink");
+    const output = await shell.render();
+    expect(output).toMatch(/Relink ok.*\(\d+\.\d+s\)/);
+  });
+
+  it("per-section backlog IDs start at 1 for each section (#112)", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("b");
+    const output = await shell.render();
+    expect(output).toContain("A1");
+    expect(output).toContain("Q1");
+    expect(output).toContain("D1");
   });
 });

@@ -56,12 +56,12 @@ for dir in */; do
   [ "$PROJECT" = "global" ] || [ "$PROJECT" = "profiles" ] && continue
 
   if [ -f "$dir/LEARNINGS.md" ]; then
-    LAST_MODIFIED=$(git log -1 --format="%cr" -- "$dir/LEARNINGS.md" 2>/dev/null || stat -c %Y "$dir/LEARNINGS.md" 2>/dev/null)
+    LAST_MODIFIED=$(git log -1 --format="%cr" -- "$dir/LEARNINGS.md" 2>/dev/null || stat -c %Y "$dir/LEARNINGS.md" 2>/dev/null || stat -f %m "$dir/LEARNINGS.md" 2>/dev/null)
     echo "$PROJECT/LEARNINGS.md: last updated $LAST_MODIFIED"
   fi
 
   if [ -f "$dir/CLAUDE.md" ]; then
-    LAST_MODIFIED=$(git log -1 --format="%cr" -- "$dir/CLAUDE.md" 2>/dev/null || stat -c %Y "$dir/CLAUDE.md" 2>/dev/null)
+    LAST_MODIFIED=$(git log -1 --format="%cr" -- "$dir/CLAUDE.md" 2>/dev/null || stat -c %Y "$dir/CLAUDE.md" 2>/dev/null || stat -f %m "$dir/CLAUDE.md" 2>/dev/null)
     echo "$PROJECT/CLAUDE.md: last updated $LAST_MODIFIED"
   fi
 done

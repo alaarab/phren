@@ -13,6 +13,7 @@ Whitepaper deliverables are now intentionally minimal:
 - `docs/environment.md`: Full reference for all environment variables with types and defaults.
 - `docs/shell.md`: Interactive shell user guide: views, keyboard shortcuts, palette commands.
 - `docs/feature-flags.md`: Feature flag reference (`CORTEX_FEATURE_*` env vars).
+- `docs/faq.md`: Common setup and workflow questions.
 ## Internal design docs (`docs/internal/`)
 
 - `docs/internal/shell-spec.md`: Product/UX contract for the interactive `cortex` shell.

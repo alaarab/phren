@@ -1,6 +1,9 @@
 ---
 name: discover
 description: Audit your cortex repo and tell you exactly what needs attention.
+dependencies:
+  - git
+  - gh
 ---
 # /cortex-discover - Cortex health check
 

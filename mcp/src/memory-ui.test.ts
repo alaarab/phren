@@ -1,15 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { writeFile as write, makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as http from "http";
 import * as querystring from "querystring";
 import { createMemoryUiServer } from "./memory-ui.js";
-
-function write(file: string, content: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, content);
-}
 
 function seedProject(root: string): void {
   write(
@@ -81,12 +77,13 @@ async function postForm(
 
 describe.sequential("memory-ui server", () => {
   let tmpRoot = "";
+  let tmpCleanup: () => void;
   let server: http.Server | null = null;
   let port = 0;
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-memory-ui-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-memory-ui-test-"));
     seedProject(tmpRoot);
     process.env.CORTEX_ACTOR = "memory-ui-admin";
     write(
@@ -115,7 +112,7 @@ describe.sequential("memory-ui server", () => {
     server = null;
     if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
     else process.env.CORTEX_ACTOR = priorActor;
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    tmpCleanup();
   });
 
   it("supports edit/approve/reject workflow via HTTP actions", async () => {
@@ -171,7 +168,7 @@ describe.sequential("memory-ui server", () => {
       line: staleLine,
     });
     expect(res.status).toBe(403);
-    expect(res.body).toContain("maintainer/admin role");
+    expect(res.body).toContain("maintainer or admin");
   });
 
   it("returns 400 for empty edit text", async () => {
@@ -239,13 +236,14 @@ describe.sequential("memory-ui server", () => {
 
 describe.sequential("memory-ui CSRF protection", () => {
   let tmpRoot = "";
+  let tmpCleanup: () => void;
   let server: http.Server | null = null;
   let port = 0;
   let csrfTokens: Set<string>;
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-csrf-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-csrf-test-"));
     seedProject(tmpRoot);
     process.env.CORTEX_ACTOR = "memory-ui-admin";
     write(
@@ -275,7 +273,7 @@ describe.sequential("memory-ui CSRF protection", () => {
     server = null;
     if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
     else process.env.CORTEX_ACTOR = priorActor;
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    tmpCleanup();
   });
 
   it("GET / returns HTML with a CSRF token embedded", async () => {

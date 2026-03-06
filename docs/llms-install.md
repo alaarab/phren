@@ -6,6 +6,7 @@ cortex gives AI coding agents persistent memory across sessions and machines. It
 
 ```bash
 npx @alaarab/cortex init
+npx @alaarab/cortex init --dry-run
 ```
 
 This creates `~/.cortex`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.

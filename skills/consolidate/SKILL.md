@@ -1,6 +1,8 @@
 ---
 name: consolidate
 description: Find patterns across project learnings and surface insights that apply everywhere.
+dependencies:
+  - git
 ---
 # /cortex-consolidate - Cross-project synthesis
 

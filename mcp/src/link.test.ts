@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as yaml from "js-yaml";
 import { isVersionNewer } from "./init.js";
-import { runLink } from "./link.js";
+import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, migrateSkillsToFolders } from "./link.js";
 
 describe("link", () => {
   describe("isVersionNewer", () => {
@@ -51,8 +52,10 @@ describe("link", () => {
     const origUserProfile = process.env.USERPROFILE;
     const origProjectsDir = process.env.PROJECTS_DIR;
 
+    let tmpCleanup: () => void;
+
     beforeEach(() => {
-      tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-link-test-"));
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-link-test-"));
       homeDir = path.join(tmpRoot, "home");
       cortexPath = path.join(tmpRoot, "cortex");
 
@@ -68,7 +71,7 @@ describe("link", () => {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origUserProfile;
       process.env.PROJECTS_DIR = origProjectsDir;
-      fs.rmSync(tmpRoot, { recursive: true, force: true });
+      tmpCleanup();
     });
 
     function setupProfile(projects: string[]) {
@@ -170,6 +173,606 @@ describe("link", () => {
       // Should now be a symlink to the cortex source
       expect(fs.lstatSync(destClaude).isSymbolicLink()).toBe(true);
       expect(fs.readFileSync(destClaude, "utf8")).toBe("# Real content");
+    });
+
+    it("linkProject creates KNOWLEDGE.md and LEARNINGS.md symlinks", async () => {
+      setupProfile(["kb-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "kb-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "kb-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(cortexProject, "KNOWLEDGE.md"), "# Knowledge base");
+      fs.writeFileSync(path.join(cortexProject, "LEARNINGS.md"), "# Learnings");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      expect(fs.lstatSync(path.join(projectDir, "KNOWLEDGE.md")).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(projectDir, "LEARNINGS.md")).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(projectDir, "KNOWLEDGE.md"), "utf8")).toBe("# Knowledge base");
+    });
+
+    it("linkProject handles CLAUDE-*.md split files", async () => {
+      setupProfile(["split-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "split-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "split-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Main");
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE-testing.md"), "# Testing instructions");
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE-deploy.md"), "# Deploy instructions");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      expect(fs.lstatSync(path.join(projectDir, "CLAUDE-testing.md")).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(projectDir, "CLAUDE-deploy.md")).isSymbolicLink()).toBe(true);
+    });
+
+    it("writes context file in default mode", async () => {
+      setupProfile(["ctx-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "ctx-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "ctx-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+
+      // Context file is written to the module-level CONTEXT_FILE path (resolved at import)
+      // which uses the real os.homedir(), not the test override.
+      // We capture the real path before HOME is overridden for assertion.
+      const realContextFile = path.join(origHome!, ".cortex-context.md");
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      expect(fs.existsSync(realContextFile)).toBe(true);
+      const content = fs.readFileSync(realContextFile, "utf8");
+      expect(content).toContain("cortex-managed");
+    });
+
+    it("writes context file in debugging mode", async () => {
+      setupProfile(["dbg-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "dbg-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "dbg-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(cortexProject, "LEARNINGS.md"), "# LEARNINGS\n\n## 2025-01-01\n\n- debug insight\n");
+
+      const realContextFile = path.join(origHome!, ".cortex-context.md");
+      await runLink(cortexPath, { machine: "test-machine", profile: "test", task: "debugging" });
+
+      const content = fs.readFileSync(realContextFile, "utf8");
+      expect(content).toContain("debugging");
+    });
+
+    it("writes context file in planning mode", async () => {
+      setupProfile(["plan-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "plan-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "plan-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(cortexProject, "summary.md"), "**What:** A planning test project\n");
+      fs.writeFileSync(path.join(cortexProject, "backlog.md"), "# Backlog\n\n## Active\n\n- Important task\n");
+
+      const realContextFile = path.join(origHome!, ".cortex-context.md");
+      await runLink(cortexPath, { machine: "test-machine", profile: "test", task: "planning" });
+
+      const content = fs.readFileSync(realContextFile, "utf8");
+      expect(content).toContain("planning");
+    });
+
+    it("writes context file in clean mode", async () => {
+      setupProfile(["clean-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "clean-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "clean-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+
+      const realContextFile = path.join(origHome!, ".cortex-context.md");
+      await runLink(cortexPath, { machine: "test-machine", profile: "test", task: "clean" });
+
+      const content = fs.readFileSync(realContextFile, "utf8");
+      expect(content).toContain("clean");
+    });
+
+    it("rebuildMemory creates per-project MEMORY files", async () => {
+      setupProfile(["mem-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "mem-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "mem-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(cortexProject, "summary.md"), "**What:** A memory test project\n");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      const projectKey = homeDir.replace(/[/\\]/g, "-").replace(/^-/, "");
+      const memDir = path.join(homeDir, ".claude", "projects", projectKey, "memory");
+      const perProject = path.join(memDir, "MEMORY-mem-project.md");
+      expect(fs.existsSync(perProject)).toBe(true);
+      const content = fs.readFileSync(perProject, "utf8");
+      expect(content).toContain("Mem Project");
+      expect(content).toContain("memory test project");
+    });
+
+    it("rebuildMemory preserves existing header in MEMORY.md", async () => {
+      setupProfile(["preserve-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "preserve-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "preserve-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(path.join(cortexProject, "summary.md"), "**What:** Preserve project\n");
+
+      // Pre-populate MEMORY.md with custom header
+      const projectKey = homeDir.replace(/[/\\]/g, "-").replace(/^-/, "");
+      const memDir = path.join(homeDir, ".claude", "projects", projectKey, "memory");
+      fs.mkdirSync(memDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(memDir, "MEMORY.md"),
+        "# Custom Header\n\nMy custom notes here.\n\n<!-- cortex:projects:start -->\nold data\n<!-- cortex:projects:end -->\n"
+      );
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      const content = fs.readFileSync(path.join(memDir, "MEMORY.md"), "utf8");
+      expect(content).toContain("# Custom Header");
+      expect(content).toContain("My custom notes here");
+      expect(content).toContain("Preserve Project");
+    });
+
+    it("skips projects not found on disk", async () => {
+      setupProfile(["missing-project"]);
+
+      // Do NOT create the project directory on disk
+      const cortexProject = path.join(cortexPath, "missing-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+
+      // Should not throw, just skip
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+    });
+
+    it("handles multiple projects in profile", async () => {
+      setupProfile(["proj-a", "proj-b"]);
+
+      for (const name of ["proj-a", "proj-b"]) {
+        const projectDir = path.join(tmpRoot, "projects", name);
+        fs.mkdirSync(projectDir, { recursive: true });
+
+        const cortexProject = path.join(cortexPath, name);
+        fs.mkdirSync(cortexProject, { recursive: true });
+        fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), `# ${name}`);
+        fs.writeFileSync(path.join(cortexProject, "summary.md"), `**What:** ${name} project\n`);
+      }
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      // Both projects should have symlinks
+      for (const name of ["proj-a", "proj-b"]) {
+        const dest = path.join(tmpRoot, "projects", name, "CLAUDE.md");
+        expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true);
+      }
+
+      // MEMORY.md should list both
+      const projectKey = homeDir.replace(/[/\\]/g, "-").replace(/^-/, "");
+      const memFile = path.join(homeDir, ".claude", "projects", projectKey, "memory", "MEMORY.md");
+      const content = fs.readFileSync(memFile, "utf8");
+      expect(content).toContain("Proj A");
+      expect(content).toContain("Proj B");
+    });
+
+    it("allTools option configures for copilot/cursor/codex", async () => {
+      setupProfile(["tool-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "tool-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "tool-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Tool project");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test", allTools: true });
+
+      // With allTools, should create AGENTS.md (codex link)
+      const agentsMd = path.join(projectDir, "AGENTS.md");
+      expect(fs.existsSync(agentsMd)).toBe(true);
+    });
+
+    it("writes cortex.SKILL.md during link", async () => {
+      setupProfile(["skill-test"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "skill-test");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "skill-test");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      const skillFile = path.join(cortexPath, "cortex.SKILL.md");
+      expect(fs.existsSync(skillFile)).toBe(true);
+      const content = fs.readFileSync(skillFile, "utf8");
+      expect(content).toContain("cortex");
+      expect(content).toContain("hooks:");
+    });
+
+    it("throws when profile has no projects", async () => {
+      setupProfile([]);
+
+      await expect(
+        runLink(cortexPath, { machine: "test-machine", profile: "test" })
+      ).rejects.toThrow("has no projects");
+    });
+
+    it("throws when profile not found", async () => {
+      await expect(
+        runLink(cortexPath, { machine: "test-machine", profile: "nonexistent" })
+      ).rejects.toThrow("not found");
+    });
+  });
+
+  describe("runDoctor", () => {
+    let tmpRoot: string;
+    let cortexPath: string;
+    const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
+
+    let tmpCleanup: () => void;
+
+    beforeEach(() => {
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-doctor-test-"));
+      cortexPath = path.join(tmpRoot, "cortex");
+      fs.mkdirSync(cortexPath, { recursive: true });
+
+      // Create minimal governance
+      const govDir = path.join(cortexPath, ".governance");
+      fs.mkdirSync(govDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(govDir, "access-control.json"),
+        JSON.stringify({ admins: ["test"], maintainers: [], contributors: [], viewers: [] })
+      );
+    });
+
+    afterEach(() => {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origUserProfile;
+      tmpCleanup();
+    });
+
+    it("returns DoctorResult with checks array", async () => {
+      const result = await runDoctor(cortexPath);
+      expect(result).toHaveProperty("ok");
+      expect(result).toHaveProperty("checks");
+      expect(Array.isArray(result.checks)).toBe(true);
+      expect(result.checks.length).toBeGreaterThan(0);
+    });
+
+    it("checks include machine-registered", async () => {
+      const result = await runDoctor(cortexPath);
+      const machineCheck = result.checks.find(c => c.name === "machine-registered");
+      expect(machineCheck).toBeDefined();
+    });
+
+    it("checks include fts-index", async () => {
+      const result = await runDoctor(cortexPath);
+      const ftsCheck = result.checks.find(c => c.name === "fts-index");
+      expect(ftsCheck).toBeDefined();
+    });
+
+    it("checks include claude-hooks and lifecycle-hooks", async () => {
+      const result = await runDoctor(cortexPath);
+      const hookCheck = result.checks.find(c => c.name === "claude-hooks");
+      const lifecycleCheck = result.checks.find(c => c.name === "lifecycle-hooks");
+      expect(hookCheck).toBeDefined();
+      expect(lifecycleCheck).toBeDefined();
+    });
+
+    it("checks include runtime-health-file", async () => {
+      const result = await runDoctor(cortexPath);
+      const runtimeCheck = result.checks.find(c => c.name === "runtime-health-file");
+      expect(runtimeCheck).toBeDefined();
+    });
+
+    it("checkData flag adds governance file validation", async () => {
+      const result = await runDoctor(cortexPath, false, true);
+      const govChecks = result.checks.filter(c => c.name.startsWith("data:governance:"));
+      expect(govChecks.length).toBeGreaterThan(0);
+    });
+
+    it("checkData validates access-control.json", async () => {
+      const result = await runDoctor(cortexPath, false, true);
+      const accessCheck = result.checks.find(c => c.name === "data:governance:access-control.json");
+      expect(accessCheck).toBeDefined();
+      expect(accessCheck!.ok).toBe(true);
+      expect(accessCheck!.detail).toBe("valid");
+    });
+
+    it("checkData detects invalid governance JSON", async () => {
+      fs.writeFileSync(
+        path.join(cortexPath, ".governance", "memory-policy.json"),
+        "{ invalid json"
+      );
+      const result = await runDoctor(cortexPath, false, true);
+      const policyCheck = result.checks.find(c => c.name === "data:governance:memory-policy.json");
+      expect(policyCheck).toBeDefined();
+      expect(policyCheck!.ok).toBe(false);
+    });
+
+    it("checkData validates backlog format", async () => {
+      // Need a profile for getProjectDirs to work
+      const profilesDir = path.join(cortexPath, "profiles");
+      fs.mkdirSync(profilesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(profilesDir, "test.yaml"),
+        yaml.dump({ name: "test", description: "Test", projects: ["doc-proj"] })
+      );
+      fs.writeFileSync(
+        path.join(cortexPath, "machines.yaml"),
+        `${os.hostname()}: test\n`
+      );
+
+      const projDir = path.join(cortexPath, "doc-proj");
+      fs.mkdirSync(projDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projDir, "backlog.md"),
+        "# doc-proj Backlog\n\n## Active\n\n- Task one\n\n## Queue\n\n## Done\n\n"
+      );
+
+      const result = await runDoctor(cortexPath, false, true);
+      const backlogCheck = result.checks.find(c => c.name === "data:backlog:doc-proj");
+      expect(backlogCheck).toBeDefined();
+      expect(backlogCheck!.ok).toBe(true);
+    });
+
+    it("checkData validates learnings format", async () => {
+      const profilesDir = path.join(cortexPath, "profiles");
+      fs.mkdirSync(profilesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(profilesDir, "test.yaml"),
+        yaml.dump({ name: "test", description: "Test", projects: ["learn-proj"] })
+      );
+      fs.writeFileSync(
+        path.join(cortexPath, "machines.yaml"),
+        `${os.hostname()}: test\n`
+      );
+
+      const projDir = path.join(cortexPath, "learn-proj");
+      fs.mkdirSync(projDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projDir, "LEARNINGS.md"),
+        "# learn-proj LEARNINGS\n\n## 2025-01-01\n\n- An insight\n"
+      );
+
+      const result = await runDoctor(cortexPath, false, true);
+      const learningsCheck = result.checks.find(c => c.name === "data:learnings:learn-proj");
+      expect(learningsCheck).toBeDefined();
+      expect(learningsCheck!.ok).toBe(true);
+    });
+
+    it("returns machine and profile in result", async () => {
+      const result = await runDoctor(cortexPath);
+      expect(result.machine).toBeDefined();
+      expect(typeof result.machine).toBe("string");
+    });
+  });
+
+  describe("skill frontmatter validation (#294, #298)", () => {
+    it("parses valid frontmatter", () => {
+      const content = "---\nname: test\ndescription: A test skill\n---\n# Body";
+      const { frontmatter, body } = parseSkillFrontmatter(content);
+      expect(frontmatter).toEqual({ name: "test", description: "A test skill" });
+      expect(body).toBe("# Body");
+    });
+
+    it("returns null for missing frontmatter", () => {
+      const { frontmatter } = parseSkillFrontmatter("# No frontmatter");
+      expect(frontmatter).toBeNull();
+    });
+
+    it("returns null for malformed YAML", () => {
+      const { frontmatter } = parseSkillFrontmatter("---\n: bad: yaml: here\n---\n");
+      expect(frontmatter).toBeNull();
+    });
+
+    it("validates required fields", () => {
+      const result = validateSkillFrontmatter("---\nname: test\n---\n");
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('missing required field "description"');
+    });
+
+    it("validates name is required", () => {
+      const result = validateSkillFrontmatter("---\ndescription: desc\n---\n");
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('missing required field "name"');
+    });
+
+    it("accepts valid skill with all fields", () => {
+      const content = "---\nname: sync\ndescription: Sync stuff\ndependencies:\n  - git\n---\n# Sync";
+      const result = validateSkillFrontmatter(content);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+      expect(result.frontmatter?.name).toBe("sync");
+      expect(result.frontmatter?.dependencies).toEqual(["git"]);
+    });
+
+    it("rejects non-array dependencies", () => {
+      const content = "---\nname: test\ndescription: desc\ndependencies: git\n---\n";
+      const result = validateSkillFrontmatter(content);
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('"dependencies" must be an array');
+    });
+
+    it("rejects non-string dependency entries", () => {
+      const content = "---\nname: test\ndescription: desc\ndependencies:\n  - 123\n---\n";
+      const result = validateSkillFrontmatter(content);
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('"dependencies" entries must be strings');
+    });
+
+    it("rejects non-object hooks", () => {
+      const content = "---\nname: test\ndescription: desc\nhooks: bad\n---\n";
+      const result = validateSkillFrontmatter(content);
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('"hooks" must be an object');
+    });
+
+    it("includes file path prefix in errors", () => {
+      const result = validateSkillFrontmatter("---\nname: test\n---\n", "/path/to/SKILL.md");
+      expect(result.errors[0]).toMatch(/^\/path\/to\/SKILL\.md: /);
+    });
+
+    it("validates a directory of skills", () => {
+      const tmp = makeTempDir("skill-val-");
+      try {
+        const validSkill = path.join(tmp.path, "sync");
+        fs.mkdirSync(validSkill);
+        fs.writeFileSync(path.join(validSkill, "SKILL.md"), "---\nname: sync\ndescription: Sync\n---\n");
+
+        const invalidSkill = path.join(tmp.path, "bad");
+        fs.mkdirSync(invalidSkill);
+        fs.writeFileSync(path.join(invalidSkill, "SKILL.md"), "---\nname: bad\n---\n");
+
+        const results = validateSkillsDir(tmp.path);
+        expect(results).toHaveLength(2);
+        expect(results.filter(r => r.valid)).toHaveLength(1);
+        expect(results.filter(r => !r.valid)).toHaveLength(1);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("handles flat .md skill files in directory", () => {
+      const tmp = makeTempDir("skill-val-");
+      try {
+        fs.writeFileSync(path.join(tmp.path, "flat.md"), "---\nname: flat\ndescription: A flat skill\n---\n# Flat");
+        const results = validateSkillsDir(tmp.path);
+        expect(results).toHaveLength(1);
+        expect(results[0].valid).toBe(true);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("returns empty for nonexistent directory", () => {
+      expect(validateSkillsDir("/nonexistent/path")).toEqual([]);
+    });
+  });
+
+  describe("readSkillManifestHooks (#297)", () => {
+    it("returns null when no manifest exists", () => {
+      const tmp = makeTempDir("manifest-");
+      try {
+        expect(readSkillManifestHooks(tmp.path)).toBeNull();
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("reads hooks from a valid manifest", () => {
+      const tmp = makeTempDir("manifest-");
+      try {
+        const manifest = `---
+name: cortex
+description: Memory for AI agents
+hooks:
+  SessionStart:
+    - hooks:
+        - type: command
+          command: "node /path/to/hook-session-start"
+  UserPromptSubmit:
+    - hooks:
+        - type: command
+          command: "node /path/to/hook-prompt"
+  Stop:
+    - hooks:
+        - type: command
+          command: "node /path/to/hook-stop"
+---
+# cortex
+`;
+        fs.writeFileSync(path.join(tmp.path, "cortex.SKILL.md"), manifest);
+        const hooks = readSkillManifestHooks(tmp.path);
+        expect(hooks).not.toBeNull();
+        expect(hooks!.SessionStart).toBe("node /path/to/hook-session-start");
+        expect(hooks!.UserPromptSubmit).toBe("node /path/to/hook-prompt");
+        expect(hooks!.Stop).toBe("node /path/to/hook-stop");
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("returns null for manifest without hooks", () => {
+      const tmp = makeTempDir("manifest-");
+      try {
+        fs.writeFileSync(path.join(tmp.path, "cortex.SKILL.md"), "---\nname: cortex\ndescription: test\n---\n");
+        expect(readSkillManifestHooks(tmp.path)).toBeNull();
+      } finally {
+        tmp.cleanup();
+      }
+    });
+  });
+
+  describe("migrateSkillsToFolders", () => {
+    it("moves flat .md files into name/SKILL.md folders", () => {
+      const tmp = makeTempDir("skills-migrate-");
+      try {
+        fs.writeFileSync(path.join(tmp.path, "swarm.md"), "---\nname: swarm\ndescription: test\n---\nbody");
+        fs.writeFileSync(path.join(tmp.path, "creative.md"), "---\nname: creative\ndescription: test\n---\nbody");
+        const migrated = migrateSkillsToFolders(tmp.path);
+        expect(migrated.sort()).toEqual(["creative", "swarm"]);
+        expect(fs.existsSync(path.join(tmp.path, "swarm", "SKILL.md"))).toBe(true);
+        expect(fs.existsSync(path.join(tmp.path, "creative", "SKILL.md"))).toBe(true);
+        expect(fs.existsSync(path.join(tmp.path, "swarm.md"))).toBe(false);
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("skips files that already have a matching folder", () => {
+      const tmp = makeTempDir("skills-migrate-");
+      try {
+        fs.writeFileSync(path.join(tmp.path, "swarm.md"), "flat content");
+        fs.mkdirSync(path.join(tmp.path, "swarm"));
+        fs.writeFileSync(path.join(tmp.path, "swarm", "SKILL.md"), "folder content");
+        const migrated = migrateSkillsToFolders(tmp.path);
+        expect(migrated).toEqual([]);
+        expect(fs.readFileSync(path.join(tmp.path, "swarm.md"), "utf8")).toBe("flat content");
+      } finally {
+        tmp.cleanup();
+      }
+    });
+
+    it("returns empty array for nonexistent directory", () => {
+      expect(migrateSkillsToFolders("/tmp/nonexistent-skills-dir-xyz")).toEqual([]);
     });
   });
 });

@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (must match package.json)
+        required: true
+        type: string
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Ensure version matches package.json
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+          if [ "$PKG_VERSION" != "$INPUT_VERSION" ]; then
+            echo "Version mismatch: package.json=$PKG_VERSION, input=$INPUT_VERSION"
+            exit 1
+          fi
+
+      - name: Ensure changelog contains this version
+        run: |
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+          grep -q "^## \[$INPUT_VERSION\]" CHANGELOG.md || {
+            echo "CHANGELOG.md missing header for $INPUT_VERSION"
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test -- --coverage
+
+      - name: Validate docs
+        run: npm run validate-docs
+
+      - name: Publish package
+        run: npm publish --access public --provenance
+
+      - name: Create git tag
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"

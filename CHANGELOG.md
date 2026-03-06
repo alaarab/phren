@@ -11,7 +11,7 @@
   - #225: Added OSS contributor docs (`CONTRIBUTING.md`, `SECURITY.md`, API references).
   - #222: Added docs refresh across README, site, and whitepaper v2 artifacts.
 
-## [1.10.1-rc.1] - 2026-03-06
+## [1.10.2] - 2026-03-06
 
 ### Added
 - Release gating and verification upgrades:

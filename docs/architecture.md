@@ -22,7 +22,7 @@ How data flows through the system, from user prompt to persistent memory.
  +--------+----------+     +--------+----------+
  | Hook:              |     | MCP Server        |
  | UserPromptSubmit   |     | (cortex-mcp)      |
- | hook-prompt        |     | 22 tools          |
+ | hook-prompt        |     | MCP tools         |
  +--------+----------+     +--------+----------+
           |                          |
           v                          v
@@ -133,7 +133,7 @@ Stop
 
 ## MCP Server
 
-The MCP server exposes 22 tools organized into four categories.
+The MCP server exposes tools organized into four categories.
 
 ```
 Claude Code <--stdio--> cortex-mcp
