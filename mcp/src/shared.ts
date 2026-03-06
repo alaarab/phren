@@ -574,11 +574,21 @@ function classifyFile(filename: string, relPath: string): string {
 
 // Find and load the WASM binary for sql.js-fts5
 function findWasmBinary(): Buffer | undefined {
+  // Most reliable path in packaged installs (including npx cache layouts).
+  try {
+    const resolved = require.resolve("sql.js-fts5/dist/sql-wasm.wasm") as string;
+    if (fs.existsSync(resolved)) return fs.readFileSync(resolved);
+  } catch {
+    // fall through to path probing
+  }
+
   const __filename = fileURLToPath(import.meta.url);
   let dir = path.dirname(__filename);
   for (let i = 0; i < 5; i++) {
-    const candidate = path.join(dir, "node_modules", "sql.js-fts5", "dist", "sql-wasm.wasm");
-    if (fs.existsSync(candidate)) return fs.readFileSync(candidate);
+    const candidateA = path.join(dir, "node_modules", "sql.js-fts5", "dist", "sql-wasm.wasm");
+    if (fs.existsSync(candidateA)) return fs.readFileSync(candidateA);
+    const candidateB = path.join(dir, "sql.js-fts5", "dist", "sql-wasm.wasm");
+    if (fs.existsSync(candidateB)) return fs.readFileSync(candidateB);
     dir = path.dirname(dir);
   }
   return undefined;

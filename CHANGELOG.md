@@ -49,6 +49,7 @@
 - `remove_learning` now removes an immediately attached `cortex:cite` comment, preventing orphan citation metadata lines in `LEARNINGS.md`.
 - GitHub data mining now executes `gh` using argument-safe process execution (no shell-string concatenation in `runGhJson`).
 - `hook-prompt` daily quality maintenance moved to detached background execution (`background-maintenance`) so prompt hooks stay low-latency.
+- MCP runtime in packaged/npx installs now resolves `sql.js-fts5` WASM reliably (fixes server boot failures from invalid local WASM URL resolution).
 - CLI `link` path resolution now uses ESM-safe `os.homedir()` import (removes Node `ERR_AMBIGUOUS_MODULE_SYNTAX` runtime failure).
 - VS Code auto-detection now includes WSL + Windows user-install paths (`USERPROFILE/AppData/Roaming/Code/User`), including Windows-style `C:\...` path normalization.
 - Conflict auto-merge git operations now use argument-safe `execFileSync("git", [...])` calls instead of shell command strings.
