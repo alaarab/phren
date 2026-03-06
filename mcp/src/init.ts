@@ -19,6 +19,7 @@ type ToolStatus = McpConfigStatus | "no_settings" | "no_vscode" | "no_cursor" | 
 
 interface InstallPreferences {
   mcpEnabled?: boolean;
+  hooksEnabled?: boolean;
   installedVersion?: string;
   updatedAt?: string;
 }
@@ -120,6 +121,15 @@ export function getMcpEnabledPreference(cortexPath: string): boolean {
 
 export function setMcpEnabledPreference(cortexPath: string, enabled: boolean): void {
   writeInstallPreferences(cortexPath, { mcpEnabled: enabled });
+}
+
+export function getHooksEnabledPreference(cortexPath: string): boolean {
+  const prefs = readInstallPreferences(cortexPath);
+  return prefs.hooksEnabled !== false;
+}
+
+export function setHooksEnabledPreference(cortexPath: string, enabled: boolean): void {
+  writeInstallPreferences(cortexPath, { hooksEnabled: enabled });
 }
 
 function log(msg: string) {
@@ -295,10 +305,11 @@ export function ensureGovernanceFiles(cortexPath: string) {
   }
 }
 
-export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): McpConfigStatus {
+export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   const entryScript = resolveEntryScript();
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  const hooksEnabled = opts.hooksEnabled ?? getHooksEnabledPreference(cortexPath);
   const lifecycle = buildLifecycleCommands(cortexPath);
   let status: McpConfigStatus = "already_disabled";
 
@@ -306,7 +317,7 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
     // MCP server
     status = upsertMcpServer(data, mcpEnabled, "mcpServers", cortexPath);
 
-    // Hooks: always update to latest version
+    // Hooks: update to latest version when enabled, otherwise remove cortex hooks.
     if (!data.hooks) data.hooks = {};
 
     const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart", hookBody: Record<string, any>) => {
@@ -330,21 +341,33 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
       else eventHooks.push(payload);
     };
 
-    upsertCortexHook("UserPromptSubmit", {
-      type: "command",
-      command: lifecycle.userPromptSubmit || `node "${entryScript}" hook-prompt`,
-      timeout: 3,
-    });
+    if (hooksEnabled) {
+      upsertCortexHook("UserPromptSubmit", {
+        type: "command",
+        command: lifecycle.userPromptSubmit || `node "${entryScript}" hook-prompt`,
+        timeout: 3,
+      });
 
-    upsertCortexHook("Stop", {
-      type: "command",
-      command: lifecycle.stop,
-    });
+      upsertCortexHook("Stop", {
+        type: "command",
+        command: lifecycle.stop,
+      });
 
-    upsertCortexHook("SessionStart", {
-      type: "command",
-      command: lifecycle.sessionStart,
-    });
+      upsertCortexHook("SessionStart", {
+        type: "command",
+        command: lifecycle.sessionStart,
+      });
+    } else {
+      for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart"] as const) {
+        const hooks = data.hooks?.[hookEvent] as any[] | undefined;
+        if (!Array.isArray(hooks)) continue;
+        data.hooks[hookEvent] = hooks.filter(
+          (h: any) => !h.hooks?.some(
+            (hook: any) => typeof hook.command === "string" && hook.command.includes("cortex")
+          )
+        );
+      }
+    }
   });
   return status;
 }
@@ -485,7 +508,9 @@ export interface InitOptions {
 export async function runInit(opts: InitOptions = {}) {
   const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
+  const hooksEnabled = getHooksEnabledPreference(cortexPath);
   const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
+  const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
 
   if (fs.existsSync(cortexPath)) {
     const entries = fs.readdirSync(cortexPath);
@@ -493,10 +518,11 @@ export async function runInit(opts: InitOptions = {}) {
       log(`\ncortex already exists at ${cortexPath}`);
       log(`Updating configuration...\n`);
       log(`  MCP mode: ${mcpLabel}`);
+      log(`  Hooks mode: ${hooksLabel}`);
 
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
       try {
-        const status = configureClaude(cortexPath, { mcpEnabled });
+        const status = configureClaude(cortexPath, { mcpEnabled, hooksEnabled });
         if (status === "disabled" || status === "already_disabled") {
           log(`  Updated Claude Code hooks (MCP disabled)`);
         } else {
@@ -523,10 +549,14 @@ export async function runInit(opts: InitOptions = {}) {
         logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled }), "Updated");
       } catch {}
 
-      try {
-        const hooked = configureAllHooks(cortexPath);
-        if (hooked.length) log(`  Updated hooks: ${hooked.join(", ")}`);
-      } catch { /* best effort */ }
+      if (hooksEnabled) {
+        try {
+          const hooked = configureAllHooks(cortexPath);
+          if (hooked.length) log(`  Updated hooks: ${hooked.join(", ")}`);
+        } catch { /* best effort */ }
+      } else {
+        log(`  Hooks are disabled by preference (run: npx @alaarab/cortex hooks-mode on)`);
+      }
 
       ensureGovernanceFiles(cortexPath);
       const prefs = readInstallPreferences(cortexPath);
@@ -543,7 +573,7 @@ export async function runInit(opts: InitOptions = {}) {
           log(`  No starter template updates were applied (starter files not found).`);
         }
       }
-      writeInstallPreferences(cortexPath, { mcpEnabled, installedVersion: VERSION });
+      writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, installedVersion: VERSION });
 
       log(`\nDone. Restart your coding agent(s) to pick up changes.\n`);
       process.exit(0);
@@ -605,10 +635,11 @@ export async function runInit(opts: InitOptions = {}) {
   updateMachinesYaml(cortexPath, opts.machine, opts.profile);
   log(`  Updated machines.yaml with hostname "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
+  log(`  Hooks mode: ${hooksLabel}`);
 
   // Configure Claude Code
   try {
-    const status = configureClaude(cortexPath, { mcpEnabled });
+    const status = configureClaude(cortexPath, { mcpEnabled, hooksEnabled });
     if (status === "disabled" || status === "already_disabled") {
       log(`  Configured Claude Code hooks (MCP disabled)`);
     } else {
@@ -639,13 +670,17 @@ export async function runInit(opts: InitOptions = {}) {
   } catch { /* best effort */ }
 
   // Configure hooks for other detected AI coding tools (Copilot CLI, Cursor, Codex)
-  try {
-    const hooked = configureAllHooks(cortexPath);
-    if (hooked.length) log(`  Configured hooks: ${hooked.join(", ")}`);
-  } catch { /* best effort */ }
+  if (hooksEnabled) {
+    try {
+      const hooked = configureAllHooks(cortexPath);
+      if (hooked.length) log(`  Configured hooks: ${hooked.join(", ")}`);
+    } catch { /* best effort */ }
+  } else {
+    log(`  Hooks are disabled by preference (run: npx @alaarab/cortex hooks-mode on)`);
+  }
 
   ensureGovernanceFiles(cortexPath);
-  writeInstallPreferences(cortexPath, { mcpEnabled, installedVersion: VERSION });
+  writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, installedVersion: VERSION });
 
   log(`\nDone. Your knowledge base is at ${cortexPath}\n`);
   log(`Next steps:`);
@@ -670,8 +705,11 @@ export async function runMcpMode(modeArg?: string) {
   const normalizedArg = modeArg?.trim().toLowerCase();
   if (!normalizedArg || normalizedArg === "status") {
     const current = getMcpEnabledPreference(cortexPath);
+    const hooks = getHooksEnabledPreference(cortexPath);
     log(`MCP mode: ${current ? "on (recommended)" : "off (hooks-only fallback)"}`);
+    log(`Hooks mode: ${hooks ? "on (active)" : "off (disabled)"}`);
     log(`Change mode: npx @alaarab/cortex mcp-mode on|off`);
+    log(`Hooks toggle: npx @alaarab/cortex hooks-mode on|off`);
     return;
   }
   const mode = parseMcpMode(normalizedArg);
@@ -699,6 +737,46 @@ export async function runMcpMode(modeArg?: string) {
   log(`Cursor status: ${cursorStatus}`);
   log(`Copilot CLI status: ${copilotStatus}`);
   log(`Codex status: ${codexStatus}`);
+  log(`Restart your agent to apply changes.`);
+}
+
+export async function runHooksMode(modeArg?: string) {
+  const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const normalizedArg = modeArg?.trim().toLowerCase();
+  if (!normalizedArg || normalizedArg === "status") {
+    const current = getHooksEnabledPreference(cortexPath);
+    log(`Hooks mode: ${current ? "on (active)" : "off (disabled)"}`);
+    log(`Change mode: npx @alaarab/cortex hooks-mode on|off`);
+    return;
+  }
+  const mode = parseMcpMode(normalizedArg);
+  if (!mode) {
+    log(`Invalid mode "${modeArg}". Use: on | off | status`);
+    process.exit(1);
+  }
+
+  const enabled = mode === "on";
+  setHooksEnabledPreference(cortexPath, enabled);
+
+  let claudeStatus: ToolStatus = "no_settings";
+  try {
+    claudeStatus = configureClaude(cortexPath, {
+      mcpEnabled: getMcpEnabledPreference(cortexPath),
+      hooksEnabled: enabled,
+    }) ?? claudeStatus;
+  } catch { /* best effort */ }
+
+  if (enabled) {
+    try {
+      const hooked = configureAllHooks(cortexPath);
+      if (hooked.length) log(`Updated hooks: ${hooked.join(", ")}`);
+    } catch { /* best effort */ }
+  } else {
+    log("Hooks will no-op immediately via preference and Claude hooks are removed.");
+  }
+
+  log(`Hooks mode set to ${mode}.`);
+  log(`Claude status: ${claudeStatus}`);
   log(`Restart your agent to apply changes.`);
 }
 

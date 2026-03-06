@@ -12,6 +12,7 @@ import {
   configureCursorMcp,
   configureVSCode,
   ensureGovernanceFiles,
+  getHooksEnabledPreference,
   getMcpEnabledPreference,
   setMcpEnabledPreference,
   type McpMode,
@@ -570,11 +571,13 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   // Step 6: Configure MCP
   log("Configuring MCP...");
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
+  const hooksEnabled = getHooksEnabledPreference(cortexPath);
   setMcpEnabledPreference(cortexPath, mcpEnabled);
   log(`  MCP mode: ${mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)"}`);
+  log(`  Hooks mode: ${hooksEnabled ? "ON (active)" : "OFF (disabled)"}`);
   maybeOfferStarterTemplateUpdate(cortexPath);
   let mcpStatus = "no_settings";
-  try { mcpStatus = configureClaude(cortexPath, { mcpEnabled }) ?? "installed"; } catch { /* best effort */ }
+  try { mcpStatus = configureClaude(cortexPath, { mcpEnabled, hooksEnabled }) ?? "installed"; } catch { /* best effort */ }
   logMcpStatus("Claude", mcpStatus);
 
   let vsStatus = "no_vscode";
@@ -603,8 +606,12 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
       : mcpStatus;
 
   // Register hooks for Copilot CLI, Cursor, Codex (reuse same detected set)
-  const hookedTools = configureAllHooks(cortexPath, detectedTools);
-  if (hookedTools.length) log(`  Hooks registered: ${hookedTools.join(", ")}`);
+  if (hooksEnabled) {
+    const hookedTools = configureAllHooks(cortexPath, detectedTools);
+    if (hookedTools.length) log(`  Hooks registered: ${hookedTools.join(", ")}`);
+  } else {
+    log(`  Hooks registration skipped (hooks-mode is off)`);
+  }
 
   // Write cortex.SKILL.md for agentskills-compatible tools
   try {

@@ -62,6 +62,7 @@ A memory system for coding agents must solve four coupled problems:
 \end{enumerate}
 
 Cortex optimizes for ownership and controllability. Alternatives can outperform for managed convenience. The right choice depends on which constraints are binding.
+This report separates \textit{architecture judgments} from \textit{measured performance}; they are not interchangeable.
 
 \section{Decision Criteria}
 This report evaluates systems on six dimensions:
@@ -98,6 +99,15 @@ where \(N\) is prompt volume, \(T_b\) is configured budget cap, and \(p_{in}\) i
 \subsection{Governance model}
 Cortex policy defaults include TTL/retention/confidence thresholds and decay windows (for example, \texttt{ttlDays=120}, \texttt{retentionDays=365}) \cite{cortex-shared}. Queue-based triage and role controls provide explicit quality gates.
 
+\section{API vs MCP vs Local}
+These concepts are often mixed:
+\begin{itemize}
+  \item \textbf{MCP} is an integration protocol (tooling interface).
+  \item \textbf{Local vs API} is a storage/compute decision (where memory runs).
+\end{itemize}
+
+Cortex is \textit{local memory + MCP interface + lifecycle hooks}. So a local system can still expose MCP tools.
+
 \section{Comparative Assessment}
 \textit{Evidence window: public documentation/changelogs available as of March 6, 2026.}
 
@@ -107,6 +117,14 @@ Cortex policy defaults include TTL/retention/confidence thresholds and decay win
   \item \textbf{claude-mem}: hook-driven local architecture with SQLite/FTS5 and optional semantic layer \cite{cm-overview,cm-hooks,cm-db,cm-search}.
   \item \textbf{Copilot Memory}: repository-scoped managed memory with policy controls and expiry semantics, with active rollout changes in 2026 \cite{gh-memory-docs,gh-changelog-jan2026,gh-changelog-mar2026}.
 \end{itemize}
+
+\subsection{Known figures used in this report}
+\begin{itemize}
+  \item Cortex default injection controls: token budget \(\approx 550\), snippet lines \(6\), snippet chars \(520\) \cite{cortex-cli,cortex-index}.
+  \item Cortex governance defaults: \texttt{ttlDays=120}, \texttt{retentionDays=365} \cite{cortex-shared}.
+  \item Claude Opus 4.6 announcement includes a 1M-token context window (beta) \cite{anthropic-opus46}.
+\end{itemize}
+No comparable public p95 coding-latency benchmark exists across all systems/models, so cross-system speed claims must be measured directly.
 
 \subsection{Visual Scorecard (non-empirical, architecture-level)}
 \begin{table*}[t]
@@ -196,6 +214,19 @@ The minimum viable benchmark uses:
   \item bootstrap confidence intervals for primary endpoints.
 \end{itemize}
 
+\subsection{Model matrix (practical default)}
+Run each system with the same task set across:
+\begin{itemize}
+  \item Claude family: Opus 4.6, Sonnet 4.6, Haiku 4.6.
+  \item OpenAI family: GPT-5.2, GPT-5.3, Codex.
+\end{itemize}
+
+For each model, report both:
+\begin{itemize}
+  \item \textbf{memory-path latency} (retrieval, ranking, augmentation, persistence),
+  \item \textbf{end-to-end latency} (including generation).
+\end{itemize}
+
 \subsection{Primary endpoints}
 \begin{itemize}
   \item task success rate,
@@ -206,6 +237,9 @@ The minimum viable benchmark uses:
 
 \section{Conclusion}
 The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex is a strong default when the organization optimizes for inspectability, policy control, and low lock-in. Managed alternatives remain strong choices where integration speed and platform convenience dominate.
+
+\subsection*{Can tradeoffs disappear?}
+Not fully. Some tradeoffs are structural (ownership vs managed convenience). But many are reducible with engineering: startup caching, tighter ranking, model-specific token budgets, and async governance paths. The practical goal is not ``zero tradeoffs''; it is a better frontier for your constraints.
 
 \appendix
 \section*{Artifact Map}
@@ -235,6 +269,7 @@ The decision is less about ``who retrieves best on a single prompt'' and more ab
 \bibitem{gh-memory-docs} GitHub Docs: Copilot Memory. \url{https://docs.github.com/en/copilot/how-tos/use-copilot-agents/copilot-memory}
 \bibitem{gh-changelog-jan2026} GitHub Changelog (Jan 15, 2026). \href{https://github.blog/changelog/2026-01-15-agentic-memory-for-github-copilot-is-in-public-preview/}{github.blog changelog link}
 \bibitem{gh-changelog-mar2026} GitHub Changelog (Mar 4, 2026). \href{https://github.blog/changelog/2026-03-04-copilot-memory-now-on-by-default-for-pro-and-pro-users-in-public-preview/}{github.blog changelog link}
+\bibitem{anthropic-opus46} Anthropic News: Claude Opus 4.6 (Feb 5, 2026). \url{https://www.anthropic.com/news/claude-opus-4-6}
 \bibitem{cortex-readme} Cortex README. \url{https://github.com/alaarab/cortex/blob/main/README.md}
 \bibitem{cortex-cli} Cortex source: \texttt{mcp/src/cli.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/cli.ts}
 \bibitem{cortex-shared} Cortex source: \texttt{mcp/src/shared.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/shared.ts}

@@ -583,8 +583,25 @@ function runBestEffort(cmd: string, cwd: string): { ok: boolean; output?: string
   }
 }
 
+function getHooksEnabledPreference(cortexRoot: string): boolean {
+  try {
+    const prefsPath = path.join(cortexRoot, ".governance", "install-preferences.json");
+    if (!fs.existsSync(prefsPath)) return true;
+    const parsed = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as { hooksEnabled?: boolean };
+    return parsed.hooksEnabled !== false;
+  } catch {
+    return true;
+  }
+}
+
 async function handleHookSessionStart() {
   const startedAt = new Date().toISOString();
+  if (!getHooksEnabledPreference(cortexPath)) {
+    updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
+    appendAuditLog(cortexPath, "hook_session_start", "status=disabled");
+    return;
+  }
+
   const pull = runBestEffort("git pull --rebase --quiet", cortexPath);
   const doctor = await runDoctor(cortexPath, false);
   const maintenanceScheduled = scheduleBackgroundMaintenance(cortexPath);
@@ -599,6 +616,15 @@ async function handleHookSessionStart() {
 
 async function handleHookStop() {
   const now = new Date().toISOString();
+  if (!getHooksEnabledPreference(cortexPath)) {
+    updateRuntimeHealth(cortexPath, {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "clean", detail: "hooks disabled by preference" },
+    });
+    appendAuditLog(cortexPath, "hook_stop", "status=disabled");
+    return;
+  }
+
   const status = runBestEffort("git status --porcelain", cortexPath);
   if (!status.ok) {
     updateRuntimeHealth(cortexPath, {
@@ -681,6 +707,11 @@ async function handleHookPrompt() {
   }
 
   if (!prompt.trim()) process.exit(0);
+
+  if (!getHooksEnabledPreference(cortexPath)) {
+    appendAuditLog(cortexPath, "hook_prompt", "status=disabled");
+    process.exit(0);
+  }
 
   updateRuntimeHealth(cortexPath, { lastPromptAt: new Date().toISOString() });
 
@@ -880,7 +911,6 @@ async function handleHookPrompt() {
       if (selected.length >= 3) break;
     }
     if (!selected.length) process.exit(0);
-
     const projectLabel = detectedProject ? ` · ${detectedProject}` : "";
     const resultLabel = selected.length === 1 ? "1 result" : `${selected.length} results`;
     const statusLine = `◆ cortex${projectLabel} · ${resultLabel}`;
@@ -895,8 +925,8 @@ async function handleHookPrompt() {
       parts.push("");
     }
     parts.push("</cortex-context>");
+    const changedCount = gitCtx?.changedFiles.size ?? 0;
     if (gitCtx) {
-      const changedCount = gitCtx.changedFiles.size;
       const fileHits = selected.filter((r) => fileRelevanceBoost((r.row as string[])[4], gitCtx.changedFiles) > 0).length;
       const branchHits = selected.filter((r) => branchMatchBoost((r.row as string[])[3], gitCtx.branch) > 0).length;
       parts.push(
@@ -976,6 +1006,10 @@ async function handleHookPrompt() {
 }
 
 async function handleHookContext() {
+  if (!getHooksEnabledPreference(cortexPath)) {
+    process.exit(0);
+  }
+
   // SessionStart hook provides stdin JSON with cwd and source
   let cwd = process.cwd();
   try {

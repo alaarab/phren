@@ -76,6 +76,8 @@ You can toggle later anytime:
 ```bash
 npx @alaarab/cortex mcp-mode on    # recommended
 npx @alaarab/cortex mcp-mode off   # hooks-only fallback
+npx @alaarab/cortex hooks-mode off # disable hook execution temporarily
+npx @alaarab/cortex hooks-mode on  # re-enable hooks
 ```
 
 ### Sync across machines
@@ -178,6 +180,7 @@ cortex memory-policy get|set ...     # retention/decay/confidence tuning
 cortex memory-workflow get|set ...   # approval workflow tuning
 cortex memory-access get|set ...     # role permissions
 cortex mcp-mode on|off|status        # toggle MCP integration anytime
+cortex hooks-mode on|off|status      # toggle hook execution anytime
 ```
 
 ### Interactive shell

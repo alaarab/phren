@@ -13,6 +13,7 @@ Usage:
                                                  --apply-starter-update: refresh global/CLAUDE.md + global skills from latest starter
   npx @alaarab/cortex uninstall                  Remove cortex MCP config and hooks
   npx @alaarab/cortex mcp-mode [on|off|status]   Toggle MCP integration without reinstalling
+  npx @alaarab/cortex hooks-mode [on|off|status] Toggle hook execution without removing hook wiring
   npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean] [--all-tools] [--mcp on|off]
                                                  Sync profile, symlinks, hooks, and context (replaces link.sh)
                                                  --all-tools: configure hooks for all agents (default: auto-detect)
@@ -90,6 +91,12 @@ if (process.argv[2] === "uninstall") {
 if (process.argv[2] === "mcp-mode") {
   const { runMcpMode } = await import("./init.js");
   await runMcpMode(process.argv[3]);
+  process.exit(0);
+}
+
+if (process.argv[2] === "hooks-mode") {
+  const { runHooksMode } = await import("./init.js");
+  await runHooksMode(process.argv[3]);
   process.exit(0);
 }
 
