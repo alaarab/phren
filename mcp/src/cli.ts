@@ -37,6 +37,8 @@ import { execFileSync, execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
 import { startMemoryUi } from "./memory-ui.js";
+import { startShell } from "./shell.js";
+import { runCortexUpdate } from "./update.js";
 
 const cortexPath = findCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
@@ -204,6 +206,10 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleMemoryAccess(args);
     case "memory-ui":
       return handleMemoryUi(args);
+    case "shell":
+      return handleShell(args);
+    case "update":
+      return handleUpdate(args);
     case "background-maintenance":
       return handleBackgroundMaintenance(args[0]);
     default:
@@ -1517,6 +1523,25 @@ async function handleMemoryUi(args: string[]) {
   const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
   const safePort = Number.isNaN(port) ? 3499 : port;
   await startMemoryUi(cortexPath, safePort);
+}
+
+async function handleShell(args: string[]) {
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log("Usage: cortex shell");
+    console.log("Interactive shell with views for Projects, Backlog, Learnings, Memory Queue, Machines/Profiles, and Health.");
+    return;
+  }
+  await startShell(cortexPath, profile);
+}
+
+async function handleUpdate(args: string[]) {
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log("Usage: cortex update");
+    console.log("Updates cortex to the latest version (local git clone when available, otherwise npm global package).");
+    return;
+  }
+  const result = await runCortexUpdate();
+  console.log(result);
 }
 
 async function handleBackgroundMaintenance(projectArg?: string) {

@@ -154,6 +154,9 @@ The server indexes your cortex into a local SQLite FTS5 database. Twenty-two too
 For scripting, hooks, and quick lookups:
 
 ```bash
+cortex                               # interactive shell (TTY default)
+cortex shell                         # explicit shell mode
+cortex update                        # update to latest cortex version
 cortex search "rate limiting"        # FTS5 search with synonym expansion
 cortex hook-prompt                   # reads stdin JSON, outputs context block
 cortex hook-session-start            # lifecycle preflight: pull/check/schedule governance
@@ -175,6 +178,17 @@ cortex memory-workflow get|set ...   # approval workflow tuning
 cortex memory-access get|set ...     # role permissions
 cortex mcp-mode on|off|status        # toggle MCP integration anytime
 ```
+
+### Interactive shell
+
+`cortex` opens an interactive shell in terminal contexts. It includes six views (`Projects`, `Backlog`, `Learnings`, `Memory Queue`, `Machines/Profiles`, `Health`) with `:command` palette actions and global shortcuts (`p b l m h / : q`).
+
+Key workflows:
+- Backlog board read/write (`add`, `move`, `complete`, `reprioritize`, `context`)
+- Lifecycle helpers (`work next`, `tidy`)
+- Learnings write/remove
+- Memory queue triage (`approve`, `reject`, `edit`)
+- Health remediation (`run fix`, `relink`, `rerun hooks`, `update`)
 
 ---
 
