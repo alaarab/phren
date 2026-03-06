@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
-import { configureAllHooks } from "./hooks.js";
+import { buildLifecycleCommands, configureAllHooks } from "./hooks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..", "..");
@@ -19,6 +19,7 @@ type ToolStatus = McpConfigStatus | "no_settings" | "no_vscode" | "no_cursor" | 
 
 interface InstallPreferences {
   mcpEnabled?: boolean;
+  installedVersion?: string;
   updatedAt?: string;
 }
 
@@ -53,6 +54,56 @@ function writeInstallPreferences(cortexPath: string, patch: Partial<InstallPrefe
       2
     ) + "\n"
   );
+}
+
+function semverParts(version: string): [number, number, number] {
+  const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return [0, 0, 0];
+  return [
+    Number.parseInt(match[1], 10) || 0,
+    Number.parseInt(match[2], 10) || 0,
+    Number.parseInt(match[3], 10) || 0,
+  ];
+}
+
+function isVersionNewer(current: string, previous?: string): boolean {
+  if (!previous) return false;
+  const [ca, cb, cc] = semverParts(current);
+  const [pa, pb, pc] = semverParts(previous);
+  if (ca !== pa) return ca > pa;
+  if (cb !== pb) return cb > pb;
+  return cc > pc;
+}
+
+function copyStarterFile(src: string, dest: string) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(src, dest);
+}
+
+function applyStarterTemplateUpdates(cortexPath: string): string[] {
+  const updates: string[] = [];
+  const starterGlobal = path.join(STARTER_DIR, "global");
+  if (!fs.existsSync(starterGlobal)) return updates;
+
+  const starterClaude = path.join(starterGlobal, "CLAUDE.md");
+  const targetClaude = path.join(cortexPath, "global", "CLAUDE.md");
+  if (fs.existsSync(starterClaude)) {
+    copyStarterFile(starterClaude, targetClaude);
+    updates.push("global/CLAUDE.md");
+  }
+
+  const starterSkillsDir = path.join(starterGlobal, "skills");
+  const targetSkillsDir = path.join(cortexPath, "global", "skills");
+  if (fs.existsSync(starterSkillsDir)) {
+    fs.mkdirSync(targetSkillsDir, { recursive: true });
+    for (const f of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
+      if (!f.isFile()) continue;
+      copyStarterFile(path.join(starterSkillsDir, f.name), path.join(targetSkillsDir, f.name));
+      updates.push(`global/skills/${f.name}`);
+    }
+  }
+
+  return updates;
 }
 
 export function parseMcpMode(raw?: string): McpMode | undefined {
@@ -192,6 +243,8 @@ export function ensureGovernanceFiles(cortexPath: string) {
   const policy = path.join(govDir, "memory-policy.json");
   const access = path.join(govDir, "access-control.json");
   const workflow = path.join(govDir, "memory-workflow-policy.json");
+  const indexPolicy = path.join(govDir, "index-policy.json");
+  const runtimeHealth = path.join(govDir, "runtime-health.json");
 
   if (!fs.existsSync(policy)) {
     fs.writeFileSync(
@@ -227,12 +280,26 @@ export function ensureGovernanceFiles(cortexPath: string) {
       }, null, 2) + "\n"
     );
   }
+  if (!fs.existsSync(indexPolicy)) {
+    fs.writeFileSync(
+      indexPolicy,
+      JSON.stringify({
+        includeGlobs: ["**/*.md", ".claude/skills/**/*.md"],
+        excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
+        includeHidden: false,
+      }, null, 2) + "\n"
+    );
+  }
+  if (!fs.existsSync(runtimeHealth)) {
+    fs.writeFileSync(runtimeHealth, JSON.stringify({}, null, 2) + "\n");
+  }
 }
 
 export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): McpConfigStatus {
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   const entryScript = resolveEntryScript();
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  const lifecycle = buildLifecycleCommands(cortexPath);
   let status: McpConfigStatus = "already_disabled";
 
   patchJsonFile(settingsPath, (data) => {
@@ -242,48 +309,42 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
     // Hooks: always update to latest version
     if (!data.hooks) data.hooks = {};
 
-    // UserPromptSubmit hook: auto-inject cortex context into every prompt
-    const promptHook = {
+    const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart", hookBody: Record<string, any>) => {
+      if (!Array.isArray(data.hooks[eventName])) data.hooks[eventName] = [];
+      const eventHooks = data.hooks[eventName] as any[];
+      const marker = eventName === "UserPromptSubmit" ? "hook-prompt" : eventName === "Stop" ? "hook-stop" : "hook-session-start";
+      const legacyMarker = eventName === "Stop" ? "auto-save" : eventName === "SessionStart" ? "doctor --fix" : "hook-prompt";
+      const existingIdx = eventHooks.findIndex(
+        (h: any) => h?.hooks?.some(
+          (hook: any) =>
+            typeof hook?.command === "string" &&
+            (
+              hook.command.includes(marker) ||
+              hook.command.includes(legacyMarker) ||
+              hook.command.includes("cortex")
+            )
+        )
+      );
+      const payload = { matcher: "", hooks: [hookBody] };
+      if (existingIdx >= 0) eventHooks[existingIdx] = payload;
+      else eventHooks.push(payload);
+    };
+
+    upsertCortexHook("UserPromptSubmit", {
       type: "command",
-      command: `node "${entryScript}" hook-prompt`,
+      command: lifecycle.userPromptSubmit || `node "${entryScript}" hook-prompt`,
       timeout: 3,
-    };
-    const existingPrompt = data.hooks.UserPromptSubmit as any[] | undefined;
-    const hasCortexPromptHook = existingPrompt?.some(
-      (h: any) => h.hooks?.some((hook: any) => hook.command?.includes("cortex") && hook.command?.includes("hook-prompt"))
-    );
-    if (!hasCortexPromptHook) {
-      if (!data.hooks.UserPromptSubmit) data.hooks.UserPromptSubmit = [];
-      data.hooks.UserPromptSubmit.push({ matcher: "", hooks: [promptHook] });
-    }
+    });
 
-    // Stop hook: auto-commit cortex changes
-    const stopHook = {
+    upsertCortexHook("Stop", {
       type: "command",
-      command: `cd "${cortexPath}" && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)`,
-    };
-    const existingStop = data.hooks.Stop as any[] | undefined;
-    const hasCortexStopHook = existingStop?.some(
-      (h: any) => h.hooks?.some((hook: any) => hook.command?.includes(".cortex") && hook.command?.includes("auto-save"))
-    );
-    if (!hasCortexStopHook) {
-      if (!data.hooks.Stop) data.hooks.Stop = [];
-      data.hooks.Stop.push({ matcher: "", hooks: [stopHook] });
-    }
+      command: lifecycle.stop,
+    });
 
-    // SessionStart hook: auto-pull cortex on session start
-    const startHook = {
+    upsertCortexHook("SessionStart", {
       type: "command",
-      command: `cd "${cortexPath}" && (git pull --rebase --quiet 2>/dev/null || true) && (npx @alaarab/cortex doctor --fix >/dev/null 2>&1 || true)`,
-    };
-    const existingStart = data.hooks.SessionStart as any[] | undefined;
-    const hasCortexStartHook = existingStart?.some(
-      (h: any) => h.hooks?.some((hook: any) => hook.command?.includes(".cortex") && hook.command?.includes("git pull"))
-    );
-    if (!hasCortexStartHook) {
-      if (!data.hooks.SessionStart) data.hooks.SessionStart = [];
-      data.hooks.SessionStart.push({ matcher: "", hooks: [startHook] });
-    }
+      command: lifecycle.sessionStart,
+    });
   });
   return status;
 }
@@ -418,6 +479,7 @@ export interface InitOptions {
   machine?: string;
   profile?: string;
   mcp?: McpMode;
+  applyStarterUpdate?: boolean;
 }
 
 export async function runInit(opts: InitOptions = {}) {
@@ -467,7 +529,21 @@ export async function runInit(opts: InitOptions = {}) {
       } catch { /* best effort */ }
 
       ensureGovernanceFiles(cortexPath);
-      setMcpEnabledPreference(cortexPath, mcpEnabled);
+      const prefs = readInstallPreferences(cortexPath);
+      const previousVersion = prefs.installedVersion;
+      if (isVersionNewer(VERSION, previousVersion)) {
+        log(`\n  Starter template update available: v${previousVersion} -> v${VERSION}`);
+        log(`  Run \`npx @alaarab/cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+      }
+      if (opts.applyStarterUpdate) {
+        const updated = applyStarterTemplateUpdates(cortexPath);
+        if (updated.length) {
+          log(`  Applied starter template updates (${updated.length} file${updated.length === 1 ? "" : "s"}).`);
+        } else {
+          log(`  No starter template updates were applied (starter files not found).`);
+        }
+      }
+      writeInstallPreferences(cortexPath, { mcpEnabled, installedVersion: VERSION });
 
       log(`\nDone. Restart your coding agent(s) to pick up changes.\n`);
       process.exit(0);
@@ -569,7 +645,7 @@ export async function runInit(opts: InitOptions = {}) {
   } catch { /* best effort */ }
 
   ensureGovernanceFiles(cortexPath);
-  setMcpEnabledPreference(cortexPath, mcpEnabled);
+  writeInstallPreferences(cortexPath, { mcpEnabled, installedVersion: VERSION });
 
   log(`\nDone. Your knowledge base is at ${cortexPath}\n`);
   log(`Next steps:`);

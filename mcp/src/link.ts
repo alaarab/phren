@@ -4,6 +4,7 @@ import * as os from "os";
 import * as readline from "readline";
 import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
+import { fileURLToPath } from "url";
 import {
   configureClaude,
   configureCodexMcp,
@@ -15,10 +16,11 @@ import {
   setMcpEnabledPreference,
   type McpMode,
 } from "./init.js";
-import { configureAllHooks, detectInstalledTools } from "./hooks.js";
+import { buildLifecycleCommands, configureAllHooks, detectInstalledTools } from "./hooks.js";
 
 const MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
 const CONTEXT_FILE = path.join(os.homedir(), ".cortex-context.md");
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const DEFAULT_SEARCH_PATHS = [
   os.homedir(),
@@ -112,6 +114,51 @@ function displayName(slug: string): string {
   return slug.split("-").map(w => w[0]?.toUpperCase() + w.slice(1)).join(" ");
 }
 
+function semverParts(version: string): [number, number, number] {
+  const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return [0, 0, 0];
+  return [
+    Number.parseInt(match[1], 10) || 0,
+    Number.parseInt(match[2], 10) || 0,
+    Number.parseInt(match[3], 10) || 0,
+  ];
+}
+
+function isVersionNewer(current: string, previous?: string): boolean {
+  if (!previous) return false;
+  const [ca, cb, cc] = semverParts(current);
+  const [pa, pb, pc] = semverParts(previous);
+  if (ca !== pa) return ca > pa;
+  if (cb !== pb) return cb > pb;
+  return cc > pc;
+}
+
+function currentPackageVersion(): string | null {
+  try {
+    const pkgPath = path.join(ROOT, "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string };
+    return pkg.version || null;
+  } catch {
+    return null;
+  }
+}
+
+function maybeOfferStarterTemplateUpdate(cortexPath: string) {
+  const current = currentPackageVersion();
+  if (!current) return;
+  const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
+  if (!fs.existsSync(prefsPath)) return;
+  try {
+    const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as { installedVersion?: string };
+    if (isVersionNewer(current, prefs.installedVersion)) {
+      log(`  Starter template update available: v${prefs.installedVersion} -> v${current}`);
+      log(`  Run \`npx @alaarab/cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+    }
+  } catch {
+    // best effort
+  }
+}
+
 async function registerMachine(cortexPath: string): Promise<{ machine: string; profile: string }> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string) => new Promise<string>(r => rl.question(q, r));
@@ -172,9 +219,10 @@ function symlinkFile(src: string, dest: string) {
 // ── SKILL.md ──────────────────────────────────────────────────────────────────
 
 function writeSkillMd(cortexPath: string) {
-  const cortexPathEscaped = cortexPath.replace(/"/g, '\\"');
-  const pullCmd = `cd "${cortexPathEscaped}" && (git pull --rebase --quiet 2>/dev/null || true) && (npx @alaarab/cortex doctor --fix >/dev/null 2>&1 || true)`;
-  const stopCmd = `cd "${cortexPathEscaped}" && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)`;
+  const lifecycle = buildLifecycleCommands(cortexPath);
+  const sessionStartCmd = lifecycle.sessionStart.replace(/"/g, '\\"');
+  const promptCmd = lifecycle.userPromptSubmit.replace(/"/g, '\\"');
+  const stopCmd = lifecycle.stop.replace(/"/g, '\\"');
 
   const content = `---
 name: cortex
@@ -185,11 +233,11 @@ hooks:
   SessionStart:
     - hooks:
         - type: command
-          command: "${pullCmd}"
+          command: "${sessionStartCmd}"
   UserPromptSubmit:
     - hooks:
         - type: command
-          command: "npx @alaarab/cortex hook-prompt"
+          command: "${promptCmd}"
           timeout: 3
   Stop:
     - hooks:
@@ -524,6 +572,7 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
   setMcpEnabledPreference(cortexPath, mcpEnabled);
   log(`  MCP mode: ${mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)"}`);
+  maybeOfferStarterTemplateUpdate(cortexPath);
   let mcpStatus = "no_settings";
   try { mcpStatus = configureClaude(cortexPath, { mcpEnabled }) ?? "installed"; } catch { /* best effort */ }
   logMcpStatus("Claude", mcpStatus);
@@ -580,6 +629,20 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   log(`\nDone. Profile '${profile}' is active.`);
   if (opts.task) log(`Task mode: ${opts.task}`);
+}
+
+function isWrapperActive(tool: string): boolean {
+  const wrapperPath = path.join(os.homedir(), ".local", "bin", tool);
+  if (!fs.existsSync(wrapperPath)) return false;
+  try {
+    const resolved = execFileSync("bash", ["-lc", `command -v ${tool}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return path.resolve(resolved) === path.resolve(wrapperPath);
+  } catch {
+    return false;
+  }
 }
 
 export async function runDoctor(cortexPath: string, fix: boolean = false): Promise<DoctorResult> {
@@ -671,28 +734,57 @@ export async function runDoctor(cortexPath: string, fix: boolean = false): Promi
 
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   let hookOk = false;
-  let doctorOk = false;
+  let lifecycleOk = false;
   try {
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     const hooks = cfg?.hooks || {};
     const promptHooks = JSON.stringify(hooks.UserPromptSubmit || []);
     const stopHooks = JSON.stringify(hooks.Stop || []);
     const startHooks = JSON.stringify(hooks.SessionStart || []);
-    hookOk = promptHooks.includes("hook-prompt") && stopHooks.includes("auto-save");
-    doctorOk = startHooks.includes("doctor --fix");
+    hookOk = promptHooks.includes("hook-prompt");
+    const stopHookOk = stopHooks.includes("hook-stop") || stopHooks.includes("auto-save");
+    const startHookOk = startHooks.includes("hook-session-start") || startHooks.includes("doctor --fix");
+    lifecycleOk = stopHookOk && startHookOk;
   } catch {
     hookOk = false;
-    doctorOk = false;
+    lifecycleOk = false;
   }
   checks.push({
     name: "claude-hooks",
     ok: hookOk,
-    detail: hookOk ? "prompt + stop hooks configured" : "missing prompt/stop hooks in ~/.claude/settings.json",
+    detail: hookOk ? "prompt hook configured" : "missing prompt hook in ~/.claude/settings.json",
   });
   checks.push({
-    name: "doctor-background",
-    ok: doctorOk,
-    detail: doctorOk ? "doctor --fix is wired in SessionStart hook" : "doctor --fix missing from SessionStart",
+    name: "lifecycle-hooks",
+    ok: lifecycleOk,
+    detail: lifecycleOk
+      ? "session-start + stop lifecycle hooks configured"
+      : "missing lifecycle hooks (expected hook-session-start and hook-stop)",
+  });
+
+  const runtimeHealthPath = path.join(cortexPath, ".governance", "runtime-health.json");
+  let runtime: any = null;
+  if (fs.existsSync(runtimeHealthPath)) {
+    try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch { runtime = null; }
+  }
+  checks.push({
+    name: "runtime-health-file",
+    ok: Boolean(runtime),
+    detail: runtime ? runtimeHealthPath : "missing or unreadable .governance/runtime-health.json",
+  });
+  const autoSaveStatus = runtime?.lastAutoSave?.status as string | undefined;
+  const autoSaveAt = runtime?.lastAutoSave?.at as string | undefined;
+  checks.push({
+    name: "runtime-auto-save",
+    ok: autoSaveStatus === "saved-pushed" || autoSaveStatus === "saved-local" || autoSaveStatus === "clean",
+    detail: autoSaveStatus
+      ? `last auto-save: ${autoSaveStatus}${autoSaveAt ? ` @ ${autoSaveAt}` : ""}`
+      : "no auto-save runtime record yet",
+  });
+  checks.push({
+    name: "runtime-prompt",
+    ok: Boolean(runtime?.lastPromptAt),
+    detail: runtime?.lastPromptAt ? `last prompt hook run @ ${runtime.lastPromptAt}` : "no prompt runtime record yet",
   });
 
   const detected = detectInstalledTools();
@@ -718,6 +810,17 @@ export async function runDoctor(cortexPath: string, fix: boolean = false): Promi
       name: "codex-hooks",
       ok: fs.existsSync(codexHooks),
       detail: fs.existsSync(codexHooks) ? "codex hooks config present" : "missing codex.json in cortex root",
+    });
+  }
+  for (const tool of ["copilot", "cursor", "codex"]) {
+    if (!detected.has(tool)) continue;
+    const active = isWrapperActive(tool);
+    checks.push({
+      name: `wrapper:${tool}`,
+      ok: active,
+      detail: active
+        ? `${tool} wrapper active via ~/.local/bin/${tool}`
+        : `${tool} wrapper missing or not first in PATH`,
     });
   }
 

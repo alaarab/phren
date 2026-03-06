@@ -59,6 +59,28 @@ export interface MemoryWorkflowPolicy {
   riskySections: Array<"Review" | "Stale" | "Conflicts">;
 }
 
+export interface IndexPolicy {
+  includeGlobs: string[];
+  excludeGlobs: string[];
+  includeHidden: boolean;
+}
+
+export interface RuntimeHealth {
+  lastSessionStartAt?: string;
+  lastPromptAt?: string;
+  lastStopAt?: string;
+  lastAutoSave?: {
+    at: string;
+    status: "clean" | "saved-local" | "saved-pushed" | "error";
+    detail?: string;
+  };
+  lastGovernance?: {
+    at: string;
+    status: "ok" | "error";
+    detail: string;
+  };
+}
+
 export interface MemoryScore {
   impressions: number;
   helpful: number;
@@ -90,6 +112,20 @@ const DEFAULT_WORKFLOW_POLICY: MemoryWorkflowPolicy = {
   requireMaintainerApproval: true,
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
+};
+
+const DEFAULT_INDEX_POLICY: IndexPolicy = {
+  includeGlobs: [
+    "**/*.md",
+    ".claude/skills/**/*.md",
+  ],
+  excludeGlobs: [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+  ],
+  includeHidden: false,
 };
 
 const DEFAULT_ACCESS: AccessControl = {
@@ -140,6 +176,10 @@ function workflowPolicyFile(cortexPath: string): string {
   return path.join(governanceDir(cortexPath), "memory-workflow-policy.json");
 }
 
+function indexPolicyFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "index-policy.json");
+}
+
 function scoreFile(cortexPath: string): string {
   return path.join(governanceDir(cortexPath), "memory-scores.json");
 }
@@ -150,6 +190,10 @@ function usageLogFile(cortexPath: string): string {
 
 function lockFile(cortexPath: string): string {
   return path.join(governanceDir(cortexPath), "canonical-locks.json");
+}
+
+function runtimeHealthFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "runtime-health.json");
 }
 
 function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRole {
@@ -256,6 +300,55 @@ export function updateMemoryWorkflowPolicy(
   };
   writeJsonFile(workflowPolicyFile(cortexPath), next);
   appendAuditLog(cortexPath, "update_workflow_policy", JSON.stringify(next));
+  return next;
+}
+
+export function getIndexPolicy(cortexPath: string): IndexPolicy {
+  const parsed = readJsonFile<Partial<IndexPolicy>>(indexPolicyFile(cortexPath), {});
+  const includeGlobs = Array.isArray(parsed.includeGlobs)
+    ? parsed.includeGlobs.filter((g): g is string => typeof g === "string" && g.trim().length > 0)
+    : DEFAULT_INDEX_POLICY.includeGlobs;
+  const excludeGlobs = Array.isArray(parsed.excludeGlobs)
+    ? parsed.excludeGlobs.filter((g): g is string => typeof g === "string" && g.trim().length > 0)
+    : DEFAULT_INDEX_POLICY.excludeGlobs;
+  return {
+    includeGlobs: includeGlobs.length ? includeGlobs : DEFAULT_INDEX_POLICY.includeGlobs,
+    excludeGlobs: excludeGlobs.length ? excludeGlobs : DEFAULT_INDEX_POLICY.excludeGlobs,
+    includeHidden: parsed.includeHidden ?? DEFAULT_INDEX_POLICY.includeHidden,
+  };
+}
+
+export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy>): IndexPolicy | string {
+  const denial = checkMemoryPermission(cortexPath, "policy");
+  if (denial) return denial;
+  const current = getIndexPolicy(cortexPath);
+  const next: IndexPolicy = {
+    includeGlobs: Array.isArray(patch.includeGlobs)
+      ? patch.includeGlobs.filter((g): g is string => typeof g === "string" && g.trim().length > 0)
+      : current.includeGlobs,
+    excludeGlobs: Array.isArray(patch.excludeGlobs)
+      ? patch.excludeGlobs.filter((g): g is string => typeof g === "string" && g.trim().length > 0)
+      : current.excludeGlobs,
+    includeHidden: patch.includeHidden ?? current.includeHidden,
+  };
+  writeJsonFile(indexPolicyFile(cortexPath), next);
+  appendAuditLog(cortexPath, "update_index_policy", JSON.stringify(next));
+  return next;
+}
+
+export function getRuntimeHealth(cortexPath: string): RuntimeHealth {
+  return readJsonFile<RuntimeHealth>(runtimeHealthFile(cortexPath), {});
+}
+
+export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHealth>): RuntimeHealth {
+  const current = getRuntimeHealth(cortexPath);
+  const next: RuntimeHealth = {
+    ...current,
+    ...patch,
+    lastAutoSave: patch.lastAutoSave ?? current.lastAutoSave,
+    lastGovernance: patch.lastGovernance ?? current.lastGovernance,
+  };
+  writeJsonFile(runtimeHealthFile(cortexPath), next);
   return next;
 }
 
@@ -597,11 +690,17 @@ function findWasmBinary(): Buffer | undefined {
 // Compute a hash of all .md file mtimes to use as a cache invalidation key
 function computeCortexHash(cortexPath: string, profile?: string): string {
   const projectDirs = getProjectDirs(cortexPath, profile);
+  const policy = getIndexPolicy(cortexPath);
   const files: string[] = [];
   for (const dir of projectDirs) {
     try {
-      const mdFiles = globSync("**/*.md", { cwd: dir, nodir: true });
-      for (const f of mdFiles) files.push(path.join(dir, f));
+      const matched = new Set<string>();
+      for (const pattern of policy.includeGlobs) {
+        const dot = policy.includeHidden || pattern.startsWith(".") || pattern.includes("/.");
+        const mdFiles = globSync(pattern, { cwd: dir, nodir: true, dot, ignore: policy.excludeGlobs });
+        for (const f of mdFiles) matched.add(f);
+      }
+      for (const f of matched) files.push(path.join(dir, f));
     } catch { /* skip unreadable dirs */ }
   }
   files.sort();
@@ -614,6 +713,7 @@ function computeCortexHash(cortexPath: string, profile?: string): string {
   }
   // Include profile in hash so profile changes invalidate cache
   if (profile) hash.update(`profile:${profile}`);
+  hash.update(`index-policy:${JSON.stringify(policy)}`);
   return hash.digest("hex");
 }
 
@@ -647,11 +747,23 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
   `);
 
   const projectDirs = getProjectDirs(cortexPath, profile);
+  const indexPolicy = getIndexPolicy(cortexPath);
   let fileCount = 0;
 
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
-    const mdFiles = globSync("**/*.md", { cwd: dir, nodir: true });
+    const mdFilesSet = new Set<string>();
+    for (const pattern of indexPolicy.includeGlobs) {
+      const dot = indexPolicy.includeHidden || pattern.startsWith(".") || pattern.includes("/.");
+      const matched = globSync(pattern, {
+        cwd: dir,
+        nodir: true,
+        dot,
+        ignore: indexPolicy.excludeGlobs,
+      });
+      for (const rel of matched) mdFilesSet.add(rel);
+    }
+    const mdFiles = [...mdFilesSet].sort();
 
     for (const relFile of mdFiles) {
       const fullPath = path.join(dir, relFile);
@@ -1367,6 +1479,100 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
   } catch {
     // best effort
   }
+}
+
+const LEGACY_FINDINGS_CANDIDATES = [
+  "FINDINGS.md",
+  "findings.md",
+  "LESSONS.md",
+  "lessons.md",
+  "POSTMORTEM.md",
+  "postmortem.md",
+  "RETRO.md",
+  "retro.md",
+];
+
+function normalizeMigratedBullet(raw: string): string {
+  const cleaned = raw
+    .replace(/^\s*[-*]\s*/, "")
+    .replace(/^\[[ xX]\]\s*/, "")
+    .replace(/^\d+\.\s*/, "")
+    .trim();
+  return cleaned;
+}
+
+function shouldPinCanonical(text: string): boolean {
+  return /(must|always|never|avoid|required|critical|do not|don't)\b/i.test(text);
+}
+
+export function migrateLegacyFindings(
+  cortexPath: string,
+  project: string,
+  opts: { pinCanonical?: boolean; dryRun?: boolean } = {}
+): string {
+  const denial = checkMemoryPermission(cortexPath, "write");
+  if (denial) return denial;
+  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  const resolvedDir = safeProjectPath(cortexPath, project);
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return `Project "${project}" not found in cortex.`;
+
+  const available = new Map(
+    fs.readdirSync(resolvedDir).map((name) => [name.toLowerCase(), name] as const)
+  );
+  const files = LEGACY_FINDINGS_CANDIDATES
+    .map((name) => available.get(name.toLowerCase()))
+    .filter((name): name is string => Boolean(name));
+  if (!files.length) return `No legacy findings docs found for "${project}".`;
+
+  const seen = new Set<string>();
+  const extracted: Array<{ text: string; file: string; line: number }> = [];
+
+  for (const file of files) {
+    const fullPath = path.join(resolvedDir, file);
+    const lines = fs.readFileSync(fullPath, "utf8").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.match(/^\s*(?:[-*]\s+|\d+\.\s+)/)) continue;
+      const bullet = normalizeMigratedBullet(line);
+      if (!bullet) continue;
+      const key = bullet.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      extracted.push({ text: bullet, file, line: i + 1 });
+    }
+  }
+
+  if (!extracted.length) {
+    return `Legacy findings docs found for "${project}", but no actionable bullet entries were detected.`;
+  }
+
+  if (opts.dryRun) {
+    return `Found ${extracted.length} migratable findings in ${files.length} file(s) for "${project}".`;
+  }
+
+  let migrated = 0;
+  let pinned = 0;
+  for (const entry of extracted) {
+    const learning = `${entry.text} (migrated from ${entry.file})`;
+    addLearningToFile(cortexPath, project, learning, {
+      repo: resolvedDir,
+      file: path.join(resolvedDir, entry.file),
+      line: entry.line,
+    });
+    migrated++;
+
+    if (opts.pinCanonical && shouldPinCanonical(entry.text)) {
+      upsertCanonicalMemory(cortexPath, project, entry.text);
+      pinned++;
+    }
+  }
+
+  appendAuditLog(
+    cortexPath,
+    "migrate_findings",
+    `project=${project} files=${files.length} migrated=${migrated} pinned=${pinned}`
+  );
+  return `Migrated ${migrated} findings for "${project}" from ${files.length} legacy file(s)${opts.pinCanonical ? `; pinned ${pinned} canonical memories` : ""}.`;
 }
 
 export function upsertCanonicalMemory(cortexPath: string, project: string, memory: string): string {

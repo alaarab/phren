@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { execSync } from "child_process";
+import { fileURLToPath } from "url";
 
 export function commandExists(cmd: string): boolean {
   try {
@@ -39,20 +40,61 @@ function resolveToolBinary(tool: string): string | null {
   return null;
 }
 
+function resolveCliEntryScript(): string | null {
+  const local = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+  return fs.existsSync(local) ? local : null;
+}
+
+export interface LifecycleCommands {
+  sessionStart: string;
+  userPromptSubmit: string;
+  stop: string;
+}
+
+export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
+  const entry = resolveCliEntryScript();
+  if (entry) {
+    const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return {
+      sessionStart: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-session-start`,
+      userPromptSubmit: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-prompt`,
+      stop: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-stop`,
+    };
+  }
+
+  const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return {
+    sessionStart: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-session-start`,
+    userPromptSubmit: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-prompt`,
+    stop: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-stop`,
+  };
+}
+
 function installSessionWrapper(tool: string, cortexPath: string): boolean {
   const realBinary = resolveToolBinary(tool);
   if (!realBinary) return false;
+
+  const entry = resolveCliEntryScript();
 
   const localBinDir = path.join(os.homedir(), ".local", "bin");
   const wrapperPath = path.join(localBinDir, tool);
 
   const escapedBinary = realBinary.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const escapedEntry = entry ? entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"') : "";
+  const sessionStartCmd = entry
+    ? `env CORTEX_PATH="$CORTEX_PATH" node "$ENTRY_SCRIPT" hook-session-start`
+    : `env CORTEX_PATH="$CORTEX_PATH" npx @alaarab/cortex hook-session-start`;
+  const stopCmd = entry
+    ? `env CORTEX_PATH="$CORTEX_PATH" node "$ENTRY_SCRIPT" hook-stop`
+    : `env CORTEX_PATH="$CORTEX_PATH" npx @alaarab/cortex hook-stop`;
   const content = `#!/usr/bin/env bash
 set -u
 
 REAL_BIN="${escapedBinary}"
 CORTEX_PATH="\${CORTEX_PATH:-${escapedCortex}}"
+ENTRY_SCRIPT="${escapedEntry}"
 
 if [ ! -x "$REAL_BIN" ]; then
   echo "cortex wrapper error: real ${tool} binary not executable: $REAL_BIN" >&2
@@ -73,19 +115,12 @@ run_with_timeout() {
   fi
 }
 
-cd "$CORTEX_PATH" 2>/dev/null || true
-run_with_timeout 8s git pull --rebase --quiet
-run_with_timeout 12s npx @alaarab/cortex doctor --fix >/dev/null 2>&1
+run_with_timeout 14s ${sessionStartCmd} >/dev/null 2>&1
 
 "$REAL_BIN" "$@"
 status=$?
 
-cd "$CORTEX_PATH" 2>/dev/null || true
-if ! git diff --quiet 2>/dev/null; then
-  git add -A
-  git commit -m 'auto-save cortex' >/dev/null 2>&1 || true
-  run_with_timeout 8s git push >/dev/null 2>&1
-fi
+run_with_timeout 14s ${stopCmd} >/dev/null 2>&1
 
 exit $status
 `;
@@ -108,9 +143,10 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
     tools ? new Set(["copilot", "cursor", "codex"]) :
     detectInstalledTools();
 
-  const pullCmd = `cd "${cortexPath}" && (git pull --rebase --quiet 2>/dev/null || true) && (npx @alaarab/cortex doctor --fix >/dev/null 2>&1 || true)`;
-  const promptCmd = `npx @alaarab/cortex hook-prompt`;
-  const stopCmd = `cd "${cortexPath}" && git diff --quiet 2>/dev/null || (git add -A && git commit -m 'auto-save cortex' && git push 2>/dev/null || true)`;
+  const lifecycle = buildLifecycleCommands(cortexPath);
+  const pullCmd = lifecycle.sessionStart;
+  const promptCmd = lifecycle.userPromptSubmit;
+  const stopCmd = lifecycle.stop;
 
   // ── GitHub Copilot CLI (user-level: ~/.github/hooks/cortex.json) ──────────
   if (detected.has("copilot")) {
@@ -142,13 +178,15 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
       const config = {
         ...existing,
         version: 1,
-        // Cursor has no sessionStart hook; best effort is beforeSubmitPrompt + stop
+        // Cursor parity: sessionStart is best-effort where supported; wrapper also enforces lifecycle.
+        sessionStart: { command: pullCmd },
         beforeSubmitPrompt: { command: promptCmd },
         stop: { command: stopCmd },
       };
       fs.writeFileSync(cursorFile, JSON.stringify(config, null, 2));
       configured.push("Cursor");
     } catch { /* best effort */ }
+    installSessionWrapper("cursor", cortexPath);
   }
 
   // ── Codex (codex.json in cortex path) ────────────────────────────────────

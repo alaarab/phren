@@ -64,6 +64,47 @@
 - Harden GitHub mining for large repos and API failures (pagination, timeouts, rate-limit backoff).
 - Expand docs/README with governance model, role setup, policy tuning examples, and operator runbook.
 
+## [1.9.0] - 2026-03-06
+
+### Added
+- Release hardening gates:
+  - Added `mcp/src/release.test.ts` to enforce package/MCP version consistency.
+  - Added lifecycle integration coverage for Copilot/Cursor/Codex hook and wrapper parity.
+  - Added upgrade-path coverage that converts legacy Claude lifecycle hooks to `hook-session-start` / `hook-stop`.
+- New migration tooling for legacy findings:
+  - `migrateLegacyFindings` core migration flow in shared layer.
+  - New CLI: `cortex migrate-findings <project> [--pin] [--dry-run]`.
+  - New MCP tool: `migrate_legacy_findings`.
+- New indexer completeness controls:
+  - Explicit include/exclude and hidden-doc indexing policy via `.governance/index-policy.json`.
+  - New CLI: `cortex index-policy get|set ...`.
+  - New MCP tool: `index_policy`.
+- Runtime lifecycle health tracking in `.governance/runtime-health.json`:
+  - Session start, prompt, stop, auto-save, and maintenance status timestamps.
+
+### Changed
+- Cross-tool lifecycle parity:
+  - Claude/Copilot/Cursor/Codex lifecycle hooks now route through consistent commands:
+    - `hook-session-start`
+    - `hook-prompt`
+    - `hook-stop`
+  - Session wrappers now orchestrate the same lifecycle commands for consistent behavior.
+- `cortex doctor` now validates runtime execution health:
+  - lifecycle hook presence
+  - wrapper activation in PATH
+  - last prompt hook run
+  - last auto-save status/result
+- Search UX hardening:
+  - Added robust FTS query builder that quotes terms and neutralizes syntax surprises.
+  - Search paths now use robust query construction by default.
+- `get_backlog` MCP now reads backlog files directly from disk at call time (no stale startup snapshot behavior).
+- `complete_backlog_item` now marks moved entries as checked (`[x]`) in `## Done`.
+- `init`/`link` now detect newer package versions and offer starter template refresh (`--apply-starter-update`).
+
+### Fixed
+- MCP backlog completion now correctly marks moved tasks as complete (`[x]`) instead of leaving unchecked entries in `## Done`.
+- `get_backlog` results now stay consistent immediately after updates because they no longer rely on stale startup index snapshots.
+
 ## [1.8.6] - 2026-03-06
 
 ### Changed

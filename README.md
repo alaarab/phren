@@ -117,7 +117,7 @@ When the context window fills and resets, a hook re-injects your project summary
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Twenty tools available:
+The server indexes your cortex into a local SQLite FTS5 database. Twenty-two tools available:
 
 **Search and browse:**
 - `search_cortex(query, type?, limit?)` with automatic synonym expansion
@@ -137,6 +137,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Twenty tools a
 - `remove_learning(project, learning)` removes by matching text
 - `save_learnings(message?)` commits and pushes all changes
 - `pin_memory(project, memory)` writes canonical/pinned memory entries
+- `migrate_legacy_findings(project, pinCanonical?, dryRun?)` promotes legacy findings docs into LEARNINGS/CANONICAL
 
 **Memory governance and quality:**
 - `govern_memories(project?)` queues stale/conflicting/low-value entries for review
@@ -146,6 +147,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Twenty tools a
 - `prune_memories(project?)` deletes expired entries by retention policy
 - `consolidate_memories(project?)` deduplicates and rewrites LEARNINGS.md
 - `memory_feedback(key, feedback)` records helpful/reprompt/regression outcomes
+- `index_policy(mode, ...)` configures include/exclude globs and hidden-doc indexing policy
 
 ### CLI subcommands
 
@@ -154,9 +156,12 @@ For scripting, hooks, and quick lookups:
 ```bash
 cortex search "rate limiting"        # FTS5 search with synonym expansion
 cortex hook-prompt                   # reads stdin JSON, outputs context block
+cortex hook-session-start            # lifecycle preflight: pull/check/schedule governance
+cortex hook-stop                     # lifecycle autosave with runtime status tracking
 cortex hook-context                  # project context for current directory
 cortex add-learning <project> "..."  # append a learning from the terminal
 cortex pin-memory <project> "..."    # promote canonical memory
+cortex migrate-findings <project> [--pin] [--dry-run]
 cortex extract-memories [project]    # mine git + GitHub signals into candidates
 cortex govern-memories [project]     # queue stale/conflicting/low-value memories
 cortex doctor [--fix]                # health checks + optional self-heal
@@ -164,6 +169,7 @@ cortex memory-ui [--port=3499]       # lightweight review UI
 cortex quality-feedback --key=<k> --type=helpful|reprompt|regression
 cortex prune-memories [project]      # delete stale memory entries
 cortex consolidate-memories [project]
+cortex index-policy get|set ...      # index include/exclude policy (hidden docs, globs)
 cortex memory-policy get|set ...     # retention/decay/confidence tuning
 cortex memory-workflow get|set ...   # approval workflow tuning
 cortex memory-access get|set ...     # role permissions
@@ -180,7 +186,7 @@ Cortex hooks are plain shell commands. Init auto-detects which tools you have an
 |-------|:-----------------:|:---------:|:---------:|:-----------------:|
 | Claude Code | ✓ | ✓ | ✓ | `CLAUDE.md` |
 | GitHub Copilot CLI | ✓ | ✓ | ✓ | `copilot-instructions.md` |
-| Cursor | ✓ (no session start) | ✓ | ✓ | — |
+| Cursor | ✓ | ✓ | ✓ | — |
 | OpenAI Codex | ✓ | ✓ | ✓ | `AGENTS.md` |
 | Any agentskills tool | ✓ | ✓ | — | via `cortex.SKILL.md` |
 

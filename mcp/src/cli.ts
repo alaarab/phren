@@ -25,8 +25,12 @@ import {
   pruneDeadMemories,
   consolidateProjectLearnings,
   enforceCanonicalLocks,
+  migrateLegacyFindings,
+  updateRuntimeHealth,
+  getIndexPolicy,
+  updateIndexPolicy,
 } from "./shared.js";
-import { sanitizeFts5Query, expandSynonyms, extractKeywords, isValidProjectName } from "./utils.js";
+import { buildRobustFtsQuery, extractKeywords, isValidProjectName } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync, execSync, spawn } from "child_process";
@@ -166,6 +170,10 @@ export async function runCliCommand(command: string, args: string[]) {
       }
     case "hook-prompt":
       return handleHookPrompt();
+    case "hook-session-start":
+      return handleHookSessionStart();
+    case "hook-stop":
+      return handleHookStop();
     case "hook-context":
       return handleHookContext();
     case "add-learning":
@@ -184,6 +192,10 @@ export async function runCliCommand(command: string, args: string[]) {
       return handlePruneMemories(args[0]);
     case "consolidate-memories":
       return handleConsolidateMemories(args[0]);
+    case "migrate-findings":
+      return handleMigrateFindings(args);
+    case "index-policy":
+      return handleIndexPolicy(args);
     case "memory-policy":
       return handleMemoryPolicy(args);
     case "memory-workflow":
@@ -502,7 +514,7 @@ async function handleSearch(opts: SearchOptions) {
     const params: Array<string | number> = [];
 
     if (opts.query) {
-      const safeQuery = expandSynonyms(sanitizeFts5Query(opts.query));
+      const safeQuery = buildRobustFtsQuery(opts.query);
       if (!safeQuery) {
         console.error("Query empty after sanitization.");
         process.exit(1);
@@ -556,6 +568,92 @@ async function handleSearch(opts: SearchOptions) {
   }
 }
 
+function runBestEffort(cmd: string, cwd: string): { ok: boolean; output?: string; error?: string } {
+  try {
+    const output = execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return { ok: true, output };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+async function handleHookSessionStart() {
+  const startedAt = new Date().toISOString();
+  const pull = runBestEffort("git pull --rebase --quiet", cortexPath);
+  const doctor = await runDoctor(cortexPath, false);
+  const maintenanceScheduled = scheduleBackgroundMaintenance(cortexPath);
+
+  updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
+  appendAuditLog(
+    cortexPath,
+    "hook_session_start",
+    `pull=${pull.ok ? "ok" : "fail"} doctor=${doctor.ok ? "ok" : "issues"} maintenance=${maintenanceScheduled ? "scheduled" : "skipped"}`
+  );
+}
+
+async function handleHookStop() {
+  const now = new Date().toISOString();
+  const status = runBestEffort("git status --porcelain", cortexPath);
+  if (!status.ok) {
+    updateRuntimeHealth(cortexPath, {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "error", detail: status.error || "git status failed" },
+    });
+    appendAuditLog(cortexPath, "hook_stop", `status=error detail=${JSON.stringify(status.error || "git status failed")}`);
+    return;
+  }
+
+  if (!status.output) {
+    updateRuntimeHealth(cortexPath, {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "clean", detail: "no changes" },
+    });
+    appendAuditLog(cortexPath, "hook_stop", "status=clean");
+    return;
+  }
+
+  const add = runBestEffort("git add -A", cortexPath);
+  const commit = add.ok ? runBestEffort("git commit -m 'auto-save cortex'", cortexPath) : { ok: false, error: add.error };
+  if (!add.ok || !commit.ok) {
+    updateRuntimeHealth(cortexPath, {
+      lastStopAt: now,
+      lastAutoSave: {
+        at: now,
+        status: "error",
+        detail: add.error || commit.error || "git add/commit failed",
+      },
+    });
+    appendAuditLog(cortexPath, "hook_stop", `status=error detail=${JSON.stringify(add.error || commit.error || "git add/commit failed")}`);
+    return;
+  }
+
+  const remotes = runBestEffort("git remote", cortexPath);
+  if (!remotes.ok || !remotes.output) {
+    updateRuntimeHealth(cortexPath, {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "saved-local", detail: "commit created; no remote configured" },
+    });
+    appendAuditLog(cortexPath, "hook_stop", "status=saved-local");
+    return;
+  }
+
+  const push = runBestEffort("git push", cortexPath);
+  if (push.ok) {
+    updateRuntimeHealth(cortexPath, {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed" },
+    });
+    appendAuditLog(cortexPath, "hook_stop", "status=saved-pushed");
+    return;
+  }
+
+  updateRuntimeHealth(cortexPath, {
+    lastStopAt: now,
+    lastAutoSave: { at: now, status: "saved-local", detail: push.error || "push failed" },
+  });
+  appendAuditLog(cortexPath, "hook_stop", `status=saved-local detail=${JSON.stringify(push.error || "push failed")}`);
+}
+
 async function handleHookPrompt() {
   let input = "";
   try {
@@ -578,6 +676,8 @@ async function handleHookPrompt() {
 
   if (!prompt.trim()) process.exit(0);
 
+  updateRuntimeHealth(cortexPath, { lastPromptAt: new Date().toISOString() });
+
   const keywords = extractKeywords(prompt);
   if (!keywords) process.exit(0);
 
@@ -591,7 +691,7 @@ async function handleHookPrompt() {
   const detectedProject = cwd ? detectProject(cortexPath, cwd, profile) : null;
   if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
 
-  const safeQuery = expandSynonyms(sanitizeFts5Query(keywords));
+  const safeQuery = buildRobustFtsQuery(keywords);
   if (!safeQuery) process.exit(0);
 
   try {
@@ -1167,7 +1267,14 @@ async function handleExtractMemories(projectArg?: string, cwdArg?: string, silen
   if (!silent) console.log(`Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, window=${days}d`);
 }
 
-async function handleGovernMemories(projectArg?: string, silent: boolean = false) {
+interface GovernanceSummary {
+  projects: number;
+  staleCount: number;
+  conflictCount: number;
+  reviewCount: number;
+}
+
+async function handleGovernMemories(projectArg?: string, silent: boolean = false): Promise<GovernanceSummary> {
   const policy = getMemoryPolicy(cortexPath);
   const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
   const projects = projectArg
@@ -1207,8 +1314,17 @@ async function handleGovernMemories(projectArg?: string, silent: boolean = false
   for (const project of projects) {
     consolidateProjectLearnings(cortexPath, project);
   }
-  enforceCanonicalLocks(cortexPath, projectArg);
-  if (!silent) console.log(`Governed memories: stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`);
+  const lockSummary = enforceCanonicalLocks(cortexPath, projectArg);
+  if (!silent) {
+    console.log(`Governed memories: stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`);
+    console.log(lockSummary);
+  }
+  return {
+    projects: projects.length,
+    staleCount,
+    conflictCount,
+    reviewCount,
+  };
 }
 
 async function handlePinMemory(project: string, memory: string) {
@@ -1254,6 +1370,54 @@ async function handleConsolidateMemories(projectArg?: string) {
     : getProjectDirs(cortexPath, profile).map((p) => path.basename(p)).filter((p) => p !== "global");
   const results = projects.map((p) => consolidateProjectLearnings(cortexPath, p));
   console.log(results.join("\n"));
+}
+
+async function handleMigrateFindings(args: string[]) {
+  const project = args.find((arg) => !arg.startsWith("-"));
+  if (!project) {
+    console.error("Usage: cortex migrate-findings <project> [--pin] [--dry-run]");
+    process.exit(1);
+  }
+  const pinCanonical = args.includes("--pin");
+  const dryRun = args.includes("--dry-run");
+  const result = migrateLegacyFindings(cortexPath, project, { pinCanonical, dryRun });
+  console.log(result);
+}
+
+async function handleIndexPolicy(args: string[]) {
+  if (!args.length || args[0] === "get") {
+    console.log(JSON.stringify(getIndexPolicy(cortexPath), null, 2));
+    return;
+  }
+  if (args[0] === "set") {
+    const patch: {
+      includeGlobs?: string[];
+      excludeGlobs?: string[];
+      includeHidden?: boolean;
+    } = {};
+    for (const arg of args.slice(1)) {
+      if (!arg.startsWith("--")) continue;
+      const [k, v] = arg.slice(2).split("=");
+      if (!k || v === undefined) continue;
+      if (k === "include") {
+        patch.includeGlobs = v.split(",").map((s) => s.trim()).filter(Boolean);
+      } else if (k === "exclude") {
+        patch.excludeGlobs = v.split(",").map((s) => s.trim()).filter(Boolean);
+      } else if (k === "includeHidden") {
+        patch.includeHidden = /^(1|true|yes|on)$/i.test(v);
+      }
+    }
+    const result = updateIndexPolicy(cortexPath, patch);
+    if (typeof result === "string") {
+      console.log(result);
+      if (result.startsWith("Permission denied")) process.exit(1);
+      return;
+    }
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.error("Usage: cortex index-policy [get|set --include=**/*.md,.claude/skills/**/*.md --exclude=**/node_modules/**,**/.git/** --includeHidden=false]");
+  process.exit(1);
 }
 
 async function handleMemoryPolicy(args: string[]) {
@@ -1357,11 +1521,31 @@ async function handleMemoryUi(args: string[]) {
 
 async function handleBackgroundMaintenance(projectArg?: string) {
   const markers = qualityMarkers(cortexPath);
+  const startedAt = new Date().toISOString();
   try {
-    await handleGovernMemories(projectArg, true);
-    pruneDeadMemories(cortexPath, projectArg);
+    const governance = await handleGovernMemories(projectArg, true);
+    const pruneResult = pruneDeadMemories(cortexPath, projectArg);
     fs.writeFileSync(markers.done, new Date().toISOString() + "\n");
+    updateRuntimeHealth(cortexPath, {
+      lastGovernance: {
+        at: startedAt,
+        status: "ok",
+        detail: `projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}; ${pruneResult}`,
+      },
+    });
+    appendAuditLog(
+      cortexPath,
+      "background_maintenance",
+      `status=ok projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}`
+    );
   } catch (err: any) {
+    updateRuntimeHealth(cortexPath, {
+      lastGovernance: {
+        at: startedAt,
+        status: "error",
+        detail: err?.message || String(err),
+      },
+    });
     appendAuditLog(cortexPath, "background_maintenance_failed", `error=${err?.message || String(err)}`);
   } finally {
     try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }

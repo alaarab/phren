@@ -1,6 +1,6 @@
 {
   "name": "@alaarab/cortex",
-  "version": "1.8.6",
+  "version": "1.9.0",
   "description": "Long-term memory for Claude Code",
   "type": "module",
   "bin": {

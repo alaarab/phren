@@ -120,9 +120,36 @@ export function safeProjectPath(base: string, ...segments: string[]): string | n
 // Sanitize user input before passing it to an FTS5 MATCH expression.
 // Strips FTS5-specific syntax that could cause injection or parse errors.
 export function sanitizeFts5Query(raw: string): string {
-  let q = raw.replace(/\0/g, "");
+  let q = raw.replace(/\0/g, " ");
   q = q.replace(/\b(content|type|project|filename|path):/gi, "");
-  q = q.replace(/\^/g, "");
-  q = q.replace(/"/g, "");
+  q = q.replace(/\b(AND|OR|NOT|NEAR)\b/gi, " ");
+  q = q.replace(/[\^"()[\]{}!@#$%&*+=~`';?,\\|]/g, " ");
+  q = q.replace(/\s+/g, " ");
   return q.trim();
+}
+
+// Build a defensive FTS5 MATCH query:
+// - sanitizes user input
+// - expands known synonyms
+// - quotes each term/phrase to avoid syntax surprises
+export function buildRobustFtsQuery(raw: string): string {
+  const safe = sanitizeFts5Query(raw);
+  if (!safe) return "";
+
+  const terms = new Set<string>();
+  const baseTerms = safe.split(/\s+/).filter((t) => t.length > 1);
+  for (const t of baseTerms) terms.add(t);
+
+  const lowered = safe.toLowerCase();
+  for (const [term, synonyms] of Object.entries(SYNONYMS)) {
+    if (!lowered.includes(term)) continue;
+    terms.add(term);
+    for (const syn of synonyms) terms.add(syn);
+  }
+
+  return [...terms]
+    .map((term) => term.replace(/"/g, "").trim())
+    .filter((term) => term.length > 1)
+    .map((term) => `"${term}"`)
+    .join(" OR ");
 }

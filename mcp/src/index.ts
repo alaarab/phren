@@ -10,6 +10,7 @@ Usage:
   npx @alaarab/cortex init [--machine <name>] [--profile <name>] [--mcp on|off]
                                                  Set up cortex in ~/.cortex
                                                  --mcp on|off: MCP tools enabled/disabled (default on)
+                                                 --apply-starter-update: refresh global/CLAUDE.md + global skills from latest starter
   npx @alaarab/cortex uninstall                  Remove cortex MCP config and hooks
   npx @alaarab/cortex mcp-mode [on|off|status]   Toggle MCP integration without reinstalling
   npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean] [--all-tools] [--mcp on|off]
@@ -20,6 +21,8 @@ Usage:
   npx @alaarab/cortex add-learning <project> "<insight>"
                                                  Add a learning to a project
   npx @alaarab/cortex hook-prompt                (used by Claude Code UserPromptSubmit hook)
+  npx @alaarab/cortex hook-session-start         (used by lifecycle SessionStart hooks)
+  npx @alaarab/cortex hook-stop                  (used by lifecycle Stop/sessionEnd hooks)
   npx @alaarab/cortex hook-context               (used by Claude Code SessionStart hook)
   npx @alaarab/cortex extract-memories [project] Auto-generate memory candidates from git history
   npx @alaarab/cortex govern-memories [project]  Queue stale/conflicting/low-value memory items
@@ -32,6 +35,10 @@ Usage:
   npx @alaarab/cortex prune-memories [project]   Delete stale memory entries by retention policy
   npx @alaarab/cortex consolidate-memories [project]
                                                  Deduplicate and consolidate LEARNINGS.md bullets
+  npx @alaarab/cortex migrate-findings <project> [--pin] [--dry-run]
+                                                 Promote legacy findings docs into LEARNINGS/CANONICAL
+  npx @alaarab/cortex index-policy [get|set ...]
+                                                 Configure index include/exclude policy (hidden docs)
   npx @alaarab/cortex memory-policy [get|set ...]
                                                  Read/update retention and scoring policy
   npx @alaarab/cortex memory-workflow [get|set ...]
@@ -67,6 +74,7 @@ if (process.argv[2] === "init") {
     machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
     profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
     mcp: mcpMode,
+    applyStarterUpdate: initArgs.includes("--apply-starter-update"),
   });
   process.exit(0);
 }
@@ -116,6 +124,8 @@ if (process.argv[2] === "--health") {
 const CLI_COMMANDS = [
   "search",
   "hook-prompt",
+  "hook-session-start",
+  "hook-stop",
   "hook-context",
   "add-learning",
   "extract-memories",
@@ -126,6 +136,8 @@ const CLI_COMMANDS = [
   "quality-feedback",
   "prune-memories",
   "consolidate-memories",
+  "migrate-findings",
+  "index-policy",
   "memory-policy",
   "memory-workflow",
   "memory-access",
@@ -143,7 +155,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { isValidProjectName, safeProjectPath, sanitizeFts5Query, expandSynonyms } from "./utils.js";
+import { isValidProjectName, safeProjectPath, buildRobustFtsQuery } from "./utils.js";
 import {
   findCortexPathWithArg,
   buildIndex,
@@ -167,6 +179,11 @@ import {
   consolidateProjectLearnings,
   recordMemoryFeedback,
   enforceCanonicalLocks,
+  getRuntimeHealth,
+  getIndexPolicy,
+  updateIndexPolicy,
+  migrateLegacyFindings,
+  getProjectDirs,
 } from "./shared.js";
 
 // MCP mode: first non-flag arg is the cortex path
@@ -183,7 +200,7 @@ async function main() {
 
   const server = new McpServer({
     name: "cortex-mcp",
-    version: "1.8.6",
+    version: "1.9.0",
   });
 
   server.registerTool(
@@ -322,6 +339,54 @@ async function main() {
   );
 
   server.registerTool(
+    "index_policy",
+    {
+      title: "◆ cortex · index policy",
+      description:
+        "Read or update indexer include/exclude controls, including explicit hidden-doc coverage policy.",
+      inputSchema: z.object({
+        mode: z.enum(["get", "set"]).describe("get returns current index policy, set applies provided fields."),
+        includeGlobs: z.array(z.string()).optional(),
+        excludeGlobs: z.array(z.string()).optional(),
+        includeHidden: z.boolean().optional(),
+      }),
+    },
+    async ({ mode, includeGlobs, excludeGlobs, includeHidden }) => {
+      if (mode === "get") {
+        return textResponse(JSON.stringify(getIndexPolicy(cortexPath), null, 2));
+      }
+      const result = updateIndexPolicy(cortexPath, {
+        includeGlobs,
+        excludeGlobs,
+        includeHidden,
+      });
+      if (typeof result === "string") return textResponse(result);
+      return textResponse(JSON.stringify(result, null, 2));
+    }
+  );
+
+  server.registerTool(
+    "migrate_legacy_findings",
+    {
+      title: "◆ cortex · migrate findings",
+      description:
+        "Promote legacy findings/retro docs into LEARNINGS.md and optionally CANONICAL_MEMORIES.md.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        pinCanonical: z.boolean().optional().describe("When true, pin high-signal migrated findings as canonical memories."),
+        dryRun: z.boolean().optional().describe("Preview how many findings would be migrated without writing files."),
+      }),
+    },
+    async ({ project, pinCanonical, dryRun }) => {
+      const result = migrateLegacyFindings(cortexPath, project, {
+        pinCanonical: pinCanonical ?? false,
+        dryRun: dryRun ?? false,
+      });
+      return textResponse(result);
+    }
+  );
+
+  server.registerTool(
     "prune_memories",
     {
       title: "◆ cortex · prune",
@@ -412,7 +477,7 @@ async function main() {
         if (filterProject && !isValidProjectName(filterProject)) {
           return textResponse(`Invalid project name: "${project}"`);
         }
-        const safeQuery = expandSynonyms(sanitizeFts5Query(query));
+        const safeQuery = buildRobustFtsQuery(query);
 
         if (!safeQuery) return textResponse("Search query is empty after sanitization.");
 
@@ -591,13 +656,27 @@ async function main() {
       }),
     },
     async ({ project }) => {
-      const sql = project
-        ? "SELECT project, content, path FROM docs WHERE project = ? AND type = 'backlog'"
-        : "SELECT project, content, path FROM docs WHERE type = 'backlog' ORDER BY project";
-      const params = project ? [project] : [];
-      const rows = queryRows(db, sql, params);
-      if (!rows) return textResponse(project ? `No backlog found for "${project}".` : "No backlogs found.");
-      const parts = rows.map((r) => `## ${r[0]}\n${r[1]}`);
+      if (project) {
+        if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
+        const resolvedDir = safeProjectPath(cortexPath, project);
+        if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
+        const backlogPath = path.join(resolvedDir, "backlog.md");
+        if (!fs.existsSync(backlogPath)) return textResponse(`No backlog found for "${project}".`);
+        const content = fs.readFileSync(backlogPath, "utf8");
+        return textResponse(`## ${project}\n${content}`);
+      }
+
+      const projects = getProjectDirs(cortexPath, profile).map((p) => path.basename(p)).sort();
+      const parts: string[] = [];
+      for (const proj of projects) {
+        const resolvedDir = safeProjectPath(cortexPath, proj);
+        if (!resolvedDir) continue;
+        const backlogPath = path.join(resolvedDir, "backlog.md");
+        if (!fs.existsSync(backlogPath)) continue;
+        const content = fs.readFileSync(backlogPath, "utf8");
+        parts.push(`## ${proj}\n${content}`);
+      }
+      if (!parts.length) return textResponse("No backlogs found.");
       return textResponse(parts.join("\n\n"));
     }
   );
@@ -657,16 +736,27 @@ async function main() {
       if (!fs.existsSync(backlogPath)) return textResponse(`No backlog found for "${project}".`);
       const content = fs.readFileSync(backlogPath, "utf8");
       const lines = content.split("\n");
-      const idx = lines.findIndex(l => l.match(/^- /) && l.toLowerCase().includes(item.toLowerCase()));
+      let section = "";
+      const idx = lines.findIndex((line) => {
+        if (line.startsWith("## ")) {
+          section = line.slice(3).trim().toLowerCase();
+          return false;
+        }
+        if (section === "done") return false;
+        return line.match(/^- /) && line.toLowerCase().includes(item.toLowerCase());
+      });
       if (idx === -1) return textResponse(`No item matching "${item}" found in ${project} backlog.`);
       const matched = lines[idx];
+      const completed = matched.match(/^- \[[ xX]\]\s+/)
+        ? matched.replace(/^- \[[ xX]\]\s+/, "- [x] ")
+        : matched.replace(/^- /, "- [x] ");
       const removed = lines.filter((_, i) => i !== idx).join("\n");
       const doneMatch = removed.match(/^(## Done\s*\n)/m);
       const updated = doneMatch
-        ? removed.replace(doneMatch[0], `${doneMatch[0]}\n${matched}\n`)
-        : removed + `\n## Done\n\n${matched}\n`;
+        ? removed.replace(doneMatch[0], `${doneMatch[0]}\n${completed}\n`)
+        : removed + `\n## Done\n\n${completed}\n`;
       fs.writeFileSync(backlogPath, updated);
-      return textResponse(`Marked done in ${project}: ${matched.replace(/^- /, "")}`);
+      return textResponse(`Marked done in ${project}: ${completed.replace(/^- /, "")}`);
     }
   );
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { sanitizeFts5Query, isValidProjectName, safeProjectPath, expandSynonyms, extractKeywords } from "./utils.js";
+import { sanitizeFts5Query, isValidProjectName, safeProjectPath, expandSynonyms, extractKeywords, buildRobustFtsQuery } from "./utils.js";
 import {
   validateLearningsFormat,
   validateBacklogFormat,
@@ -13,6 +13,9 @@ import {
   consolidateProjectLearnings,
   getMemoryWorkflowPolicy,
   updateMemoryWorkflowPolicy,
+  getIndexPolicy,
+  updateIndexPolicy,
+  migrateLegacyFindings,
 } from "./shared.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -44,11 +47,11 @@ describe("sanitizeFts5Query", () => {
     expect(result).toBe("user login");
   });
 
-  it("passes through SQL-like strings (SQL injection prevented by parameterized queries, not here)", () => {
+  it("normalizes SQL-like strings into plain search terms", () => {
     const result = sanitizeFts5Query("'; DROP TABLE docs--");
-    // sanitizeFts5Query only strips FTS5 syntax, not SQL.
-    // SQL injection is prevented by bind parameters at the query layer.
-    expect(result).toBe("'; DROP TABLE docs--");
+    expect(result).toContain("DROP TABLE docs--");
+    expect(result).not.toContain("'");
+    expect(result).not.toContain(";");
   });
 
   it("removes FTS5 column filter prefixes", () => {
@@ -71,7 +74,7 @@ describe("sanitizeFts5Query", () => {
 
   it("removes null bytes", () => {
     const result = sanitizeFts5Query("hello\0world");
-    expect(result).toBe("helloworld");
+    expect(result).toBe("hello world");
   });
 
   it("removes FTS5 ^ anchors", () => {
@@ -99,6 +102,29 @@ describe("sanitizeFts5Query", () => {
     expect(result).not.toContain("content:");
     expect(result).not.toContain("filename:");
     expect(result).not.toContain('"');
+    expect(result).not.toContain(" OR ");
+  });
+});
+
+describe("buildRobustFtsQuery", () => {
+  it("quotes terms and expands known synonyms", () => {
+    const query = buildRobustFtsQuery("throttling");
+    expect(query).toContain("\"throttling\"");
+    expect(query).toContain("\"rate limit\"");
+    expect(query).toContain(" OR ");
+  });
+
+  it("returns empty string for empty or fully stripped input", () => {
+    expect(buildRobustFtsQuery("")).toBe("");
+    expect(buildRobustFtsQuery('""   ')).toBe("");
+  });
+
+  it("removes dangerous syntax and keeps stable quoted terms", () => {
+    const query = buildRobustFtsQuery('content:"foo" OR path:/tmp && bar');
+    expect(query).not.toContain("content:");
+    expect(query).not.toContain("&&");
+    expect(query).toContain("\"foo\"");
+    expect(query).toContain("\"bar\"");
   });
 });
 
@@ -295,6 +321,79 @@ describe("memory workflow policy", () => {
     expect(policy.requireMaintainerApproval).toBe(false);
     expect(policy.lowConfidenceThreshold).toBe(0.55);
     expect(policy.riskySections).toEqual(["Review", "Conflicts"]);
+  });
+});
+
+describe("index policy", () => {
+  let tmpRoot: string;
+  let cortexDir: string;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-index-policy-test-"));
+    cortexDir = path.join(tmpRoot, "cortex");
+    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
+    grantAdminAccess(cortexDir, "index-admin");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("returns defaults when file is missing", () => {
+    const policy = getIndexPolicy(cortexDir);
+    expect(policy.includeGlobs).toContain("**/*.md");
+    expect(policy.includeGlobs).toContain(".claude/skills/**/*.md");
+    expect(policy.excludeGlobs).toContain("**/node_modules/**");
+    expect(policy.includeHidden).toBe(false);
+  });
+
+  it("updates include/exclude globs with admin permission", () => {
+    const updated = updateIndexPolicy(cortexDir, {
+      includeGlobs: ["**/*.md", ".claude/skills/**/*.md", "notes/**/*.md"],
+      excludeGlobs: ["**/.git/**", "**/tmp/**"],
+      includeHidden: true,
+    });
+    expect(typeof updated).not.toBe("string");
+    const policy = getIndexPolicy(cortexDir);
+    expect(policy.includeGlobs).toContain("notes/**/*.md");
+    expect(policy.excludeGlobs).toContain("**/tmp/**");
+    expect(policy.includeHidden).toBe(true);
+  });
+});
+
+describe("legacy findings migration", () => {
+  const originalActor = process.env.CORTEX_ACTOR;
+
+  afterEach(() => {
+    process.env.CORTEX_ACTOR = originalActor;
+  });
+
+  it("migrates legacy findings bullets into LEARNINGS and optionally canonical", () => {
+    const cortexDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-migrate-findings-"));
+    const project = "proj";
+    const projectDir = path.join(cortexDir, project);
+    fs.mkdirSync(projectDir, { recursive: true });
+    grantAdminAccess(cortexDir, "migrate-admin");
+
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      "# Findings\n\n- Must pin this rule\n- Normal migration item\n"
+    );
+
+    const dryRun = migrateLegacyFindings(cortexDir, project, { dryRun: true });
+    expect(dryRun).toContain("migratable");
+
+    const result = migrateLegacyFindings(cortexDir, project, { pinCanonical: true });
+    expect(result).toContain("Migrated");
+
+    const learningsPath = path.join(projectDir, "LEARNINGS.md");
+    const canonicalPath = path.join(projectDir, "CANONICAL_MEMORIES.md");
+    expect(fs.existsSync(learningsPath)).toBe(true);
+    expect(fs.readFileSync(learningsPath, "utf8")).toContain("migrated from FINDINGS.md");
+    expect(fs.existsSync(canonicalPath)).toBe(true);
+    expect(fs.readFileSync(canonicalPath, "utf8")).toContain("Must pin this rule");
+
+    fs.rmSync(cortexDir, { recursive: true, force: true });
   });
 });
 
