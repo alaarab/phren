@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { configureAllHooks } from "./hooks.js";
 
@@ -12,6 +13,9 @@ const STARTER_DIR = path.join(ROOT, "starter");
 const DEFAULT_CORTEX_PATH = path.join(os.homedir(), ".cortex");
 
 export type McpMode = "on" | "off";
+type McpConfigStatus = "installed" | "already_configured" | "disabled" | "already_disabled";
+type McpRootKey = "mcpServers" | "servers";
+type ToolStatus = McpConfigStatus | "no_settings" | "no_vscode" | "no_cursor" | "no_copilot" | "no_codex";
 
 interface InstallPreferences {
   mcpEnabled?: boolean;
@@ -86,6 +90,97 @@ function patchJsonFile(filePath: string, patch: (data: Record<string, any>) => v
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n");
 }
 
+function commandExists(cmd: string): boolean {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pickExistingFile(candidates: string[]): string | null {
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function normalizeWindowsPathToWsl(input: string | undefined): string | undefined {
+  if (!input) return undefined;
+  if (input.startsWith("/")) return input;
+  const match = input.match(/^([A-Za-z]):\\(.*)$/);
+  if (!match) return input;
+  const drive = match[1].toLowerCase();
+  const rest = match[2].replace(/\\/g, "/");
+  return `/mnt/${drive}/${rest}`;
+}
+
+function uniqStrings(values: Array<string | undefined>): string[] {
+  return Array.from(new Set(values.filter((v): v is string => Boolean(v && v.trim()))));
+}
+
+function buildMcpServerConfig(cortexPath: string) {
+  return {
+    command: "npx",
+    args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
+  };
+}
+
+function upsertMcpServer(
+  data: Record<string, any>,
+  mcpEnabled: boolean,
+  preferredRoot: McpRootKey,
+  cortexPath: string
+): McpConfigStatus {
+  const hadMcp = Boolean(data.mcpServers?.cortex || data.servers?.cortex);
+  if (mcpEnabled) {
+    const root: McpRootKey =
+      data.mcpServers && typeof data.mcpServers === "object"
+        ? "mcpServers"
+        : data.servers && typeof data.servers === "object"
+          ? "servers"
+          : preferredRoot;
+    if (!data[root] || typeof data[root] !== "object") data[root] = {};
+    data[root].cortex = buildMcpServerConfig(cortexPath);
+    return hadMcp ? "already_configured" : "installed";
+  }
+
+  if (data.mcpServers?.cortex) delete data.mcpServers.cortex;
+  if (data.servers?.cortex) delete data.servers.cortex;
+  return hadMcp ? "disabled" : "already_disabled";
+}
+
+function configureMcpAtPath(
+  filePath: string,
+  mcpEnabled: boolean,
+  preferredRoot: McpRootKey,
+  cortexPath: string
+): McpConfigStatus {
+  if (!mcpEnabled && !fs.existsSync(filePath)) return "already_disabled";
+  let status: McpConfigStatus = "already_disabled";
+  patchJsonFile(filePath, (data) => {
+    status = upsertMcpServer(data, mcpEnabled, preferredRoot, cortexPath);
+  });
+  return status;
+}
+
+function removeMcpServerAtPath(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  let removed = false;
+  patchJsonFile(filePath, (data) => {
+    if (data.mcpServers?.cortex) {
+      delete data.mcpServers.cortex;
+      removed = true;
+    }
+    if (data.servers?.cortex) {
+      delete data.servers.cortex;
+      removed = true;
+    }
+  });
+  return removed;
+}
+
 function resolveEntryScript(): string {
   // Find the actual index.js path so hooks can use `node <path>` instead of npx
   return path.join(ROOT, "mcp", "dist", "index.js");
@@ -96,6 +191,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
   fs.mkdirSync(govDir, { recursive: true });
   const policy = path.join(govDir, "memory-policy.json");
   const access = path.join(govDir, "access-control.json");
+  const workflow = path.join(govDir, "memory-workflow-policy.json");
 
   if (!fs.existsSync(policy)) {
     fs.writeFileSync(
@@ -121,28 +217,27 @@ export function ensureGovernanceFiles(cortexPath: string) {
       }, null, 2) + "\n"
     );
   }
+  if (!fs.existsSync(workflow)) {
+    fs.writeFileSync(
+      workflow,
+      JSON.stringify({
+        requireMaintainerApproval: true,
+        lowConfidenceThreshold: 0.7,
+        riskySections: ["Stale", "Conflicts"],
+      }, null, 2) + "\n"
+    );
+  }
 }
 
-export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean } = {}) {
+export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): McpConfigStatus {
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   const entryScript = resolveEntryScript();
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  let status: "installed" | "already_configured" | "disabled" | "already_disabled" = "already_disabled";
+  let status: McpConfigStatus = "already_disabled";
 
   patchJsonFile(settingsPath, (data) => {
     // MCP server
-    if (!data.mcpServers) data.mcpServers = {};
-    const hadMcp = Boolean(data.mcpServers.cortex);
-    if (mcpEnabled) {
-      data.mcpServers.cortex = {
-        command: "npx",
-        args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
-      };
-      status = hadMcp ? "already_configured" : "installed";
-    } else {
-      if (hadMcp) delete data.mcpServers.cortex;
-      status = hadMcp ? "disabled" : "already_disabled";
-    }
+    status = upsertMcpServer(data, mcpEnabled, "mcpServers", cortexPath);
 
     // Hooks: always update to latest version
     if (!data.hooks) data.hooks = {};
@@ -193,34 +288,113 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
   return status;
 }
 
-export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean } = {}) {
+export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): McpConfigStatus | "no_vscode" {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const candidates = [
-    path.join(os.homedir(), ".config", "Code", "User"),
-    path.join(os.homedir(), "Library", "Application Support", "Code", "User"),
-    path.join(os.homedir(), "AppData", "Roaming", "Code", "User"),
-  ];
-  const vscodeDir = candidates.find((d) => fs.existsSync(d));
-  if (!vscodeDir) return "no_vscode";
+  const home = os.homedir();
+  const userProfile = normalizeWindowsPathToWsl(process.env.USERPROFILE);
+  const username = process.env.USERNAME;
+  const userProfileRoaming = userProfile ? path.join(userProfile, "AppData", "Roaming", "Code", "User") : undefined;
+  const guessedWindowsRoaming = !userProfile && username
+    ? path.join("/mnt/c", "Users", username, "AppData", "Roaming", "Code", "User")
+    : undefined;
+  const candidates = uniqStrings([
+    userProfileRoaming,
+    guessedWindowsRoaming,
+    path.join(home, ".config", "Code", "User"),
+    path.join(home, ".vscode-server", "data", "User"),
+    path.join(home, "Library", "Application Support", "Code", "User"),
+    path.join(home, "AppData", "Roaming", "Code", "User"),
+  ]);
+  const existing = candidates.find((d) => fs.existsSync(d));
+  const vscodeInstalled =
+    Boolean(existing) ||
+    commandExists("code") ||
+    Boolean(
+      userProfile &&
+      (
+        fs.existsSync(path.join(userProfile, "AppData", "Local", "Programs", "Microsoft VS Code")) ||
+        fs.existsSync(path.join(userProfile, "AppData", "Roaming", "Code"))
+      )
+    );
+  if (!vscodeInstalled) return "no_vscode";
 
-  const mcp_file = path.join(vscodeDir, "mcp.json");
-  if (!mcpEnabled && !fs.existsSync(mcp_file)) return "already_disabled";
-  let status: "installed" | "already_configured" | "disabled" | "already_disabled" = "already_disabled";
-  patchJsonFile(mcp_file, (data) => {
-    if (!data.servers) data.servers = {};
-    const hadMcp = Boolean(data.servers.cortex);
-    if (mcpEnabled) {
-      data.servers.cortex = {
-        command: "npx",
-        args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
-      };
-      status = hadMcp ? "already_configured" : "installed";
-    } else {
-      if (hadMcp) delete data.servers.cortex;
-      status = hadMcp ? "disabled" : "already_disabled";
-    }
-  });
-  return status;
+  const targetDir = existing || userProfileRoaming || path.join(home, ".config", "Code", "User");
+  const mcpFile = path.join(targetDir, "mcp.json");
+  return configureMcpAtPath(mcpFile, mcpEnabled, "servers", cortexPath);
+}
+
+export function configureCursorMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".cursor", "mcp.json"),
+    path.join(home, ".config", "Cursor", "User", "mcp.json"),
+    path.join(home, "Library", "Application Support", "Cursor", "User", "mcp.json"),
+    path.join(home, "AppData", "Roaming", "Cursor", "User", "mcp.json"),
+  ];
+  const existing = pickExistingFile(candidates);
+  const cursorInstalled =
+    Boolean(existing) ||
+    fs.existsSync(path.join(home, ".cursor")) ||
+    fs.existsSync(path.join(home, ".config", "Cursor")) ||
+    fs.existsSync(path.join(home, "Library", "Application Support", "Cursor")) ||
+    fs.existsSync(path.join(home, "AppData", "Roaming", "Cursor")) ||
+    commandExists("cursor");
+  if (!cursorInstalled) return "no_cursor";
+  return configureMcpAtPath(existing || candidates[0], mcpEnabled, "mcpServers", cortexPath);
+}
+
+export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".github", "mcp.json"),
+    path.join(home, ".config", "github-copilot", "mcp.json"),
+    path.join(home, "Library", "Application Support", "github-copilot", "mcp.json"),
+    path.join(home, "AppData", "Roaming", "github-copilot", "mcp.json"),
+  ];
+  const existing = pickExistingFile(candidates);
+  const copilotInstalled =
+    Boolean(existing) ||
+    fs.existsSync(path.join(home, ".github")) ||
+    fs.existsSync(path.join(home, ".config", "github-copilot")) ||
+    fs.existsSync(path.join(home, "Library", "Application Support", "github-copilot")) ||
+    fs.existsSync(path.join(home, "AppData", "Roaming", "github-copilot")) ||
+    commandExists("gh");
+  if (!copilotInstalled) return "no_copilot";
+  return configureMcpAtPath(existing || candidates[0], mcpEnabled, "servers", cortexPath);
+}
+
+export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".codex", "config.json"),
+    path.join(home, ".codex", "mcp.json"),
+    path.join(cortexPath, "codex.json"),
+  ];
+  const existing = pickExistingFile(candidates);
+  const codexInstalled =
+    Boolean(existing) ||
+    fs.existsSync(path.join(home, ".codex")) ||
+    commandExists("codex");
+  if (!codexInstalled) return "no_codex";
+  return configureMcpAtPath(existing || candidates[0], mcpEnabled, "mcpServers", cortexPath);
+}
+
+function logMcpTargetStatus(tool: string, status: ToolStatus, phase: "Configured" | "Updated") {
+  const text: Record<ToolStatus, string> = {
+    installed: `${phase} ${tool} MCP`,
+    already_configured: `${tool} MCP already configured`,
+    disabled: `${tool} MCP disabled`,
+    already_disabled: `${tool} MCP already disabled`,
+    no_settings: `${tool} settings not found`,
+    no_vscode: `${tool} not detected`,
+    no_cursor: `${tool} not detected`,
+    no_copilot: `${tool} not detected`,
+    no_codex: `${tool} not detected`,
+  };
+  log(`  ${text[status]}`);
 }
 
 function updateMachinesYaml(cortexPath: string, machine?: string, profile?: string) {
@@ -272,8 +446,19 @@ export async function runInit(opts: InitOptions = {}) {
 
       try {
         const vscodeResult = configureVSCode(cortexPath, { mcpEnabled });
-        if (vscodeResult === "installed") log(`  Updated VS Code MCP`);
-        if (vscodeResult === "disabled") log(`  Disabled VS Code MCP`);
+        logMcpTargetStatus("VS Code", vscodeResult, "Updated");
+      } catch {}
+
+      try {
+        logMcpTargetStatus("Cursor", configureCursorMcp(cortexPath, { mcpEnabled }), "Updated");
+      } catch {}
+
+      try {
+        logMcpTargetStatus("Copilot CLI", configureCopilotMcp(cortexPath, { mcpEnabled }), "Updated");
+      } catch {}
+
+      try {
+        logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled }), "Updated");
       } catch {}
 
       try {
@@ -284,7 +469,7 @@ export async function runInit(opts: InitOptions = {}) {
       ensureGovernanceFiles(cortexPath);
       setMcpEnabledPreference(cortexPath, mcpEnabled);
 
-      log(`\nDone. Restart Claude Code to pick up changes.\n`);
+      log(`\nDone. Restart your coding agent(s) to pick up changes.\n`);
       process.exit(0);
     }
   }
@@ -360,13 +545,22 @@ export async function runInit(opts: InitOptions = {}) {
   // Configure VS Code
   try {
     const vscodeResult = configureVSCode(cortexPath, { mcpEnabled });
-    if (vscodeResult === "installed") log(`  Configured VS Code MCP`);
-    else if (vscodeResult === "already_configured") log(`  VS Code MCP already configured`);
-    else if (vscodeResult === "disabled") log(`  VS Code MCP disabled`);
-    // no_vscode: skip silently
+    logMcpTargetStatus("VS Code", vscodeResult, "Configured");
   } catch {
     // skip
   }
+
+  try {
+    logMcpTargetStatus("Cursor", configureCursorMcp(cortexPath, { mcpEnabled }), "Configured");
+  } catch { /* best effort */ }
+
+  try {
+    logMcpTargetStatus("Copilot CLI", configureCopilotMcp(cortexPath, { mcpEnabled }), "Configured");
+  } catch { /* best effort */ }
+
+  try {
+    logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled }), "Configured");
+  } catch { /* best effort */ }
 
   // Configure hooks for other detected AI coding tools (Copilot CLI, Cursor, Codex)
   try {
@@ -387,9 +581,9 @@ export async function runInit(opts: InitOptions = {}) {
   log(`     git remote add origin git@github.com:YOUR_USERNAME/cortex.git`);
   log(`     git push -u origin main`);
   if (mcpEnabled) {
-    log(`  2. Restart Claude Code to activate the MCP server`);
+    log(`  2. Restart your coding agent(s) to activate MCP changes`);
   } else {
-    log(`  2. Restart Claude Code to use hooks-only mode (no MCP tools)`);
+    log(`  2. Restart your coding agent(s) to use hooks-only mode (no MCP tools)`);
     log(`     Turn MCP on later: npx @alaarab/cortex mcp-mode on`);
   }
   log(`  3. Open a project and run /cortex-init <name> to add it\n`);
@@ -412,14 +606,23 @@ export async function runMcpMode(modeArg?: string) {
   const enabled = mode === "on";
   setMcpEnabledPreference(cortexPath, enabled);
 
-  let claudeStatus = "no_settings";
-  let vscodeStatus = "no_vscode";
+  let claudeStatus: ToolStatus = "no_settings";
+  let vscodeStatus: ToolStatus = "no_vscode";
+  let cursorStatus: ToolStatus = "no_cursor";
+  let copilotStatus: ToolStatus = "no_copilot";
+  let codexStatus: ToolStatus = "no_codex";
   try { claudeStatus = configureClaude(cortexPath, { mcpEnabled: enabled }) ?? claudeStatus; } catch { /* best effort */ }
   try { vscodeStatus = configureVSCode(cortexPath, { mcpEnabled: enabled }) ?? vscodeStatus; } catch { /* best effort */ }
+  try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled: enabled }) ?? cursorStatus; } catch { /* best effort */ }
+  try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled: enabled }) ?? copilotStatus; } catch { /* best effort */ }
+  try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled: enabled }) ?? codexStatus; } catch { /* best effort */ }
 
   log(`MCP mode set to ${mode}.`);
   log(`Claude status: ${claudeStatus}`);
   log(`VS Code status: ${vscodeStatus}`);
+  log(`Cursor status: ${cursorStatus}`);
+  log(`Copilot CLI status: ${copilotStatus}`);
+  log(`Codex status: ${codexStatus}`);
   log(`Restart your agent to apply changes.`);
 }
 
@@ -467,19 +670,59 @@ export async function runUninstall() {
     path.join(home, "AppData", "Roaming", "Code", "User", "mcp.json"),
   ];
   for (const mcpFile of vsCandidates) {
-    if (!fs.existsSync(mcpFile)) continue;
     try {
-      patchJsonFile(mcpFile, (data) => {
-        if (data.servers?.cortex) {
-          delete data.servers.cortex;
-          log(`  Removed cortex from VS Code MCP config (${mcpFile})`);
-        }
-      });
+      if (removeMcpServerAtPath(mcpFile)) {
+        log(`  Removed cortex from VS Code MCP config (${mcpFile})`);
+      }
+    } catch { /* skip */ }
+  }
+
+  // Remove from Cursor MCP config
+  const cursorCandidates = [
+    path.join(home, ".cursor", "mcp.json"),
+    path.join(home, ".config", "Cursor", "User", "mcp.json"),
+    path.join(home, "Library", "Application Support", "Cursor", "User", "mcp.json"),
+    path.join(home, "AppData", "Roaming", "Cursor", "User", "mcp.json"),
+  ];
+  for (const mcpFile of cursorCandidates) {
+    try {
+      if (removeMcpServerAtPath(mcpFile)) {
+        log(`  Removed cortex from Cursor MCP config (${mcpFile})`);
+      }
+    } catch { /* skip */ }
+  }
+
+  // Remove from Copilot CLI MCP config
+  const copilotCandidates = [
+    path.join(home, ".github", "mcp.json"),
+    path.join(home, ".config", "github-copilot", "mcp.json"),
+    path.join(home, "Library", "Application Support", "github-copilot", "mcp.json"),
+    path.join(home, "AppData", "Roaming", "github-copilot", "mcp.json"),
+  ];
+  for (const mcpFile of copilotCandidates) {
+    try {
+      if (removeMcpServerAtPath(mcpFile)) {
+        log(`  Removed cortex from Copilot CLI MCP config (${mcpFile})`);
+      }
+    } catch { /* skip */ }
+  }
+
+  // Remove from Codex MCP config
+  const codexCandidates = [
+    path.join(home, ".codex", "config.json"),
+    path.join(home, ".codex", "mcp.json"),
+    path.join(process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH, "codex.json"),
+  ];
+  for (const mcpFile of codexCandidates) {
+    try {
+      if (removeMcpServerAtPath(mcpFile)) {
+        log(`  Removed cortex from Codex MCP config (${mcpFile})`);
+      }
     } catch { /* skip */ }
   }
 
   log(`\nCortex hooks and MCP config removed.`);
   log(`\nYour knowledge base at ~/.cortex was NOT deleted.`);
   log(`To fully remove it, run: rm -rf ~/.cortex\n`);
-  log(`Restart Claude Code to apply changes.\n`);
+  log(`Restart your agent(s) to apply changes.\n`);
 }

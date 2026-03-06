@@ -4,6 +4,9 @@ import * as path from "path";
 import * as os from "os";
 import {
   configureClaude,
+  configureCodexMcp,
+  configureCopilotMcp,
+  configureCursorMcp,
   configureVSCode,
   getMcpEnabledPreference,
   parseMcpMode,
@@ -107,5 +110,108 @@ describe.sequential("mcp mode configuration", () => {
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
     expect(onCfg.servers?.cortex?.command).toBe("npx");
     expect(onCfg.servers?.cortex?.args).toContain(cortexPath);
+  });
+
+  it("detects VS Code in USERPROFILE/AppData/Roaming path", () => {
+    const roamingDir = path.join(homeDir, "AppData", "Roaming", "Code", "User");
+    fs.mkdirSync(roamingDir, { recursive: true });
+    const mcpPath = path.join(roamingDir, "mcp.json");
+
+    const onStatus = configureVSCode(cortexPath, { mcpEnabled: true });
+    expect(onStatus).toBe("installed");
+
+    const cfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
+    expect(cfg.servers?.cortex?.command).toBe("npx");
+    expect(cfg.servers?.cortex?.args).toContain(cortexPath);
+  });
+
+  it("toggles Cursor MCP config on and off", () => {
+    const cursorDir = path.join(homeDir, ".cursor");
+    fs.mkdirSync(cursorDir, { recursive: true });
+    const mcpPath = path.join(cursorDir, "mcp.json");
+    fs.writeFileSync(
+      mcpPath,
+      JSON.stringify(
+        {
+          mcpServers: {
+            cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const offStatus = configureCursorMcp(cortexPath, { mcpEnabled: false });
+    expect(offStatus).toBe("disabled");
+    const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
+    expect(offCfg.mcpServers?.cortex).toBeUndefined();
+
+    const onStatus = configureCursorMcp(cortexPath, { mcpEnabled: true });
+    expect(onStatus).toBe("installed");
+    const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
+    expect(onCfg.mcpServers?.cortex?.command).toBe("npx");
+    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+  });
+
+  it("toggles Copilot CLI MCP config on and off", () => {
+    const copilotDir = path.join(homeDir, ".github");
+    fs.mkdirSync(copilotDir, { recursive: true });
+    const mcpPath = path.join(copilotDir, "mcp.json");
+    fs.writeFileSync(
+      mcpPath,
+      JSON.stringify(
+        {
+          servers: {
+            cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const offStatus = configureCopilotMcp(cortexPath, { mcpEnabled: false });
+    expect(offStatus).toBe("disabled");
+    const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
+    expect(offCfg.servers?.cortex).toBeUndefined();
+
+    const onStatus = configureCopilotMcp(cortexPath, { mcpEnabled: true });
+    expect(onStatus).toBe("installed");
+    const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
+    expect(onCfg.servers?.cortex?.command).toBe("npx");
+    expect(onCfg.servers?.cortex?.args).toContain(cortexPath);
+  });
+
+  it("toggles Codex MCP config on and off while preserving existing codex.json content", () => {
+    const codexDir = path.join(homeDir, ".codex");
+    fs.mkdirSync(codexDir, { recursive: true });
+    const codexConfig = path.join(codexDir, "config.json");
+    fs.writeFileSync(
+      codexConfig,
+      JSON.stringify(
+        {
+          hooks: { Stop: [{ type: "command", command: "echo keep" }] },
+          mcpServers: {
+            cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const offStatus = configureCodexMcp(cortexPath, { mcpEnabled: false });
+    expect(offStatus).toBe("disabled");
+    const offCfg = JSON.parse(fs.readFileSync(codexConfig, "utf8"));
+    expect(offCfg.mcpServers?.cortex).toBeUndefined();
+    expect(Array.isArray(offCfg.hooks?.Stop)).toBe(true);
+
+    const onStatus = configureCodexMcp(cortexPath, { mcpEnabled: true });
+    expect(onStatus).toBe("installed");
+    const onCfg = JSON.parse(fs.readFileSync(codexConfig, "utf8"));
+    expect(onCfg.mcpServers?.cortex?.command).toBe("npx");
+    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+    expect(Array.isArray(onCfg.hooks?.Stop)).toBe(true);
   });
 });

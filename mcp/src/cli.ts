@@ -13,7 +13,9 @@ import {
   upsertCanonicalMemory,
   getProjectDirs,
   getMemoryPolicy,
+  getMemoryWorkflowPolicy,
   updateMemoryPolicy,
+  updateMemoryWorkflowPolicy,
   getAccessControl,
   updateAccessControl,
   recordMemoryInjection,
@@ -61,6 +63,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleConsolidateMemories(args[0]);
     case "memory-policy":
       return handleMemoryPolicy(args);
+    case "memory-workflow":
+      return handleMemoryWorkflow(args);
     case "memory-access":
       return handleMemoryAccess(args);
     case "memory-ui":
@@ -181,6 +185,104 @@ function lowValuePenalty(content: string, docType: string): number {
   if (bullets.length === 0) return 0;
   const low = bullets.filter((b) => /(fixed stuff|updated things|misc|temp|wip)/i.test(b) || b.length < 16).length;
   return low >= Math.ceil(bullets.length * 0.5) ? 2 : 0;
+}
+
+const RETRIEVAL_STOP_WORDS = new Set([
+  "the", "is", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+  "with", "by", "from", "it", "this", "that", "are", "was", "were", "be", "been",
+  "being", "have", "has", "had", "do", "does", "did", "will", "would", "could",
+  "should", "may", "might", "can", "shall", "not", "no", "if", "then", "than",
+  "too", "very", "just", "about", "your", "our", "they", "them", "their", "what",
+  "which", "who", "when", "where", "how", "why", "use", "using", "used", "need",
+  "want", "look", "help", "please",
+]);
+
+function normalizeToken(token: string): string {
+  let t = token.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  if (t.length > 4 && t.endsWith("ing")) t = t.slice(0, -3);
+  else if (t.length > 3 && t.endsWith("ed")) t = t.slice(0, -2);
+  else if (t.length > 3 && t.endsWith("es")) t = t.slice(0, -2);
+  else if (t.length > 2 && t.endsWith("s")) t = t.slice(0, -1);
+  return t;
+}
+
+function tokenizeForOverlap(text: string): string[] {
+  const tokens = text
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-\s]/g, " ")
+    .split(/\s+/)
+    .map(normalizeToken)
+    .filter((t) => t.length > 1 && !RETRIEVAL_STOP_WORDS.has(t));
+  return [...new Set(tokens)].slice(0, 24);
+}
+
+function overlapScore(queryTokens: string[], content: string): number {
+  if (!queryTokens.length) return 0;
+  const contentTokens = new Set(tokenizeForOverlap(content));
+  if (!contentTokens.size) return 0;
+  let matched = 0;
+  for (const t of queryTokens) {
+    if (contentTokens.has(t)) matched += 1;
+  }
+  return matched / Math.max(1, Math.min(queryTokens.length, 10));
+}
+
+function mergeUniqueRows(primary: any[][] | null, secondary: any[][]): any[][] | null {
+  if (!primary || !primary.length) return secondary.length ? secondary : null;
+  const seen = new Set(primary.map((r) => String((r as string[])[4] || `${(r as string[])[0]}/${(r as string[])[1]}`)));
+  for (const row of secondary) {
+    const key = String((row as string[])[4] || `${(row as string[])[0]}/${(row as string[])[1]}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    primary.push(row);
+  }
+  return primary;
+}
+
+function semanticFallbackRows(db: any, prompt: string, project?: string | null): any[][] {
+  const queryTokens = tokenizeForOverlap(prompt);
+  if (!queryTokens.length) return [];
+  const sampleLimit = project ? 180 : 260;
+  const rows = project
+    ? queryRows(
+      db,
+      "SELECT project, filename, type, content, path FROM docs WHERE project = ? LIMIT ?",
+      [project, sampleLimit]
+    ) || []
+    : queryRows(
+      db,
+      "SELECT project, filename, type, content, path FROM docs LIMIT ?",
+      [sampleLimit]
+    ) || [];
+
+  const scored = rows
+    .map((row) => {
+      const [proj, file, docType, content, filePath] = row as string[];
+      const corpus = `${proj} ${file} ${docType} ${filePath}\n${content.slice(0, 5000)}`;
+      const score = overlapScore(queryTokens, corpus);
+      return { row, score };
+    })
+    .filter((x) => x.score >= 0.15)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((x) => x.row);
+
+  return scored;
+}
+
+function approximateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+function compactSnippet(snippet: string, maxLines: number, maxChars: number): string {
+  const lines = snippet
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim().length > 0)
+    .slice(0, Math.max(1, maxLines));
+  let out = lines.join("\n");
+  if (out.length > maxChars) out = out.slice(0, Math.max(24, maxChars - 1)).trimEnd() + "…";
+  return out;
 }
 
 interface SessionMetric {
@@ -350,21 +452,28 @@ async function handleHookPrompt() {
     if (detectedProject) {
       rows = queryRows(
         db,
-        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 5",
+        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 7",
         [safeQuery, detectedProject]
       );
     }
 
-    // Fall back to global search if no project-specific results
-    if (!rows) {
-      rows = queryRows(
+    // Fall back to global search if no project-specific results or we got too few.
+    if (!rows || rows.length < 3) {
+      const globalRows = queryRows(
         db,
-        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 5",
+        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10",
         [safeQuery]
       );
+      rows = mergeUniqueRows(rows, globalRows || []);
     }
 
-    if (!rows) process.exit(0);
+    // Fallback: overlap-based retrieval when FTS misses paraphrases.
+    if (!rows || rows.length < 2) {
+      const semanticRows = semanticFallbackRows(db, `${prompt}\n${keywords}`, detectedProject);
+      rows = mergeUniqueRows(rows, semanticRows);
+    }
+
+    if (!rows || !rows.length) process.exit(0);
 
     const policy = getMemoryPolicy(cortexPath);
     const memoryTtlDays = Number.parseInt(
@@ -478,8 +587,8 @@ async function handleHookPrompt() {
       return 0;
     });
 
-    // Show top 3 after recency sort
-    rows = rows.slice(0, 3);
+    // Keep a wider candidate set before applying token-budget selection.
+    rows = rows.slice(0, 8);
 
     // If we have changed files, drop unrelated rows except high-priority docs.
     if (gitCtx && gitCtx.changedFiles.size > 0) {
@@ -491,15 +600,40 @@ async function handleHookPrompt() {
       if (!rows.length) process.exit(0);
     }
 
+    const tokenBudget = Number.parseInt(process.env.CORTEX_CONTEXT_TOKEN_BUDGET || "550", 10);
+    const snippetLineBudget = Number.parseInt(process.env.CORTEX_CONTEXT_SNIPPET_LINES || "6", 10);
+    const snippetCharBudget = Number.parseInt(process.env.CORTEX_CONTEXT_SNIPPET_CHARS || "520", 10);
+    const safeTokenBudget = Number.isNaN(tokenBudget) ? 550 : Math.max(180, tokenBudget);
+    const safeLineBudget = Number.isNaN(snippetLineBudget) ? 6 : Math.max(2, snippetLineBudget);
+    const safeCharBudget = Number.isNaN(snippetCharBudget) ? 520 : Math.max(120, snippetCharBudget);
+
+    const selected: Array<{ row: any[]; snippet: string; key: string }> = [];
+    let usedTokens = 36; // status and wrapper overhead
+    for (const row of rows) {
+      const [project, filename, , content] = row as string[];
+      let snippet = compactSnippet(extractSnippet(content, keywords, 8), safeLineBudget, safeCharBudget);
+      if (!snippet.trim()) continue;
+      let est = approximateTokens(snippet) + 14;
+      if (selected.length > 0 && usedTokens + est > safeTokenBudget) continue;
+      if (selected.length === 0 && usedTokens + est > safeTokenBudget) {
+        snippet = compactSnippet(snippet, 3, Math.floor(safeCharBudget * 0.55));
+        est = approximateTokens(snippet) + 14;
+      }
+      const key = memoryScoreKey(project, filename, snippet);
+      selected.push({ row, snippet, key });
+      usedTokens += est;
+      if (selected.length >= 3) break;
+    }
+    if (!selected.length) process.exit(0);
+
     const projectLabel = detectedProject ? ` · ${detectedProject}` : "";
-    const resultLabel = rows.length === 1 ? "1 result" : `${rows.length} results`;
+    const resultLabel = selected.length === 1 ? "1 result" : `${selected.length} results`;
     const statusLine = `◆ cortex${projectLabel} · ${resultLabel}`;
 
     const parts: string[] = [statusLine, "<cortex-context>"];
-    for (const row of rows) {
-      const [project, filename, docType, content] = row as string[];
-      const snippet = extractSnippet(content, keywords, 8);
-      const key = memoryScoreKey(project, filename, snippet);
+    for (const injected of selected) {
+      const [project, filename, docType] = injected.row as string[];
+      const { snippet, key } = injected;
       recordMemoryInjection(cortexPath, key, sessionId);
       parts.push(`[${project}/${filename}] (${docType})`);
       parts.push(snippet);
@@ -508,13 +642,13 @@ async function handleHookPrompt() {
     parts.push("</cortex-context>");
     if (gitCtx) {
       const changedCount = gitCtx.changedFiles.size;
-      const fileHits = rows.filter((r) => fileRelevanceBoost((r as string[])[4], gitCtx.changedFiles) > 0).length;
-      const branchHits = rows.filter((r) => branchMatchBoost((r as string[])[3], gitCtx.branch) > 0).length;
+      const fileHits = selected.filter((r) => fileRelevanceBoost((r.row as string[])[4], gitCtx.changedFiles) > 0).length;
+      const branchHits = selected.filter((r) => branchMatchBoost((r.row as string[])[3], gitCtx.branch) > 0).length;
       parts.push(
-        `◆ cortex · trace: intent=${intent}; reasons=file:${fileHits},branch:${branchHits}; branch=${gitCtx.branch}; changed_files=${changedCount}`
+        `◆ cortex · trace: intent=${intent}; reasons=file:${fileHits},branch:${branchHits}; branch=${gitCtx.branch}; changed_files=${changedCount}; tokens≈${usedTokens}/${safeTokenBudget}`
       );
     } else {
-      parts.push(`◆ cortex · trace: intent=${intent}; reasons=intent-only`);
+      parts.push(`◆ cortex · trace: intent=${intent}; reasons=intent-only; tokens≈${usedTokens}/${safeTokenBudget}`);
     }
 
     if (sessionId) {
@@ -522,10 +656,9 @@ async function handleHookPrompt() {
       if (!metrics[sessionId]) metrics[sessionId] = { prompts: 0, keys: {}, lastChangedCount: 0, lastKeys: [] };
       metrics[sessionId].prompts += 1;
       const injectedKeys: string[] = [];
-      for (const row of rows) {
-        const [project, filename, , content] = row as string[];
-        const key = memoryScoreKey(project, filename, extractSnippet(content, keywords, 8));
-        injectedKeys.push(key);
+      for (const injected of selected) {
+        injectedKeys.push(injected.key);
+        const key = injected.key;
         const seen = metrics[sessionId].keys[key] || 0;
         metrics[sessionId].keys[key] = seen + 1;
         if (seen >= 1) recordMemoryFeedback(cortexPath, key, "reprompt");
@@ -1004,6 +1137,39 @@ async function handleMemoryPolicy(args: string[]) {
     return;
   }
   console.error("Usage: cortex memory-policy [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45]");
+  process.exit(1);
+}
+
+async function handleMemoryWorkflow(args: string[]) {
+  if (!args.length || args[0] === "get") {
+    console.log(JSON.stringify(getMemoryWorkflowPolicy(cortexPath), null, 2));
+    return;
+  }
+  if (args[0] === "set") {
+    const patch: any = {};
+    for (const arg of args.slice(1)) {
+      if (!arg.startsWith("--")) continue;
+      const [k, v] = arg.slice(2).split("=");
+      if (!k || v === undefined) continue;
+      if (k === "requireMaintainerApproval") {
+        patch.requireMaintainerApproval = /^(1|true|yes|on)$/i.test(v);
+      } else if (k === "riskySections") {
+        patch.riskySections = v.split(",").map((s) => s.trim()).filter(Boolean);
+      } else {
+        const num = Number(v);
+        patch[k] = Number.isNaN(num) ? v : num;
+      }
+    }
+    const result = updateMemoryWorkflowPolicy(cortexPath, patch);
+    if (typeof result === "string") {
+      console.log(result);
+      if (result.startsWith("Permission denied")) process.exit(1);
+      return;
+    }
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.error("Usage: cortex memory-workflow [get|set --requireMaintainerApproval=true --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts]");
   process.exit(1);
 }
 

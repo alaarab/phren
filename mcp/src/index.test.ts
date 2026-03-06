@@ -11,6 +11,8 @@ import {
   addLearningToFile,
   pruneDeadMemories,
   consolidateProjectLearnings,
+  getMemoryWorkflowPolicy,
+  updateMemoryWorkflowPolicy,
 } from "./shared.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -255,6 +257,44 @@ describe("safeProjectPath", () => {
     // e.g. base is /tmp/test-cortex, attacker tries /tmp/test-cortex-evil
     const result = safeProjectPath(base, "..", "test-cortex-evil");
     expect(result).toBeNull();
+  });
+});
+
+describe("memory workflow policy", () => {
+  let tmpRoot: string;
+  let cortexDir: string;
+  let actor: string;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-workflow-test-"));
+    cortexDir = path.join(tmpRoot, "cortex");
+    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
+    actor = grantAdminAccess(cortexDir, "workflow-admin");
+    process.env.CORTEX_ACTOR = actor;
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("returns defaults when no workflow policy file exists", () => {
+    const policy = getMemoryWorkflowPolicy(cortexDir);
+    expect(policy.requireMaintainerApproval).toBe(true);
+    expect(policy.lowConfidenceThreshold).toBe(0.7);
+    expect(policy.riskySections).toContain("Stale");
+  });
+
+  it("updates workflow policy with admin permission", () => {
+    const updated = updateMemoryWorkflowPolicy(cortexDir, {
+      requireMaintainerApproval: false,
+      lowConfidenceThreshold: 0.55,
+      riskySections: ["Review", "Conflicts"],
+    });
+    expect(typeof updated).not.toBe("string");
+    const policy = getMemoryWorkflowPolicy(cortexDir);
+    expect(policy.requireMaintainerApproval).toBe(false);
+    expect(policy.lowConfidenceThreshold).toBe(0.55);
+    expect(policy.riskySections).toEqual(["Review", "Conflicts"]);
   });
 });
 
@@ -507,7 +547,7 @@ describe("addLearningToFile", () => {
       line: 12,
       commit: "abc123",
     });
-    expect(result).toContain("citation metadata");
+    expect(result).toContain("added insight");
 
     const learnings = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
     expect(learnings).toContain("<!-- cortex:cite");

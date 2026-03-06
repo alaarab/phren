@@ -31,18 +31,33 @@
   - `init`/`link` accept `--mcp on|off` to choose MCP tools vs hooks-only fallback during one-shot setup.
   - New `mcp-mode on|off|status` command toggles MCP integration later without reinstalling.
   - MCP preference is persisted in `.governance/install-preferences.json`.
+- Expanded MCP auto-configuration beyond Claude/VS Code:
+  - New best-effort MCP config writers for Cursor, GitHub Copilot CLI, and Codex.
+  - `init`, `link`, and `mcp-mode` now apply MCP mode across all detected tool targets.
+  - `uninstall` now removes cortex MCP entries from all known tool config paths.
+- Memory workflow policy and approval gates:
+  - New workflow policy file: `.governance/memory-workflow-policy.json`.
+  - New CLI command: `memory-workflow [get|set ...]`.
+  - New MCP tool: `memory_workflow`.
+  - `memory-ui` now enforces maintainer/admin approval for risky queue items (by section or low confidence).
+- Retrieval pipeline upgrades:
+  - Added hybrid overlap-based fallback when strict FTS misses paraphrased prompts.
+  - Added context token budgeting and snippet compaction to cap prompt injection size.
+  - Added token usage trace in hook output.
 
 ### Fixed
 - `remove_learning` now removes an immediately attached `cortex:cite` comment, preventing orphan citation metadata lines in `LEARNINGS.md`.
 - GitHub data mining now executes `gh` using argument-safe process execution (no shell-string concatenation in `runGhJson`).
 - `hook-prompt` daily quality maintenance moved to detached background execution (`background-maintenance`) so prompt hooks stay low-latency.
+- CLI `link` path resolution now uses ESM-safe `os.homedir()` import (removes Node `ERR_AMBIGUOUS_MODULE_SYNTAX` runtime failure).
+- VS Code auto-detection now includes WSL + Windows user-install paths (`USERPROFILE/AppData/Roaming/Code/User`), including Windows-style `C:\...` path normalization.
+- Conflict auto-merge git operations now use argument-safe `execFileSync("git", [...])` calls instead of shell command strings.
 - Version/docs consistency updates:
   - package version aligned to `1.8.4`
   - MCP server version aligned to `1.8.4`
   - README MCP tool and CLI command docs updated to match current implementation
 
 ### TODO
-- Run `tsc` and `vitest` once Node toolchain is installed and fix any compile/test regressions.
 - Add integration tests for `memory-ui` approve/reject/edit flows and markdown mutation edge cases.
 - Add CLI-level feature flags for gradual rollout of auto-extraction and daily maintenance jobs.
 - Harden GitHub mining for large repos and API failures (pagination, timeouts, rate-limit backoff).
