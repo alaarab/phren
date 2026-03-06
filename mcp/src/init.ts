@@ -204,6 +204,13 @@ function uniqStrings(values: Array<string | undefined>): string[] {
 }
 
 function buildMcpServerConfig(cortexPath: string) {
+  const entryScript = resolveEntryScript();
+  if (entryScript && fs.existsSync(entryScript)) {
+    return {
+      command: "node",
+      args: [entryScript, cortexPath],
+    };
+  }
   return {
     command: "npx",
     args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
