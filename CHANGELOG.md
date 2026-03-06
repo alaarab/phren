@@ -10,6 +10,12 @@
   - #252: Added dry-run coverage for destructive lifecycle/governance operations.
   - #225: Added OSS contributor docs (`CONTRIBUTING.md`, `SECURITY.md`, API references).
   - #222: Added docs refresh across README, site, and whitepaper v2 artifacts.
+  - #264: Rewrote starter template with guided tour, day-to-day workflow, and P0/P1/P2 backlog examples.
+  - #265: Init success output now mentions agent restart and points to README for a guided tour.
+  - #166: Added test coverage for shell backlog subsection headers (P0, P1, P2 display).
+  - #176/#177: Verified Copilot and Cursor hook schema validation (already implemented).
+  - #276/#277/#279: Updated whitepaper architecture sections, fixed MCP tool count, regenerated PDF.
+  - #195: Added Keep a Changelog comparison links for all versions.
 
 ## [1.10.2] - 2026-03-06
 
