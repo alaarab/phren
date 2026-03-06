@@ -33,7 +33,7 @@ import {
 import { buildRobustFtsQuery, extractKeywords, isValidProjectName } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync, execSync, spawn } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
 import { startMemoryUi } from "./memory-ui.js";
@@ -223,9 +223,9 @@ interface GitContext {
   changedFiles: Set<string>;
 }
 
-function runGit(cwd: string, cmd: string): string | null {
+function runGit(cwd: string, args: string[]): string | null {
   try {
-    return execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
     return null;
   }
@@ -233,36 +233,62 @@ function runGit(cwd: string, cmd: string): string | null {
 
 function commandExists(cmd: string): boolean {
   try {
-    execSync(`command -v ${cmd}`, { stdio: "ignore" });
+    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"] });
     return true;
   } catch {
     return false;
   }
 }
 
-function runGhJson<T>(cwd: string, args: string[]): T | null {
+function isFeatureEnabled(envName: string, defaultValue: boolean = true): boolean {
+  const raw = process.env[envName];
+  if (!raw) return defaultValue;
+  return !["0", "false", "off", "no"].includes(raw.trim().toLowerCase());
+}
+
+function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(raw || "", 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function shouldRetryGh(err: unknown): boolean {
+  const msg = String((err as any)?.message ?? err ?? "");
+  return /(rate limit|secondary rate limit|timed out|ecconn|network|502|503|504|bad gateway|service unavailable)/i.test(msg);
+}
+
+async function runGhJson<T>(cwd: string, args: string[]): Promise<T | null> {
   if (!commandExists("gh")) return null;
-  try {
-    const out = execFileSync("gh", args, {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    if (!out) return null;
-    return JSON.parse(out) as T;
-  } catch {
-    return null;
+  const retries = clampInt(process.env.CORTEX_GH_RETRIES, 2, 0, 5);
+  const timeoutMs = clampInt(process.env.CORTEX_GH_TIMEOUT_MS, 10000, 1000, 60000);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const out = execFileSync("gh", args, {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: timeoutMs,
+        maxBuffer: 4 * 1024 * 1024,
+      }).trim();
+      if (!out) return null;
+      return JSON.parse(out) as T;
+    } catch (err) {
+      if (attempt >= retries || !shouldRetryGh(err)) return null;
+      const backoffMs = 750 * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
   }
+  return null;
 }
 
 function getGitContext(cwd?: string): GitContext | null {
   if (!cwd) return null;
-  const branch = runGit(cwd, "git rev-parse --abbrev-ref HEAD");
+  const branch = runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
   if (!branch) return null;
   const changedFiles = new Set<string>();
   for (const changed of [
-    runGit(cwd, "git diff --name-only"),
-    runGit(cwd, "git diff --name-only --cached"),
+    runGit(cwd, ["diff", "--name-only"]),
+    runGit(cwd, ["diff", "--name-only", "--cached"]),
   ]) {
     if (!changed) continue;
     for (const line of changed.split("\n").map((s) => s.trim()).filter(Boolean)) {
@@ -458,6 +484,7 @@ function qualityMarkers(cortexPathLocal: string): { done: string; lock: string }
 }
 
 function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string): boolean {
+  if (!isFeatureEnabled("CORTEX_FEATURE_DAILY_MAINTENANCE", true)) return false;
   const markers = qualityMarkers(cortexPathLocal);
   if (fs.existsSync(markers.done)) return false;
   if (fs.existsSync(markers.lock)) {
@@ -574,9 +601,13 @@ async function handleSearch(opts: SearchOptions) {
   }
 }
 
-function runBestEffort(cmd: string, cwd: string): { ok: boolean; output?: string; error?: string } {
+function runBestEffortGit(args: string[], cwd: string): { ok: boolean; output?: string; error?: string } {
   try {
-    const output = execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    const output = execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
     return { ok: true, output };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
@@ -602,7 +633,7 @@ async function handleHookSessionStart() {
     return;
   }
 
-  const pull = runBestEffort("git pull --rebase --quiet", cortexPath);
+  const pull = runBestEffortGit(["pull", "--rebase", "--quiet"], cortexPath);
   const doctor = await runDoctor(cortexPath, false);
   const maintenanceScheduled = scheduleBackgroundMaintenance(cortexPath);
 
@@ -625,7 +656,7 @@ async function handleHookStop() {
     return;
   }
 
-  const status = runBestEffort("git status --porcelain", cortexPath);
+  const status = runBestEffortGit(["status", "--porcelain"], cortexPath);
   if (!status.ok) {
     updateRuntimeHealth(cortexPath, {
       lastStopAt: now,
@@ -644,8 +675,8 @@ async function handleHookStop() {
     return;
   }
 
-  const add = runBestEffort("git add -A", cortexPath);
-  const commit = add.ok ? runBestEffort("git commit -m 'auto-save cortex'", cortexPath) : { ok: false, error: add.error };
+  const add = runBestEffortGit(["add", "-A"], cortexPath);
+  const commit = add.ok ? runBestEffortGit(["commit", "-m", "auto-save cortex"], cortexPath) : { ok: false, error: add.error };
   if (!add.ok || !commit.ok) {
     updateRuntimeHealth(cortexPath, {
       lastStopAt: now,
@@ -659,7 +690,7 @@ async function handleHookStop() {
     return;
   }
 
-  const remotes = runBestEffort("git remote", cortexPath);
+  const remotes = runBestEffortGit(["remote"], cortexPath);
   if (!remotes.ok || !remotes.output) {
     updateRuntimeHealth(cortexPath, {
       lastStopAt: now,
@@ -669,7 +700,7 @@ async function handleHookStop() {
     return;
   }
 
-  const push = runBestEffort("git push", cortexPath);
+  const push = runBestEffortGit(["push"], cortexPath);
   if (push.ok) {
     updateRuntimeHealth(cortexPath, {
       lastStopAt: now,
@@ -819,7 +850,7 @@ async function handleHookPrompt() {
     }
 
     // Automatic extraction from PR/review/CI/issues once per session+project.
-    if (sessionId && detectedProject && cwd) {
+    if (isFeatureEnabled("CORTEX_FEATURE_AUTO_EXTRACT", true) && sessionId && detectedProject && cwd) {
       const marker = path.join(cortexPath, `.extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
@@ -1099,7 +1130,7 @@ function inferProject(arg?: string): string | null {
 
 function parseGitLogRecords(cwd: string, days: number): Array<{ hash: string; subject: string; body: string }> {
   const fmt = "%H%x1f%s%x1f%b%x1e";
-  const raw = runGit(cwd, `git log --since="${days} days ago" --first-parent --pretty=format:${fmt}`) || "";
+  const raw = runGit(cwd, ["log", `--since=${days} days ago`, "--first-parent", `--pretty=format:${fmt}`]) || "";
   const records: Array<{ hash: string; subject: string; body: string }> = [];
   for (const rec of raw.split("\x1e")) {
     const trimmed = rec.trim();
@@ -1141,16 +1172,19 @@ interface Candidate {
   file?: string;
 }
 
-function mineGithubCandidates(repoRoot: string): Candidate[] {
+async function mineGithubCandidates(repoRoot: string): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
+  const prLimit = clampInt(process.env.CORTEX_GH_PR_LIMIT, 40, 5, 200);
+  const runLimit = clampInt(process.env.CORTEX_GH_RUN_LIMIT, 25, 5, 200);
+  const issueLimit = clampInt(process.env.CORTEX_GH_ISSUE_LIMIT, 25, 5, 200);
 
-  const prs = runGhJson<GhPr[]>(repoRoot, [
+  const prs = await runGhJson<GhPr[]>(repoRoot, [
     "pr",
     "list",
     "--state",
     "merged",
     "--limit",
-    "40",
+    String(prLimit),
     "--json",
     "number,title,body,mergeCommit,files,comments,reviews",
   ]) || [];
@@ -1173,13 +1207,13 @@ function mineGithubCandidates(repoRoot: string): Candidate[] {
     });
   }
 
-  const runs = runGhJson<GhRun[]>(repoRoot, [
+  const runs = await runGhJson<GhRun[]>(repoRoot, [
     "run",
     "list",
     "--status",
     "failure",
     "--limit",
-    "25",
+    String(runLimit),
     "--json",
     "databaseId,displayTitle,workflowName,headSha",
   ]) || [];
@@ -1193,13 +1227,13 @@ function mineGithubCandidates(repoRoot: string): Candidate[] {
     });
   }
 
-  const issues = runGhJson<GhIssue[]>(repoRoot, [
+  const issues = await runGhJson<GhIssue[]>(repoRoot, [
     "issue",
     "list",
     "--state",
     "all",
     "--limit",
-    "25",
+    String(issueLimit),
     "--json",
     "number,title,body",
   ]) || [];
@@ -1209,16 +1243,7 @@ function mineGithubCandidates(repoRoot: string): Candidate[] {
       continue;
     }
     const text = `Issue #${issue.number}: ${issue.title}`;
-    let issueScore = 0.58;
-    const comments = runGhJson<Array<{ body?: string }>>(
-      repoRoot,
-      ["issue", "view", String(issue.number), "--json", "comments"]
-    ) as any;
-    if (comments && Array.isArray((comments as any).comments)) {
-      const blob = (comments as any).comments.map((c: any) => c.body || "").join("\n").toLowerCase();
-      if (/(workaround|root cause|regression|postmortem|must|avoid)/.test(blob)) issueScore += 0.1;
-    }
-    candidates.push({ text, score: Math.min(0.9, issueScore) });
+    candidates.push({ text, score: 0.58 });
   }
 
   return candidates;
@@ -1255,7 +1280,7 @@ async function handleExtractMemories(projectArg?: string, cwdArg?: string, silen
     return;
   }
 
-  const repoRoot = runGit(cwdArg || process.cwd(), "git rev-parse --show-toplevel");
+  const repoRoot = runGit(cwdArg || process.cwd(), ["rev-parse", "--show-toplevel"]);
   if (!repoRoot) {
     if (!silent) console.error("extract-memories must run from inside a git repository.");
     if (!silent) process.exit(1);
@@ -1265,7 +1290,7 @@ async function handleExtractMemories(projectArg?: string, cwdArg?: string, silen
   const days = Number.parseInt(process.env.CORTEX_MEMORY_EXTRACT_WINDOW_DAYS || "30", 10);
   const threshold = Number.parseFloat(process.env.CORTEX_MEMORY_AUTO_ACCEPT || String(getMemoryPolicy(cortexPath).autoAcceptThreshold));
   const records = parseGitLogRecords(repoRoot, Number.isNaN(days) ? 30 : days);
-  const ghCandidates = mineGithubCandidates(repoRoot);
+  const ghCandidates = await mineGithubCandidates(repoRoot);
 
   let accepted = 0;
   let queued = 0;

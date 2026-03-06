@@ -8,8 +8,10 @@ import {
   configureCopilotMcp,
   configureCursorMcp,
   configureVSCode,
+  getHooksEnabledPreference,
   getMcpEnabledPreference,
   parseMcpMode,
+  setHooksEnabledPreference,
   setMcpEnabledPreference,
 } from "./init.js";
 
@@ -51,6 +53,14 @@ describe.sequential("mcp mode configuration", () => {
     expect(getMcpEnabledPreference(cortexPath)).toBe(true);
   });
 
+  it("defaults to hooks enabled and persists preference updates", () => {
+    expect(getHooksEnabledPreference(cortexPath)).toBe(true);
+    setHooksEnabledPreference(cortexPath, false);
+    expect(getHooksEnabledPreference(cortexPath)).toBe(false);
+    setHooksEnabledPreference(cortexPath, true);
+    expect(getHooksEnabledPreference(cortexPath)).toBe(true);
+  });
+
   it("toggles Claude MCP config on and off while keeping hooks", () => {
     const claudeDir = path.join(homeDir, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });
@@ -81,6 +91,27 @@ describe.sequential("mcp mode configuration", () => {
     const onCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     expect(onCfg.mcpServers?.cortex?.command).toBe("npx");
     expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+  });
+
+  it("can disable and re-enable Claude hooks independently from MCP", () => {
+    const claudeDir = path.join(homeDir, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = path.join(claudeDir, "settings.json");
+    fs.writeFileSync(settingsPath, JSON.stringify({ hooks: {} }, null, 2));
+
+    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: false });
+    const offCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const offHooks = JSON.stringify(offCfg.hooks || {});
+    expect(offHooks).not.toContain("hook-prompt");
+    expect(offHooks).not.toContain("hook-stop");
+    expect(offHooks).not.toContain("hook-session-start");
+
+    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: true });
+    const onCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const onHooks = JSON.stringify(onCfg.hooks || {});
+    expect(onHooks).toContain("hook-prompt");
+    expect(onHooks).toContain("hook-stop");
+    expect(onHooks).toContain("hook-session-start");
   });
 
   it("toggles VS Code MCP config on and off", () => {

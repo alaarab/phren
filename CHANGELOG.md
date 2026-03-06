@@ -58,11 +58,33 @@
   - MCP server version aligned to `1.8.4`
   - README MCP tool and CLI command docs updated to match current implementation
 
-### TODO
-- Add integration tests for `memory-ui` approve/reject/edit flows and markdown mutation edge cases.
-- Add CLI-level feature flags for gradual rollout of auto-extraction and daily maintenance jobs.
-- Harden GitHub mining for large repos and API failures (pagination, timeouts, rate-limit backoff).
-- Expand docs/README with governance model, role setup, policy tuning examples, and operator runbook.
+## [1.10.1-rc.1] - 2026-03-06
+
+### Added
+- Release gating and verification upgrades:
+  - New GitHub Actions CI workflow (`.github/workflows/ci.yml`) for build/test/package smoke checks.
+  - Added strict TypeScript unused-symbol gate in CI (`--noUnusedLocals --noUnusedParameters`).
+  - Added `memory-ui` integration tests for approve/reject/edit flows and error handling.
+  - Added explicit hooks-mode test coverage in `init.test.ts` and release-gate checks.
+- CLI rollout controls via environment flags:
+  - `CORTEX_FEATURE_AUTO_EXTRACT` (toggle automatic extraction in hook-prompt).
+  - `CORTEX_FEATURE_DAILY_MAINTENANCE` (toggle detached daily maintenance jobs).
+  - GitHub mining safety knobs: `CORTEX_GH_TIMEOUT_MS`, `CORTEX_GH_RETRIES`, `CORTEX_GH_PR_LIMIT`, `CORTEX_GH_RUN_LIMIT`, `CORTEX_GH_ISSUE_LIMIT`.
+
+### Changed
+- Command execution hardening:
+  - Replaced shell-string command execution in key lifecycle/save paths with arg-safe `execFileSync` calls.
+  - Standardized binary detection on `which`-based checks for safer command probing.
+- Docs/site alignment:
+  - Restored the previous docs-site landing design and kept whitepaper references in nav/CTA/footer.
+  - Updated shell release hardening checklist to reflect completed gates.
+
+### Fixed
+- Queue approval policy enforcement:
+  - Memory queue approve/reject/edit flows now consistently enforce role permissions.
+  - Risky queue approvals now require maintainer/admin role consistently across shell and memory UI.
+- Input validation:
+  - Memory queue edit flow now rejects empty replacement text.
 
 ## [1.10.0] - 2026-03-06
 

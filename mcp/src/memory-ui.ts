@@ -3,12 +3,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as querystring from "querystring";
 import {
-  checkMemoryPermission,
   getProjectDirs,
-  getMemoryWorkflowPolicy,
-  addLearningToFile,
-  appendAuditLog,
 } from "./shared.js";
+import {
+  approveMemoryQueueItem,
+  editMemoryQueueItem,
+  rejectMemoryQueueItem,
+} from "./data-access.js";
 
 interface QueueItem {
   section: "Review" | "Stale" | "Conflicts";
@@ -44,38 +45,6 @@ function parseQueueItems(cortexPath: string, project: string): QueueItem[] {
   }
 
   return items;
-}
-
-function findQueueItem(cortexPath: string, project: string, line: string): QueueItem | null {
-  return parseQueueItems(cortexPath, project).find((i) => i.line === line) || null;
-}
-
-function isRiskyQueueItem(cortexPath: string, item: QueueItem | null): boolean {
-  if (!item) return false;
-  const workflow = getMemoryWorkflowPolicy(cortexPath);
-  const riskyBySection = workflow.riskySections.includes(item.section);
-  const confidence = item.text.match(/\[confidence\s+([01](?:\.\d+)?)\]/i);
-  const riskyByConfidence = confidence ? Number.parseFloat(confidence[1]) < workflow.lowConfidenceThreshold : false;
-  return riskyBySection || riskyByConfidence;
-}
-
-function rewriteQueue(cortexPath: string, project: string, items: QueueItem[]) {
-  const bySection: Record<QueueItem["section"], QueueItem[]> = {
-    Review: [],
-    Stale: [],
-    Conflicts: [],
-  };
-  for (const item of items) bySection[item.section].push(item);
-
-  const out: string[] = [`# ${project} Memory Queue`, "", "## Review", ""];
-  for (const item of bySection.Review) out.push(item.line);
-  out.push("", "## Stale", "");
-  for (const item of bySection.Stale) out.push(item.line);
-  out.push("", "## Conflicts", "");
-  for (const item of bySection.Conflicts) out.push(item.line);
-  out.push("");
-
-  fs.writeFileSync(queuePath(cortexPath, project), out.join("\n").replace(/\n{3,}/g, "\n\n"));
 }
 
 function recentUsage(cortexPath: string): string[] {
@@ -200,28 +169,8 @@ function renderPage(cortexPath: string): string {
 </html>`;
 }
 
-function removeLine(cortexPath: string, project: string, line: string): boolean {
-  const items = parseQueueItems(cortexPath, project);
-  const idx = items.findIndex((i) => i.line === line);
-  if (idx === -1) return false;
-  items.splice(idx, 1);
-  rewriteQueue(cortexPath, project, items);
-  return true;
-}
-
-function editLine(cortexPath: string, project: string, line: string, newText: string): boolean {
-  const items = parseQueueItems(cortexPath, project);
-  const idx = items.findIndex((i) => i.line === line);
-  if (idx === -1) return false;
-  const date = items[idx].date;
-  items[idx].text = newText.trim();
-  items[idx].line = `- [${date}] ${items[idx].text}`;
-  rewriteQueue(cortexPath, project, items);
-  return true;
-}
-
-export async function startMemoryUi(cortexPath: string, port: number): Promise<void> {
-  const server = http.createServer(async (req, res) => {
+export function createMemoryUiServer(cortexPath: string): http.Server {
+  return http.createServer((req, res) => {
     const url = req.url || "/";
     if (req.method === "GET" && url === "/") {
       const html = renderPage(cortexPath);
@@ -244,30 +193,29 @@ export async function startMemoryUi(cortexPath: string, port: number): Promise<v
           return;
         }
 
+        let outcome = "";
         if (url === "/approve") {
-          const item = findQueueItem(cortexPath, project, line);
-          const workflow = getMemoryWorkflowPolicy(cortexPath);
-          if (workflow.requireMaintainerApproval && isRiskyQueueItem(cortexPath, item)) {
-            const denial = checkMemoryPermission(cortexPath, "pin");
-            if (denial) {
-              appendAuditLog(cortexPath, "approve_memory_denied", `project=${project} reason=${JSON.stringify(denial)}`);
-              res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
-              res.end("Approval requires maintainer/admin role for risky memory entries.");
-              return;
-            }
-          }
-
-          const m = line.match(/^- \[\d{4}-\d{2}-\d{2}\]\s*(.+)$/);
-          const text = m ? m[1] : line.replace(/^- /, "");
-          addLearningToFile(cortexPath, project, text);
-          removeLine(cortexPath, project, line);
-          appendAuditLog(cortexPath, "approve_memory", `project=${project} memory=${JSON.stringify(text)}`);
+          outcome = approveMemoryQueueItem(cortexPath, project, line);
         } else if (url === "/reject") {
-          removeLine(cortexPath, project, line);
-          appendAuditLog(cortexPath, "reject_memory", `project=${project} memory=${JSON.stringify(line)}`);
+          outcome = rejectMemoryQueueItem(cortexPath, project, line);
         } else if (url === "/edit") {
-          editLine(cortexPath, project, line, newText);
-          appendAuditLog(cortexPath, "edit_memory", `project=${project} old=${JSON.stringify(line)} new=${JSON.stringify(newText)}`);
+          outcome = editMemoryQueueItem(cortexPath, project, line, newText);
+        }
+
+        if (outcome.includes("requires maintainer/admin role") || outcome.startsWith("Permission denied")) {
+          res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
+          res.end(outcome);
+          return;
+        }
+        if (outcome.startsWith("No memory queue item")) {
+          res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+          res.end(outcome);
+          return;
+        }
+        if (outcome.startsWith("Invalid") || outcome.startsWith("Usage:") || outcome.includes("cannot be empty")) {
+          res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+          res.end(outcome);
+          return;
         }
 
         res.writeHead(302, { location: "/" });
@@ -279,7 +227,10 @@ export async function startMemoryUi(cortexPath: string, port: number): Promise<v
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("Not found");
   });
+}
 
+export async function startMemoryUi(cortexPath: string, port: number): Promise<void> {
+  const server = createMemoryUiServer(cortexPath);
   await new Promise<void>((resolve) => {
     server.listen(port, "127.0.0.1", () => resolve());
   });

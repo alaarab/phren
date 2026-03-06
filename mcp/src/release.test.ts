@@ -5,7 +5,7 @@ import * as os from "os";
 import { configureAllHooks } from "./hooks.js";
 import { configureClaude } from "./init.js";
 
-describe.sequential("v1.10 release hardening gates", () => {
+describe.sequential("1.10.x release hardening gates", () => {
   let tmpRoot: string;
   let homeDir: string;
   let cortexPath: string;
@@ -107,5 +107,20 @@ describe.sequential("v1.10 release hardening gates", () => {
     expect(prompt).toContain("hook-prompt");
     expect(stop).toContain("hook-stop");
     expect(start).toContain("hook-session-start");
+  });
+
+  it("can disable Claude hooks while keeping MCP configured", () => {
+    const claudeDir = path.join(homeDir, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = path.join(claudeDir, "settings.json");
+    fs.writeFileSync(settingsPath, JSON.stringify({ hooks: {} }, null, 2));
+
+    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: false });
+    const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    expect(cfg.mcpServers?.cortex?.command).toBe("npx");
+    const hooksBlob = JSON.stringify(cfg.hooks || {});
+    expect(hooksBlob).not.toContain("hook-prompt");
+    expect(hooksBlob).not.toContain("hook-stop");
+    expect(hooksBlob).not.toContain("hook-session-start");
   });
 });
