@@ -225,14 +225,14 @@ function upsertMcpServer(
 ): McpConfigStatus {
   const hadMcp = Boolean(data.mcpServers?.cortex || data.servers?.cortex);
   if (mcpEnabled) {
-    const root: McpRootKey =
-      data.mcpServers && typeof data.mcpServers === "object"
-        ? "mcpServers"
-        : data.servers && typeof data.servers === "object"
-          ? "servers"
-          : preferredRoot;
-    if (!data[root] || typeof data[root] !== "object") data[root] = {};
-    data[root].cortex = buildMcpServerConfig(cortexPath);
+    // Always use preferredRoot; migrate cortex entry from stale key if present
+    const staleKey: McpRootKey = preferredRoot === "mcpServers" ? "servers" : "mcpServers";
+    if (data[staleKey]?.cortex) {
+      delete data[staleKey].cortex;
+      if (Object.keys(data[staleKey]).length === 0) delete data[staleKey];
+    }
+    if (!data[preferredRoot] || typeof data[preferredRoot] !== "object") data[preferredRoot] = {};
+    data[preferredRoot].cortex = buildMcpServerConfig(cortexPath);
     return hadMcp ? "already_configured" : "installed";
   }
 
@@ -274,7 +274,7 @@ function patchTomlMcpServer(
 
   const cfg = buildMcpServerConfig(cortexPath);
   const argsToml = "[" + cfg.args.map((a: string) => `"${a}"`).join(", ") + "]";
-  const newSection = `[mcp_servers.cortex]\ncommand = "${cfg.command}"\nargs = ${argsToml}`;
+  const newSection = `[mcp_servers.cortex]\ncommand = "${cfg.command}"\nargs = ${argsToml}\nstartup_timeout_sec = 30`;
 
   // Match [mcp_servers.cortex] section up to the next [header] or EOF
   const sectionRe = /^\[mcp_servers\.cortex\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
@@ -693,23 +693,19 @@ export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boo
   // Always ensure ~/.copilot/mcp-config.json is configured when .copilot dir exists
   // (Copilot CLI v0.0.423+ reads from this path, not ~/.github/mcp.json)
   const copilotCliConfig = candidates[0];
+  let status: McpConfigStatus = "already_disabled";
   if (fs.existsSync(path.join(home, ".copilot"))) {
-    // Migrate legacy "servers" key to "mcpServers" per GitHub spec
-    if (fs.existsSync(copilotCliConfig)) {
-      patchJsonFile(copilotCliConfig, (data) => {
-        if (data.servers && !data.mcpServers) {
-          data.mcpServers = data.servers;
-          delete data.servers;
-        }
-      });
-    }
-    configureMcpAtPath(copilotCliConfig, mcpEnabled, "mcpServers", cortexPath);
+    status = configureMcpAtPath(copilotCliConfig, mcpEnabled, "mcpServers", cortexPath);
   }
   // Also update any other existing config file
   if (existing && existing !== copilotCliConfig) {
-    configureMcpAtPath(existing, mcpEnabled, "mcpServers", cortexPath);
+    status = configureMcpAtPath(existing, mcpEnabled, "mcpServers", cortexPath);
   }
-  return configureMcpAtPath(existing || copilotCliConfig, mcpEnabled, "mcpServers", cortexPath);
+  // If neither path was hit, configure the primary target
+  if (!fs.existsSync(path.join(home, ".copilot")) && !existing) {
+    status = configureMcpAtPath(copilotCliConfig, mcpEnabled, "mcpServers", cortexPath);
+  }
+  return status;
 }
 
 export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
