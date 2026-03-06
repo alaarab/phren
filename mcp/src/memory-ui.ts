@@ -4,7 +4,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as querystring from "querystring";
 import {
+  CortexError,
   getProjectDirs,
+
 } from "./shared.js";
 import {
   approveMemoryQueueItem,
@@ -52,9 +54,8 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   const hiddenFields = csrfField + authField;
 
   for (const project of projects) {
-    const result = readMemoryQueue(cortexPath, project);
-    // TODO (#85): readMemoryQueue returns QueueItem[] | string; migrate to CortexResult<T>
-    const items = Array.isArray(result) ? result : [];
+    const queueResult = readMemoryQueue(cortexPath, project);
+    const items = queueResult.ok ? queueResult.data : [];
     if (!items.length) continue;
     for (const item of items) {
       rows.push(`
@@ -221,28 +222,34 @@ export function createMemoryUiServer(cortexPath: string, opts?: MemoryUiOptions)
           return;
         }
 
-        let outcome = "";
+        let result: import("./shared.js").CortexResult<string> = { ok: false, error: "unknown action" };
         if (url === "/approve") {
-          outcome = approveMemoryQueueItem(cortexPath, project, line);
+          result = approveMemoryQueueItem(cortexPath, project, line);
         } else if (url === "/reject") {
-          outcome = rejectMemoryQueueItem(cortexPath, project, line);
+          result = rejectMemoryQueueItem(cortexPath, project, line);
         } else if (url === "/edit") {
-          outcome = editMemoryQueueItem(cortexPath, project, line, newText);
+          result = editMemoryQueueItem(cortexPath, project, line, newText);
         }
 
-        if (outcome.includes("requires maintainer/admin role") || outcome.startsWith("Permission denied")) {
-          res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
-          res.end(outcome);
-          return;
-        }
-        if (outcome.startsWith("No memory queue item")) {
-          res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-          res.end(outcome);
-          return;
-        }
-        if (outcome.startsWith("Invalid") || outcome.startsWith("Usage:") || outcome.includes("cannot be empty")) {
-          res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
-          res.end(outcome);
+        if (!result.ok) {
+          const code = result.code;
+          if (code === CortexError.PERMISSION_DENIED || result.error.includes("requires maintainer/admin role")) {
+            res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
+            res.end(result.error);
+            return;
+          }
+          if (code === CortexError.NOT_FOUND) {
+            res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+            res.end(result.error);
+            return;
+          }
+          if (code === CortexError.INVALID_PROJECT_NAME || code === CortexError.EMPTY_INPUT) {
+            res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+            res.end(result.error);
+            return;
+          }
+          res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+          res.end(result.error);
           return;
         }
 

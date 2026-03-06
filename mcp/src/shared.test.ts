@@ -26,27 +26,44 @@ import {
   upsertCanonicalMemory,
   migrateGovernance,
   validateGovernanceJson,
+  withDefaults,
+  validateLearningsFormat,
+  validateBacklogFormat,
+  stripBacklogDoneSection,
+  pruneDeadMemories,
+  getMemoryPolicy,
+  updateMemoryPolicy,
+  getMemoryWorkflowPolicy,
+  updateMemoryWorkflowPolicy,
+  getIndexPolicy,
+  updateIndexPolicy,
+  getRuntimeHealth,
+  updateRuntimeHealth,
+  migrateLegacyFindings,
+  appendMemoryQueue,
+  getProjectDirs,
+  flushMemoryScores,
+  findCortexPathWithArg,
+  collectNativeMemoryFiles,
+  CortexError,
+  parseCortexErrorCode,
+  isCortexError,
+  cortexOk,
+  cortexErr,
 } from "./shared.js";
 import { isValidProjectName } from "./utils.js";
+import { grantAdmin, makeTempDir } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import * as yaml from "js-yaml";
 
 let tmpDir: string;
+let tmpCleanup: (() => void) | undefined;
 
 function makeCortex(): string {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-test-"));
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-test-"));
   return tmpDir;
-}
-
-function grantAdmin(cortexDir: string, actor = "vitest-admin"): void {
-  const govDir = path.join(cortexDir, ".governance");
-  fs.mkdirSync(govDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(govDir, "access-control.json"),
-    JSON.stringify({ admins: [actor], maintainers: [], contributors: [], viewers: [] }, null, 2) + "\n"
-  );
-  process.env.CORTEX_ACTOR = actor;
 }
 
 function makeProject(cortexDir: string, name: string, files: Record<string, string>): void {
@@ -72,8 +89,9 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.CORTEX_PATH;
   delete process.env.CORTEX_ACTOR;
-  if (tmpDir && fs.existsSync(tmpDir)) {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+  if (tmpCleanup) {
+    tmpCleanup();
+    tmpCleanup = undefined;
   }
 });
 
@@ -112,45 +130,45 @@ describe("findCortexPath", () => {
   });
 
   it("returns null when no cortex directory exists and no env var", () => {
-    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "fakehome-"));
+    const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
-    process.env.HOME = fakeHome;
+    process.env.HOME = tmp.path;
     try {
       expect(findCortexPath()).toBeNull();
     } finally {
       process.env.HOME = origHome;
-      fs.rmSync(fakeHome, { recursive: true, force: true });
+      tmp.cleanup();
     }
   });
 
   it("finds ~/.cortex when it exists", () => {
-    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "fakehome-"));
-    const dotCortex = path.join(fakeHome, ".cortex");
+    const tmp = makeTempDir("fakehome-");
+    const dotCortex = path.join(tmp.path, ".cortex");
     fs.mkdirSync(dotCortex);
     const origHome = process.env.HOME;
-    process.env.HOME = fakeHome;
+    process.env.HOME = tmp.path;
     try {
       expect(findCortexPath()).toBe(dotCortex);
     } finally {
       process.env.HOME = origHome;
-      fs.rmSync(fakeHome, { recursive: true, force: true });
+      tmp.cleanup();
     }
   });
 });
 
 describe("ensureCortexPath", () => {
   it("creates ~/.cortex if nothing exists", () => {
-    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "fakehome-"));
+    const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
-    process.env.HOME = fakeHome;
+    process.env.HOME = tmp.path;
     try {
       const result = ensureCortexPath();
-      expect(result).toBe(path.join(fakeHome, ".cortex"));
+      expect(result).toBe(path.join(tmp.path, ".cortex"));
       expect(fs.existsSync(result)).toBe(true);
       expect(fs.existsSync(path.join(result, "README.md"))).toBe(true);
     } finally {
       process.env.HOME = origHome;
-      fs.rmSync(fakeHome, { recursive: true, force: true });
+      tmp.cleanup();
     }
   });
 });
@@ -519,13 +537,15 @@ describe("RBAC and canonical locks", () => {
     );
   }
 
+  let rbacCleanup: () => void;
+
   beforeEach(() => {
-    cortex = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-rbac-"));
+    ({ path: cortex, cleanup: rbacCleanup } = makeTempDir("cortex-rbac-"));
   });
 
   afterEach(() => {
     process.env.CORTEX_ACTOR = origActor;
-    fs.rmSync(cortex, { recursive: true, force: true });
+    rbacCleanup();
   });
 
   describe("checkMemoryPermission", () => {
@@ -760,6 +780,7 @@ describe("recordMemoryInjection", () => {
     const key = "testproj/LEARNINGS.md:abc123";
 
     recordMemoryInjection(cortex, key, "session-1");
+    flushMemoryScores(cortex);
 
     const scoresPath = path.join(cortex, ".governance", "memory-scores.json");
     expect(fs.existsSync(scoresPath)).toBe(true);
@@ -768,6 +789,7 @@ describe("recordMemoryInjection", () => {
     expect(scores[key].impressions).toBe(1);
 
     recordMemoryInjection(cortex, key, "session-2");
+    flushMemoryScores(cortex);
     const scores2 = readVersionedEntries<any>(scoresPath);
     expect(scores2[key].impressions).toBe(2);
   });
@@ -798,6 +820,7 @@ describe("recordMemoryFeedback", () => {
 
     recordMemoryInjection(cortex, key);
     recordMemoryFeedback(cortex, key, "helpful");
+    flushMemoryScores(cortex);
 
     const scores = readVersionedEntries<any>(
       path.join(cortex, ".governance", "memory-scores.json")
@@ -813,6 +836,7 @@ describe("recordMemoryFeedback", () => {
 
     recordMemoryInjection(cortex, key);
     recordMemoryFeedback(cortex, key, "reprompt");
+    flushMemoryScores(cortex);
 
     const scores = readVersionedEntries<any>(
       path.join(cortex, ".governance", "memory-scores.json")
@@ -827,6 +851,7 @@ describe("recordMemoryFeedback", () => {
 
     recordMemoryInjection(cortex, key);
     recordMemoryFeedback(cortex, key, "regression");
+    flushMemoryScores(cortex);
 
     const scores = readVersionedEntries<any>(
       path.join(cortex, ".governance", "memory-scores.json")
@@ -1067,13 +1092,16 @@ describe("mergeBacklog (shared.test)", () => {
 describe("autoMergeConflicts", () => {
   let gitDir: string;
 
+  let gitCleanup: () => void;
+
   function initGitRepo(): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-automerge-"));
+    const tmp = makeTempDir("cortex-automerge-");
+    gitCleanup = tmp.cleanup;
     const { execFileSync } = require("child_process");
-    execFileSync("git", ["init", dir], { stdio: "ignore" });
-    execFileSync("git", ["-C", dir, "config", "user.email", "test@test.com"], { stdio: "ignore" });
-    execFileSync("git", ["-C", dir, "config", "user.name", "test"], { stdio: "ignore" });
-    return dir;
+    execFileSync("git", ["init", tmp.path], { stdio: "ignore" });
+    execFileSync("git", ["-C", tmp.path, "config", "user.email", "test@test.com"], { stdio: "ignore" });
+    execFileSync("git", ["-C", tmp.path, "config", "user.name", "test"], { stdio: "ignore" });
+    return tmp.path;
   }
 
   function commitFile(dir: string, filename: string, content: string, message: string) {
@@ -1090,9 +1118,7 @@ describe("autoMergeConflicts", () => {
   });
 
   afterEach(() => {
-    if (gitDir && fs.existsSync(gitDir)) {
-      fs.rmSync(gitDir, { recursive: true, force: true });
-    }
+    if (gitCleanup) gitCleanup();
   });
 
   it("returns true when there are no conflicted files", () => {
@@ -1228,11 +1254,944 @@ describe("autoMergeConflicts", () => {
   });
 
   it("returns false for a non-git directory", () => {
-    const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-nongit-"));
+    const tmp = makeTempDir("cortex-nongit-");
     try {
-      expect(autoMergeConflicts(nonGit)).toBe(false);
+      expect(autoMergeConflicts(tmp.path)).toBe(false);
     } finally {
-      fs.rmSync(nonGit, { recursive: true, force: true });
+      tmp.cleanup();
     }
+  });
+});
+
+// --- withDefaults ---
+
+describe("withDefaults", () => {
+  it("fills in missing keys from defaults", () => {
+    const result = withDefaults({ a: 1 } as any, { a: 0, b: 2, c: 3 } as any);
+    expect(result).toEqual({ a: 1, b: 2, c: 3 });
+  });
+
+  it("deep-merges nested objects", () => {
+    const result = withDefaults(
+      { nested: { x: 10 } } as any,
+      { nested: { x: 0, y: 20 }, top: "hello" } as any
+    );
+    expect(result).toEqual({ nested: { x: 10, y: 20 }, top: "hello" });
+  });
+
+  it("does not overwrite with null or undefined", () => {
+    const result = withDefaults(
+      { a: null, b: undefined } as any,
+      { a: 5, b: 10 } as any
+    );
+    expect(result).toEqual({ a: 5, b: 10 });
+  });
+
+  it("replaces arrays entirely (no deep merge on arrays)", () => {
+    const result = withDefaults(
+      { items: ["new"] } as any,
+      { items: ["old1", "old2"] } as any
+    );
+    expect(result).toEqual({ items: ["new"] });
+  });
+});
+
+// --- validateLearningsFormat ---
+
+describe("validateLearningsFormat", () => {
+  it("returns empty for valid format", () => {
+    const content = "# proj LEARNINGS\n\n## 2025-01-01\n\n- A learning\n";
+    const issues = validateLearningsFormat(content);
+    expect(issues).toEqual([]);
+  });
+
+  it("flags missing title heading", () => {
+    const content = "## 2025-01-01\n\n- A learning\n";
+    const issues = validateLearningsFormat(content);
+    expect(issues.length).toBe(1);
+    expect(issues[0]).toContain("Missing title");
+  });
+
+  it("flags bad date format in headings that start with digits", () => {
+    const content = "# LEARNINGS\n\n## 2025-1-1\n\n- A learning\n";
+    const issues = validateLearningsFormat(content);
+    expect(issues.some(i => i.includes("YYYY-MM-DD"))).toBe(true);
+  });
+
+  it("does not flag non-date headings like ## Overview", () => {
+    const content = "# LEARNINGS\n\n## Overview\n\nSome text\n";
+    const issues = validateLearningsFormat(content);
+    expect(issues.length).toBe(0);
+  });
+});
+
+// --- validateBacklogFormat ---
+
+describe("validateBacklogFormat", () => {
+  it("returns empty for valid format", () => {
+    const content = "# backlog\n\n## Active\n\n- Task\n\n## Queue\n\n## Done\n";
+    const issues = validateBacklogFormat(content);
+    expect(issues).toEqual([]);
+  });
+
+  it("flags missing title heading", () => {
+    const content = "## Active\n\n- Task\n";
+    const issues = validateBacklogFormat(content);
+    expect(issues.some(i => i.includes("title"))).toBe(true);
+  });
+
+  it("flags missing sections", () => {
+    const content = "# backlog\n\nJust some text without sections.\n";
+    const issues = validateBacklogFormat(content);
+    expect(issues.some(i => i.includes("sections"))).toBe(true);
+  });
+});
+
+// --- stripBacklogDoneSection ---
+
+describe("stripBacklogDoneSection", () => {
+  it("strips everything after ## Done", () => {
+    const content = "# backlog\n\n## Active\n\n- A\n\n## Done\n\n- Completed\n- Also done\n";
+    const result = stripBacklogDoneSection(content);
+    expect(result).toContain("## Active");
+    expect(result).not.toContain("## Done");
+    expect(result).not.toContain("Completed");
+  });
+
+  it("returns content unchanged when no Done section", () => {
+    const content = "# backlog\n\n## Active\n\n- A\n\n## Queue\n\n- B\n";
+    expect(stripBacklogDoneSection(content)).toBe(content);
+  });
+});
+
+// --- pruneDeadMemories ---
+
+describe("pruneDeadMemories", () => {
+  it("prunes entries older than retention policy in dry-run mode", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const govDir = path.join(cortex, ".governance");
+    fs.writeFileSync(
+      path.join(govDir, "memory-policy.json"),
+      JSON.stringify({ ttlDays: 120, retentionDays: 30, autoAcceptThreshold: 0.75, minInjectConfidence: 0.35, decay: { d30: 1, d60: 0.85, d90: 0.65, d120: 0.45 } }, null, 2) + "\n"
+    );
+    makeProject(cortex, "pruneproj", {
+      "LEARNINGS.md": "# pruneproj LEARNINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
+    });
+
+    const result = pruneDeadMemories(cortex, "pruneproj", true);
+    expect(result).toContain("[dry-run]");
+    expect(result).toContain("1");
+    // File should be unchanged in dry-run
+    const content = fs.readFileSync(path.join(cortex, "pruneproj", "LEARNINGS.md"), "utf8");
+    expect(content).toContain("Very old entry");
+  });
+
+  it("prunes entries and creates backup on real run", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const govDir = path.join(cortex, ".governance");
+    fs.writeFileSync(
+      path.join(govDir, "memory-policy.json"),
+      JSON.stringify({ ttlDays: 120, retentionDays: 30, autoAcceptThreshold: 0.75, minInjectConfidence: 0.35, decay: { d30: 1, d60: 0.85, d90: 0.65, d120: 0.45 } }, null, 2) + "\n"
+    );
+    makeProject(cortex, "pruneproj", {
+      "LEARNINGS.md": "# pruneproj LEARNINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
+    });
+
+    const result = pruneDeadMemories(cortex, "pruneproj");
+    expect(result).toContain("Pruned 1");
+    const content = fs.readFileSync(path.join(cortex, "pruneproj", "LEARNINGS.md"), "utf8");
+    expect(content).not.toContain("Very old entry");
+    expect(content).toContain("Future entry");
+    expect(fs.existsSync(path.join(cortex, "pruneproj", "LEARNINGS.md.bak"))).toBe(true);
+  });
+
+  it("denies prune when actor lacks delete permission", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "access-control.json"),
+      JSON.stringify({ admins: [], contributors: ["dev"], viewers: [] }, null, 2) + "\n"
+    );
+    process.env.CORTEX_ACTOR = "dev";
+    const result = pruneDeadMemories(cortex, "proj");
+    expect(result).toContain("Permission denied");
+  });
+});
+
+// --- getMemoryPolicy / updateMemoryPolicy ---
+
+describe("getMemoryPolicy and updateMemoryPolicy", () => {
+  it("returns defaults when no policy file exists", () => {
+    const cortex = makeCortex();
+    const policy = getMemoryPolicy(cortex);
+    expect(policy.ttlDays).toBe(120);
+    expect(policy.retentionDays).toBe(365);
+    expect(policy.decay.d30).toBe(1.0);
+    expect(policy.decay.d120).toBe(0.45);
+  });
+
+  it("merges partial policy with defaults", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "memory-policy.json"),
+      JSON.stringify({ ttlDays: 60 }, null, 2) + "\n"
+    );
+    const policy = getMemoryPolicy(cortex);
+    expect(policy.ttlDays).toBe(60);
+    expect(policy.retentionDays).toBe(365);
+  });
+
+  it("admin can update policy", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const result = updateMemoryPolicy(cortex, { ttlDays: 90 });
+    expect(typeof result).toBe("object");
+    expect((result as any).ttlDays).toBe(90);
+  });
+
+  it("non-admin cannot update policy", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "access-control.json"),
+      JSON.stringify({ contributors: ["dev"] }, null, 2) + "\n"
+    );
+    process.env.CORTEX_ACTOR = "dev";
+    const result = updateMemoryPolicy(cortex, { ttlDays: 1 });
+    expect(typeof result).toBe("string");
+    expect(result as string).toContain("Permission denied");
+  });
+});
+
+// --- getMemoryWorkflowPolicy / updateMemoryWorkflowPolicy ---
+
+describe("getMemoryWorkflowPolicy and updateMemoryWorkflowPolicy", () => {
+  it("returns defaults when no file exists", () => {
+    const cortex = makeCortex();
+    const wp = getMemoryWorkflowPolicy(cortex);
+    expect(wp.requireMaintainerApproval).toBe(true);
+    expect(wp.lowConfidenceThreshold).toBe(0.7);
+    expect(wp.riskySections).toEqual(["Stale", "Conflicts"]);
+  });
+
+  it("filters invalid riskySections values", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "memory-workflow-policy.json"),
+      JSON.stringify({ riskySections: ["Review", "BadSection", "Stale"] }, null, 2) + "\n"
+    );
+    const wp = getMemoryWorkflowPolicy(cortex);
+    expect(wp.riskySections).toEqual(["Review", "Stale"]);
+  });
+
+  it("admin can update workflow policy", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const result = updateMemoryWorkflowPolicy(cortex, { lowConfidenceThreshold: 0.5 });
+    expect(typeof result).toBe("object");
+    expect((result as any).lowConfidenceThreshold).toBe(0.5);
+  });
+});
+
+// --- getIndexPolicy / updateIndexPolicy ---
+
+describe("getIndexPolicy and updateIndexPolicy", () => {
+  it("returns defaults when no file exists", () => {
+    const cortex = makeCortex();
+    const ip = getIndexPolicy(cortex);
+    expect(ip.includeGlobs).toContain("**/*.md");
+    expect(ip.includeHidden).toBe(false);
+  });
+
+  it("filters empty globs and falls back to defaults", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "index-policy.json"),
+      JSON.stringify({ includeGlobs: ["", "  "], excludeGlobs: [] }, null, 2) + "\n"
+    );
+    const ip = getIndexPolicy(cortex);
+    expect(ip.includeGlobs.length).toBeGreaterThan(0);
+    expect(ip.includeGlobs.every(g => g.trim().length > 0)).toBe(true);
+  });
+
+  it("admin can update index policy", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const result = updateIndexPolicy(cortex, { includeHidden: true });
+    expect(typeof result).toBe("object");
+    expect((result as any).includeHidden).toBe(true);
+  });
+});
+
+// --- getRuntimeHealth / updateRuntimeHealth ---
+
+describe("getRuntimeHealth and updateRuntimeHealth", () => {
+  it("returns default health when no file exists", () => {
+    const cortex = makeCortex();
+    const h = getRuntimeHealth(cortex);
+    expect(h.schemaVersion).toBe(1);
+    expect(h.lastPromptAt).toBeUndefined();
+  });
+
+  it("updates and persists runtime health", () => {
+    const cortex = makeCortex();
+    const now = new Date().toISOString();
+    updateRuntimeHealth(cortex, { lastPromptAt: now });
+    const h = getRuntimeHealth(cortex);
+    expect(h.lastPromptAt).toBe(now);
+  });
+
+  it("handles lastAutoSave updates", () => {
+    const cortex = makeCortex();
+    const now = new Date().toISOString();
+    updateRuntimeHealth(cortex, {
+      lastAutoSave: { at: now, status: "saved-pushed", detail: "ok" },
+    });
+    const h = getRuntimeHealth(cortex);
+    expect(h.lastAutoSave?.status).toBe("saved-pushed");
+  });
+});
+
+// --- migrateLegacyFindings ---
+
+describe("migrateLegacyFindings", () => {
+  it("migrates bullet entries from FINDINGS.md to LEARNINGS.md", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "legacyproj", {
+      "FINDINGS.md": "# Findings\n\n- Use explicit timezone handling\n- Retry transient failures\n",
+    });
+    const result = migrateLegacyFindings(cortex, "legacyproj");
+    expect(result).toContain("Migrated 2 findings");
+    const learnings = fs.readFileSync(path.join(cortex, "legacyproj", "LEARNINGS.md"), "utf8");
+    expect(learnings).toContain("timezone handling");
+    expect(learnings).toContain("transient failures");
+  });
+
+  it("dry-run returns count without writing", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "dryproj", {
+      "FINDINGS.md": "# Findings\n\n- Finding one\n",
+    });
+    const result = migrateLegacyFindings(cortex, "dryproj", { dryRun: true });
+    expect(result).toContain("Found 1 migratable");
+    expect(fs.existsSync(path.join(cortex, "dryproj", "LEARNINGS.md"))).toBe(false);
+  });
+
+  it("deduplicates findings across files", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "dedupfindings", {
+      "FINDINGS.md": "# Findings\n\n- Same insight\n",
+      "LESSONS.md": "# Lessons\n\n- Same insight\n",
+    });
+    const result = migrateLegacyFindings(cortex, "dedupfindings");
+    expect(result).toContain("Migrated 1 findings");
+  });
+
+  it("returns message when no findings docs exist", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "nofind", { "summary.md": "# nofind\n" });
+    const result = migrateLegacyFindings(cortex, "nofind");
+    expect(result).toContain("No legacy findings");
+  });
+
+  it("rejects invalid project name", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const result = migrateLegacyFindings(cortex, "../bad");
+    expect(result).toContain("Invalid project name");
+  });
+
+  it("pins canonical memories with pinCanonical option", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "pinfindings", {
+      "FINDINGS.md": "# Findings\n\n- Must always validate input\n- Some optional thing\n",
+    });
+    const result = migrateLegacyFindings(cortex, "pinfindings", { pinCanonical: true });
+    expect(result).toContain("pinned 1");
+    const canonical = fs.readFileSync(path.join(cortex, "pinfindings", "CANONICAL_MEMORIES.md"), "utf8");
+    expect(canonical).toContain("validate input");
+  });
+});
+
+// --- appendMemoryQueue ---
+
+describe("appendMemoryQueue", () => {
+  it("creates MEMORY_QUEUE.md if it does not exist", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "queueproj", { "summary.md": "# queueproj\n" });
+
+    const count = appendMemoryQueue(cortex, "queueproj", "Stale", ["Old memory"]);
+    expect(count).toBe(1);
+    const content = fs.readFileSync(path.join(cortex, "queueproj", "MEMORY_QUEUE.md"), "utf8");
+    expect(content).toContain("## Stale");
+    expect(content).toContain("Old memory");
+  });
+
+  it("does not duplicate existing entries", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "dupqueue", { "summary.md": "# dupqueue\n" });
+
+    appendMemoryQueue(cortex, "dupqueue", "Review", ["Check this"]);
+    const count = appendMemoryQueue(cortex, "dupqueue", "Review", ["Check this"]);
+    expect(count).toBe(0);
+  });
+
+  it("returns 0 for empty entries", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "emptyq", { "summary.md": "# emptyq\n" });
+    expect(appendMemoryQueue(cortex, "emptyq", "Stale", [])).toBe(0);
+  });
+
+  it("returns 0 for invalid project", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    expect(appendMemoryQueue(cortex, "../bad", "Stale", ["entry"])).toBe(0);
+  });
+});
+
+// --- getProjectDirs ---
+
+describe("getProjectDirs", () => {
+  it("lists directories excluding hidden dirs, profiles, and templates", () => {
+    const cortex = makeCortex();
+    fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "projB"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "templates"), { recursive: true });
+
+    const dirs = getProjectDirs(cortex);
+    const names = dirs.map(d => path.basename(d));
+    expect(names).toContain("projA");
+    expect(names).toContain("projB");
+    expect(names).not.toContain(".governance");
+    expect(names).not.toContain("profiles");
+    expect(names).not.toContain("templates");
+  });
+
+  it("uses profile to filter projects", () => {
+    const cortex = makeCortex();
+    fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "projB"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cortex, "profiles", "test.yaml"),
+      yaml.dump({ name: "test", projects: ["projA"] })
+    );
+
+    const dirs = getProjectDirs(cortex, "test");
+    const names = dirs.map(d => path.basename(d));
+    expect(names).toContain("projA");
+    expect(names).not.toContain("projB");
+  });
+
+  it("includes shared/org dirs alongside profile projects", () => {
+    const cortex = makeCortex();
+    fs.mkdirSync(path.join(cortex, "projA"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "shared"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "org"), { recursive: true });
+    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cortex, "profiles", "myprof.yaml"),
+      yaml.dump({ name: "myprof", projects: ["projA"] })
+    );
+
+    const dirs = getProjectDirs(cortex, "myprof");
+    const names = dirs.map(d => path.basename(d));
+    expect(names).toContain("projA");
+    expect(names).toContain("shared");
+    expect(names).toContain("org");
+  });
+
+  it("rejects invalid profile names", () => {
+    const cortex = makeCortex();
+    const dirs = getProjectDirs(cortex, "../bad");
+    expect(dirs).toEqual([]);
+  });
+});
+
+// --- consolidateProjectLearnings additional ---
+
+describe("consolidateProjectLearnings additional", () => {
+  it("supports dry-run mode", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "drycons", {
+      "LEARNINGS.md": "# drycons LEARNINGS\n\n## 2025-01-01\n\n- A\n- A\n- B\n",
+    });
+    const result = consolidateProjectLearnings(cortex, "drycons", true);
+    expect(result).toContain("[dry-run]");
+    expect(result).toContain("1 duplicate");
+    // File unchanged
+    const content = fs.readFileSync(path.join(cortex, "drycons", "LEARNINGS.md"), "utf8");
+    expect(content.split("\n").filter(l => l.startsWith("- ")).length).toBe(3);
+  });
+
+  it("rejects invalid project name", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const result = consolidateProjectLearnings(cortex, "../bad");
+    expect(result).toContain("Invalid project name");
+  });
+
+  it("returns message when no LEARNINGS.md exists", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "emptycons", { "summary.md": "# emptycons\n" });
+    const result = consolidateProjectLearnings(cortex, "emptycons");
+    expect(result).toContain("No LEARNINGS.md");
+  });
+
+  it("preserves citation comments during dedup", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "citecons", {
+      "LEARNINGS.md": [
+        "# citecons LEARNINGS",
+        "",
+        "## 2025-01-01",
+        "",
+        "- Some insight",
+        '  <!-- cortex:cite {"created_at":"2025-01-01T00:00:00.000Z"} -->',
+        "- Some insight",
+        "",
+      ].join("\n"),
+    });
+    consolidateProjectLearnings(cortex, "citecons");
+    const content = fs.readFileSync(path.join(cortex, "citecons", "LEARNINGS.md"), "utf8");
+    const bullets = content.split("\n").filter(l => l.startsWith("- "));
+    expect(bullets.length).toBe(1);
+    expect(content).toContain("cortex:cite");
+  });
+});
+
+// --- filterTrustedLearningsDetailed (extended) ---
+
+describe("filterTrustedLearningsDetailed (extended)", () => {
+  it("strips <details> blocks from input", () => {
+    const content = [
+      "# proj LEARNINGS",
+      "",
+      "<details>",
+      "## 2025-01-01",
+      "- Archived learning",
+      "</details>",
+      "",
+      "## 2025-06-01",
+      "",
+      "- Active learning",
+    ].join("\n");
+    const result = filterTrustedLearningsDetailed(content, { ttlDays: 365 });
+    expect(result.content).not.toContain("Archived learning");
+    expect(result.content).toContain("Active learning");
+  });
+
+  it("respects custom decay parameters", () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 50);
+    const dateStr = d.toISOString().slice(0, 10);
+    const content = `# proj LEARNINGS\n\n## ${dateStr}\n\n- Decaying uncited learning\n`;
+    // With aggressive decay and high minConfidence, this should be filtered
+    const result = filterTrustedLearningsDetailed(content, {
+      ttlDays: 365,
+      minConfidence: 0.9,
+      decay: { d30: 1.0, d60: 0.5, d90: 0.3, d120: 0.1 },
+    });
+    // 50 days old = d60 bucket = 0.5 confidence, x0.8 for no citation = 0.4 < 0.9
+    expect(result.issues.length).toBe(1);
+    expect(result.issues[0].reason).toBe("stale");
+  });
+
+  it("keeps entries when decay is generous even without citation", () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 50);
+    const dateStr = d.toISOString().slice(0, 10);
+    const content = `# proj LEARNINGS\n\n## ${dateStr}\n\n- Learning without citation\n`;
+    const result = filterTrustedLearningsDetailed(content, {
+      ttlDays: 365,
+      minConfidence: 0.3,
+      decay: { d30: 1.0, d60: 1.0, d90: 0.9, d120: 0.8 },
+    });
+    expect(result.content).toContain("Learning without citation");
+    expect(result.issues.length).toBe(0);
+  });
+
+  it("only emits date headings that have surviving entries", () => {
+    const content = [
+      "# proj LEARNINGS",
+      "",
+      "## 2020-01-01",
+      "",
+      "- All stale here",
+      "",
+      "## 2099-01-01",
+      "",
+      "- This survives",
+    ].join("\n");
+    const result = filterTrustedLearningsDetailed(content, { ttlDays: 120 });
+    expect(result.content).not.toContain("2020-01-01");
+    expect(result.content).toContain("2099-01-01");
+    expect(result.content).toContain("This survives");
+  });
+
+  it("handles content with no date headings gracefully", () => {
+    const content = "# proj LEARNINGS\n\nSome raw text without dates.\n";
+    const result = filterTrustedLearningsDetailed(content, { ttlDays: 120 });
+    expect(result.issues.length).toBe(0);
+  });
+
+  it("marks invalid citation entries", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const content = [
+      "# proj LEARNINGS",
+      "",
+      `## ${today}`,
+      "",
+      "- Entry with bad citation",
+      '  <!-- cortex:cite {"created_at":"2025-01-01T00:00:00.000Z","repo":"/nonexistent/path"} -->',
+    ].join("\n");
+    const result = filterTrustedLearningsDetailed(content, { ttlDays: 365 });
+    expect(result.issues.some(i => i.reason === "invalid_citation")).toBe(true);
+  });
+});
+
+// --- migrateGovernance (extended) ---
+
+describe("migrateGovernance (extended)", () => {
+  it("reports missing files without error", () => {
+    const cortex = makeCortex();
+    const report = migrateGovernance(cortex);
+    expect(report.results.every(r => r.action === "missing")).toBe(true);
+    expect(report.migratedFiles.length).toBe(0);
+  });
+
+  it("skips files with newer schema version", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "access-control.json"),
+      JSON.stringify({ schemaVersion: 999, admins: [] }, null, 2) + "\n"
+    );
+    const report = migrateGovernance(cortex);
+    const acResult = report.results.find(r => r.file === "access-control.json");
+    expect(acResult?.action).toBe("skipped-newer-version");
+  });
+
+  it("reports up-to-date files without changes", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "access-control.json"),
+      JSON.stringify({ schemaVersion: 1, admins: [], maintainers: [], contributors: [], viewers: [] }, null, 2) + "\n"
+    );
+    const report = migrateGovernance(cortex);
+    const acResult = report.results.find(r => r.file === "access-control.json");
+    expect(acResult?.action).toBe("up-to-date");
+    expect(acResult?.changed).toBe(false);
+  });
+
+  it("handles corrupted JSON files gracefully", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(path.join(govDir, "access-control.json"), "not json{{{");
+    const report = migrateGovernance(cortex);
+    const acResult = report.results.find(r => r.file === "access-control.json");
+    expect(acResult?.action).toBe("error");
+  });
+});
+
+// --- validateGovernanceJson (extended) ---
+
+describe("validateGovernanceJson (extended)", () => {
+  it("returns true for non-existent file", () => {
+    expect(validateGovernanceJson("/nonexistent/file.json", "access-control")).toBe(true);
+  });
+
+  it("returns false for non-object JSON (array)", () => {
+    const cortex = makeCortex();
+    const f = path.join(cortex, "test.json");
+    fs.writeFileSync(f, "[1,2,3]");
+    expect(validateGovernanceJson(f, "access-control")).toBe(false);
+  });
+
+  it("validates memory-policy with bad decay", () => {
+    const cortex = makeCortex();
+    const f = path.join(cortex, "test.json");
+    fs.writeFileSync(f, JSON.stringify({ decay: "not an object" }));
+    expect(validateGovernanceJson(f, "memory-policy")).toBe(false);
+  });
+
+  it("validates memory-workflow-policy", () => {
+    const cortex = makeCortex();
+    const f = path.join(cortex, "test.json");
+    fs.writeFileSync(f, JSON.stringify({ requireMaintainerApproval: "not-bool" }));
+    expect(validateGovernanceJson(f, "memory-workflow-policy")).toBe(false);
+  });
+
+  it("validates index-policy", () => {
+    const cortex = makeCortex();
+    const f = path.join(cortex, "test.json");
+    fs.writeFileSync(f, JSON.stringify({ includeHidden: "not-bool" }));
+    expect(validateGovernanceJson(f, "index-policy")).toBe(false);
+  });
+
+  it("validates canonical-locks", () => {
+    const cortex = makeCortex();
+    const f = path.join(cortex, "test.json");
+    fs.writeFileSync(f, JSON.stringify({
+      entries: { "k": { hash: "h", snapshot: "s", updatedAt: "2025-01-01" } },
+    }));
+    expect(validateGovernanceJson(f, "canonical-locks")).toBe(true);
+  });
+
+  it("rejects canonical-locks with bad entries", () => {
+    const cortex = makeCortex();
+    const f = path.join(cortex, "test.json");
+    fs.writeFileSync(f, JSON.stringify({
+      entries: { "k": { hash: 123 } },
+    }));
+    expect(validateGovernanceJson(f, "canonical-locks")).toBe(false);
+  });
+});
+
+// --- flushMemoryScores ---
+
+describe("flushMemoryScores", () => {
+  it("writes cached scores to disk", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const key = "proj/file:flush-test";
+    recordMemoryInjection(cortex, key);
+    // Scores are already on disk from recordMemoryInjection, but flushMemoryScores re-writes
+    flushMemoryScores(cortex);
+    const scoresPath = path.join(cortex, ".governance", "memory-scores.json");
+    const raw = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
+    expect(raw.entries[key]).toBeDefined();
+  });
+});
+
+// --- findCortexPathWithArg ---
+
+describe("findCortexPathWithArg", () => {
+  it("resolves an explicit argument path", () => {
+    const cortex = makeCortex();
+    const result = findCortexPathWithArg(cortex);
+    expect(result).toBe(cortex);
+  });
+
+  it("throws for non-existent explicit path", () => {
+    expect(() => findCortexPathWithArg("/nonexistent/path")).toThrow();
+  });
+
+  it("falls back to ensureCortexPath when no arg given", () => {
+    const tmp = makeTempDir("fakehome-");
+    const origHome = process.env.HOME;
+    process.env.HOME = tmp.path;
+    try {
+      const result = findCortexPathWithArg();
+      expect(result).toBe(path.join(tmp.path, ".cortex"));
+      expect(fs.existsSync(result)).toBe(true);
+    } finally {
+      process.env.HOME = origHome;
+      tmp.cleanup();
+    }
+  });
+});
+
+// --- extractSnippet (extended) ---
+
+describe("extractSnippet (extended)", () => {
+  it("returns early lines when query terms are empty after cleanup", () => {
+    const content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6";
+    const snippet = extractSnippet(content, "AND OR NOT", 3);
+    expect(snippet).toContain("Line 1");
+  });
+
+  it("prefers lines near headings", () => {
+    const content = [
+      "# Section A",
+      "irrelevant stuff",
+      "also irrelevant",
+      "also more irrelevant",
+      "# Section B",
+      "target keyword here",
+      "more context",
+    ].join("\n");
+    const snippet = extractSnippet(content, "target keyword", 3);
+    expect(snippet).toContain("target keyword");
+  });
+
+  it("handles single-line content", () => {
+    const snippet = extractSnippet("just one line with keyword", "keyword", 5);
+    expect(snippet).toContain("keyword");
+  });
+
+  it("scores multi-term matches higher than single-term", () => {
+    const content = [
+      "# Docs",
+      "line with alpha only",
+      "line with beta only",
+      "# Both",
+      "line with alpha and beta together",
+      "trailing line",
+    ].join("\n");
+    const snippet = extractSnippet(content, "alpha beta", 3);
+    expect(snippet).toContain("alpha and beta together");
+  });
+
+  it("handles empty content gracefully", () => {
+    const snippet = extractSnippet("", "anything", 5);
+    expect(snippet).toBe("");
+  });
+
+  it("strips FTS operators from query before matching", () => {
+    const content = "line 1\nthe real answer is here\nline 3";
+    const snippet = extractSnippet(content, '"real" AND "answer"', 3);
+    expect(snippet).toContain("real answer");
+  });
+
+  it("respects lines parameter for window size", () => {
+    const content = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+    const snippet = extractSnippet(content, "line 10", 2);
+    const snippetLines = snippet.split("\n");
+    expect(snippetLines.length).toBeLessThanOrEqual(2);
+  });
+});
+
+// --- parseCortexErrorCode ---
+
+describe("parseCortexErrorCode", () => {
+  it("extracts known error codes from prefixed strings", () => {
+    expect(parseCortexErrorCode('PROJECT_NOT_FOUND: "myproj"')).toBe(CortexError.PROJECT_NOT_FOUND);
+    expect(parseCortexErrorCode('NOT_FOUND: No item matching "foo"')).toBe(CortexError.NOT_FOUND);
+    expect(parseCortexErrorCode("PERMISSION_DENIED: write denied")).toBe(CortexError.PERMISSION_DENIED);
+    expect(parseCortexErrorCode("LOCK_TIMEOUT: could not acquire lock")).toBe(CortexError.LOCK_TIMEOUT);
+    expect(parseCortexErrorCode("EMPTY_INPUT: field required")).toBe(CortexError.EMPTY_INPUT);
+    expect(parseCortexErrorCode("AMBIGUOUS_MATCH: 3 matches")).toBe(CortexError.AMBIGUOUS_MATCH);
+    expect(parseCortexErrorCode("MALFORMED_YAML: machines.yaml")).toBe(CortexError.MALFORMED_YAML);
+  });
+
+  it("returns undefined for non-error strings", () => {
+    expect(parseCortexErrorCode("Added to project backlog: task")).toBeUndefined();
+    expect(parseCortexErrorCode("Marked done in project: item")).toBeUndefined();
+    expect(parseCortexErrorCode("")).toBeUndefined();
+  });
+
+  it("returns undefined for unknown error codes", () => {
+    expect(parseCortexErrorCode("UNKNOWN_CODE: something")).toBeUndefined();
+  });
+});
+
+// --- CortexResult helpers ---
+
+describe("CortexResult helpers", () => {
+  it("cortexOk wraps data", () => {
+    const result = cortexOk({ items: [1, 2, 3] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toEqual({ items: [1, 2, 3] });
+  });
+
+  it("cortexErr wraps error with optional code", () => {
+    const result = cortexErr("something failed", CortexError.FILE_NOT_FOUND);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("something failed");
+      expect(result.code).toBe("FILE_NOT_FOUND");
+    }
+  });
+
+  it("cortexErr works without code", () => {
+    const result = cortexErr("generic error");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBeUndefined();
+  });
+
+  it("isCortexError distinguishes strings from objects", () => {
+    expect(isCortexError("error message")).toBe(true);
+    expect(isCortexError({ items: [] })).toBe(false);
+    expect(isCortexError([])).toBe(false);
+  });
+});
+
+// ─── collectNativeMemoryFiles ──────────────────────────────────────────────
+
+describe("collectNativeMemoryFiles", () => {
+  let tmpRoot: string;
+  let nativeMemCleanup: () => void;
+  const origHome = process.env.HOME;
+
+  beforeEach(() => {
+    ({ path: tmpRoot, cleanup: nativeMemCleanup } = makeTempDir("cortex-native-mem-"));
+    process.env.HOME = tmpRoot;
+  });
+
+  afterEach(() => {
+    process.env.HOME = origHome;
+    nativeMemCleanup();
+  });
+
+  it("returns empty when no .claude/projects dir exists", () => {
+    const result = collectNativeMemoryFiles();
+    expect(result).toEqual([]);
+  });
+
+  it("skips MEMORY.md (root memory managed by cortex)", () => {
+    const memDir = path.join(tmpRoot, ".claude", "projects", "test-key", "memory");
+    fs.mkdirSync(memDir, { recursive: true });
+    fs.writeFileSync(path.join(memDir, "MEMORY.md"), "# Root Memory");
+    const result = collectNativeMemoryFiles();
+    expect(result).toEqual([]);
+  });
+
+  it("collects MEMORY-project.md files with correct project name", () => {
+    const memDir = path.join(tmpRoot, ".claude", "projects", "test-key", "memory");
+    fs.mkdirSync(memDir, { recursive: true });
+    fs.writeFileSync(path.join(memDir, "MEMORY-myapp.md"), "# My App Notes");
+    fs.writeFileSync(path.join(memDir, "MEMORY-backend.md"), "# Backend Notes");
+    const result = collectNativeMemoryFiles();
+    expect(result).toHaveLength(2);
+    const projects = result.map(r => r.project).sort();
+    expect(projects).toEqual(["backend", "myapp"]);
+  });
+
+  it("handles non-standard .md files with native: prefix", () => {
+    const memDir = path.join(tmpRoot, ".claude", "projects", "proj-key", "memory");
+    fs.mkdirSync(memDir, { recursive: true });
+    fs.writeFileSync(path.join(memDir, "notes.md"), "# Custom notes");
+    const result = collectNativeMemoryFiles();
+    expect(result).toHaveLength(1);
+    expect(result[0].project).toBe("native:proj-key");
+    expect(result[0].file).toBe("notes.md");
+  });
+
+  it("collects from multiple project directories", () => {
+    for (const key of ["proj-a", "proj-b"]) {
+      const memDir = path.join(tmpRoot, ".claude", "projects", key, "memory");
+      fs.mkdirSync(memDir, { recursive: true });
+      fs.writeFileSync(path.join(memDir, `MEMORY-${key}.md`), `# ${key} notes`);
+    }
+    const result = collectNativeMemoryFiles();
+    expect(result).toHaveLength(2);
   });
 });

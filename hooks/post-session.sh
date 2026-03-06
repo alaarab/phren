@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # post-session.sh: Remind Claude to capture learnings before a session ends.
 #
 # Wired as a Stop hook in Claude Code. When Claude finishes responding,
@@ -11,8 +11,10 @@
 # The Stop hook fires every time Claude finishes a turn. To avoid
 # spamming, we guard against re-entry when the hook itself triggered
 # a continuation (stop_hook_active=true).
+#
+# Shell compatibility: POSIX sh. No bash-specific syntax.
 
-set -euo pipefail
+set -eu
 
 INPUT=$(cat)
 
@@ -36,24 +38,24 @@ fi
 # Walk up the directory tree looking for a CLAUDE.md that's a symlink
 # pointing back into cortex.
 detect_project() {
-  local dir="$1"
-  local basename
-  basename="$(basename "$dir")"
+  _dp_dir="$1"
+  _dp_basename="$(basename "$_dp_dir")"
 
   # Direct check: does cortex have a directory for this project?
-  if [ -d "$CORTEX_DIR/$basename" ]; then
-    echo "$basename"
+  if [ -d "$CORTEX_DIR/$_dp_basename" ]; then
+    echo "$_dp_basename"
     return 0
   fi
 
   # Symlink check: is CLAUDE.md a symlink to cortex?
-  if [ -L "$dir/CLAUDE.md" ]; then
-    local target
-    target="$(readlink -f "$dir/CLAUDE.md")"
-    if [[ "$target" == "$CORTEX_DIR"/* ]]; then
-      echo "$basename"
-      return 0
-    fi
+  if [ -L "$_dp_dir/CLAUDE.md" ]; then
+    _dp_target="$(readlink -f "$_dp_dir/CLAUDE.md")"
+    case "$_dp_target" in
+      "$CORTEX_DIR"/*)
+        echo "$_dp_basename"
+        return 0
+        ;;
+    esac
   fi
 
   return 1

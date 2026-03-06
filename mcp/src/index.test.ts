@@ -18,6 +18,7 @@ import {
   updateIndexPolicy,
   migrateLegacyFindings,
 } from "./shared.js";
+import { grantAdmin, makeTempDir } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -42,29 +43,13 @@ function runCli(args: string[], env: Record<string, string> = {}): { stdout: str
   }
 }
 
-function grantAdminAccess(cortexDir: string, actor = "vitest-admin"): string {
-  const govDir = path.join(cortexDir, ".governance");
-  fs.mkdirSync(govDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(govDir, "access-control.json"),
-    JSON.stringify({
-      admins: [actor],
-      maintainers: [],
-      contributors: [],
-      viewers: [],
-    }, null, 2) + "\n"
-  );
-  process.env.CORTEX_ACTOR = actor;
-  return actor;
-}
-
 function setupCortexDirWithLegacyFindings(): { cortexDir: string; cleanup: () => void } {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-index-routing-test-"));
-  const cortexDir = path.join(tmpRoot, ".cortex");
+  const tmp = makeTempDir("cortex-index-routing-test-");
+  const cortexDir = path.join(tmp.path, ".cortex");
   const projectDir = path.join(cortexDir, "test-proj");
 
   fs.mkdirSync(projectDir, { recursive: true });
-  grantAdminAccess(cortexDir, "cli-test");
+  grantAdmin(cortexDir, "cli-test");
   fs.writeFileSync(
     path.join(projectDir, "FINDINGS.md"),
     "# Findings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
@@ -72,7 +57,7 @@ function setupCortexDirWithLegacyFindings(): { cortexDir: string; cleanup: () =>
 
   return {
     cortexDir,
-    cleanup: () => fs.rmSync(tmpRoot, { recursive: true, force: true }),
+    cleanup: tmp.cleanup,
   };
 }
 
@@ -284,16 +269,18 @@ describe("memory workflow policy", () => {
   let cortexDir: string;
   let actor: string;
 
+  let tmpCleanup: () => void;
+
   beforeEach(() => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-workflow-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-workflow-test-"));
     cortexDir = path.join(tmpRoot, "cortex");
     fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
-    actor = grantAdminAccess(cortexDir, "workflow-admin");
+    actor = grantAdmin(cortexDir, "workflow-admin");
     process.env.CORTEX_ACTOR = actor;
   });
 
   afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    tmpCleanup();
   });
 
   it("returns defaults when no workflow policy file exists", () => {
@@ -321,15 +308,17 @@ describe("index policy", () => {
   let tmpRoot: string;
   let cortexDir: string;
 
+  let tmpCleanup: () => void;
+
   beforeEach(() => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-index-policy-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-index-policy-test-"));
     cortexDir = path.join(tmpRoot, "cortex");
     fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
-    grantAdminAccess(cortexDir, "index-admin");
+    grantAdmin(cortexDir, "index-admin");
   });
 
   afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    tmpCleanup();
   });
 
   it("returns defaults when file is missing", () => {
@@ -362,21 +351,21 @@ describe("legacy findings migration", () => {
   });
 
   it("migrates legacy findings bullets into LEARNINGS and optionally canonical", () => {
-    const cortexDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-migrate-findings-"));
+    const tmp = makeTempDir("cortex-migrate-findings-");
     const project = "proj";
-    const projectDir = path.join(cortexDir, project);
+    const projectDir = path.join(tmp.path, project);
     fs.mkdirSync(projectDir, { recursive: true });
-    grantAdminAccess(cortexDir, "migrate-admin");
+    grantAdmin(tmp.path, "migrate-admin");
 
     fs.writeFileSync(
       path.join(projectDir, "FINDINGS.md"),
       "# Findings\n\n- Must pin this rule\n- Normal migration item\n"
     );
 
-    const dryRun = migrateLegacyFindings(cortexDir, project, { dryRun: true });
+    const dryRun = migrateLegacyFindings(tmp.path, project, { dryRun: true });
     expect(dryRun).toContain("migratable");
 
-    const result = migrateLegacyFindings(cortexDir, project, { pinCanonical: true });
+    const result = migrateLegacyFindings(tmp.path, project, { pinCanonical: true });
     expect(result).toContain("Migrated");
 
     const learningsPath = path.join(projectDir, "LEARNINGS.md");
@@ -386,7 +375,7 @@ describe("legacy findings migration", () => {
     expect(fs.existsSync(canonicalPath)).toBe(true);
     expect(fs.readFileSync(canonicalPath, "utf8")).toContain("Must pin this rule");
 
-    fs.rmSync(cortexDir, { recursive: true, force: true });
+    tmp.cleanup();
   });
 });
 
@@ -640,8 +629,8 @@ describe("mergeBacklog", () => {
 
 describe("filterTrustedLearnings", () => {
   it("keeps recent legacy bullets and valid cited bullets", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-cite-valid-"));
-    const file = path.join(tmpDir, "source.ts");
+    const tmp = makeTempDir("cortex-cite-valid-");
+    const file = path.join(tmp.path, "source.ts");
     fs.writeFileSync(file, "line1\nline2\nline3\n");
 
     const today = new Date().toISOString().slice(0, 10);
@@ -661,7 +650,7 @@ describe("filterTrustedLearnings", () => {
     expect(filtered).toContain("- Legacy entry");
     expect(filtered).toContain("- Cited entry");
 
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    tmp.cleanup();
   });
 
   it("drops stale and invalid-citation bullets", () => {
@@ -693,13 +682,13 @@ describe("addLearningToFile", () => {
   });
 
   it("writes citation metadata alongside a new learning", () => {
-    const cortexDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-add-learning-"));
+    const tmp = makeTempDir("cortex-add-learning-");
     const project = "proj";
-    const projectDir = path.join(cortexDir, project);
+    const projectDir = path.join(tmp.path, project);
     fs.mkdirSync(projectDir, { recursive: true });
-    grantAdminAccess(cortexDir);
+    grantAdmin(tmp.path);
 
-    const result = addLearningToFile(cortexDir, project, "Remember to clear cache", {
+    const result = addLearningToFile(tmp.path, project, "Remember to clear cache", {
       file: "/tmp/source.ts",
       line: 12,
       commit: "abc123",
@@ -711,7 +700,7 @@ describe("addLearningToFile", () => {
     expect(learnings).toContain("\"file\":\"/tmp/source.ts\"");
     expect(learnings).toContain("\"line\":12");
 
-    fs.rmSync(cortexDir, { recursive: true, force: true });
+    tmp.cleanup();
   });
 });
 
@@ -723,11 +712,12 @@ describe("memory maintenance", () => {
   });
 
   it("prunes stale bullets and removes attached/dangling citation comments", () => {
-    const cortexDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-prune-"));
+    const tmp = makeTempDir("cortex-prune-");
+    const cortexDir = tmp.path;
     const project = "proj";
     const projectDir = path.join(cortexDir, project);
     fs.mkdirSync(projectDir, { recursive: true });
-    grantAdminAccess(cortexDir);
+    grantAdmin(cortexDir);
 
     const today = new Date().toISOString().slice(0, 10);
     const content = [
@@ -755,15 +745,16 @@ describe("memory maintenance", () => {
     // One citation remains (attached to fresh bullet); dangling citation is removed.
     expect((next.match(/<!-- cortex:cite/g) || []).length).toBe(1);
 
-    fs.rmSync(cortexDir, { recursive: true, force: true });
+    tmp.cleanup();
   });
 
   it("consolidates duplicate bullets and preserves citation metadata", () => {
-    const cortexDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-consolidate-"));
+    const tmp = makeTempDir("cortex-consolidate-");
+    const cortexDir = tmp.path;
     const project = "proj";
     const projectDir = path.join(cortexDir, project);
     fs.mkdirSync(projectDir, { recursive: true });
-    grantAdminAccess(cortexDir);
+    grantAdmin(cortexDir);
 
     const today = new Date().toISOString().slice(0, 10);
     const content = [
@@ -784,17 +775,18 @@ describe("memory maintenance", () => {
     expect((next.match(/- Same bullet/g) || []).length).toBe(1);
     expect((next.match(/<!-- cortex:cite/g) || []).length).toBe(1);
 
-    fs.rmSync(cortexDir, { recursive: true, force: true });
+    tmp.cleanup();
   });
 });
 
 describe("debugLog", () => {
   let tmpDir: string;
+  let tmpCleanup: () => void;
   const origEnv = process.env.CORTEX_DEBUG;
   const origHome = process.env.HOME;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-debug-test-"));
+    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-debug-test-"));
     process.env.HOME = tmpDir;
     fs.mkdirSync(path.join(tmpDir, ".cortex"), { recursive: true });
   });
@@ -802,7 +794,7 @@ describe("debugLog", () => {
   afterEach(() => {
     process.env.CORTEX_DEBUG = origEnv;
     process.env.HOME = origHome;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    tmpCleanup();
   });
 
   it("does not write when CORTEX_DEBUG is unset", () => {

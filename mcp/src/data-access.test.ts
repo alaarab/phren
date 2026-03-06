@@ -23,26 +23,12 @@ import {
   addLearning,
   removeLearning,
 } from "./data-access.js";
+import { CortexError } from "./shared.js";
+import { grantAdmin, makeTempDir, resultMsg } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { spawn } from "child_process";
-
-function grantAdminAccess(cortexDir: string, actor = "vitest-admin"): string {
-  const govDir = path.join(cortexDir, ".governance");
-  fs.mkdirSync(govDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(govDir, "access-control.json"),
-    JSON.stringify({
-      admins: [actor],
-      maintainers: [],
-      contributors: [],
-      viewers: [],
-    }, null, 2) + "\n"
-  );
-  process.env.CORTEX_ACTOR = actor;
-  return actor;
-}
 
 let tmpDir: string;
 let projectDir: string;
@@ -66,15 +52,17 @@ function runDataAccessWorker(code: string): Promise<{ exitCode: number; stdout: 
   });
 }
 
+let tmpCleanup: () => void;
+
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-da-test-"));
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-da-test-"));
   projectDir = path.join(tmpDir, PROJECT);
   fs.mkdirSync(projectDir, { recursive: true });
-  grantAdminAccess(tmpDir);
+  grantAdmin(tmpDir);
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  tmpCleanup();
   delete process.env.CORTEX_ACTOR;
 });
 
@@ -112,56 +100,99 @@ describe("readBacklog", () => {
   it("parses a valid backlog with Active/Queue/Done sections", () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
     const result = readBacklog(tmpDir, PROJECT);
-    expect(typeof result).not.toBe("string");
-    if (typeof result === "string") return;
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
 
-    expect(result.project).toBe(PROJECT);
-    expect(result.items.Active).toHaveLength(2);
-    expect(result.items.Queue).toHaveLength(2);
-    expect(result.items.Done).toHaveLength(1);
+    expect(result.data.project).toBe(PROJECT);
+    expect(result.data.items.Active).toHaveLength(2);
+    expect(result.data.items.Queue).toHaveLength(2);
+    expect(result.data.items.Done).toHaveLength(1);
 
-    expect(result.items.Active[0].line).toBe("Implement auth middleware [high]");
-    expect(result.items.Active[0].priority).toBe("high");
-    expect(result.items.Active[0].checked).toBe(false);
+    expect(result.data.items.Active[0].line).toBe("Implement auth middleware [high]");
+    expect(result.data.items.Active[0].priority).toBe("high");
+    expect(result.data.items.Active[0].checked).toBe(false);
 
-    expect(result.items.Queue[1].line).toBe("Refactor database layer [medium]");
-    expect(result.items.Queue[1].priority).toBe("medium");
+    expect(result.data.items.Queue[1].line).toBe("Refactor database layer [medium]");
+    expect(result.data.items.Queue[1].priority).toBe("medium");
 
-    expect(result.items.Done[0].checked).toBe(true);
+    expect(result.data.items.Done[0].checked).toBe(true);
   });
 
   it("returns an empty backlog when the file does not exist", () => {
     const result = readBacklog(tmpDir, PROJECT);
-    expect(typeof result).not.toBe("string");
-    if (typeof result === "string") return;
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
 
-    expect(result.items.Active).toHaveLength(0);
-    expect(result.items.Queue).toHaveLength(0);
-    expect(result.items.Done).toHaveLength(0);
+    expect(result.data.items.Active).toHaveLength(0);
+    expect(result.data.items.Queue).toHaveLength(0);
+    expect(result.data.items.Done).toHaveLength(0);
   });
 
-  it("returns an error string for an invalid project name", () => {
+  it("returns an error for an invalid project name", () => {
     const result = readBacklog(tmpDir, "../escape");
-    expect(typeof result).toBe("string");
-    expect(result).toContain("INVALID_PROJECT_NAME");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(CortexError.INVALID_PROJECT_NAME);
   });
 
-  it("returns an error string for a missing project directory", () => {
+  it("returns an error for a missing project directory", () => {
     const result = readBacklog(tmpDir, "nonexistent");
-    expect(typeof result).toBe("string");
-    expect(result).toContain("PROJECT_NOT_FOUND");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
   });
 
   it("handles a backlog with no items", () => {
     const empty = `# testproject backlog\n\n## Active\n\n## Queue\n\n## Done\n`;
     fs.writeFileSync(path.join(projectDir, "backlog.md"), empty);
     const result = readBacklog(tmpDir, PROJECT);
-    expect(typeof result).not.toBe("string");
-    if (typeof result === "string") return;
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
 
-    expect(result.items.Active).toHaveLength(0);
-    expect(result.items.Queue).toHaveLength(0);
-    expect(result.items.Done).toHaveLength(0);
+    expect(result.data.items.Active).toHaveLength(0);
+    expect(result.data.items.Queue).toHaveLength(0);
+    expect(result.data.items.Done).toHaveLength(0);
+  });
+
+  it("uses per-section counters so IDs start at 1 within each section (#112)", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const result = readBacklog(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.items.Active[0].id).toBe("A1");
+    expect(result.data.items.Active[1].id).toBe("A2");
+    expect(result.data.items.Queue[0].id).toBe("Q1");
+    expect(result.data.items.Queue[1].id).toBe("Q2");
+    expect(result.data.items.Done[0].id).toBe("D1");
+  });
+
+  it("recognizes custom section headers like 'In Progress' and 'Todo' (#113)", () => {
+    const custom = [
+      "# testproject backlog",
+      "",
+      "## In Progress",
+      "",
+      "- [ ] task in progress",
+      "",
+      "## Todo",
+      "",
+      "- [ ] task in todo",
+      "",
+      "## Completed",
+      "",
+      "- [x] task completed",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), custom);
+    const result = readBacklog(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.items.Active).toHaveLength(1);
+    expect(result.data.items.Active[0].line).toBe("task in progress");
+    expect(result.data.items.Queue).toHaveLength(1);
+    expect(result.data.items.Queue[0].line).toBe("task in todo");
+    expect(result.data.items.Done).toHaveLength(1);
+    expect(result.data.items.Done[0].line).toBe("task completed");
   });
 });
 
@@ -169,14 +200,14 @@ describe("addBacklogItem", () => {
   it("adds an item to the Queue section", () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
     const msg = addBacklogItem(tmpDir, PROJECT, "Add WebSocket support");
-    expect(msg).toContain("Added");
-    expect(msg).toContain("Add WebSocket support");
+    expect(resultMsg(msg)).toContain("Added");
+    expect(resultMsg(msg)).toContain("Add WebSocket support");
 
     const after = readBacklog(tmpDir, PROJECT);
-    expect(typeof after).not.toBe("string");
-    if (typeof after === "string") return;
-    expect(after.items.Queue).toHaveLength(3);
-    expect(after.items.Queue[2].line).toBe("Add WebSocket support");
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.items.Queue).toHaveLength(3);
+    expect(after.data.items.Queue[2].line).toBe("Add WebSocket support");
   });
 
   it("strips leading bullet prefix from input", () => {
@@ -184,17 +215,17 @@ describe("addBacklogItem", () => {
     addBacklogItem(tmpDir, PROJECT, "- Already has dash");
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    expect(after.items.Queue[2].line).toBe("Already has dash");
+    if (!after.ok) return;
+    expect(after.data.items.Queue[2].line).toBe("Already has dash");
   });
 
   it("creates a backlog file when none exists", () => {
     const msg = addBacklogItem(tmpDir, PROJECT, "First item");
-    expect(msg).toContain("Added");
+    expect(resultMsg(msg)).toContain("Added");
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    expect(after.items.Queue).toHaveLength(1);
+    if (!after.ok) return;
+    expect(after.data.items.Queue).toHaveLength(1);
   });
 
   it("parses priority from the added item", () => {
@@ -202,8 +233,8 @@ describe("addBacklogItem", () => {
     addBacklogItem(tmpDir, PROJECT, "Urgent fix [high]");
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    const added = after.items.Queue.find((i) => i.line.includes("Urgent fix"));
+    if (!after.ok) return;
+    const added = after.data.items.Queue.find((i) => i.line.includes("Urgent fix"));
     expect(added?.priority).toBe("high");
   });
 });
@@ -212,31 +243,31 @@ describe("completeBacklogItem", () => {
   it("moves a matched item to Done", () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
     const msg = completeBacklogItem(tmpDir, PROJECT, "rate limiting");
-    expect(msg).toContain("Marked done");
+    expect(resultMsg(msg)).toContain("Marked done");
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    expect(after.items.Queue).toHaveLength(1);
-    expect(after.items.Done).toHaveLength(2);
-    expect(after.items.Done[0].line).toContain("rate limiting");
-    expect(after.items.Done[0].checked).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.items.Queue).toHaveLength(1);
+    expect(after.data.items.Done).toHaveLength(2);
+    expect(after.data.items.Done[0].line).toContain("rate limiting");
+    expect(after.data.items.Done[0].checked).toBe(true);
   });
 
   it("matches by item ID", () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
     const msg = completeBacklogItem(tmpDir, PROJECT, "A1");
-    expect(msg).toContain("Marked done");
+    expect(resultMsg(msg)).toContain("Marked done");
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    expect(after.items.Active).toHaveLength(1);
-    expect(after.items.Done[0].line).toContain("auth middleware");
+    if (!after.ok) return;
+    expect(after.data.items.Active).toHaveLength(1);
+    expect(after.data.items.Done[0].line).toContain("auth middleware");
   });
 
   it("returns an error when no item matches", () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
     const msg = completeBacklogItem(tmpDir, PROJECT, "nonexistent item xyz");
-    expect(msg).toContain("No item matching");
+    expect(resultMsg(msg)).toContain("No backlog item matching");
   });
 });
 
@@ -248,12 +279,12 @@ describe("backlog mutation helpers", () => {
       context: "protect burst traffic",
       section: "active",
     });
-    expect(msg).toContain("Updated item");
+    expect(resultMsg(msg)).toContain("Updated item");
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    expect(after.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(false);
-    const moved = after.items.Active.find((i) => i.line.includes("Add rate limiting"));
+    if (!after.ok) return;
+    expect(after.data.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(false);
+    const moved = after.data.items.Active.find((i) => i.line.includes("Add rate limiting"));
     expect(moved).toBeDefined();
     expect(moved?.priority).toBe("high");
     expect(moved?.context).toContain("burst traffic");
@@ -274,11 +305,11 @@ describe("backlog mutation helpers", () => {
 `;
     fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
     const msg = tidyBacklogDone(tmpDir, PROJECT, 1);
-    expect(msg).toContain("archived 2");
+    expect(resultMsg(msg)).toContain("archived 2");
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    expect(after.items.Done).toHaveLength(1);
+    if (!after.ok) return;
+    expect(after.data.items.Done).toHaveLength(1);
 
     const archive = path.join(tmpDir, ".governance", "backlog-archive", `${PROJECT}.md`);
     expect(fs.existsSync(archive)).toBe(true);
@@ -292,70 +323,70 @@ describe("readLearnings", () => {
   it("parses dated entries with citations", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
     const result = readLearnings(tmpDir, PROJECT);
-    expect(Array.isArray(result)).toBe(true);
-    if (!Array.isArray(result)) return;
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
 
-    expect(result).toHaveLength(3);
+    expect(result.data).toHaveLength(3);
 
-    expect(result[0].date).toBe("2026-03-01");
-    expect(result[0].text).toContain("auth middleware");
-    expect(result[0].citation).toContain("cortex:cite");
+    expect(result.data[0].date).toBe("2026-03-01");
+    expect(result.data[0].text).toContain("auth middleware");
+    expect(result.data[0].citation).toContain("cortex:cite");
 
-    expect(result[1].date).toBe("2026-03-01");
-    expect(result[1].text).toContain("WAL mode");
-    expect(result[1].citation).toBeUndefined();
+    expect(result.data[1].date).toBe("2026-03-01");
+    expect(result.data[1].text).toContain("WAL mode");
+    expect(result.data[1].citation).toBeUndefined();
 
-    expect(result[2].date).toBe("2026-02-15");
-    expect(result[2].text).toContain("vitest");
+    expect(result.data[2].date).toBe("2026-02-15");
+    expect(result.data[2].text).toContain("vitest");
   });
 
   it("returns an empty array when no LEARNINGS.md exists", () => {
     const result = readLearnings(tmpDir, PROJECT);
-    expect(Array.isArray(result)).toBe(true);
-    if (!Array.isArray(result)) return;
-    expect(result).toHaveLength(0);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toHaveLength(0);
   });
 
-  it("returns an error string for a missing project", () => {
+  it("returns an error for a missing project", () => {
     const result = readLearnings(tmpDir, "nonexistent");
-    expect(typeof result).toBe("string");
-    expect(result).toContain("PROJECT_NOT_FOUND");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
   });
 
   it("assigns sequential IDs", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
     const result = readLearnings(tmpDir, PROJECT);
-    if (!Array.isArray(result)) return;
-    expect(result[0].id).toBe("L1");
-    expect(result[1].id).toBe("L2");
-    expect(result[2].id).toBe("L3");
+    if (!result.ok) return;
+    expect(result.data[0].id).toBe("L1");
+    expect(result.data[1].id).toBe("L2");
+    expect(result.data[2].id).toBe("L3");
   });
 });
 
 describe("addLearning", () => {
   it("creates LEARNINGS.md and appends under today's date", () => {
     const msg = addLearning(tmpDir, PROJECT, "New insight about caching");
-    expect(msg).toContain("Created LEARNINGS.md");
+    expect(resultMsg(msg)).toContain("Created LEARNINGS.md");
 
     const result = readLearnings(tmpDir, PROJECT);
-    if (!Array.isArray(result)) return;
-    expect(result).toHaveLength(1);
-    expect(result[0].text).toContain("caching");
+    if (!result.ok) return;
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].text).toContain("caching");
 
     const today = new Date().toISOString().slice(0, 10);
-    expect(result[0].date).toBe(today);
+    expect(result.data[0].date).toBe(today);
   });
 
   it("appends to an existing LEARNINGS.md", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
     const msg = addLearning(tmpDir, PROJECT, "Another insight");
-    expect(msg.toLowerCase()).toContain("added");
+    expect(resultMsg(msg).toLowerCase()).toContain("added");
 
     const result = readLearnings(tmpDir, PROJECT);
-    if (!Array.isArray(result)) return;
-    expect(result.length).toBeGreaterThan(3);
+    if (!result.ok) return;
+    expect(result.data.length).toBeGreaterThan(3);
     // New learnings are inserted under today's date at the top of the file
-    const found = result.find((l) => l.text.includes("Another insight"));
+    const found = result.data.find((l) => l.text.includes("Another insight"));
     expect(found).toBeDefined();
     expect(found!.date).toBe(new Date().toISOString().slice(0, 10));
   });
@@ -365,18 +396,18 @@ describe("removeLearning", () => {
   it("removes a matching learning entry", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
     const msg = removeLearning(tmpDir, PROJECT, "WAL mode");
-    expect(msg).toContain("Removed");
+    expect(resultMsg(msg)).toContain("Removed");
 
     const result = readLearnings(tmpDir, PROJECT);
-    if (!Array.isArray(result)) return;
-    expect(result).toHaveLength(2);
-    expect(result.every((l) => !l.text.includes("WAL mode"))).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toHaveLength(2);
+    expect(result.data.every((l) => !l.text.includes("WAL mode"))).toBe(true);
   });
 
   it("removes a learning along with its citation comment", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
     const msg = removeLearning(tmpDir, PROJECT, "auth middleware");
-    expect(msg).toContain("Removed");
+    expect(resultMsg(msg)).toContain("Removed");
 
     const content = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
     expect(content).not.toContain("auth middleware");
@@ -386,12 +417,13 @@ describe("removeLearning", () => {
   it("returns an error when no learning matches", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
     const msg = removeLearning(tmpDir, PROJECT, "nonexistent xyz");
-    expect(msg).toContain("No learning matching");
+    expect(resultMsg(msg)).toContain("No learning matching");
   });
 
   it("returns an error when LEARNINGS.md does not exist", () => {
     const msg = removeLearning(tmpDir, PROJECT, "anything");
-    expect(msg).toContain("FILE_NOT_FOUND");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(CortexError.FILE_NOT_FOUND);
   });
 });
 
@@ -415,43 +447,43 @@ describe("memory queue helpers", () => {
   });
 
   it("readMemoryQueue parses sections and confidence", () => {
-    const items = readMemoryQueue(tmpDir, PROJECT);
-    expect(Array.isArray(items)).toBe(true);
-    if (!Array.isArray(items)) return;
-    expect(items).toHaveLength(3);
-    expect(items[0].section).toBe("Review");
-    expect(items[0].confidence).toBe(0.4);
+    const result = readMemoryQueue(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toHaveLength(3);
+    expect(result.data[0].section).toBe("Review");
+    expect(result.data[0].confidence).toBe(0.4);
   });
 
   it("approveMemoryQueueItem adds learning and removes queue item", () => {
     const msg = approveMemoryQueueItem(tmpDir, PROJECT, "cleanup flaky");
-    expect(msg).toContain("Approved memory");
+    expect(resultMsg(msg)).toContain("Approved memory");
 
     const queueAfter = readMemoryQueue(tmpDir, PROJECT);
-    if (Array.isArray(queueAfter)) {
-      expect(queueAfter.some((i) => i.text.includes("cleanup flaky"))).toBe(false);
+    if (queueAfter.ok) {
+      expect(queueAfter.data.some((i) => i.text.includes("cleanup flaky"))).toBe(false);
     }
 
     const learnings = readLearnings(tmpDir, PROJECT);
-    if (Array.isArray(learnings)) {
-      expect(learnings.some((i) => i.text.includes("cleanup flaky"))).toBe(true);
+    if (learnings.ok) {
+      expect(learnings.data.some((i) => i.text.includes("cleanup flaky"))).toBe(true);
     }
   });
 
   it("rejectMemoryQueueItem removes the matched queue item", () => {
     const msg = rejectMemoryQueueItem(tmpDir, PROJECT, "conflicting guidance");
-    expect(msg).toContain("Rejected memory");
+    expect(resultMsg(msg)).toContain("Rejected memory");
     const queueAfter = readMemoryQueue(tmpDir, PROJECT);
-    if (!Array.isArray(queueAfter)) return;
-    expect(queueAfter.some((i) => i.text.includes("conflicting guidance"))).toBe(false);
+    if (!queueAfter.ok) return;
+    expect(queueAfter.data.some((i) => i.text.includes("conflicting guidance"))).toBe(false);
   });
 
   it("editMemoryQueueItem rewrites the item text", () => {
     const msg = editMemoryQueueItem(tmpDir, PROJECT, "old stale memory", "updated stale memory");
-    expect(msg).toContain("Edited memory");
+    expect(resultMsg(msg)).toContain("Edited memory");
     const queueAfter = readMemoryQueue(tmpDir, PROJECT);
-    if (!Array.isArray(queueAfter)) return;
-    expect(queueAfter.some((i) => i.text.includes("updated stale memory"))).toBe(true);
+    if (!queueAfter.ok) return;
+    expect(queueAfter.data.some((i) => i.text.includes("updated stale memory"))).toBe(true);
   });
 });
 
@@ -464,55 +496,55 @@ describe("machines, profiles, and shell state", () => {
 
   it("lists and updates machines", () => {
     const listed = listMachines(tmpDir);
-    expect(typeof listed).not.toBe("string");
-    if (typeof listed === "string") return;
-    expect(listed["machine-a"]).toBe("personal");
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.data["machine-a"]).toBe("personal");
 
     const msg = setMachineProfile(tmpDir, "machine-b", "personal");
-    expect(msg).toContain("Mapped machine machine-b");
+    expect(resultMsg(msg)).toContain("Mapped machine machine-b");
     const after = listMachines(tmpDir);
-    if (typeof after === "string") return;
-    expect(after["machine-b"]).toBe("personal");
+    if (!after.ok) return;
+    expect(after.data["machine-b"]).toBe("personal");
   });
 
   it("returns FILE_NOT_FOUND when machines.yaml is missing", () => {
     fs.unlinkSync(path.join(tmpDir, "machines.yaml"));
     const listed = listMachines(tmpDir);
-    expect(typeof listed).toBe("string");
-    expect(listed).toContain("FILE_NOT_FOUND");
+    expect(listed.ok).toBe(false);
+    if (!listed.ok) expect(listed.code).toBe(CortexError.FILE_NOT_FOUND);
   });
 
   it("returns MALFORMED_YAML for invalid machines.yaml", () => {
     fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "machine-a: [\n");
     const listed = listMachines(tmpDir);
-    expect(typeof listed).toBe("string");
-    expect(listed).toContain("MALFORMED_YAML");
+    expect(listed.ok).toBe(false);
+    if (!listed.ok) expect(listed.code).toBe(CortexError.MALFORMED_YAML);
   });
 
   it("lists profiles and mutates profile projects", () => {
     const listed = listProfiles(tmpDir);
-    expect(typeof listed).not.toBe("string");
-    if (typeof listed === "string") return;
-    expect(listed[0].name).toBe("personal");
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.data[0].name).toBe("personal");
 
     const addMsg = addProjectToProfile(tmpDir, "personal", "another-proj");
-    expect(addMsg).toContain("Added another-proj");
+    expect(resultMsg(addMsg)).toContain("Added another-proj");
     const removeMsg = removeProjectFromProfile(tmpDir, "personal", "another-proj");
-    expect(removeMsg).toContain("Removed another-proj");
+    expect(resultMsg(removeMsg)).toContain("Removed another-proj");
   });
 
   it("returns FILE_NOT_FOUND when profiles directory is missing", () => {
     fs.rmSync(path.join(tmpDir, "profiles"), { recursive: true, force: true });
     const listed = listProfiles(tmpDir);
-    expect(typeof listed).toBe("string");
-    expect(listed).toContain("FILE_NOT_FOUND");
+    expect(listed.ok).toBe(false);
+    if (!listed.ok) expect(listed.code).toBe(CortexError.FILE_NOT_FOUND);
   });
 
   it("returns MALFORMED_YAML for invalid profile yaml", () => {
     fs.writeFileSync(path.join(tmpDir, "profiles", "personal.yaml"), "name: personal\nprojects: [\n");
     const listed = listProfiles(tmpDir);
-    expect(typeof listed).toBe("string");
-    expect(listed).toContain("MALFORMED_YAML");
+    expect(listed.ok).toBe(false);
+    if (!listed.ok) expect(listed.code).toBe(CortexError.MALFORMED_YAML);
   });
 
   it("listProjectCards includes summary/docs", () => {
@@ -544,7 +576,7 @@ describe("machines, profiles, and shell state", () => {
     expect(loaded.perPage).toBe(25);
 
     const msg = resetShellState(tmpDir);
-    expect(msg).toContain("reset");
+    expect(resultMsg(msg)).toContain("reset");
     const fallback = loadShellState(tmpDir);
     expect(fallback.view).toBe("Projects");
   });
@@ -557,9 +589,9 @@ describe("file locking", () => {
     addBacklogItem(tmpDir, PROJECT, "Second concurrent item");
 
     const after = readBacklog(tmpDir, PROJECT);
-    expect(typeof after).not.toBe("string");
-    if (typeof after === "string") return;
-    const lines = after.items.Queue.map((i) => i.line);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    const lines = after.data.items.Queue.map((i) => i.line);
     expect(lines).toContain("First concurrent item");
     expect(lines).toContain("Second concurrent item");
   });
@@ -569,9 +601,9 @@ describe("file locking", () => {
     addLearning(tmpDir, PROJECT, "Second learning");
 
     const result = readLearnings(tmpDir, PROJECT);
-    expect(Array.isArray(result)).toBe(true);
-    if (!Array.isArray(result)) return;
-    const texts = result.map((l) => l.text);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const texts = result.data.map((l) => l.text);
     expect(texts.some((t) => t.includes("First learning"))).toBe(true);
     expect(texts.some((t) => t.includes("Second learning"))).toBe(true);
   });
@@ -605,11 +637,11 @@ describe("file locking", () => {
     fs.utimesSync(lockPath, past, past);
 
     const msg = addBacklogItem(tmpDir, PROJECT, "After stale lock");
-    expect(msg).toContain("Added");
+    expect(resultMsg(msg)).toContain("Added");
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    const lines = after.items.Queue.map((i) => i.line);
+    if (!after.ok) return;
+    const lines = after.data.items.Queue.map((i) => i.line);
     expect(lines).toContain("After stale lock");
 
     // Lock should be cleaned up
@@ -641,7 +673,8 @@ describe("file locking", () => {
     delete process.env.CORTEX_FILE_LOCK_POLL_MS;
     fs.unlinkSync(lockPath);
 
-    expect(msg).toContain("LOCK_TIMEOUT");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(CortexError.LOCK_TIMEOUT);
     expect(after).toBe(before);
     expect(after).not.toContain("Blocked by lock");
   });
@@ -658,12 +691,13 @@ describe("file locking", () => {
     delete process.env.CORTEX_FILE_LOCK_POLL_MS;
     fs.unlinkSync(lockPath);
 
-    expect(msg).toContain("LOCK_TIMEOUT");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(CortexError.LOCK_TIMEOUT);
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    expect(after.items.Active.some((i) => i.line.includes("Add rate limiting"))).toBe(false);
-    expect(after.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.items.Active.some((i) => i.line.includes("Add rate limiting"))).toBe(false);
+    expect(after.data.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(true);
   });
 
   it("allows concurrent backlog writes from two processes without data loss", async () => {
@@ -673,7 +707,7 @@ describe("file locking", () => {
       `import { addBacklogItem } from ${JSON.stringify(path.join(REPO_ROOT, "mcp/src/data-access.ts"))};` +
       `process.env.CORTEX_ACTOR='vitest-admin';` +
       `const out=addBacklogItem(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
-      `console.log(out); if(out.includes('LOCK_TIMEOUT')) process.exit(2);`;
+      `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
     const [a, b] = await Promise.all([
       runDataAccessWorker(mkCode("Concurrent item A")),
@@ -684,8 +718,8 @@ describe("file locking", () => {
     expect(b.exitCode).toBe(0);
 
     const after = readBacklog(tmpDir, PROJECT);
-    if (typeof after === "string") return;
-    const lines = after.items.Queue.map((i) => i.line);
+    if (!after.ok) return;
+    const lines = after.data.items.Queue.map((i) => i.line);
     expect(lines).toContain("Concurrent item A");
     expect(lines).toContain("Concurrent item B");
   });
@@ -695,7 +729,7 @@ describe("file locking", () => {
       `import { addLearning } from ${JSON.stringify(path.join(REPO_ROOT, "mcp/src/data-access.ts"))};` +
       `process.env.CORTEX_ACTOR='vitest-admin';` +
       `const out=addLearning(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(text)});` +
-      `console.log(out); if(out.includes('LOCK_TIMEOUT')) process.exit(2);`;
+      `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
     const [a, b] = await Promise.all([
       runDataAccessWorker(mkCode("Concurrent learning A")),
@@ -706,9 +740,56 @@ describe("file locking", () => {
     expect(b.exitCode).toBe(0);
 
     const result = readLearnings(tmpDir, PROJECT);
-    if (!Array.isArray(result)) return;
-    const texts = result.map((l) => l.text);
+    if (!result.ok) return;
+    const texts = result.data.map((l) => l.text);
     expect(texts.some((t) => t.includes("Concurrent learning A"))).toBe(true);
     expect(texts.some((t) => t.includes("Concurrent learning B"))).toBe(true);
+  });
+});
+
+// --- Structured error codes ---
+
+describe("structured error codes in data-access", () => {
+  it("readBacklog returns INVALID_PROJECT_NAME for path traversal", () => {
+    const result = readBacklog(tmpDir, "../escape");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(CortexError.INVALID_PROJECT_NAME);
+  });
+
+  it("readBacklog returns PROJECT_NOT_FOUND for missing project", () => {
+    const result = readBacklog(tmpDir, "nonexistent");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
+  });
+
+  it("completeBacklogItem returns NOT_FOUND for unmatched item", () => {
+    const msg = completeBacklogItem(tmpDir, PROJECT, "does-not-exist");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
+  });
+
+  it("removeLearning returns NOT_FOUND for unmatched learning", () => {
+    // Ensure LEARNINGS.md exists so the search runs
+    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), "# LEARNINGS\n\n## 2025-01-01\n\n- Existing learning\n");
+    const msg = removeLearning(tmpDir, PROJECT, "nonexistent-learning-xyz");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
+  });
+
+  it("editMemoryQueueItem returns EMPTY_INPUT for blank text", () => {
+    const msg = editMemoryQueueItem(tmpDir, PROJECT, "anything", "");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(CortexError.EMPTY_INPUT);
+  });
+
+  it("listMachines returns FILE_NOT_FOUND when machines.yaml missing", () => {
+    const tmp = makeTempDir("cortex-err-");
+    try {
+      const result = listMachines(tmp.path);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe(CortexError.FILE_NOT_FOUND);
+    } finally {
+      tmp.cleanup();
+    }
   });
 });

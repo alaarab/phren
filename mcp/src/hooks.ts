@@ -193,29 +193,121 @@ function validateCodexConfig(config: CodexHookConfig): boolean {
   );
 }
 
-function isHooksEnabled(cortexPath: string): boolean {
+export interface HookToolPreferences {
+  claude?: boolean;
+  copilot?: boolean;
+  cursor?: boolean;
+  codex?: boolean;
+}
+
+function readHookPreferences(cortexPath: string): { enabled: boolean; toolPrefs: HookToolPreferences } {
   try {
     const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
-    return prefs.hooksEnabled !== false;
+    const enabled = prefs.hooksEnabled !== false;
+    const toolPrefs: HookToolPreferences = prefs.hookTools && typeof prefs.hookTools === "object"
+      ? prefs.hookTools
+      : {};
+    return { enabled, toolPrefs };
   } catch {
-    return true;
+    return { enabled: true, toolPrefs: {} };
   }
 }
 
-// tools param accepts either a pre-computed Set (from link) or a boolean (from init)
-export function configureAllHooks(cortexPath: string, tools: Set<string> | boolean = false): string[] {
+function isToolHookEnabled(cortexPath: string, tool: string): boolean {
+  const { enabled, toolPrefs } = readHookPreferences(cortexPath);
+  if (!enabled) return false;
+  const key = tool as keyof HookToolPreferences;
+  if (key in toolPrefs) return toolPrefs[key] !== false;
+  return true;
+}
+
+// ── #218: Custom integration hooks ──────────────────────────────────────
+
+export type CustomHookEvent =
+  | "pre-save"      // Before save_learnings commits
+  | "post-save"     // After save_learnings pushes
+  | "post-search"   // After search_knowledge returns results
+  | "pre-learning"  // Before a learning is written to LEARNINGS.md
+  | "post-learning" // After a learning is written
+  | "pre-index"     // Before FTS index rebuild
+  | "post-index";   // After FTS index rebuild
+
+export interface CustomHookEntry {
+  event: CustomHookEvent;
+  command: string;
+  timeout?: number; // ms, default 5000
+}
+
+const VALID_HOOK_EVENTS = new Set<string>([
+  "pre-save", "post-save", "post-search",
+  "pre-learning", "post-learning",
+  "pre-index", "post-index",
+]);
+
+const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
+
+export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
+  try {
+    const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
+    const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
+    if (!Array.isArray(prefs.customHooks)) return [];
+    return prefs.customHooks.filter(
+      (h: any) =>
+        h &&
+        typeof h.event === "string" &&
+        VALID_HOOK_EVENTS.has(h.event) &&
+        typeof h.command === "string" &&
+        h.command.trim().length > 0
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function runCustomHooks(
+  cortexPath: string,
+  event: CustomHookEvent,
+  env: Record<string, string> = {}
+): { ran: number; errors: string[] } {
+  const hooks = readCustomHooks(cortexPath);
+  const matching = hooks.filter((h) => h.event === event);
+  const errors: string[] = [];
+
+  for (const hook of matching) {
+    try {
+      execFileSync("sh", ["-c", hook.command], {
+        cwd: cortexPath,
+        encoding: "utf8",
+        timeout: hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT,
+        env: { ...process.env, CORTEX_PATH: cortexPath, CORTEX_HOOK_EVENT: event, ...env },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+    } catch (err: any) {
+      errors.push(`${event}: ${hook.command}: ${err.message || String(err)}`);
+    }
+  }
+
+  return { ran: matching.length, errors };
+}
+
+export interface HookConfigOptions {
+  tools?: Set<string>;
+  allTools?: boolean;
+}
+
+export function configureAllHooks(cortexPath: string, options: HookConfigOptions = {}): string[] {
   const configured: string[] = [];
-  const detected: Set<string> =
-    tools instanceof Set ? tools :
-    tools ? new Set(["copilot", "cursor", "codex"]) :
-    detectInstalledTools();
+  const detected: Set<string> = options.tools
+    ? options.tools
+    : options.allTools
+      ? new Set(["copilot", "cursor", "codex"])
+      : detectInstalledTools();
 
   const lifecycle = buildLifecycleCommands(cortexPath);
   const pullCmd = lifecycle.sessionStart;
   const promptCmd = lifecycle.userPromptSubmit;
   const stopCmd = lifecycle.stop;
-  const hooksEnabled = isHooksEnabled(cortexPath);
 
   // ── GitHub Copilot CLI (user-level: ~/.github/hooks/cortex.json) ──────────
   if (detected.has("copilot")) {
@@ -235,7 +327,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
       fs.writeFileSync(copilotFile, JSON.stringify(config, null, 2));
       configured.push("Copilot CLI");
     } catch { /* best effort */ }
-    if (hooksEnabled) installSessionWrapper("copilot", cortexPath);
+    if (isToolHookEnabled(cortexPath, "copilot")) installSessionWrapper("copilot", cortexPath);
   }
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
@@ -257,7 +349,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
       fs.writeFileSync(cursorFile, JSON.stringify(config, null, 2));
       configured.push("Cursor");
     } catch { /* best effort */ }
-    if (hooksEnabled) installSessionWrapper("cursor", cortexPath);
+    if (isToolHookEnabled(cortexPath, "cursor")) installSessionWrapper("cursor", cortexPath);
   }
 
   // ── Codex (codex.json in cortex path) ────────────────────────────────────
@@ -278,7 +370,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
       fs.writeFileSync(codexFile, JSON.stringify(config, null, 2));
       configured.push("Codex");
     } catch { /* best effort */ }
-    if (hooksEnabled) installSessionWrapper("codex", cortexPath);
+    if (isToolHookEnabled(cortexPath, "codex")) installSessionWrapper("codex", cortexPath);
   }
 
   return configured;

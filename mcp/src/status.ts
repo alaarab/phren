@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { execFileSync } from "child_process";
-import { findCortexPath, detectProject, getProjectDirs } from "./shared.js";
+import { findCortexPath, detectProject, getProjectDirs, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 
 const RESET = "\x1b[0m";
@@ -33,7 +33,7 @@ function runGit(cwd: string, args: string[]): string | null {
     return execFileSync("git", args, {
       cwd,
       encoding: "utf8",
-      timeout: 5000,
+      timeout: EXEC_TIMEOUT_QUICK_MS,
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
   } catch {
@@ -93,8 +93,8 @@ export async function runStatus() {
       });
     } catch { /* malformed settings */ }
   }
-  console.log(`  ${BOLD}MCP cfg:${RESET}  ${check(mcpConfigured)}`);
-  console.log(`  ${BOLD}Hooks:${RESET}    ${check(hooksInstalled)} ${DIM}(in settings.json)${RESET}`);
+  console.log(`  ${BOLD}MCP cfg:${RESET}  ${check(mcpConfigured)} ${DIM}(in settings.json)${RESET}`);
+  console.log(`  ${BOLD}Hooks cfg:${RESET} ${check(hooksInstalled)} ${DIM}(in settings.json)${RESET}`);
 
   // Stats
   const projectDirs = getProjectDirs(cortexPath, profile);

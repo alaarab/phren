@@ -95,7 +95,27 @@ Exit codes:
 
 See the [Claude Code hooks docs](https://code.claude.com/docs/en/hooks-guide) for the full event list and input schemas.
 
+## Per-tool hook enablement
+
+By default, `hooksEnabled` is all-or-nothing. To control which tools get session wrappers, add a `hookTools` key to `.governance/install-preferences.json`:
+
+```json
+{
+  "hooksEnabled": true,
+  "hookTools": {
+    "claude": true,
+    "copilot": true,
+    "cursor": false,
+    "codex": true
+  }
+}
+```
+
+Missing keys default to the value of `hooksEnabled`. When `hooksEnabled` is `false`, all tools are disabled regardless of `hookTools`.
+
+See `docs/internal/hook-config-spec.md` for the full schema specification.
+
 ## Dependencies
 
 - `jq` for JSON parsing (`apt install jq` or `brew install jq`)
-- Bash 4+
+- POSIX sh (bash not required; scripts use `#!/bin/sh`)

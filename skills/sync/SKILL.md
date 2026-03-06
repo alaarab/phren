@@ -1,6 +1,8 @@
 ---
 name: sync
 description: Sync your Claude skills and project config across machines using profiles.
+dependencies:
+  - git
 ---
 # /cortex-sync - Profile-aware sync
 

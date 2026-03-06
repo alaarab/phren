@@ -613,9 +613,9 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
   const govDir = path.join(cortexPath, ".governance");
   const govOk = fs.existsSync(govDir);
   checks.push({
-    name: "governance",
+    name: "config",
     ok: govOk,
-    detail: govOk ? ".governance/ directory exists" : ".governance/ directory missing",
+    detail: govOk ? ".governance/ config directory exists" : ".governance/ config directory missing",
   });
 
   const ok = checks.every((c) => c.ok);
@@ -627,19 +627,102 @@ export interface InitOptions {
   profile?: string;
   mcp?: McpMode;
   applyStarterUpdate?: boolean;
+  dryRun?: boolean;
+  yes?: boolean; // Skip interactive walkthrough
+}
+
+// Interactive walkthrough for first-time init
+async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp: McpMode; projectName?: string }> {
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q: string): Promise<string> => new Promise(r => rl.question(q, r));
+
+  log("\nWelcome to cortex. Let's set up persistent memory for your AI coding agents.\n");
+
+  const defaultMachine = os.hostname();
+  const machineAnswer = (await ask(`Machine name [${defaultMachine}]: `)).trim();
+  const machine = machineAnswer || defaultMachine;
+
+  const profileAnswer = (await ask(`Profile name [personal]: `)).trim();
+  const profile = profileAnswer || "personal";
+
+  log("\nMCP mode lets your AI agent call cortex tools directly (search, backlog, learnings).");
+  log("This is the recommended setup and works with Claude Code, Cursor, Copilot CLI, and Codex.");
+  log("Hooks-only mode injects context into prompts instead (works with any agent, but read-only).");
+  const mcpAnswer = (await ask(`Enable MCP? [Y/n]: `)).trim().toLowerCase();
+  const mcp: McpMode = (mcpAnswer === "n" || mcpAnswer === "no") ? "off" : "on";
+
+  const projectAnswer = (await ask(`\nFirst project name (or press Enter to use "my-first-project"): `)).trim();
+  const projectName = projectAnswer || undefined;
+
+  rl.close();
+
+  log("");
+  return { machine, profile, mcp, projectName };
 }
 
 export async function runInit(opts: InitOptions = {}) {
   const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const dryRun = Boolean(opts.dryRun);
+  const existing = fs.existsSync(cortexPath);
+  const existingEntries = existing ? fs.readdirSync(cortexPath) : [];
+  const hasExistingInstall = existing && existingEntries.length > 0;
 
-  if (fs.existsSync(cortexPath)) {
-    const entries = fs.readdirSync(cortexPath);
-    if (entries.length > 0) {
+  // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
+  if (!hasExistingInstall && !dryRun && !opts.yes && process.stdin.isTTY && process.stdout.isTTY) {
+    const answers = await runWalkthrough();
+    opts.machine = opts.machine || answers.machine;
+    opts.profile = opts.profile || answers.profile;
+    opts.mcp = opts.mcp || answers.mcp;
+    if (answers.projectName) {
+      // Store for use in project creation below
+      (opts as any)._walkthroughProject = answers.projectName;
+    }
+  }
+
+  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
+  const hooksEnabled = getHooksEnabledPreference(cortexPath);
+  const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
+  const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
+
+  if (dryRun) {
+    log("\nInit dry run. No files will be written.\n");
+    if (hasExistingInstall) {
+      log(`cortex install detected at ${cortexPath}`);
+      log(`Would update configuration for the existing install:\n`);
+      log(`  MCP mode: ${mcpLabel}`);
+      log(`  Hooks mode: ${hooksLabel}`);
+      log(`  Reconfigure Claude Code MCP/hooks`);
+      log(`  Reconfigure VS Code, Cursor, Copilot CLI, and Codex MCP targets`);
+      if (hooksEnabled) {
+        log(`  Reconfigure lifecycle hooks for detected tools`);
+      }
+      if (opts.applyStarterUpdate) {
+        log(`  Apply starter template updates to global/CLAUDE.md and global skills`);
+      }
+      log(`  Run post-init verification checks`);
+      log(`\nDry run complete.\n`);
+      return;
+    }
+
+    log(`No existing cortex install found at ${cortexPath}`);
+    log(`Would create a new cortex install:\n`);
+    log(`  Copy starter files to ${cortexPath} (or create minimal structure)`);
+    log(`  Update machines.yaml for machine "${opts.machine || os.hostname()}"`);
+    log(`  Create/update config files`);
+    log(`  MCP mode: ${mcpLabel}`);
+    log(`  Hooks mode: ${hooksLabel}`);
+    log(`  Configure Claude Code plus detected MCP targets (VS Code/Cursor/Copilot/Codex)`);
+    if (hooksEnabled) {
+      log(`  Configure lifecycle hooks for detected tools`);
+    }
+    log(`  Write install preferences and run post-init verification checks`);
+    log(`\nDry run complete.\n`);
+    return;
+  }
+
+  if (hasExistingInstall) {
       ensureGovernanceFiles(cortexPath);
-      const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
-      const hooksEnabled = getHooksEnabledPreference(cortexPath);
-      const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
-      const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
       log(`\ncortex already exists at ${cortexPath}`);
       log(`Updating configuration...\n`);
       log(`  MCP mode: ${mcpLabel}`);
@@ -708,10 +791,12 @@ export async function runInit(opts: InitOptions = {}) {
 
       log(`\nDone. Restart your coding agent to pick up changes.\n`);
       return;
-    }
   }
 
   log("\nSetting up cortex...\n");
+
+  const walkthroughProject = (opts as any)._walkthroughProject as string | undefined;
+  const firstProjectName = walkthroughProject || "my-first-project";
 
   // Copy bundled starter to ~/.cortex
   function copyDir(src: string, dest: string) {
@@ -729,35 +814,56 @@ export async function runInit(opts: InitOptions = {}) {
 
   if (fs.existsSync(STARTER_DIR)) {
     copyDir(STARTER_DIR, cortexPath);
-    log(`  Created cortex v${VERSION} → ${cortexPath}`);
+    // Rename the default project dir if the user chose a custom name via walkthrough
+    if (walkthroughProject && walkthroughProject !== "my-first-project") {
+      const defaultDir = path.join(cortexPath, "my-first-project");
+      const customDir = path.join(cortexPath, walkthroughProject);
+      if (fs.existsSync(defaultDir) && !fs.existsSync(customDir)) {
+        fs.renameSync(defaultDir, customDir);
+        // Update profile to reference the new project name
+        const profilesDir = path.join(cortexPath, "profiles");
+        if (fs.existsSync(profilesDir)) {
+          for (const pf of fs.readdirSync(profilesDir)) {
+            const pfPath = path.join(profilesDir, pf);
+            if (!pf.endsWith(".yaml")) continue;
+            const content = fs.readFileSync(pfPath, "utf8");
+            if (content.includes("my-first-project")) {
+              fs.writeFileSync(pfPath, content.replace(/my-first-project/g, walkthroughProject));
+            }
+          }
+        }
+      }
+    }
+    log(`  Created cortex v${VERSION} \u2192 ${cortexPath}`);
   } else {
     log(`  Starter not found in package, creating minimal structure...`);
     fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
     fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
-    fs.mkdirSync(path.join(cortexPath, "my-first-project"), { recursive: true });
+    fs.mkdirSync(path.join(cortexPath, firstProjectName), { recursive: true });
     fs.writeFileSync(
       path.join(cortexPath, "global", "CLAUDE.md"),
       `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`
     );
     fs.writeFileSync(
-      path.join(cortexPath, "my-first-project", "summary.md"),
-      `# my-first-project\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Gotcha:** the one thing that will bite you if you forget\n`
+      path.join(cortexPath, firstProjectName, "summary.md"),
+      `# ${firstProjectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Gotcha:** the one thing that will bite you if you forget\n`
     );
     fs.writeFileSync(
-      path.join(cortexPath, "my-first-project", "CLAUDE.md"),
-      `# my-first-project\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
+      path.join(cortexPath, firstProjectName, "CLAUDE.md"),
+      `# ${firstProjectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
     );
     fs.writeFileSync(
-      path.join(cortexPath, "my-first-project", "LEARNINGS.md"),
-      `# my-first-project LEARNINGS\n\n<!-- Learnings are captured automatically during sessions and committed on exit -->\n`
+      path.join(cortexPath, firstProjectName, "LEARNINGS.md"),
+      `# ${firstProjectName} LEARNINGS\n\n<!-- Learnings are captured automatically during sessions and committed on exit -->\n`
     );
     fs.writeFileSync(
-      path.join(cortexPath, "my-first-project", "backlog.md"),
-      `# my-first-project backlog\n\n## Active\n\n## Queue\n\n## Done\n`
+      path.join(cortexPath, firstProjectName, "backlog.md"),
+      `# ${firstProjectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
     );
+    const profileName = opts.profile || "personal";
     fs.writeFileSync(
-      path.join(cortexPath, "profiles", "personal.yaml"),
-      `name: personal\ndescription: Default profile\nprojects:\n  - global\n  - my-first-project\n`
+      path.join(cortexPath, "profiles", `${profileName}.yaml`),
+      `name: ${profileName}\ndescription: Default profile\nprojects:\n  - global\n  - ${firstProjectName}\n`
     );
   }
 
@@ -765,10 +871,6 @@ export async function runInit(opts: InitOptions = {}) {
   const effectiveMachine = opts.machine || os.hostname();
   updateMachinesYaml(cortexPath, opts.machine, opts.profile);
   ensureGovernanceFiles(cortexPath);
-  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
-  const hooksEnabled = getHooksEnabledPreference(cortexPath);
-  const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
-  const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
   log(`  Updated machines.yaml with hostname "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
@@ -828,7 +930,7 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  ${cortexPath}/global/CLAUDE.md    Global instructions loaded in every session`);
   log(`  ${cortexPath}/global/skills/      Cortex slash commands`);
   log(`  ${cortexPath}/profiles/           Machine-to-project mappings`);
-  log(`  ${cortexPath}/.governance/        Memory governance policies`);
+  log(`  ${cortexPath}/.governance/        Memory quality settings and config`);
 
   log(`\nNext steps:`);
   log(`  1. Restart your coding agent to activate cortex`);

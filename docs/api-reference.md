@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Cortex exposes 22 tools through the Model Context Protocol. These are available to any MCP-compatible client (Claude Code, etc.) when the cortex server is running.
+Cortex exposes a full tool surface through the Model Context Protocol. These are available to any MCP-compatible client (Claude Code, etc.) when the cortex server is running.
 
 All tools return text responses. Error conditions return descriptive error messages in the same format.
 

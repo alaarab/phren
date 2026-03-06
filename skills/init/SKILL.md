@@ -1,6 +1,8 @@
 ---
 name: init
 description: Set up a new project in cortex with summary, CLAUDE.md, backlog, and skill templates.
+dependencies:
+  - git
 ---
 # /cortex-init - Scaffold a new project
 

@@ -8,8 +8,9 @@ if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] 
 
 Usage:
   cortex                                 Open interactive shell
-  cortex init [--machine <n>] [--profile <n>] [--mcp on|off]
-                                         Set up cortex in ~/.cortex
+  cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--dry-run] [-y]
+                                         Set up cortex (interactive walkthrough on first run)
+  cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
   cortex status                          Health, active project, stats
   cortex search <query> [--project <n>] [--type <t>] [--limit <n>]
                                          Search your knowledge base
@@ -17,8 +18,10 @@ Usage:
   cortex pin-memory <project> "..."      Pin a canonical memory
   cortex backlog                         Cross-project backlog view
   cortex skill-list                      List installed skills
-  cortex doctor [--fix]                  Health check and self-heal
+  cortex doctor [--fix] [--check-data]   Health check and self-heal
   cortex memory-ui [--port=3499]         Memory review web UI
+  cortex debug-injection --prompt "..."  Preview hook-prompt injection output
+  cortex inspect-index [--project <n>]   Inspect FTS index contents for debugging
   cortex update                          Update to latest version
 
 Configuration:
@@ -51,6 +54,15 @@ Environment:
   CORTEX_PATH     Override cortex directory (default: ~/.cortex)
   CORTEX_PROFILE  Active profile name
   CORTEX_DEBUG    Enable debug logging (set to 1)
+
+Examples:
+  cortex search "rate limiting"          Search across all projects
+  cortex search "auth" --project my-api  Search within one project
+  cortex add-learning my-app "Redis connections need explicit close in finally blocks"
+  cortex doctor --fix                    Fix common config issues
+  cortex config policy set --ttlDays=90  Change memory retention to 90 days
+  cortex maintain govern my-app          Queue stale memories for review
+  cortex status                          Quick health check
 `);
   process.exit(0);
 }
@@ -70,6 +82,8 @@ if (process.argv[2] === "init") {
     profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
     mcp: mcpMode,
     applyStarterUpdate: initArgs.includes("--apply-starter-update"),
+    dryRun: initArgs.includes("--dry-run"),
+    yes: initArgs.includes("--yes") || initArgs.includes("-y"),
   });
   process.exit(0);
 }
@@ -88,7 +102,7 @@ if (process.argv[2] === "status") {
 
 if (process.argv[2] === "verify") {
   const { runPostInitVerify } = await import("./init.js");
-  const cortexPath = process.env.CORTEX_PATH || os.homedir() + "/.cortex";
+  const cortexPath = process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex");
   const result = runPostInitVerify(cortexPath);
   console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
   for (const check of result.checks) {
@@ -136,7 +150,7 @@ if (process.argv[2] === "link") {
     console.error(`Invalid --mcp value "${mcpArg}". Use "on" or "off".`);
     process.exit(1);
   }
-  await runLink(process.env.CORTEX_PATH || os.homedir() + "/.cortex", {
+  await runLink(process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex"), {
     machine: getFlag("--machine"),
     profile: getFlag("--profile"),
     register: linkArgs.includes("--register"),
@@ -172,9 +186,12 @@ const CLI_COMMANDS = [
   "add-learning",
   "pin-memory",
   "doctor",
+  "debug-injection",
+  "inspect-index",
   "memory-ui",
   "quality-feedback",
   "skill-list",
+  "detect-skills",
   "backlog",
   "background-maintenance",
   // Legacy aliases (still work, route to old handlers)
@@ -200,13 +217,14 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { isValidProjectName, buildRobustFtsQuery } from "./utils.js";
+import { isValidProjectName, buildRobustFtsQuery, extractKeywords, STOP_WORDS } from "./utils.js";
 import {
   addBacklogItem as addBacklogItemStore,
   backlogMarkdown,
   completeBacklogItem as completeBacklogItemStore,
   readBacklog,
   readBacklogs,
+  readLearnings,
   removeLearning as removeLearningStore,
   updateBacklogItem as updateBacklogItemStore,
 } from "./data-access.js";
@@ -220,7 +238,10 @@ import {
   debugLog,
   upsertCanonicalMemory,
   recordMemoryFeedback,
+  flushMemoryScores,
+  EXEC_TIMEOUT_MS,
 } from "./shared.js";
+import { runCustomHooks } from "./hooks.js";
 
 // MCP mode: first non-flag arg is the cortex path
 const cortexArg = process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
@@ -242,11 +263,23 @@ function textResponse(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
+function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+}
+
 async function main() {
   let db = await buildIndex(cortexPath, profile);
+  let writeQueue: Promise<void> = Promise.resolve();
   async function rebuildIndex() {
+    runCustomHooks(cortexPath, "pre-index");
     try { db.close(); } catch { /* best effort */ }
     db = await buildIndex(cortexPath, profile);
+    runCustomHooks(cortexPath, "post-index");
+  }
+  async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = writeQueue.then(fn, fn);
+    writeQueue = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   const server = new McpServer({
@@ -266,8 +299,10 @@ async function main() {
       }),
     },
     async ({ project, memory }) => {
-      const result = upsertCanonicalMemory(cortexPath, project, memory);
-      return textResponse(result);
+      return withWriteQueue(async () => {
+        const result = upsertCanonicalMemory(cortexPath, project, memory);
+        return jsonResponse({ ok: true, message: result, data: { project, memory } });
+      });
     }
   );
 
@@ -286,13 +321,17 @@ async function main() {
       }),
     },
     async ({ key, feedback }) => {
-      recordMemoryFeedback(cortexPath, key, feedback);
-      return textResponse(`Recorded feedback ${feedback} for ${key}`);
+      return withWriteQueue(async () => {
+        recordMemoryFeedback(cortexPath, key, feedback);
+        flushMemoryScores(cortexPath);
+        return jsonResponse({ ok: true, message: `Recorded feedback ${feedback} for ${key}`, data: { key, feedback } });
+      });
     }
   );
 
+  // search_cortex is preserved as an alias for backwards compatibility
   server.registerTool(
-    "search_cortex",
+    "search_knowledge",
     {
       title: "◆ cortex · search",
       description: "Search the user's personal knowledge base. Call this at the start of any session to get project context, and any time the user asks about their codebase, stack, architecture, past decisions, commands, conventions, or lessons learned. Prefer this over asking the user to re-explain things they've already documented.",
@@ -311,11 +350,11 @@ async function main() {
         const filterType = type === "skills" ? "skill" : type;
         const filterProject = project?.trim();
         if (filterProject && !isValidProjectName(filterProject)) {
-          return textResponse(`Invalid project name: "${project}"`);
+          return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
         }
         const safeQuery = buildRobustFtsQuery(query);
 
-        if (!safeQuery) return textResponse("Search query is empty after sanitization.");
+        if (!safeQuery) return jsonResponse({ ok: false, error: "Search query is empty after sanitization." });
 
         let sql = "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ?";
         const params: (string | number)[] = [safeQuery];
@@ -330,12 +369,55 @@ async function main() {
         sql += " ORDER BY rank LIMIT ?";
         params.push(maxResults);
 
-        const rows = queryRows(db, sql, params);
+        let rows = queryRows(db, sql, params);
+        let usedFallback = false;
         if (!rows) {
-          const scope: string[] = [`"${query}"`];
-          if (filterProject) scope.push(`project=${filterProject}`);
-          if (filterType) scope.push(`type=${filterType}`);
-          return textResponse(`No results found for ${scope.join(", ")}`);
+          // Keyword overlap fallback: scan all docs and rank by term overlap
+          let fallbackSql = "SELECT project, filename, type, content, path FROM docs";
+          const fallbackParams: (string | number)[] = [];
+          const clauses: string[] = [];
+          if (filterProject) {
+            clauses.push("project = ?");
+            fallbackParams.push(filterProject);
+          }
+          if (filterType) {
+            clauses.push("type = ?");
+            fallbackParams.push(filterType);
+          }
+          if (clauses.length) fallbackSql += " WHERE " + clauses.join(" AND ");
+
+          const allRows = queryRows(db, fallbackSql, fallbackParams);
+          if (allRows) {
+            const terms = query
+              .toLowerCase()
+              .replace(/[^\w\s-]/g, " ")
+              .split(/\s+/)
+              .filter(w => w.length > 1 && !STOP_WORDS.has(w));
+
+            if (terms.length > 0) {
+              const scored = allRows
+                .map((row: any[]) => {
+                  const content = (row[3] as string).toLowerCase();
+                  let score = 0;
+                  for (const term of terms) {
+                    if (content.includes(term)) score++;
+                  }
+                  return { row, score };
+                })
+                .filter(r => r.score > 0)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, maxResults);
+
+              if (scored.length > 0) {
+                rows = scored.map(s => s.row);
+                usedFallback = true;
+              }
+            }
+          }
+
+          if (!rows) {
+            return jsonResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
+          }
         }
 
         const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -350,18 +432,25 @@ async function main() {
         });
         scored.sort((a, b) => b.rank - a.rank);
 
-        const formatted = scored.map(({ row }) => {
+        const results = scored.map(({ row }) => {
           const [project, filename, docType, content, filePath] = row as string[];
           const snippet = extractSnippet(content, query);
-          return `### ${project}/${filename} (${docType})\n${snippet}\n\n\`${filePath}\``;
+          return { project, filename, type: docType, snippet, path: filePath };
         });
 
-        const scope: string[] = [`"${query}"`];
-        if (filterProject) scope.push(`project=${filterProject}`);
-        if (filterType) scope.push(`type=${filterType}`);
-        return textResponse(`Found ${rows.length} result(s) for ${scope.join(", ")}:\n\n${formatted.join("\n\n---\n\n")}`);
+        const formatted = results.map((r) =>
+          `### ${r.project}/${r.filename} (${r.type})\n${r.snippet}\n\n\`${r.path}\``
+        );
+
+        const fallbackNote = usedFallback ? " (keyword fallback)" : "";
+        runCustomHooks(cortexPath, "post-search", { CORTEX_QUERY: query, CORTEX_RESULT_COUNT: String(results.length) });
+        return jsonResponse({
+          ok: true,
+          message: `Found ${results.length} result(s) for "${query}"${fallbackNote}:\n\n${formatted.join("\n\n---\n\n")}`,
+          data: { query, count: results.length, results, fallback: usedFallback },
+        });
       } catch (err: any) {
-        return textResponse(`Search error: ${err.message}`);
+        return jsonResponse({ ok: false, error: `Search error: ${err.message}` });
       }
     }
   );
@@ -380,29 +469,37 @@ async function main() {
 
       if (!files) {
         const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
-        const names = projectRows ? projectRows.map((r: any[]) => r[0]).join(", ") : "(none)";
-        return textResponse(`Project "${name}" not found.\n\nAvailable projects: ${names}`);
+        const names = projectRows ? projectRows.map((r: any[]) => r[0]) : [];
+        return jsonResponse({ ok: false, error: `Project "${name}" not found.`, data: { available: names } });
       }
 
       const summaryRow = queryRows(db, "SELECT content, path FROM docs WHERE project = ? AND type = 'summary'", [name]);
       const claudeRow = queryRows(db, "SELECT content, path FROM docs WHERE project = ? AND type = 'claude'", [name]);
 
-      const parts: string[] = [`# ${name}`];
+      const indexedFiles = files.map((f: any[]) => ({ filename: f[0], type: f[1], path: f[2] }));
 
+      const parts: string[] = [`# ${name}`];
       if (summaryRow) {
         parts.push(`\n## Summary\n${summaryRow[0][0]}`);
       } else {
         parts.push("\n*No summary.md found for this project.*");
       }
-
       if (claudeRow) {
         parts.push(`\n## CLAUDE.md path\n\`${claudeRow[0][1]}\``);
       }
-
-      const fileList = files.map((f: any[]) => `- ${f[0]} (${f[1]})`).join("\n");
+      const fileList = indexedFiles.map((f) => `- ${f.filename} (${f.type})`).join("\n");
       parts.push(`\n## Indexed files\n${fileList}`);
 
-      return textResponse(parts.join("\n"));
+      return jsonResponse({
+        ok: true,
+        message: parts.join("\n"),
+        data: {
+          name,
+          summary: summaryRow ? summaryRow[0][0] : null,
+          claudeMdPath: claudeRow ? claudeRow[0][1] : null,
+          files: indexedFiles,
+        },
+      });
     }
   );
 
@@ -413,26 +510,32 @@ async function main() {
       description:
         "List all projects in the active cortex profile with a brief summary of each. " +
         "Shows which documentation files exist per project.",
-      inputSchema: z.object({}),
+      inputSchema: z.object({
+        page: z.number().int().min(1).optional().describe("1-based page number (default 1)."),
+        page_size: z.number().int().min(1).max(50).optional().describe("Page size (default 20, max 50)."),
+      }),
     },
-    async () => {
+    async ({ page, page_size }) => {
       const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
-      if (!projectRows) return textResponse("No projects indexed.");
+      if (!projectRows) return jsonResponse({ ok: true, message: "No projects indexed.", data: { projects: [], total: 0 } });
 
       const projects = projectRows.map((r: any[]) => r[0] as string);
-
-      const lines: string[] = [`# Cortex Projects (${projects.length})`];
-      if (profile) lines.push(`Profile: ${profile}`);
-      lines.push(`Path: ${cortexPath}\n`);
+      const pageSize = page_size ?? 20;
+      const pageNum = page ?? 1;
+      const start = Math.max(0, (pageNum - 1) * pageSize);
+      const end = start + pageSize;
+      const pageProjects = projects.slice(start, end);
+      const totalPages = Math.max(1, Math.ceil(projects.length / pageSize));
+      if (pageNum > totalPages) {
+        return jsonResponse({ ok: false, error: `Page ${pageNum} out of range. Total pages: ${totalPages}.` });
+      }
 
       const badgeTypes = ["claude", "learnings", "summary", "backlog"] as const;
       const badgeLabels: Record<string, string> = { claude: "CLAUDE.md", learnings: "LEARNINGS", summary: "summary", backlog: "backlog" };
 
-      for (const proj of projects) {
+      const projectList = pageProjects.map((proj) => {
         const rows = queryRows(db, "SELECT filename, type, content FROM docs WHERE project = ?", [proj]) ?? [];
-
         const types = rows.map((r) => r[1] as string);
-
         const summaryRow = rows.find((r) => r[1] === "summary");
         const claudeRow = rows.find((r) => r[1] === "claude");
         const source = (summaryRow ?? claudeRow)?.[2] as string | undefined;
@@ -441,15 +544,25 @@ async function main() {
           const firstLine = source.split("\n").find(l => l.trim() && !l.startsWith("#"));
           brief = firstLine?.trim() || "";
         }
+        const badges = badgeTypes.filter(t => types.includes(t)).map(t => badgeLabels[t]);
+        return { name: proj, brief, badges, fileCount: rows.length };
+      });
 
-        const badges = badgeTypes.filter(t => types.includes(t)).map(t => badgeLabels[t]).join(" | ");
-
-        lines.push(`## ${proj}`);
-        if (brief) lines.push(brief);
-        lines.push(`[${badges}] - ${rows.length} file(s)\n`);
+      const lines: string[] = [`# Cortex Projects (${projects.length})`];
+      if (profile) lines.push(`Profile: ${profile}`);
+      lines.push(`Page: ${pageNum}/${totalPages} (page_size=${pageSize})`);
+      lines.push(`Path: ${cortexPath}\n`);
+      for (const p of projectList) {
+        lines.push(`## ${p.name}`);
+        if (p.brief) lines.push(p.brief);
+        lines.push(`[${p.badges.join(" | ")}] - ${p.fileCount} file(s)\n`);
       }
 
-      return textResponse(lines.join("\n"));
+      return jsonResponse({
+        ok: true,
+        message: lines.join("\n"),
+        data: { projects: projectList, total: projects.length, page: pageNum, totalPages, pageSize },
+      });
     }
   );
 
@@ -466,17 +579,50 @@ async function main() {
     },
     async ({ project }) => {
       if (project) {
-        if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
-        const doc = readBacklog(cortexPath, project);
-        if (typeof doc === "string") return textResponse(doc);
-        if (!fs.existsSync(doc.path)) return textResponse(`No backlog found for "${project}".`);
-        return textResponse(`## ${project}\n${backlogMarkdown(doc)}`);
+        if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        const result = readBacklog(cortexPath, project);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const doc = result.data;
+        if (!fs.existsSync(doc.path)) return jsonResponse({ ok: true, message: `No backlog found for "${project}".`, data: { project, items: { Active: [], Queue: [], Done: [] } } });
+        return jsonResponse({ ok: true, message: `## ${project}\n${backlogMarkdown(doc)}`, data: { project, items: doc.items, issues: doc.issues } });
       }
 
       const docs = readBacklogs(cortexPath, profile);
+      if (!docs.length) return jsonResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
       const parts = docs.map((doc) => `## ${doc.project}\n${backlogMarkdown(doc)}`);
-      if (!parts.length) return textResponse("No backlogs found.");
-      return textResponse(parts.join("\n\n"));
+      const projectData = docs.map((doc) => ({ project: doc.project, items: doc.items, issues: doc.issues }));
+      return jsonResponse({ ok: true, message: parts.join("\n\n"), data: { projects: projectData } });
+    }
+  );
+
+  server.registerTool(
+    "get_backlog_item",
+    {
+      title: "◆ cortex · task",
+      description: "Fetch a single backlog item by ID or exact text match.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        id: z.string().optional().describe("Backlog item ID like A1, Q3, D2."),
+        item: z.string().optional().describe("Exact backlog item text."),
+      }),
+    },
+    async ({ project, id, item }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (!id && !item) return jsonResponse({ ok: false, error: "Provide either `id` or `item`." });
+      const result = readBacklog(cortexPath, project);
+      if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+      const doc = result.data;
+      const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
+      const match = all.find((entry) =>
+        (id && entry.id.toLowerCase() === id.toLowerCase()) ||
+        (item && entry.line.trim() === item.trim())
+      );
+      if (!match) return jsonResponse({ ok: false, error: `No backlog item found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
+      return jsonResponse({
+        ok: true,
+        message: `${match.id}: ${match.line} (${match.section})`,
+        data: { project, id: match.id, section: match.section, checked: match.checked, line: match.line, context: match.context || null, priority: match.priority || null },
+      });
     }
   );
 
@@ -491,9 +637,12 @@ async function main() {
       }),
     },
     async ({ project, item }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
-      const result = addBacklogItemStore(cortexPath, project, item);
-      return textResponse(result);
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = addBacklogItemStore(cortexPath, project, item);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        return jsonResponse({ ok: true, message: result.data, data: { project, item } });
+      });
     }
   );
 
@@ -508,9 +657,12 @@ async function main() {
       }),
     },
     async ({ project, item }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
-      const result = completeBacklogItemStore(cortexPath, project, item);
-      return textResponse(result);
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = completeBacklogItemStore(cortexPath, project, item);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        return jsonResponse({ ok: true, message: result.data, data: { project, item } });
+      });
     }
   );
 
@@ -523,16 +675,19 @@ async function main() {
         project: z.string().describe("Project name."),
         item: z.string().describe("Partial text to match against existing backlog items."),
         updates: z.object({
-          priority: z.string().optional().describe("New priority tag: high, medium, or low."),
+          priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
           context: z.string().optional().describe("Text to append to (or create) the Context: line below the item."),
-          section: z.string().optional().describe("Move item to this section: Queue, Active, or Done."),
+          section: z.enum(["queue", "active", "done", "Queue", "Active", "Done"]).optional().describe("Move item to this section: Queue, Active, or Done."),
         }).describe("Fields to update. All are optional."),
       }),
     },
     async ({ project, item, updates }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
-      const result = updateBacklogItemStore(cortexPath, project, item, updates);
-      return textResponse(result);
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = updateBacklogItemStore(cortexPath, project, item, updates);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        return jsonResponse({ ok: true, message: result.data, data: { project, item, updates } });
+      });
     }
   );
 
@@ -554,15 +709,46 @@ async function main() {
       }),
     },
     async ({ project, learning, citation_file, citation_line, citation_repo, citation_commit }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
-      const result = addLearningToFile(cortexPath, project, learning, {
-        file: citation_file,
-        line: citation_line,
-        repo: citation_repo,
-        commit: citation_commit,
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        runCustomHooks(cortexPath, "pre-learning", { CORTEX_PROJECT: project });
+        const result = addLearningToFile(cortexPath, project, learning, {
+          file: citation_file,
+          line: citation_line,
+          repo: citation_repo,
+          commit: citation_commit,
+        });
+        await rebuildIndex();
+        const ok = result.startsWith("Added learning") || result.startsWith("Saved learning");
+        if (ok) runCustomHooks(cortexPath, "post-learning", { CORTEX_PROJECT: project });
+        return jsonResponse({ ok, message: result, data: ok ? { project, learning } : undefined });
       });
-      await rebuildIndex();
-      return textResponse(result);
+    }
+  );
+
+  server.registerTool(
+    "get_learnings",
+    {
+      title: "◆ cortex · learnings",
+      description: "List recent learnings for a project without requiring a search query.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        limit: z.number().int().min(1).max(200).optional().describe("Max rows to return (default 50)."),
+      }),
+    },
+    async ({ project, limit }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const result = readLearnings(cortexPath, project);
+      if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+      const items = result.data;
+      if (!items.length) return jsonResponse({ ok: true, message: `No learnings found for "${project}".`, data: { project, learnings: [], total: 0 } });
+      const capped = items.slice(0, limit ?? 50);
+      const lines = capped.map((entry) => `- [${entry.id}] ${entry.date}: ${entry.text}${entry.citation ? ` (${entry.citation})` : ""}`);
+      return jsonResponse({
+        ok: true,
+        message: `Learnings for ${project} (${capped.length}/${items.length}):\n` + lines.join("\n"),
+        data: { project, learnings: capped, total: items.length },
+      });
     }
   );
 
@@ -579,9 +765,12 @@ async function main() {
       }),
     },
     async ({ project, learning }) => {
-      const result = removeLearningStore(cortexPath, project, learning);
-      await rebuildIndex();
-      return textResponse(result);
+      return withWriteQueue(async () => {
+        const result = removeLearningStore(cortexPath, project, learning);
+        await rebuildIndex();
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        return jsonResponse({ ok: true, message: result.data, data: { project, learning } });
+      });
     }
   );
 
@@ -598,94 +787,288 @@ async function main() {
       }),
     },
     async ({ message }) => {
-      const { execFileSync } = await import("child_process");
-      const commitMsg = message || "update cortex";
-      const DEFAULT_GIT_TIMEOUT = 30_000;
-      const runGit = (args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}): string => execFileSync(
-        "git",
-        args,
-        {
-          cwd: cortexPath,
-          encoding: "utf8",
-          timeout: opts.timeout ?? DEFAULT_GIT_TIMEOUT,
-          env: opts.env,
-          stdio: ["ignore", "pipe", "pipe"],
-        }
-      ).trim();
+      return withWriteQueue(async () => {
+        const { execFileSync } = await import("child_process");
+        const runGit = (args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}): string => execFileSync(
+          "git",
+          args,
+          {
+            cwd: cortexPath,
+            encoding: "utf8",
+            timeout: opts.timeout ?? EXEC_TIMEOUT_MS,
+            env: opts.env,
+            stdio: ["ignore", "pipe", "pipe"],
+          }
+        ).trim();
 
-      try {
-        const status = runGit(["status", "--porcelain"]);
-        if (!status) return textResponse("Nothing to save. Cortex is up to date.");
-
-        runGit(["add", "-A"]);
-        runGit(["commit", "-m", commitMsg]);
-
-        // Check if remote exists
-        let hasRemote = false;
         try {
-          const remotes = runGit(["remote"]);
-          hasRemote = remotes.length > 0;
-        } catch { /* no remote */ }
+          const status = runGit(["status", "--porcelain"]);
+          if (!status) return jsonResponse({ ok: true, message: "Nothing to save. Cortex is up to date.", data: { files: 0, pushed: false } });
+          const files = status.split("\n").filter(Boolean);
+          const projectNames = Array.from(
+            new Set(
+              files
+                .map((line) => line.slice(3).trim().split("/")[0])
+                .filter((name) => name && !name.startsWith(".") && name !== "profiles")
+            )
+          );
+          const commitMsg = message || `cortex: save ${files.length} file(s) across ${projectNames.length} project(s)`;
 
-        if (!hasRemote) {
-          const changedFiles = status.split("\n").length;
-          return textResponse(`Saved ${changedFiles} changed file(s). (No remote configured — skipping push.)`);
-        }
+          runCustomHooks(cortexPath, "pre-save");
+          runGit(["add", "-A"]);
+          runGit(["commit", "-m", commitMsg]);
 
-        // Push with retry: on failure, pull --rebase then retry up to 3 times
-        let pushed = false;
-        let lastPushError = "";
-        const delays = [2000, 4000, 8000];
-
-        for (let attempt = 0; attempt <= 3; attempt++) {
+          // Check if remote exists
+          let hasRemote = false;
           try {
-            runGit(["push"], { timeout: 15000 });
-            pushed = true;
-            break;
-          } catch (pushErr: any) {
-            lastPushError = pushErr.message ?? String(pushErr);
-            debugLog(`Push attempt ${attempt + 1} failed: ${lastPushError}`);
+            const remotes = runGit(["remote"]);
+            hasRemote = remotes.length > 0;
+          } catch { /* no remote */ }
 
-            if (attempt < 3) {
-              // Pull --rebase to incorporate remote changes
-              try {
-                runGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
-              } catch {
-                // Rebase hit conflicts — try auto-merge for LEARNINGS.md / backlog.md
-                const resolved = autoMergeConflicts(cortexPath);
-                if (resolved) {
-                  try {
-                    runGit(["rebase", "--continue"], {
-                      timeout: 10000,
-                      env: { ...process.env, GIT_EDITOR: "true" },
-                    });
-                  } catch {
-                    // Rebase continue failed, abort and give up
+          if (!hasRemote) {
+            const changedFiles = status.split("\n").length;
+            return jsonResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). No remote configured, skipping push.`, data: { files: changedFiles, pushed: false } });
+          }
+
+          // Push with retry: on failure, pull --rebase then retry up to 3 times
+          let pushed = false;
+          let lastPushError = "";
+          const delays = [2000, 4000, 8000];
+
+          for (let attempt = 0; attempt <= 3; attempt++) {
+            try {
+              runGit(["push"], { timeout: 15000 });
+              pushed = true;
+              break;
+            } catch (pushErr: any) {
+              lastPushError = pushErr.message ?? String(pushErr);
+              debugLog(`Push attempt ${attempt + 1} failed: ${lastPushError}`);
+
+              if (attempt < 3) {
+                // Pull --rebase to incorporate remote changes
+                try {
+                  runGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
+                } catch {
+                  // Rebase hit conflicts — try auto-merge for LEARNINGS.md / backlog.md
+                  const resolved = autoMergeConflicts(cortexPath);
+                  if (resolved) {
+                    try {
+                      runGit(["rebase", "--continue"], {
+                        timeout: 10000,
+                        env: { ...process.env, GIT_EDITOR: "true" },
+                      });
+                    } catch {
+                      // Rebase continue failed, abort and give up
+                      try { runGit(["rebase", "--abort"]); } catch { /* ignore */ }
+                      break;
+                    }
+                  } else {
+                    // Unresolvable conflicts — abort rebase
                     try { runGit(["rebase", "--abort"]); } catch { /* ignore */ }
                     break;
                   }
-                } else {
-                  // Unresolvable conflicts — abort rebase
-                  try { runGit(["rebase", "--abort"]); } catch { /* ignore */ }
-                  break;
                 }
-              }
 
-              // Exponential backoff before retry
-              await new Promise(r => setTimeout(r, delays[attempt]));
+                // Exponential backoff before retry
+                await new Promise(r => setTimeout(r, delays[attempt]));
+              }
             }
           }
+
+          const changedFiles = status.split("\n").length;
+          runCustomHooks(cortexPath, "post-save", { CORTEX_FILES_CHANGED: String(changedFiles), CORTEX_PUSHED: String(pushed) });
+          if (pushed) {
+            return jsonResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). Pushed to remote.`, data: { files: changedFiles, pushed: true } });
+          } else {
+            return jsonResponse({ ok: true, message: `Saved ${changedFiles} changed file(s) locally. Push failed: ${lastPushError}`, data: { files: changedFiles, pushed: false, pushError: lastPushError } });
+          }
+        } catch (err: any) {
+          return jsonResponse({ ok: false, error: `Save failed: ${err.message}` });
+        }
+      });
+    }
+  );
+
+  // ── #209: Export/Import ──────────────────────────────────────────────────
+
+  server.registerTool(
+    "export_project",
+    {
+      title: "◆ cortex · export",
+      description: "Export a project's data (learnings, backlog, summary) as portable JSON for sharing or backup.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name to export."),
+      }),
+    },
+    async ({ project }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const projectDir = path.join(cortexPath, project);
+      if (!fs.existsSync(projectDir)) return jsonResponse({ ok: false, error: `Project "${project}" not found.` });
+
+      const exported: Record<string, unknown> = { project, exportedAt: new Date().toISOString(), version: 1 };
+
+      const summaryPath = path.join(projectDir, "summary.md");
+      if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
+
+      const learningsResult = readLearnings(cortexPath, project);
+      if (learningsResult.ok) exported.learnings = learningsResult.data;
+
+      const backlogResult = readBacklog(cortexPath, project);
+      if (backlogResult.ok) exported.backlog = backlogResult.data.items;
+
+      const claudePath = path.join(projectDir, "CLAUDE.md");
+      if (fs.existsSync(claudePath)) exported.claudeMd = fs.readFileSync(claudePath, "utf8");
+
+      return jsonResponse({ ok: true, message: `Exported project "${project}".`, data: exported });
+    }
+  );
+
+  server.registerTool(
+    "import_project",
+    {
+      title: "◆ cortex · import",
+      description: "Import project data from a previously exported JSON payload. Creates the project directory if needed.",
+      inputSchema: z.object({
+        data: z.string().describe("JSON string from a previous export_project call."),
+      }),
+    },
+    async ({ data: rawData }) => {
+      return withWriteQueue(async () => {
+        let parsed: any;
+        try {
+          parsed = JSON.parse(rawData);
+        } catch {
+          return jsonResponse({ ok: false, error: "Invalid JSON input." });
         }
 
-        const changedFiles = status.split("\n").length;
-        if (pushed) {
-          return textResponse(`Saved ${changedFiles} changed file(s). Pushed to remote.`);
-        } else {
-          return textResponse(`Saved ${changedFiles} changed file(s) locally. Push failed: ${lastPushError}`);
+        if (!parsed.project || typeof parsed.project !== "string") {
+          return jsonResponse({ ok: false, error: "Missing 'project' field in import data." });
         }
-      } catch (err: any) {
-        return textResponse(`Save failed: ${err.message}`);
+        if (!isValidProjectName(parsed.project)) {
+          return jsonResponse({ ok: false, error: `Invalid project name: "${parsed.project}"` });
+        }
+
+        const projectDir = path.join(cortexPath, parsed.project);
+        fs.mkdirSync(projectDir, { recursive: true });
+        const imported: string[] = [];
+
+        if (parsed.summary && typeof parsed.summary === "string") {
+          fs.writeFileSync(path.join(projectDir, "summary.md"), parsed.summary);
+          imported.push("summary.md");
+        }
+
+        if (parsed.claudeMd && typeof parsed.claudeMd === "string") {
+          fs.writeFileSync(path.join(projectDir, "CLAUDE.md"), parsed.claudeMd);
+          imported.push("CLAUDE.md");
+        }
+
+        if (Array.isArray(parsed.learnings) && parsed.learnings.length > 0) {
+          const date = new Date().toISOString().slice(0, 10);
+          const lines = [`# ${parsed.project} Learnings`, "", `## ${date}`, ""];
+          for (const item of parsed.learnings) {
+            if (item && typeof item.text === "string") {
+              lines.push(`- ${item.text}`);
+            }
+          }
+          lines.push("");
+          fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), lines.join("\n"));
+          imported.push("LEARNINGS.md");
+        }
+
+        if (parsed.backlog && typeof parsed.backlog === "object") {
+          const sections = ["Active", "Queue", "Done"] as const;
+          const lines = [`# ${parsed.project} backlog`, ""];
+          for (const section of sections) {
+            lines.push(`## ${section}`, "");
+            const items = parsed.backlog[section];
+            if (Array.isArray(items)) {
+              for (const item of items) {
+                if (item && typeof item.line === "string") {
+                  const prefix = item.checked || section === "Done" ? "- [x] " : "- [ ] ";
+                  lines.push(`${prefix}${item.line}`);
+                  if (item.context) lines.push(`  Context: ${item.context}`);
+                }
+              }
+            }
+            lines.push("");
+          }
+          fs.writeFileSync(path.join(projectDir, "backlog.md"), lines.join("\n"));
+          imported.push("backlog.md");
+        }
+
+        await rebuildIndex();
+        return jsonResponse({
+          ok: true,
+          message: `Imported project "${parsed.project}": ${imported.join(", ")}`,
+          data: { project: parsed.project, files: imported },
+        });
+      });
+    }
+  );
+
+  // ── #210: Archive/Unarchive ────────────────────────────────────────────
+
+  server.registerTool(
+    "archive_project",
+    {
+      title: "◆ cortex · archive",
+      description: "Archive a project: moves it out of the active index without deleting data. The project directory is renamed with an .archived suffix.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name to archive."),
+      }),
+    },
+    async ({ project }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const projectDir = path.join(cortexPath, project);
+      const archiveDir = path.join(cortexPath, `${project}.archived`);
+
+      if (!fs.existsSync(projectDir)) {
+        return jsonResponse({ ok: false, error: `Project "${project}" not found.` });
       }
+      if (fs.existsSync(archiveDir)) {
+        return jsonResponse({ ok: false, error: `Archive "${project}.archived" already exists. Unarchive or remove it first.` });
+      }
+
+      fs.renameSync(projectDir, archiveDir);
+      await rebuildIndex();
+      return jsonResponse({
+        ok: true,
+        message: `Archived project "${project}". Data preserved at ${archiveDir}.`,
+        data: { project, archivePath: archiveDir },
+      });
+    }
+  );
+
+  server.registerTool(
+    "unarchive_project",
+    {
+      title: "◆ cortex · unarchive",
+      description: "Restore a previously archived project back into the active index.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name to unarchive (without .archived suffix)."),
+      }),
+    },
+    async ({ project }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const projectDir = path.join(cortexPath, project);
+      const archiveDir = path.join(cortexPath, `${project}.archived`);
+
+      if (fs.existsSync(projectDir)) {
+        return jsonResponse({ ok: false, error: `Project "${project}" already exists as an active project.` });
+      }
+      if (!fs.existsSync(archiveDir)) {
+        const entries = fs.readdirSync(cortexPath).filter((e) => e.endsWith(".archived"));
+        const available = entries.map((e) => e.replace(/\.archived$/, ""));
+        return jsonResponse({ ok: false, error: `No archive found for "${project}".`, data: { availableArchives: available } });
+      }
+
+      fs.renameSync(archiveDir, projectDir);
+      await rebuildIndex();
+      return jsonResponse({
+        ok: true,
+        message: `Unarchived project "${project}". It is now active again.`,
+        data: { project, path: projectDir },
+      });
     }
   );
 

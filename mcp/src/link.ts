@@ -20,7 +20,16 @@ import {
   type McpMode,
 } from "./init.js";
 import { buildLifecycleCommands, configureAllHooks, detectInstalledTools } from "./hooks.js";
-import { EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
+import {
+  buildIndex,
+  EXEC_TIMEOUT_MS,
+  EXEC_TIMEOUT_QUICK_MS,
+  getProjectDirs,
+  queryRows,
+  validateBacklogFormat,
+  validateGovernanceJson,
+  validateLearningsFormat,
+} from "./shared.js";
 
 const MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
 const CONTEXT_FILE = path.join(os.homedir(), ".cortex-context.md");
@@ -36,10 +45,16 @@ const DEFAULT_SEARCH_PATHS = [
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
-
+function safeUsername(): string {
+  try { return os.userInfo().username; } catch { return "unknown"; }
+}
 
 function getMachineName(): string {
   if (fs.existsSync(MACHINE_FILE)) return fs.readFileSync(MACHINE_FILE, "utf8").trim();
+  // On WSL, prefer the Windows hostname for consistency with native Windows.
+  if (process.env.WSL_DISTRO_NAME && process.env.COMPUTERNAME) {
+    return process.env.COMPUTERNAME.toLowerCase();
+  }
   return os.hostname();
 }
 
@@ -244,17 +259,17 @@ Cursor, and Codex.
 - **UserPromptSubmit**: searches cortex, injects matching context with trust filtering and token budgeting
 - **Stop**: commits and pushes any cortex changes to remote
 
-## MCP tools (22)
+## MCP tools (18)
 
 **Search and browse:**
-- \`search_cortex\`: FTS5 search with synonym expansion across all project knowledge
+- \`search_knowledge\`: FTS5 search with synonym expansion across all project knowledge
 - \`get_project_summary\`: project summary card and available docs
 - \`list_projects\`: all projects in the active profile
-- \`list_machines\`: registered machines and their profiles
-- \`list_profiles\`: all profiles and which projects each includes
+- \`get_learnings\`: read recent learnings without a search query
 
 **Backlog management:**
 - \`get_backlog\`: read tasks for one or all projects
+- \`get_backlog_item\`: fetch a single backlog item by ID or text match
 - \`add_backlog_item\`: add a task to the Queue section
 - \`complete_backlog_item\`: match by text, move to Done
 - \`update_backlog_item\`: change priority, context, or section
@@ -264,21 +279,150 @@ Cursor, and Codex.
 - \`remove_learning\`: remove a learning by matching text
 - \`save_learnings\`: commit and push all cortex changes
 - \`pin_memory\`: promote important memory into CANONICAL_MEMORIES.md
-- \`migrate_legacy_findings\`: promote legacy findings docs into LEARNINGS/CANONICAL
-
-**Memory governance and quality:**
-- \`govern_memories\`: queue stale/conflicting/low-value entries for review
-- \`memory_policy\`: read or update retention, ttl, decay, and confidence thresholds
-- \`memory_workflow\`: read or update risky-memory approval workflow settings
-- \`memory_access\`: read or update role-based permissions
-- \`prune_memories\`: delete expired entries by retention policy
-- \`consolidate_memories\`: deduplicate and rewrite LEARNINGS.md
 - \`memory_feedback\`: record helpful/reprompt/regression outcomes
-- \`index_policy\`: configure include/exclude globs and hidden-doc indexing
+
+**Data management:**
+- \`export_project\`: export project data as portable JSON for sharing or backup
+- \`import_project\`: import project from previously exported JSON
+- \`archive_project\`: archive a project without deleting data
+- \`unarchive_project\`: restore a previously archived project
 `;
 
   const dest = path.join(cortexPath, "cortex.SKILL.md");
   fs.writeFileSync(dest, content);
+}
+
+// ── Skill manifest reading (#297) ───────────────────────────────────────────
+
+export interface ManifestHooks {
+  SessionStart?: string;
+  UserPromptSubmit?: string;
+  Stop?: string;
+}
+
+export function readSkillManifestHooks(cortexPath: string): ManifestHooks | null {
+  const manifestPath = path.join(cortexPath, "cortex.SKILL.md");
+  if (!fs.existsSync(manifestPath)) return null;
+
+  const content = fs.readFileSync(manifestPath, "utf8");
+  const { frontmatter } = parseSkillFrontmatter(content);
+  if (!frontmatter || typeof frontmatter.hooks !== "object" || !frontmatter.hooks) return null;
+
+  const hooks = frontmatter.hooks as Record<string, unknown>;
+  const result: ManifestHooks = {};
+
+  for (const [event, value] of Object.entries(hooks)) {
+    if (!Array.isArray(value) || !value[0]) continue;
+    const entry = value[0] as Record<string, unknown>;
+    const hooksList = entry.hooks as unknown[];
+    if (!Array.isArray(hooksList) || !hooksList[0]) continue;
+    const hookDef = hooksList[0] as Record<string, unknown>;
+    if (typeof hookDef.command === "string") {
+      (result as Record<string, string>)[event] = hookDef.command;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// ── Skill frontmatter validation (#294, #298) ──────────────────────────────
+
+export interface SkillFrontmatter {
+  name: string;
+  description: string;
+  version?: string;
+  license?: string;
+  dependencies?: string[];
+  hooks?: Record<string, unknown>;
+}
+
+export interface SkillValidationResult {
+  valid: boolean;
+  errors: string[];
+  frontmatter?: SkillFrontmatter;
+}
+
+const REQUIRED_SKILL_FIELDS = ["name", "description"] as const;
+
+export function parseSkillFrontmatter(content: string): { frontmatter: Record<string, unknown> | null; body: string } {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!match) return { frontmatter: null, body: content };
+  try {
+    const parsed = yaml.load(match[1]) as Record<string, unknown>;
+    return { frontmatter: parsed && typeof parsed === "object" ? parsed : null, body: match[2] };
+  } catch {
+    return { frontmatter: null, body: content };
+  }
+}
+
+export function validateSkillFrontmatter(content: string, filePath?: string): SkillValidationResult {
+  const { frontmatter } = parseSkillFrontmatter(content);
+  const prefix = filePath ? `${filePath}: ` : "";
+  if (!frontmatter) return { valid: false, errors: [`${prefix}missing or invalid YAML frontmatter`] };
+
+  const errors: string[] = [];
+  for (const field of REQUIRED_SKILL_FIELDS) {
+    if (typeof frontmatter[field] !== "string" || !frontmatter[field]) {
+      errors.push(`${prefix}missing required field "${field}"`);
+    }
+  }
+
+  if (frontmatter.dependencies !== undefined) {
+    if (!Array.isArray(frontmatter.dependencies)) {
+      errors.push(`${prefix}"dependencies" must be an array`);
+    } else if (frontmatter.dependencies.some((d: unknown) => typeof d !== "string")) {
+      errors.push(`${prefix}"dependencies" entries must be strings`);
+    }
+  }
+
+  if (frontmatter.hooks !== undefined && (typeof frontmatter.hooks !== "object" || frontmatter.hooks === null)) {
+    errors.push(`${prefix}"hooks" must be an object`);
+  }
+
+  if (frontmatter.version !== undefined && typeof frontmatter.version !== "string") {
+    errors.push(`${prefix}"version" must be a string`);
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    frontmatter: errors.length === 0 ? frontmatter as unknown as SkillFrontmatter : undefined,
+  };
+}
+
+export function validateSkillsDir(skillsDir: string): SkillValidationResult[] {
+  if (!fs.existsSync(skillsDir)) return [];
+  const results: SkillValidationResult[] = [];
+  for (const entry of fs.readdirSync(skillsDir)) {
+    const entryPath = path.join(skillsDir, entry);
+    const stat = fs.statSync(entryPath);
+    if (stat.isDirectory()) {
+      const skillFile = path.join(entryPath, "SKILL.md");
+      if (fs.existsSync(skillFile)) {
+        results.push(validateSkillFrontmatter(fs.readFileSync(skillFile, "utf8"), skillFile));
+      }
+    } else if (stat.isFile() && entry.endsWith(".md")) {
+      results.push(validateSkillFrontmatter(fs.readFileSync(entryPath, "utf8"), entryPath));
+    }
+  }
+  return results;
+}
+
+export function migrateSkillsToFolders(skillsDir: string): string[] {
+  if (!fs.existsSync(skillsDir)) return [];
+  const migrated: string[] = [];
+  for (const entry of fs.readdirSync(skillsDir)) {
+    if (!entry.endsWith(".md")) continue;
+    const filePath = path.join(skillsDir, entry);
+    if (!fs.statSync(filePath).isFile()) continue;
+    const name = entry.replace(/\.md$/, "");
+    const folderPath = path.join(skillsDir, name);
+    if (fs.existsSync(folderPath)) continue;
+    fs.mkdirSync(folderPath, { recursive: true });
+    fs.renameSync(filePath, path.join(folderPath, "SKILL.md"));
+    migrated.push(name);
+  }
+  return migrated;
 }
 
 function linkSkillsDir(srcDir: string, destDir: string) {
@@ -394,7 +538,7 @@ function writeContextFile(managedContent: string) {
 
 function formatMcpStatus(status: string): string {
   if (status === "installed" || status === "already_configured") {
-    return "MCP: active (search_cortex, get_project_summary, list_projects)";
+    return "MCP: active (search_knowledge, get_project_summary, list_projects)";
   }
   if (status === "disabled" || status === "already_disabled") {
     return "MCP: disabled (hooks-only fallback active)";
@@ -491,6 +635,35 @@ function writeContextClean(machine: string, profile: string, mcpStatus: string, 
   if (mcpLine) content += mcpLine + "\n";
   writeContextFile(content);
   log(`  wrote ${CONTEXT_FILE} (clean mode)`);
+}
+
+function readBackNativeMemory(cortexPath: string, projects: string[]) {
+  const projectKey = os.homedir().replace(/[/\\]/g, "-").replace(/^-/, "");
+  const memoryDir = path.join(os.homedir(), ".claude", "projects", projectKey, "memory");
+  if (!fs.existsSync(memoryDir)) return;
+
+  for (const project of projects) {
+    if (project === "global") continue;
+    const nativeFile = path.join(memoryDir, `MEMORY-${project}.md`);
+    if (!fs.existsSync(nativeFile)) continue;
+
+    const content = fs.readFileSync(nativeFile, "utf8");
+    const notesMatch = content.match(/^## Notes\n([\s\S]*)$/m);
+    if (!notesMatch) continue;
+
+    const notes = notesMatch[1]
+      .replace(/<!-- Session learnings, patterns, decisions -->\n?/, "")
+      .trim();
+    if (!notes) continue;
+
+    const targetFile = path.join(cortexPath, project, "native-notes.md");
+    const existing = fs.existsSync(targetFile) ? fs.readFileSync(targetFile, "utf8").trim() : "";
+    if (existing === notes) continue;
+
+    fs.mkdirSync(path.join(cortexPath, project), { recursive: true });
+    fs.writeFileSync(targetFile, notes + "\n");
+    log(`  synced native memory notes for ${project}`);
+  }
 }
 
 function rebuildMemory(cortexPath: string, projects: string[]) {
@@ -651,7 +824,7 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   // Register hooks for Copilot CLI, Cursor, Codex (reuse same detected set)
   if (hooksEnabled) {
-    const hookedTools = configureAllHooks(cortexPath, detectedTools);
+    const hookedTools = configureAllHooks(cortexPath, { tools: detectedTools });
     if (hookedTools.length) log(`  Hooks registered: ${hookedTools.join(", ")}`);
   } else {
     log(`  Hooks registration skipped (hooks-mode is off)`);
@@ -675,7 +848,8 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
     writeContextDefault(machine, profile, mcpStatusForContext, projects, cortexPath);
   }
 
-  // Step 8: Memory
+  // Step 8: Memory (read back native changes, then rebuild)
+  readBackNativeMemory(cortexPath, projects);
   rebuildMemory(cortexPath, projects);
 
   log(`\nDone. Profile '${profile}' is active.`);
@@ -697,7 +871,7 @@ function isWrapperActive(tool: string): boolean {
   }
 }
 
-export async function runDoctor(cortexPath: string, fix: boolean = false): Promise<DoctorResult> {
+export async function runDoctor(cortexPath: string, fix: boolean = false, checkData: boolean = false): Promise<DoctorResult> {
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
   const machine = getMachineName();
   const profile = lookupProfile(cortexPath, machine);
@@ -735,7 +909,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false): Promi
     os.homedir(),
     ".claude",
     "projects",
-    `-home-${os.userInfo().username}`,
+    `-home-${safeUsername()}`,
     "memory",
     "MEMORY.md"
   );
@@ -839,6 +1013,23 @@ export async function runDoctor(cortexPath: string, fix: boolean = false): Promi
     detail: runtime?.lastPromptAt ? `last prompt hook run @ ${runtime.lastPromptAt}` : "no prompt runtime record yet",
   });
 
+  try {
+    const db = await buildIndex(cortexPath, profile || undefined);
+    const healthRow = queryRows(db, "SELECT count(*) FROM docs", []);
+    const count = Number((healthRow?.[0]?.[0] as number | string | undefined) ?? 0);
+    checks.push({
+      name: "fts-index",
+      ok: Number.isFinite(count) && count >= 0,
+      detail: `index query ok (docs=${count})`,
+    });
+  } catch (err: any) {
+    checks.push({
+      name: "fts-index",
+      ok: false,
+      detail: `index build/query failed: ${err?.message || String(err)}`,
+    });
+  }
+
   const detected = detectInstalledTools();
   if (detected.has("copilot")) {
     const copilotHooks = path.join(os.homedir(), ".github", "hooks", "cortex.json");
@@ -903,6 +1094,79 @@ export async function runDoctor(cortexPath: string, fix: boolean = false): Promi
           ? "no external tools detected"
           : `missing hook configs for: ${missing.join(", ")}`,
     });
+  }
+
+  if (checkData) {
+    const governanceChecks: Array<{ file: string; schema: "access-control" | "memory-policy" | "memory-workflow-policy" | "index-policy" | "runtime-health" | "memory-scores" | "canonical-locks" }> = [
+      { file: "access-control.json", schema: "access-control" },
+      { file: "memory-policy.json", schema: "memory-policy" },
+      { file: "memory-workflow-policy.json", schema: "memory-workflow-policy" },
+      { file: "index-policy.json", schema: "index-policy" },
+      { file: "runtime-health.json", schema: "runtime-health" },
+      { file: "memory-scores.json", schema: "memory-scores" },
+      { file: "canonical-locks.json", schema: "canonical-locks" },
+    ];
+
+    for (const item of governanceChecks) {
+      const filePath = path.join(cortexPath, ".governance", item.file);
+      const exists = fs.existsSync(filePath);
+      const valid = exists ? validateGovernanceJson(filePath, item.schema) : false;
+      checks.push({
+        name: `data:governance:${item.file}`,
+        ok: exists && valid,
+        detail: !exists ? "missing governance file" : valid ? "valid" : "invalid JSON/schema",
+      });
+    }
+
+    for (const projectDir of getProjectDirs(cortexPath, profile)) {
+      const projectName = path.basename(projectDir);
+      if (projectName === "global") continue;
+
+      const backlogPath = path.join(projectDir, "backlog.md");
+      if (fs.existsSync(backlogPath)) {
+        const content = fs.readFileSync(backlogPath, "utf8");
+        const issues = validateBacklogFormat(content);
+        checks.push({
+          name: `data:backlog:${projectName}`,
+          ok: issues.length === 0,
+          detail: issues.length ? issues.join("; ") : "valid",
+        });
+      }
+
+      const learningsPath = path.join(projectDir, "LEARNINGS.md");
+      if (fs.existsSync(learningsPath)) {
+        const content = fs.readFileSync(learningsPath, "utf8");
+        const issues = validateLearningsFormat(content);
+        checks.push({
+          name: `data:learnings:${projectName}`,
+          ok: issues.length === 0,
+          detail: issues.length ? issues.join("; ") : "valid",
+        });
+      }
+    }
+
+    // Validate skill frontmatter in bundled skills
+    const bundledSkills = path.join(cortexPath, "..", "skills");
+    const skillResults = validateSkillsDir(fs.existsSync(bundledSkills) ? bundledSkills : path.join(cortexPath, "skills"));
+    const invalidSkills = skillResults.filter(r => !r.valid);
+    checks.push({
+      name: "data:skills-frontmatter",
+      ok: invalidSkills.length === 0,
+      detail: invalidSkills.length
+        ? `${invalidSkills.length} skill(s) with invalid frontmatter: ${invalidSkills.flatMap(r => r.errors).join("; ")}`
+        : `${skillResults.length} skill(s) validated`,
+    });
+
+    // Validate cortex.SKILL.md manifest
+    const manifestPath = path.join(cortexPath, "cortex.SKILL.md");
+    if (fs.existsSync(manifestPath)) {
+      const manifestResult = validateSkillFrontmatter(fs.readFileSync(manifestPath, "utf8"), manifestPath);
+      checks.push({
+        name: "data:skill-manifest",
+        ok: manifestResult.valid,
+        detail: manifestResult.valid ? "cortex.SKILL.md frontmatter valid" : manifestResult.errors.join("; "),
+      });
+    }
   }
 
   const ok = checks.every((c) => c.ok);
