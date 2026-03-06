@@ -18,6 +18,8 @@ Usage:
                                                  --all-tools: configure hooks for all agents (default: auto-detect)
   npx @alaarab/cortex search <query> [--project <name>] [--type <type>] [--limit <n>] [--all]
                                                  Search your knowledge base (or browse a project with --project)
+  npx @alaarab/cortex shell                      Open interactive shell (also default with no args in a terminal)
+  npx @alaarab/cortex update                     Update cortex to latest version
   npx @alaarab/cortex add-learning <project> "<insight>"
                                                  Add a learning to a project
   npx @alaarab/cortex hook-prompt                (used by Claude Code UserPromptSubmit hook)
@@ -120,9 +122,18 @@ if (process.argv[2] === "--health") {
   process.exit(0);
 }
 
+// Terminal-first behavior: open shell for no-arg human invocations.
+if (!process.argv[2] && process.stdin.isTTY && process.stdout.isTTY) {
+  const { runCliCommand } = await import("./cli.js");
+  await runCliCommand("shell", []);
+  process.exit(0);
+}
+
 // CLI subcommands (run before MCP server starts)
 const CLI_COMMANDS = [
   "search",
+  "shell",
+  "update",
   "hook-prompt",
   "hook-session-start",
   "hook-stop",
@@ -154,15 +165,24 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import * as yaml from "js-yaml";
-import { isValidProjectName, safeProjectPath, buildRobustFtsQuery } from "./utils.js";
+import { isValidProjectName, buildRobustFtsQuery } from "./utils.js";
+import {
+  addBacklogItem as addBacklogItemStore,
+  backlogMarkdown,
+  completeBacklogItem as completeBacklogItemStore,
+  listMachines as listMachinesStore,
+  listProfiles as listProfilesStore,
+  readBacklog,
+  readBacklogs,
+  removeLearning as removeLearningStore,
+  updateBacklogItem as updateBacklogItemStore,
+} from "./data-access.js";
 import {
   findCortexPathWithArg,
   buildIndex,
   extractSnippet,
   queryRows,
   addLearningToFile,
-  validateBacklogFormat,
   autoMergeConflicts,
   debugLog,
   upsertCanonicalMemory,
@@ -183,7 +203,6 @@ import {
   getIndexPolicy,
   updateIndexPolicy,
   migrateLegacyFindings,
-  getProjectDirs,
 } from "./shared.js";
 
 // MCP mode: first non-flag arg is the cortex path
@@ -613,12 +632,9 @@ async function main() {
       inputSchema: z.object({}),
     },
     async () => {
-      const machinesPath = path.join(cortexPath, "machines.yaml");
-      if (!fs.existsSync(machinesPath)) return textResponse("No machines.yaml found. Run `./link.sh` to register this machine.");
-      const raw = fs.readFileSync(machinesPath, "utf8");
-      const data = yaml.load(raw) as Record<string, string> | null;
-      if (!data || typeof data !== "object") return textResponse("machines.yaml is empty or invalid.");
-      const lines = Object.entries(data).map(([machine, prof]) => `- ${machine}: ${prof}`);
+      const machines = listMachinesStore(cortexPath);
+      if (typeof machines === "string") return textResponse(machines);
+      const lines = Object.entries(machines).map(([machine, prof]) => `- ${machine}: ${prof}`);
       return textResponse(`# Registered Machines\n\n${lines.join("\n")}`);
     }
   );
@@ -631,16 +647,10 @@ async function main() {
       inputSchema: z.object({}),
     },
     async () => {
-      const profilesDir = path.join(cortexPath, "profiles");
-      if (!fs.existsSync(profilesDir)) return textResponse("No profiles directory found.");
-      const files = fs.readdirSync(profilesDir).filter(f => f.endsWith(".yaml"));
-      if (!files.length) return textResponse("No profiles found.");
-      const parts = files.map(file => {
-        const raw = fs.readFileSync(path.join(profilesDir, file), "utf8");
-        const data = yaml.load(raw) as Record<string, unknown> | null;
-        const name = (data?.name as string) || file.replace(".yaml", "");
-        const projects = Array.isArray(data?.projects) ? (data.projects as string[]) : [];
-        return `## ${name}\n${projects.map(p => `- ${p}`).join("\n") || "(no projects)"}`;
+      const profiles = listProfilesStore(cortexPath);
+      if (typeof profiles === "string") return textResponse(profiles);
+      const parts = profiles.map((profileInfo) => {
+        return `## ${profileInfo.name}\n${profileInfo.projects.map((p) => `- ${p}`).join("\n") || "(no projects)"}`;
       });
       return textResponse(`# Profiles\n\n${parts.join("\n\n")}`);
     }
@@ -657,25 +667,14 @@ async function main() {
     },
     async ({ project }) => {
       if (project) {
-        if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
-        const resolvedDir = safeProjectPath(cortexPath, project);
-        if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
-        const backlogPath = path.join(resolvedDir, "backlog.md");
-        if (!fs.existsSync(backlogPath)) return textResponse(`No backlog found for "${project}".`);
-        const content = fs.readFileSync(backlogPath, "utf8");
-        return textResponse(`## ${project}\n${content}`);
+        const doc = readBacklog(cortexPath, project);
+        if (typeof doc === "string") return textResponse(doc);
+        if (!fs.existsSync(doc.path)) return textResponse(`No backlog found for "${project}".`);
+        return textResponse(`## ${project}\n${backlogMarkdown(doc)}`);
       }
 
-      const projects = getProjectDirs(cortexPath, profile).map((p) => path.basename(p)).sort();
-      const parts: string[] = [];
-      for (const proj of projects) {
-        const resolvedDir = safeProjectPath(cortexPath, proj);
-        if (!resolvedDir) continue;
-        const backlogPath = path.join(resolvedDir, "backlog.md");
-        if (!fs.existsSync(backlogPath)) continue;
-        const content = fs.readFileSync(backlogPath, "utf8");
-        parts.push(`## ${proj}\n${content}`);
-      }
+      const docs = readBacklogs(cortexPath, profile);
+      const parts = docs.map((doc) => `## ${doc.project}\n${backlogMarkdown(doc)}`);
       if (!parts.length) return textResponse("No backlogs found.");
       return textResponse(parts.join("\n\n"));
     }
@@ -692,29 +691,8 @@ async function main() {
       }),
     },
     async ({ project, item }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
-      const resolvedDir = safeProjectPath(cortexPath, project);
-      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
-      const backlogPath = path.join(resolvedDir, "backlog.md");
-      if (!fs.existsSync(backlogPath)) {
-        if (!fs.existsSync(resolvedDir)) return textResponse(`Project "${project}" not found in cortex.`);
-        fs.writeFileSync(backlogPath, `# ${project} backlog\n\n## Active\n\n## Queue\n\n- ${item}\n\n## Done\n`);
-        return textResponse(`Created backlog.md for "${project}" and added: ${item}`);
-      }
-      const content = fs.readFileSync(backlogPath, "utf8");
-
-      // Soft-validate format before writing
-      const issues = validateBacklogFormat(content);
-      if (issues.length > 0) {
-        debugLog(`backlog.md format warnings for "${project}": ${issues.join("; ")}`);
-      }
-
-      const queueMatch = content.match(/^(## Queue\s*\n)/m);
-      const updated = queueMatch
-        ? content.replace(queueMatch[0], `${queueMatch[0]}\n- ${item}\n`)
-        : content + `\n- ${item}\n`;
-      fs.writeFileSync(backlogPath, updated);
-      return textResponse(`Added to ${project} backlog: ${item}`);
+      const result = addBacklogItemStore(cortexPath, project, item);
+      return textResponse(result);
     }
   );
 
@@ -729,34 +707,8 @@ async function main() {
       }),
     },
     async ({ project, item }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
-      const resolvedDir = safeProjectPath(cortexPath, project);
-      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
-      const backlogPath = path.join(resolvedDir, "backlog.md");
-      if (!fs.existsSync(backlogPath)) return textResponse(`No backlog found for "${project}".`);
-      const content = fs.readFileSync(backlogPath, "utf8");
-      const lines = content.split("\n");
-      let section = "";
-      const idx = lines.findIndex((line) => {
-        if (line.startsWith("## ")) {
-          section = line.slice(3).trim().toLowerCase();
-          return false;
-        }
-        if (section === "done") return false;
-        return line.match(/^- /) && line.toLowerCase().includes(item.toLowerCase());
-      });
-      if (idx === -1) return textResponse(`No item matching "${item}" found in ${project} backlog.`);
-      const matched = lines[idx];
-      const completed = matched.match(/^- \[[ xX]\]\s+/)
-        ? matched.replace(/^- \[[ xX]\]\s+/, "- [x] ")
-        : matched.replace(/^- /, "- [x] ");
-      const removed = lines.filter((_, i) => i !== idx).join("\n");
-      const doneMatch = removed.match(/^(## Done\s*\n)/m);
-      const updated = doneMatch
-        ? removed.replace(doneMatch[0], `${doneMatch[0]}\n${completed}\n`)
-        : removed + `\n## Done\n\n${completed}\n`;
-      fs.writeFileSync(backlogPath, updated);
-      return textResponse(`Marked done in ${project}: ${completed.replace(/^- /, "")}`);
+      const result = completeBacklogItemStore(cortexPath, project, item);
+      return textResponse(result);
     }
   );
 
@@ -776,64 +728,8 @@ async function main() {
       }),
     },
     async ({ project, item, updates }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
-      const resolvedDir = safeProjectPath(cortexPath, project);
-      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
-      const backlogPath = path.join(resolvedDir, "backlog.md");
-      if (!fs.existsSync(backlogPath)) return textResponse(`No backlog found for "${project}".`);
-
-      let lines = fs.readFileSync(backlogPath, "utf8").split("\n");
-
-      const idx = lines.findIndex(l => l.match(/^- /) && l.toLowerCase().includes(item.toLowerCase()));
-      if (idx === -1) return textResponse(`No item matching "${item}" found in ${project} backlog.`);
-
-      const changes: string[] = [];
-
-      if (updates.priority) {
-        const before = lines[idx];
-        lines[idx] = lines[idx].replace(/\s*\[(high|medium|low)\]/gi, "").trimEnd() + ` [${updates.priority}]`;
-        if (lines[idx] !== before) changes.push(`priority -> ${updates.priority}`);
-      }
-
-      if (updates.context) {
-        const contextLineIdx = idx + 1;
-        const hasContext = contextLineIdx < lines.length && lines[contextLineIdx].trim().startsWith("Context:");
-        if (hasContext) {
-          lines[contextLineIdx] = lines[contextLineIdx].trimEnd() + "; " + updates.context;
-        } else {
-          lines.splice(contextLineIdx, 0, `  Context: ${updates.context}`);
-        }
-        changes.push(`context updated`);
-      }
-
-      if (updates.section) {
-        const targetSection = updates.section;
-        const sectionPattern = new RegExp(`^## ${targetSection}\\s*$`, "i");
-
-        const itemLine = lines[idx];
-        const contextIdx = idx + 1;
-        const hasContext = contextIdx < lines.length && lines[contextIdx].trim().startsWith("Context:");
-        const extraLine = hasContext ? lines[contextIdx] : null;
-
-        const removeCount = extraLine !== null ? 2 : 1;
-        lines.splice(idx, removeCount);
-
-        const targetIdx = lines.findIndex(l => sectionPattern.test(l));
-        if (targetIdx === -1) {
-          lines.push(`\n## ${targetSection}\n`, itemLine);
-          if (extraLine) lines.push(extraLine);
-        } else {
-          let insertAt = targetIdx + 1;
-          if (insertAt < lines.length && lines[insertAt].trim() === "") insertAt++;
-          const toInsert = extraLine !== null ? [itemLine, extraLine] : [itemLine];
-          lines.splice(insertAt, 0, ...toInsert);
-        }
-
-        changes.push(`moved to ${targetSection}`);
-      }
-
-      fs.writeFileSync(backlogPath, lines.join("\n"));
-      return textResponse(`Updated item in ${project}: ${changes.join(", ")}`);
+      const result = updateBacklogItemStore(cortexPath, project, item, updates);
+      return textResponse(result);
     }
   );
 
@@ -878,24 +774,8 @@ async function main() {
       }),
     },
     async ({ project, learning }) => {
-      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}".`);
-      const resolvedDir = safeProjectPath(cortexPath, project);
-      if (!resolvedDir) return textResponse(`Invalid project name: "${project}".`);
-      const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
-      if (!fs.existsSync(learningsPath)) return textResponse(`No LEARNINGS.md found for "${project}".`);
-
-      const content = fs.readFileSync(learningsPath, "utf8");
-      const lines = content.split("\n");
-      const idx = lines.findIndex(l => l.startsWith("- ") && l.toLowerCase().includes(learning.toLowerCase()));
-      if (idx === -1) return textResponse(`No learning matching "${learning}" found in ${project}.`);
-
-      const matched = lines[idx];
-      const citationComment = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/;
-      const removeCount = citationComment.test(lines[idx + 1] || "") ? 2 : 1;
-      lines.splice(idx, removeCount);
-      const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-      fs.writeFileSync(learningsPath, normalized);
-      return textResponse(`Removed from ${project}: ${matched}`);
+      const result = removeLearningStore(cortexPath, project, learning);
+      return textResponse(result);
     }
   );
 
