@@ -32,10 +32,11 @@ describe.sequential("1.10.x release hardening gates", () => {
 
   it("keeps package and MCP server versions consistent", () => {
     const root = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..");
-    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as { version: string };
     const indexTs = fs.readFileSync(path.join(root, "mcp", "src", "index.ts"), "utf8");
 
-    expect(indexTs).toContain(`version: "${pkg.version}"`);
+    // Version is now read dynamically from package.json at runtime, not hardcoded
+    expect(indexTs).toContain("version: PACKAGE_VERSION");
+    expect(indexTs).not.toMatch(/version:\s*"[\d.]+/);
   });
 
   it("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {

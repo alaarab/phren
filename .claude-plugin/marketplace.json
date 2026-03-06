@@ -7,15 +7,15 @@
     {
       "name": "cortex",
       "source": "./",
-      "description": "Long-term memory for Claude Code. Project context, lessons learned, slash commands, task queues.",
-      "version": "1.0.1",
+      "description": "Long-term memory for AI coding agents. Project context, learnings, task queues, memory governance. Works with Claude Code, Copilot CLI, Cursor, and Codex.",
+      "version": "1.10.1-rc.1",
       "author": {
         "name": "Ala Arab"
       },
       "homepage": "https://github.com/alaarab/cortex",
       "repository": "https://github.com/alaarab/cortex",
       "license": "MIT",
-      "keywords": ["claude", "claude-code", "mcp", "memory", "knowledge"]
+      "keywords": ["claude", "claude-code", "mcp", "memory", "knowledge", "agentskills", "hooks"]
     }
   ]
 }

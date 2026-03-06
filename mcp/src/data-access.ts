@@ -12,6 +12,43 @@ import {
 } from "./shared.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 
+// TODO(v2): Many functions return `string` for errors and a typed object for success.
+// Replace with a Result<T, E> type or throw typed errors for clearer call-site handling.
+
+function withFileLock<T>(filePath: string, fn: () => T): T {
+  const lockPath = filePath + ".lock";
+  const maxWait = 5000;
+  const pollInterval = 100;
+  const staleThreshold = 30000;
+
+  let waited = 0;
+  while (waited < maxWait) {
+    try {
+      fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
+      break;
+    } catch {
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > staleThreshold) {
+          fs.unlinkSync(lockPath);
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      const start = Date.now();
+      while (Date.now() - start < pollInterval) { /* busy wait */ }
+      waited += pollInterval;
+    }
+  }
+
+  try {
+    return fn();
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch { /* lock may not exist */ }
+  }
+}
+
 export type BacklogSection = "Active" | "Queue" | "Done";
 
 export interface BacklogItem {
@@ -236,34 +273,44 @@ export function readBacklogs(cortexPath: string, profile?: string): BacklogDoc[]
 }
 
 export function addBacklogItem(cortexPath: string, project: string, item: string): string {
-  const parsed = readBacklog(cortexPath, project);
-  if (typeof parsed === "string") return parsed;
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return `Invalid project name: "${project}".`;
 
-  const line = item.replace(/^-\s*/, "").trim();
-  parsed.items.Queue.push({
-    id: `Q${parsed.items.Queue.length + 1}`,
-    section: "Queue",
-    line,
-    checked: false,
-    priority: normalizePriority(line),
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (typeof parsed === "string") return parsed;
+
+    const line = item.replace(/^-\s*/, "").trim();
+    parsed.items.Queue.push({
+      id: `Q${parsed.items.Queue.length + 1}`,
+      section: "Queue",
+      line,
+      checked: false,
+      priority: normalizePriority(line),
+    });
+    writeBacklogDoc(parsed);
+    return `Added to ${project} backlog: ${line}`;
   });
-  writeBacklogDoc(parsed);
-  return `Added to ${project} backlog: ${line}`;
 }
 
 export function completeBacklogItem(cortexPath: string, project: string, match: string): string {
-  const parsed = readBacklog(cortexPath, project);
-  if (typeof parsed === "string") return parsed;
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return `Invalid project name: "${project}".`;
 
-  const found = findItemByMatch(parsed, match);
-  if (!found) return `No item matching "${match}" found in ${project} backlog.`;
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (typeof parsed === "string") return parsed;
 
-  const [item] = parsed.items[found.section].splice(found.index, 1);
-  item.section = "Done";
-  item.checked = true;
-  parsed.items.Done.unshift(item);
-  writeBacklogDoc(parsed);
-  return `Marked done in ${project}: ${item.line}`;
+    const found = findItemByMatch(parsed, match);
+    if (!found) return `No item matching "${match}" found in ${project} backlog.`;
+
+    const [item] = parsed.items[found.section].splice(found.index, 1);
+    item.section = "Done";
+    item.checked = true;
+    parsed.items.Done.unshift(item);
+    writeBacklogDoc(parsed);
+    return `Marked done in ${project}: ${item.line}`;
+  });
 }
 
 export function updateBacklogItem(
@@ -272,45 +319,50 @@ export function updateBacklogItem(
   match: string,
   updates: { priority?: string; context?: string; section?: string }
 ): string {
-  const parsed = readBacklog(cortexPath, project);
-  if (typeof parsed === "string") return parsed;
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return `Invalid project name: "${project}".`;
 
-  const found = findItemByMatch(parsed, match);
-  if (!found) return `No item matching "${match}" found in ${project} backlog.`;
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (typeof parsed === "string") return parsed;
 
-  const item = parsed.items[found.section][found.index];
-  const changes: string[] = [];
+    const found = findItemByMatch(parsed, match);
+    if (!found) return `No item matching "${match}" found in ${project} backlog.`;
 
-  if (updates.priority) {
-    const p = updates.priority.toLowerCase();
-    if (["high", "medium", "low"].includes(p)) {
-      item.priority = p as "high" | "medium" | "low";
-      item.line = item.line.replace(/\s*\[(high|medium|low)\]\s*$/gi, "").trim();
-      item.line = `${item.line} [${item.priority}]`;
-      changes.push(`priority -> ${p}`);
+    const item = parsed.items[found.section][found.index];
+    const changes: string[] = [];
+
+    if (updates.priority) {
+      const p = updates.priority.toLowerCase();
+      if (["high", "medium", "low"].includes(p)) {
+        item.priority = p as "high" | "medium" | "low";
+        item.line = item.line.replace(/\s*\[(high|medium|low)\]\s*$/gi, "").trim();
+        item.line = `${item.line} [${item.priority}]`;
+        changes.push(`priority -> ${p}`);
+      }
     }
-  }
 
-  if (updates.context) {
-    if (item.context) item.context = `${item.context}; ${updates.context}`;
-    else item.context = updates.context;
-    changes.push("context updated");
-  }
-
-  if (updates.section) {
-    const target = updates.section[0].toUpperCase() + updates.section.slice(1).toLowerCase();
-    if (["Active", "Queue", "Done"].includes(target)) {
-      parsed.items[found.section].splice(found.index, 1);
-      const section = target as BacklogSection;
-      item.section = section;
-      item.checked = section === "Done";
-      parsed.items[section].unshift(item);
-      changes.push(`moved to ${section}`);
+    if (updates.context) {
+      if (item.context) item.context = `${item.context}; ${updates.context}`;
+      else item.context = updates.context;
+      changes.push("context updated");
     }
-  }
 
-  writeBacklogDoc(parsed);
-  return `Updated item in ${project}: ${changes.join(", ") || "no changes"}`;
+    if (updates.section) {
+      const target = updates.section[0].toUpperCase() + updates.section.slice(1).toLowerCase();
+      if (["Active", "Queue", "Done"].includes(target)) {
+        parsed.items[found.section].splice(found.index, 1);
+        const section = target as BacklogSection;
+        item.section = section;
+        item.checked = section === "Done";
+        parsed.items[section].unshift(item);
+        changes.push(`moved to ${section}`);
+      }
+    }
+
+    writeBacklogDoc(parsed);
+    return `Updated item in ${project}: ${changes.join(", ") || "no changes"}`;
+  });
 }
 
 export function workNextBacklogItem(cortexPath: string, project: string): string {
@@ -390,7 +442,12 @@ export function readLearnings(cortexPath: string, project: string): LearningItem
 }
 
 export function addLearning(cortexPath: string, project: string, learning: string): string {
-  return addLearningToFile(cortexPath, project, learning);
+  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  const resolved = safeProjectPath(cortexPath, project);
+  if (!resolved) return `Invalid project name: "${project}".`;
+  const learningsPath = path.join(resolved, "LEARNINGS.md");
+
+  return withFileLock(learningsPath, () => addLearningToFile(cortexPath, project, learning));
 }
 
 export function removeLearning(cortexPath: string, project: string, match: string): string {
@@ -400,17 +457,19 @@ export function removeLearning(cortexPath: string, project: string, match: strin
   const learningsPath = path.join(ensured.dir!, "LEARNINGS.md");
   if (!fs.existsSync(learningsPath)) return `No LEARNINGS.md found for "${project}".`;
 
-  const lines = fs.readFileSync(learningsPath, "utf8").split("\n");
-  const idx = lines.findIndex((line) => line.startsWith("- ") && line.toLowerCase().includes(match.toLowerCase()));
-  if (idx === -1) return `No learning matching "${match}" found in ${project}.`;
+  return withFileLock(learningsPath, () => {
+    const lines = fs.readFileSync(learningsPath, "utf8").split("\n");
+    const idx = lines.findIndex((line) => line.startsWith("- ") && line.toLowerCase().includes(match.toLowerCase()));
+    if (idx === -1) return `No learning matching "${match}" found in ${project}.`;
 
-  const citationComment = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/;
-  const removeCount = citationComment.test(lines[idx + 1] || "") ? 2 : 1;
-  const matched = lines[idx];
-  lines.splice(idx, removeCount);
-  const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-  fs.writeFileSync(learningsPath, normalized);
-  return `Removed from ${project}: ${matched}`;
+    const citationComment = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/;
+    const removeCount = citationComment.test(lines[idx + 1] || "") ? 2 : 1;
+    const matched = lines[idx];
+    lines.splice(idx, removeCount);
+    const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+    fs.writeFileSync(learningsPath, normalized);
+    return `Removed from ${project}: ${matched}`;
+  });
 }
 
 function queuePath(cortexPath: string, project: string): string {
@@ -564,7 +623,7 @@ export function listMachines(cortexPath: string): Record<string, string> | strin
   const machinesPath = path.join(cortexPath, "machines.yaml");
   if (!fs.existsSync(machinesPath)) return "No machines.yaml found.";
   const raw = fs.readFileSync(machinesPath, "utf8");
-  const parsed = yaml.load(raw) as Record<string, string> | null;
+  const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA }) as Record<string, string> | null;
   if (!parsed || typeof parsed !== "object") return "machines.yaml is empty or invalid.";
   return parsed;
 }
@@ -602,7 +661,7 @@ export function listProfiles(cortexPath: string): ProfileInfo[] | string {
   for (const file of files) {
     const full = path.join(profilesDir, file);
     const raw = fs.readFileSync(full, "utf8");
-    const parsed = yaml.load(raw) as Record<string, unknown> | null;
+    const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA }) as Record<string, unknown> | null;
     const name = (parsed?.name as string) || file.replace(/\.yaml$/, "");
     const projects = Array.isArray(parsed?.projects)
       ? (parsed?.projects as unknown[]).map((project) => String(project)).filter(Boolean)

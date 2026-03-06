@@ -1,3 +1,7 @@
+---
+name: humanize
+description: Strip AI language from writing and code. Kill the AI voice.
+---
 # /humanize - Kill the AI voice
 
 Strip out artificial language and make your writing sound like you actually talk.

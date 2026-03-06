@@ -37,7 +37,7 @@ const SYNONYMS: Record<string, string[]> = {
 };
 
 // Common English stop words to strip from prompts before searching
-const STOP_WORDS = new Set([
+export const STOP_WORDS = new Set([
   "the", "is", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
   "of", "with", "by", "from", "it", "this", "that", "are", "was", "were",
   "be", "been", "being", "have", "has", "had", "do", "does", "did", "will",
@@ -48,30 +48,8 @@ const STOP_WORDS = new Set([
   "how", "why", "all", "each", "every", "some", "any", "few", "more", "most",
   "other", "into", "over", "such", "only", "own", "same", "also", "back",
   "get", "got", "make", "made", "take", "like", "well", "here", "there",
-  "fix", "use", "using", "used", "need", "want", "look", "help", "please",
+  "use", "using", "used", "need", "want", "look", "help", "please",
 ]);
-
-// Expand a search query with synonym alternatives using OR
-export function expandSynonyms(query: string): string {
-  const lower = query.toLowerCase();
-  const additions: string[] = [];
-
-  for (const [term, synonyms] of Object.entries(SYNONYMS)) {
-    if (lower.includes(term)) {
-      for (const syn of synonyms) {
-        if (!lower.includes(syn)) {
-          additions.push(syn);
-        }
-      }
-    }
-  }
-
-  if (additions.length === 0) return query;
-
-  // Build OR expression: original terms OR each synonym
-  const parts = [query, ...additions];
-  return parts.map(p => p.includes(" ") ? `"${p}"` : p).join(" OR ");
-}
 
 // Extract meaningful keywords from a prompt, including bigrams (2-word noun phrases).
 // Bigrams capture intent better than isolated words (e.g., "rate limit" vs "rate" + "limit").
@@ -144,7 +122,11 @@ export function buildRobustFtsQuery(raw: string): string {
   for (const [term, synonyms] of Object.entries(SYNONYMS)) {
     if (!lowered.includes(term)) continue;
     terms.add(term);
-    for (const syn of synonyms) terms.add(syn);
+    for (const syn of synonyms) {
+      if (terms.size >= 20) break;
+      terms.add(syn);
+    }
+    if (terms.size >= 20) break;
   }
 
   return [...terms]

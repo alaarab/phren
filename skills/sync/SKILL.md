@@ -14,7 +14,7 @@ This skill requires a cortex repository. If you don't have one yet, see "New mac
 
 **Expected structure:**
 ```
-~/cortex/               # or wherever your cortex repo lives
+~/.cortex/               # or wherever your cortex repo lives
   global/               # skills and config for all projects
     skills/             # global skill files (.md)
     CLAUDE.md           # global Claude instructions
@@ -41,12 +41,12 @@ When the user says "get my skills", "sync my config", "pull from cortex", or jus
 ### 1. Find the cortex directory
 
 ```bash
-CORTEX_DIR="${CORTEX_DIR:-$HOME/cortex}"
+CORTEX_DIR="${CORTEX_DIR:-$HOME/.cortex}"
 ls "$CORTEX_DIR" 2>/dev/null
 ```
 
 If the directory doesn't exist, tell the user:
-> "No cortex repo found at ~/cortex. Clone yours with `git clone <your-repo-url> ~/cortex`, or set `CORTEX_DIR` to point to a different location."
+> "No cortex repo found at ~/.cortex. Clone yours with `git clone <your-repo-url> ~/.cortex`, or set `CORTEX_DIR` to point to a different location."
 
 ### 2. Figure out which machine this is
 
@@ -97,7 +97,7 @@ If this fails (not a git repo, no remote), tell the user. Don't silently skip.
 
 ### 5. Link everything in the profile
 
-For each project in the profile's `projects` list, run `link.sh` or replicate its logic:
+For each project in the profile's `projects` list, run `npx @alaarab/cortex link` or replicate its logic:
 
 - Symlink `$CORTEX_DIR/<project>/CLAUDE.md` to `~/<project>/CLAUDE.md`
 - Symlink `$CORTEX_DIR/<project>/skills/` contents to `~/<project>/.claude/skills/`
@@ -222,7 +222,7 @@ First time on a new machine:
 
 ```bash
 # 1. Clone your cortex repo
-git clone <your-repo-url> ~/cortex
+git clone <your-repo-url> ~/.cortex
 
 # 2. Name this machine
 echo "my-machine-name" > ~/.cortex-machine
@@ -235,7 +235,22 @@ echo "my-machine-name" > ~/.cortex-machine
 
 If you don't have a cortex repo yet, start with `/cortex-init` to create one from scratch.
 
+## Conflict resolution
+
+When two machines edit the same cortex file before syncing, `git pull` will hit a merge conflict. Here's how to handle each file type:
+
+**backlog.md**: Take both changes. Backlog items from both machines are valid. Concat them, deduplicate if needed, commit.
+
+**LEARNINGS.md**: Take both changes. Keep entries in chronological order. If both machines added entries on the same date, interleave or group them under the same date heading.
+
+**CLAUDE.md**: Manual merge. Ask the user which version they want, or show both and let them pick. These files contain preferences and instructions where intent matters, so don't auto-resolve.
+
+**skills/ files**: If the same skill was edited on both machines, show the user a diff and let them choose. If different skills were edited, git handles this automatically (no conflict).
+
+**General approach**: Run `git pull --rebase` during sync. If conflicts appear, tell the user which files conflict and apply the rules above. Don't silently drop changes from either side.
+
 ## Related skills
 
 - `/cortex-init`: create a new project or set up cortex from scratch
+- `add_learning()`: capture learnings via MCP (synced across machines by `save_learnings()`)
 - `/cortex-consolidate`: synthesize learnings across projects

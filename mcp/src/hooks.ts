@@ -13,7 +13,7 @@ export function commandExists(cmd: string): boolean {
 
 export function detectInstalledTools(): Set<string> {
   const tools = new Set<string>();
-  if (commandExists("gh") || fs.existsSync(path.join(os.homedir(), ".github"))) {
+  if (commandExists("github-copilot-cli") || fs.existsSync(path.join(os.homedir(), ".local", "share", "gh", "extensions", "gh-copilot"))) {
     tools.add("copilot");
   }
   if (commandExists("cursor") || fs.existsSync(path.join(os.homedir(), ".cursor"))) {
@@ -92,7 +92,7 @@ function installSessionWrapper(tool: string, cortexPath: string): boolean {
   const stopCmd = entry
     ? `env CORTEX_PATH="$CORTEX_PATH" node "$ENTRY_SCRIPT" hook-stop`
     : `env CORTEX_PATH="$CORTEX_PATH" npx @alaarab/cortex hook-stop`;
-  const content = `#!/usr/bin/env bash
+  const content = `#!/bin/sh
 set -u
 
 REAL_BIN="${escapedBinary}"
@@ -111,10 +111,12 @@ case "\${1:-}" in
 esac
 
 run_with_timeout() {
+  _timeout_val="$1"
+  shift
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$1" "\${@:2}" || true
+    timeout "$_timeout_val" "$@" || true
   else
-    "\${@:2}" || true
+    "$@" || true
   fi
 }
 
@@ -138,6 +140,67 @@ exit $status
   }
 }
 
+// Hook config schemas for each tool. Validates shape before writing to catch
+// breaking changes if any tool updates its config format.
+interface HookEntry { type: string; [k: string]: unknown }
+interface CopilotHookConfig {
+  version: number;
+  hooks: {
+    sessionStart: HookEntry[];
+    userPromptSubmitted: HookEntry[];
+    sessionEnd: HookEntry[];
+  };
+}
+interface CursorHookConfig {
+  version: number;
+  sessionStart: { command: string };
+  beforeSubmitPrompt: { command: string };
+  stop: { command: string };
+}
+interface CodexHookConfig {
+  hooks: {
+    SessionStart: HookEntry[];
+    UserPromptSubmit: HookEntry[];
+    Stop: HookEntry[];
+  };
+}
+
+function validateCopilotConfig(config: CopilotHookConfig): boolean {
+  return (
+    typeof config.version === "number" &&
+    Array.isArray(config.hooks?.sessionStart) &&
+    Array.isArray(config.hooks?.userPromptSubmitted) &&
+    Array.isArray(config.hooks?.sessionEnd)
+  );
+}
+
+function validateCursorConfig(config: CursorHookConfig): boolean {
+  return (
+    typeof config.version === "number" &&
+    typeof config.sessionStart?.command === "string" &&
+    typeof config.beforeSubmitPrompt?.command === "string" &&
+    typeof config.stop?.command === "string"
+  );
+}
+
+function validateCodexConfig(config: CodexHookConfig): boolean {
+  return (
+    Array.isArray(config.hooks?.SessionStart) &&
+    Array.isArray(config.hooks?.UserPromptSubmit) &&
+    Array.isArray(config.hooks?.Stop)
+  );
+}
+
+function isHooksEnabled(cortexPath: string): boolean {
+  try {
+    const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
+    const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
+    return prefs.hooksEnabled !== false;
+  } catch {
+    return true;
+  }
+}
+
 // tools param accepts either a pre-computed Set (from link) or a boolean (from init)
 export function configureAllHooks(cortexPath: string, tools: Set<string> | boolean = false): string[] {
   const configured: string[] = [];
@@ -150,6 +213,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
   const pullCmd = lifecycle.sessionStart;
   const promptCmd = lifecycle.userPromptSubmit;
   const stopCmd = lifecycle.stop;
+  const hooksEnabled = isHooksEnabled(cortexPath);
 
   // ── GitHub Copilot CLI (user-level: ~/.github/hooks/cortex.json) ──────────
   if (detected.has("copilot")) {
@@ -157,7 +221,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
     const copilotFile = path.join(copilotHooksDir, "cortex.json");
     try {
       fs.mkdirSync(copilotHooksDir, { recursive: true });
-      const config = {
+      const config: CopilotHookConfig = {
         version: 1,
         hooks: {
           sessionStart: [{ type: "command", bash: pullCmd }],
@@ -165,10 +229,11 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
           sessionEnd: [{ type: "command", bash: stopCmd }],
         },
       };
+      if (!validateCopilotConfig(config)) throw new Error("invalid copilot hook config shape");
       fs.writeFileSync(copilotFile, JSON.stringify(config, null, 2));
       configured.push("Copilot CLI");
     } catch { /* best effort */ }
-    installSessionWrapper("copilot", cortexPath);
+    if (hooksEnabled) installSessionWrapper("copilot", cortexPath);
   }
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
@@ -178,7 +243,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
       let existing: any = {};
       try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch { /* new file */ }
-      const config = {
+      const config: CursorHookConfig = {
         ...existing,
         version: 1,
         // Cursor parity: sessionStart is best-effort where supported; wrapper also enforces lifecycle.
@@ -186,10 +251,11 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
         beforeSubmitPrompt: { command: promptCmd },
         stop: { command: stopCmd },
       };
+      if (!validateCursorConfig(config)) throw new Error("invalid cursor hook config shape");
       fs.writeFileSync(cursorFile, JSON.stringify(config, null, 2));
       configured.push("Cursor");
     } catch { /* best effort */ }
-    installSessionWrapper("cursor", cortexPath);
+    if (hooksEnabled) installSessionWrapper("cursor", cortexPath);
   }
 
   // ── Codex (codex.json in cortex path) ────────────────────────────────────
@@ -198,7 +264,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
     try {
       let existing: any = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch { /* new file */ }
-      const config = {
+      const config: CodexHookConfig = {
         ...existing,
         hooks: {
           SessionStart: [{ type: "command", command: pullCmd }],
@@ -206,10 +272,11 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
           Stop: [{ type: "command", command: stopCmd }],
         },
       };
+      if (!validateCodexConfig(config)) throw new Error("invalid codex hook config shape");
       fs.writeFileSync(codexFile, JSON.stringify(config, null, 2));
       configured.push("Codex");
     } catch { /* best effort */ }
-    installSessionWrapper("codex", cortexPath);
+    if (hooksEnabled) installSessionWrapper("codex", cortexPath);
   }
 
   return configured;

@@ -18,7 +18,7 @@ npx @cortex/mcp
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CORTEX_PATH` | `~/cortex` or `~/my-cortex` | Path to your cortex instance |
+| `CORTEX_PATH` | `~/.cortex` | Path to your cortex instance |
 | `CORTEX_PROFILE` | *(none)* | Active profile name. Reads `profiles/<name>.yaml` to filter projects |
 
 If no profile is set, all top-level directories in the cortex are indexed.
@@ -51,7 +51,7 @@ No parameters.
 
 ## How it works
 
-1. Reads `CORTEX_PATH` (or finds `~/cortex`)
+1. Reads `CORTEX_PATH` (or defaults to `~/.cortex`)
 2. If `CORTEX_PROFILE` is set, reads `profiles/<profile>.yaml` for the project list
 3. Otherwise indexes all top-level directories
 4. Walks each project directory, reads `.md` files, classifies them by filename

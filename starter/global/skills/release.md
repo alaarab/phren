@@ -1,3 +1,7 @@
+---
+name: release
+description: Get from "code is ready" to "users have it" with a version bump, changelog, tag, and publish checklist.
+---
 # /release - Ship a version
 
 Get from "code is ready" to "users have it" with a checklist.

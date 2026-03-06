@@ -123,7 +123,7 @@ When the context window fills and resets, a hook re-injects your project summary
 The server indexes your cortex into a local SQLite FTS5 database. Twenty-two tools available:
 
 **Search and browse:**
-- `search_cortex(query, type?, limit?)` with automatic synonym expansion
+- `search_cortex(query, type?, limit?, project?)` with automatic synonym expansion
 - `get_project_summary(name)` for a project's summary card and file list
 - `list_projects()` for everything in your active profile
 - `list_machines()` shows registered machines and their profiles

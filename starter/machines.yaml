@@ -5,4 +5,4 @@
 #   work-laptop: work
 #   home-desktop: personal
 #
-# After adding a line, run: ./link.sh
+# After adding a line, run: npx @alaarab/cortex link

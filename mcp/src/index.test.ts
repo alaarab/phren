@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { sanitizeFts5Query, isValidProjectName, safeProjectPath, expandSynonyms, extractKeywords, buildRobustFtsQuery } from "./utils.js";
+import { sanitizeFts5Query, isValidProjectName, safeProjectPath, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import {
   validateLearningsFormat,
   validateBacklogFormat,
@@ -167,52 +167,6 @@ describe("isValidProjectName", () => {
 
   it("rejects triple dots containing ..", () => {
     expect(isValidProjectName("...")).toBe(false);
-  });
-});
-
-describe("expandSynonyms", () => {
-  it("expands a known synonym", () => {
-    const result = expandSynonyms("throttling");
-    expect(result).toContain("throttling");
-    expect(result).toContain("rate limit");
-    expect(result).toContain("OR");
-  });
-
-  it("expands bidirectionally", () => {
-    const result = expandSynonyms("rate limit");
-    expect(result).toContain("throttle");
-    expect(result).toContain("429");
-  });
-
-  it("returns original query when no synonyms match", () => {
-    expect(expandSynonyms("xyzzy")).toBe("xyzzy");
-  });
-
-  it("does not duplicate terms already in the query", () => {
-    const result = expandSynonyms("throttle rate limit");
-    // "rate limit" is a synonym of "throttle" but already present
-    expect(result).not.toMatch(/rate limit.*rate limit/);
-  });
-
-  it("handles multi-word synonyms with quotes", () => {
-    const result = expandSynonyms("429");
-    expect(result).toContain('"rate limit"');
-  });
-
-  it("handles empty string", () => {
-    expect(expandSynonyms("")).toBe("");
-  });
-
-  it("expands auth terms", () => {
-    const result = expandSynonyms("auth");
-    expect(result).toContain("authentication");
-    expect(result).toContain("login");
-  });
-
-  it("expands database terms", () => {
-    const result = expandSynonyms("db");
-    expect(result).toContain("database");
-    expect(result).toContain("sqlite");
   });
 });
 

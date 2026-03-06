@@ -150,6 +150,7 @@ describe("CortexShell", () => {
     await shell.handleInput(":add write shell tests [medium]");
     await shell.handleInput(":work next");
     await shell.handleInput(":complete write shell tests");
+    await shell.handleInput("y");
 
     const parsedInitial = readBacklog(dir, "demo");
     expect(typeof parsedInitial).not.toBe("string");
@@ -159,6 +160,7 @@ describe("CortexShell", () => {
     // Force multiple done entries and archive old ones.
     await shell.handleInput(":add prune this task");
     await shell.handleInput(":complete prune this task");
+    await shell.handleInput("y");
     await shell.handleInput(":tidy 1");
 
     const parsedAfterTidy = readBacklog(dir, "demo");
@@ -179,6 +181,7 @@ describe("CortexShell", () => {
     expect((learnings as any[]).some((entry) => entry.text.includes("Shell can write learnings"))).toBe(true);
 
     await shell.handleInput(":learn remove Shell can write learnings");
+    await shell.handleInput("y");
     learnings = readLearnings(dir, "demo");
     expect((learnings as any[]).some((entry) => entry.text.includes("Shell can write learnings"))).toBe(false);
   });
@@ -189,6 +192,7 @@ describe("CortexShell", () => {
     await shell.handleInput(":mq edit M1 keep this memory updated");
     await shell.handleInput(":mq approve M1");
     await shell.handleInput(":mq reject stale memory");
+    await shell.handleInput("y");
 
     const queue = readMemoryQueue(dir, "demo");
     expect(typeof queue).not.toBe("string");
@@ -223,5 +227,91 @@ describe("CortexShell", () => {
     const output = await shell.render();
     expect(output).toContain("View: Backlog");
     expect(output).toContain("Project: demo");
+  });
+
+  it(":help renders help text as main content and clears on next input", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":help");
+    let output = await shell.render();
+    expect(output).toContain("Palette Commands");
+    expect(output).toContain("Navigation");
+    expect(output).toContain("Press any key to dismiss.");
+
+    await shell.handleInput("");
+    output = await shell.render();
+    expect(output).not.toContain("Palette Commands");
+  });
+
+  it("preserves per-view page numbers when switching views", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+
+    await shell.handleInput("b");
+    await shell.handleInput(":page 3");
+    const stateAfterBacklog = loadShellState(dir);
+    expect(stateAfterBacklog.page).toBe(3);
+
+    await shell.handleInput("l");
+    const stateAfterLearnings = loadShellState(dir);
+    expect(stateAfterLearnings.page).toBe(1);
+
+    await shell.handleInput("b");
+    const stateBackAgain = loadShellState(dir);
+    expect(stateBackAgain.page).toBe(3);
+  });
+
+  it(":govern and :consolidate require a selected project", async () => {
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-shell-empty-"));
+    try {
+      const shell = new CortexShell(emptyDir, "", {
+        runDoctor: async () => ({ ok: true, checks: [] }) as any,
+        runRelink: async () => "ok",
+        runHooks: async () => "ok",
+        runUpdate: async () => "ok",
+      });
+
+      await shell.handleInput(":govern");
+      let output = await shell.render();
+      expect(output).toContain("Select a project first");
+
+      await shell.handleInput(":consolidate");
+      output = await shell.render();
+      expect(output).toContain("Select a project first");
+    } finally {
+      fs.rmSync(emptyDir, { recursive: true, force: true });
+    }
+  });
+
+  it("shows loading indicators during async operations", async () => {
+    let relinkResolve: (() => void) | undefined;
+    const relinkPromise = new Promise<string>((resolve) => {
+      relinkResolve = () => resolve("Relink done");
+    });
+
+    const shell = new CortexShell(dir, "", {
+      runDoctor: async () => ({ ok: true, checks: [] }) as any,
+      runRelink: async () => relinkPromise,
+      runHooks: async () => "ok",
+      runUpdate: async () => "ok",
+    });
+    await shell.handleInput(":open demo");
+
+    const inputPromise = shell.handleInput(":relink");
+    relinkResolve!();
+    await inputPromise;
+
+    const output = await shell.render();
+    expect(output).toContain("Relink done");
+  });
+
+  it("groups memory queue items by section with headers", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("m");
+    const output = await shell.render();
+    expect(output).toContain("[Memory Queue]");
+    expect(output).toContain("Review");
+    expect(output).toContain("Stale");
+    expect(output).toMatch(/─{10,}/);
   });
 });

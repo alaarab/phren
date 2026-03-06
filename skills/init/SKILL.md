@@ -23,7 +23,7 @@ ls "$CORTEX_DIR" 2>/dev/null
 ```
 
 If the cortex directory doesn't exist, offer to create it:
-> "No cortex repo found. Want me to create one at ~/cortex? This will set up the base directory structure (global/, profiles/, machines.yaml)."
+> "No cortex repo found. Want me to create one at ~/.cortex? This will set up the base directory structure (global/, profiles/, machines.yaml)."
 
 If the user says yes, create the base structure:
 ```bash
@@ -142,7 +142,9 @@ If cortex isn't a git repo yet, walk them through the full setup:
 
 ```bash
 cd "$CORTEX_DIR"
-git init && git add -A && git commit -m "initial cortex setup"
+git init
+git add -A
+git commit -m "initial cortex setup"
 ```
 
 Then check if `gh` is available:
@@ -159,7 +161,7 @@ If they say yes:
 gh repo create my-cortex --private --source=. --push
 ```
 
-If `gh` isn't available, give them the manual steps:
+If `gh` isn't available, show the manual steps:
 > "Create a private repo at github.com/new, then:
 >   git remote add origin git@github.com:YOU/my-cortex.git
 >   git push -u origin main

@@ -1,3 +1,7 @@
+---
+name: cortex-discover
+description: Audit your cortex repo and tell you exactly what needs attention.
+---
 # /cortex-discover - Cortex health check
 
 > Audit your cortex repo and tell you exactly what needs attention.
@@ -18,12 +22,12 @@ Scans your cortex directory for missing files, stale content, skill gaps, and st
 ### 1. Find the cortex directory
 
 ```bash
-CORTEX_DIR="${CORTEX_DIR:-$HOME/cortex}"
+CORTEX_DIR="${CORTEX_DIR:-$HOME/.cortex}"
 ls "$CORTEX_DIR" 2>/dev/null
 ```
 
 If it doesn't exist:
-> "No cortex directory found at ~/cortex. Run `/cortex-init` to set one up."
+> "No cortex directory found at ~/.cortex. Run `/cortex-init` to set one up."
 
 ### 2. Scan all projects
 
@@ -143,7 +147,7 @@ Stuck items:
 
 ## Top 3 things to work on next
 
-1. **Add LEARNINGS.md to myapp.** You've been working on it actively but capturing nothing. Run `/cortex-learn` after your next session.
+1. **Add LEARNINGS.md to myapp.** You've been working on it actively but capturing nothing. Use `add_learning()` during your next session.
 2. **Unstick api-server backlog.** 5 items, 0 completed. Either work them or trim them. Stale backlogs are worse than no backlog.
 3. **Create a `/changelog` skill.** You're doing it manually in 3 projects. 15 minutes to write the skill saves hours over time.
 ```
@@ -163,6 +167,6 @@ The "Top 3" section is the most important part. Make these:
 ## Related skills
 
 - `/cortex-init`: scaffold missing files for a project
-- `/cortex-learn`: capture learnings (fixes "missing LEARNINGS.md")
+- `add_learning()`: capture learnings via MCP (fixes "missing LEARNINGS.md")
 - `/cortex-consolidate`: synthesize cross-project patterns
 - `/backlog`: work on stuck backlog items

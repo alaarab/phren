@@ -14,6 +14,8 @@ import {
   ensureGovernanceFiles,
   getHooksEnabledPreference,
   getMcpEnabledPreference,
+  isVersionNewer,
+  logMcpTargetStatus,
   setMcpEnabledPreference,
   type McpMode,
 } from "./init.js";
@@ -33,20 +35,7 @@ const DEFAULT_SEARCH_PATHS = [
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
-function logMcpStatus(tool: string, status: string) {
-  const text: Record<string, string> = {
-    installed: `${tool}: installed cortex MCP server`,
-    already_configured: `${tool}: cortex MCP already configured`,
-    disabled: `${tool}: cortex MCP disabled`,
-    already_disabled: `${tool}: cortex MCP already disabled`,
-    no_settings: `${tool}: settings not found (skipping)`,
-    no_vscode: `${tool}: not detected`,
-    no_cursor: `${tool}: not detected`,
-    no_copilot: `${tool}: not detected`,
-    no_codex: `${tool}: not detected`,
-  };
-  if (text[status]) log(`  ${text[status]}`);
-}
+
 
 function getMachineName(): string {
   if (fs.existsSync(MACHINE_FILE)) return fs.readFileSync(MACHINE_FILE, "utf8").trim();
@@ -56,7 +45,7 @@ function getMachineName(): string {
 function lookupProfile(cortexPath: string, machine: string): string {
   const machinesFile = path.join(cortexPath, "machines.yaml");
   if (!fs.existsSync(machinesFile)) return "";
-  const data = yaml.load(fs.readFileSync(machinesFile, "utf8")) as Record<string, any>;
+  const data = yaml.load(fs.readFileSync(machinesFile, "utf8"), { schema: yaml.CORE_SCHEMA }) as Record<string, any>;
   return data?.[machine] ?? "";
 }
 
@@ -66,7 +55,7 @@ function listProfiles(cortexPath: string): Array<{ name: string; description: st
   return fs.readdirSync(profilesDir)
     .filter(f => f.endsWith(".yaml"))
     .map(f => {
-      const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8")) as any;
+      const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as any;
       return { name: data?.name ?? "", description: data?.description ?? "" };
     })
     .filter(p => p.name);
@@ -77,14 +66,14 @@ function findProfileFile(cortexPath: string, profileName: string): string | null
   if (!fs.existsSync(profilesDir)) return null;
   for (const f of fs.readdirSync(profilesDir)) {
     if (!f.endsWith(".yaml")) continue;
-    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8")) as any;
+    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as any;
     if (data?.name === profileName) return path.join(profilesDir, f);
   }
   return null;
 }
 
 function getProfileProjects(profileFile: string): string[] {
-  const data = yaml.load(fs.readFileSync(profileFile, "utf8")) as any;
+  const data = yaml.load(fs.readFileSync(profileFile, "utf8"), { schema: yaml.CORE_SCHEMA }) as any;
   return Array.isArray(data?.projects) ? data.projects : [];
 }
 
@@ -94,7 +83,7 @@ function allKnownProjects(cortexPath: string): string[] {
   const projects = new Set<string>();
   for (const f of fs.readdirSync(profilesDir)) {
     if (!f.endsWith(".yaml")) continue;
-    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8")) as any;
+    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as any;
     for (const p of (data?.projects ?? [])) projects.add(p);
   }
   return [...projects].sort();
@@ -112,27 +101,10 @@ function findProjectDir(name: string): string | null {
 }
 
 function displayName(slug: string): string {
+  if (!slug) return "";
   return slug.split("-").map(w => w[0]?.toUpperCase() + w.slice(1)).join(" ");
 }
 
-function semverParts(version: string): [number, number, number] {
-  const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return [0, 0, 0];
-  return [
-    Number.parseInt(match[1], 10) || 0,
-    Number.parseInt(match[2], 10) || 0,
-    Number.parseInt(match[3], 10) || 0,
-  ];
-}
-
-function isVersionNewer(current: string, previous?: string): boolean {
-  if (!previous) return false;
-  const [ca, cb, cc] = semverParts(current);
-  const [pa, pb, pc] = semverParts(previous);
-  if (ca !== pa) return ca > pa;
-  if (cb !== pb) return cb > pb;
-  return cc > pc;
-}
 
 function currentPackageVersion(): string | null {
   try {
@@ -213,22 +185,35 @@ function setupSparseCheckout(cortexPath: string, projects: string[]) {
 function symlinkFile(src: string, dest: string) {
   try {
     if (fs.lstatSync(dest)) fs.unlinkSync(dest);
-  } catch { /* dest doesn't exist */ }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
   fs.symlinkSync(src, dest);
 }
 
 // ── SKILL.md ──────────────────────────────────────────────────────────────────
+
+function getPackageVersion(): string {
+  try {
+    const pkgPath = path.join(ROOT, "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    return pkg.version || "1.0.0";
+  } catch {
+    return "1.0.0";
+  }
+}
 
 function writeSkillMd(cortexPath: string) {
   const lifecycle = buildLifecycleCommands(cortexPath);
   const sessionStartCmd = lifecycle.sessionStart.replace(/"/g, '\\"');
   const promptCmd = lifecycle.userPromptSubmit.replace(/"/g, '\\"');
   const stopCmd = lifecycle.stop.replace(/"/g, '\\"');
+  const version = getPackageVersion();
 
   const content = `---
 name: cortex
-description: Long-term memory system — injects project context and saves learnings across sessions
-version: "1.0"
+description: Long-term memory for AI coding agents with automatic context injection and learning capture
+version: "${version}"
 license: MIT
 hooks:
   SessionStart:
@@ -248,39 +233,78 @@ hooks:
 
 # cortex
 
-Cortex is a long-term memory system for AI coding agents. It injects relevant project
-context at the start of each prompt and saves learnings at session end via git.
+Long-term memory for AI coding agents. Injects relevant project context at the start of
+each prompt and saves learnings at session end via git. Works with Claude Code, Copilot CLI,
+Cursor, and Codex.
 
-## What it does
+## Lifecycle hooks
 
-- **SessionStart**: pulls latest cortex knowledge and self-heals hook/symlink drift
-- **UserPromptSubmit**: injects relevant project context, learnings, and backlog items
-- **Stop**: commits and pushes any new learnings to remote
+- **SessionStart**: pulls latest cortex data and self-heals hook/symlink drift
+- **UserPromptSubmit**: searches cortex, injects matching context with trust filtering and token budgeting
+- **Stop**: commits and pushes any cortex changes to remote
 
-## MCP tools (when cortex MCP server is running)
+## MCP tools (22)
 
-- \`search_cortex\` — semantic search across all project knowledge
-- \`get_project_summary\` — get summary + CLAUDE.md for a project
-- \`list_projects\` — list all known projects
-- \`save_learnings\` — save a new learning to a project
+**Search and browse:**
+- \`search_cortex\`: FTS5 search with synonym expansion across all project knowledge
+- \`get_project_summary\`: project summary card and available docs
+- \`list_projects\`: all projects in the active profile
+- \`list_machines\`: registered machines and their profiles
+- \`list_profiles\`: all profiles and which projects each includes
+
+**Backlog management:**
+- \`get_backlog\`: read tasks for one or all projects
+- \`add_backlog_item\`: add a task to the Queue section
+- \`complete_backlog_item\`: match by text, move to Done
+- \`update_backlog_item\`: change priority, context, or section
+
+**Learning capture:**
+- \`add_learning\`: append insight under today's date with optional citation metadata
+- \`remove_learning\`: remove a learning by matching text
+- \`save_learnings\`: commit and push all cortex changes
+- \`pin_memory\`: promote important memory into CANONICAL_MEMORIES.md
+- \`migrate_legacy_findings\`: promote legacy findings docs into LEARNINGS/CANONICAL
+
+**Memory governance and quality:**
+- \`govern_memories\`: queue stale/conflicting/low-value entries for review
+- \`memory_policy\`: read or update retention, ttl, decay, and confidence thresholds
+- \`memory_workflow\`: read or update risky-memory approval workflow settings
+- \`memory_access\`: read or update role-based permissions
+- \`prune_memories\`: delete expired entries by retention policy
+- \`consolidate_memories\`: deduplicate and rewrite LEARNINGS.md
+- \`memory_feedback\`: record helpful/reprompt/regression outcomes
+- \`index_policy\`: configure include/exclude globs and hidden-doc indexing
 `;
 
   const dest = path.join(cortexPath, "cortex.SKILL.md");
   fs.writeFileSync(dest, content);
 }
 
+function linkSkillsDir(srcDir: string, destDir: string) {
+  if (!fs.existsSync(srcDir)) return;
+  fs.mkdirSync(destDir, { recursive: true });
+
+  for (const entry of fs.readdirSync(srcDir)) {
+    const srcPath = path.join(srcDir, entry);
+    const stat = fs.statSync(srcPath);
+
+    if (stat.isFile() && entry.endsWith(".md")) {
+      // Flat skill file: link directly
+      symlinkFile(srcPath, path.join(destDir, entry));
+    } else if (stat.isDirectory()) {
+      // Subfolder format: look for SKILL.md inside
+      const skillFile = path.join(srcPath, "SKILL.md");
+      if (fs.existsSync(skillFile)) {
+        symlinkFile(skillFile, path.join(destDir, `${entry}.md`));
+      }
+    }
+  }
+}
+
 function linkGlobal(cortexPath: string, tools: Set<string>) {
   log("  global skills -> ~/.claude/skills/");
   const skillsDir = path.join(os.homedir(), ".claude", "skills");
-  fs.mkdirSync(skillsDir, { recursive: true });
-
-  const globalSkillsDir = path.join(cortexPath, "global", "skills");
-  if (fs.existsSync(globalSkillsDir)) {
-    for (const f of fs.readdirSync(globalSkillsDir)) {
-      const src = path.join(globalSkillsDir, f);
-      if (fs.statSync(src).isFile()) symlinkFile(src, path.join(skillsDir, f));
-    }
-  }
+  linkSkillsDir(path.join(cortexPath, "global", "skills"), skillsDir);
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
@@ -342,15 +366,11 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
     try { addTokenAnnotation(claudeFile); } catch { /* best effort */ }
   }
 
-  // Project-level skills
+  // Project-level skills (supports both flat .md and subfolder/SKILL.md)
   const projectSkills = path.join(cortexPath, project, ".claude", "skills");
   if (fs.existsSync(projectSkills)) {
     const targetSkills = path.join(target, ".claude", "skills");
-    fs.mkdirSync(targetSkills, { recursive: true });
-    for (const f of fs.readdirSync(projectSkills)) {
-      const src = path.join(projectSkills, f);
-      if (fs.statSync(src).isFile()) symlinkFile(src, path.join(targetSkills, f));
-    }
+    linkSkillsDir(projectSkills, targetSkills);
   }
 }
 
@@ -409,11 +429,20 @@ function writeContextDebugging(machine: string, profile: string, mcpStatus: stri
     ...(mcpLine ? [mcpLine] : []),
   ].join("\n") + "\n\n## Project Learnings\n";
 
+  const MAX_FILE_BYTES = 50 * 1024;
   for (const project of projects) {
     if (project === "global") continue;
     const learnings = path.join(cortexPath, project, "LEARNINGS.md");
     if (fs.existsSync(learnings)) {
-      content += `\n### ${project}\n${fs.readFileSync(learnings, "utf8")}\n`;
+      let body = fs.readFileSync(learnings, "utf8");
+      if (body.length > MAX_FILE_BYTES) {
+        // Keep only the most recent entries (end of file)
+        body = body.slice(-MAX_FILE_BYTES);
+        const firstNewline = body.indexOf("\n");
+        if (firstNewline !== -1) body = body.slice(firstNewline + 1);
+        body = `(truncated to most recent entries)\n${body}`;
+      }
+      content += `\n### ${project}\n${body}\n`;
     }
   }
   writeContextFile(content);
@@ -430,14 +459,26 @@ function writeContextPlanning(machine: string, profile: string, mcpStatus: strin
     ...(mcpLine ? [mcpLine] : []),
   ].join("\n");
 
+  const MAX_CONTEXT_BYTES = 100 * 1024;
   for (const project of projects) {
     if (project === "global") continue;
+    if (content.length >= MAX_CONTEXT_BYTES) {
+      content += `\n\n(remaining projects truncated, context size limit reached)\n`;
+      break;
+    }
     const summaryFile = path.join(cortexPath, project, "summary.md");
     const backlogFile = path.join(cortexPath, project, "backlog.md");
     if (!fs.existsSync(summaryFile) && !fs.existsSync(backlogFile)) continue;
     content += `\n\n## ${project}\n`;
     if (fs.existsSync(summaryFile)) content += fs.readFileSync(summaryFile, "utf8") + "\n";
-    if (fs.existsSync(backlogFile)) content += `\n### Backlog\n${fs.readFileSync(backlogFile, "utf8")}\n`;
+    if (fs.existsSync(backlogFile)) {
+      let backlog = fs.readFileSync(backlogFile, "utf8");
+      const remaining = MAX_CONTEXT_BYTES - content.length;
+      if (backlog.length > remaining && remaining > 0) {
+        backlog = backlog.slice(0, remaining) + "\n(backlog truncated)\n";
+      }
+      content += `\n### Backlog\n${backlog}\n`;
+    }
   }
   writeContextFile(content);
   log(`  wrote ${CONTEXT_FILE} (planning mode)`);
@@ -452,8 +493,10 @@ function writeContextClean(machine: string, profile: string, mcpStatus: string, 
 }
 
 function rebuildMemory(cortexPath: string, projects: string[]) {
-  const user = os.userInfo().username;
-  const memoryDir = path.join(os.homedir(), ".claude", "projects", `-home-${user}`, "memory");
+  // Claude Code uses CWD with path separators replaced by dashes as the project key.
+  // The root memory lives under the home directory's project key.
+  const projectKey = os.homedir().replace(/[/\\]/g, "-").replace(/^-/, "");
+  const memoryDir = path.join(os.homedir(), ".claude", "projects", projectKey, "memory");
   const memoryFile = path.join(memoryDir, "MEMORY.md");
 
   const hasSummaries = projects.some(p =>
@@ -578,23 +621,23 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   maybeOfferStarterTemplateUpdate(cortexPath);
   let mcpStatus = "no_settings";
   try { mcpStatus = configureClaude(cortexPath, { mcpEnabled, hooksEnabled }) ?? "installed"; } catch { /* best effort */ }
-  logMcpStatus("Claude", mcpStatus);
+  logMcpTargetStatus("Claude", mcpStatus);
 
   let vsStatus = "no_vscode";
   try { vsStatus = configureVSCode(cortexPath, { mcpEnabled }) ?? "no_vscode"; } catch { /* best effort */ }
-  logMcpStatus("VS Code", vsStatus);
+  logMcpTargetStatus("VS Code", vsStatus);
 
   let cursorStatus = "no_cursor";
   try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled }) ?? "no_cursor"; } catch { /* best effort */ }
-  logMcpStatus("Cursor", cursorStatus);
+  logMcpTargetStatus("Cursor", cursorStatus);
 
   let copilotStatus = "no_copilot";
   try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled }) ?? "no_copilot"; } catch { /* best effort */ }
-  logMcpStatus("Copilot CLI", copilotStatus);
+  logMcpTargetStatus("Copilot CLI", copilotStatus);
 
   let codexStatus = "no_codex";
   try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled }) ?? "no_codex"; } catch { /* best effort */ }
-  logMcpStatus("Codex", codexStatus);
+  logMcpTargetStatus("Codex", codexStatus);
   const mcpStatusForContext = [mcpStatus, vsStatus, cursorStatus, copilotStatus, codexStatus].some(
     (s) => s === "installed" || s === "already_configured"
   )
@@ -837,12 +880,26 @@ export async function runDoctor(cortexPath: string, fix: boolean = false): Promi
   } else if (fix) {
     checks.push({ name: "self-heal", ok: false, detail: "blocked: machine/profile not fully configured" });
   } else {
+    // Read-only mode: just check if hook configs exist, don't write anything
     const detectedTools = detectInstalledTools();
-    const hooked = configureAllHooks(cortexPath, detectedTools);
+    const hookChecks: string[] = [];
+    const missing: string[] = [];
+    for (const tool of detectedTools) {
+      let configPath = "";
+      if (tool === "copilot") configPath = path.join(os.homedir(), ".github", "hooks", "cortex.json");
+      else if (tool === "cursor") configPath = path.join(os.homedir(), ".cursor", "hooks.json");
+      else if (tool === "codex") configPath = path.join(cortexPath, "codex.json");
+      if (configPath && fs.existsSync(configPath)) hookChecks.push(tool);
+      else if (configPath) missing.push(tool);
+    }
     checks.push({
       name: "hooks",
-      ok: hooked.length > 0 || detectedTools.size === 0,
-      detail: hooked.length ? `hook configs present for: ${hooked.join(", ")}` : "no external tools detected",
+      ok: missing.length === 0,
+      detail: hookChecks.length
+        ? `hook configs present for: ${hookChecks.join(", ")}${missing.length ? `; missing: ${missing.join(", ")}` : ""}`
+        : detectedTools.size === 0
+          ? "no external tools detected"
+          : `missing hook configs for: ${missing.join(", ")}`,
     });
   }
 

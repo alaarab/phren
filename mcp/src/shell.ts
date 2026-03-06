@@ -34,6 +34,60 @@ import {
 import { runDoctor, runLink } from "./link.js";
 import { runCortexUpdate } from "./update.js";
 
+// ── ANSI color utilities ────────────────────────────────────────────────────
+
+const ESC = "\x1b[";
+const RESET = `${ESC}0m`;
+
+const style = {
+  bold: (s: string) => `${ESC}1m${s}${RESET}`,
+  dim: (s: string) => `${ESC}2m${s}${RESET}`,
+  italic: (s: string) => `${ESC}3m${s}${RESET}`,
+  cyan: (s: string) => `${ESC}36m${s}${RESET}`,
+  green: (s: string) => `${ESC}32m${s}${RESET}`,
+  yellow: (s: string) => `${ESC}33m${s}${RESET}`,
+  red: (s: string) => `${ESC}31m${s}${RESET}`,
+  magenta: (s: string) => `${ESC}35m${s}${RESET}`,
+  blue: (s: string) => `${ESC}34m${s}${RESET}`,
+  white: (s: string) => `${ESC}37m${s}${RESET}`,
+  gray: (s: string) => `${ESC}90m${s}${RESET}`,
+  boldCyan: (s: string) => `${ESC}1;36m${s}${RESET}`,
+  boldGreen: (s: string) => `${ESC}1;32m${s}${RESET}`,
+  boldYellow: (s: string) => `${ESC}1;33m${s}${RESET}`,
+  boldRed: (s: string) => `${ESC}1;31m${s}${RESET}`,
+  boldMagenta: (s: string) => `${ESC}1;35m${s}${RESET}`,
+  boldBlue: (s: string) => `${ESC}1;34m${s}${RESET}`,
+  dimItalic: (s: string) => `${ESC}2;3m${s}${RESET}`,
+};
+
+function badge(label: string, colorFn: (s: string) => string): string {
+  return colorFn(`[${label}]`);
+}
+
+function box(content: string[], width = 50): string[] {
+  const lines: string[] = [];
+  const inner = width - 2;
+  lines.push(style.dim(`╭${"─".repeat(inner)}╮`));
+  for (const line of content) {
+    // Pad without counting ANSI escapes toward width
+    const stripped = line.replace(/\x1b\[[0-9;]*m/g, "");
+    const pad = Math.max(0, inner - stripped.length);
+    lines.push(style.dim("│") + line + " ".repeat(pad) + style.dim("│"));
+  }
+  lines.push(style.dim(`╰${"─".repeat(inner)}╯`));
+  return lines;
+}
+
+function separator(width = 50): string {
+  return style.dim("─".repeat(width));
+}
+
+function highlightKey(key: string, label: string): string {
+  return style.boldCyan(`[${key}]`) + style.dim(label);
+}
+
+// ── End ANSI utilities ──────────────────────────────────────────────────────
+
 export type ShellView = ShellState["view"];
 
 export interface ShellDeps {
@@ -113,32 +167,51 @@ function normalizeSection(sectionRaw: string): "Active" | "Queue" | "Done" | nul
 }
 
 function shellHelpText(): string {
+  const hdr = (s: string) => style.bold(style.white(s));
+  const cmd = (s: string) => style.boldCyan(s);
+  const desc = (s: string) => style.dim(s);
+
   return [
-    "Shortcuts: p=projects b=backlog l=learnings m=memory h=health q=quit /=filter :palette",
-    "Palette commands:",
-    "  :open <project>                              select active project context",
-    "  :add <task>                                  add backlog item to queue",
-    "  :complete <task-id|match>                    mark backlog item done",
-    "  :move <task-id|match> <active|queue|done>    move backlog item",
-    "  :reprioritize <task-id|match> <high|medium|low>",
-    "  :context <task-id|match> <text>              append/update context",
-    "  :work next                                   move top queue item to active",
-    "  :tidy [keep]                                 archive done items (default keep=30)",
-    "  :learn add <text>                            append learning",
-    "  :learn remove <learning-id|match>            remove learning",
-    "  :mq approve|reject <queue-id|match>          memory queue triage",
-    "  :mq edit <queue-id|match> <text>             edit memory queue item",
-    "  :machine map <hostname> <profile>            safely edit machines.yaml",
-    "  :profile add-project <profile> <project>     safely edit profile projects",
-    "  :profile remove-project <profile> <project>",
-    "  :run fix                                     run doctor --fix",
-    "  :relink                                      rerun cortex link",
-    "  :rerun hooks                                 run lifecycle hooks now",
-    "  :update                                      update cortex to latest",
-    "  :reset                                       reset shell state",
-    "  :page next|prev|<n>                          change pagination",
-    "  :per-page <n>                                set rows per page",
-    "  :help                                        show this help",
+    "",
+    hdr("Navigation"),
+    `  ${highlightKey("p", "rojects")}  ${highlightKey("b", "acklog")}  ${highlightKey("l", "earnings")}  ${highlightKey("m", "emory")}  ${highlightKey("h", "ealth")}  ${highlightKey("q", "uit")}  ${style.boldCyan("/")}${style.dim("filter")}  ${style.boldCyan(":")}${style.dim("palette")}`,
+    "",
+    hdr("Palette Commands"),
+    `  ${cmd(":open <project>")}                              ${desc("select active project context")}`,
+    `  ${cmd(":add <task>")}                                  ${desc("add backlog item to queue")}`,
+    `  ${cmd(":complete <task-id|match>")}                    ${desc("mark backlog item done")}`,
+    `  ${cmd(":move <task-id|match> <active|queue|done>")}    ${desc("move backlog item")}`,
+    `  ${cmd(":reprioritize <task-id|match> <high|medium|low>")}`,
+    `  ${cmd(":context <task-id|match> <text>")}              ${desc("append/update context")}`,
+    `  ${cmd(":work next")}                                   ${desc("move top queue item to active")}`,
+    `  ${cmd(":tidy [keep]")}                                 ${desc("archive done items (default keep=30)")}`,
+    "",
+    hdr("Learnings"),
+    `  ${cmd(":learn add <text>")}                            ${desc("append learning")}`,
+    `  ${cmd(":learn remove <learning-id|match>")}            ${desc("remove learning")}`,
+    "",
+    hdr("Memory Queue"),
+    `  ${cmd(":mq approve|reject <queue-id|match>")}          ${desc("memory queue triage")}`,
+    `  ${cmd(":mq edit <queue-id|match> <text>")}             ${desc("edit memory queue item")}`,
+    "",
+    hdr("Governance"),
+    `  ${cmd(":govern")}                                      ${desc("scan and queue stale/low-value memories")}`,
+    `  ${cmd(":consolidate")}                                  ${desc("deduplicate LEARNINGS.md")}`,
+    "",
+    hdr("Infrastructure"),
+    `  ${cmd(":machine map <hostname> <profile>")}            ${desc("safely edit machines.yaml")}`,
+    `  ${cmd(":profile add-project <profile> <project>")}     ${desc("safely edit profile projects")}`,
+    `  ${cmd(":profile remove-project <profile> <project>")}`,
+    `  ${cmd(":run fix")}                                     ${desc("run doctor --fix")}`,
+    `  ${cmd(":relink")}                                      ${desc("rerun cortex link")}`,
+    `  ${cmd(":rerun hooks")}                                 ${desc("run lifecycle hooks now")}`,
+    `  ${cmd(":update")}                                      ${desc("update cortex to latest")}`,
+    `  ${cmd(":reset")}                                       ${desc("reset shell state")}`,
+    "",
+    hdr("Pagination"),
+    `  ${cmd(":page next|prev|<n>")}                          ${desc("change pagination")}`,
+    `  ${cmd(":per-page <n>")}                                ${desc("set rows per page")}`,
+    `  ${cmd(":help")}                                        ${desc("show this help")}`,
   ].join("\n");
 }
 
@@ -168,7 +241,7 @@ async function defaultRunUpdate(): Promise<string> {
 
 async function defaultRunRelink(cortexPath: string): Promise<string> {
   await runLink(cortexPath, {
-    register: true,
+    register: false,
     allTools: true,
   });
   return "Relink completed for detected tools.";
@@ -176,8 +249,11 @@ async function defaultRunRelink(cortexPath: string): Promise<string> {
 
 export class CortexShell {
   private state: ShellState;
-  private message = "Type :help for keyboard map and palette commands.";
+  private message = `Type ${style.boldCyan(":help")} for keyboard map and palette commands.`;
   private healthCache?: { at: number; result: DoctorResultLike };
+  private showHelp = false;
+  private pages: Partial<Record<ShellView, number>> = {};
+  private pendingConfirm?: { label: string; action: () => void };
 
   constructor(
     private readonly cortexPath: string,
@@ -194,6 +270,7 @@ export class CortexShell {
     if (!this.state.project && cards.length > 0) this.state.project = cards[0].name;
     if (!this.state.perPage) this.state.perPage = 40;
     if (!this.state.page) this.state.page = 1;
+    this.pages[this.state.view] = this.state.page;
   }
 
   close(): void {
@@ -204,19 +281,20 @@ export class CortexShell {
     this.message = msg;
   }
 
+  private confirmThen(label: string, action: () => void): void {
+    this.pendingConfirm = { label, action };
+    this.setMessage(`${label} Confirm? (y/n)`);
+  }
+
   private setView(view: ShellView): void {
+    this.pages[this.state.view] = this.state.page || 1;
     this.state.view = view;
-    this.state.page = 1;
+    this.state.page = this.pages[view] || 1;
     saveShellState(this.cortexPath, this.state);
   }
 
-  private selectedProject(): string | null {
-    if (!this.state.project) return null;
-    return this.state.project;
-  }
-
   private ensureProjectSelected(): string | null {
-    const selected = this.selectedProject();
+    const selected = this.state.project;
     if (!selected) {
       this.setMessage("Select a project first with :open <project> or from Projects view.");
       return null;
@@ -225,20 +303,29 @@ export class CortexShell {
   }
 
   private renderHeader(): string[] {
-    return [
-      "cortex shell",
-      `Path: ${this.cortexPath}`,
-      `View: ${this.state.view} | Project: ${this.state.project || "(none)"} | Filter: ${this.state.filter || "(none)"}`,
-      "Keys: p b l m h q / :",
+    const viewLabel = this.state.view;
+    const projectLabel = this.state.project || "(none)";
+    const filterLabel = this.state.filter || "(none)";
+
+    const bannerContent = [
+      `  ${style.boldCyan("cortex")} ${style.dim("interactive shell")}`,
+    ];
+    const lines = [
+      ...box(bannerContent, 40),
+      `  ${style.dim("Path:")} ${style.gray(this.cortexPath)}`,
+      `  View: ${viewLabel} ${style.dim("|")} Project: ${projectLabel} ${style.dim("|")} Filter: ${this.state.filter ? style.yellow(filterLabel) : style.dim(filterLabel)}`,
+      `  ${highlightKey("p", "rojects")} ${highlightKey("b", "acklog")} ${highlightKey("l", "earnings")} ${highlightKey("m", "emory")} ${highlightKey("h", "ealth")} ${highlightKey("q", "uit")} ${style.boldCyan("/")}${style.dim("filter")} ${style.boldCyan(":")}${style.dim("palette")}`,
+      separator(60),
       "",
     ];
+    return lines;
   }
 
   private renderProjectsView(): string[] {
-    const lines: string[] = ["[Projects]", ""];    
+    const lines: string[] = [style.bold("[Projects]"), ""];
     const cards = listProjectCards(this.cortexPath, this.profile);
     if (!cards.length) {
-      lines.push("No indexed projects in this profile.");
+      lines.push(style.dim("No indexed projects in this profile."));
       return lines;
     }
 
@@ -247,49 +334,100 @@ export class CortexShell {
       : cards;
 
     if (!filtered.length) {
-      lines.push("No projects matched current filter.");
+      lines.push(style.dim("No projects matched current filter."));
       return lines;
     }
 
     for (const card of filtered) {
-      const marker = card.name === this.state.project ? "*" : " ";
-      lines.push(`${marker} ${card.name}  [${card.docs.join(" | ") || "no docs"}]`);
-      if (card.summary) lines.push(`    ${card.summary}`);
+      const isActive = card.name === this.state.project;
+      const bullet = isActive ? style.green("●") : style.dim("○");
+      const name = isActive ? style.boldGreen(card.name) : style.bold(card.name);
+      const docs = style.dim(`[${card.docs.join(" | ") || "no docs"}]`);
+      lines.push(`${bullet} ${name}  ${docs}`);
+      if (card.summary) lines.push(`    ${style.dim(card.summary)}`);
     }
 
-    lines.push("", "Use :open <project> to pin context across all views.");
+    lines.push("", style.dim("Use :open <project> to pin context across all views."));
     return lines;
   }
 
-  private renderBacklogSection(title: string, items: BacklogItem[]): string[] {
-    const lines: string[] = [`${title}:`];
+  private sectionBullet(title: string): { bullet: string; colorFn: (s: string) => string } {
+    switch (title) {
+      case "Active": return { bullet: style.green("●"), colorFn: style.boldGreen };
+      case "Queue": return { bullet: style.yellow("●"), colorFn: style.boldYellow };
+      case "Done": return { bullet: style.gray("●"), colorFn: style.dim };
+      default: return { bullet: "●", colorFn: style.bold };
+    }
+  }
+
+  private renderBacklogSection(title: string, items: BacklogItem[], subsections?: Map<string, string>): string[] {
+    const { bullet, colorFn } = this.sectionBullet(title);
+    const lines: string[] = [`${bullet} ${colorFn(title + ":")}`];
     if (!items.length) {
-      lines.push("  (empty)");
+      lines.push(`  ${style.dim("(empty)")}`);
       return lines;
     }
 
     const filtered = this.state.filter ? backlogsByFilter(items, this.state.filter) : items;
     if (!filtered.length) {
-      lines.push("  (no matches under current filter)");
+      lines.push(`  ${style.dim("(no matches under current filter)")}`);
       return lines;
     }
 
     const { pageItems, totalPages } = perPageSlice(filtered, this.state.page || 1, this.state.perPage || 40);
+    let currentSub = "";
     for (const item of pageItems) {
-      lines.push(`  ${item.id} ${item.checked ? "[x]" : "[ ]"} ${item.line}`);
-      if (item.context) lines.push(`    Context: ${item.context}`);
+      if (subsections) {
+        const sub = subsections.get(item.line) || "";
+        if (sub && sub !== currentSub) {
+          currentSub = sub;
+          lines.push(`  ${style.boldYellow(sub)}`);
+        }
+      }
+      const id = style.dim(item.id);
+      if (item.checked) {
+        lines.push(`  ${id} ${style.green("[x]")} ${style.dim(item.line)}`);
+      } else {
+        lines.push(`  ${id} [ ] ${item.line}`);
+      }
+      if (item.context) lines.push(`    ${style.dimItalic("Context: " + item.context)}`);
     }
     if (totalPages > 1) {
-      lines.push(`  Page ${Math.min(this.state.page || 1, totalPages)} / ${totalPages}`);
+      const pg = Math.min(this.state.page || 1, totalPages);
+      lines.push(`  ${style.dim(`Page ${pg} / ${totalPages}`)}`);
     }
     return lines;
   }
 
+  private parseSubsections(backlogPath: string): Map<string, string> {
+    const map = new Map<string, string>();
+    try {
+      const raw = fs.readFileSync(backlogPath, "utf8");
+      let currentSub = "";
+      for (const line of raw.split("\n")) {
+        const subMatch = line.match(/^###\s+(.+)/);
+        if (subMatch) {
+          currentSub = subMatch[1].trim();
+          continue;
+        }
+        if (line.match(/^##\s/)) {
+          currentSub = "";
+          continue;
+        }
+        if (line.startsWith("- ")) {
+          const body = line.replace(/^- \[[ x]\]\s*/, "").trim();
+          if (currentSub && body) map.set(body, currentSub);
+        }
+      }
+    } catch { /* best effort */ }
+    return map;
+  }
+
   private renderBacklogView(): string[] {
-    const lines: string[] = ["[Backlog]", ""];
-    const project = this.selectedProject();
+    const lines: string[] = [style.bold("[Backlog]"), ""];
+    const project = this.state.project;
     if (!project) {
-      lines.push("No selected project. Use :open <project>.");
+      lines.push(style.dim("No selected project. Use :open <project>."));
       return lines;
     }
 
@@ -300,20 +438,23 @@ export class CortexShell {
     }
 
     if (parsed.issues.length) {
-      lines.push(`Warnings: ${parsed.issues.join("; ")}`, "");
+      lines.push(`${style.yellow("Warnings:")} ${parsed.issues.join("; ")}`, "");
     }
 
-    lines.push(...this.renderBacklogSection("Active", parsed.items.Active), "");
-    lines.push(...this.renderBacklogSection("Queue", parsed.items.Queue), "");
-    lines.push(...this.renderBacklogSection("Done", parsed.items.Done));
+    const backlogFile = path.join(this.cortexPath, project, "backlog.md");
+    const subsections = this.parseSubsections(backlogFile);
+
+    lines.push(...this.renderBacklogSection("Active", parsed.items.Active, subsections), "");
+    lines.push(...this.renderBacklogSection("Queue", parsed.items.Queue, subsections), "");
+    lines.push(...this.renderBacklogSection("Done", parsed.items.Done, subsections));
     return lines;
   }
 
   private renderLearningsView(): string[] {
-    const lines: string[] = ["[Learnings]", ""];
-    const project = this.selectedProject();
+    const lines: string[] = [style.bold("[Learnings]"), ""];
+    const project = this.state.project;
     if (!project) {
-      lines.push("No selected project. Use :open <project>.");
+      lines.push(style.dim("No selected project. Use :open <project>."));
       return lines;
     }
 
@@ -324,7 +465,7 @@ export class CortexShell {
     }
 
     if (!learnings.length) {
-      lines.push("No learning entries yet.");
+      lines.push(style.dim("No learning entries yet."));
       return lines;
     }
 
@@ -334,21 +475,31 @@ export class CortexShell {
 
     const { pageItems, totalPages } = perPageSlice(filtered, this.state.page || 1, this.state.perPage || 40);
     for (const item of pageItems) {
-      lines.push(`${item.id} [${item.date}] ${item.text}`);
-      if (item.citation) lines.push(`  citation: ${item.citation}`);
+      lines.push(`${style.dim(item.id)} ${style.dim(`[${item.date}]`)} ${item.text}`);
+      if (item.citation) lines.push(`  ${style.italic(style.blue("citation: " + item.citation))}`);
     }
     if (totalPages > 1) {
-      lines.push(``, `Page ${Math.min(this.state.page || 1, totalPages)} / ${totalPages}`);
+      const pg = Math.min(this.state.page || 1, totalPages);
+      lines.push(``, style.dim(`Page ${pg} / ${totalPages}`));
     }
-    lines.push("", "Write with :learn add <text>, remove with :learn remove <id|match>");
+    lines.push("", style.dim("Write with :learn add <text>, remove with :learn remove <id|match>"));
     return lines;
   }
 
+  private queueSectionBadge(section: string): string {
+    switch (section.toLowerCase()) {
+      case "review": return badge(section, style.yellow);
+      case "stale": return badge(section, style.red);
+      case "conflicts": return badge(section, style.magenta);
+      default: return badge(section, style.dim);
+    }
+  }
+
   private renderMemoryQueueView(): string[] {
-    const lines: string[] = ["[Memory Queue]", ""];
-    const project = this.selectedProject();
+    const lines: string[] = [style.bold("[Memory Queue]"), ""];
+    const project = this.state.project;
     if (!project) {
-      lines.push("No selected project. Use :open <project>.");
+      lines.push(style.dim("No selected project. Use :open <project>."));
       return lines;
     }
 
@@ -359,55 +510,66 @@ export class CortexShell {
     }
 
     if (!items.length) {
-      lines.push("No queued memory items.");
+      lines.push(style.dim("No queued memory items."));
       return lines;
     }
 
     const filtered = this.state.filter ? queueByFilter(items, this.state.filter) : items;
     const { pageItems, totalPages } = perPageSlice(filtered, this.state.page || 1, this.state.perPage || 40);
+
+    let currentSection = "";
     for (const item of pageItems) {
-      const risk = item.risky ? "risk" : "ok";
-      const conf = item.confidence !== undefined ? ` conf=${item.confidence.toFixed(2)}` : "";
-      lines.push(`${item.id} [${item.section}] [${risk}] [${item.date}]${conf}`);
-      lines.push(`  ${item.text}`);
+      if (item.section !== currentSection) {
+        currentSection = item.section;
+        if (lines.length > 2) lines.push("");
+        lines.push(`${this.queueSectionBadge(currentSection)} ${style.bold(currentSection)}`);
+        lines.push(style.dim("─".repeat(40)));
+      }
+      const riskBadge = item.risky ? badge("risk", style.boldRed) : badge("ok", style.green);
+      const conf = item.confidence !== undefined
+        ? ` ${style.dim("conf=")}${item.confidence >= 0.8 ? style.green(item.confidence.toFixed(2)) : item.confidence >= 0.6 ? style.yellow(item.confidence.toFixed(2)) : style.red(item.confidence.toFixed(2))}`
+        : "";
+      lines.push(`  ${style.dim(item.id)} ${riskBadge} ${style.dim(`[${item.date}]`)}${conf}`);
+      lines.push(`    ${item.text}`);
     }
     if (totalPages > 1) {
-      lines.push(``, `Page ${Math.min(this.state.page || 1, totalPages)} / ${totalPages}`);
+      const pg = Math.min(this.state.page || 1, totalPages);
+      lines.push(``, style.dim(`Page ${pg} / ${totalPages}`));
     }
-    lines.push("", "Actions: :mq approve <id> | :mq reject <id> | :mq edit <id> <text>");
+    lines.push("", style.dim("Actions: :mq approve <id> | :mq reject <id> | :mq edit <id> <text>"));
     return lines;
   }
 
   private renderMachinesView(): string[] {
-    const lines: string[] = ["[Machines/Profiles]", ""];
+    const lines: string[] = [style.bold("[Machines/Profiles]"), ""];
     const machines = listMachines(this.cortexPath);
     const profiles = listProfiles(this.cortexPath);
 
-    lines.push("Machines:");
+    lines.push(style.bold("Machines:"));
     if (typeof machines === "string") {
-      lines.push(`  ${machines}`);
+      lines.push(`  ${style.dim(machines)}`);
     } else {
       const entries = Object.entries(machines);
-      if (!entries.length) lines.push("  (none)");
-      for (const [machine, profile] of entries) lines.push(`  ${machine} -> ${profile}`);
+      if (!entries.length) lines.push(`  ${style.dim("(none)")}`);
+      for (const [machine, profile] of entries) lines.push(`  ${style.bold(machine)} ${style.dim("→")} ${style.cyan(profile as string)}`);
     }
 
-    lines.push("", "Profiles:");
+    lines.push("", style.bold("Profiles:"));
     if (typeof profiles === "string") {
-      lines.push(`  ${profiles}`);
+      lines.push(`  ${style.dim(profiles)}`);
     } else {
-      if (!profiles.length) lines.push("  (none)");
+      if (!profiles.length) lines.push(`  ${style.dim("(none)")}`);
       for (const profile of profiles) {
-        lines.push(`  ${profile.name}: ${profile.projects.join(", ") || "(no projects)"}`);
+        lines.push(`  ${style.cyan(profile.name)}: ${profile.projects.join(", ") || style.dim("(no projects)")}`);
       }
     }
 
     lines.push(
       "",
-      "Safe edit flow:",
-      "  :machine map <hostname> <profile>",
-      "  :profile add-project <profile> <project>",
-      "  :profile remove-project <profile> <project>"
+      style.dim("Safe edit flow:"),
+      `  ${style.boldCyan(":machine map")} ${style.dim("<hostname> <profile>")}`,
+      `  ${style.boldCyan(":profile add-project")} ${style.dim("<profile> <project>")}`,
+      `  ${style.boldCyan(":profile remove-project")} ${style.dim("<profile> <project>")}`
     );
 
     return lines;
@@ -426,35 +588,44 @@ export class CortexShell {
   }
 
   private async renderHealthView(): Promise<string[]> {
-    const lines: string[] = ["[Health]", ""];
+    const lines: string[] = [style.bold("[Health]"), ""];
     const doctor = await this.doctorSnapshot();
     const runtime = readRuntimeHealth(this.cortexPath);
 
-    lines.push(`Doctor: ${doctor.ok ? "ok" : "issues found"}`);
-    if (doctor.machine) lines.push(`Machine: ${doctor.machine}`);
-    if (doctor.profile) lines.push(`Profile: ${doctor.profile}`);
+    const statusLabel = doctor.ok ? style.boldGreen("ok") : style.boldRed("issues found");
+    lines.push(`${style.bold("Doctor:")} ${statusLabel}`);
+    if (doctor.machine) lines.push(`${style.dim("Machine:")} ${style.bold(doctor.machine)}`);
+    if (doctor.profile) lines.push(`${style.dim("Profile:")} ${style.cyan(doctor.profile)}`);
 
-    lines.push("", "Checks:");
+    lines.push("", style.bold("Checks:"));
     for (const check of doctor.checks) {
-      lines.push(`  - ${check.ok ? "ok" : "fail"} ${check.name}: ${check.detail}`);
+      const icon = check.ok ? style.green("✓") : style.red("✗");
+      const status = check.ok ? style.dim("ok") : style.boldRed("fail");
+      lines.push(`  ${icon} ${status} ${check.name}: ${check.detail}`);
     }
 
-    lines.push("", "Runtime:");
-    lines.push(`  last hook run: ${runtime.lastPromptAt || "n/a"}`);
-    lines.push(`  last auto-save: ${runtime.lastAutoSave?.at || "n/a"} (${runtime.lastAutoSave?.status || "n/a"})`);
-    lines.push(`  last governance: ${runtime.lastGovernance?.at || "n/a"} (${runtime.lastGovernance?.status || "n/a"})`);
+    lines.push("", style.bold("Runtime:"));
+    lines.push(`  ${style.dim("last hook run:")} ${style.dim(runtime.lastPromptAt || "n/a")}`);
+    lines.push(`  ${style.dim("last auto-save:")} ${style.dim(runtime.lastAutoSave?.at || "n/a")} (${style.dim(runtime.lastAutoSave?.status || "n/a")})`);
+    lines.push(`  ${style.dim("last governance:")} ${style.dim(runtime.lastGovernance?.at || "n/a")} (${style.dim(runtime.lastGovernance?.status || "n/a")})`);
 
-    lines.push("", "Remediation commands:");
-    lines.push("  :run fix      (doctor --fix)");
-    lines.push("  :relink       (rebuild links/hooks)");
-    lines.push("  :rerun hooks  (session-start + stop)");
-    lines.push("  :update       (install latest cortex)");
+    lines.push("", style.bold("Remediation commands:"));
+    lines.push(`  ${style.boldCyan(":run fix")}      ${style.dim("(doctor --fix)")}`);
+    lines.push(`  ${style.boldCyan(":relink")}       ${style.dim("(rebuild links/hooks)")}`);
+    lines.push(`  ${style.boldCyan(":rerun hooks")}  ${style.dim("(session-start + stop)")}`);
+    lines.push(`  ${style.boldCyan(":update")}       ${style.dim("(install latest cortex)")}`);
 
     return lines;
   }
 
   async render(): Promise<string> {
     const lines = this.renderHeader();
+    if (this.showHelp) {
+      lines.push(shellHelpText());
+      lines.push("", `${style.dimItalic("Status:")} ${style.italic(this.message)}`);
+      lines.push(style.dim("Press any key to dismiss."));
+      return lines.join("\n") + "\n";
+    }
     switch (this.state.view) {
       case "Projects":
         lines.push(...this.renderProjectsView());
@@ -478,8 +649,8 @@ export class CortexShell {
         lines.push("Unknown view.");
     }
 
-    lines.push("", `Status: ${this.message}`);
-    lines.push("Type :help for command palette.");
+    lines.push("", `${style.dimItalic("Status:")} ${style.italic(this.message)}`);
+    lines.push(style.dim("Type :help for command palette."));
     return lines.join("\n") + "\n";
   }
 
@@ -490,10 +661,6 @@ export class CortexShell {
     this.setMessage(this.state.filter ? `Filter set to: ${this.state.filter}` : "Filter cleared.");
   }
 
-  private resolveMatchToken(token: string): string {
-    return token.trim();
-  }
-
   private async executePalette(input: string): Promise<void> {
     const trimmed = input.trim();
     if (!trimmed) return;
@@ -501,7 +668,8 @@ export class CortexShell {
     const command = (parts[0] || "").toLowerCase();
 
     if (command === "help") {
-      this.setMessage(shellHelpText());
+      this.showHelp = true;
+      this.setMessage("Showing help. Press any key to dismiss.");
       return;
     }
 
@@ -569,12 +737,14 @@ export class CortexShell {
     if (command === "complete") {
       const project = this.ensureProjectSelected();
       if (!project) return;
-      const match = this.resolveMatchToken(parts.slice(1).join(" "));
+      const match = parts.slice(1).join(" ").trim();
       if (!match) {
         this.setMessage("Usage: :complete <task-id|match>");
         return;
       }
-      this.setMessage(completeBacklogItem(this.cortexPath, project, match));
+      this.confirmThen(`Complete "${match}"?`, () => {
+        this.setMessage(completeBacklogItem(this.cortexPath, project, match));
+      });
       return;
     }
 
@@ -620,7 +790,7 @@ export class CortexShell {
         return;
       }
       const match = parts[1];
-      const context = trimmed.slice(trimmed.indexOf(match) + match.length).trim();
+      const context = parts.slice(2).join(" ");
       this.setMessage(updateBacklogItem(this.cortexPath, project, match, { context }));
       return;
     }
@@ -659,7 +829,9 @@ export class CortexShell {
           this.setMessage("Usage: :learn remove <learning-id|match>");
           return;
         }
-        this.setMessage(removeLearning(this.cortexPath, project, match));
+        this.confirmThen(`Remove learning "${match}"?`, () => {
+          this.setMessage(removeLearning(this.cortexPath, project!, match));
+        });
         return;
       }
       this.setMessage("Usage: :learn add <text> | :learn remove <id|match>");
@@ -685,7 +857,9 @@ export class CortexShell {
           this.setMessage("Usage: :mq reject <queue-id|match>");
           return;
         }
-        this.setMessage(rejectMemoryQueueItem(this.cortexPath, project, match));
+        this.confirmThen(`Reject "${match}"?`, () => {
+          this.setMessage(rejectMemoryQueueItem(this.cortexPath, project!, match));
+        });
         return;
       }
       if (action === "edit") {
@@ -694,7 +868,7 @@ export class CortexShell {
           return;
         }
         const match = parts[2];
-        const text = trimmed.slice(trimmed.indexOf(match) + match.length).trim();
+        const text = parts.slice(3).join(" ");
         this.setMessage(editMemoryQueueItem(this.cortexPath, project, match, text));
         return;
       }
@@ -732,6 +906,7 @@ export class CortexShell {
     }
 
     if (command === "run" && parts[1]?.toLowerCase() === "fix") {
+      this.setMessage("Running doctor --fix...");
       const doctor = await this.deps.runDoctor(this.cortexPath, true);
       this.healthCache = undefined;
       this.setMessage(`doctor --fix completed: ${doctor.ok ? "ok" : "issues remain"}`);
@@ -739,18 +914,59 @@ export class CortexShell {
     }
 
     if (command === "relink") {
+      this.setMessage("Running relink...");
       this.setMessage(await this.deps.runRelink(this.cortexPath));
       return;
     }
 
     if (command === "rerun" && parts[1]?.toLowerCase() === "hooks") {
+      this.setMessage("Running lifecycle hooks...");
       this.setMessage(await this.deps.runHooks(this.cortexPath));
       this.healthCache = undefined;
       return;
     }
 
     if (command === "update") {
+      this.setMessage("Checking for updates...");
       this.setMessage(await this.deps.runUpdate());
+      return;
+    }
+
+    if (command === "govern") {
+      const project = this.ensureProjectSelected();
+      if (!project) return;
+      this.setMessage("Running governance scan...");
+      try {
+        const entry = resolveEntryScript();
+        const out = execFileSync(process.execPath, [entry, "govern-memories", project], {
+          cwd: this.cortexPath,
+          encoding: "utf8",
+          timeout: 60_000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        this.setMessage(out || "Governance scan completed.");
+      } catch (err: any) {
+        this.setMessage(`Governance failed: ${err?.message || err}`);
+      }
+      return;
+    }
+
+    if (command === "consolidate") {
+      const project = this.ensureProjectSelected();
+      if (!project) return;
+      this.setMessage("Consolidating learnings...");
+      try {
+        const entry = resolveEntryScript();
+        const out = execFileSync(process.execPath, [entry, "consolidate-memories", project], {
+          cwd: this.cortexPath,
+          encoding: "utf8",
+          timeout: 60_000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        this.setMessage(out || "Consolidation completed.");
+      } catch (err: any) {
+        this.setMessage(`Consolidation failed: ${err?.message || err}`);
+      }
       return;
     }
 
@@ -795,6 +1011,21 @@ export class CortexShell {
 
   async handleInput(raw: string): Promise<boolean> {
     const input = raw.trim();
+    if (this.pendingConfirm) {
+      const pending = this.pendingConfirm;
+      this.pendingConfirm = undefined;
+      if (input.toLowerCase() === "y") {
+        pending.action();
+      } else {
+        this.setMessage("Cancelled.");
+      }
+      return true;
+    }
+    if (this.showHelp) {
+      this.showHelp = false;
+      this.setMessage(`Type ${style.boldCyan(":help")} for keyboard map and palette commands.`);
+      if (!input) return true;
+    }
     if (!input) return true;
 
     if (["q", "quit", ":q", ":quit", ":exit"].includes(input.toLowerCase())) {
@@ -860,7 +1091,7 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
   const repaint = async () => {
     clearScreen();
     process.stdout.write(await shell.render());
-    rl.setPrompt("\n:cortex> ");
+    rl.setPrompt(`\n${style.boldCyan(":cortex>")} `);
     rl.prompt();
   };
 
@@ -875,7 +1106,7 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
         return;
       }
     } catch (err: any) {
-      process.stdout.write(`\nError: ${String(err?.message || err)}\n`);
+      process.stdout.write(`\n${style.red("Error:")} ${String(err?.message || err)}\n`);
     }
 
     await repaint();

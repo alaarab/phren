@@ -35,6 +35,13 @@ export async function runCortexUpdate(): Promise<string> {
 
   if (pkgName === "@alaarab/cortex" && hasGit) {
     try {
+      // Warn if working tree is dirty (autostash handles it, but good to know)
+      try {
+        const status = run("git", ["status", "--porcelain"], root);
+        if (status) {
+          process.stderr.write(`Note: uncommitted changes detected, autostash will preserve them.\n`);
+        }
+      } catch { /* best effort */ }
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
       run("npm", ["install"], root);
       return `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.`;

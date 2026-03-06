@@ -57,27 +57,47 @@ function writeInstallPreferences(cortexPath: string, patch: Partial<InstallPrefe
   );
 }
 
-function semverParts(version: string): [number, number, number] {
-  const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return [0, 0, 0];
-  return [
-    Number.parseInt(match[1], 10) || 0,
-    Number.parseInt(match[2], 10) || 0,
-    Number.parseInt(match[3], 10) || 0,
-  ];
+function parseVersion(version: string): { major: number; minor: number; patch: number; pre: string } {
+  const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?/);
+  if (!match) return { major: 0, minor: 0, patch: 0, pre: "" };
+  return {
+    major: Number.parseInt(match[1], 10) || 0,
+    minor: Number.parseInt(match[2], 10) || 0,
+    patch: Number.parseInt(match[3], 10) || 0,
+    pre: match[4] || "",
+  };
 }
 
-function isVersionNewer(current: string, previous?: string): boolean {
+/**
+ * Compare two semver strings. Returns true when `current` is strictly newer
+ * than `previous`. Pre-release versions (e.g. 1.2.3-rc.1) sort before the
+ * corresponding release (1.2.3). Among pre-release tags, comparison is
+ * lexicographic.
+ */
+export function isVersionNewer(current: string, previous?: string): boolean {
   if (!previous) return false;
-  const [ca, cb, cc] = semverParts(current);
-  const [pa, pb, pc] = semverParts(previous);
-  if (ca !== pa) return ca > pa;
-  if (cb !== pb) return cb > pb;
-  return cc > pc;
+  const c = parseVersion(current);
+  const p = parseVersion(previous);
+  if (c.major !== p.major) return c.major > p.major;
+  if (c.minor !== p.minor) return c.minor > p.minor;
+  if (c.patch !== p.patch) return c.patch > p.patch;
+  // Same major.minor.patch: release (no pre) beats any pre-release
+  if (c.pre && !p.pre) return false;
+  if (!c.pre && p.pre) return true;
+  // Both have pre-release tags: lexicographic compare
+  return c.pre > p.pre;
 }
 
 function copyStarterFile(src: string, dest: string) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
+  // Back up existing file if it differs from the new content
+  if (fs.existsSync(dest)) {
+    const existing = fs.readFileSync(dest);
+    const incoming = fs.readFileSync(src);
+    if (!existing.equals(incoming)) {
+      fs.copyFileSync(dest, dest + ".bak");
+    }
+  }
   fs.copyFileSync(src, dest);
 }
 
@@ -141,8 +161,8 @@ function patchJsonFile(filePath: string, patch: (data: Record<string, any>) => v
   if (fs.existsSync(filePath)) {
     try {
       data = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    } catch {
-      // malformed json, start fresh
+    } catch (err) {
+      throw new Error(`Malformed JSON in ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   } else {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -305,6 +325,12 @@ export function ensureGovernanceFiles(cortexPath: string) {
   }
 }
 
+function isCortexCommand(command: string): boolean {
+  // Split on path separators and spaces, check if any segment starts with "cortex"
+  const segments = command.split(/[/\\\s]+/);
+  return segments.some(seg => seg === "cortex" || seg.startsWith("cortex@") || seg.startsWith("@alaarab/cortex"));
+}
+
 export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   const entryScript = resolveEntryScript();
@@ -332,7 +358,7 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
             (
               hook.command.includes(marker) ||
               hook.command.includes(legacyMarker) ||
-              hook.command.includes("cortex")
+              isCortexCommand(hook.command)
             )
         )
       );
@@ -363,7 +389,7 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
         if (!Array.isArray(hooks)) continue;
         data.hooks[hookEvent] = hooks.filter(
           (h: any) => !h.hooks?.some(
-            (hook: any) => typeof hook.command === "string" && hook.command.includes("cortex")
+            (hook: any) => typeof hook.command === "string" && isCortexCommand(hook.command)
           )
         );
       }
@@ -372,8 +398,13 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
   return status;
 }
 
-export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): McpConfigStatus | "no_vscode" {
-  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+let _vscodeProbeCache: { targetDir: string | null; installed: boolean } | null = null;
+
+/** Reset the VS Code path probe cache (for testing). */
+export function resetVSCodeProbeCache() { _vscodeProbeCache = null; }
+
+function probeVSCodePath(): { targetDir: string | null; installed: boolean } {
+  if (_vscodeProbeCache) return _vscodeProbeCache;
   const home = os.homedir();
   const userProfile = normalizeWindowsPathToWsl(process.env.USERPROFILE);
   const username = process.env.USERNAME;
@@ -390,7 +421,7 @@ export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean
     path.join(home, "AppData", "Roaming", "Code", "User"),
   ]);
   const existing = candidates.find((d) => fs.existsSync(d));
-  const vscodeInstalled =
+  const installed =
     Boolean(existing) ||
     commandExists("code") ||
     Boolean(
@@ -400,10 +431,18 @@ export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean
         fs.existsSync(path.join(userProfile, "AppData", "Roaming", "Code"))
       )
     );
-  if (!vscodeInstalled) return "no_vscode";
+  const targetDir = installed
+    ? (existing || userProfileRoaming || path.join(home, ".config", "Code", "User"))
+    : null;
+  _vscodeProbeCache = { targetDir, installed };
+  return _vscodeProbeCache;
+}
 
-  const targetDir = existing || userProfileRoaming || path.join(home, ".config", "Code", "User");
-  const mcpFile = path.join(targetDir, "mcp.json");
+export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): McpConfigStatus | "no_vscode" {
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  const probe = probeVSCodePath();
+  if (!probe.installed || !probe.targetDir) return "no_vscode";
+  const mcpFile = path.join(probe.targetDir, "mcp.json");
   return configureMcpAtPath(mcpFile, mcpEnabled, "servers", cortexPath);
 }
 
@@ -466,8 +505,8 @@ export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boole
   return configureMcpAtPath(existing || candidates[0], mcpEnabled, "mcpServers", cortexPath);
 }
 
-function logMcpTargetStatus(tool: string, status: ToolStatus, phase: "Configured" | "Updated") {
-  const text: Record<ToolStatus, string> = {
+export function logMcpTargetStatus(tool: string, status: string, phase: "Configured" | "Updated" = "Configured") {
+  const text: Record<string, string> = {
     installed: `${phase} ${tool} MCP`,
     already_configured: `${tool} MCP already configured`,
     disabled: `${tool} MCP disabled`,
@@ -478,7 +517,7 @@ function logMcpTargetStatus(tool: string, status: ToolStatus, phase: "Configured
     no_copilot: `${tool} not detected`,
     no_codex: `${tool} not detected`,
   };
-  log(`  ${text[status]}`);
+  if (text[status]) log(`  ${text[status]}`);
 }
 
 function updateMachinesYaml(cortexPath: string, machine?: string, profile?: string) {
@@ -487,13 +526,15 @@ function updateMachinesYaml(cortexPath: string, machine?: string, profile?: stri
   const hostname = machine || os.hostname();
   const profileName = profile || "personal";
   let content = fs.readFileSync(machinesFile, "utf8");
-  // Replace placeholder comment block with actual hostname entry
   if (!content.includes(hostname)) {
-    content = content.replace(
-      /^#.*\n/gm,
-      ""
-    ).trim();
-    content = `${hostname}: ${profileName}\n\n` + content;
+    // Strip leading comment block (template placeholder), preserve the rest
+    const lines = content.split("\n");
+    let firstNonComment = 0;
+    while (firstNonComment < lines.length && (lines[firstNonComment].startsWith("#") || lines[firstNonComment].trim() === "")) {
+      firstNonComment++;
+    }
+    const rest = lines.slice(firstNonComment).join("\n").trim();
+    content = rest ? `${hostname}: ${profileName}\n${rest}\n` : `${hostname}: ${profileName}\n`;
     fs.writeFileSync(machinesFile, content);
   }
 }
@@ -576,7 +617,7 @@ export async function runInit(opts: InitOptions = {}) {
       writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, installedVersion: VERSION });
 
       log(`\nDone. Restart your coding agent(s) to pick up changes.\n`);
-      process.exit(0);
+      return;
     }
   }
 
@@ -714,8 +755,7 @@ export async function runMcpMode(modeArg?: string) {
   }
   const mode = parseMcpMode(normalizedArg);
   if (!mode) {
-    log(`Invalid mode "${modeArg}". Use: on | off | status`);
-    process.exit(1);
+    throw new Error(`Invalid mode "${modeArg}". Use: on | off | status`);
   }
   const enabled = mode === "on";
   setMcpEnabledPreference(cortexPath, enabled);
@@ -751,8 +791,7 @@ export async function runHooksMode(modeArg?: string) {
   }
   const mode = parseMcpMode(normalizedArg);
   if (!mode) {
-    log(`Invalid mode "${modeArg}". Use: on | off | status`);
-    process.exit(1);
+    throw new Error(`Invalid mode "${modeArg}". Use: on | off | status`);
   }
 
   const enabled = mode === "on";
@@ -803,7 +842,7 @@ export async function runUninstall() {
           const before = hooks.length;
           data.hooks[hookEvent] = hooks.filter(
             (h: any) => !h.hooks?.some(
-              (hook: any) => typeof hook.command === "string" && hook.command.includes("cortex")
+              (hook: any) => typeof hook.command === "string" && isCortexCommand(hook.command)
             )
           );
           const removed = before - data.hooks[hookEvent].length;

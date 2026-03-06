@@ -6,7 +6,7 @@ Shell scripts that plug into Claude Code's hook system. These run automatically 
 
 ### post-session.sh
 
-Fires when Claude finishes responding (`Stop` event). Detects whether you're in a cortex-managed project and reminds Claude to run `/cortex-learn` before the session ends.
+Fires when Claude finishes responding (`Stop` event). Auto-commits and pushes any cortex changes from the session.
 
 Set `CORTEX_AUTO_LEARN=1` to make it output a stronger prompt that triggers an automatic learning extraction instead of a passive reminder.
 
@@ -24,7 +24,7 @@ Add the hook config to `~/.claude/settings.json` (applies to all projects) or `.
         "hooks": [
           {
             "type": "command",
-            "command": "~/cortex/hooks/post-session.sh"
+            "command": "~/.cortex/hooks/post-session.sh"
           }
         ]
       }
@@ -33,7 +33,7 @@ Add the hook config to `~/.claude/settings.json` (applies to all projects) or `.
 }
 ```
 
-If your cortex repo lives somewhere other than `~/cortex`, update the path or set `CORTEX_DIR`:
+If your cortex repo lives somewhere other than `~/.cortex`, update the path or set `CORTEX_DIR`:
 
 ```json
 {
@@ -62,7 +62,7 @@ If you already have hooks in your settings, merge the entries. Each event key (`
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "~/cortex/hooks/post-session.sh" }
+          { "type": "command", "command": "~/.cortex/hooks/post-session.sh" }
         ]
       }
     ],

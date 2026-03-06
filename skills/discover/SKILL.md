@@ -22,12 +22,12 @@ Scans your cortex directory for missing files, stale content, skill gaps, and st
 ### 1. Find the cortex directory
 
 ```bash
-CORTEX_DIR="${CORTEX_DIR:-$HOME/cortex}"
+CORTEX_DIR="${CORTEX_DIR:-$HOME/.cortex}"
 ls "$CORTEX_DIR" 2>/dev/null
 ```
 
 If it doesn't exist:
-> "No cortex directory found at ~/cortex. Run `/cortex-init` to set one up."
+> "No cortex directory found at ~/.cortex. Run `/cortex-init` to set one up."
 
 ### 2. Scan all projects
 
@@ -85,7 +85,31 @@ For each project with a backlog.md:
 - Flag backlogs where nothing has been completed recently
 - Flag backlogs with items older than 60 days that haven't moved
 
-### 6. Output the report
+### 6. Scaffold missing summary.md files
+
+For each project with a missing summary.md, output the template and offer to create it:
+
+```
+Project: myapp
+MISSING: summary.md
+
+Template:
+```
+# myapp
+
+What:
+Stack:
+Status: active
+Run:
+Gotcha:
+```
+
+Want me to fill this in for myapp?
+```
+
+If yes, gather the 5 fields from the user and write the file to `$CORTEX_DIR/myapp/summary.md`.
+
+### 7. Output the report
 
 ```
 /cortex-discover
@@ -123,7 +147,7 @@ Stuck items:
 
 ## Top 3 things to work on next
 
-1. **Add LEARNINGS.md to myapp.** You've been working on it actively but capturing nothing. Learnings are captured automatically via hooks now, but the file needs to exist first.
+1. **Add LEARNINGS.md to myapp.** You've been working on it actively but capturing nothing. Use `add_learning()` during your next session.
 2. **Unstick api-server backlog.** 5 items, 0 completed. Either work them or trim them. Stale backlogs are worse than no backlog.
 3. **Create a `/changelog` skill.** You're doing it manually in 3 projects. 15 minutes to write the skill saves hours over time.
 ```
@@ -143,5 +167,6 @@ The "Top 3" section is the most important part. Make these:
 ## Related skills
 
 - `/cortex-init`: scaffold missing files for a project
+- `add_learning()`: capture learnings via MCP (fixes "missing LEARNINGS.md")
 - `/cortex-consolidate`: synthesize cross-project patterns
 - `/backlog`: work on stuck backlog items

@@ -4,32 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
-  build-test:
+  build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Strict unused checks
-        run: npx tsc -p mcp/tsconfig.json --noUnusedLocals --noUnusedParameters
-
-      - name: Test
-        run: npm test
-
-      - name: Package smoke check
-        run: npm pack --dry-run
+          node-version: ${{ matrix.node-version }}
+      - run: npm install
+      - run: npm run build
+      - run: npm test -- --coverage

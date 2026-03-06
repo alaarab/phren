@@ -20,7 +20,7 @@ export function debugLog(msg: string): void {
   const logFile = path.join(home, ".cortex", "debug.log");
   try {
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch { /* best effort */ }
+  } catch { /* debug log is best-effort; logging errors about logging would recurse */ }
 }
 
 type MemoryRole = "admin" | "maintainer" | "contributor" | "viewer";
@@ -144,14 +144,18 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
     if (!fs.existsSync(filePath)) return fallback;
     const raw = fs.readFileSync(filePath, "utf8");
     return JSON.parse(raw) as T;
-  } catch {
+  } catch (err: any) {
+    debugLog(`readJsonFile failed for ${filePath}: ${err.message}`);
     return fallback;
   }
 }
 
 function writeJsonFile(filePath: string, data: unknown): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n");
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmpPath = path.join(dir, `.tmp-${crypto.randomUUID()}`);
+  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n");
+  fs.renameSync(tmpPath, filePath);
 }
 
 function actorName(): string {
@@ -160,6 +164,7 @@ function actorName(): string {
   try {
     return os.userInfo().username;
   } catch {
+    // os.userInfo() can throw in containers or sandboxed environments
     return "unknown";
   }
 }
@@ -398,11 +403,22 @@ export function recordMemoryInjection(cortexPath: string, key: string, sessionId
   entry.lastUsedAt = new Date().toISOString();
   saveMemoryScores(cortexPath, scores);
   const session = sessionId || "none";
-  fs.mkdirSync(path.dirname(usageLogFile(cortexPath)), { recursive: true });
+  const logFile = usageLogFile(cortexPath);
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
   fs.appendFileSync(
-    usageLogFile(cortexPath),
+    logFile,
     `${new Date().toISOString()}\tinject\t${session}\t${key}\n`
   );
+  try {
+    const stat = fs.statSync(logFile);
+    if (stat.size > 1_000_000) {
+      const content = fs.readFileSync(logFile, "utf8");
+      const lines = content.split("\n");
+      fs.writeFileSync(logFile, lines.slice(-500).join("\n"));
+    }
+  } catch (err: any) {
+    debugLog(`Usage log rotation failed: ${err.message}`);
+  }
 }
 
 export function recordMemoryFeedback(
@@ -537,7 +553,7 @@ export function consolidateProjectLearnings(cortexPath: string, project: string)
       continue;
     }
     if (line.startsWith("- ") && currentDate) {
-      const key = line.trim().toLowerCase();
+      const key = line.trim().toLowerCase().replace(/\s+/g, " ");
       const nextLine = lines[i + 1] || "";
       const citation = nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/) ? nextLine : undefined;
       const existing = byDate.get(currentDate)!.get(key);
@@ -570,25 +586,31 @@ export function consolidateProjectLearnings(cortexPath: string, project: string)
 // Validate that a path is a safe, existing directory
 function requireDirectory(resolved: string, label: string): string {
   if (!fs.existsSync(resolved)) {
-    console.error(`${label} not found: ${resolved}`);
-    process.exit(1);
+    throw new Error(`${label} not found: ${resolved}`);
   }
   if (!fs.statSync(resolved).isDirectory()) {
-    console.error(`${label} is not a directory: ${resolved}`);
-    process.exit(1);
+    throw new Error(`${label} is not a directory: ${resolved}`);
   }
   return resolved;
 }
 
-// Resolve the cortex root directory
-// Priority: CORTEX_PATH env > ~/.cortex > ~/cortex (auto-creates ~/.cortex on first run)
-export function findCortexPath(): string {
+// Pure lookup: find an existing cortex root directory, returns null if none found
+// Priority: CORTEX_PATH env > ~/.cortex > ~/cortex
+export function findCortexPath(): string | null {
   if (process.env.CORTEX_PATH) return process.env.CORTEX_PATH;
   const home = process.env.HOME || process.env.USERPROFILE || "";
   for (const name of [".cortex", "cortex"]) {
     const candidate = path.join(home, name);
     if (fs.existsSync(candidate)) return candidate;
   }
+  return null;
+}
+
+// Find or create the cortex root directory (creates ~/.cortex on first run)
+export function ensureCortexPath(): string {
+  const existing = findCortexPath();
+  if (existing) return existing;
+  const home = process.env.HOME || process.env.USERPROFILE || "";
   const defaultPath = path.join(home, ".cortex");
   fs.mkdirSync(defaultPath, { recursive: true });
   fs.writeFileSync(
@@ -605,7 +627,7 @@ export function findCortexPathWithArg(arg?: string): string {
     const resolved = arg.replace(/^~/, process.env.HOME || process.env.USERPROFILE || "");
     return requireDirectory(resolved, "cortex path");
   }
-  return findCortexPath();
+  return ensureCortexPath();
 }
 
 // Figure out which project directories to index
@@ -719,7 +741,13 @@ function computeCortexHash(cortexPath: string, profile?: string): string {
 
 export async function buildIndex(cortexPath: string, profile?: string): Promise<any> {
   const t0 = Date.now();
-  const cacheDir = path.join(os.tmpdir(), "cortex-fts-cache");
+  let userSuffix: string;
+  try {
+    userSuffix = String(os.userInfo().uid);
+  } catch {
+    userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
+  }
+  const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
   const hash = computeCortexHash(cortexPath, profile);
   const cacheFile = path.join(cacheDir, `${hash}.db`);
 
@@ -787,7 +815,7 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
 
   const buildMs = Date.now() - t0;
   debugLog(`Built FTS index: ${fileCount} files from ${projectDirs.length} projects in ${buildMs}ms`);
-  console.error(`Indexed ${fileCount} files from ${projectDirs.length} projects`);
+  if (process.env.CORTEX_DEBUG) console.error(`Indexed ${fileCount} files from ${projectDirs.length} projects`);
 
   // Persist cache to disk for future fast loads
   try {
@@ -796,7 +824,7 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
     // Clean stale cache entries (all except current hash)
     for (const f of fs.readdirSync(cacheDir)) {
       if (!f.endsWith(".db") || f === `${hash}.db`) continue;
-      try { fs.unlinkSync(path.join(cacheDir, f)); } catch { /* best effort */ }
+      try { fs.unlinkSync(path.join(cacheDir, f)); } catch { /* stale cache cleanup is best-effort */ }
     }
     debugLog(`Saved FTS index cache (${hash.slice(0, 8)}) — total ${Date.now() - t0}ms`);
   } catch {
@@ -892,9 +920,14 @@ export function detectProject(cortexPath: string, cwd: string, profile?: string)
   const projectDirs = getProjectDirs(cortexPath, profile);
   const cwdSegments = cwd.toLowerCase().split(path.sep);
 
+  const lastSegment = cwdSegments[cwdSegments.length - 1];
   for (const dir of projectDirs) {
     const projectName = path.basename(dir).toLowerCase();
-    if (cwdSegments.includes(projectName)) return path.basename(dir);
+    if (projectName.length <= 3) {
+      if (lastSegment === projectName) return path.basename(dir);
+    } else {
+      if (cwdSegments.includes(projectName)) return path.basename(dir);
+    }
   }
   return null;
 }
@@ -1144,7 +1177,8 @@ export function autoMergeConflicts(cortexPath: string): boolean {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     conflictedFiles = out ? out.split("\n") : [];
-  } catch {
+  } catch (err: any) {
+    debugLog(`autoMergeConflicts: failed to list conflicted files: ${err.message}`);
     return false;
   }
 
@@ -1189,6 +1223,7 @@ function getHeadCommit(cwd: string): string | undefined {
     const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     return commit || undefined;
   } catch {
+    // Expected when cwd is not inside a git repo
     return undefined;
   }
 }
@@ -1198,6 +1233,7 @@ function getRepoRoot(cwd: string): string | undefined {
     const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     return root || undefined;
   } catch {
+    // Expected when cwd is not inside a git repo
     return undefined;
   }
 }
@@ -1220,8 +1256,8 @@ function inferCitationLocation(repoPath: string, commit: string): { file?: strin
         return { file: currentFile, line: Number.parseInt(hunk[1], 10) };
       }
     }
-  } catch {
-    // best effort
+  } catch (err: any) {
+    debugLog(`citationLocationFromCommit: git show failed: ${err.message}`);
   }
   return {};
 }
@@ -1239,6 +1275,7 @@ function parseCitationComment(line: string): LearningCitation | null {
     if (typeof parsed.created_at !== "string" || !parsed.created_at) return null;
     return parsed;
   } catch {
+    // Malformed JSON in citation comment, treat as uncitable
     return null;
   }
 }
@@ -1258,6 +1295,7 @@ function commitExists(repoPath: string, commit: string): boolean {
     });
     return true;
   } catch {
+    // Expected when commit SHA doesn't exist in the repo
     return false;
   }
 }
@@ -1282,11 +1320,12 @@ function isCitationValid(citation: LearningCitation): boolean {
           const out = execFileSync(
             "git",
             ["blame", "-L", `${citation.line},${citation.line}`, "--porcelain", relFile],
-            { cwd: citation.repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+            { cwd: citation.repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }
           ).trim();
           const first = out.split("\n")[0] || "";
           if (!first.startsWith(citation.commit)) return false;
         } catch {
+          // git blame can fail for many reasons (shallow clone, missing file); treat as invalid
           return false;
         }
       }
@@ -1476,8 +1515,14 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
   const line = `[${new Date().toISOString()}] ${event} ${details}\n`;
   try {
     fs.appendFileSync(logPath, line);
-  } catch {
-    // best effort
+    const stat = fs.statSync(logPath);
+    if (stat.size > 1_000_000) {
+      const content = fs.readFileSync(logPath, "utf8");
+      const lines = content.split("\n");
+      fs.writeFileSync(logPath, lines.slice(-500).join("\n"));
+    }
+  } catch (err: any) {
+    debugLog(`Audit log write failed: ${err.message}`);
   }
 }
 
@@ -1668,19 +1713,22 @@ export function addLearningToFile(
   }
 
   const todayHeader = `## ${today}`;
+  let updated: string;
 
   if (content.includes(todayHeader)) {
-    const updated = content.replace(todayHeader, `${todayHeader}\n\n${bullet}\n${citationComment}`);
-    fs.writeFileSync(learningsPath, updated);
+    updated = content.replace(todayHeader, `${todayHeader}\n\n${bullet}\n${citationComment}`);
   } else {
     const firstHeading = content.match(/^(## \d{4}-\d{2}-\d{2})/m);
     if (firstHeading) {
-      const updated = content.replace(firstHeading[0], `${todayHeader}\n\n${bullet}\n${citationComment}\n\n${firstHeading[0]}`);
-      fs.writeFileSync(learningsPath, updated);
+      updated = content.replace(firstHeading[0], `${todayHeader}\n\n${bullet}\n${citationComment}\n\n${firstHeading[0]}`);
     } else {
-      fs.writeFileSync(learningsPath, content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n${citationComment}\n`);
+      updated = content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n${citationComment}\n`;
     }
   }
+
+  const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
+  fs.writeFileSync(tmpPath, updated);
+  fs.renameSync(tmpPath, learningsPath);
 
   appendAuditLog(
     cortexPath,

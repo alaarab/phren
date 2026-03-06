@@ -25,7 +25,7 @@ These skills are available as a full set via cortex, or individually from the Cl
 
 ### Your own skills
 
-Put personal workflow skills in `~/.cortex/global/skills/` and list them here. See [cortex-starter](https://github.com/alaarab/cortex-starter) for examples.
+Put personal workflow skills in `~/.cortex/global/skills/` and list them here. See [cortex](https://github.com/alaarab/cortex) for examples.
 
 <!-- Example:
 | `/humanize` | Strip AI language from writing and code |
@@ -39,12 +39,12 @@ Put personal workflow skills in `~/.cortex/global/skills/` and list them here. S
 
 ## Knowledge repo
 
-All skills and project config live in `~/cortex` (or wherever `CORTEX_DIR` points). This is a git repo that syncs across machines using profiles.
+All skills and project config live in `~/.cortex` (or wherever `CORTEX_DIR` points). This is a git repo that syncs across machines using profiles.
 
-- `~/cortex/global/`: skills and config that apply everywhere
-- `~/cortex/<project>/`: per-project CLAUDE.md, skills, backlog, learnings
-- `~/cortex/profiles/`: YAML files mapping project sets to machine roles
-- `~/cortex/machines.yaml`: maps machine hostnames to profiles
+- `~/.cortex/global/`: skills and config that apply everywhere
+- `~/.cortex/<project>/`: per-project CLAUDE.md, skills, backlog, learnings
+- `~/.cortex/profiles/`: YAML files mapping project sets to machine roles
+- `~/.cortex/machines.yaml`: maps machine hostnames to profiles
 
 Run `/cortex-sync` to pull everything down or push changes back.
 

@@ -1,4 +1,5 @@
 import * as http from "http";
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as querystring from "querystring";
@@ -10,6 +11,12 @@ import {
   editMemoryQueueItem,
   rejectMemoryQueueItem,
 } from "./data-access.js";
+import { isValidProjectName } from "./utils.js";
+
+export interface MemoryUiOptions {
+  authToken?: string;
+  csrfTokens?: Set<string>;
+}
 
 interface QueueItem {
   section: "Review" | "Stale" | "Conflicts";
@@ -69,11 +76,15 @@ function h(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderPage(cortexPath: string): string {
+function renderPage(cortexPath: string, csrfToken?: string, authToken?: string): string {
   const projects = getProjectDirs(cortexPath).map((p) => path.basename(p)).filter((p) => p !== "global");
   const usage = recentUsage(cortexPath);
   const accepted = recentAccepted(cortexPath);
   const rows: string[] = [];
+
+  const csrfField = csrfToken ? `<input type="hidden" name="_csrf" value="${h(csrfToken)}" />` : "";
+  const authField = authToken ? `<input type="hidden" name="_auth" value="${h(authToken)}" />` : "";
+  const hiddenFields = csrfField + authField;
 
   for (const project of projects) {
     const items = parseQueueItems(cortexPath, project);
@@ -87,16 +98,19 @@ function renderPage(cortexPath: string): string {
           <td>${h(item.text)}</td>
           <td class="actions">
             <form method="POST" action="/approve">
+              ${hiddenFields}
               <input type="hidden" name="project" value="${h(project)}" />
               <input type="hidden" name="line" value="${h(item.line)}" />
               <button type="submit">Approve</button>
             </form>
             <form method="POST" action="/reject">
+              ${hiddenFields}
               <input type="hidden" name="project" value="${h(project)}" />
               <input type="hidden" name="line" value="${h(item.line)}" />
               <button type="submit">Reject</button>
             </form>
             <form method="POST" action="/edit">
+              ${hiddenFields}
               <input type="hidden" name="project" value="${h(project)}" />
               <input type="hidden" name="line" value="${h(item.line)}" />
               <input type="text" name="new_text" value="${h(item.text)}" />
@@ -169,27 +183,74 @@ function renderPage(cortexPath: string): string {
 </html>`;
 }
 
-export function createMemoryUiServer(cortexPath: string): http.Server {
+export function createMemoryUiServer(cortexPath: string, opts?: MemoryUiOptions): http.Server {
+  const authToken = opts?.authToken;
+  const csrfTokens = opts?.csrfTokens;
+
   return http.createServer((req, res) => {
     const url = req.url || "/";
     if (req.method === "GET" && url === "/") {
-      const html = renderPage(cortexPath);
+      let csrfToken: string | undefined;
+      if (csrfTokens) {
+        csrfToken = crypto.randomUUID();
+        csrfTokens.add(csrfToken);
+      }
+      const html = renderPage(cortexPath, csrfToken, authToken);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(html);
       return;
     }
 
     if (req.method === "POST" && ["/approve", "/reject", "/edit"].includes(url)) {
+      const contentLength = parseInt(req.headers["content-length"] || "0", 10);
+      if (contentLength > 1_048_576) {
+        res.writeHead(413, { "content-type": "text/plain" });
+        res.end("Request body too large");
+        return;
+      }
+
       let body = "";
-      req.on("data", (chunk) => { body += String(chunk); });
+      let received = 0;
+      req.on("data", (chunk) => {
+        received += chunk.length;
+        if (received > 1_048_576) {
+          req.destroy();
+          return;
+        }
+        body += String(chunk);
+      });
       req.on("end", () => {
         const parsed = querystring.parse(body);
+
+        if (authToken) {
+          const submitted = String(parsed._auth || "");
+          if (submitted !== authToken) {
+            res.writeHead(401, { "content-type": "text/plain" });
+            res.end("Unauthorized");
+            return;
+          }
+        }
+
+        if (csrfTokens) {
+          const submitted = String(parsed._csrf || "");
+          if (!submitted || !csrfTokens.delete(submitted)) {
+            res.writeHead(403, { "content-type": "text/plain" });
+            res.end("Invalid or missing CSRF token");
+            return;
+          }
+        }
+
         const project = String(parsed.project || "");
         const line = String(parsed.line || "");
         const newText = String(parsed.new_text || "");
         if (!project || !line) {
           res.writeHead(400, { "content-type": "text/plain" });
           res.end("Missing project/line");
+          return;
+        }
+        if (!isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "text/plain" });
+          res.end("Invalid project name");
           return;
         }
 
@@ -230,10 +291,22 @@ export function createMemoryUiServer(cortexPath: string): http.Server {
 }
 
 export async function startMemoryUi(cortexPath: string, port: number): Promise<void> {
-  const server = createMemoryUiServer(cortexPath);
+  const authToken = crypto.randomUUID();
+  const csrfTokens = new Set<string>();
+  const server = createMemoryUiServer(cortexPath, { authToken, csrfTokens });
+
   await new Promise<void>((resolve) => {
     server.listen(port, "127.0.0.1", () => resolve());
   });
+
   process.stdout.write(`cortex memory-ui running at http://127.0.0.1:${port}\n`);
-  await new Promise<void>(() => { /* keep alive */ });
+  process.stderr.write(`auth token: ${authToken}\n`);
+
+  await new Promise<void>((resolve) => {
+    const shutdown = () => {
+      server.close(() => resolve());
+    };
+    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdown);
+  });
 }

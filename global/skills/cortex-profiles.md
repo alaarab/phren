@@ -1,3 +1,7 @@
+---
+name: cortex-profiles
+description: Manage which projects appear on which machines by editing profile definitions.
+---
 # /cortex-profiles - Manage your profiles
 
 > Add projects to profiles, move projects between profiles, create new profiles, and check what's in each one.

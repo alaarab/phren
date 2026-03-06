@@ -1,7 +1,8 @@
 name: default
 description: Default profile, all projects
 projects:
-  - global
+  # "global" is a special directory for cross-project config, not a project itself.
+  # List your actual projects below:
   - my-api
   - my-frontend
   - my-first-project

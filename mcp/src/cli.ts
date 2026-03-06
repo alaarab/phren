@@ -1,5 +1,5 @@
 import {
-  findCortexPath,
+  ensureCortexPath,
   buildIndex,
   extractSnippet,
   queryRows,
@@ -30,17 +30,19 @@ import {
   getIndexPolicy,
   updateIndexPolicy,
 } from "./shared.js";
-import { buildRobustFtsQuery, extractKeywords, isValidProjectName } from "./utils.js";
+import { buildRobustFtsQuery, extractKeywords, isValidProjectName, STOP_WORDS } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
+import { commandExists } from "./hooks.js";
+import { getHooksEnabledPreference } from "./init.js";
 import { startMemoryUi } from "./memory-ui.js";
 import { startShell } from "./shell.js";
 import { runCortexUpdate } from "./update.js";
 
-const cortexPath = findCortexPath();
+const cortexPath = ensureCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
 
 const SEARCH_TYPE_ALIASES: Record<string, string> = {
@@ -231,15 +233,6 @@ function runGit(cwd: string, args: string[]): string | null {
   }
 }
 
-function commandExists(cmd: string): boolean {
-  try {
-    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"] });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function isFeatureEnabled(envName: string, defaultValue: boolean = true): boolean {
   const raw = process.env[envName];
   if (!raw) return defaultValue;
@@ -354,15 +347,7 @@ function lowValuePenalty(content: string, docType: string): number {
   return low >= Math.ceil(bullets.length * 0.5) ? 2 : 0;
 }
 
-const RETRIEVAL_STOP_WORDS = new Set([
-  "the", "is", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of",
-  "with", "by", "from", "it", "this", "that", "are", "was", "were", "be", "been",
-  "being", "have", "has", "had", "do", "does", "did", "will", "would", "could",
-  "should", "may", "might", "can", "shall", "not", "no", "if", "then", "than",
-  "too", "very", "just", "about", "your", "our", "they", "them", "their", "what",
-  "which", "who", "when", "where", "how", "why", "use", "using", "used", "need",
-  "want", "look", "help", "please",
-]);
+const RETRIEVAL_STOP_WORDS = STOP_WORDS;
 
 function normalizeToken(token: string): string {
   let t = token.toLowerCase().replace(/[^a-z0-9_-]/g, "");
@@ -457,6 +442,7 @@ interface SessionMetric {
   keys: Record<string, number>;
   lastChangedCount: number;
   lastKeys: string[];
+  lastSeen?: string;
 }
 
 function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMetric> {
@@ -611,17 +597,6 @@ function runBestEffortGit(args: string[], cwd: string): { ok: boolean; output?: 
     return { ok: true, output };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
-  }
-}
-
-function getHooksEnabledPreference(cortexRoot: string): boolean {
-  try {
-    const prefsPath = path.join(cortexRoot, ".governance", "install-preferences.json");
-    if (!fs.existsSync(prefsPath)) return true;
-    const parsed = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as { hooksEnabled?: boolean };
-    return parsed.hooksEnabled !== false;
-  } catch {
-    return true;
   }
 }
 
@@ -989,6 +964,17 @@ async function handleHookPrompt() {
       }
       metrics[sessionId].lastChangedCount = changedCount;
       metrics[sessionId].lastKeys = injectedKeys;
+      metrics[sessionId].lastSeen = new Date().toISOString();
+
+      // Prune sessions older than 30 days
+      const thirtyDaysAgo = Date.now() - 30 * 86400000;
+      for (const sid of Object.keys(metrics)) {
+        const seen = metrics[sid].lastSeen;
+        if (seen && new Date(seen).getTime() < thirtyDaysAgo) {
+          delete metrics[sid];
+        }
+      }
+
       writeSessionMetrics(cortexPath, metrics);
     }
 
@@ -1000,11 +986,11 @@ async function handleHookPrompt() {
     const alreadyNoticed = noticeFile ? fs.existsSync(noticeFile) : false;
 
     if (!alreadyNoticed) {
-      // Clean up stale notice files (older than 24h)
+      // Clean up stale notice and extraction marker files (older than 24h)
       try {
         const cutoff = Date.now() - 86400000;
         for (const f of fs.readdirSync(cortexPath)) {
-          if (!f.startsWith(".noticed-")) continue;
+          if (!f.startsWith(".noticed-") && !f.startsWith(".extracted-")) continue;
           const fp = path.join(cortexPath, f);
           if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
         }
@@ -1030,7 +1016,8 @@ async function handleHookPrompt() {
     }
 
     console.log(parts.join("\n"));
-  } catch {
+  } catch (err: any) {
+    process.stderr.write("cortex hook-prompt error: " + String(err?.message || err) + "\n");
     process.exit(0);
   }
 }

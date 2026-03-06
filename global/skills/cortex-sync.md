@@ -1,3 +1,7 @@
+---
+name: cortex-sync
+description: Sync your Claude skills and project config across machines using profiles.
+---
 # /cortex-sync - Profile-aware sync
 
 > Sync your Claude skills and project config across machines using profiles that control what goes where.
@@ -10,7 +14,7 @@ This skill requires a cortex repository. If you don't have one yet, see "New mac
 
 **Expected structure:**
 ```
-~/cortex/               # or wherever your cortex repo lives
+~/.cortex/               # or wherever your cortex repo lives
   global/               # skills and config for all projects
     skills/             # global skill files (.md)
     CLAUDE.md           # global Claude instructions
@@ -37,12 +41,12 @@ When the user says "get my skills", "sync my config", "pull from cortex", or jus
 ### 1. Find the cortex directory
 
 ```bash
-CORTEX_DIR="${CORTEX_DIR:-$HOME/cortex}"
+CORTEX_DIR="${CORTEX_DIR:-$HOME/.cortex}"
 ls "$CORTEX_DIR" 2>/dev/null
 ```
 
 If the directory doesn't exist, tell the user:
-> "No cortex repo found at ~/cortex. Clone yours with `git clone <your-repo-url> ~/cortex`, or set `CORTEX_DIR` to point to a different location."
+> "No cortex repo found at ~/.cortex. Clone yours with `git clone <your-repo-url> ~/.cortex`, or set `CORTEX_DIR` to point to a different location."
 
 ### 2. Figure out which machine this is
 
@@ -93,7 +97,7 @@ If this fails (not a git repo, no remote), tell the user. Don't silently skip.
 
 ### 5. Link everything in the profile
 
-For each project in the profile's `projects` list, run `link.sh` or replicate its logic:
+For each project in the profile's `projects` list, run `npx @alaarab/cortex link` or replicate its logic:
 
 - Symlink `$CORTEX_DIR/<project>/CLAUDE.md` to `~/<project>/CLAUDE.md`
 - Symlink `$CORTEX_DIR/<project>/skills/` contents to `~/<project>/.claude/skills/`
@@ -118,7 +122,7 @@ Last synced: <date>
 - api-server: Description from summary.md
 
 ## Global skills
-/cortex-sync, /cortex-learn, /cortex-init, /cortex-consolidate, /cortex-discover
+/cortex-sync, /cortex-init, /cortex-consolidate, /cortex-discover
 ```
 
 Pull project descriptions from each project's `summary.md` if it exists.
@@ -218,7 +222,7 @@ First time on a new machine:
 
 ```bash
 # 1. Clone your cortex repo
-git clone <your-repo-url> ~/cortex
+git clone <your-repo-url> ~/.cortex
 
 # 2. Name this machine
 echo "my-machine-name" > ~/.cortex-machine
@@ -248,5 +252,5 @@ When two machines edit the same cortex file before syncing, `git pull` will hit 
 ## Related skills
 
 - `/cortex-init`: create a new project or set up cortex from scratch
-- `/cortex-learn`: capture learnings that get synced across machines
+- `add_learning()`: capture learnings via MCP (synced across machines by `save_learnings()`)
 - `/cortex-consolidate`: synthesize learnings across projects

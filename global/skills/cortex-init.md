@@ -1,3 +1,7 @@
+---
+name: cortex-init
+description: Set up a new project in cortex with summary, CLAUDE.md, backlog, and skill templates.
+---
 # /cortex-init - Scaffold a new project
 
 > Set up a new project in cortex with summary, CLAUDE.md, backlog, and skill templates.
@@ -19,7 +23,7 @@ ls "$CORTEX_DIR" 2>/dev/null
 ```
 
 If the cortex directory doesn't exist, offer to create it:
-> "No cortex repo found. Want me to create one at ~/cortex? This will set up the base directory structure (global/, profiles/, machines.yaml)."
+> "No cortex repo found. Want me to create one at ~/.cortex? This will set up the base directory structure (global/, profiles/, machines.yaml)."
 
 If the user says yes, create the base structure:
 ```bash

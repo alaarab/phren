@@ -90,13 +90,23 @@ if (process.argv[2] === "uninstall") {
 
 if (process.argv[2] === "mcp-mode") {
   const { runMcpMode } = await import("./init.js");
-  await runMcpMode(process.argv[3]);
+  try {
+    await runMcpMode(process.argv[3]);
+  } catch (e: any) {
+    console.error(e.message || e);
+    process.exit(1);
+  }
   process.exit(0);
 }
 
 if (process.argv[2] === "hooks-mode") {
   const { runHooksMode } = await import("./init.js");
-  await runHooksMode(process.argv[3]);
+  try {
+    await runHooksMode(process.argv[3]);
+  } catch (e: any) {
+    console.error(e.message || e);
+    process.exit(1);
+  }
   process.exit(0);
 }
 
@@ -172,6 +182,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import { isValidProjectName, buildRobustFtsQuery } from "./utils.js";
 import {
   addBacklogItem as addBacklogItemStore,
@@ -214,6 +225,17 @@ import {
 // MCP mode: first non-flag arg is the cortex path
 const cortexArg = process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
 const cortexPath = findCortexPathWithArg(cortexArg);
+
+const __indexDirname = path.dirname(fileURLToPath(import.meta.url));
+const __packageRoot = path.join(__indexDirname, "..", "..");
+const PACKAGE_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__packageRoot, "package.json"), "utf8"));
+    return pkg.version || "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 const profile = process.env.CORTEX_PROFILE || "";
 
 function textResponse(text: string) {
@@ -221,11 +243,15 @@ function textResponse(text: string) {
 }
 
 async function main() {
-  const db = await buildIndex(cortexPath, profile);
+  let db = await buildIndex(cortexPath, profile);
+  async function rebuildIndex() {
+    try { db.close(); } catch { /* best effort */ }
+    db = await buildIndex(cortexPath, profile);
+  }
 
   const server = new McpServer({
     name: "cortex-mcp",
-    version: "1.10.1-rc.1",
+    version: PACKAGE_VERSION,
   });
 
   server.registerTool(
@@ -527,7 +553,19 @@ async function main() {
           return textResponse(`No results found for ${scope.join(", ")}`);
         }
 
-        const formatted = rows.map((row: any[]) => {
+        const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const scored = rows.map((row: any[], idx: number) => {
+          const filePath = row[4] as string;
+          let boost = 1.0;
+          try {
+            const mtime = fs.statSync(filePath).mtimeMs;
+            if (mtime > thirtyDaysAgo) boost = 1.2;
+          } catch { /* file may not exist on disk */ }
+          return { row, rank: (rows.length - idx) * boost };
+        });
+        scored.sort((a, b) => b.rank - a.rank);
+
+        const formatted = scored.map(({ row }) => {
           const [project, filename, docType, content, filePath] = row as string[];
           const snippet = extractSnippet(content, query);
           return `### ${project}/${filename} (${docType})\n${snippet}\n\n\`${filePath}\``;
@@ -673,6 +711,7 @@ async function main() {
     },
     async ({ project }) => {
       if (project) {
+        if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
         const doc = readBacklog(cortexPath, project);
         if (typeof doc === "string") return textResponse(doc);
         if (!fs.existsSync(doc.path)) return textResponse(`No backlog found for "${project}".`);
@@ -697,6 +736,7 @@ async function main() {
       }),
     },
     async ({ project, item }) => {
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
       const result = addBacklogItemStore(cortexPath, project, item);
       return textResponse(result);
     }
@@ -713,6 +753,7 @@ async function main() {
       }),
     },
     async ({ project, item }) => {
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
       const result = completeBacklogItemStore(cortexPath, project, item);
       return textResponse(result);
     }
@@ -734,6 +775,7 @@ async function main() {
       }),
     },
     async ({ project, item, updates }) => {
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
       const result = updateBacklogItemStore(cortexPath, project, item, updates);
       return textResponse(result);
     }
@@ -757,12 +799,14 @@ async function main() {
       }),
     },
     async ({ project, learning, citation_file, citation_line, citation_repo, citation_commit }) => {
+      if (!isValidProjectName(project)) return textResponse(`Invalid project name: "${project}"`);
       const result = addLearningToFile(cortexPath, project, learning, {
         file: citation_file,
         line: citation_line,
         repo: citation_repo,
         commit: citation_commit,
       });
+      await rebuildIndex();
       return textResponse(result);
     }
   );
@@ -781,6 +825,7 @@ async function main() {
     },
     async ({ project, learning }) => {
       const result = removeLearningStore(cortexPath, project, learning);
+      await rebuildIndex();
       return textResponse(result);
     }
   );
