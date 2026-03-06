@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.11.1] - 2026-03-06
+
+### Added
+- Bulk MCP operations: `complete_backlog_items`, `add_learnings`, `remove_learnings` accept arrays and process all items in one call. FTS index rebuilds once at the end instead of per-item.
+- Tiered knowledge system: auto-consolidation moves old LEARNINGS.md entries into `knowledge/{topic}.md` when cap exceeded (default 15 entries).
+- Injection budget: `CORTEX_MAX_INJECT_TOKENS` env var (default 2000) with priority ordering (learnings > search results > knowledge).
+- Backlog priority filtering: only HIGH/MEDIUM items injected by default, configurable via `CORTEX_BACKLOG_PRIORITY`.
+- Duplicate learning detection: >60% word overlap check before appending to LEARNINGS.md.
+
+### Fixed
+- Telemetry: in-memory buffer with flush after 10 events or process exit (was writing to disk on every call).
+- File path consistency: search-history.jsonl moved from `.governance/` to `.runtime/`.
+- Extraction quality: `cli-extract.ts` now filters out commit-message-style entries.
+- Concurrent learning test: test strings "Concurrent learning A/B" triggered duplicate detection because single-char suffixes were filtered out during normalization.
+- Template init: recursive subdirectory copy and `{{date}}` placeholder replacement.
+
+### Changed
+- MCP tool count: 16 to 19 (added 3 bulk operations).
+- Learnings cap default: 20 entries before auto-archive triggers.
+
 ## [1.11.0] - 2026-03-06
 
 ### Added

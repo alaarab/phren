@@ -49,7 +49,7 @@ cortex migrate-findings <project> --dry-run
 
 Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `LEARNINGS.md`, cortex creates/updates `LEARNINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/LEARNINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (16)
+## MCP Tools (19)
 
 ### Search and Browse
 
@@ -67,6 +67,7 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 | `get_backlog` | `project?`, `id?`, `item?` | Read the backlog for one project, or all projects if omitted. Fetch a single item by ID or text. |
 | `add_backlog_item` | `project`, `item` | Append a task to a project's backlog Queue section. |
 | `complete_backlog_item` | `project`, `item` | Move a backlog item to Done by text match. |
+| `complete_backlog_items` | `project`, `items[]` | Bulk complete multiple items in one call. |
 | `update_backlog_item` | `project`, `item`, `updates` | Update an item's priority, context, or section. |
 
 ### Learning Capture
@@ -74,7 +75,9 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `add_learning` | `project`, `learning`, `citation?: { file?, line?, repo?, commit? }` | Append an insight to LEARNINGS.md with optional source citation. |
+| `add_learnings` | `project`, `learnings[]` | Bulk add multiple learnings in one call. |
 | `remove_learning` | `project`, `learning` | Remove a learning by text match. Use when an insight is wrong or outdated. |
+| `remove_learnings` | `project`, `learnings[]` | Bulk remove multiple learnings in one call. |
 | `push_changes` | `message?` | Commit and push all cortex changes. Retries with rebase on push conflicts. |
 
 ### Memory Quality

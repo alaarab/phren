@@ -1,6 +1,6 @@
 # My Cortex
 
-Your personal knowledge base for [cortex](https://github.com/alaarab/cortex) 1.11.0, which gives Claude Code long-term memory across sessions and machines.
+Your personal knowledge base for [cortex](https://github.com/alaarab/cortex) 1.11.1, which gives Claude Code long-term memory across sessions and machines.
 
 ## Structure
 

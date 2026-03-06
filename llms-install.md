@@ -83,7 +83,7 @@ cortex hook-context                  # project context for cwd (used after compa
 cortex add-learning <project> "..."  # append a learning via CLI
 ```
 
-## Available MCP tools (16)
+## Available MCP tools (19)
 
 **Search and browse:**
 - `search_knowledge(query, type?, limit?, project?)`: full-text search across all project knowledge. `type` filter: `claude`, `learnings`, `knowledge`, `summary`, `backlog`, `skill`.
@@ -95,11 +95,14 @@ cortex add-learning <project> "..."  # append a learning via CLI
 - `get_backlog(project?, id?, item?)`: fetch open tasks for a project (or all projects), or a single item by ID or text
 - `add_backlog_item(project, item)`: add a task to a project's backlog queue
 - `complete_backlog_item(project, item)`: match a task by text and move it to Done
+- `complete_backlog_items(project, items[])`: bulk complete multiple items in one call
 - `update_backlog_item(project, item, updates)`: update a task's priority, context, or section
 
 **Learning capture:**
 - `add_learning(project, learning, citation?)`: append a learning to LEARNINGS.md under today's date with optional citation
+- `add_learnings(project, learnings[])`: bulk add multiple learnings in one call
 - `remove_learning(project, text)`: remove a learning by matching text
+- `remove_learnings(project, learnings[])`: bulk remove multiple learnings in one call
 - `push_changes(message?)`: commit and push all cortex changes
 
 **Memory quality:**

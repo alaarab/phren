@@ -140,21 +140,18 @@ Claude Code <--stdio--> cortex-mcp
                           |
           +---------------+---------------+
           |               |               |
-     Search/Browse   Backlog CRUD    Learning Capture
-     - search_knowledge - get_backlog - add_learning
-     - get_project   - add_item     - remove_learning
-     - list_projects - complete     - push_changes
-     - list_machines - update
-     - list_profiles
+     Search/Browse   Backlog CRUD       Learning Capture
+     - search_knowledge - get_backlog   - add_learning(s)
+     - get_project      - add_item     - remove_learning(s)
+     - list_projects    - complete(s)  - push_changes
+     - get_learnings    - update
           |
-     Memory Governance
-     - pin_memory
-     - govern_memories
-     - prune_memories
-     - consolidate_memories
-     - memory_feedback
-     - migrate_legacy_findings
-     - memory_policy / workflow / access / index_policy
+     Memory Quality     Data Management
+     - pin_memory       - export_project
+     - memory_feedback  - import_project
+                        - manage_project
+
+     Governance (CLI-only: `cortex config` and `cortex maintain`)
 ```
 
 ## Data Layer
@@ -206,7 +203,7 @@ Query:
 Automated quality control for LEARNINGS.md entries.
 
 ```
-govern_memories
+cortex maintain govern
   |
   +-> scan LEARNINGS.md for each project
   |
