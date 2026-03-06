@@ -1,7 +1,15 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { addLearningToFile, appendAuditLog, getProjectDirs, getRuntimeHealth, validateBacklogFormat } from "./shared.js";
+import {
+  addLearningToFile,
+  appendAuditLog,
+  checkMemoryPermission,
+  getMemoryWorkflowPolicy,
+  getProjectDirs,
+  getRuntimeHealth,
+  validateBacklogFormat,
+} from "./shared.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 
 export type BacklogSection = "Active" | "Queue" | "Done";
@@ -487,14 +495,29 @@ function findQueueByMatch(cortexPath: string, project: string, match: string): {
   const items = readMemoryQueue(cortexPath, project);
   if (typeof items === "string") return items;
   const needle = match.toLowerCase();
-  const index = items.findIndex((item) => item.id.toLowerCase() === needle || item.text.toLowerCase().includes(needle));
+  const index = items.findIndex(
+    (item) => item.id.toLowerCase() === needle || item.text.toLowerCase().includes(needle) || item.line === match
+  );
   if (index === -1) return `No memory queue item matching "${match}" in ${project}.`;
   return { item: items[index], all: items, index };
 }
 
 export function approveMemoryQueueItem(cortexPath: string, project: string, match: string): string {
+  const queueDenied = checkMemoryPermission(cortexPath, "queue");
+  if (queueDenied) return queueDenied;
+  const writeDenied = checkMemoryPermission(cortexPath, "write");
+  if (writeDenied) return writeDenied;
+
   const found = findQueueByMatch(cortexPath, project, match);
   if (typeof found === "string") return found;
+
+  const workflow = getMemoryWorkflowPolicy(cortexPath);
+  const riskyBySection = workflow.riskySections.includes(found.item.section);
+  const riskyByConfidence = found.item.confidence !== undefined && found.item.confidence < workflow.lowConfidenceThreshold;
+  if (workflow.requireMaintainerApproval && (riskyBySection || riskyByConfidence)) {
+    const pinDenied = checkMemoryPermission(cortexPath, "pin");
+    if (pinDenied) return "Approval requires maintainer/admin role for risky memory entries.";
+  }
 
   const add = addLearningToFile(cortexPath, project, found.item.text);
   if (add.startsWith("Permission denied") || add.startsWith("Invalid")) return add;
@@ -506,6 +529,9 @@ export function approveMemoryQueueItem(cortexPath: string, project: string, matc
 }
 
 export function rejectMemoryQueueItem(cortexPath: string, project: string, match: string): string {
+  const denial = checkMemoryPermission(cortexPath, "queue");
+  if (denial) return denial;
+
   const found = findQueueByMatch(cortexPath, project, match);
   if (typeof found === "string") return found;
 
@@ -516,11 +542,17 @@ export function rejectMemoryQueueItem(cortexPath: string, project: string, match
 }
 
 export function editMemoryQueueItem(cortexPath: string, project: string, match: string, newText: string): string {
+  const denial = checkMemoryPermission(cortexPath, "queue");
+  if (denial) return denial;
+
+  const trimmed = newText.trim();
+  if (!trimmed) return "New memory text cannot be empty.";
+
   const found = findQueueByMatch(cortexPath, project, match);
   if (typeof found === "string") return found;
 
   const date = found.item.date === "unknown" ? new Date().toISOString().slice(0, 10) : found.item.date;
-  found.item.text = newText.trim();
+  found.item.text = trimmed;
   found.item.line = `- [${date}] ${found.item.text}`;
   found.all[found.index] = found.item;
   rewriteQueue(cortexPath, project, found.all);

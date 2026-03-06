@@ -1,12 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 
 export function commandExists(cmd: string): boolean {
   try {
-    execSync(`command -v ${cmd}`, { stdio: "ignore" });
+    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"] });
     return true;
   } catch { return false; }
 }
@@ -28,7 +28,10 @@ export function detectInstalledTools(): Set<string> {
 function resolveToolBinary(tool: string): string | null {
   try {
     const wrapperPath = path.resolve(path.join(os.homedir(), ".local", "bin", tool));
-    const raw = execSync(`which -a ${tool}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const raw = execFileSync("which", ["-a", tool], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
     const candidates = raw.split("\n").map((line) => line.trim()).filter(Boolean);
     for (const candidate of candidates) {
       const resolved = path.resolve(candidate);

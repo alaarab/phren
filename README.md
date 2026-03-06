@@ -183,6 +183,25 @@ cortex mcp-mode on|off|status        # toggle MCP integration anytime
 cortex hooks-mode on|off|status      # toggle hook execution anytime
 ```
 
+### Feature flags and rollout controls
+
+These are optional env vars for staged rollout and large-repo safety:
+
+```bash
+# Toggle automatic mining from git/GitHub during hook-prompt (default: on)
+export CORTEX_FEATURE_AUTO_EXTRACT=0
+
+# Toggle detached daily governance maintenance jobs (default: on)
+export CORTEX_FEATURE_DAILY_MAINTENANCE=0
+
+# GitHub mining resilience controls (defaults shown)
+export CORTEX_GH_TIMEOUT_MS=10000
+export CORTEX_GH_RETRIES=2
+export CORTEX_GH_PR_LIMIT=40
+export CORTEX_GH_RUN_LIMIT=25
+export CORTEX_GH_ISSUE_LIMIT=25
+```
+
 ### Interactive shell
 
 `cortex` opens an interactive shell in terminal contexts. It includes six views (`Projects`, `Backlog`, `Learnings`, `Memory Queue`, `Machines/Profiles`, `Health`) with `:command` palette actions and global shortcuts (`p b l m h / : q`).

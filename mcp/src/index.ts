@@ -225,7 +225,7 @@ async function main() {
 
   const server = new McpServer({
     name: "cortex-mcp",
-    version: "1.10.0",
+    version: "1.10.1-rc.1",
   });
 
   server.registerTool(
@@ -798,20 +798,31 @@ async function main() {
       }),
     },
     async ({ message }) => {
-      const { execSync } = await import("child_process");
+      const { execFileSync } = await import("child_process");
       const commitMsg = message || "update cortex";
+      const runGit = (args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}): string => execFileSync(
+        "git",
+        args,
+        {
+          cwd: cortexPath,
+          encoding: "utf8",
+          timeout: opts.timeout,
+          env: opts.env,
+          stdio: ["ignore", "pipe", "pipe"],
+        }
+      ).trim();
 
       try {
-        const status = execSync("git status --porcelain", { cwd: cortexPath, encoding: "utf8" }).trim();
+        const status = runGit(["status", "--porcelain"]);
         if (!status) return textResponse("Nothing to save. Cortex is up to date.");
 
-        execSync("git add -A", { cwd: cortexPath, encoding: "utf8" });
-        execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cortexPath, encoding: "utf8" });
+        runGit(["add", "-A"]);
+        runGit(["commit", "-m", commitMsg]);
 
         // Check if remote exists
         let hasRemote = false;
         try {
-          const remotes = execSync("git remote", { cwd: cortexPath, encoding: "utf8" }).trim();
+          const remotes = runGit(["remote"]);
           hasRemote = remotes.length > 0;
         } catch { /* no remote */ }
 
@@ -827,7 +838,7 @@ async function main() {
 
         for (let attempt = 0; attempt <= 3; attempt++) {
           try {
-            execSync("git push", { cwd: cortexPath, encoding: "utf8", timeout: 15000 });
+            runGit(["push"], { timeout: 15000 });
             pushed = true;
             break;
           } catch (pushErr: any) {
@@ -837,30 +848,24 @@ async function main() {
             if (attempt < 3) {
               // Pull --rebase to incorporate remote changes
               try {
-                execSync("git pull --rebase --quiet", {
-                  cwd: cortexPath,
-                  encoding: "utf8",
-                  timeout: 15000,
-                });
+                runGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
               } catch {
                 // Rebase hit conflicts — try auto-merge for LEARNINGS.md / backlog.md
                 const resolved = autoMergeConflicts(cortexPath);
                 if (resolved) {
                   try {
-                    execSync("git rebase --continue", {
-                      cwd: cortexPath,
-                      encoding: "utf8",
+                    runGit(["rebase", "--continue"], {
                       timeout: 10000,
                       env: { ...process.env, GIT_EDITOR: "true" },
                     });
                   } catch {
                     // Rebase continue failed, abort and give up
-                    try { execSync("git rebase --abort", { cwd: cortexPath }); } catch { /* ignore */ }
+                    try { runGit(["rebase", "--abort"]); } catch { /* ignore */ }
                     break;
                   }
                 } else {
                   // Unresolvable conflicts — abort rebase
-                  try { execSync("git rebase --abort", { cwd: cortexPath }); } catch { /* ignore */ }
+                  try { runGit(["rebase", "--abort"]); } catch { /* ignore */ }
                   break;
                 }
               }

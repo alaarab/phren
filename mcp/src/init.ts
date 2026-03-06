@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { buildLifecycleCommands, configureAllHooks } from "./hooks.js";
 
@@ -153,7 +153,7 @@ function patchJsonFile(filePath: string, patch: (data: Record<string, any>) => v
 
 function commandExists(cmd: string): boolean {
   try {
-    execSync(`command -v ${cmd}`, { stdio: "ignore" });
+    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"] });
     return true;
   } catch {
     return false;

@@ -642,7 +642,7 @@ function isWrapperActive(tool: string): boolean {
   const wrapperPath = path.join(os.homedir(), ".local", "bin", tool);
   if (!fs.existsSync(wrapperPath)) return false;
   try {
-    const resolved = execFileSync("bash", ["-lc", `command -v ${tool}`], {
+    const resolved = execFileSync("which", [tool], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
