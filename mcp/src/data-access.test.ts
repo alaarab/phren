@@ -807,8 +807,8 @@ describe("file locking", () => {
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
     const [a, b] = await Promise.all([
-      runDataAccessWorker(mkCode("Concurrent learning A")),
-      runDataAccessWorker(mkCode("Concurrent learning B")),
+      runDataAccessWorker(mkCode("Use writeFileSync with wx flag to atomically create lock files")),
+      runDataAccessWorker(mkCode("Debounce disk flushes to avoid hammering storage on every event")),
     ]);
 
     expect(a.exitCode).toBe(0);
@@ -817,8 +817,8 @@ describe("file locking", () => {
     const result = readLearnings(tmpDir, PROJECT);
     if (!result.ok) return;
     const texts = result.data.map((l) => l.text);
-    expect(texts.some((t) => t.includes("Concurrent learning A"))).toBe(true);
-    expect(texts.some((t) => t.includes("Concurrent learning B"))).toBe(true);
+    expect(texts.some((t) => t.includes("writeFileSync with wx flag"))).toBe(true);
+    expect(texts.some((t) => t.includes("Debounce disk flushes"))).toBe(true);
   });
 });
 
