@@ -214,7 +214,7 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
 
 // Collect MEMORY*.md files from native agent memory locations (~/.claude/projects/*/memory/)
 export function collectNativeMemoryFiles(): Array<{ project: string; file: string; fullPath: string }> {
-  const claudeProjectsDir = path.join(os.homedir(), ".claude", "projects");
+  const claudeProjectsDir = path.join(process.env.HOME || process.env.USERPROFILE || os.homedir(), ".claude", "projects");
   if (!fs.existsSync(claudeProjectsDir)) return [];
 
   const results: Array<{ project: string; file: string; fullPath: string }> = [];
