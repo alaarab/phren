@@ -22,6 +22,9 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.0",
     "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint": "^10.0.2",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
@@ -29,6 +32,8 @@
   "scripts": {
     "build": "rm -rf mcp/dist && tsc -p mcp/tsconfig.json && chmod +x mcp/dist/index.js",
     "dev": "tsx mcp/src/index.ts",
+    "lint": "eslint mcp/src/ --ignore-pattern '*.test.ts'",
+    "validate-docs": "bash scripts/validate-docs.sh",
     "test": "vitest run mcp/src",
     "prepublishOnly": "npm run build && npm test"
   },

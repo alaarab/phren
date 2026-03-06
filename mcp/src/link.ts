@@ -20,6 +20,7 @@ import {
   type McpMode,
 } from "./init.js";
 import { buildLifecycleCommands, configureAllHooks, detectInstalledTools } from "./hooks.js";
+import { EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 
 const MACHINE_FILE = path.join(os.homedir(), ".cortex-machine");
 const CONTEXT_FILE = path.join(os.homedir(), ".cortex-context.md");
@@ -159,9 +160,9 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
 
   // Commit if in git repo
   try {
-    execFileSync("git", ["add", "machines.yaml"], { cwd: cortexPath, stdio: "ignore" });
+    execFileSync("git", ["add", "machines.yaml"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
     execFileSync("git", ["commit", "-m", `Register machine: ${machine} (${profile})`, "--allow-empty"], {
-      cwd: cortexPath, stdio: "ignore",
+      cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS,
     });
   } catch { /* best effort */ }
 
@@ -171,14 +172,14 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
 
 function setupSparseCheckout(cortexPath: string, projects: string[]) {
   try {
-    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: cortexPath, stdio: "ignore" });
+    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
   } catch { return; } // Not a git repo
 
   const alwaysInclude = ["profiles", "machines.yaml", "global", "link.sh", "README.md", ".gitignore"];
   const paths = [...alwaysInclude, ...projects];
   try {
-    execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: cortexPath, stdio: "ignore" });
-    execFileSync("git", ["pull", "--ff-only"], { cwd: cortexPath, stdio: "ignore" });
+    execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
+    execFileSync("git", ["pull", "--ff-only"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
   } catch { /* best effort */ }
 }
 
@@ -688,6 +689,7 @@ function isWrapperActive(tool: string): boolean {
     const resolved = execFileSync("which", [tool], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
     return path.resolve(resolved) === path.resolve(wrapperPath);
   } catch {

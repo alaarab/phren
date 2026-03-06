@@ -1,0 +1,22 @@
+# Source and tests
+mcp/src/
+*.test.ts
+*.test.js
+
+# Documentation (except README)
+docs/
+*.md
+!README.md
+
+# CI and tooling
+.github/
+.claude-plugin/
+.claude/
+.gitignore
+tsconfig.json
+mcp/tsconfig.json
+vitest.config.*
+
+# Dev files
+*.log
+*.bak

@@ -3,10 +3,11 @@ import * as path from "path";
 import * as os from "os";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
+import { EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 
 export function commandExists(cmd: string): boolean {
   try {
-    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"] });
+    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
     return true;
   } catch { return false; }
 }
@@ -31,6 +32,7 @@ function resolveToolBinary(tool: string): string | null {
     const raw = execFileSync("which", ["-a", tool], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
     });
     const candidates = raw.split("\n").map((line) => line.trim()).filter(Boolean);
     for (const candidate of candidates) {

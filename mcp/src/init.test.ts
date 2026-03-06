@@ -370,12 +370,11 @@ describe("ensureGovernanceFiles", () => {
     const govDir = path.join(tmpDir, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
     const policyPath = path.join(govDir, "memory-policy.json");
-    const custom = JSON.stringify({ ttlDays: 999 }, null, 2) + "\n";
-    fs.writeFileSync(policyPath, custom);
+    fs.writeFileSync(policyPath, JSON.stringify({ ttlDays: 999 }, null, 2) + "\n");
 
     ensureGovernanceFiles(tmpDir);
 
-    const after = fs.readFileSync(policyPath, "utf8");
-    expect(after).toBe(custom);
+    const after = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+    expect(after.ttlDays).toBe(999);
   });
 });

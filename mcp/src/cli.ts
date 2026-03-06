@@ -29,9 +29,12 @@ import {
   updateRuntimeHealth,
   getIndexPolicy,
   updateIndexPolicy,
+  EXEC_TIMEOUT_MS,
+  EXEC_TIMEOUT_QUICK_MS,
 } from "./shared.js";
 import { buildRobustFtsQuery, extractKeywords, isValidProjectName, STOP_WORDS } from "./utils.js";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
@@ -41,6 +44,7 @@ import { getHooksEnabledPreference } from "./init.js";
 import { startMemoryUi } from "./memory-ui.js";
 import { startShell } from "./shell.js";
 import { runCortexUpdate } from "./update.js";
+import { readBacklogs, backlogMarkdown } from "./data-access.js";
 
 const cortexPath = ensureCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
@@ -212,6 +216,10 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleShell(args);
     case "update":
       return handleUpdate(args);
+    case "skill-list":
+      return handleSkillList();
+    case "backlog":
+      return handleBacklogView();
     case "background-maintenance":
       return handleBackgroundMaintenance(args[0]);
     default:
@@ -227,7 +235,7 @@ interface GitContext {
 
 function runGit(cwd: string, args: string[]): string | null {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS }).trim();
   } catch {
     return null;
   }
@@ -593,6 +601,7 @@ function runBestEffortGit(args: string[], cwd: string): { ok: boolean; output?: 
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      timeout: EXEC_TIMEOUT_MS,
     }).trim();
     return { ok: true, output };
   } catch (err: any) {
@@ -1159,7 +1168,23 @@ interface Candidate {
   file?: string;
 }
 
+function ghCachePath(repoRoot: string): string {
+  const repoKey = path.basename(repoRoot).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const dateKey = new Date().toISOString().slice(0, 10);
+  return path.join(os.tmpdir(), `cortex-gh-cache-${repoKey}-${dateKey}.json`);
+}
+
+const GH_CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
+
 async function mineGithubCandidates(repoRoot: string): Promise<Candidate[]> {
+  const cacheFile = ghCachePath(repoRoot);
+  try {
+    const stat = fs.statSync(cacheFile);
+    if (Date.now() - stat.mtimeMs < GH_CACHE_MAX_AGE_MS) {
+      return JSON.parse(fs.readFileSync(cacheFile, "utf8")) as Candidate[];
+    }
+  } catch {}
+
   const candidates: Candidate[] = [];
   const prLimit = clampInt(process.env.CORTEX_GH_PR_LIMIT, 40, 5, 200);
   const runLimit = clampInt(process.env.CORTEX_GH_RUN_LIMIT, 25, 5, 200);
@@ -1232,6 +1257,10 @@ async function mineGithubCandidates(repoRoot: string): Promise<Candidate[]> {
     const text = `Issue #${issue.number}: ${issue.title}`;
     candidates.push({ text, score: 0.58 });
   }
+
+  try {
+    fs.writeFileSync(cacheFile, JSON.stringify(candidates));
+  } catch {}
 
   return candidates;
 }
@@ -1620,4 +1649,105 @@ async function handleBackgroundMaintenance(projectArg?: string) {
   } finally {
     try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
   }
+}
+
+function handleSkillList() {
+  const sources: Array<{ name: string; source: string; path: string }> = [];
+
+  // Global skills (shipped with cortex)
+  const globalSkillsDir = path.join(cortexPath, "global", "skills");
+  if (fs.existsSync(globalSkillsDir)) {
+    for (const entry of fs.readdirSync(globalSkillsDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        sources.push({
+          name: entry.name.replace(/\.md$/, ""),
+          source: "global",
+          path: path.join(globalSkillsDir, entry.name),
+        });
+      }
+    }
+  }
+
+  // Project-level skills (check each project for a skills/ dir)
+  const projectDirs = getProjectDirs(cortexPath, profile);
+  for (const dir of projectDirs) {
+    const projectName = path.basename(dir);
+    if (projectName === "global") continue;
+    const projectSkillsDir = path.join(dir, "skills");
+    if (!fs.existsSync(projectSkillsDir)) continue;
+    for (const entry of fs.readdirSync(projectSkillsDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        sources.push({
+          name: entry.name.replace(/\.md$/, ""),
+          source: projectName,
+          path: path.join(projectSkillsDir, entry.name),
+        });
+      }
+    }
+  }
+
+  if (!sources.length) {
+    console.log("No skills found.");
+    return;
+  }
+
+  // Simple table output
+  const nameWidth = Math.max(4, ...sources.map((s) => s.name.length));
+  const sourceWidth = Math.max(6, ...sources.map((s) => s.source.length));
+
+  console.log(
+    `${"Name".padEnd(nameWidth)}  ${"Source".padEnd(sourceWidth)}  Path`
+  );
+  console.log(
+    `${"─".repeat(nameWidth)}  ${"─".repeat(sourceWidth)}  ${"─".repeat(30)}`
+  );
+  for (const skill of sources) {
+    console.log(
+      `${skill.name.padEnd(nameWidth)}  ${skill.source.padEnd(sourceWidth)}  ${skill.path}`
+    );
+  }
+  console.log(`\n${sources.length} skill(s) found.`);
+}
+
+function handleBacklogView() {
+  const docs = readBacklogs(cortexPath, profile);
+  if (!docs.length) {
+    console.log("No backlogs found.");
+    return;
+  }
+
+  let totalActive = 0;
+  let totalQueue = 0;
+
+  for (const doc of docs) {
+    const activeCount = doc.items.Active.length;
+    const queueCount = doc.items.Queue.length;
+    if (activeCount === 0 && queueCount === 0) continue;
+
+    totalActive += activeCount;
+    totalQueue += queueCount;
+
+    console.log(`\n## ${doc.project}`);
+    if (activeCount > 0) {
+      console.log("  Active:");
+      for (const item of doc.items.Active) {
+        const tag = item.priority ? ` [${item.priority}]` : "";
+        console.log(`    - ${item.line}${tag}`);
+      }
+    }
+    if (queueCount > 0) {
+      console.log("  Queue:");
+      for (const item of doc.items.Queue) {
+        const tag = item.priority ? ` [${item.priority}]` : "";
+        console.log(`    - ${item.line}${tag}`);
+      }
+    }
+  }
+
+  if (totalActive === 0 && totalQueue === 0) {
+    console.log("All backlogs are empty.");
+    return;
+  }
+
+  console.log(`\n${totalActive} active, ${totalQueue} queued across ${docs.length} project(s).`);
 }

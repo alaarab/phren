@@ -10,6 +10,10 @@ import {
   appendAuditLog,
   consolidateProjectLearnings,
   extractSnippet,
+  extractConflictVersions,
+  mergeLearnings,
+  mergeBacklog,
+  autoMergeConflicts,
   filterTrustedLearningsDetailed,
   recordMemoryInjection,
   recordMemoryFeedback,
@@ -787,5 +791,338 @@ describe("memoryScoreKey", () => {
     const k1 = memoryScoreKey("proj", "LEARNINGS.md", "snippet one");
     const k2 = memoryScoreKey("proj", "LEARNINGS.md", "snippet two");
     expect(k1).not.toBe(k2);
+  });
+});
+
+// --- extractConflictVersions ---
+
+describe("extractConflictVersions", () => {
+  it("returns null for content without conflict markers", () => {
+    expect(extractConflictVersions("normal content\nno conflicts")).toBeNull();
+  });
+
+  it("extracts ours and theirs from a conflict block", () => {
+    const content = [
+      "<<<<<<< HEAD",
+      "our change",
+      "=======",
+      "their change",
+      ">>>>>>> feature-branch",
+    ].join("\n");
+    const result = extractConflictVersions(content);
+    expect(result).not.toBeNull();
+    expect(result!.ours).toContain("our change");
+    expect(result!.theirs).toContain("their change");
+  });
+
+  it("preserves non-conflict lines in both versions", () => {
+    const content = [
+      "# Header",
+      "<<<<<<< HEAD",
+      "ours",
+      "=======",
+      "theirs",
+      ">>>>>>> branch",
+      "# Footer",
+    ].join("\n");
+    const result = extractConflictVersions(content);
+    expect(result!.ours).toContain("# Header");
+    expect(result!.ours).toContain("# Footer");
+    expect(result!.theirs).toContain("# Header");
+    expect(result!.theirs).toContain("# Footer");
+  });
+
+  it("strips conflict marker lines from output", () => {
+    const content = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> b";
+    const result = extractConflictVersions(content);
+    expect(result!.ours).not.toContain("<<<<<<<");
+    expect(result!.ours).not.toContain("=======");
+    expect(result!.theirs).not.toContain(">>>>>>>");
+  });
+
+  it("handles multiple conflict blocks", () => {
+    const content = [
+      "<<<<<<< HEAD",
+      "first ours",
+      "=======",
+      "first theirs",
+      ">>>>>>> branch",
+      "shared middle",
+      "<<<<<<< HEAD",
+      "second ours",
+      "=======",
+      "second theirs",
+      ">>>>>>> branch",
+    ].join("\n");
+    const result = extractConflictVersions(content);
+    expect(result).not.toBeNull();
+    expect(result!.ours).toContain("first ours");
+    expect(result!.ours).toContain("second ours");
+    expect(result!.ours).toContain("shared middle");
+    expect(result!.theirs).toContain("first theirs");
+    expect(result!.theirs).toContain("second theirs");
+    expect(result!.theirs).toContain("shared middle");
+  });
+});
+
+// --- mergeLearnings ---
+
+describe("mergeLearnings (shared.test)", () => {
+  it("combines entries from both sides under the same date", () => {
+    const ours = "# LEARNINGS\n\n## 2025-01-15\n\n- Our insight\n";
+    const theirs = "# LEARNINGS\n\n## 2025-01-15\n\n- Their insight\n";
+    const merged = mergeLearnings(ours, theirs);
+    expect(merged).toContain("- Our insight");
+    expect(merged).toContain("- Their insight");
+  });
+
+  it("deduplicates identical entries", () => {
+    const content = "# LEARNINGS\n\n## 2025-03-01\n\n- Same entry\n";
+    const merged = mergeLearnings(content, content);
+    const count = (merged.match(/- Same entry/g) || []).length;
+    expect(count).toBe(1);
+  });
+
+  it("sorts dates newest first", () => {
+    const ours = "# LEARNINGS\n\n## 2024-01-01\n\n- Old\n";
+    const theirs = "# LEARNINGS\n\n## 2025-06-15\n\n- New\n";
+    const merged = mergeLearnings(ours, theirs);
+    expect(merged.indexOf("2025-06-15")).toBeLessThan(merged.indexOf("2024-01-01"));
+  });
+
+  it("preserves the title from ours", () => {
+    const ours = "# My Project LEARNINGS\n\n## 2025-01-01\n\n- A\n";
+    const theirs = "# Other Title\n\n## 2025-01-01\n\n- B\n";
+    const merged = mergeLearnings(ours, theirs);
+    expect(merged.startsWith("# My Project LEARNINGS")).toBe(true);
+  });
+
+  it("merges dates that only exist on one side", () => {
+    const ours = "# LEARNINGS\n\n## 2025-01-01\n\n- Ours only\n";
+    const theirs = "# LEARNINGS\n\n## 2025-02-01\n\n- Theirs only\n";
+    const merged = mergeLearnings(ours, theirs);
+    expect(merged).toContain("- Ours only");
+    expect(merged).toContain("- Theirs only");
+    expect(merged).toContain("## 2025-01-01");
+    expect(merged).toContain("## 2025-02-01");
+  });
+});
+
+// --- mergeBacklog ---
+
+describe("mergeBacklog (shared.test)", () => {
+  it("combines items from both sides", () => {
+    const ours = "# backlog\n\n## Active\n\n- Our task\n\n## Queue\n\n## Done\n";
+    const theirs = "# backlog\n\n## Active\n\n- Their task\n\n## Queue\n\n## Done\n";
+    const merged = mergeBacklog(ours, theirs);
+    expect(merged).toContain("- Our task");
+    expect(merged).toContain("- Their task");
+  });
+
+  it("deduplicates identical items across sides", () => {
+    const content = "# backlog\n\n## Active\n\n- Same task\n\n## Queue\n\n## Done\n";
+    const merged = mergeBacklog(content, content);
+    const count = (merged.match(/- Same task/g) || []).length;
+    expect(count).toBe(1);
+  });
+
+  it("orders sections Active, Queue, Done first", () => {
+    const content = "# backlog\n\n## Done\n\n- D\n\n## Active\n\n- A\n\n## Queue\n\n- Q\n";
+    const merged = mergeBacklog(content, content);
+    const activeIdx = merged.indexOf("## Active");
+    const queueIdx = merged.indexOf("## Queue");
+    const doneIdx = merged.indexOf("## Done");
+    expect(activeIdx).toBeLessThan(queueIdx);
+    expect(queueIdx).toBeLessThan(doneIdx);
+  });
+
+  it("preserves title from ours", () => {
+    const ours = "# My Backlog\n\n## Active\n\n## Queue\n\n## Done\n";
+    const theirs = "# Other\n\n## Active\n\n## Queue\n\n## Done\n";
+    const merged = mergeBacklog(ours, theirs);
+    expect(merged.startsWith("# My Backlog")).toBe(true);
+  });
+
+  it("merges items from different sections", () => {
+    const ours = "# backlog\n\n## Active\n\n- Active task\n\n## Queue\n\n## Done\n";
+    const theirs = "# backlog\n\n## Active\n\n## Queue\n\n- Queued task\n\n## Done\n";
+    const merged = mergeBacklog(ours, theirs);
+    expect(merged).toContain("- Active task");
+    expect(merged).toContain("- Queued task");
+  });
+});
+
+// --- autoMergeConflicts ---
+
+describe("autoMergeConflicts", () => {
+  let gitDir: string;
+
+  function initGitRepo(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-automerge-"));
+    const { execFileSync } = require("child_process");
+    execFileSync("git", ["init", dir], { stdio: "ignore" });
+    execFileSync("git", ["-C", dir, "config", "user.email", "test@test.com"], { stdio: "ignore" });
+    execFileSync("git", ["-C", dir, "config", "user.name", "test"], { stdio: "ignore" });
+    return dir;
+  }
+
+  function commitFile(dir: string, filename: string, content: string, message: string) {
+    const { execFileSync } = require("child_process");
+    const fullPath = path.join(dir, filename);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, content);
+    execFileSync("git", ["-C", dir, "add", "-f", filename], { stdio: "ignore" });
+    execFileSync("git", ["-C", dir, "commit", "-m", message], { stdio: "ignore" });
+  }
+
+  beforeEach(() => {
+    gitDir = initGitRepo();
+  });
+
+  afterEach(() => {
+    if (gitDir && fs.existsSync(gitDir)) {
+      fs.rmSync(gitDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns true when there are no conflicted files", () => {
+    // Just an empty repo with one commit
+    commitFile(gitDir, "README.md", "hello", "init");
+    expect(autoMergeConflicts(gitDir)).toBe(true);
+  });
+
+  it("auto-merges a conflicted LEARNINGS.md", () => {
+    const { execFileSync } = require("child_process");
+
+    // Create base commit with a shared file
+    commitFile(gitDir, "proj/LEARNINGS.md", "# proj LEARNINGS\n\n## 2025-01-01\n\n- Base entry\n", "base");
+
+    // Create a branch with a different entry
+    execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-a"], { stdio: "pipe" });
+    fs.writeFileSync(
+      path.join(gitDir, "proj", "LEARNINGS.md"),
+      "# proj LEARNINGS\n\n## 2025-01-01\n\n- Branch A entry\n"
+    );
+    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/LEARNINGS.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "commit", "-m", "branch-a change"], { stdio: "ignore" });
+
+    // Go back to master and create a conflicting entry
+    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    fs.writeFileSync(
+      path.join(gitDir, "proj", "LEARNINGS.md"),
+      "# proj LEARNINGS\n\n## 2025-01-01\n\n- Master entry\n"
+    );
+    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/LEARNINGS.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "commit", "-m", "master change"], { stdio: "ignore" });
+
+    // Merge to create conflict
+    try {
+      execFileSync("git", ["-C", gitDir, "merge", "branch-a"], { stdio: "ignore" });
+    } catch {
+      // Expected to fail with conflict
+    }
+
+    // Verify conflict exists
+    const status = execFileSync("git", ["-C", gitDir, "diff", "--name-only", "--diff-filter=U"], {
+      encoding: "utf8",
+    }).trim();
+
+    if (!status.includes("LEARNINGS.md")) {
+      return;
+    }
+
+    const resolved = autoMergeConflicts(gitDir);
+    expect(resolved).toBe(true);
+
+    const content = fs.readFileSync(path.join(gitDir, "proj", "LEARNINGS.md"), "utf8");
+    expect(content).toContain("Branch A entry");
+    expect(content).toContain("Master entry");
+    expect(content).not.toContain("<<<<<<<");
+  });
+
+  it("auto-merges a conflicted backlog.md", () => {
+    const { execFileSync } = require("child_process");
+
+    commitFile(gitDir, "proj/backlog.md", "# backlog\n\n## Active\n\n- Base task\n\n## Queue\n\n## Done\n", "base");
+
+    execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-b"], { stdio: "pipe" });
+    fs.writeFileSync(
+      path.join(gitDir, "proj", "backlog.md"),
+      "# backlog\n\n## Active\n\n- Branch task\n\n## Queue\n\n## Done\n"
+    );
+    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/backlog.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "commit", "-m", "branch change"], { stdio: "ignore" });
+
+    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    fs.writeFileSync(
+      path.join(gitDir, "proj", "backlog.md"),
+      "# backlog\n\n## Active\n\n- Master task\n\n## Queue\n\n## Done\n"
+    );
+    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/backlog.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "commit", "-m", "master change"], { stdio: "ignore" });
+
+    try {
+      execFileSync("git", ["-C", gitDir, "merge", "branch-b"], { stdio: "ignore" });
+    } catch {
+      // Expected conflict
+    }
+
+    const status = execFileSync("git", ["-C", gitDir, "diff", "--name-only", "--diff-filter=U"], {
+      encoding: "utf8",
+    }).trim();
+
+    if (!status.includes("backlog.md")) {
+      return;
+    }
+
+    const resolved = autoMergeConflicts(gitDir);
+    expect(resolved).toBe(true);
+
+    const content = fs.readFileSync(path.join(gitDir, "proj", "backlog.md"), "utf8");
+    expect(content).toContain("Branch task");
+    expect(content).toContain("Master task");
+    expect(content).not.toContain("<<<<<<<");
+  });
+
+  it("returns false for non-mergeable conflicted files", () => {
+    const { execFileSync } = require("child_process");
+
+    commitFile(gitDir, "config.json", '{"key": "base"}', "base");
+
+    execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-c"], { stdio: "pipe" });
+    fs.writeFileSync(path.join(gitDir, "config.json"), '{"key": "branch"}');
+    execFileSync("git", ["-C", gitDir, "add", "-f", "config.json"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "commit", "-m", "branch change"], { stdio: "ignore" });
+
+    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    fs.writeFileSync(path.join(gitDir, "config.json"), '{"key": "master"}');
+    execFileSync("git", ["-C", gitDir, "add", "-f", "config.json"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "commit", "-m", "master change"], { stdio: "ignore" });
+
+    try {
+      execFileSync("git", ["-C", gitDir, "merge", "branch-c"], { stdio: "ignore" });
+    } catch {
+      // Expected conflict
+    }
+
+    const status = execFileSync("git", ["-C", gitDir, "diff", "--name-only", "--diff-filter=U"], {
+      encoding: "utf8",
+    }).trim();
+
+    if (!status.includes("config.json")) {
+      return;
+    }
+
+    const resolved = autoMergeConflicts(gitDir);
+    expect(resolved).toBe(false);
+  });
+
+  it("returns false for a non-git directory", () => {
+    const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-nongit-"));
+    try {
+      expect(autoMergeConflicts(nonGit)).toBe(false);
+    } finally {
+      fs.rmSync(nonGit, { recursive: true, force: true });
+    }
   });
 });
