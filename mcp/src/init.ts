@@ -694,13 +694,22 @@ export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boo
   // (Copilot CLI v0.0.423+ reads from this path, not ~/.github/mcp.json)
   const copilotCliConfig = candidates[0];
   if (fs.existsSync(path.join(home, ".copilot"))) {
-    configureMcpAtPath(copilotCliConfig, mcpEnabled, "servers", cortexPath);
+    // Migrate legacy "servers" key to "mcpServers" per GitHub spec
+    if (fs.existsSync(copilotCliConfig)) {
+      patchJsonFile(copilotCliConfig, (data) => {
+        if (data.servers && !data.mcpServers) {
+          data.mcpServers = data.servers;
+          delete data.servers;
+        }
+      });
+    }
+    configureMcpAtPath(copilotCliConfig, mcpEnabled, "mcpServers", cortexPath);
   }
   // Also update any other existing config file
   if (existing && existing !== copilotCliConfig) {
-    configureMcpAtPath(existing, mcpEnabled, "servers", cortexPath);
+    configureMcpAtPath(existing, mcpEnabled, "mcpServers", cortexPath);
   }
-  return configureMcpAtPath(existing || copilotCliConfig, mcpEnabled, "servers", cortexPath);
+  return configureMcpAtPath(existing || copilotCliConfig, mcpEnabled, "mcpServers", cortexPath);
 }
 
 export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
