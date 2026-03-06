@@ -1,9 +1,38 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { sanitizeFts5Query, isValidProjectName, safeProjectPath, expandSynonyms, extractKeywords } from "./utils.js";
-import { validateLearningsFormat, validateBacklogFormat, extractConflictVersions, mergeLearnings, mergeBacklog, debugLog } from "./shared.js";
+import {
+  validateLearningsFormat,
+  validateBacklogFormat,
+  extractConflictVersions,
+  mergeLearnings,
+  mergeBacklog,
+  debugLog,
+  filterTrustedLearnings,
+  addLearningToFile,
+  pruneDeadMemories,
+  consolidateProjectLearnings,
+  getMemoryWorkflowPolicy,
+  updateMemoryWorkflowPolicy,
+} from "./shared.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+
+function grantAdminAccess(cortexDir: string, actor = "vitest-admin"): string {
+  const govDir = path.join(cortexDir, ".governance");
+  fs.mkdirSync(govDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(govDir, "access-control.json"),
+    JSON.stringify({
+      admins: [actor],
+      maintainers: [],
+      contributors: [],
+      viewers: [],
+    }, null, 2) + "\n"
+  );
+  process.env.CORTEX_ACTOR = actor;
+  return actor;
+}
 
 describe("sanitizeFts5Query", () => {
   it("passes through a normal query", () => {
@@ -231,6 +260,44 @@ describe("safeProjectPath", () => {
   });
 });
 
+describe("memory workflow policy", () => {
+  let tmpRoot: string;
+  let cortexDir: string;
+  let actor: string;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-workflow-test-"));
+    cortexDir = path.join(tmpRoot, "cortex");
+    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
+    actor = grantAdminAccess(cortexDir, "workflow-admin");
+    process.env.CORTEX_ACTOR = actor;
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("returns defaults when no workflow policy file exists", () => {
+    const policy = getMemoryWorkflowPolicy(cortexDir);
+    expect(policy.requireMaintainerApproval).toBe(true);
+    expect(policy.lowConfidenceThreshold).toBe(0.7);
+    expect(policy.riskySections).toContain("Stale");
+  });
+
+  it("updates workflow policy with admin permission", () => {
+    const updated = updateMemoryWorkflowPolicy(cortexDir, {
+      requireMaintainerApproval: false,
+      lowConfidenceThreshold: 0.55,
+      riskySections: ["Review", "Conflicts"],
+    });
+    expect(typeof updated).not.toBe("string");
+    const policy = getMemoryWorkflowPolicy(cortexDir);
+    expect(policy.requireMaintainerApproval).toBe(false);
+    expect(policy.lowConfidenceThreshold).toBe(0.55);
+    expect(policy.riskySections).toEqual(["Review", "Conflicts"]);
+  });
+});
+
 describe("validateLearningsFormat", () => {
   it("returns no issues for valid content", () => {
     const content = "# My Project LEARNINGS\n\n## 2024-01-15\n\n- Learned something\n";
@@ -411,6 +478,156 @@ describe("mergeBacklog", () => {
     const theirs = "# Other\n\n## Active\n\n## Queue\n\n## Done\n";
     const merged = mergeBacklog(ours, theirs);
     expect(merged.startsWith("# My Backlog")).toBe(true);
+  });
+});
+
+describe("filterTrustedLearnings", () => {
+  it("keeps recent legacy bullets and valid cited bullets", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-cite-valid-"));
+    const file = path.join(tmpDir, "source.ts");
+    fs.writeFileSync(file, "line1\nline2\nline3\n");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const cited = `<!-- cortex:cite ${JSON.stringify({ created_at: new Date().toISOString(), file, line: 2 })} -->`;
+    const content = [
+      "# Project LEARNINGS",
+      "",
+      `## ${today}`,
+      "",
+      "- Legacy entry",
+      "- Cited entry",
+      `  ${cited}`,
+      "",
+    ].join("\n");
+
+    const filtered = filterTrustedLearnings(content, 90);
+    expect(filtered).toContain("- Legacy entry");
+    expect(filtered).toContain("- Cited entry");
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("drops stale and invalid-citation bullets", () => {
+    const content = [
+      "# Project LEARNINGS",
+      "",
+      "## 2000-01-01",
+      "",
+      "- Too old",
+      "",
+      `## ${new Date().toISOString().slice(0, 10)}`,
+      "",
+      "- Bad citation",
+      `  <!-- cortex:cite ${JSON.stringify({ created_at: new Date().toISOString(), file: "/missing/file.ts", line: 1 })} -->`,
+      "",
+    ].join("\n");
+
+    const filtered = filterTrustedLearnings(content, 90);
+    expect(filtered).not.toContain("- Too old");
+    expect(filtered).not.toContain("- Bad citation");
+  });
+});
+
+describe("addLearningToFile", () => {
+  const originalActor = process.env.CORTEX_ACTOR;
+
+  afterEach(() => {
+    process.env.CORTEX_ACTOR = originalActor;
+  });
+
+  it("writes citation metadata alongside a new learning", () => {
+    const cortexDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-add-learning-"));
+    const project = "proj";
+    const projectDir = path.join(cortexDir, project);
+    fs.mkdirSync(projectDir, { recursive: true });
+    grantAdminAccess(cortexDir);
+
+    const result = addLearningToFile(cortexDir, project, "Remember to clear cache", {
+      file: "/tmp/source.ts",
+      line: 12,
+      commit: "abc123",
+    });
+    expect(result).toContain("added insight");
+
+    const learnings = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
+    expect(learnings).toContain("<!-- cortex:cite");
+    expect(learnings).toContain("\"file\":\"/tmp/source.ts\"");
+    expect(learnings).toContain("\"line\":12");
+
+    fs.rmSync(cortexDir, { recursive: true, force: true });
+  });
+});
+
+describe("memory maintenance", () => {
+  const originalActor = process.env.CORTEX_ACTOR;
+
+  afterEach(() => {
+    process.env.CORTEX_ACTOR = originalActor;
+  });
+
+  it("prunes stale bullets and removes attached/dangling citation comments", () => {
+    const cortexDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-prune-"));
+    const project = "proj";
+    const projectDir = path.join(cortexDir, project);
+    fs.mkdirSync(projectDir, { recursive: true });
+    grantAdminAccess(cortexDir);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const content = [
+      "# proj LEARNINGS",
+      "",
+      "## 2000-01-01",
+      "",
+      "- Old bullet",
+      "  <!-- cortex:cite {\"created_at\":\"2000-01-01T00:00:00.000Z\"} -->",
+      "",
+      `## ${today}`,
+      "",
+      "- Fresh bullet",
+      "  <!-- cortex:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
+      "  <!-- cortex:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), content);
+
+    const result = pruneDeadMemories(cortexDir, project);
+    expect(result).toContain("Pruned");
+    const next = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
+    expect(next).not.toContain("- Old bullet");
+    expect(next).toContain("- Fresh bullet");
+    // One citation remains (attached to fresh bullet); dangling citation is removed.
+    expect((next.match(/<!-- cortex:cite/g) || []).length).toBe(1);
+
+    fs.rmSync(cortexDir, { recursive: true, force: true });
+  });
+
+  it("consolidates duplicate bullets and preserves citation metadata", () => {
+    const cortexDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-consolidate-"));
+    const project = "proj";
+    const projectDir = path.join(cortexDir, project);
+    fs.mkdirSync(projectDir, { recursive: true });
+    grantAdminAccess(cortexDir);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const content = [
+      "# proj LEARNINGS",
+      "",
+      `## ${today}`,
+      "",
+      "- Same bullet",
+      "- Same bullet",
+      "  <!-- cortex:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), content);
+
+    const result = consolidateProjectLearnings(cortexDir, project);
+    expect(result).toContain("Consolidated");
+    const next = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
+    expect((next.match(/- Same bullet/g) || []).length).toBe(1);
+    expect((next.match(/<!-- cortex:cite/g) || []).length).toBe(1);
+
+    fs.rmSync(cortexDir, { recursive: true, force: true });
   });
 });
 

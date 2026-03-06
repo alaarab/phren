@@ -3,1900 +3,422 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cortex: Long-term memory for AI coding agents</title>
-  <meta name="description" content="Git-backed knowledge base for AI coding agents. Works with Claude Code, GitHub Copilot, Cursor, and Codex. Relevant context injects automatically. Learnings save automatically. One command to set up." />
-  <meta property="og:title" content="Cortex: Long-term memory for AI coding agents" />
-  <meta property="og:description" content="Git-backed knowledge base for AI coding agents. Works with Claude Code, GitHub Copilot, Cursor, and Codex. Context injects when your prompt matches. Learnings save automatically when the session ends." />
-  <meta property="og:type" content="website" />
+  <title>cortex · file-backed memory for coding agents</title>
+  <meta name="description" content="cortex is a git-first memory system for coding agents: prompt context, learnings, governance, and MCP tooling backed by files you can inspect." />
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg: #0A0B09;
-      --bg-1: #0E100C;
-      --bg-2: #13150F;
-      --indigo: #3A7BAE;
-      --indigo-dark: #2B5F8E;
-      --indigo-deeper: #1C4A6E;
-      --copper: #F5C840;
-      --copper-mid: #D4892E;
-      --copper-dark: #8B4A12;
-      --text: #E8E4D9;
-      --text-muted: #8A8680;
-      --text-dim: #5A5752;
-      --border: #1C2018;
-      --border-subtle: #161812;
+      --bg: #0e1413;
+      --bg-soft: #16201f;
+      --card: #1b2624;
+      --line: #2a3c39;
+      --text: #edf4f2;
+      --muted: #9ab1ad;
+      --teal: #2f9b8f;
+      --teal-soft: #235f58;
+      --amber: #d8a147;
+      --max: 1080px;
     }
 
-    html { scroll-behavior: smooth; }
-
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
     body {
-      background: var(--bg);
+      font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+      background:
+        radial-gradient(60rem 40rem at 90% -10%, rgba(47, 155, 143, 0.12), transparent 60%),
+        radial-gradient(50rem 30rem at -10% 10%, rgba(216, 161, 71, 0.08), transparent 55%),
+        var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-      line-height: 1.6;
-      overflow-x: hidden;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* --- NAV --- */
-    nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 32px;
-      height: 60px;
-      border-bottom: 1px solid transparent;
-      transition: border-color 0.3s, background 0.3s, backdrop-filter 0.3s;
-    }
-
-    nav.scrolled {
-      background: rgba(10, 11, 9, 0.85);
-      backdrop-filter: blur(16px);
-      border-color: var(--border);
-    }
-
-    .nav-logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-      color: var(--text);
-    }
-
-    .nav-logo svg { display: block; }
-
-    .nav-wordmark {
-      font-size: 15px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      color: var(--text);
-    }
-
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .nav-link {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 14px;
-      padding: 6px 12px;
-      border-radius: 6px;
-      transition: color 0.2s, background 0.2s;
-    }
-
-    .nav-link:hover { color: var(--text); background: rgba(255,255,255,0.04); }
-
-    .nav-cta {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(58, 123, 174, 0.12);
-      border: 1px solid rgba(58, 123, 174, 0.25);
-      color: var(--indigo);
-      text-decoration: none;
-      font-size: 13px;
-      font-weight: 500;
-      padding: 7px 14px;
-      border-radius: 7px;
-      transition: background 0.2s, border-color 0.2s;
-      margin-left: 8px;
-    }
-
-    .nav-cta:hover {
-      background: rgba(58, 123, 174, 0.2);
-      border-color: rgba(58, 123, 174, 0.4);
-    }
-
-    .nav-cta:active {
-      background: rgba(58, 123, 174, 0.25);
-    }
-
-    /* --- HERO BRAIN --- */
-    .hero-brain {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -48%);
-      width: 680px;
-      max-width: 100%;
-      z-index: 0;
-      pointer-events: none;
-    }
-    @media (max-width: 768px) { .hero-brain { display: none; } }
-
-    /* --- HERO --- */
-    .hero {
-      position: relative;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 120px 32px 80px;
-      overflow: hidden;
-    }
-
-    #hero-canvas {
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-    }
-
-    .hero-glow {
-      position: absolute;
-      width: 600px;
-      height: 600px;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: radial-gradient(ellipse at center, rgba(58,123,174,0.06) 0%, transparent 70%);
-      pointer-events: none;
-    }
-
-    .hero-content {
-      position: relative;
-      z-index: 2;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      max-width: 720px;
-    }
-
-    .hero-icon-wrap {
-      margin-bottom: 36px;
-      opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.1s;
-    }
-
-    .hero-icon-wrap svg {
-      filter: drop-shadow(0 0 32px rgba(245,200,64,0.15)) drop-shadow(0 0 8px rgba(58,123,174,0.1));
-    }
-
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(245,200,64,0.06);
-      border: 1px solid rgba(245,200,64,0.15);
-      color: var(--copper);
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      padding: 5px 12px;
-      border-radius: 100px;
-      margin-bottom: 28px;
-      opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.2s;
-    }
-
-    .hero-badge-dot {
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--copper);
-      animation: pulse 2s ease infinite;
-    }
-
-    .hero-title {
-      font-size: clamp(40px, 6vw, 72px);
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      color: var(--text);
-      margin-bottom: 20px;
-      opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.3s;
-    }
-
-    .hero-title em {
-      font-style: normal;
-      background: linear-gradient(135deg, var(--copper) 0%, var(--copper-mid) 60%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero-sub {
-      font-size: clamp(16px, 2vw, 20px);
-      color: var(--text-muted);
-      line-height: 1.6;
-      max-width: 520px;
-      margin-bottom: 44px;
-      opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.4s;
-    }
-
-    .hero-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 56px;
-      opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.5s;
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-
-    .btn-primary {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--indigo-dark);
-      color: #fff;
-      text-decoration: none;
-      font-size: 15px;
-      font-weight: 500;
-      padding: 12px 24px;
-      border-radius: 9px;
-      border: 1px solid rgba(58,123,174,0.4);
-      transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
-      box-shadow: 0 2px 16px rgba(58,123,174,0.2);
-    }
-
-    .btn-primary:hover {
-      background: var(--indigo);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 24px rgba(58,123,174,0.35);
-    }
-
-    .btn-primary:active {
-      transform: translateY(0);
-      box-shadow: 0 1px 8px rgba(58,123,174,0.2);
-    }
-
-    .btn-ghost {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: transparent;
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 15px;
-      font-weight: 500;
-      padding: 12px 20px;
-      border-radius: 9px;
-      border: 1px solid var(--border);
-      transition: color 0.2s, border-color 0.2s, background 0.2s;
-    }
-
-    .btn-ghost:hover {
-      color: var(--text);
-      border-color: rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.03);
-    }
-
-    .btn-ghost:active {
-      transform: translateY(0);
-      background: rgba(255,255,255,0.05);
-    }
-
-    /* Rotating install command */
-    .hero-terminal {
-      width: 100%;
-      max-width: 540px;
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-      opacity: 0;
-      animation: fadeUp 0.8s ease forwards 0.6s;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.4);
-    }
-
-    .terminal-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg-2);
-    }
-
-    .terminal-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-
-    .terminal-dot-red { background: #FF5F57; }
-    .terminal-dot-yellow { background: #FFBD2E; }
-    .terminal-dot-green { background: #28C840; }
-
-    .terminal-title {
-      font-size: 11px;
-      color: var(--text-dim);
-      margin-left: 4px;
-      letter-spacing: 0.04em;
-    }
-
-    .terminal-body {
-      padding: 20px 24px;
-      min-height: 72px;
-      display: flex;
-      align-items: center;
-    }
-
-    .terminal-line {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-      font-size: 14px;
-    }
-
-    .terminal-prompt { color: var(--indigo); opacity: 0.7; }
-
-    .terminal-cmd-wrap {
-      position: relative;
-      overflow: hidden;
-    }
-
-    .terminal-cmd {
-      color: var(--text);
-      transition: opacity 0.3s, transform 0.3s;
-    }
-
-    .terminal-cmd.fade-out {
-      opacity: 0;
-      transform: translateY(-6px);
-    }
-
-    .terminal-cmd.fade-in {
-      animation: cmdFadeIn 0.3s ease forwards;
-    }
-
-    .terminal-step-label {
-      font-size: 11px;
-      color: var(--text-dim);
-      padding: 8px 24px 16px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-    }
-
-    .terminal-step-label span {
-      color: var(--copper);
-      font-weight: 500;
-    }
-
-    /* progress dots */
-    .terminal-progress {
-      display: flex;
-      gap: 6px;
-      padding: 0 24px 16px;
-    }
-
-    .terminal-progress-dot {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: var(--border);
-      transition: background 0.3s;
-    }
-
-    .terminal-progress-dot.active { background: var(--indigo); }
-
-    /* --- SECTIONS --- */
-    section {
-      padding: 100px 32px;
-    }
-
-    .container {
-      max-width: 1080px;
-      margin: 0 auto;
-    }
-
-    .section-label {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--indigo);
-      margin-bottom: 16px;
-    }
-
-    .section-title {
-      font-size: clamp(28px, 4vw, 48px);
-      font-weight: 700;
-      letter-spacing: -0.025em;
-      line-height: 1.15;
-      color: var(--text);
-      margin-bottom: 16px;
-    }
-
-    .section-sub {
-      font-size: 17px;
-      color: var(--text-muted);
-      max-width: 480px;
-      line-height: 1.65;
-    }
-
-    /* --- HOW IT WORKS --- */
-    .how-section {
-      border-top: 1px solid var(--border);
-    }
-
-    .how-header {
-      margin-bottom: 72px;
-    }
-
-    .steps-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1px;
-      background: var(--border);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      overflow: hidden;
-    }
-
-    .step {
-      background: var(--bg);
-      padding: 40px 36px;
-      position: relative;
-      transition: background 0.3s ease-out, box-shadow 0.3s ease-out;
-    }
-
-    .step:hover {
-      background: var(--bg-1);
-      box-shadow: inset 0 1px 0 rgba(58,123,174,0.1), inset 0 0 40px rgba(58,123,174,0.02);
-    }
-
-    .step-num {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      color: var(--text-dim);
-      margin-bottom: 24px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .step-num::before {
-      content: '';
-      display: block;
-      width: 20px;
-      height: 1px;
-      background: var(--text-dim);
-      opacity: 0.5;
-    }
-
-    .step-icon {
-      width: 44px;
-      height: 44px;
-      border-radius: 10px;
-      background: rgba(58,123,174,0.08);
-      border: 1px solid rgba(58,123,174,0.15);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 20px;
-      color: var(--indigo);
-    }
-
-    .step-title {
-      font-size: 17px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      color: var(--text);
-      margin-bottom: 10px;
-    }
-
-    .step-desc {
-      font-size: 14px;
-      color: var(--text-muted);
-      line-height: 1.65;
-    }
-
-    .step-code {
-      display: inline-block;
-      margin-top: 16px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 12px;
-      color: var(--copper);
-      background: rgba(245,200,64,0.06);
-      border: 1px solid rgba(245,200,64,0.12);
-      padding: 4px 10px;
-      border-radius: 5px;
-    }
-
-    /* --- BENTO GRID --- */
-    .bento-section {
-      border-top: 1px solid var(--border);
-    }
-
-    .bento-header {
-      margin-bottom: 56px;
-    }
-
-    .bento-grid {
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      grid-template-rows: auto auto;
-      gap: 16px;
-    }
-
-    .bento-card {
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 36px;
-      position: relative;
-      overflow: hidden;
-      transition: border-color 0.3s ease-out, transform 0.25s ease-out, box-shadow 0.3s ease-out;
-    }
-
-    .bento-card:hover {
-      border-color: rgba(58,123,174,0.25);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(58,123,174,0.08), inset 0 1px 0 rgba(255,255,255,0.03);
-    }
-
-    .bento-card-1 { grid-column: span 7; }
-    .bento-card-2 { grid-column: span 5; }
-    .bento-card-3 { grid-column: span 5; }
-    .bento-card-4 { grid-column: span 7; }
-
-    .bento-card-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 9px;
-      background: rgba(245,200,64,0.07);
-      border: 1px solid rgba(245,200,64,0.12);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 24px;
-      color: var(--copper-mid);
-    }
-
-    .bento-card-2 .bento-card-icon,
-    .bento-card-3 .bento-card-icon {
-      background: rgba(58,123,174,0.07);
-      border-color: rgba(58,123,174,0.12);
-      color: var(--indigo);
-    }
-
-    .bento-card-title {
-      font-size: 20px;
-      font-weight: 650;
-      letter-spacing: -0.02em;
-      color: var(--text);
-      margin-bottom: 10px;
-    }
-
-    .bento-card-desc {
-      font-size: 14px;
-      color: var(--text-muted);
-      line-height: 1.7;
-      max-width: 340px;
-    }
-
-    .bento-stat {
-      margin-top: 28px;
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-    }
-
-    .bento-stat-num {
-      font-size: 40px;
-      font-weight: 700;
-      letter-spacing: -0.04em;
-      color: var(--copper);
-      line-height: 1;
-    }
-
-    .bento-stat-label {
-      font-size: 13px;
-      color: var(--text-muted);
-    }
-
-    .bento-visual {
-      position: absolute;
-      bottom: 0;
-      right: 0;
-      opacity: 0.04;
-      pointer-events: none;
-    }
-
-    .bento-tag-row {
-      display: flex;
-      gap: 6px;
-      margin-top: 20px;
-      flex-wrap: wrap;
-    }
-
-    .bento-tag {
-      font-size: 11px;
-      font-weight: 500;
-      padding: 4px 9px;
-      border-radius: 5px;
-      background: rgba(58,123,174,0.08);
-      border: 1px solid rgba(58,123,174,0.12);
-      color: var(--indigo);
-      font-family: 'SF Mono', 'Fira Code', monospace;
-    }
-
-    .bento-file-list {
-      margin-top: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .bento-file {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 12px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      color: var(--text-muted);
-    }
-
-    .bento-file-dot {
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--indigo);
-      opacity: 0.4;
-      flex-shrink: 0;
-    }
-
-    /* --- INSTALL --- */
-    .install-section {
-      border-top: 1px solid var(--border);
-    }
-
-    .install-header {
-      margin-bottom: 56px;
-    }
-
-    .install-steps {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .install-step {
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-      transition: border-color 0.3s ease-out, box-shadow 0.3s ease-out;
-    }
-
-    .install-step:hover {
-      border-color: rgba(58,123,174,0.2);
-      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-    }
-
-    .install-step-header {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 20px 24px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .install-step-num {
-      width: 28px;
-      height: 28px;
-      border-radius: 7px;
-      background: rgba(58,123,174,0.1);
-      border: 1px solid rgba(58,123,174,0.2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--indigo);
-      flex-shrink: 0;
-    }
-
-    .install-step-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text);
-      letter-spacing: -0.01em;
-    }
-
-    .install-step-desc {
-      font-size: 13px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
-
-    .install-step-body {
-      padding: 20px 24px;
-    }
-
-    .code-block {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 9px;
-      padding: 14px 18px;
-      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-      font-size: 13px;
-      color: var(--text);
-    }
-
-    .code-prompt { color: var(--indigo); opacity: 0.6; margin-right: 8px; }
-
-    .copy-btn {
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text-muted);
-      cursor: pointer;
-      padding: 4px 10px;
-      font-size: 11px;
-      font-family: inherit;
-      transition: color 0.2s, border-color 0.2s, background 0.2s;
-      flex-shrink: 0;
-    }
-
-    .copy-btn:hover {
-      color: var(--text);
-      border-color: rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.04);
-    }
-
-    .copy-btn.copied { color: #5FD87C; border-color: rgba(95,216,124,0.3); }
-
-    /* --- INSTALL TABS --- */
-    .install-tabs-container {
-      max-width: 660px;
-      margin: 0 auto;
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-    }
-
-    .install-tab-buttons {
-      display: flex;
-      gap: 0;
-      padding: 0;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg-2);
-    }
-
-    .install-tab-btn {
-      flex: 1;
-      background: transparent;
-      border: none;
-      border-right: 1px solid var(--border);
-      padding: 14px 20px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: color 0.2s, background 0.2s;
-      letter-spacing: -0.01em;
-    }
-
-    .install-tab-btn:last-child { border-right: none; }
-
-    .install-tab-btn:hover {
-      color: var(--text);
-      background: rgba(58, 123, 174, 0.05);
-    }
-
-    .install-tab-btn.active {
-      color: var(--text);
-      background: rgba(58, 123, 174, 0.08);
-      border-bottom: 2px solid var(--indigo);
-      margin-bottom: -1px;
-    }
-
-    .install-tab-panel {
-      display: none;
-      animation: fadeIn 0.2s ease;
-    }
-
-    .install-tab-panel.active { display: block; }
-
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    /* --- SKILLS --- */
-    .skills-section {
-      border-top: 1px solid var(--border);
-    }
-
-    .skills-header {
-      margin-bottom: 56px;
-    }
-
-    .skills-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 1px;
-      background: var(--border);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      overflow: hidden;
-    }
-
-    .skill-card {
-      background: var(--bg);
-      padding: 24px 28px;
-      transition: background 0.2s ease-out, box-shadow 0.2s ease-out;
-      cursor: default;
-    }
-
-    .skill-card:hover {
-      background: var(--bg-1);
-      box-shadow: inset 0 1px 0 rgba(245,200,64,0.06);
-    }
-
-    .skill-name {
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--copper-mid);
-      margin-bottom: 6px;
-    }
-
-    .skill-desc {
-      font-size: 13px;
-      color: var(--text-muted);
       line-height: 1.55;
     }
 
-    /* --- CTA FOOTER --- */
-    .cta-section {
-      border-top: 1px solid var(--border);
-      text-align: center;
-      padding: 100px 32px 80px;
-    }
+    a { color: inherit; }
 
-    .cta-content {
-      max-width: 560px;
+    .wrap {
+      width: min(var(--max), calc(100vw - 2.2rem));
       margin: 0 auto;
     }
 
-    .cta-title {
-      font-size: clamp(28px, 4vw, 44px);
-      font-weight: 700;
-      letter-spacing: -0.025em;
-      line-height: 1.15;
-      color: var(--text);
-      margin-bottom: 16px;
-    }
-
-    .cta-sub {
-      font-size: 16px;
-      color: var(--text-muted);
-      margin-bottom: 36px;
-      line-height: 1.6;
-    }
-
-    .cta-actions {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .npm-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(200,0,0,0.08);
-      border: 1px solid rgba(200,0,0,0.15);
-      color: #FF6B6B;
-      font-size: 12px;
-      font-weight: 600;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      padding: 6px 12px;
-      border-radius: 6px;
-      text-decoration: none;
-      transition: background 0.2s, border-color 0.2s;
-    }
-
-    .npm-badge:hover {
-      background: rgba(200,0,0,0.12);
-      border-color: rgba(200,0,0,0.25);
-    }
-
-    .footer-bar {
+    header {
+      padding: 5rem 0 3.5rem;
       position: relative;
-      border-top: 1px solid var(--border);
-      padding: 40px 32px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .footer-bar::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 10%;
-      right: 10%;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(58,123,174,0.15), transparent);
-    }
-
-    .footer-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--text-dim);
-      font-size: 13px;
-      letter-spacing: -0.01em;
-    }
-
-    .footer-right {
-      font-size: 13px;
-      color: var(--text-dim);
-    }
-
-    .footer-right a {
-      color: var(--text-muted);
-      text-decoration: none;
-      transition: color 0.15s ease-out;
-    }
-
-    .footer-right a:hover { color: var(--text); }
-
-    /* --- ANIMATIONS --- */
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(16px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    @keyframes cmdFadeIn {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Scroll reveal */
-    .reveal {
-      opacity: 0;
-      transform: translateY(20px);
-      transition: opacity 0.7s ease, transform 0.7s ease;
-    }
-
-    .reveal.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .reveal-delay-1 { transition-delay: 0.1s; }
-    .reveal-delay-2 { transition-delay: 0.2s; }
-    .reveal-delay-3 { transition-delay: 0.3s; }
-
-    /* --- RESPONSIVE --- */
-    @media (max-width: 768px) {
-      nav { padding: 0 20px; }
-
-      section { padding: 72px 20px; }
-
-      .steps-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .bento-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .bento-card-1,
-      .bento-card-2,
-      .bento-card-3,
-      .bento-card-4 {
-        grid-column: span 1;
-      }
-
-      .hero { padding: 100px 20px 60px; }
-
-      .skills-grid { grid-template-columns: 1fr; }
-
-      .footer-bar {
-        flex-direction: column;
-        gap: 12px;
-        text-align: center;
-      }
-
-      .nav-links .nav-link { display: none; }
-    }
-
-    @media (max-width: 480px) {
-      .hero-actions { flex-direction: column; width: 100%; }
-      .btn-primary, .btn-ghost { width: 100%; justify-content: center; }
-    }
-
-    /* Token bar visual */
-    .token-bars {
-      margin-top: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .token-bar-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 11px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-    }
-
-    .token-bar-label {
-      width: 60px;
-      color: var(--text-dim);
-      text-align: right;
-      flex-shrink: 0;
-    }
-
-    .token-bar-track {
-      flex: 1;
-      height: 6px;
-      background: var(--border);
-      border-radius: 3px;
       overflow: hidden;
     }
 
-    .token-bar-fill {
-      height: 100%;
-      border-radius: 3px;
-      transition: width 1.2s cubic-bezier(0.25,0.46,0.45,0.94) 0.3s;
+    .kicker {
+      display: inline-block;
+      background: rgba(47, 155, 143, 0.15);
+      border: 1px solid rgba(47, 155, 143, 0.35);
+      color: #8ed8cf;
+      font-size: 0.74rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 0.42rem 0.62rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
     }
 
-    .token-bar-fill-before { background: linear-gradient(90deg, var(--copper-dark), var(--copper-mid)); width: 0; }
-    .token-bar-fill-after { background: linear-gradient(90deg, var(--indigo-deeper), var(--indigo)); width: 0; }
-
-    .token-bar-val {
-      width: 48px;
-      color: var(--text-muted);
-      flex-shrink: 0;
+    h1 {
+      margin: 0;
+      font-size: clamp(2.2rem, 6vw, 4.5rem);
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      max-width: 16ch;
     }
 
-    .bento-card.in-view .token-bar-fill-before { width: 100%; }
-    .bento-card.in-view .token-bar-fill-after { width: 10%; }
+    .sub {
+      margin-top: 1.2rem;
+      color: var(--muted);
+      max-width: 60ch;
+      font-size: clamp(1rem, 2.3vw, 1.2rem);
+    }
 
-    /* --- SELECTION --- */
-    ::selection {
-      background: rgba(58, 123, 174, 0.3);
+    .hero-actions {
+      margin-top: 1.7rem;
+      display: flex;
+      gap: 0.7rem;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0.7rem;
+      border: 1px solid var(--line);
+      padding: 0.68rem 1rem;
+      font-weight: 600;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); }
+    .btn.primary {
+      background: linear-gradient(140deg, var(--teal), var(--teal-soft));
+      border-color: transparent;
+      color: white;
+    }
+    .btn.ghost {
       color: var(--text);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .btn.ghost:hover { border-color: #3a5652; }
+
+    .terminal {
+      margin-top: 2rem;
+      background: #111918;
+      border: 1px solid var(--line);
+      border-radius: 0.95rem;
+      overflow: hidden;
+      max-width: 740px;
     }
 
-    /* --- FOCUS VISIBLE --- */
-    :focus-visible {
-      outline: 2px solid rgba(58, 123, 174, 0.5);
-      outline-offset: 2px;
+    .terminal-top {
+      display: flex;
+      gap: 0.35rem;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding: 0.62rem 0.8rem;
+      background: #0e1514;
     }
 
-    a:focus-visible, button:focus-visible {
-      outline: 2px solid rgba(58, 123, 174, 0.5);
-      outline-offset: 2px;
-      border-radius: 4px;
+    .dot { width: 0.56rem; height: 0.56rem; border-radius: 100px; }
+    .dot.r { background: #dc5f5f; }
+    .dot.y { background: #d7b161; }
+    .dot.g { background: #57a173; }
+
+    .terminal-body {
+      padding: 1rem 1.05rem 1.15rem;
+      font-family: "IBM Plex Mono", "Iosevka", "Menlo", monospace;
+      font-size: 0.95rem;
+    }
+
+    .prompt { color: #7ecdc3; }
+    .cmd { color: #d8e7e4; }
+    .hint {
+      margin-top: 0.5rem;
+      color: #89a8a2;
+      font-size: 0.85rem;
+    }
+
+    main section {
+      padding: 2.9rem 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    h2 {
+      margin: 0 0 0.8rem;
+      font-size: clamp(1.5rem, 3.4vw, 2.2rem);
+      letter-spacing: -0.02em;
+    }
+
+    .lead {
+      color: var(--muted);
+      max-width: 64ch;
+      margin-bottom: 1.1rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.9rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 0.9rem;
+      padding: 1rem;
+    }
+
+    .card h3 {
+      margin: 0 0 0.45rem;
+      font-size: 1.03rem;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .pill {
+      display: inline-block;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #f0d6a2;
+      background: rgba(216, 161, 71, 0.14);
+      border: 1px solid rgba(216, 161, 71, 0.32);
+      border-radius: 999px;
+      padding: 0.25rem 0.45rem;
+      margin-bottom: 0.45rem;
+    }
+
+    pre {
+      margin: 0;
+      background: #111918;
+      border: 1px solid var(--line);
+      border-radius: 0.85rem;
+      padding: 0.9rem;
+      overflow: auto;
+      color: #dce9e6;
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+
+    code {
+      font-family: "IBM Plex Mono", "Iosevka", "Menlo", monospace;
+    }
+
+    .cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.9rem;
+    }
+
+    ul {
+      margin: 0.45rem 0 0;
+      padding-left: 1.1rem;
+      color: var(--muted);
+    }
+
+    li + li { margin-top: 0.22rem; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 0.8rem;
+      overflow: hidden;
+      background: var(--card);
+      font-size: 0.95rem;
+    }
+
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 0.62rem 0.65rem;
+    }
+    th { color: #d3e4e0; font-size: 0.84rem; letter-spacing: 0.04em; text-transform: uppercase; }
+    td { color: var(--muted); }
+
+    footer {
+      border-top: 1px solid var(--line);
+      margin-top: 1.2rem;
+      padding: 1.4rem 0 2.1rem;
+      color: #90a6a2;
+      font-size: 0.9rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.8rem;
+      flex-wrap: wrap;
+    }
+
+    .accent { color: var(--amber); }
+
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+      .cols { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      header { padding-top: 3.6rem; }
+      .grid { grid-template-columns: 1fr; }
+      .hero-actions { width: 100%; }
+      .btn { width: 100%; }
     }
   </style>
 </head>
 <body>
-
-  <!-- NAV -->
-  <nav id="nav">
-    <a href="#" class="nav-logo">
-      <svg width="26" height="26" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <radialGradient id="n-centerGlow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#F5C840"/>
-            <stop offset="45%" stop-color="#D4892E"/>
-            <stop offset="100%" stop-color="#8B4A12"/>
-          </radialGradient>
-          <radialGradient id="n-nodeGrad">
-            <stop offset="0%" stop-color="#3A7BAE"/>
-            <stop offset="100%" stop-color="#1C4A6E"/>
-          </radialGradient>
-          <linearGradient id="n-edgeGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.7"/>
-            <stop offset="100%" stop-color="#1C3D5E" stop-opacity="0.25"/>
-          </linearGradient>
-        </defs>
-        <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
-        <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
-        <line x1="72" y1="22" x2="46" y2="26" stroke="url(#n-edgeGrad1)" stroke-width="1.2"/>
-        <line x1="46" y1="26" x2="26" y2="42" stroke="url(#n-edgeGrad1)" stroke-width="1.2"/>
-        <line x1="26" y1="42" x2="22" y2="64" stroke="url(#n-edgeGrad1)" stroke-width="1.2"/>
-        <line x1="22" y1="64" x2="26" y2="86" stroke="url(#n-edgeGrad1)" stroke-width="1.2"/>
-        <line x1="26" y1="86" x2="46" y2="102" stroke="url(#n-edgeGrad1)" stroke-width="1.2"/>
-        <line x1="46" y1="102" x2="72" y2="106" stroke="url(#n-edgeGrad1)" stroke-width="1.2"/>
-        <circle cx="72" cy="22" r="3.5" fill="url(#n-nodeGrad)"/>
-        <circle cx="46" cy="26" r="3" fill="url(#n-nodeGrad)"/>
-        <circle cx="26" cy="42" r="3" fill="url(#n-nodeGrad)"/>
-        <circle cx="22" cy="64" r="3.5" fill="url(#n-nodeGrad)"/>
-        <circle cx="26" cy="86" r="3" fill="url(#n-nodeGrad)"/>
-        <circle cx="46" cy="102" r="3" fill="url(#n-nodeGrad)"/>
-        <circle cx="72" cy="106" r="3.5" fill="url(#n-nodeGrad)"/>
-        <circle cx="64" cy="64" r="6.5" fill="url(#n-centerGlow)"/>
-        <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
-      </svg>
-      <span class="nav-wordmark">cortex</span>
-    </a>
-    <div class="nav-links">
-      <a href="#how" class="nav-link">How it works</a>
-      <a href="#install" class="nav-link">Install</a>
-      <a href="#skills" class="nav-link">Skills</a>
-      <a href="https://github.com/alaarab/cortex" class="nav-cta" target="_blank" rel="noopener">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        GitHub
-      </a>
-    </div>
-  </nav>
-
-  <!-- HERO -->
-  <section class="hero">
-    <canvas id="hero-canvas"></canvas>
-    <div class="hero-glow"></div>
-
-    <!-- Brain background -->
-    <div class="hero-brain">
-      <svg viewBox="0 0 560 480" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <radialGradient id="bn-hot" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#F5C840" stop-opacity="0.9"/>
-            <stop offset="60%" stop-color="#D4892E" stop-opacity="0.4"/>
-            <stop offset="100%" stop-color="#8B4A12" stop-opacity="0"/>
-          </radialGradient>
-          <radialGradient id="bn-warm" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#D4892E" stop-opacity="0.7"/>
-            <stop offset="100%" stop-color="#8B4A12" stop-opacity="0"/>
-          </radialGradient>
-          <filter id="bn-glow" x="-80%" y="-80%" width="260%" height="260%">
-            <feGaussianBlur stdDeviation="5" result="blur"/>
-            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-          <filter id="bn-soften" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="1.5"/>
-          </filter>
-        </defs>
-
-        <!-- Outer brain silhouette -->
-        <path d="M 115,242 C 94,208 96,162 118,122 C 140,82 178,56 222,42 C 264,28 310,30 350,50 C 390,70 416,104 422,144 C 428,180 416,216 408,242 C 398,268 396,285 410,310 C 422,332 440,350 432,374 C 424,394 400,404 372,400 C 344,396 318,380 292,372 C 268,364 244,358 220,364 C 196,370 175,382 154,380 C 132,378 114,364 108,344 C 102,324 108,300 115,278 C 122,258 120,250 115,242 Z"
-              stroke="#2B5F8E" stroke-width="1.5" stroke-opacity="0.22" fill="none"/>
-
-        <!-- Cerebellum -->
-        <path d="M 415,312 C 434,322 448,345 440,366 C 432,384 412,390 394,382 C 376,374 368,356 374,340 C 380,324 400,304 415,312 Z"
-              stroke="#1E4A6E" stroke-width="1" stroke-opacity="0.18" fill="none"/>
-
-        <!-- Central sulcus -->
-        <path d="M 306,46 C 300,80 296,118 300,156 C 304,190 316,218 312,248"
-              stroke="#1C3D5E" stroke-width="0.9" stroke-opacity="0.2" fill="none"/>
-
-        <!-- Lateral sulcus (Sylvian fissure) -->
-        <path d="M 118,244 C 162,234 208,228 255,230 C 300,232 342,242 380,250"
-              stroke="#1C3D5E" stroke-width="0.9" stroke-opacity="0.18" fill="none"/>
-
-        <!-- Superior frontal sulcus -->
-        <path d="M 172,74 C 180,102 184,135 178,166 C 172,194 160,215 162,242"
-              stroke="#1C3D5E" stroke-width="0.7" stroke-opacity="0.15" fill="none"/>
-
-        <!-- Postcentral sulcus -->
-        <path d="M 336,54 C 346,86 350,120 346,154 C 342,184 330,208 334,238"
-              stroke="#1C3D5E" stroke-width="0.7" stroke-opacity="0.15" fill="none"/>
-
-        <!-- Parieto-occipital sulcus -->
-        <path d="M 392,110 C 406,138 414,170 410,202"
-              stroke="#1C3D5E" stroke-width="0.7" stroke-opacity="0.14" fill="none"/>
-
-        <!-- Neural connections: dim (indigo) -->
-        <line x1="200" y1="138" x2="268" y2="82" stroke="#1E4A6E" stroke-width="0.8" stroke-opacity="0.28"/>
-        <line x1="200" y1="138" x2="152" y2="234" stroke="#1E4A6E" stroke-width="0.8" stroke-opacity="0.25"/>
-        <line x1="200" y1="138" x2="244" y2="198" stroke="#1E4A6E" stroke-width="0.7" stroke-opacity="0.22"/>
-        <line x1="268" y1="82" x2="344" y2="112" stroke="#1E4A6E" stroke-width="0.8" stroke-opacity="0.26"/>
-        <line x1="344" y1="112" x2="394" y2="172" stroke="#1E4A6E" stroke-width="0.7" stroke-opacity="0.22"/>
-        <line x1="394" y1="172" x2="378" y2="254" stroke="#1E4A6E" stroke-width="0.6" stroke-opacity="0.2"/>
-        <line x1="244" y1="198" x2="314" y2="262" stroke="#1E4A6E" stroke-width="0.6" stroke-opacity="0.2"/>
-        <line x1="152" y1="234" x2="244" y2="198" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.18"/>
-        <line x1="152" y1="234" x2="210" y2="308" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.17"/>
-        <line x1="314" y1="262" x2="378" y2="254" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.18"/>
-        <line x1="314" y1="262" x2="260" y2="350" stroke="#1C3D5E" stroke-width="0.5" stroke-opacity="0.15"/>
-        <line x1="210" y1="308" x2="260" y2="350" stroke="#1C3D5E" stroke-width="0.5" stroke-opacity="0.15"/>
-        <line x1="378" y1="254" x2="425" y2="295" stroke="#1C3D5E" stroke-width="0.5" stroke-opacity="0.14"/>
-
-        <!-- Neural connections: active (copper) -->
-        <line x1="268" y1="82" x2="152" y2="234" stroke="#8B5A1A" stroke-width="0.9" stroke-opacity="0.32"/>
-        <line x1="268" y1="82" x2="344" y2="112" stroke="#C4762A" stroke-width="1.1" stroke-opacity="0.35"/>
-        <line x1="200" y1="138" x2="344" y2="112" stroke="#8B5A1A" stroke-width="0.8" stroke-opacity="0.28"/>
-        <line x1="268" y1="82" x2="314" y2="262" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.2"/>
-
-        <!-- Dim nodes (indigo) -->
-        <circle cx="244" cy="198" r="2.5" fill="#3A7BAE" fill-opacity="0.55"/>
-        <circle cx="394" cy="172" r="2.5" fill="#3A7BAE" fill-opacity="0.5"/>
-        <circle cx="378" cy="254" r="2.2" fill="#3A7BAE" fill-opacity="0.48"/>
-        <circle cx="314" cy="262" r="2.5" fill="#3A7BAE" fill-opacity="0.5"/>
-        <circle cx="210" cy="308" r="2" fill="#3A7BAE" fill-opacity="0.42"/>
-        <circle cx="260" cy="350" r="2" fill="#3A7BAE" fill-opacity="0.38"/>
-        <circle cx="425" cy="295" r="2" fill="#3A7BAE" fill-opacity="0.4"/>
-        <circle cx="152" cy="340" r="1.8" fill="#3A7BAE" fill-opacity="0.35"/>
-
-        <!-- Active nodes (copper glow) -->
-        <!-- Frontal active -->
-        <circle cx="268" cy="82" r="20" fill="#C4762A" fill-opacity="0.05" filter="url(#bn-soften)"/>
-        <circle cx="268" cy="82" r="4.5" fill="url(#bn-hot)" filter="url(#bn-glow)"/>
-        <circle cx="268" cy="82" r="2.2" fill="#F5C840" fill-opacity="0.75"/>
-
-        <!-- Prefrontal active -->
-        <circle cx="200" cy="138" r="16" fill="#C4762A" fill-opacity="0.05" filter="url(#bn-soften)"/>
-        <circle cx="200" cy="138" r="3.8" fill="url(#bn-warm)" filter="url(#bn-glow)"/>
-        <circle cx="200" cy="138" r="1.8" fill="#F5C840" fill-opacity="0.65"/>
-
-        <!-- Parietal active -->
-        <circle cx="344" cy="112" r="18" fill="#C4762A" fill-opacity="0.05" filter="url(#bn-soften)"/>
-        <circle cx="344" cy="112" r="4.2" fill="url(#bn-hot)" filter="url(#bn-glow)"/>
-        <circle cx="344" cy="112" r="2" fill="#F5C840" fill-opacity="0.7"/>
-
-        <!-- Language area active -->
-        <circle cx="152" cy="234" r="14" fill="#C4762A" fill-opacity="0.04" filter="url(#bn-soften)"/>
-        <circle cx="152" cy="234" r="3.5" fill="url(#bn-warm)" filter="url(#bn-glow)"/>
-        <circle cx="152" cy="234" r="1.6" fill="#F5C840" fill-opacity="0.6"/>
-      </svg>
-    </div>
-
-    <div class="hero-content">
-      <div class="hero-icon-wrap">
-        <svg width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <radialGradient id="h-centerGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#F5C840"/>
-              <stop offset="45%" stop-color="#D4892E"/>
-              <stop offset="100%" stop-color="#8B4A12"/>
-            </radialGradient>
-            <radialGradient id="h-ambientGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#C4762A" stop-opacity="0.12"/>
-              <stop offset="65%" stop-color="#C4762A" stop-opacity="0.03"/>
-              <stop offset="100%" stop-color="#C4762A" stop-opacity="0"/>
-            </radialGradient>
-            <linearGradient id="h-edgeGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.7"/>
-              <stop offset="100%" stop-color="#1C3D5E" stop-opacity="0.25"/>
-            </linearGradient>
-            <linearGradient id="h-edgeGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#1E4A6E" stop-opacity="0.55"/>
-              <stop offset="100%" stop-color="#162E45" stop-opacity="0.15"/>
-            </linearGradient>
-            <radialGradient id="h-nodeGrad">
-              <stop offset="0%" stop-color="#3A7BAE"/>
-              <stop offset="100%" stop-color="#1C4A6E"/>
-            </radialGradient>
-            <linearGradient id="h-ringGrad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.25"/>
-              <stop offset="50%" stop-color="#1C3D5E" stop-opacity="0.08"/>
-              <stop offset="100%" stop-color="#2B5F8E" stop-opacity="0.25"/>
-            </linearGradient>
-          </defs>
-          <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
-          <circle cx="64" cy="64" r="62" stroke="url(#h-ringGrad)" stroke-width="1"/>
-          <circle cx="64" cy="64" r="48" fill="url(#h-ambientGlow)"/>
-          <line x1="72" y1="22" x2="46" y2="26" stroke="url(#h-edgeGrad1)" stroke-width="1.2"/>
-          <line x1="46" y1="26" x2="26" y2="42" stroke="url(#h-edgeGrad1)" stroke-width="1.2"/>
-          <line x1="26" y1="42" x2="22" y2="64" stroke="url(#h-edgeGrad1)" stroke-width="1.2"/>
-          <line x1="22" y1="64" x2="26" y2="86" stroke="url(#h-edgeGrad1)" stroke-width="1.2"/>
-          <line x1="26" y1="86" x2="46" y2="102" stroke="url(#h-edgeGrad1)" stroke-width="1.2"/>
-          <line x1="46" y1="102" x2="72" y2="106" stroke="url(#h-edgeGrad1)" stroke-width="1.2"/>
-          <line x1="62" y1="34" x2="44" y2="38" stroke="url(#h-edgeGrad2)" stroke-width="0.8"/>
-          <line x1="44" y1="38" x2="34" y2="50" stroke="url(#h-edgeGrad2)" stroke-width="0.8"/>
-          <line x1="34" y1="50" x2="32" y2="64" stroke="url(#h-edgeGrad2)" stroke-width="0.8"/>
-          <line x1="32" y1="64" x2="34" y2="78" stroke="url(#h-edgeGrad2)" stroke-width="0.8"/>
-          <line x1="34" y1="78" x2="44" y2="90" stroke="url(#h-edgeGrad2)" stroke-width="0.8"/>
-          <line x1="44" y1="90" x2="62" y2="94" stroke="url(#h-edgeGrad2)" stroke-width="0.8"/>
-          <line x1="72" y1="22" x2="62" y2="34" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
-          <line x1="46" y1="26" x2="44" y2="38" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
-          <line x1="26" y1="42" x2="34" y2="50" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
-          <line x1="22" y1="64" x2="32" y2="64" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
-          <line x1="26" y1="86" x2="34" y2="78" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
-          <line x1="46" y1="102" x2="44" y2="90" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
-          <line x1="72" y1="106" x2="62" y2="94" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
-          <line x1="62" y1="34" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
-          <line x1="44" y1="38" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
-          <line x1="34" y1="50" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
-          <line x1="32" y1="64" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
-          <line x1="34" y1="78" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
-          <line x1="44" y1="90" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
-          <line x1="62" y1="94" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
-          <circle cx="72" cy="22" r="3.5" fill="url(#h-nodeGrad)"/>
-          <circle cx="46" cy="26" r="3" fill="url(#h-nodeGrad)"/>
-          <circle cx="26" cy="42" r="3" fill="url(#h-nodeGrad)"/>
-          <circle cx="22" cy="64" r="3.5" fill="url(#h-nodeGrad)"/>
-          <circle cx="26" cy="86" r="3" fill="url(#h-nodeGrad)"/>
-          <circle cx="46" cy="102" r="3" fill="url(#h-nodeGrad)"/>
-          <circle cx="72" cy="106" r="3.5" fill="url(#h-nodeGrad)"/>
-          <circle cx="62" cy="34" r="2.2" fill="#1E4A6E" opacity="0.8"/>
-          <circle cx="44" cy="38" r="2" fill="#1E4A6E" opacity="0.7"/>
-          <circle cx="34" cy="50" r="2" fill="#1E4A6E" opacity="0.7"/>
-          <circle cx="32" cy="64" r="2.2" fill="#1E4A6E" opacity="0.8"/>
-          <circle cx="34" cy="78" r="2" fill="#1E4A6E" opacity="0.7"/>
-          <circle cx="44" cy="90" r="2" fill="#1E4A6E" opacity="0.7"/>
-          <circle cx="62" cy="94" r="2.2" fill="#1E4A6E" opacity="0.8"/>
-          <circle cx="64" cy="64" r="10" fill="#8B4A12" opacity="0.10"/>
-          <circle cx="64" cy="64" r="6.5" fill="url(#h-centerGlow)"/>
-          <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
-        </svg>
-      </div>
-
-      <div class="hero-badge">
-        <span class="hero-badge-dot"></span>
-        Claude Code · Copilot · Cursor · Codex · MCP
-      </div>
-
-      <h1 class="hero-title">Long-term memory<br>for <em>AI coding agents.</em></h1>
-
-      <p class="hero-sub">Relevant context injects when your prompt matches what cortex knows. Learnings save automatically when the session ends. One command to set up, nothing to do after that.</p>
-
+  <header>
+    <div class="wrap">
+      <span class="kicker">git-backed memory</span>
+      <h1>Your team memory. <span class="accent">Still yours.</span></h1>
+      <p class="sub">
+        <strong>cortex</strong> keeps long-term engineering memory in files, not a black box.
+        It pulls relevant context into prompts, captures lessons from real work, and keeps policy/governance in plain markdown and JSON.
+      </p>
       <div class="hero-actions">
-        <a href="#install" class="btn-primary">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Get started
-        </a>
-        <a href="https://github.com/alaarab/cortex" class="btn-ghost" target="_blank" rel="noopener">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          GitHub
-        </a>
+        <a class="btn primary" href="https://www.npmjs.com/package/@alaarab/cortex">Install from npm</a>
+        <a class="btn ghost" href="https://github.com/alaarab/cortex">View source</a>
       </div>
-
-      <!-- Rotating terminal -->
-      <div class="hero-terminal">
-        <div class="terminal-bar">
-          <div class="terminal-dot terminal-dot-red"></div>
-          <div class="terminal-dot terminal-dot-yellow"></div>
-          <div class="terminal-dot terminal-dot-green"></div>
-          <span class="terminal-title">terminal</span>
+      <div class="terminal" aria-label="Install command">
+        <div class="terminal-top">
+          <span class="dot r"></span>
+          <span class="dot y"></span>
+          <span class="dot g"></span>
         </div>
         <div class="terminal-body">
-          <div class="terminal-line">
-            <span class="terminal-prompt" id="terminal-prompt">$</span>
-            <div class="terminal-cmd-wrap">
-              <span class="terminal-cmd" id="terminal-cmd">npx @alaarab/cortex init</span>
-            </div>
-          </div>
-        </div>
-        <div class="terminal-step-label" id="terminal-label">One time: <span id="step-num">set it up</span></div>
-        <div class="terminal-progress">
-          <div class="terminal-progress-dot active" id="dot-0"></div>
-          <div class="terminal-progress-dot" id="dot-1"></div>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
-  <!-- HOW IT WORKS -->
-  <section class="how-section" id="how">
-    <div class="container">
-      <div class="how-header reveal">
-        <div class="section-label">How it works</div>
-        <h2 class="section-title">Three steps.<br>Then Claude remembers.</h2>
-      </div>
-      <div class="steps-grid">
-        <div class="step reveal reveal-delay-1">
-          <div class="step-num">01</div>
-          <div class="step-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-          </div>
-          <div class="step-title">Create your knowledge base</div>
-          <p class="step-desc">A folder of markdown files at <code style="font-size:12px;color:var(--copper-mid)">~/.cortex</code>. Project notes, learnings, backlog. Anything Claude should know. It's just a git repo you own.</p>
-          <span class="step-code">~/.cortex/</span>
-        </div>
-        <div class="step reveal reveal-delay-2">
-          <div class="step-num">02</div>
-          <div class="step-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-          </div>
-          <div class="step-title">One command sets everything up</div>
-          <p class="step-desc">Creates your knowledge base, registers the MCP server, and wires up hooks for every detected agent (Claude Code, Copilot CLI, Cursor, Codex). Restart your agent and you're done.</p>
-          <span class="step-code">npx @alaarab/cortex init</span>
-        </div>
-        <div class="step reveal reveal-delay-3">
-          <div class="step-num">03</div>
-          <div class="step-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          </div>
-          <div class="step-title">Knowledge compounds</div>
-          <p class="step-desc">Claude captures learnings as it works. When the session ends, a hook commits and pushes everything automatically. Next session, next machine: it's all there.</p>
-          <span class="step-code">automatic</span>
+          <div><span class="prompt">$</span> <span class="cmd">npx @alaarab/cortex init</span></div>
+          <div class="hint">Recommended default: MCP on. Optional: <code>--mcp off</code> for hooks-only fallback.</div>
         </div>
       </div>
     </div>
-  </section>
+  </header>
 
-  <!-- BENTO -->
-  <section class="bento-section">
-    <div class="container">
-      <div class="bento-header reveal">
-        <div class="section-label">Why cortex</div>
-        <h2 class="section-title">Built around how<br>Claude actually works.</h2>
-        <p class="section-sub" style="margin-top:12px">Context windows are finite and tokens cost money. Cortex makes Claude precise about what it loads, pulling only the relevant slice instead of the whole file.</p>
+  <main class="wrap">
+    <section>
+      <h2>What You Get</h2>
+      <p class="lead">Built for people who live in terminals and pull requests: fast retrieval, strict provenance, and maintenance that does not become a second job.</p>
+      <div class="grid">
+        <article class="card">
+          <div class="pill">Automation</div>
+          <h3>Runs in the flow</h3>
+          <p>Context on prompt submit, sync on session start, and save hooks at session end for supported tools.</p>
+        </article>
+        <article class="card">
+          <div class="pill">Control</div>
+          <h3>MCP when you want it</h3>
+          <p>Default to MCP on, or switch to hooks-only mode. Setup covers detected Claude Code, VS Code, Cursor, Copilot CLI, and Codex installs.</p>
+        </article>
+        <article class="card">
+          <div class="pill">Governance</div>
+          <h3>Trustable memory</h3>
+          <p>Citation-aware filtering, retention and decay policy, role controls, and audit logs you can diff.</p>
+        </article>
       </div>
-      <div class="bento-grid">
-        <!-- Card 1: Targeted retrieval -->
-        <div class="bento-card bento-card-1 reveal" id="token-card">
-          <div class="bento-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          </div>
-          <div class="bento-card-title">Search, not load</div>
-          <p class="bento-card-desc">Claude searches your knowledge base for what it needs instead of loading everything upfront. Synonym expansion finds related terms automatically: search "throttling" and it also finds "rate limit" and "429".</p>
-          <div class="token-bars">
-            <div class="token-bar-row">
-              <div class="token-bar-label">Without</div>
-              <div class="token-bar-track"><div class="token-bar-fill token-bar-fill-before"></div></div>
-              <div class="token-bar-val" style="color:var(--copper-mid)">re-explain</div>
-            </div>
-            <div class="token-bar-row">
-              <div class="token-bar-label">With</div>
-              <div class="token-bar-track"><div class="token-bar-fill token-bar-fill-after"></div></div>
-              <div class="token-bar-val" style="color:var(--indigo)">already knows</div>
-            </div>
-          </div>
-        </div>
+    </section>
 
-        <!-- Card 2: Git-backed -->
-        <div class="bento-card bento-card-2 reveal reveal-delay-1">
-          <div class="bento-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
-          </div>
-          <div class="bento-card-title">Git-backed</div>
-          <p class="bento-card-desc">Push, pull, branch. Your knowledge base has full version history. Work from your laptop, pick up on your desktop, and Claude has the same context either way.</p>
-          <div class="bento-tag-row">
-            <div class="bento-tag">git push</div>
-            <div class="bento-tag">git pull</div>
-            <div class="bento-tag">git log</div>
-          </div>
-        </div>
+    <section>
+      <h2>Quick Start</h2>
+      <div class="cols">
+        <pre><code>npx @alaarab/cortex init
 
-        <!-- Card 3: Just files -->
-        <div class="bento-card bento-card-3 reveal reveal-delay-2">
-          <div class="bento-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          </div>
-          <div class="bento-card-title">Just files</div>
-          <p class="bento-card-desc">No app. No account. No cloud service with a pricing page. Open a file and edit it. It's markdown all the way down.</p>
-          <div class="bento-file-list">
-            <div class="bento-file"><div class="bento-file-dot"></div>~/.cortex/my-app/CLAUDE.md</div>
-            <div class="bento-file"><div class="bento-file-dot"></div>~/.cortex/backend/backlog.md</div>
-          </div>
-        </div>
+# Optional mode at install
+npx @alaarab/cortex init --mcp off
 
-        <!-- Card 4: Persistent learning -->
-        <div class="bento-card bento-card-4 reveal reveal-delay-3">
-          <div class="bento-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-          </div>
-          <div class="bento-card-title">Automatic context</div>
-          <p class="bento-card-desc">Before each prompt, hooks search your knowledge base and inject matching results: nothing if there's no match, top 3 results (~400 tokens) if there is. Learnings auto-commit when the session ends. Zero manual work.</p>
-          <div class="bento-stat">
-            <div class="bento-stat-num">∞</div>
-            <div class="bento-stat-label">sessions of accumulated context,<br>available in every future session</div>
-          </div>
+# Toggle later
+npx @alaarab/cortex mcp-mode status
+npx @alaarab/cortex mcp-mode on
+npx @alaarab/cortex mcp-mode off</code></pre>
+        <div class="card">
+          <h3>What <code>init</code> actually does</h3>
+          <ul>
+            <li>creates or updates <code>~/.cortex</code></li>
+            <li>writes MCP config for detected tools (if enabled)</li>
+            <li>registers lifecycle hooks for supported local agents</li>
+            <li>applies machine/profile wiring for multi-machine setups</li>
+          </ul>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- INSTALL -->
-  <section class="install-section" id="install">
-    <div class="container">
-      <div class="install-header reveal">
-        <div class="section-label">Get started</div>
-        <h2 class="section-title">One command.</h2>
-        <p class="section-sub" style="margin-top:12px">Sets up your knowledge base, configures the MCP server, and registers context hooks for every detected agent — Claude Code, Copilot CLI, Cursor, and Codex — automatically.</p>
-      </div>
+    <section>
+      <h2>CLI Surface</h2>
+      <p class="lead">Operator-facing commands currently shipped in the CLI.</p>
+      <pre><code>init, uninstall, mcp-mode, link
+search, hook-prompt, hook-context, add-learning
+extract-memories, govern-memories, pin-memory
+doctor, memory-ui, quality-feedback
+prune-memories, consolidate-memories
+memory-policy, memory-workflow, memory-access</code></pre>
+    </section>
 
-      <div class="install-tabs-container">
-        <div class="install-tab-buttons">
-          <button class="install-tab-btn active" data-tab="claude-code">Claude Code</button>
-          <button class="install-tab-btn" data-tab="vscode">VS Code / Copilot</button>
-          <button class="install-tab-btn" data-tab="cursor">Cursor</button>
-          <button class="install-tab-btn" data-tab="codex">Codex</button>
+    <section>
+      <h2>MCP Tools (20)</h2>
+      <div class="cols">
+        <div class="card">
+          <h3>Retrieval and discovery</h3>
+          <ul>
+            <li><code>search_cortex</code></li>
+            <li><code>get_project_summary</code></li>
+            <li><code>list_projects</code></li>
+            <li><code>list_machines</code></li>
+            <li><code>list_profiles</code></li>
+          </ul>
+          <h3 style="margin-top:0.9rem;">Backlog</h3>
+          <ul>
+            <li><code>get_backlog</code></li>
+            <li><code>add_backlog_item</code></li>
+            <li><code>complete_backlog_item</code></li>
+            <li><code>update_backlog_item</code></li>
+          </ul>
         </div>
-
-        <div id="claude-code" class="install-tab-panel active">
-          <div class="install-step-body">
-            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures the MCP server, and wires up hooks for every detected agent. Restart your agent and you're done.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="vscode" class="install-tab-panel">
-          <div class="install-step-body">
-            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Detects VS Code automatically and writes <code style="color:var(--indigo)">mcp.json</code> for you. Or add it manually:
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:flex-start">
-                <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
-  "servers": {
-    "cortex": {
-      "command": "npx",
-      "args": ["@alaarab/cortex", "~/.cortex"]
-    }
-  }
-}</pre>
-                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="cursor" class="install-tab-panel">
-          <div class="install-step-body">
-            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Detects Cursor automatically and writes hooks to <code style="color:var(--indigo)">~/.cursor/hooks.json</code>. Prompt injection and auto-save both work. Note: Cursor has no session-start hook, so context re-injection after compaction isn't available.
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                For MCP, add to your Cursor settings:
-              </div>
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:flex-start">
-                <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
-  "mcpServers": {
-    "cortex": {
-      "command": "npx",
-      "args": ["@alaarab/cortex", "~/.cortex"]
-    }
-  }
-}</pre>
-                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"mcpServers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="codex" class="install-tab-panel">
-          <div class="install-step-body">
-            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Detects Codex automatically and writes hooks to <code style="color:var(--indigo)">codex.json</code> in your cortex directory. Per-project <code style="color:var(--indigo)">CLAUDE.md</code> is also symlinked as <code style="color:var(--indigo)">AGENTS.md</code> in each project for full instruction file support.
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Context injection, auto-save, and session start/end hooks all work with Codex out of the box.
-              </div>
-            </div>
-          </div>
+        <div class="card">
+          <h3>Memory and governance</h3>
+          <ul>
+            <li><code>add_learning</code></li>
+            <li><code>remove_learning</code></li>
+            <li><code>save_learnings</code></li>
+            <li><code>pin_memory</code></li>
+            <li><code>govern_memories</code></li>
+            <li><code>prune_memories</code></li>
+            <li><code>consolidate_memories</code></li>
+            <li><code>memory_policy</code></li>
+            <li><code>memory_workflow</code></li>
+            <li><code>memory_access</code></li>
+            <li><code>memory_feedback</code></li>
+          </ul>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- SKILLS -->
-  <section class="skills-section" id="skills">
-    <div class="container">
-      <div class="skills-header reveal">
-        <div class="section-label">Skills</div>
-        <h2 class="section-title">Four skills.<br>Yours to extend.</h2>
-        <p class="section-sub" style="margin-top:12px">Hooks handle saving and context automatically. These four skills cover the things that need a human trigger. Your own workflow skills go in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code> and get symlinked into every session.</p>
-      </div>
+    <section>
+      <h2>Core Files</h2>
+      <p class="lead">Everything important is file-backed and versionable.</p>
+      <table>
+        <thead>
+          <tr><th>File</th><th>Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>summary.md</code></td><td>Quick project card</td></tr>
+          <tr><td><code>CLAUDE.md</code></td><td>Main project operating context</td></tr>
+          <tr><td><code>KNOWLEDGE.md</code></td><td>Deeper reference content</td></tr>
+          <tr><td><code>LEARNINGS.md</code></td><td>Date-stamped lessons with optional citations</td></tr>
+          <tr><td><code>backlog.md</code></td><td>Active / Queue / Done task tracking</td></tr>
+          <tr><td><code>CANONICAL_MEMORIES.md</code></td><td>Pinned, protected memory points</td></tr>
+          <tr><td><code>MEMORY_QUEUE.md</code></td><td>Review queue for stale/conflicting candidates</td></tr>
+          <tr><td><code>.governance/*.json</code></td><td>Policy, access control, install preferences, usage metadata</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
 
-      <div class="skills-grid">
-        <div class="skill-card reveal">
-          <div class="skill-name">/cortex-sync</div>
-          <div class="skill-desc">Pull cortex to a new machine or push config changes back. Run this on first setup or after switching machines.</div>
-        </div>
-        <div class="skill-card reveal reveal-delay-2">
-          <div class="skill-name">/cortex-init</div>
-          <div class="skill-desc">Scaffold a new project entry with summary, CLAUDE.md, backlog, and skills directory.</div>
-        </div>
-        <div class="skill-card reveal">
-          <div class="skill-name">/cortex-discover</div>
-          <div class="skill-desc">Research what's missing in a project. Returns a prioritized list of gaps and opportunities.</div>
-        </div>
-        <div class="skill-card reveal reveal-delay-1">
-          <div class="skill-name">/cortex-consolidate</div>
-          <div class="skill-desc">Find patterns across all your project LEARNINGS.md files. Surfaces what applies everywhere.</div>
-        </div>
-        <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
-          <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Workflow skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/swarm</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code> are personal. Drop them in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex link</code> wires them up. The starter template (bundled in the package) has examples.</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CTA FOOTER -->
-  <section class="cta-section">
-    <div class="cta-content reveal">
-      <h2 class="cta-title">One command.<br>Then it runs itself.</h2>
-      <p class="cta-sub">Context injects when it's relevant. Learnings commit when the session ends. Nothing to remember.</p>
-      <div class="cta-actions">
-        <a href="#install" class="btn-primary">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Get started
-        </a>
-        <a href="https://github.com/alaarab/cortex" class="btn-ghost" target="_blank" rel="noopener">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          View on GitHub
-        </a>
-        <a href="https://www.npmjs.com/package/@alaarab/cortex" class="npm-badge" target="_blank" rel="noopener">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M0 0v24h24V0H0zm13 20.727H7.273V3.273H13v13.636h3.636V3.273H20.727v17.454H13z"/></svg>
-          @alaarab/cortex
-        </a>
-      </div>
-    </div>
-  </section>
-
-  <footer class="footer-bar">
-    <div class="footer-left">
-      <svg width="18" height="18" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
-        <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
-        <line x1="72" y1="22" x2="46" y2="26" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="46" y1="26" x2="26" y2="42" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="26" y1="42" x2="22" y2="64" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="22" y1="64" x2="26" y2="86" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="26" y1="86" x2="46" y2="102" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="46" y1="102" x2="72" y2="106" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <circle cx="64" cy="64" r="5" fill="#D4892E"/>
-      </svg>
-      cortex: long-term memory for AI coding agents
-    </div>
-    <div class="footer-right">
-      <a href="https://github.com/alaarab/cortex" target="_blank" rel="noopener">github.com/alaarab/cortex</a>
-    </div>
+  <footer class="wrap">
+    <span>MIT License · cortex</span>
+    <span>
+      <a href="https://github.com/alaarab/cortex">GitHub</a> ·
+      <a href="https://www.npmjs.com/package/@alaarab/cortex">npm</a>
+    </span>
   </footer>
-
-  <script>
-    // --- NAV scroll state ---
-    const nav = document.getElementById('nav');
-    window.addEventListener('scroll', () => {
-      nav.classList.toggle('scrolled', window.scrollY > 20);
-    }, { passive: true });
-
-    // --- Hero canvas: subtle network nodes ---
-    (function() {
-      const canvas = document.getElementById('hero-canvas');
-      const ctx = canvas.getContext('2d');
-      let W, H, nodes, raf;
-
-      function resize() {
-        W = canvas.width = canvas.offsetWidth;
-        H = canvas.height = canvas.offsetHeight;
-      }
-
-      function mkNode() {
-        return {
-          x: Math.random() * W,
-          y: Math.random() * H,
-          vx: (Math.random() - 0.5) * 0.25,
-          vy: (Math.random() - 0.5) * 0.25,
-          r: 1 + Math.random() * 1.5,
-          a: 0.08 + Math.random() * 0.12,
-        };
-      }
-
-      function init() {
-        resize();
-        const count = Math.floor((W * H) / 14000);
-        nodes = Array.from({ length: Math.min(count, 55) }, mkNode);
-      }
-
-      function draw() {
-        ctx.clearRect(0, 0, W, H);
-
-        // Draw edges
-        for (let i = 0; i < nodes.length; i++) {
-          for (let j = i + 1; j < nodes.length; j++) {
-            const dx = nodes[i].x - nodes[j].x;
-            const dy = nodes[i].y - nodes[j].y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const maxDist = 160;
-            if (dist < maxDist) {
-              const alpha = (1 - dist / maxDist) * 0.06;
-              ctx.beginPath();
-              ctx.strokeStyle = `rgba(58,123,174,${alpha})`;
-              ctx.lineWidth = 0.6;
-              ctx.moveTo(nodes[i].x, nodes[i].y);
-              ctx.lineTo(nodes[j].x, nodes[j].y);
-              ctx.stroke();
-            }
-          }
-        }
-
-        // Draw nodes
-        for (const n of nodes) {
-          ctx.beginPath();
-          ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(58,123,174,${n.a})`;
-          ctx.fill();
-
-          n.x += n.vx;
-          n.y += n.vy;
-
-          if (n.x < -10) n.x = W + 10;
-          if (n.x > W + 10) n.x = -10;
-          if (n.y < -10) n.y = H + 10;
-          if (n.y > H + 10) n.y = -10;
-        }
-
-        raf = requestAnimationFrame(draw);
-      }
-
-      init();
-      draw();
-
-      window.addEventListener('resize', () => {
-        cancelAnimationFrame(raf);
-        init();
-        draw();
-      });
-    })();
-
-    // --- Rotating terminal command ---
-    (function() {
-      const steps = [
-        {
-          cmd: 'npx @alaarab/cortex init',
-          prefix: 'One time:',
-          label: 'set everything up',
-        },
-        {
-          cmd: '✓ context injected  ✓ learnings saved',
-          prefix: 'Every session:',
-          label: 'hooks handle it. you just code.',
-          output: true,
-        },
-      ];
-
-      const cmdEl = document.getElementById('terminal-cmd');
-      const promptEl = document.getElementById('terminal-prompt');
-      const labelEl = document.getElementById('terminal-label');
-      const stepNumEl = document.getElementById('step-num');
-      const dots = [
-        document.getElementById('dot-0'),
-        document.getElementById('dot-1'),
-      ];
-
-      let current = 0;
-
-      function advance() {
-        cmdEl.classList.add('fade-out');
-
-        setTimeout(() => {
-          current = (current + 1) % steps.length;
-          const step = steps[current];
-          cmdEl.textContent = step.cmd;
-          cmdEl.style.color = step.output ? 'var(--indigo)' : '';
-          promptEl.style.display = step.output ? 'none' : '';
-          cmdEl.classList.remove('fade-out');
-          cmdEl.classList.add('fade-in');
-          labelEl.innerHTML = `${step.prefix} <span id="step-num">${step.label}</span>`;
-
-          dots.forEach((d, i) => d.classList.toggle('active', i === current));
-
-          setTimeout(() => cmdEl.classList.remove('fade-in'), 300);
-        }, 280);
-      }
-
-      setInterval(advance, 3200);
-    })();
-
-    // --- Install tabs ---
-    (function() {
-      const tabBtns = document.querySelectorAll('.install-tab-btn');
-      const tabPanels = document.querySelectorAll('.install-tab-panel');
-
-      tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-          const tabId = btn.dataset.tab;
-
-          tabBtns.forEach(b => b.classList.remove('active'));
-          tabPanels.forEach(p => p.classList.remove('active'));
-
-          btn.classList.add('active');
-          document.getElementById(tabId).classList.add('active');
-        });
-      });
-    })();
-
-    // --- Copy buttons ---
-    document.querySelectorAll('.copy-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const cmd = btn.dataset.cmd;
-        try {
-          await navigator.clipboard.writeText(cmd);
-          btn.textContent = 'copied!';
-          btn.classList.add('copied');
-          setTimeout(() => {
-            btn.textContent = 'copy';
-            btn.classList.remove('copied');
-          }, 1800);
-        } catch {
-          btn.textContent = 'copy';
-        }
-      });
-    });
-
-    // --- Scroll reveal ---
-    (function() {
-      const els = document.querySelectorAll('.reveal');
-      const obs = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-            obs.unobserve(entry.target);
-          }
-        });
-      }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
-
-      els.forEach(el => obs.observe(el));
-    })();
-
-    // --- Token bar animation (triggered when bento card enters view) ---
-    (function() {
-      const card = document.getElementById('token-card');
-      if (!card) return;
-      const obs = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            card.classList.add('in-view');
-            obs.unobserve(card);
-          }
-        });
-      }, { threshold: 0.3 });
-      obs.observe(card);
-    })();
-  </script>
 </body>
 </html>

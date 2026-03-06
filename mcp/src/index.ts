@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 
-import { runInit } from "./init.js";
+import { parseMcpMode, runInit } from "./init.js";
+import * as os from "os";
 
 if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
   console.log(`cortex - Long-term memory for Claude Code
 
 Usage:
-  npx @alaarab/cortex init [--machine <name>] [--profile <name>]
+  npx @alaarab/cortex init [--machine <name>] [--profile <name>] [--mcp on|off]
                                                  Set up cortex in ~/.cortex
+                                                 --mcp on|off: MCP tools enabled/disabled (default on)
   npx @alaarab/cortex uninstall                  Remove cortex MCP config and hooks
-  npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean] [--all-tools]
+  npx @alaarab/cortex mcp-mode [on|off|status]   Toggle MCP integration without reinstalling
+  npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean] [--all-tools] [--mcp on|off]
                                                  Sync profile, symlinks, hooks, and context (replaces link.sh)
                                                  --all-tools: configure hooks for all agents (default: auto-detect)
   npx @alaarab/cortex search <query>             Search your knowledge base
@@ -17,6 +20,23 @@ Usage:
                                                  Add a learning to a project
   npx @alaarab/cortex hook-prompt                (used by Claude Code UserPromptSubmit hook)
   npx @alaarab/cortex hook-context               (used by Claude Code SessionStart hook)
+  npx @alaarab/cortex extract-memories [project] Auto-generate memory candidates from git history
+  npx @alaarab/cortex govern-memories [project]  Queue stale/conflicting/low-value memory items
+  npx @alaarab/cortex pin-memory <project> "<memory>"
+                                                 Pin canonical memory for a project
+  npx @alaarab/cortex doctor [--fix]             Health-check setup; with --fix run self-heal
+  npx @alaarab/cortex memory-ui [--port=3499]    Open lightweight memory review UI
+  npx @alaarab/cortex quality-feedback --key=<k> --type=helpful|reprompt|regression
+                                                 Record memory usefulness feedback
+  npx @alaarab/cortex prune-memories [project]   Delete stale memory entries by retention policy
+  npx @alaarab/cortex consolidate-memories [project]
+                                                 Deduplicate and consolidate LEARNINGS.md bullets
+  npx @alaarab/cortex memory-policy [get|set ...]
+                                                 Read/update retention and scoring policy
+  npx @alaarab/cortex memory-workflow [get|set ...]
+                                                 Read/update risky-memory approval workflow policy
+  npx @alaarab/cortex memory-access [get|set ...]
+                                                 Read/update role-based memory access control
 
 MCP server mode (used by Claude Code automatically):
   npx @alaarab/cortex [cortex-path]
@@ -25,6 +45,9 @@ Environment variables:
   CORTEX_PATH     Override cortex directory (default: ~/.cortex)
   CORTEX_PROFILE  Active profile name (filters which projects are indexed)
   CORTEX_DEBUG    Set to 1 to enable debug logging to ~/.cortex/debug.log
+  CORTEX_CONTEXT_TOKEN_BUDGET   Max approx tokens injected by hook-prompt (default: 550)
+  CORTEX_CONTEXT_SNIPPET_LINES  Max lines per injected snippet (default: 6)
+  CORTEX_CONTEXT_SNIPPET_CHARS  Max chars per injected snippet (default: 520)
 `);
   process.exit(0);
 }
@@ -33,9 +56,16 @@ if (process.argv[2] === "init") {
   const initArgs = process.argv.slice(3);
   const machineIdx = initArgs.indexOf("--machine");
   const profileIdx = initArgs.indexOf("--profile");
+  const mcpIdx = initArgs.indexOf("--mcp");
+  const mcpMode = mcpIdx !== -1 ? parseMcpMode(initArgs[mcpIdx + 1]) : undefined;
+  if (mcpIdx !== -1 && !mcpMode) {
+    console.error(`Invalid --mcp value "${initArgs[mcpIdx + 1] || ""}". Use "on" or "off".`);
+    process.exit(1);
+  }
   await runInit({
     machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
     profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
+    mcp: mcpMode,
   });
   process.exit(0);
 }
@@ -43,6 +73,12 @@ if (process.argv[2] === "init") {
 if (process.argv[2] === "uninstall") {
   const { runUninstall } = await import("./init.js");
   await runUninstall();
+  process.exit(0);
+}
+
+if (process.argv[2] === "mcp-mode") {
+  const { runMcpMode } = await import("./init.js");
+  await runMcpMode(process.argv[3]);
   process.exit(0);
 }
 
@@ -54,12 +90,19 @@ if (process.argv[2] === "link") {
     return idx !== -1 ? linkArgs[idx + 1] : undefined;
   };
   const taskArg = getFlag("--task") as "debugging" | "planning" | "clean" | undefined;
-  await runLink(process.env.CORTEX_PATH || require("os").homedir() + "/.cortex", {
+  const mcpArg = getFlag("--mcp");
+  const mcpMode = mcpArg ? parseMcpMode(mcpArg) : undefined;
+  if (mcpArg && !mcpMode) {
+    console.error(`Invalid --mcp value "${mcpArg}". Use "on" or "off".`);
+    process.exit(1);
+  }
+  await runLink(process.env.CORTEX_PATH || os.homedir() + "/.cortex", {
     machine: getFlag("--machine"),
     profile: getFlag("--profile"),
     register: linkArgs.includes("--register"),
     task: taskArg,
     allTools: linkArgs.includes("--all-tools"),
+    mcp: mcpMode,
   });
   process.exit(0);
 }
@@ -69,7 +112,24 @@ if (process.argv[2] === "--health") {
 }
 
 // CLI subcommands (run before MCP server starts)
-const CLI_COMMANDS = ["search", "hook-prompt", "hook-context", "add-learning"];
+const CLI_COMMANDS = [
+  "search",
+  "hook-prompt",
+  "hook-context",
+  "add-learning",
+  "extract-memories",
+  "govern-memories",
+  "pin-memory",
+  "doctor",
+  "memory-ui",
+  "quality-feedback",
+  "prune-memories",
+  "consolidate-memories",
+  "memory-policy",
+  "memory-workflow",
+  "memory-access",
+  "background-maintenance",
+];
 if (CLI_COMMANDS.includes(process.argv[2])) {
   const { runCliCommand } = await import("./cli.js");
   await runCliCommand(process.argv[2], process.argv.slice(3));
@@ -83,7 +143,30 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { isValidProjectName, safeProjectPath, sanitizeFts5Query, expandSynonyms } from "./utils.js";
-import { findCortexPathWithArg, buildIndex, extractSnippet, queryRows, addLearningToFile, validateBacklogFormat, autoMergeConflicts, debugLog } from "./shared.js";
+import {
+  findCortexPathWithArg,
+  buildIndex,
+  extractSnippet,
+  queryRows,
+  addLearningToFile,
+  validateBacklogFormat,
+  autoMergeConflicts,
+  debugLog,
+  upsertCanonicalMemory,
+  filterTrustedLearningsDetailed,
+  appendMemoryQueue,
+  appendAuditLog,
+  getMemoryPolicy,
+  getMemoryWorkflowPolicy,
+  updateMemoryPolicy,
+  updateMemoryWorkflowPolicy,
+  getAccessControl,
+  updateAccessControl,
+  pruneDeadMemories,
+  consolidateProjectLearnings,
+  recordMemoryFeedback,
+  enforceCanonicalLocks,
+} from "./shared.js";
 
 // MCP mode: first non-flag arg is the cortex path
 const cortexArg = process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
@@ -99,8 +182,212 @@ async function main() {
 
   const server = new McpServer({
     name: "cortex-mcp",
-    version: "1.7.4",
+    version: "1.8.4",
   });
+
+  server.registerTool(
+    "pin_memory",
+    {
+      title: "◆ cortex · pin memory",
+      description:
+        "Promote an important memory into CANONICAL_MEMORIES.md so retrieval prioritizes it.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        memory: z.string().describe("Canonical memory text to pin."),
+      }),
+    },
+    async ({ project, memory }) => {
+      const result = upsertCanonicalMemory(cortexPath, project, memory);
+      return textResponse(result);
+    }
+  );
+
+  server.registerTool(
+    "govern_memories",
+    {
+      title: "◆ cortex · govern",
+      description:
+        "Scan LEARNINGS.md entries and queue stale/citation-conflicting/low-value memory items in MEMORY_QUEUE.md.",
+      inputSchema: z.object({
+        project: z.string().optional().describe("Optional project name; omit to scan all indexed projects."),
+      }),
+    },
+    async ({ project }) => {
+      const projects = project
+        ? [project]
+        : (queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []) ?? []).map((r) => r[0] as string);
+      const policy = getMemoryPolicy(cortexPath);
+      const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
+
+      let staleCount = 0;
+      let conflictCount = 0;
+      let reviewCount = 0;
+      for (const proj of projects) {
+        const learningsFile = path.join(cortexPath, proj, "LEARNINGS.md");
+        if (!fs.existsSync(learningsFile)) continue;
+        const content = fs.readFileSync(learningsFile, "utf8");
+        const trust = filterTrustedLearningsDetailed(content, {
+          ttlDays: Number.isNaN(ttlDays) ? policy.ttlDays : ttlDays,
+          minConfidence: policy.minInjectConfidence,
+          decay: policy.decay,
+        });
+        const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
+        const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);
+        staleCount += appendMemoryQueue(cortexPath, proj, "Stale", stale);
+        conflictCount += appendMemoryQueue(cortexPath, proj, "Conflicts", conflicts);
+        const lowValue = content.split("\n")
+          .filter((l) => l.startsWith("- "))
+          .filter((l) => /(fixed stuff|updated things|misc|temp|wip|quick note)/i.test(l) || l.length < 16);
+        reviewCount += appendMemoryQueue(cortexPath, proj, "Review", lowValue);
+        consolidateProjectLearnings(cortexPath, proj);
+      }
+
+      appendAuditLog(
+        cortexPath,
+        "govern_memories_mcp",
+        `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
+      );
+      enforceCanonicalLocks(cortexPath, project);
+      return textResponse(
+        `Governed memories across ${projects.length} project(s): stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`
+      );
+    }
+  );
+
+  server.registerTool(
+    "memory_policy",
+    {
+      title: "◆ cortex · policy",
+      description:
+        "Read or update memory governance policy (retention, ttl, confidence thresholds, decay).",
+      inputSchema: z.object({
+        mode: z.enum(["get", "set"]).describe("get returns policy, set applies provided fields."),
+        ttlDays: z.number().optional(),
+        retentionDays: z.number().optional(),
+        autoAcceptThreshold: z.number().optional(),
+        minInjectConfidence: z.number().optional(),
+        decay_d30: z.number().optional(),
+        decay_d60: z.number().optional(),
+        decay_d90: z.number().optional(),
+        decay_d120: z.number().optional(),
+      }),
+    },
+    async ({ mode, ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay_d30, decay_d60, decay_d90, decay_d120 }) => {
+      if (mode === "get") {
+        return textResponse(JSON.stringify(getMemoryPolicy(cortexPath), null, 2));
+      }
+      const decayPatch: Record<string, number> = {};
+      if (decay_d30 !== undefined) decayPatch.d30 = decay_d30;
+      if (decay_d60 !== undefined) decayPatch.d60 = decay_d60;
+      if (decay_d90 !== undefined) decayPatch.d90 = decay_d90;
+      if (decay_d120 !== undefined) decayPatch.d120 = decay_d120;
+      const result = updateMemoryPolicy(cortexPath, {
+        ttlDays,
+        retentionDays,
+        autoAcceptThreshold,
+        minInjectConfidence,
+        decay: Object.keys(decayPatch).length ? (decayPatch as any) : undefined,
+      });
+      if (typeof result === "string") return textResponse(result);
+      return textResponse(JSON.stringify(result, null, 2));
+    }
+  );
+
+  server.registerTool(
+    "memory_workflow",
+    {
+      title: "◆ cortex · workflow",
+      description:
+        "Read or update risky-memory approval workflow policy (approval gate, confidence threshold, risky sections).",
+      inputSchema: z.object({
+        mode: z.enum(["get", "set"]).describe("get returns workflow policy, set applies provided fields."),
+        requireMaintainerApproval: z.boolean().optional(),
+        lowConfidenceThreshold: z.number().optional(),
+        riskySections: z.array(z.enum(["Review", "Stale", "Conflicts"])).optional(),
+      }),
+    },
+    async ({ mode, requireMaintainerApproval, lowConfidenceThreshold, riskySections }) => {
+      if (mode === "get") {
+        return textResponse(JSON.stringify(getMemoryWorkflowPolicy(cortexPath), null, 2));
+      }
+      const result = updateMemoryWorkflowPolicy(cortexPath, {
+        requireMaintainerApproval,
+        lowConfidenceThreshold,
+        riskySections,
+      });
+      if (typeof result === "string") return textResponse(result);
+      return textResponse(JSON.stringify(result, null, 2));
+    }
+  );
+
+  server.registerTool(
+    "prune_memories",
+    {
+      title: "◆ cortex · prune",
+      description: "Delete stale memory entries based on retention policy.",
+      inputSchema: z.object({
+        project: z.string().optional().describe("Optional project name; omit to prune all projects."),
+      }),
+    },
+    async ({ project }) => {
+      return textResponse(pruneDeadMemories(cortexPath, project));
+    }
+  );
+
+  server.registerTool(
+    "memory_access",
+    {
+      title: "◆ cortex · access",
+      description: "Read or update role-based memory access control (admins/maintainers/contributors/viewers).",
+      inputSchema: z.object({
+        mode: z.enum(["get", "set"]).describe("get returns current access control, set updates role lists."),
+        admins: z.array(z.string()).optional(),
+        maintainers: z.array(z.string()).optional(),
+        contributors: z.array(z.string()).optional(),
+        viewers: z.array(z.string()).optional(),
+      }),
+    },
+    async ({ mode, admins, maintainers, contributors, viewers }) => {
+      if (mode === "get") return textResponse(JSON.stringify(getAccessControl(cortexPath), null, 2));
+      const updated = updateAccessControl(cortexPath, { admins, maintainers, contributors, viewers });
+      if (typeof updated === "string") return textResponse(updated);
+      return textResponse(JSON.stringify(updated, null, 2));
+    }
+  );
+
+  server.registerTool(
+    "consolidate_memories",
+    {
+      title: "◆ cortex · consolidate",
+      description: "Deduplicate LEARNINGS.md bullets for one project or all projects.",
+      inputSchema: z.object({
+        project: z.string().optional().describe("Optional project name; omit to consolidate all indexed projects."),
+      }),
+    },
+    async ({ project }) => {
+      const projects = project
+        ? [project]
+        : (queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []) ?? []).map((r) => r[0] as string);
+      const out = projects.map((p) => consolidateProjectLearnings(cortexPath, p));
+      return textResponse(out.join("\n"));
+    }
+  );
+
+  server.registerTool(
+    "memory_feedback",
+    {
+      title: "◆ cortex · feedback",
+      description: "Record feedback on whether an injected memory was helpful or noisy/regressive.",
+      inputSchema: z.object({
+        key: z.string().describe("Memory key to score."),
+        feedback: z.enum(["helpful", "reprompt", "regression"]).describe("Feedback type."),
+      }),
+    },
+    async ({ key, feedback }) => {
+      recordMemoryFeedback(cortexPath, key, feedback);
+      return textResponse(`Recorded feedback ${feedback} for ${key}`);
+    }
+  );
 
   server.registerTool(
     "search_cortex",
@@ -110,7 +397,7 @@ async function main() {
       inputSchema: z.object({
         query: z.string().describe("Search query (supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes)"),
         limit: z.number().min(1).max(20).optional().describe("Max results to return (1-20, default 5)"),
-        type: z.enum(["claude", "learnings", "knowledge", "skills", "summary", "backlog", "changelog", "skill", "other"])
+        type: z.enum(["claude", "learnings", "knowledge", "skills", "summary", "backlog", "changelog", "canonical", "memory-queue", "skill", "other"])
           .optional()
           .describe("Filter by document type: claude, learnings, knowledge, summary, backlog, skill"),
       }),
@@ -451,10 +738,19 @@ async function main() {
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your cortex)."),
         learning: z.string().describe("The insight, written as a single bullet point. Be specific enough that someone could act on it without extra context."),
+        citation_file: z.string().optional().describe("Optional source file path that supports this learning."),
+        citation_line: z.number().int().positive().optional().describe("Optional 1-based line number in citation_file."),
+        citation_repo: z.string().optional().describe("Optional git repository root path for citation validation."),
+        citation_commit: z.string().optional().describe("Optional git commit SHA that supports this learning."),
       }),
     },
-    async ({ project, learning }) => {
-      const result = addLearningToFile(cortexPath, project, learning);
+    async ({ project, learning, citation_file, citation_line, citation_repo, citation_commit }) => {
+      const result = addLearningToFile(cortexPath, project, learning, {
+        file: citation_file,
+        line: citation_line,
+        repo: citation_repo,
+        commit: citation_commit,
+      });
       return textResponse(result);
     }
   );
@@ -484,8 +780,11 @@ async function main() {
       if (idx === -1) return textResponse(`No learning matching "${learning}" found in ${project}.`);
 
       const matched = lines[idx];
-      lines.splice(idx, 1);
-      fs.writeFileSync(learningsPath, lines.join("\n"));
+      const citationComment = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/;
+      const removeCount = citationComment.test(lines[idx + 1] || "") ? 2 : 1;
+      lines.splice(idx, removeCount);
+      const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+      fs.writeFileSync(learningsPath, normalized);
       return textResponse(`Removed from ${project}: ${matched}`);
     }
   );

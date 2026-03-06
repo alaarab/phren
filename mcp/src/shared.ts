@@ -3,6 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
 import { fileURLToPath } from "url";
+import { execFileSync } from "child_process";
 import * as yaml from "js-yaml";
 import { globSync } from "glob";
 import { createRequire } from "module";
@@ -20,6 +21,457 @@ export function debugLog(msg: string): void {
   try {
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
   } catch { /* best effort */ }
+}
+
+type MemoryRole = "admin" | "maintainer" | "contributor" | "viewer";
+type MemoryAction = "read" | "write" | "queue" | "pin" | "policy" | "delete";
+
+interface AccessControl {
+  admins?: string[];
+  maintainers?: string[];
+  contributors?: string[];
+  viewers?: string[];
+}
+
+export interface AccessControlPatch {
+  admins?: string[];
+  maintainers?: string[];
+  contributors?: string[];
+  viewers?: string[];
+}
+
+export interface MemoryPolicy {
+  ttlDays: number;
+  retentionDays: number;
+  autoAcceptThreshold: number;
+  minInjectConfidence: number;
+  decay: {
+    d30: number;
+    d60: number;
+    d90: number;
+    d120: number;
+  };
+}
+
+export interface MemoryWorkflowPolicy {
+  requireMaintainerApproval: boolean;
+  lowConfidenceThreshold: number;
+  riskySections: Array<"Review" | "Stale" | "Conflicts">;
+}
+
+export interface MemoryScore {
+  impressions: number;
+  helpful: number;
+  repromptPenalty: number;
+  regressionPenalty: number;
+  lastUsedAt: string;
+}
+
+interface CanonicalLock {
+  hash: string;
+  snapshot: string;
+  updatedAt: string;
+}
+
+const DEFAULT_POLICY: MemoryPolicy = {
+  ttlDays: 120,
+  retentionDays: 365,
+  autoAcceptThreshold: 0.75,
+  minInjectConfidence: 0.35,
+  decay: {
+    d30: 1.0,
+    d60: 0.85,
+    d90: 0.65,
+    d120: 0.45,
+  },
+};
+
+const DEFAULT_WORKFLOW_POLICY: MemoryWorkflowPolicy = {
+  requireMaintainerApproval: true,
+  lowConfidenceThreshold: 0.7,
+  riskySections: ["Stale", "Conflicts"],
+};
+
+const DEFAULT_ACCESS: AccessControl = {
+  admins: [],
+  maintainers: [],
+  contributors: [],
+  viewers: [],
+};
+
+function governanceDir(cortexPath: string): string {
+  return path.join(cortexPath, ".governance");
+}
+
+function readJsonFile<T>(filePath: string, fallback: T): T {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, "utf8");
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonFile(filePath: string, data: unknown): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n");
+}
+
+function actorName(): string {
+  const envActor = process.env.CORTEX_ACTOR || process.env.USER || process.env.USERNAME;
+  if (envActor) return envActor;
+  try {
+    return os.userInfo().username;
+  } catch {
+    return "unknown";
+  }
+}
+
+function accessFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "access-control.json");
+}
+
+function policyFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "memory-policy.json");
+}
+
+function workflowPolicyFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "memory-workflow-policy.json");
+}
+
+function scoreFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "memory-scores.json");
+}
+
+function usageLogFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "memory-usage.log");
+}
+
+function lockFile(cortexPath: string): string {
+  return path.join(governanceDir(cortexPath), "canonical-locks.json");
+}
+
+function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRole {
+  const acl = readJsonFile<AccessControl>(accessFile(cortexPath), DEFAULT_ACCESS);
+  if ((acl.admins || []).includes(actor)) return "admin";
+  if ((acl.maintainers || []).includes(actor)) return "maintainer";
+  if ((acl.contributors || []).includes(actor)) return "contributor";
+  if ((acl.viewers || []).includes(actor)) return "viewer";
+  // Default to least privilege when actor is unknown.
+  return "viewer";
+}
+
+export function getAccessControl(cortexPath: string): AccessControl {
+  return readJsonFile<AccessControl>(accessFile(cortexPath), DEFAULT_ACCESS);
+}
+
+export function updateAccessControl(cortexPath: string, patch: AccessControlPatch): AccessControl | string {
+  const denial = checkMemoryPermission(cortexPath, "policy");
+  if (denial) return denial;
+  const current = getAccessControl(cortexPath);
+  const next: AccessControl = {
+    admins: patch.admins ?? current.admins ?? [],
+    maintainers: patch.maintainers ?? current.maintainers ?? [],
+    contributors: patch.contributors ?? current.contributors ?? [],
+    viewers: patch.viewers ?? current.viewers ?? [],
+  };
+  writeJsonFile(accessFile(cortexPath), next);
+  appendAuditLog(cortexPath, "update_access", JSON.stringify(next));
+  return next;
+}
+
+function can(role: MemoryRole, action: MemoryAction): boolean {
+  if (role === "admin") return true;
+  if (role === "maintainer") return action !== "policy";
+  if (role === "contributor") return action === "read" || action === "write" || action === "queue";
+  return action === "read";
+}
+
+export function checkMemoryPermission(cortexPath: string, action: MemoryAction, actor?: string): string | null {
+  const role = resolveRole(cortexPath, actor);
+  if (can(role, action)) return null;
+  return `Permission denied for ${actor || actorName()} (role=${role}) on action=${action}.`;
+}
+
+export function getMemoryPolicy(cortexPath: string): MemoryPolicy {
+  const parsed = readJsonFile<Partial<MemoryPolicy>>(policyFile(cortexPath), {});
+  return {
+    ttlDays: parsed.ttlDays ?? DEFAULT_POLICY.ttlDays,
+    retentionDays: parsed.retentionDays ?? DEFAULT_POLICY.retentionDays,
+    autoAcceptThreshold: parsed.autoAcceptThreshold ?? DEFAULT_POLICY.autoAcceptThreshold,
+    minInjectConfidence: parsed.minInjectConfidence ?? DEFAULT_POLICY.minInjectConfidence,
+    decay: {
+      d30: parsed.decay?.d30 ?? DEFAULT_POLICY.decay.d30,
+      d60: parsed.decay?.d60 ?? DEFAULT_POLICY.decay.d60,
+      d90: parsed.decay?.d90 ?? DEFAULT_POLICY.decay.d90,
+      d120: parsed.decay?.d120 ?? DEFAULT_POLICY.decay.d120,
+    },
+  };
+}
+
+export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPolicy>): MemoryPolicy | string {
+  const denial = checkMemoryPermission(cortexPath, "policy");
+  if (denial) return denial;
+  const current = getMemoryPolicy(cortexPath);
+  const next: MemoryPolicy = {
+    ...current,
+    ...patch,
+    decay: {
+      ...current.decay,
+      ...(patch.decay || {}),
+    },
+  };
+  writeJsonFile(policyFile(cortexPath), next);
+  appendAuditLog(cortexPath, "update_policy", JSON.stringify(next));
+  return next;
+}
+
+export function getMemoryWorkflowPolicy(cortexPath: string): MemoryWorkflowPolicy {
+  const parsed = readJsonFile<Partial<MemoryWorkflowPolicy>>(workflowPolicyFile(cortexPath), {});
+  const riskySections = Array.isArray(parsed.riskySections)
+    ? parsed.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(s)))
+    : DEFAULT_WORKFLOW_POLICY.riskySections;
+  return {
+    requireMaintainerApproval: parsed.requireMaintainerApproval ?? DEFAULT_WORKFLOW_POLICY.requireMaintainerApproval,
+    lowConfidenceThreshold: parsed.lowConfidenceThreshold ?? DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold,
+    riskySections: riskySections.length ? riskySections : DEFAULT_WORKFLOW_POLICY.riskySections,
+  };
+}
+
+export function updateMemoryWorkflowPolicy(
+  cortexPath: string,
+  patch: Partial<MemoryWorkflowPolicy>
+): MemoryWorkflowPolicy | string {
+  const denial = checkMemoryPermission(cortexPath, "policy");
+  if (denial) return denial;
+  const current = getMemoryWorkflowPolicy(cortexPath);
+  const riskySections = Array.isArray(patch.riskySections)
+    ? patch.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(s)))
+    : current.riskySections;
+  const next: MemoryWorkflowPolicy = {
+    requireMaintainerApproval: patch.requireMaintainerApproval ?? current.requireMaintainerApproval,
+    lowConfidenceThreshold: patch.lowConfidenceThreshold ?? current.lowConfidenceThreshold,
+    riskySections: riskySections.length ? riskySections : current.riskySections,
+  };
+  writeJsonFile(workflowPolicyFile(cortexPath), next);
+  appendAuditLog(cortexPath, "update_workflow_policy", JSON.stringify(next));
+  return next;
+}
+
+function loadMemoryScores(cortexPath: string): Record<string, MemoryScore> {
+  return readJsonFile<Record<string, MemoryScore>>(scoreFile(cortexPath), {});
+}
+
+function loadCanonicalLocks(cortexPath: string): Record<string, CanonicalLock> {
+  return readJsonFile<Record<string, CanonicalLock>>(lockFile(cortexPath), {});
+}
+
+function saveCanonicalLocks(cortexPath: string, locks: Record<string, CanonicalLock>) {
+  writeJsonFile(lockFile(cortexPath), locks);
+}
+
+function hashContent(content: string): string {
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+function saveMemoryScores(cortexPath: string, scores: Record<string, MemoryScore>) {
+  writeJsonFile(scoreFile(cortexPath), scores);
+}
+
+function ensureScoreEntry(scores: Record<string, MemoryScore>, key: string): MemoryScore {
+  if (!scores[key]) {
+    scores[key] = {
+      impressions: 0,
+      helpful: 0,
+      repromptPenalty: 0,
+      regressionPenalty: 0,
+      lastUsedAt: new Date(0).toISOString(),
+    };
+  }
+  return scores[key];
+}
+
+export function memoryScoreKey(project: string, filename: string, snippet: string): string {
+  const short = snippet.replace(/\s+/g, " ").slice(0, 200);
+  const digest = crypto.createHash("sha1").update(`${project}:${filename}:${short}`).digest("hex").slice(0, 12);
+  return `${project}/${filename}:${digest}`;
+}
+
+export function recordMemoryInjection(cortexPath: string, key: string, sessionId?: string): void {
+  const scores = loadMemoryScores(cortexPath);
+  const entry = ensureScoreEntry(scores, key);
+  entry.impressions += 1;
+  entry.lastUsedAt = new Date().toISOString();
+  saveMemoryScores(cortexPath, scores);
+  const session = sessionId || "none";
+  fs.mkdirSync(path.dirname(usageLogFile(cortexPath)), { recursive: true });
+  fs.appendFileSync(
+    usageLogFile(cortexPath),
+    `${new Date().toISOString()}\tinject\t${session}\t${key}\n`
+  );
+}
+
+export function recordMemoryFeedback(
+  cortexPath: string,
+  key: string,
+  feedback: "helpful" | "reprompt" | "regression"
+): void {
+  const scores = loadMemoryScores(cortexPath);
+  const entry = ensureScoreEntry(scores, key);
+  if (feedback === "helpful") entry.helpful += 1;
+  if (feedback === "reprompt") entry.repromptPenalty += 1;
+  if (feedback === "regression") entry.regressionPenalty += 1;
+  saveMemoryScores(cortexPath, scores);
+  appendAuditLog(cortexPath, "memory_feedback", `key=${key} feedback=${feedback}`);
+}
+
+export function getMemoryQualityMultiplier(cortexPath: string, key: string): number {
+  const scores = loadMemoryScores(cortexPath);
+  const entry = scores[key];
+  if (!entry) return 1;
+  const helpful = entry.helpful;
+  const penalties = entry.repromptPenalty + entry.regressionPenalty * 2;
+  const raw = 1 + helpful * 0.15 - penalties * 0.2;
+  return Math.max(0.2, Math.min(1.5, raw));
+}
+
+export function pruneDeadMemories(cortexPath: string, project?: string): string {
+  const denial = checkMemoryPermission(cortexPath, "delete");
+  if (denial) return denial;
+  const policy = getMemoryPolicy(cortexPath);
+  const dirs = project
+    ? [path.join(cortexPath, project)]
+    : getProjectDirs(cortexPath).filter((d) => path.basename(d) !== "global");
+  let pruned = 0;
+  const cutoffDays = policy.retentionDays;
+
+  for (const dir of dirs) {
+    const file = path.join(dir, "LEARNINGS.md");
+    if (!fs.existsSync(file)) continue;
+    const content = fs.readFileSync(file, "utf8");
+    const lines = content.split("\n");
+    let currentDate: string | null = null;
+    const next: string[] = [];
+    let inDetails = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.includes("<details>")) { inDetails = true; next.push(line); continue; }
+      if (line.includes("</details>")) { inDetails = false; next.push(line); continue; }
+      const m = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+      if (m) {
+        currentDate = m[1];
+        next.push(line);
+        continue;
+      }
+      if (line.startsWith("- ") && !inDetails && currentDate) {
+        const age = Math.floor((Date.now() - Date.parse(`${currentDate}T00:00:00Z`)) / 86400000);
+        if (!Number.isNaN(age) && age > cutoffDays) {
+          pruned++;
+          // Also drop citation line directly attached to this bullet.
+          const nextLine = lines[i + 1] || "";
+          if (nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
+            i++;
+          }
+          continue;
+        }
+      }
+      // Drop dangling citation comments with no preceding bullet in the kept output.
+      if (line.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
+        const prev = next.length ? next[next.length - 1] : "";
+        if (!prev.startsWith("- ")) continue;
+      }
+      next.push(line);
+    }
+    fs.writeFileSync(file, next.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+  }
+
+  appendAuditLog(cortexPath, "prune_memories", `project=${project || "all"} pruned=${pruned}`);
+  return `Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
+}
+
+export function enforceCanonicalLocks(cortexPath: string, project?: string): string {
+  const locks = loadCanonicalLocks(cortexPath);
+  const projects = project
+    ? [project]
+    : getProjectDirs(cortexPath).map((d) => path.basename(d)).filter((p) => p !== "global");
+  let restored = 0;
+  let checked = 0;
+
+  for (const p of projects) {
+    const file = path.join(cortexPath, p, "CANONICAL_MEMORIES.md");
+    if (!fs.existsSync(file)) continue;
+    checked++;
+    const content = fs.readFileSync(file, "utf8");
+    const key = `${p}/CANONICAL_MEMORIES.md`;
+    const lock = locks[key];
+    if (!lock) {
+      locks[key] = { hash: hashContent(content), snapshot: content, updatedAt: new Date().toISOString() };
+      continue;
+    }
+    const currentHash = hashContent(content);
+    if (currentHash === lock.hash) continue;
+    fs.writeFileSync(file, lock.snapshot);
+    appendMemoryQueue(cortexPath, p, "Conflicts", ["Canonical memory drift detected and auto-restored"]);
+    appendAuditLog(cortexPath, "canonical_restore", `project=${p}`);
+    restored++;
+  }
+
+  saveCanonicalLocks(cortexPath, locks);
+  return `Canonical locks checked=${checked}, restored=${restored}`;
+}
+
+export function consolidateProjectLearnings(cortexPath: string, project: string): string {
+  const denial = checkMemoryPermission(cortexPath, "delete");
+  if (denial) return denial;
+  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  const file = path.join(cortexPath, project, "LEARNINGS.md");
+  if (!fs.existsSync(file)) return `No LEARNINGS.md found for "${project}".`;
+
+  const raw = fs.readFileSync(file, "utf8");
+  const lines = raw.split("\n");
+  const byDate = new Map<string, Map<string, { bullet: string; citation?: string }>>();
+  let currentDate: string | null = null;
+  const title = lines.find((l) => l.startsWith("# ")) || `# ${project} LEARNINGS`;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+    if (heading) {
+      currentDate = heading[1];
+      if (!byDate.has(currentDate)) byDate.set(currentDate, new Map());
+      continue;
+    }
+    if (line.startsWith("- ") && currentDate) {
+      const key = line.trim().toLowerCase();
+      const nextLine = lines[i + 1] || "";
+      const citation = nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/) ? nextLine : undefined;
+      const existing = byDate.get(currentDate)!.get(key);
+      if (!existing) {
+        byDate.get(currentDate)!.set(key, { bullet: line, citation });
+      } else if (!existing.citation && citation) {
+        existing.citation = citation;
+      }
+      if (citation) i++;
+    }
+  }
+
+  const dates = [...byDate.keys()].sort().reverse();
+  const out: string[] = [title, ""];
+  for (const d of dates) {
+    const items = [...(byDate.get(d)?.values() || [])];
+    if (!items.length) continue;
+    out.push(`## ${d}`, "");
+    for (const item of items) {
+      out.push(item.bullet);
+      if (item.citation) out.push(item.citation);
+    }
+    out.push("");
+  }
+  fs.writeFileSync(file, out.join("\n").trimEnd() + "\n");
+  appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
+  return `Consolidated learnings for ${project}.`;
 }
 
 // Validate that a path is a safe, existing directory
@@ -75,7 +527,7 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
       const data = yaml.load(fs.readFileSync(profilePath, "utf-8")) as Record<string, unknown>;
       const projects = data?.projects;
       if (Array.isArray(projects)) {
-        return projects
+        const listed = projects
           .map((p: unknown) => {
             const name = String(p);
             if (!isValidProjectName(name)) {
@@ -85,6 +537,13 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
             return safeProjectPath(cortexPath, name);
           })
           .filter((p): p is string => p !== null && fs.existsSync(p));
+
+        // Shared spaces are always visible when present.
+        const sharedDirs = ["shared", "org"]
+          .map((name) => safeProjectPath(cortexPath, name))
+          .filter((p): p is string => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
+
+        return [...new Set([...listed, ...sharedDirs])];
       }
     }
   }
@@ -102,6 +561,8 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "knowledge.md": "knowledge",
   "backlog.md": "backlog",
   "changelog.md": "changelog",
+  "canonical_memories.md": "canonical",
+  "memory_queue.md": "memory-queue",
 };
 
 function classifyFile(filename: string, relPath: string): string {
@@ -323,6 +784,26 @@ export interface ConsolidationNeeded {
   lastConsolidated: string | null;
 }
 
+export interface LearningCitation {
+  created_at: string;
+  repo?: string;
+  file?: string;
+  line?: number;
+  commit?: string;
+}
+
+export interface LearningTrustIssue {
+  date: string;
+  bullet: string;
+  reason: "stale" | "invalid_citation";
+}
+
+export interface TrustFilterOptions {
+  ttlDays?: number;
+  minConfidence?: number;
+  decay?: Partial<MemoryPolicy["decay"]>;
+}
+
 // Check which projects have enough new learnings to warrant consolidation
 export function checkConsolidationNeeded(cortexPath: string, profile?: string): ConsolidationNeeded[] {
   const ENTRY_THRESHOLD = 25;
@@ -533,13 +1014,12 @@ export function mergeBacklog(ours: string, theirs: string): string {
 // Attempt to auto-resolve git conflicts in LEARNINGS.md and backlog.md files.
 // Returns true if all conflicts were resolved, false if any remain.
 export function autoMergeConflicts(cortexPath: string): boolean {
-  const { execSync } = require("child_process") as typeof import("child_process");
-
   let conflictedFiles: string[];
   try {
-    const out = execSync("git diff --name-only --diff-filter=U", {
+    const out = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
       cwd: cortexPath,
       encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     conflictedFiles = out ? out.split("\n") : [];
   } catch {
@@ -571,7 +1051,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
         : mergeBacklog(versions.ours, versions.theirs);
 
       fs.writeFileSync(fullPath, merged);
-      execSync(`git add "${relFile}"`, { cwd: cortexPath });
+      execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"] });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: any) {
       debugLog(`Failed to auto-merge ${relFile}: ${err.message}`);
@@ -582,8 +1062,351 @@ export function autoMergeConflicts(cortexPath: string): boolean {
   return allResolved;
 }
 
+function getHeadCommit(cwd: string): string | undefined {
+  try {
+    const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return commit || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getRepoRoot(cwd: string): string | undefined {
+  try {
+    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return root || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function inferCitationLocation(repoPath: string, commit: string): { file?: string; line?: number } {
+  try {
+    const raw = execFileSync(
+      "git",
+      ["show", "--pretty=format:", "--unified=0", "--no-color", commit],
+      { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    );
+    let currentFile = "";
+    for (const line of raw.split("\n")) {
+      if (line.startsWith("+++ b/")) {
+        currentFile = line.slice(6).trim();
+        continue;
+      }
+      const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hunk && currentFile) {
+        return { file: currentFile, line: Number.parseInt(hunk[1], 10) };
+      }
+    }
+  } catch {
+    // best effort
+  }
+  return {};
+}
+
+function buildCitationComment(citation: LearningCitation): string {
+  return `<!-- cortex:cite ${JSON.stringify(citation)} -->`;
+}
+
+function parseCitationComment(line: string): LearningCitation | null {
+  const match = line.match(/<!--\s*cortex:cite\s+(\{.*\})\s*-->/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]) as LearningCitation;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.created_at !== "string" || !parsed.created_at) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function resolveCitationFile(citation: LearningCitation): string | null {
+  if (!citation.file) return null;
+  if (path.isAbsolute(citation.file)) return citation.file;
+  if (citation.repo) return path.resolve(citation.repo, citation.file);
+  return path.resolve(citation.file);
+}
+
+function commitExists(repoPath: string, commit: string): boolean {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], {
+      cwd: repoPath,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isCitationValid(citation: LearningCitation): boolean {
+  if (citation.repo && !fs.existsSync(citation.repo)) return false;
+  if (citation.commit && citation.repo && !commitExists(citation.repo, citation.commit)) return false;
+
+  const resolvedFile = resolveCitationFile(citation);
+  if (resolvedFile) {
+    if (!fs.existsSync(resolvedFile)) return false;
+    if (citation.line !== undefined) {
+      if (!Number.isInteger(citation.line) || citation.line < 1) return false;
+      const lineCount = fs.readFileSync(resolvedFile, "utf8").split("\n").length;
+      if (citation.line > lineCount) return false;
+      // Strong validation: if commit+repo are set, line blame must resolve to the cited commit.
+      if (citation.commit && citation.repo) {
+        const relFile = path.isAbsolute(resolvedFile)
+          ? path.relative(citation.repo, resolvedFile)
+          : resolvedFile;
+        try {
+          const out = execFileSync(
+            "git",
+            ["blame", "-L", `${citation.line},${citation.line}`, "--porcelain", relFile],
+            { cwd: citation.repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+          ).trim();
+          const first = out.split("\n")[0] || "";
+          if (!first.startsWith(citation.commit)) return false;
+        } catch {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+function parseLearningDateHeading(line: string): string | null {
+  const match = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+  return match ? match[1] : null;
+}
+
+function isDateStale(headingDate: string, ttlDays: number): boolean {
+  const ts = Date.parse(`${headingDate}T00:00:00Z`);
+  if (Number.isNaN(ts)) return false;
+  const ageDays = Math.floor((Date.now() - ts) / 86400000);
+  return ageDays > ttlDays;
+}
+
+function ageDaysForDate(headingDate: string): number | null {
+  const ts = Date.parse(`${headingDate}T00:00:00Z`);
+  if (Number.isNaN(ts)) return null;
+  return Math.floor((Date.now() - ts) / 86400000);
+}
+
+function confidenceForAge(ageDays: number, decay: MemoryPolicy["decay"]): number {
+  if (ageDays <= 30) return decay.d30;
+  if (ageDays <= 60) return decay.d60;
+  if (ageDays <= 90) return decay.d90;
+  return decay.d120;
+}
+
+// Keep only trustworthy learning bullets.
+// - Legacy bullets (no citation) are kept until they age out by date heading.
+// - Cited bullets are only kept if citation validates.
+export function filterTrustedLearnings(content: string, ttlDays: number): string {
+  return filterTrustedLearningsDetailed(content, { ttlDays }).content;
+}
+
+export function filterTrustedLearningsDetailed(content: string, opts: number | TrustFilterOptions): {
+  content: string;
+  issues: LearningTrustIssue[];
+} {
+  const options: TrustFilterOptions = typeof opts === "number" ? { ttlDays: opts } : opts;
+  const ttlDays = options.ttlDays ?? 120;
+  const minConfidence = options.minConfidence ?? 0.35;
+  const decay: MemoryPolicy["decay"] = {
+    ...DEFAULT_POLICY.decay,
+    ...(options.decay || {}),
+  };
+
+  const lines = content.split("\n");
+  const out: string[] = [];
+  const issues: LearningTrustIssue[] = [];
+  let currentDate: string | null = null;
+  let headingBuffer: string[] = [];
+  let inDetails = false;
+
+  const flushHeading = (hasEntries: boolean) => {
+    if (headingBuffer.length === 0) return;
+    if (hasEntries) {
+      out.push(...headingBuffer);
+      if (out.length > 0 && out[out.length - 1] !== "") out.push("");
+    }
+    headingBuffer = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.includes("<details>")) {
+      inDetails = true;
+      continue;
+    }
+    if (line.includes("</details>")) {
+      inDetails = false;
+      continue;
+    }
+    if (inDetails) continue;
+
+    const headingDate = parseLearningDateHeading(line);
+    if (headingDate) {
+      flushHeading(false);
+      currentDate = headingDate;
+      headingBuffer = [line];
+      continue;
+    }
+
+    if (line.startsWith("# ")) {
+      if (out.length === 0) out.push(line, "");
+      continue;
+    }
+
+    if (!line.startsWith("- ")) continue;
+
+    const stale = currentDate ? isDateStale(currentDate, ttlDays) : false;
+    if (stale) {
+      issues.push({ date: currentDate || "unknown", bullet: line, reason: "stale" });
+      continue;
+    }
+
+    let confidence = 1;
+    if (currentDate) {
+      const age = ageDaysForDate(currentDate);
+      if (age !== null) confidence *= confidenceForAge(age, decay);
+    }
+
+    const next = lines[i + 1] ?? "";
+    const citation = parseCitationComment(next);
+    if (citation && !isCitationValid(citation)) {
+      issues.push({ date: currentDate || "unknown", bullet: line, reason: "invalid_citation" });
+      continue;
+    }
+    if (!citation) confidence *= 0.8;
+    if (confidence < minConfidence) {
+      issues.push({ date: currentDate || "unknown", bullet: line, reason: "stale" });
+      continue;
+    }
+
+    flushHeading(true);
+    out.push(line);
+    if (citation) {
+      out.push(next);
+      i++;
+    }
+  }
+
+  return { content: out.join("\n").trim(), issues };
+}
+
+function normalizeBulletForQueue(line: string): string {
+  return line.startsWith("- ") ? line.slice(2).trim() : line.trim();
+}
+
+export function appendMemoryQueue(
+  cortexPath: string,
+  project: string,
+  section: "Review" | "Stale" | "Conflicts",
+  entries: string[]
+): number {
+  const denial = checkMemoryPermission(cortexPath, "queue");
+  if (denial) return 0;
+  if (!isValidProjectName(project)) return 0;
+  const resolvedDir = safeProjectPath(cortexPath, project);
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return 0;
+  const queuePath = path.join(resolvedDir, "MEMORY_QUEUE.md");
+  const today = new Date().toISOString().slice(0, 10);
+
+  const normalized = entries.map(normalizeBulletForQueue).filter(Boolean);
+  if (normalized.length === 0) return 0;
+
+  let content = "";
+  if (fs.existsSync(queuePath)) {
+    content = fs.readFileSync(queuePath, "utf8");
+  } else {
+    content = `# ${project} Memory Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n`;
+  }
+
+  const lines = content.split("\n");
+  const secHeader = `## ${section}`;
+  let secIdx = lines.findIndex((l) => l.trim() === secHeader);
+  if (secIdx === -1) {
+    lines.push("", secHeader, "");
+    secIdx = lines.length - 2;
+  }
+
+  let insertAt = secIdx + 1;
+  while (insertAt < lines.length && !lines[insertAt].startsWith("## ")) insertAt++;
+
+  const existing = new Set(lines.map((l) => l.trim()));
+  const toInsert: string[] = [];
+  for (const entry of normalized) {
+    const line = `- [${today}] ${entry}`;
+    if (!existing.has(line)) toInsert.push(line);
+  }
+  if (!toInsert.length) return 0;
+
+  lines.splice(insertAt, 0, ...toInsert, "");
+  fs.writeFileSync(queuePath, lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+  return toInsert.length;
+}
+
+export function appendAuditLog(cortexPath: string, event: string, details: string): void {
+  const logPath = path.join(cortexPath, ".cortex-audit.log");
+  const line = `[${new Date().toISOString()}] ${event} ${details}\n`;
+  try {
+    fs.appendFileSync(logPath, line);
+  } catch {
+    // best effort
+  }
+}
+
+export function upsertCanonicalMemory(cortexPath: string, project: string, memory: string): string {
+  const denial = checkMemoryPermission(cortexPath, "pin");
+  if (denial) return denial;
+  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  const resolvedDir = safeProjectPath(cortexPath, project);
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return `Project "${project}" not found in cortex.`;
+  const canonicalPath = path.join(resolvedDir, "CANONICAL_MEMORIES.md");
+  const today = new Date().toISOString().slice(0, 10);
+  const bullet = memory.startsWith("- ") ? memory : `- ${memory}`;
+
+  if (!fs.existsSync(canonicalPath)) {
+    fs.writeFileSync(
+      canonicalPath,
+      `# ${project} Canonical Memories\n\n## Pinned\n\n${bullet} _(pinned ${today})_\n`
+    );
+  } else {
+    const content = fs.readFileSync(canonicalPath, "utf8");
+    const line = `${bullet} _(pinned ${today})_`;
+    if (!content.includes(bullet)) {
+      const updated = content.includes("## Pinned")
+        ? content.replace("## Pinned", `## Pinned\n\n${line}`)
+        : `${content.trimEnd()}\n\n## Pinned\n\n${line}\n`;
+      fs.writeFileSync(canonicalPath, updated.endsWith("\n") ? updated : updated + "\n");
+    }
+  }
+
+  const canonicalContent = fs.readFileSync(canonicalPath, "utf8");
+  const locks = loadCanonicalLocks(cortexPath);
+  const lockKey = `${project}/CANONICAL_MEMORIES.md`;
+  locks[lockKey] = {
+    hash: hashContent(canonicalContent),
+    snapshot: canonicalContent,
+    updatedAt: new Date().toISOString(),
+  };
+  saveCanonicalLocks(cortexPath, locks);
+  appendAuditLog(cortexPath, "pin_memory", `project=${project} memory=${JSON.stringify(memory)}`);
+  return `Pinned canonical memory in ${project}.`;
+}
+
 // Add a learning to a project's LEARNINGS.md
-export function addLearningToFile(cortexPath: string, project: string, learning: string): string {
+export function addLearningToFile(
+  cortexPath: string,
+  project: string,
+  learning: string,
+  citationInput?: Partial<LearningCitation>
+): string {
+  const denial = checkMemoryPermission(cortexPath, "write");
+  if (denial) return denial;
   if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
   const resolvedDir = safeProjectPath(cortexPath, project);
   if (!resolvedDir) return `Invalid project name: "${project}".`;
@@ -591,11 +1414,32 @@ export function addLearningToFile(cortexPath: string, project: string, learning:
 
   const today = new Date().toISOString().slice(0, 10);
   const bullet = learning.startsWith("- ") ? learning : `- ${learning}`;
+  const nowIso = new Date().toISOString();
+  const cwd = process.cwd();
+  const inferredRepo = getRepoRoot(cwd);
+  const citation: LearningCitation = {
+    created_at: nowIso,
+    repo: citationInput?.repo || inferredRepo,
+    file: citationInput?.file,
+    line: citationInput?.line,
+    commit: citationInput?.commit || (inferredRepo ? getHeadCommit(inferredRepo) : undefined),
+  };
+  if (citation.repo && citation.commit && (!citation.file || !citation.line)) {
+    const inferred = inferCitationLocation(citation.repo, citation.commit);
+    citation.file = citation.file || inferred.file;
+    citation.line = citation.line || inferred.line;
+  }
+  const citationComment = `  ${buildCitationComment(citation)}`;
 
   if (!fs.existsSync(learningsPath)) {
     if (!fs.existsSync(resolvedDir)) return `Project "${project}" not found in cortex.`;
-    const newContent = `# ${project} LEARNINGS\n\n## ${today}\n\n${bullet}\n`;
+    const newContent = `# ${project} LEARNINGS\n\n## ${today}\n\n${bullet}\n${citationComment}\n`;
     fs.writeFileSync(learningsPath, newContent);
+    appendAuditLog(
+      cortexPath,
+      "add_learning",
+      `project=${project} created=true citation_commit=${citation.commit ?? "none"} citation_file=${citation.file ?? "none"}`
+    );
     return `Created LEARNINGS.md for "${project}" and added insight.`;
   }
 
@@ -610,17 +1454,22 @@ export function addLearningToFile(cortexPath: string, project: string, learning:
   const todayHeader = `## ${today}`;
 
   if (content.includes(todayHeader)) {
-    const updated = content.replace(todayHeader, `${todayHeader}\n\n${bullet}`);
+    const updated = content.replace(todayHeader, `${todayHeader}\n\n${bullet}\n${citationComment}`);
     fs.writeFileSync(learningsPath, updated);
   } else {
     const firstHeading = content.match(/^(## \d{4}-\d{2}-\d{2})/m);
     if (firstHeading) {
-      const updated = content.replace(firstHeading[0], `${todayHeader}\n\n${bullet}\n\n${firstHeading[0]}`);
+      const updated = content.replace(firstHeading[0], `${todayHeader}\n\n${bullet}\n${citationComment}\n\n${firstHeading[0]}`);
       fs.writeFileSync(learningsPath, updated);
     } else {
-      fs.writeFileSync(learningsPath, content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n`);
+      fs.writeFileSync(learningsPath, content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n${citationComment}\n`);
     }
   }
 
-  return `Added learning to ${project}: ${bullet}`;
+  appendAuditLog(
+    cortexPath,
+    "add_learning",
+    `project=${project} citation_commit=${citation.commit ?? "none"} citation_file=${citation.file ?? "none"}`
+  );
+  return `Added learning to ${project}: ${bullet} (with citation metadata)`;
 }

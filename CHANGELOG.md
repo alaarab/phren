@@ -1,5 +1,68 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `1.8.0` Memory trust layer:
+  - `add_learning` supports citation fields (`citation_file`, `citation_line`, `citation_repo`, `citation_commit`) and stores citation metadata for saved learnings.
+  - Trust filter re-validates citations before injection, skips stale entries, and applies policy-based confidence decay (30/60/90/120 day buckets).
+- `1.8.1` Automatic candidate extraction:
+  - New CLI command `extract-memories [project]` mines git history and GitHub PR/review/CI/issue signals when `gh` is available.
+  - High-confidence candidates are auto-written to `LEARNINGS.md`; lower-confidence items are queued in `MEMORY_QUEUE.md` for review.
+- `1.8.2` Self-healing setup:
+  - New `doctor [--fix]` command with health checks for machine/profile linkage and optional full relink repair.
+  - Session-start hooks run `doctor --fix` after pull for continuous setup drift repair.
+- `1.8.3` Branch-aware retrieval:
+  - `hook-prompt` uses task intent, branch tokens, changed files, and local-project preference to rerank/filter injected memory.
+  - Injection output now includes a short reason trace (`intent`, file hits, branch hits, branch, changed file count).
+- `1.8.4` Governance and quality controls:
+  - Canonical/pinned memory support via `CANONICAL_MEMORIES.md` and `pin_memory` (MCP) / `pin-memory` (CLI).
+  - Governance queue + audit trail via `MEMORY_QUEUE.md` and `.cortex-audit.log`.
+  - Governance/policy/admin APIs:
+    - MCP: `govern_memories`, `memory_policy`, `memory_access`, `prune_memories`, `consolidate_memories`, `memory_feedback`
+    - CLI: `govern-memories`, `memory-policy`, `memory-access`, `prune-memories`, `consolidate-memories`, `quality-feedback`
+  - Quality feedback loop with usage scoring, reprompt/regression penalties, helpful signal capture, and daily maintenance hooks.
+  - Canonical drift locks with auto-restore and conflict queueing.
+- Lightweight review UI (`memory-ui`) with accepted/stale/conflicting/recently-used views and one-click approve/reject/edit actions backed by markdown files.
+- Role-based memory permissions and policy defaults auto-created at init/link:
+  - `.governance/access-control.json`
+  - `.governance/memory-policy.json`
+- MCP mode controls:
+  - `init`/`link` accept `--mcp on|off` to choose MCP tools vs hooks-only fallback during one-shot setup.
+  - New `mcp-mode on|off|status` command toggles MCP integration later without reinstalling.
+  - MCP preference is persisted in `.governance/install-preferences.json`.
+- Expanded MCP auto-configuration beyond Claude/VS Code:
+  - New best-effort MCP config writers for Cursor, GitHub Copilot CLI, and Codex.
+  - `init`, `link`, and `mcp-mode` now apply MCP mode across all detected tool targets.
+  - `uninstall` now removes cortex MCP entries from all known tool config paths.
+- Memory workflow policy and approval gates:
+  - New workflow policy file: `.governance/memory-workflow-policy.json`.
+  - New CLI command: `memory-workflow [get|set ...]`.
+  - New MCP tool: `memory_workflow`.
+  - `memory-ui` now enforces maintainer/admin approval for risky queue items (by section or low confidence).
+- Retrieval pipeline upgrades:
+  - Added hybrid overlap-based fallback when strict FTS misses paraphrased prompts.
+  - Added context token budgeting and snippet compaction to cap prompt injection size.
+  - Added token usage trace in hook output.
+
+### Fixed
+- `remove_learning` now removes an immediately attached `cortex:cite` comment, preventing orphan citation metadata lines in `LEARNINGS.md`.
+- GitHub data mining now executes `gh` using argument-safe process execution (no shell-string concatenation in `runGhJson`).
+- `hook-prompt` daily quality maintenance moved to detached background execution (`background-maintenance`) so prompt hooks stay low-latency.
+- CLI `link` path resolution now uses ESM-safe `os.homedir()` import (removes Node `ERR_AMBIGUOUS_MODULE_SYNTAX` runtime failure).
+- VS Code auto-detection now includes WSL + Windows user-install paths (`USERPROFILE/AppData/Roaming/Code/User`), including Windows-style `C:\...` path normalization.
+- Conflict auto-merge git operations now use argument-safe `execFileSync("git", [...])` calls instead of shell command strings.
+- Version/docs consistency updates:
+  - package version aligned to `1.8.4`
+  - MCP server version aligned to `1.8.4`
+  - README MCP tool and CLI command docs updated to match current implementation
+
+### TODO
+- Add integration tests for `memory-ui` approve/reject/edit flows and markdown mutation edge cases.
+- Add CLI-level feature flags for gradual rollout of auto-extraction and daily maintenance jobs.
+- Harden GitHub mining for large repos and API failures (pagination, timeouts, rate-limit backoff).
+- Expand docs/README with governance model, role setup, policy tuning examples, and operator runbook.
+
 ## [1.7.4] - 2026-03-04
 
 ### Changed
