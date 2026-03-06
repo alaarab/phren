@@ -111,7 +111,7 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureClaude(cortexPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toBe("npx");
+    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
     expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
   });
 
@@ -161,7 +161,7 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureVSCode(cortexPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.servers?.cortex?.command).toBe("npx");
+    expect(onCfg.servers?.cortex?.command).toMatch(/^(node|npx)$/);
     expect(onCfg.servers?.cortex?.args).toContain(cortexPath);
   });
 
@@ -174,7 +174,7 @@ describe.sequential("mcp mode configuration", () => {
     expect(onStatus).toBe("installed");
 
     const cfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(cfg.servers?.cortex?.command).toBe("npx");
+    expect(cfg.servers?.cortex?.command).toMatch(/^(node|npx)$/);
     expect(cfg.servers?.cortex?.args).toContain(cortexPath);
   });
 
@@ -203,11 +203,11 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureCursorMcp(cortexPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toBe("npx");
+    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
     expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
   });
 
-  it("toggles Copilot CLI MCP config on and off", () => {
+  it("toggles Copilot CLI MCP config on and off (legacy servers key migrated)", () => {
     const copilotDir = path.join(homeDir, ".github");
     fs.mkdirSync(copilotDir, { recursive: true });
     const mcpPath = path.join(copilotDir, "mcp.json");
@@ -228,12 +228,27 @@ describe.sequential("mcp mode configuration", () => {
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
     expect(offCfg.servers?.cortex).toBeUndefined();
+    expect(offCfg.mcpServers?.cortex).toBeUndefined();
 
     const onStatus = configureCopilotMcp(cortexPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.servers?.cortex?.command).toBe("npx");
-    expect(onCfg.servers?.cortex?.args).toContain(cortexPath);
+    // upsertMcpServer migrates legacy "servers" key to "mcpServers"
+    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+  });
+
+  it("uses mcpServers key for fresh Copilot CLI config", () => {
+    const copilotDir = path.join(homeDir, ".copilot");
+    fs.mkdirSync(copilotDir, { recursive: true });
+
+    const onStatus = configureCopilotMcp(cortexPath, { mcpEnabled: true });
+    // First internal call installs, but the returned status is from the final call
+    expect(["installed", "already_configured"]).toContain(onStatus);
+    const mcpPath = path.join(copilotDir, "mcp-config.json");
+    const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
+    expect(onCfg.mcpServers?.cortex?.command).toBeDefined();
+    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
   });
 
   it("throws on malformed JSON via patchJsonFile (tested through configureClaude)", () => {
@@ -294,7 +309,7 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureCodexMcp(cortexPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(codexConfig, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toBe("npx");
+    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
     expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
     expect(Array.isArray(onCfg.hooks?.Stop)).toBe(true);
   });

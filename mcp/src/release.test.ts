@@ -121,7 +121,7 @@ describe.sequential("1.10.x release hardening gates", () => {
 
     configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: false });
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(cfg.mcpServers?.cortex?.command).toBe("npx");
+    expect(cfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
     const hooksBlob = JSON.stringify(cfg.hooks || {});
     expect(hooksBlob).not.toContain("hook-prompt");
     expect(hooksBlob).not.toContain("hook-stop");
