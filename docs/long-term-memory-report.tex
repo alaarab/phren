@@ -1,0 +1,361 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{setspace}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  urlcolor=blue!50!black,
+  citecolor=blue!50!black,
+  pdftitle={Long-Term Memory for Coding Agents},
+  pdfauthor={Cortex Project}
+}
+
+\setlist{itemsep=4pt,topsep=4pt}
+\setstretch{1.12}
+
+\title{Long-Term Memory for Coding Agents\\\large Architecture, Tradeoffs, and Evaluation Framework}
+\author{Cortex Project}
+\date{March 6, 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Long-term memory has become a practical requirement for multi-session AI-assisted software engineering. Without persistent memory, agents repeatedly reconstruct architecture, conventions, and prior decisions, increasing both token spend and human coordination overhead. This report documents the rationale behind Cortex's long-term memory architecture, compares it against selected alternatives (Supermemory, claude-mem, and GitHub Copilot Memory), and specifies a reproducible benchmark framework for future empirical validation. The central position is pragmatic: in engineering workflows, memory quality must be evaluated jointly with auditability, governance, and cost control---not retrieval relevance alone.
+\end{abstract}
+
+\section{Problem Statement}
+A usable memory layer for coding agents must solve four coupled problems at once:
+\begin{enumerate}
+  \item \textbf{Persistence}: preserve high-value context across sessions and machines.
+  \item \textbf{Retrieval}: surface the right memory under strict prompt-token limits.
+  \item \textbf{Governance}: prevent stale, low-confidence, or invalid memories from degrading behavior.
+  \item \textbf{Operability}: keep setup, maintenance, and failure recovery practical.
+\end{enumerate}
+
+In practice, systems tend to fail by optimizing one axis in isolation (for example, strong retrieval with weak provenance, or broad capture with unbounded injection overhead).
+
+\section{Evaluation Lens}
+This report uses six evaluation dimensions:
+\begin{enumerate}
+  \item \textbf{Representation}: files, SQL stores, vector/graph stores, or managed service state.
+  \item \textbf{Capture path}: hook-driven capture, agent-triggered writes, or asynchronous ingestion.
+  \item \textbf{Retrieval path}: ranking strategy, selection controls, and prompt integration.
+  \item \textbf{Governance \& forgetting}: TTL, retention, validation, review workflows.
+  \item \textbf{Economics}: token overhead, latency impact, operational labor.
+  \item \textbf{Portability \& control}: ownership, lock-in risk, and forensic auditability.
+\end{enumerate}
+
+\subsection{Research grounding}
+The framework is aligned with established memory and retrieval literature:
+\begin{itemize}
+  \item RAG formalizes coupling parametric and non-parametric memory \cite{rag2020}.
+  \item Self-RAG emphasizes adaptive retrieval and explicit critique signals \cite{selfrag2023}.
+  \item MemoryBank highlights memory updating and forgetting dynamics over long horizons \cite{memorybank2023}.
+  \item MemGPT frames hierarchical memory management under bounded context windows \cite{memgpt2023}.
+\end{itemize}
+
+These are not one-to-one product implementations, but they provide durable design principles for engineering systems.
+
+\section{Cortex Architecture (Current)}
+\subsection{Storage model}
+Cortex uses markdown files as the source of truth (for example, \texttt{CLAUDE.md}, \texttt{summary.md}, \texttt{LEARNINGS.md}, \texttt{backlog.md}) in a user-owned git repository, plus a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}.
+
+\textbf{Why this matters:}
+\begin{itemize}
+  \item Direct inspectability and diffability.
+  \item Native provenance through git history.
+  \item Low mandatory infrastructure footprint.
+\end{itemize}
+
+\subsection{Lifecycle automation}
+Cortex automates memory behavior through lifecycle hooks (prompt, session start, session stop), reducing reliance on manual tool invocation \cite{cortex-cli,cortex-hooks}.
+
+\textbf{Design effect:}
+\begin{itemize}
+  \item lower behavioral variance across sessions,
+  \item fewer missed memory updates,
+  \item best-effort operation that avoids hard blocking in common failure modes.
+\end{itemize}
+
+\subsection{Bounded retrieval economics}
+Cortex retrieval is explicitly budgeted via runtime parameters (default values shown):
+\begin{itemize}
+  \item injection token budget \(\approx 550\),
+  \item snippet line budget \(6\),
+  \item snippet character budget \(520\).
+\end{itemize}
+
+This enforces predictable upper bounds on context overhead \cite{cortex-cli,cortex-index}.
+
+\subsection{Governance controls}
+Default policy values include:
+\begin{itemize}
+  \item \texttt{ttlDays = 120}, \texttt{retentionDays = 365},
+  \item \texttt{autoAcceptThreshold = 0.75},
+  \item \texttt{minInjectConfidence = 0.35},
+  \item decay factors across 30/60/90/120-day windows.
+\end{itemize}
+
+Cortex also supports memory queue triage and role-based access control \cite{cortex-shared,cortex-index}.
+
+\section{Comparative Review}
+This section reflects public documentation and changelogs available as of \textbf{March 6, 2026}.
+
+\subsection{Supermemory}
+Documented characteristics include API-first memory creation, metadata and \texttt{containerTags} partitioning, filtering controls, graph-memory semantics, and an open benchmark initiative (MemoryBench) \cite{sm-intro,sm-create,sm-filter,sm-graph,sm-bench}.
+
+\textbf{Interpretation:}
+Strong fit for hosted, multi-tenant products that prioritize API integration speed and external-memory service capabilities.
+
+\subsection{claude-mem}
+Documented characteristics include lifecycle-hook architecture, SQLite/FTS5 core storage, optional ChromaDB integration, and hybrid retrieval paths \cite{cm-overview,cm-hooks,cm-db,cm-search}.
+
+\textbf{Interpretation:}
+Architecturally close to Cortex in hook-first philosophy, with greater dependence on local runtime composition (workers/storage options) for full behavior.
+
+\subsection{GitHub Copilot Memory}
+Documented characteristics include repository-scoped memory, citation-backed checks against current codebase, policy controls, and time-based expiry. Changelog history indicates material rollout changes in early 2026 \cite{gh-memory-docs,gh-changelog-mar2026,gh-changelog-jan2026}.
+
+\textbf{Interpretation:}
+Strong convenience and ecosystem integration for GitHub-centric teams; comparatively less transparent ownership and portability than file-native approaches.
+
+\subsection{Comparative matrix}
+\renewcommand{\arraystretch}{1.15}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.19\textwidth} >{\raggedright\arraybackslash}p{0.19\textwidth} >{\raggedright\arraybackslash}p{0.19\textwidth} >{\raggedright\arraybackslash}p{0.19\textwidth}}
+\toprule
+\textbf{Dimension} & \textbf{Cortex} & \textbf{Supermemory} & \textbf{claude-mem} & \textbf{Copilot Memory} \\
+\midrule
+Primary substrate & Markdown + git + local FTS5 & Managed API/service state & SQLite/FTS5 (+ optional vector layer) & Managed repository memory \\
+Capture trigger & Lifecycle hooks + tools & API calls/connectors & Lifecycle hooks + processing pipeline & Platform feature actions \\
+Retrieval control & Explicit token/line/char caps & API-level controls & Hybrid lexical+semantic retrieval & Platform-managed retrieval behavior \\
+Forgetting model & TTL/retention/decay policy & Graph updates + forgetting semantics & DB/workflow dependent & Time-based expiry \\
+Auditability & High (file diffs/history) & Medium (service-centric records) & Medium-high (local DB artifacts) & Medium (platform UI/policy) \\
+Lock-in risk & Low & Medium-high & Low-medium & Medium-high \\
+Ops overhead & Medium & Low-medium & Medium-high & Low \\
+\bottomrule
+\end{longtable}
+
+\section{Economics Model}
+\subsection{Token overhead}
+Let:
+\begin{itemize}
+  \item \(N\): prompts per month,
+  \item \(T_i\): injected tokens per prompt,
+  \item \(T_b\): configured token budget cap,
+  \item \(p_{in}\): input-token price.
+\end{itemize}
+
+Then:
+\[
+\text{Cost}_{\text{injection}} \le N \cdot T_b \cdot p_{in}
+\]
+
+Expected cost is typically lower:
+\[
+\mathbb{E}[\text{Cost}_{\text{injection}}] = N \cdot \mathbb{E}[T_i] \cdot p_{in}, \quad \mathbb{E}[T_i] \ll T_b
+\]
+
+\subsection{Total operating cost}
+\[
+\text{Total Cost} = \text{Token Cost} + \text{Compute Cost} + \text{Storage Cost} + (\text{Engineer Hours} \times \text{Loaded Rate})
+\]
+
+This makes hidden labor cost explicit (triage, cleanup, and integration maintenance).
+
+\section{Decision Rationale For Cortex}
+Cortex favors explicit control over managed convenience:
+\begin{enumerate}
+  \item ownership-first memory representation,
+  \item diffable/auditable change history,
+  \item bounded prompt-cost behavior,
+  \item lifecycle automation that reduces operator burden,
+  \item governance primitives as first-class controls,
+  \item interoperability across MCP and CLI surfaces.
+\end{enumerate}
+
+This is an intentional tradeoff, not an accidental one.
+
+\section{When Alternatives Are Better}
+Cortex is not universally optimal.
+\begin{itemize}
+  \item Prefer Supermemory when hosted multi-tenant memory APIs and connector ecosystems are primary.
+  \item Prefer Copilot Memory when the team is deeply GitHub-native and optimizes for minimal setup.
+  \item Prefer claude-mem when local hook-driven behavior is desired with richer custom runtime composition.
+\end{itemize}
+
+\section{Benchmark Design For Empirical Validation}
+A full empirical comparison should use paired task-level runs across systems with fixed model/runtime controls.
+
+\subsection{Recommended endpoints}
+\textbf{Primary endpoints}
+\begin{itemize}
+  \item task success rate,
+  \item mean injected tokens,
+  \item latency (p95),
+  \item citation validity rate.
+\end{itemize}
+
+\textbf{Secondary endpoints}
+\begin{itemize}
+  \item defect rate,
+  \item Precision@k / Recall@k,
+  \item stale-memory incident rate,
+  \item manual intervention rate.
+\end{itemize}
+
+\subsection{Statistical plan}
+\begin{itemize}
+  \item paired designs per task where feasible,
+  \item bootstrap confidence intervals for key differences,
+  \item effect-size reporting (for example, Cliff's delta),
+  \item multiple-comparison control for multi-system primary endpoint tests.
+\end{itemize}
+
+\section{Reproducibility Package}
+This report is accompanied by a benchmark artifact pack:
+\begin{itemize}
+  \item \texttt{docs/whitepaper-artifacts/benchmark-protocol.md}
+  \item \texttt{docs/whitepaper-artifacts/analysis-guide.md}
+  \item \texttt{docs/whitepaper-artifacts/report-template.md}
+  \item CSV schemas for per-trial, summary, failures, and cost modeling
+\end{itemize}
+
+\section{Risks And Mitigations}
+\begin{itemize}
+  \item \textbf{Over-injection risk}: bounded by strict token and snippet controls.
+  \item \textbf{Stale-memory contamination}: mitigated by TTL, retention, and queue-based review workflows.
+  \item \textbf{Platform drift}: mitigated by changelog tracking and recurring regression benchmarks.
+  \item \textbf{Hook fragility}: mitigated by timeouts, best-effort execution, and explicit fallback commands.
+\end{itemize}
+
+\section{Conclusion}
+The key design claim is practical: memory for coding agents should be judged on controllability, auditability, and lifecycle economics alongside raw retrieval quality. Cortex's file-native, hook-automated architecture is strong when ownership and reproducibility are priorities. Managed alternatives can outperform on convenience and service-level capabilities, and should be selected when those constraints dominate.
+
+\appendix
+\section{Artifact Map}
+\begin{itemize}
+  \item Main narrative report: \texttt{docs/long-term-memory-report.tex}
+  \item Source whitepaper: \texttt{docs/long-term-memory-whitepaper.md}
+  \item Combined markdown report: \texttt{docs/long-term-memory-report-combined.md}
+  \item Combined HTML report: \texttt{docs/long-term-memory-report-combined.html}
+  \item Benchmark kit: \texttt{docs/whitepaper-artifacts/*}
+\end{itemize}
+
+\section{Build Instructions}
+If a LaTeX toolchain is installed:
+\begin{verbatim}
+cd docs
+pdflatex -interaction=nonstopmode long-term-memory-report.tex
+pdflatex -interaction=nonstopmode long-term-memory-report.tex
+\end{verbatim}
+
+\begin{thebibliography}{99}
+
+\bibitem{rag2020}
+Lewis, P. et al. (2020/2021).\
+\textit{Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks}.\
+\url{https://arxiv.org/abs/2005.11401}
+
+\bibitem{selfrag2023}
+Asai, A. et al. (2023).\
+\textit{Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection}.\
+\url{https://arxiv.org/abs/2310.11511}
+
+\bibitem{memorybank2023}
+Zhong, W. et al. (2023).\
+\textit{MemoryBank: Enhancing Large Language Models with Long-Term Memory}.\
+\url{https://arxiv.org/abs/2305.10250}
+
+\bibitem{memgpt2023}
+Packer, C. et al. (2023/2024).\
+\textit{MemGPT: Towards LLMs as Operating Systems}.\
+\url{https://arxiv.org/abs/2310.08560}
+
+\bibitem{sm-intro}
+Supermemory Documentation: Introduction.\
+\url{https://supermemory.ai/docs/introduction}
+
+\bibitem{sm-create}
+Supermemory Documentation: Adding Memories.\
+\url{https://supermemory.ai/docs/memory-api/creation/adding-memories}
+
+\bibitem{sm-filter}
+Supermemory Documentation: Filtering.\
+\url{https://supermemory.ai/docs/memory-api/features/filtering}
+
+\bibitem{sm-graph}
+Supermemory Documentation: Graph Memory.\
+\url{https://supermemory.ai/docs/concepts/graph-memory}
+
+\bibitem{sm-bench}
+Supermemory Documentation: MemoryBench Quickstart.\
+\url{https://supermemory.ai/docs/memorybench/quickstart}
+
+\bibitem{cm-overview}
+claude-mem Documentation: Architecture Overview.\
+\url{https://docs.claude-mem.ai/architecture/overview}
+
+\bibitem{cm-hooks}
+claude-mem Documentation: Hooks Architecture.\
+\url{https://docs.claude-mem.ai/hooks-architecture}
+
+\bibitem{cm-db}
+claude-mem Documentation: Database Architecture.\
+\url{https://docs.claude-mem.ai/architecture/database}
+
+\bibitem{cm-search}
+claude-mem Documentation: Search Architecture.\
+\url{https://docs.claude-mem.ai/architecture/search-architecture}
+
+\bibitem{gh-memory-docs}
+GitHub Docs: Copilot Memory (use and curation).\
+\url{https://docs.github.com/en/copilot/how-tos/use-copilot-agents/copilot-memory}
+
+\bibitem{gh-changelog-mar2026}
+GitHub Changelog (March 4, 2026): Copilot Memory default-on (public preview).\
+\url{https://github.blog/changelog/2026-03-04-copilot-memory-now-on-by-default-for-pro-and-pro-users-in-public-preview/}
+
+\bibitem{gh-changelog-jan2026}
+GitHub Changelog (January 15, 2026): Agentic memory public preview.\
+\url{https://github.blog/changelog/2026-01-15-agentic-memory-for-github-copilot-is-in-public-preview/}
+
+\bibitem{cortex-readme}
+Cortex README.\
+\url{https://github.com/alaarab/cortex/blob/main/README.md}
+
+\bibitem{cortex-cli}
+Cortex source: \texttt{mcp/src/cli.ts}.\
+\url{https://github.com/alaarab/cortex/blob/main/mcp/src/cli.ts}
+
+\bibitem{cortex-shared}
+Cortex source: \texttt{mcp/src/shared.ts}.\
+\url{https://github.com/alaarab/cortex/blob/main/mcp/src/shared.ts}
+
+\bibitem{cortex-hooks}
+Cortex source: \texttt{mcp/src/hooks.ts}.\
+\url{https://github.com/alaarab/cortex/blob/main/mcp/src/hooks.ts}
+
+\bibitem{cortex-index}
+Cortex source: \texttt{mcp/src/index.ts}.\
+\url{https://github.com/alaarab/cortex/blob/main/mcp/src/index.ts}
+
+\end{thebibliography}
+
+\end{document}
