@@ -312,6 +312,30 @@ async function main() {
   } as typeof server.registerTool;
 
   server.registerTool(
+    "remove_learnings",
+    {
+      title: "◆ cortex · remove learnings (bulk)",
+      description: "Remove multiple learnings from a project's LEARNINGS.md in one call.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        learnings: z.array(z.string()).describe("List of partial texts to match and remove."),
+      }),
+    },
+    async ({ project, learnings }) => {
+      return withWriteQueue(async () => {
+        const results: { learning: string; ok: boolean; message: string }[] = [];
+        for (const learning of learnings) {
+          const result = removeLearningStore(cortexPath, project, learning);
+          results.push({ learning, ok: result.ok, message: result.ok ? result.data : result.error ?? "unknown error" });
+        }
+        await rebuildIndex();
+        const succeeded = results.filter((r) => r.ok).length;
+        return jsonResponse({ ok: succeeded > 0, message: `Removed ${succeeded}/${learnings.length} learnings`, data: { project, results } });
+      });
+    }
+  );
+
+  server.registerTool(
     "pin_memory",
     {
       title: "◆ cortex · pin memory",
@@ -683,6 +707,30 @@ async function main() {
   );
 
   server.registerTool(
+    "complete_backlog_items",
+    {
+      title: "◆ cortex · done (bulk)",
+      description: "Move multiple backlog items to Done in one call. Pass an array of partial item texts.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        items: z.array(z.string()).describe("List of partial item texts to complete."),
+      }),
+    },
+    async ({ project, items }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const results: { item: string; ok: boolean; message: string }[] = [];
+        for (const item of items) {
+          const result = completeBacklogItemStore(cortexPath, project, item);
+          results.push({ item, ok: result.ok, message: result.ok ? result.data : result.error ?? "unknown error" });
+        }
+        const succeeded = results.filter((r) => r.ok).length;
+        return jsonResponse({ ok: succeeded > 0, message: `Completed ${succeeded}/${items.length} items`, data: { project, results } });
+      });
+    }
+  );
+
+  server.registerTool(
     "update_backlog_item",
     {
       title: "◆ cortex · update task",
@@ -735,6 +783,34 @@ async function main() {
         const ok = result.startsWith("Added learning") || result.startsWith("Saved learning");
         if (ok) runCustomHooks(cortexPath, "post-learning", { CORTEX_PROJECT: project });
         return jsonResponse({ ok, message: result, data: ok ? { project, learning } : undefined });
+      });
+    }
+  );
+
+  server.registerTool(
+    "add_learnings",
+    {
+      title: "◆ cortex · save learnings (bulk)",
+      description: "Record multiple insights to a project's LEARNINGS.md in one call.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name (must match a directory in your cortex)."),
+        learnings: z.array(z.string()).describe("List of insights to record."),
+      }),
+    },
+    async ({ project, learnings }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const results: { learning: string; ok: boolean; message: string }[] = [];
+        for (const learning of learnings) {
+          runCustomHooks(cortexPath, "pre-learning", { CORTEX_PROJECT: project });
+          const result = addLearningToFile(cortexPath, project, learning, undefined);
+          const ok = result.startsWith("Added learning") || result.startsWith("Saved learning");
+          if (ok) runCustomHooks(cortexPath, "post-learning", { CORTEX_PROJECT: project });
+          results.push({ learning, ok, message: result });
+        }
+        await rebuildIndex();
+        const succeeded = results.filter((r) => r.ok).length;
+        return jsonResponse({ ok: succeeded > 0, message: `Added ${succeeded}/${learnings.length} learnings`, data: { project, results } });
       });
     }
   );
