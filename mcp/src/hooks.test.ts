@@ -323,4 +323,116 @@ describe("hooks", () => {
       }
     });
   });
+
+  describe("deterministic coverage", () => {
+    const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
+    const origPath = process.env.PATH;
+    const localEntryScript = path.join(path.dirname(new URL(import.meta.url).pathname), "index.js");
+
+    afterEach(() => {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origUserProfile;
+      process.env.PATH = origPath;
+      if (fs.existsSync(localEntryScript)) fs.rmSync(localEntryScript, { force: true });
+    });
+
+    it("detects all tools from binaries on PATH", () => {
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hooks-detect-bin-"));
+      const fakeBin = path.join(tmpRoot, "bin");
+      fs.mkdirSync(fakeBin, { recursive: true });
+      for (const tool of ["github-copilot-cli", "cursor", "codex"]) {
+        const file = path.join(fakeBin, tool);
+        fs.writeFileSync(file, "#!/bin/sh\nexit 0\n");
+        fs.chmodSync(file, 0o755);
+      }
+      process.env.PATH = `${fakeBin}:${origPath || ""}`;
+
+      const detected = detectInstalledTools();
+      expect(detected).toEqual(new Set(["copilot", "cursor", "codex"]));
+
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    });
+
+    it("detects all tools from home-directory markers when binaries are absent", () => {
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hooks-detect-home-"));
+      const homeDir = path.join(tmpRoot, "home");
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+      process.env.PATH = "";
+
+      fs.mkdirSync(path.join(homeDir, ".cursor"), { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".local", "share", "gh", "extensions", "gh-copilot"), { recursive: true });
+
+      const detected = detectInstalledTools();
+      expect(detected).toEqual(new Set(["copilot", "cursor", "codex"]));
+
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    });
+
+    it("buildLifecycleCommands uses npx fallback when local entry script is missing", () => {
+      if (fs.existsSync(localEntryScript)) fs.rmSync(localEntryScript, { force: true });
+
+      const cmds = buildLifecycleCommands('/tmp/my "cortex" path\\nested');
+      expect(cmds.sessionStart).toContain("npx @alaarab/cortex hook-session-start");
+      expect(cmds.userPromptSubmit).toContain("npx @alaarab/cortex hook-prompt");
+      expect(cmds.stop).toContain("npx @alaarab/cortex hook-stop");
+      expect(cmds.sessionStart).toContain('CORTEX_PATH="/tmp/my \\"cortex\\" path\\\\nested"');
+    });
+
+    it("buildLifecycleCommands uses local node entry script when available", () => {
+      fs.writeFileSync(localEntryScript, "// test entry for hooks unit tests\n");
+
+      const cmds = buildLifecycleCommands("/tmp/cortex");
+      expect(cmds.sessionStart).toContain(" node ");
+      expect(cmds.userPromptSubmit).toContain(" node ");
+      expect(cmds.stop).toContain(" node ");
+      expect(cmds.sessionStart).toContain("index.js");
+      expect(cmds.sessionStart).not.toContain("npx @alaarab/cortex");
+    });
+
+    it("configureAllHooks(false) wires configs from auto-detected tools", () => {
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hooks-config-detect-"));
+      const homeDir = path.join(tmpRoot, "home");
+      const cortexPath = path.join(tmpRoot, "cortex");
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+      process.env.PATH = "";
+      fs.mkdirSync(cortexPath, { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".cursor"), { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".local", "share", "gh", "extensions", "gh-copilot"), { recursive: true });
+      fs.mkdirSync(path.join(cortexPath, ".governance"), { recursive: true });
+      fs.writeFileSync(
+        path.join(cortexPath, ".governance", "install-preferences.json"),
+        JSON.stringify({ hooksEnabled: false })
+      );
+
+      const configured = configureAllHooks(cortexPath, false);
+      expect(configured).toEqual(["Copilot CLI", "Cursor", "Codex"]);
+
+      const lifecycle = buildLifecycleCommands(cortexPath);
+      const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "cortex.json"), "utf8"));
+      expect(copilot.hooks.sessionStart[0].bash).toBe(lifecycle.sessionStart);
+      expect(copilot.hooks.userPromptSubmitted[0].bash).toBe(lifecycle.userPromptSubmit);
+      expect(copilot.hooks.sessionEnd[0].bash).toBe(lifecycle.stop);
+
+      const cursor = JSON.parse(fs.readFileSync(path.join(homeDir, ".cursor", "hooks.json"), "utf8"));
+      expect(cursor.sessionStart.command).toBe(lifecycle.sessionStart);
+      expect(cursor.beforeSubmitPrompt.command).toBe(lifecycle.userPromptSubmit);
+      expect(cursor.stop.command).toBe(lifecycle.stop);
+
+      const codex = JSON.parse(fs.readFileSync(path.join(cortexPath, "codex.json"), "utf8"));
+      expect(codex.hooks.SessionStart[0].command).toBe(lifecycle.sessionStart);
+      expect(codex.hooks.UserPromptSubmit[0].command).toBe(lifecycle.userPromptSubmit);
+      expect(codex.hooks.Stop[0].command).toBe(lifecycle.stop);
+
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(false);
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "cursor"))).toBe(false);
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "codex"))).toBe(false);
+
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    });
+  });
 });

@@ -65,6 +65,14 @@ describe("CLI integration: search", () => {
       path.join(projDir, "summary.md"),
       "# test-proj\n\nA test project for CLI integration tests.\n"
     );
+    fs.writeFileSync(
+      path.join(projDir, "SEARCH_STRONG.md"),
+      "# Strong\n\nrestart server restart server cache invalidation details\n"
+    );
+    fs.writeFileSync(
+      path.join(projDir, "SEARCH_WEAK.md"),
+      "# Weak\n\nrestart notes only\n"
+    );
   });
 
   afterEach(() => cleanup());
@@ -94,6 +102,28 @@ describe("CLI integration: search", () => {
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("test-proj");
+  });
+
+  it("search pipeline sanitizes query operators and still matches expected docs", () => {
+    const { stdout, exitCode } = runCli(
+      ["search", 'content:restart AND server OR "^cache"', "--project", "test-proj"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("[test-proj/SEARCH_STRONG.md]");
+  });
+
+  it("search pipeline ranks stronger match ahead of weaker match", () => {
+    const { stdout, exitCode } = runCli(
+      ["search", "restart server", "--project", "test-proj"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    const strongIdx = stdout.indexOf("[test-proj/SEARCH_STRONG.md]");
+    const weakIdx = stdout.indexOf("[test-proj/SEARCH_WEAK.md]");
+    expect(strongIdx).toBeGreaterThanOrEqual(0);
+    expect(weakIdx).toBeGreaterThanOrEqual(0);
+    expect(strongIdx).toBeLessThan(weakIdx);
   });
 });
 
@@ -197,5 +227,102 @@ describe("CLI integration: pin-memory", () => {
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage");
+  });
+});
+
+describe("CLI integration: maintain migrate", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+    const projectDir = path.join(cortexDir, "test-proj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      "# Findings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
+    );
+  });
+
+  afterEach(() => cleanup());
+
+  it("supports governance migration dry-run with readable output", () => {
+    const accessPath = path.join(cortexDir, ".governance", "access-control.json");
+    const before = JSON.parse(fs.readFileSync(accessPath, "utf8")) as Record<string, unknown>;
+    expect(before.schemaVersion).toBeUndefined();
+
+    const { stdout, exitCode } = runCli(
+      ["maintain", "migrate", "governance", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Governance migration:");
+    expect(stdout).toContain("[dry-run]");
+
+    const after = JSON.parse(fs.readFileSync(accessPath, "utf8")) as Record<string, unknown>;
+    expect(after.schemaVersion).toBeUndefined();
+  });
+
+  it("supports explicit data migration command path", () => {
+    const { stdout, exitCode } = runCli(
+      ["maintain", "migrate", "data", "test-proj", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Data migration (test-proj):");
+    expect(stdout).toContain("Found");
+    expect(stdout).toContain("migratable findings");
+  });
+});
+
+describe("CLI integration: destructive backup reporting", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+    const projectDir = path.join(cortexDir, "test-proj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "LEARNINGS.md"),
+      "# test-proj LEARNINGS\n\n## 2020-01-01\n\n- old memory to prune\n\n## 2026-01-01\n\n- fresh memory\n"
+    );
+  });
+
+  afterEach(() => cleanup());
+
+  it("prune --dry-run does not create backups", () => {
+    const backupPath = path.join(cortexDir, "test-proj", "LEARNINGS.md.bak");
+    const { stdout, exitCode } = runCli(
+      ["maintain", "prune", "test-proj", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("[dry-run]");
+    expect(fs.existsSync(backupPath)).toBe(false);
+  });
+
+  it("prune reports updated backup paths on write", () => {
+    const backupPath = path.join(cortexDir, "test-proj", "LEARNINGS.md.bak");
+    const { stdout, exitCode } = runCli(
+      ["maintain", "prune", "test-proj"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Pruned");
+    expect(stdout).toContain("Updated backups (1): test-proj/LEARNINGS.md.bak");
+    expect(fs.existsSync(backupPath)).toBe(true);
+  });
+
+  it("consolidate reports updated backup paths on write", () => {
+    const backupPath = path.join(cortexDir, "test-proj", "LEARNINGS.md.bak");
+    const { stdout, exitCode } = runCli(
+      ["maintain", "consolidate", "test-proj"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Consolidated learnings for test-proj.");
+    expect(stdout).toContain("Updated backups (1): test-proj/LEARNINGS.md.bak");
+    expect(fs.existsSync(backupPath)).toBe(true);
   });
 });

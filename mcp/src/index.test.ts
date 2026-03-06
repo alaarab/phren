@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { execFileSync } from "child_process";
 import { sanitizeFts5Query, isValidProjectName, safeProjectPath, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import {
   validateLearningsFormat,
@@ -21,6 +22,26 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 
+const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
+
+function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
+  try {
+    const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 15000,
+    });
+    return { stdout, stderr: "", exitCode: 0 };
+  } catch (err: any) {
+    return {
+      stdout: err.stdout?.toString() || "",
+      stderr: err.stderr?.toString() || "",
+      exitCode: err.status ?? 1,
+    };
+  }
+}
+
 function grantAdminAccess(cortexDir: string, actor = "vitest-admin"): string {
   const govDir = path.join(cortexDir, ".governance");
   fs.mkdirSync(govDir, { recursive: true });
@@ -35,6 +56,24 @@ function grantAdminAccess(cortexDir: string, actor = "vitest-admin"): string {
   );
   process.env.CORTEX_ACTOR = actor;
   return actor;
+}
+
+function setupCortexDirWithLegacyFindings(): { cortexDir: string; cleanup: () => void } {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-index-routing-test-"));
+  const cortexDir = path.join(tmpRoot, ".cortex");
+  const projectDir = path.join(cortexDir, "test-proj");
+
+  fs.mkdirSync(projectDir, { recursive: true });
+  grantAdminAccess(cortexDir, "cli-test");
+  fs.writeFileSync(
+    path.join(projectDir, "FINDINGS.md"),
+    "# Findings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
+  );
+
+  return {
+    cortexDir,
+    cleanup: () => fs.rmSync(tmpRoot, { recursive: true, force: true }),
+  };
 }
 
 describe("sanitizeFts5Query", () => {
@@ -348,6 +387,71 @@ describe("legacy findings migration", () => {
     expect(fs.readFileSync(canonicalPath, "utf8")).toContain("Must pin this rule");
 
     fs.rmSync(cortexDir, { recursive: true, force: true });
+  });
+});
+
+describe("index entry routing: maintain migrate", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDirWithLegacyFindings());
+  });
+
+  afterEach(() => {
+    cleanup();
+    process.env.CORTEX_ACTOR = undefined;
+  });
+
+  it("routes maintain migrate governance and reports dry-run output shape", () => {
+    const { stdout, exitCode } = runCli(
+      ["maintain", "migrate", "governance", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Governance migration:");
+    expect(stdout).toContain("[dry-run]");
+  });
+
+  it("routes maintain migrate data form and preserves data output prefix", () => {
+    const { stdout, exitCode } = runCli(
+      ["maintain", "migrate", "data", "test-proj", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Data migration (test-proj):");
+    expect(stdout).toContain("migratable findings");
+  });
+
+  it("routes maintain migrate all and emits both governance and data outputs", () => {
+    const { stdout, exitCode } = runCli(
+      ["maintain", "migrate", "all", "test-proj", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Governance migration:");
+    expect(stdout).toContain("Data migration (test-proj):");
+  });
+
+  it("routes legacy maintain migrate <project> alias to data migration", () => {
+    const { stdout, exitCode } = runCli(
+      ["maintain", "migrate", "test-proj", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Data migration (test-proj):");
+    expect(stdout).toContain("migratable findings");
+  });
+
+  it("routes legacy migrate-findings command and keeps findings summary output", () => {
+    const { stdout, exitCode } = runCli(
+      ["migrate-findings", "test-proj", "--dry-run"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Found");
+    expect(stdout).toContain("migratable findings");
+    expect(stdout).not.toContain("Data migration (test-proj):");
   });
 });
 

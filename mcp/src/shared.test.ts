@@ -24,6 +24,8 @@ import {
   updateAccessControl,
   enforceCanonicalLocks,
   upsertCanonicalMemory,
+  migrateGovernance,
+  validateGovernanceJson,
 } from "./shared.js";
 import { isValidProjectName } from "./utils.js";
 import * as path from "path";
@@ -53,6 +55,14 @@ function makeProject(cortexDir: string, name: string, files: Record<string, stri
   for (const [file, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, file), content);
   }
+}
+
+function readVersionedEntries<T>(filePath: string): Record<string, T> {
+  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.entries && typeof parsed.entries === "object" && !Array.isArray(parsed.entries)) {
+    return parsed.entries as Record<string, T>;
+  }
+  return parsed as Record<string, T>;
 }
 
 beforeEach(() => {
@@ -145,6 +155,71 @@ describe("ensureCortexPath", () => {
   });
 });
 
+describe("governance validation and migrations", () => {
+  it("validates runtime-health and memory-scores schemas", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+
+    const runtimeHealth = path.join(govDir, "runtime-health.json");
+    fs.writeFileSync(runtimeHealth, JSON.stringify({ lastAutoSave: { at: 123, status: "clean" } }, null, 2));
+    expect(validateGovernanceJson(runtimeHealth, "runtime-health")).toBe(false);
+
+    const scores = path.join(govDir, "memory-scores.json");
+    fs.writeFileSync(scores, JSON.stringify({ "k": { impressions: 1, helpful: 0, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: new Date().toISOString() } }, null, 2));
+    expect(validateGovernanceJson(scores, "memory-scores")).toBe(true);
+  });
+
+  it("supports dry-run governance migration reporting", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "memory-scores.json"),
+      JSON.stringify({ "legacy/key": { impressions: 1, helpful: 0, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: new Date().toISOString() } }, null, 2)
+    );
+
+    const report = migrateGovernance(cortex, { dryRun: true });
+    const scoreResult = report.results.find((r) => r.file === "memory-scores.json");
+    expect(report.dryRun).toBe(true);
+    expect(scoreResult?.changed).toBe(true);
+    expect(scoreResult?.action).toBe("migrated");
+
+    const raw = JSON.parse(fs.readFileSync(path.join(govDir, "memory-scores.json"), "utf8"));
+    expect(raw.entries).toBeUndefined();
+  });
+
+  it("migrates legacy governance files to versioned formats", () => {
+    const cortex = makeCortex();
+    const govDir = path.join(cortex, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "memory-scores.json"),
+      JSON.stringify({ "legacy/key": { impressions: 1, helpful: 0, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: new Date().toISOString() } }, null, 2)
+    );
+    fs.writeFileSync(
+      path.join(govDir, "canonical-locks.json"),
+      JSON.stringify({ "proj/CANONICAL_MEMORIES.md": { hash: "h", snapshot: "s", updatedAt: new Date().toISOString() } }, null, 2)
+    );
+    fs.writeFileSync(
+      path.join(govDir, "index-policy.json"),
+      JSON.stringify({ includeGlobs: "bad-shape" }, null, 2)
+    );
+
+    const report = migrateGovernance(cortex);
+    expect(report.migratedFiles).toContain("memory-scores.json");
+    expect(report.migratedFiles).toContain("canonical-locks.json");
+    expect(report.results.find((r) => r.file === "index-policy.json")?.action).toBe("invalid-fallback");
+
+    const scoresRaw = JSON.parse(fs.readFileSync(path.join(govDir, "memory-scores.json"), "utf8"));
+    const locksRaw = JSON.parse(fs.readFileSync(path.join(govDir, "canonical-locks.json"), "utf8"));
+    expect(scoresRaw.schemaVersion).toBe(1);
+    expect(locksRaw.schemaVersion).toBe(1);
+    expect(scoresRaw.entries["legacy/key"]).toBeDefined();
+    expect(locksRaw.entries["proj/CANONICAL_MEMORIES.md"]).toBeDefined();
+  });
+});
+
 // --- buildIndex + queryRows ---
 
 describe("buildIndex and queryRows", () => {
@@ -188,6 +263,41 @@ describe("buildIndex and queryRows", () => {
     expect(betaRows).not.toBeNull();
     expect(alphaRows![0][0]).toBe("alpha");
     expect(betaRows![0][0]).toBe("beta");
+    db.close();
+  });
+
+  it("returns null for invalid SQL instead of throwing", async () => {
+    const cortex = makeCortex();
+    makeProject(cortex, "testproj", {
+      "summary.md": "# testproj\n\nA simple project.\n",
+    });
+
+    const db = await buildIndex(cortex);
+    expect(queryRows(db, "SELECT definitely_not_a_column FROM docs", [])).toBeNull();
+    db.close();
+  });
+
+  it("returns null when db.exec throws (corrupt/invalid db path)", () => {
+    const fakeDb = {
+      exec: () => {
+        throw new Error("database disk image is malformed");
+      },
+    };
+    expect(queryRows(fakeDb, "SELECT 1", [])).toBeNull();
+  });
+
+  it("buildIndex tolerates malformed profile YAML by falling back to default project discovery", async () => {
+    const cortex = makeCortex();
+    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(cortex, "profiles", "broken.yaml"), "name: broken\nprojects: [\n");
+    makeProject(cortex, "testproj", {
+      "summary.md": "# testproj\n\nProfile parse fallback should still index this.\n",
+    });
+
+    const db = await buildIndex(cortex, "broken");
+    const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["fallback"]);
+    expect(rows).not.toBeNull();
+    expect(rows![0][0]).toBe("testproj");
     db.close();
   });
 });
@@ -529,8 +639,8 @@ describe("RBAC and canonical locks", () => {
       expect(canonical).toContain("## Pinned");
 
       // Lock file should exist
-      const lockData = JSON.parse(
-        fs.readFileSync(path.join(cortex, ".governance", "canonical-locks.json"), "utf8")
+      const lockData = readVersionedEntries<{ hash: string }>(
+        path.join(cortex, ".governance", "canonical-locks.json")
       );
       expect(lockData["pinproj/CANONICAL_MEMORIES.md"]).toBeDefined();
       expect(lockData["pinproj/CANONICAL_MEMORIES.md"].hash).toBeTruthy();
@@ -653,12 +763,12 @@ describe("recordMemoryInjection", () => {
 
     const scoresPath = path.join(cortex, ".governance", "memory-scores.json");
     expect(fs.existsSync(scoresPath)).toBe(true);
-    const scores = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
+    const scores = readVersionedEntries<any>(scoresPath);
     expect(scores[key]).toBeDefined();
     expect(scores[key].impressions).toBe(1);
 
     recordMemoryInjection(cortex, key, "session-2");
-    const scores2 = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
+    const scores2 = readVersionedEntries<any>(scoresPath);
     expect(scores2[key].impressions).toBe(2);
   });
 
@@ -689,8 +799,8 @@ describe("recordMemoryFeedback", () => {
     recordMemoryInjection(cortex, key);
     recordMemoryFeedback(cortex, key, "helpful");
 
-    const scores = JSON.parse(
-      fs.readFileSync(path.join(cortex, ".governance", "memory-scores.json"), "utf8")
+    const scores = readVersionedEntries<any>(
+      path.join(cortex, ".governance", "memory-scores.json")
     );
     expect(scores[key].helpful).toBe(1);
     expect(scores[key].repromptPenalty).toBe(0);
@@ -704,8 +814,8 @@ describe("recordMemoryFeedback", () => {
     recordMemoryInjection(cortex, key);
     recordMemoryFeedback(cortex, key, "reprompt");
 
-    const scores = JSON.parse(
-      fs.readFileSync(path.join(cortex, ".governance", "memory-scores.json"), "utf8")
+    const scores = readVersionedEntries<any>(
+      path.join(cortex, ".governance", "memory-scores.json")
     );
     expect(scores[key].repromptPenalty).toBe(1);
   });
@@ -718,8 +828,8 @@ describe("recordMemoryFeedback", () => {
     recordMemoryInjection(cortex, key);
     recordMemoryFeedback(cortex, key, "regression");
 
-    const scores = JSON.parse(
-      fs.readFileSync(path.join(cortex, ".governance", "memory-scores.json"), "utf8")
+    const scores = readVersionedEntries<any>(
+      path.join(cortex, ".governance", "memory-scores.json")
     );
     expect(scores[key].regressionPenalty).toBe(1);
   });

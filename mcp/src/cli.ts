@@ -26,9 +26,11 @@ import {
   consolidateProjectLearnings,
   enforceCanonicalLocks,
   migrateLegacyFindings,
+  migrateGovernanceFiles,
   updateRuntimeHealth,
   getIndexPolicy,
   updateIndexPolicy,
+  GOVERNANCE_SCHEMA_VERSION,
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
 } from "./shared.js";
@@ -44,7 +46,7 @@ import { getHooksEnabledPreference } from "./init.js";
 import { startMemoryUi } from "./memory-ui.js";
 import { startShell } from "./shell.js";
 import { runCortexUpdate } from "./update.js";
-import { readBacklogs, backlogMarkdown } from "./data-access.js";
+import { readBacklogs, backlogMarkdown, listMachines as listMachinesStore, listProfiles as listProfilesStore } from "./data-access.js";
 
 const cortexPath = ensureCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
@@ -197,9 +199,9 @@ export async function runCliCommand(command: string, args: string[]) {
     case "quality-feedback":
       return handleQualityFeedback(args);
     case "prune-memories":
-      return handlePruneMemories(args[0]);
+      return handlePruneMemories(args);
     case "consolidate-memories":
-      return handleConsolidateMemories(args[0]);
+      return handleConsolidateMemories(args);
     case "migrate-findings":
       return handleMigrateFindings(args);
     case "index-policy":
@@ -216,6 +218,10 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleShell(args);
     case "update":
       return handleUpdate(args);
+    case "config":
+      return handleConfig(args);
+    case "maintain":
+      return handleMaintain(args);
     case "skill-list":
       return handleSkillList();
     case "backlog":
@@ -1439,17 +1445,86 @@ async function handleQualityFeedback(args: string[]) {
   console.log(`Recorded feedback: ${feedback} for ${key}`);
 }
 
-async function handlePruneMemories(projectArg?: string) {
-  const result = pruneDeadMemories(cortexPath, projectArg);
-  console.log(result);
+function parseProjectDryRunArgs(
+  args: string[],
+  command: string,
+  usage: string
+): { projectArg?: string; dryRun: boolean } {
+  let projectArg: string | undefined;
+  let dryRun = false;
+  for (const arg of args) {
+    if (arg === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      console.error(`Unknown ${command} flag: ${arg}`);
+      console.error(usage);
+      process.exit(1);
+    }
+    if (projectArg) {
+      console.error(`Usage: ${usage}`);
+      process.exit(1);
+    }
+    projectArg = arg;
+  }
+  return { projectArg, dryRun };
 }
 
-async function handleConsolidateMemories(projectArg?: string) {
-  const projects = projectArg
+function targetProjects(projectArg?: string): string[] {
+  return projectArg
     ? [projectArg]
     : getProjectDirs(cortexPath, profile).map((p) => path.basename(p)).filter((p) => p !== "global");
-  const results = projects.map((p) => consolidateProjectLearnings(cortexPath, p));
+}
+
+function captureLearningBackups(projects: string[]): Map<string, number> {
+  const snapshots = new Map<string, number>();
+  for (const project of projects) {
+    const backup = path.join(cortexPath, project, "LEARNINGS.md.bak");
+    if (!fs.existsSync(backup)) continue;
+    snapshots.set(backup, fs.statSync(backup).mtimeMs);
+  }
+  return snapshots;
+}
+
+function summarizeBackupChanges(before: Map<string, number>, projects: string[]): string[] {
+  const changed: string[] = [];
+  for (const project of projects) {
+    const backup = path.join(cortexPath, project, "LEARNINGS.md.bak");
+    if (!fs.existsSync(backup)) continue;
+    const current = fs.statSync(backup).mtimeMs;
+    const previous = before.get(backup);
+    if (previous === undefined || current !== previous) {
+      changed.push(path.relative(cortexPath, backup));
+    }
+  }
+  return changed.sort();
+}
+
+async function handlePruneMemories(args: string[] = []) {
+  const usage = "cortex prune-memories [project] [--dry-run]";
+  const { projectArg, dryRun } = parseProjectDryRunArgs(args, "prune-memories", usage);
+  const projects = targetProjects(projectArg);
+  const beforeBackups = dryRun ? new Map<string, number>() : captureLearningBackups(projects);
+  const result = pruneDeadMemories(cortexPath, projectArg, dryRun);
+  console.log(result);
+  if (dryRun || /^permission denied/i.test(result)) return;
+  const backups = summarizeBackupChanges(beforeBackups, projects);
+  if (!backups.length) return;
+  console.log(`Updated backups (${backups.length}): ${backups.join(", ")}`);
+}
+
+async function handleConsolidateMemories(args: string[] = []) {
+  const usage = "cortex consolidate-memories [project] [--dry-run]";
+  const { projectArg, dryRun } = parseProjectDryRunArgs(args, "consolidate-memories", usage);
+  const projects = targetProjects(projectArg);
+  const beforeBackups = dryRun ? new Map<string, number>() : captureLearningBackups(projects);
+  const results = projects.map((p) => consolidateProjectLearnings(cortexPath, p, dryRun));
   console.log(results.join("\n"));
+  if (dryRun) return;
+  const backups = summarizeBackupChanges(beforeBackups, projects);
+  if (!backups.length) return;
+  console.log(`Updated backups (${backups.length}): ${backups.join(", ")}`);
 }
 
 async function handleMigrateFindings(args: string[]) {
@@ -1462,6 +1537,135 @@ async function handleMigrateFindings(args: string[]) {
   const dryRun = args.includes("--dry-run");
   const result = migrateLegacyFindings(cortexPath, project, { pinCanonical, dryRun });
   console.log(result);
+}
+
+type MaintainMigrationKind = "governance" | "data" | "all";
+
+interface ParsedMaintainMigrationArgs {
+  kind: MaintainMigrationKind;
+  project?: string;
+  pinCanonical: boolean;
+  dryRun: boolean;
+}
+
+function printMaintainMigrationUsage() {
+  console.error("Usage:");
+  console.error("  cortex maintain migrate governance [--dry-run]");
+  console.error("  cortex maintain migrate data <project> [--pin] [--dry-run]");
+  console.error("  cortex maintain migrate all <project> [--pin] [--dry-run]");
+  console.error("  cortex maintain migrate <project> [--pin] [--dry-run]  # legacy data alias");
+}
+
+function parseMaintainMigrationArgs(args: string[]): ParsedMaintainMigrationArgs {
+  let pinCanonical = false;
+  let dryRun = false;
+  const positional: string[] = [];
+  for (const arg of args) {
+    if (arg === "--pin") {
+      pinCanonical = true;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      console.error(`Unknown migrate flag: ${arg}`);
+      printMaintainMigrationUsage();
+      process.exit(1);
+    }
+    positional.push(arg);
+  }
+
+  if (!positional.length) {
+    printMaintainMigrationUsage();
+    process.exit(1);
+  }
+
+  const mode = positional[0].toLowerCase();
+  if (mode === "governance") {
+    if (pinCanonical) {
+      console.error("--pin is only valid for data/all migrations.");
+      process.exit(1);
+    }
+    if (positional.length !== 1) {
+      printMaintainMigrationUsage();
+      process.exit(1);
+    }
+    return { kind: "governance", pinCanonical, dryRun };
+  }
+
+  if (mode === "data" || mode === "all") {
+    const project = positional[1];
+    if (!project || positional.length !== 2) {
+      printMaintainMigrationUsage();
+      process.exit(1);
+    }
+    return { kind: mode, project, pinCanonical, dryRun };
+  }
+
+  if (positional.length !== 1) {
+    printMaintainMigrationUsage();
+    process.exit(1);
+  }
+  return { kind: "data", project: positional[0], pinCanonical, dryRun };
+}
+
+function describeGovernanceMigrationPlan(): Array<{ file: string; from: number; to: number }> {
+  const govDir = path.join(cortexPath, ".governance");
+  if (!fs.existsSync(govDir)) return [];
+  const files = [
+    "memory-policy.json",
+    "access-control.json",
+    "memory-workflow-policy.json",
+    "index-policy.json",
+  ];
+  const pending: Array<{ file: string; from: number; to: number }> = [];
+  for (const file of files) {
+    const fullPath = path.join(govDir, file);
+    if (!fs.existsSync(fullPath)) continue;
+    try {
+      const raw = fs.readFileSync(fullPath, "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const fileVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 0;
+      if (fileVersion < GOVERNANCE_SCHEMA_VERSION) {
+        pending.push({ file, from: fileVersion, to: GOVERNANCE_SCHEMA_VERSION });
+      }
+    } catch {
+      // Ignore malformed files here; shared migration API handles hard failures defensively.
+    }
+  }
+  return pending;
+}
+
+function runGovernanceMigration(dryRun: boolean): string {
+  if (dryRun) {
+    const pending = describeGovernanceMigrationPlan();
+    if (!pending.length) return "[dry-run] Governance files are already up to date.";
+    const details = pending.map((entry) => `${entry.file} (${entry.from} -> ${entry.to})`).join(", ");
+    return `[dry-run] Would migrate ${pending.length} governance file(s): ${details}`;
+  }
+  const migrated = migrateGovernanceFiles(cortexPath);
+  if (!migrated.length) return "Governance files are already up to date.";
+  return `Migrated ${migrated.length} governance file(s): ${migrated.join(", ")}`;
+}
+
+async function handleMaintainMigrate(args: string[]) {
+  const parsed = parseMaintainMigrationArgs(args);
+  const lines: string[] = [];
+
+  if (parsed.kind === "governance" || parsed.kind === "all") {
+    lines.push(`Governance migration: ${runGovernanceMigration(parsed.dryRun)}`);
+  }
+  if (parsed.kind === "data" || parsed.kind === "all") {
+    const result = migrateLegacyFindings(cortexPath, parsed.project!, {
+      pinCanonical: parsed.pinCanonical,
+      dryRun: parsed.dryRun,
+    });
+    lines.push(`Data migration (${parsed.project}): ${result}`);
+  }
+
+  console.log(lines.join("\n"));
 }
 
 async function handleIndexPolicy(args: string[]) {
@@ -1750,4 +1954,97 @@ function handleBacklogView() {
   }
 
   console.log(`\n${totalActive} active, ${totalQueue} queued across ${docs.length} project(s).`);
+}
+
+async function handleConfig(args: string[]) {
+  const sub = args[0];
+  const rest = args.slice(1);
+  switch (sub) {
+    case "policy":
+      return handleMemoryPolicy(rest);
+    case "workflow":
+      return handleMemoryWorkflow(rest);
+    case "access":
+      return handleMemoryAccess(rest);
+    case "index":
+      return handleIndexPolicy(rest);
+    case "machines":
+      return handleConfigMachines();
+    case "profiles":
+      return handleConfigProfiles();
+    default:
+      console.log(`cortex config - manage settings and policies
+
+Subcommands:
+  cortex config policy [get|set ...]     Memory retention, TTL, confidence, decay
+  cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds
+  cortex config access [get|set ...]     Role-based permissions (admin/maintainer/contributor/viewer)
+  cortex config index [get|set ...]      Indexer include/exclude globs
+  cortex config machines                 Registered machines and profiles
+  cortex config profiles                 All profiles and their projects`);
+      if (sub) {
+        console.error(`\nUnknown config subcommand: "${sub}"`);
+        process.exit(1);
+      }
+  }
+}
+
+function handleConfigMachines() {
+  const machines = listMachinesStore(cortexPath);
+  if (typeof machines === "string") {
+    console.log(machines);
+    return;
+  }
+  const lines = Object.entries(machines).map(([machine, prof]) => `  ${machine}: ${prof}`);
+  console.log(`Registered Machines\n${lines.join("\n")}`);
+}
+
+function handleConfigProfiles() {
+  const profiles = listProfilesStore(cortexPath);
+  if (typeof profiles === "string") {
+    console.log(profiles);
+    return;
+  }
+  for (const p of profiles) {
+    console.log(`\n${p.name}`);
+    for (const proj of p.projects) console.log(`  - ${proj}`);
+    if (!p.projects.length) console.log("  (no projects)");
+  }
+}
+
+async function handleMaintain(args: string[]) {
+  const sub = args[0];
+  const rest = args.slice(1);
+  switch (sub) {
+    case "govern":
+      return handleGovernMemories(rest[0]);
+    case "prune":
+      return handlePruneMemories(rest);
+    case "consolidate":
+      return handleConsolidateMemories(rest);
+    case "migrate":
+      return handleMaintainMigrate(rest);
+    case "extract":
+      return handleExtractMemories(rest[0]);
+    default:
+      console.log(`cortex maintain - memory maintenance and governance
+
+Subcommands:
+  cortex maintain govern [project]       Queue stale/conflicting/low-value memories for review
+  cortex maintain prune [project] [--dry-run]
+                                         Delete expired entries by retention policy
+  cortex maintain consolidate [project] [--dry-run]
+                                         Deduplicate LEARNINGS.md bullets
+  cortex maintain migrate governance [--dry-run]
+                                         Upgrade governance policy file schemas
+  cortex maintain migrate data <project> [--pin] [--dry-run]
+  cortex maintain migrate all <project> [--pin] [--dry-run]
+  cortex maintain migrate <project> [--pin] [--dry-run]  (legacy alias)
+                                         Promote legacy findings into LEARNINGS/CANONICAL
+  cortex maintain extract [project]      Mine git/GitHub signals into memory candidates`);
+      if (sub) {
+        console.error(`\nUnknown maintain subcommand: "${sub}"`);
+        process.exit(1);
+      }
+  }
 }

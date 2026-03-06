@@ -15,14 +15,20 @@ import { isValidProjectName, safeProjectPath } from "./utils.js";
 
 function withFileLock<T>(filePath: string, fn: () => T): T {
   const lockPath = filePath + ".lock";
-  const maxWait = 5000;
-  const pollInterval = 100;
-  const staleThreshold = 30000;
+  const maxWait = Number.parseInt(process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS || "5000", 10) || 5000;
+  const pollInterval = Number.parseInt(process.env.CORTEX_FILE_LOCK_POLL_MS || "100", 10) || 100;
+  const staleThreshold = Number.parseInt(process.env.CORTEX_FILE_LOCK_STALE_MS || "30000", 10) || 30000;
+  const lockTimeoutMessage = `LOCK_TIMEOUT: Could not acquire write lock for "${path.basename(filePath)}" within ${maxWait}ms. Another write may be in progress; please retry.`;
+  const waiter = new Int32Array(new SharedArrayBuffer(4));
+  const sleep = (ms: number) => Atomics.wait(waiter, 0, 0, ms);
 
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
   let waited = 0;
+  let hasLock = false;
   while (waited < maxWait) {
     try {
       fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
+      hasLock = true;
       break;
     } catch {
       try {
@@ -32,18 +38,24 @@ function withFileLock<T>(filePath: string, fn: () => T): T {
           continue;
         }
       } catch {
+        sleep(pollInterval);
+        waited += pollInterval;
         continue;
       }
-      const start = Date.now();
-      while (Date.now() - start < pollInterval) { /* busy wait */ }
+      // Block this thread without spin-looping CPU while waiting to retry lock acquisition.
+      sleep(pollInterval);
       waited += pollInterval;
     }
   }
 
+  if (!hasLock) return lockTimeoutMessage as T;
+
   try {
     return fn();
   } finally {
-    try { fs.unlinkSync(lockPath); } catch { /* lock may not exist */ }
+    if (hasLock) {
+      try { fs.unlinkSync(lockPath); } catch { /* lock may not exist */ }
+    }
   }
 }
 
@@ -366,45 +378,55 @@ export function updateBacklogItem(
 }
 
 export function workNextBacklogItem(cortexPath: string, project: string): string {
-  const parsed = readBacklog(cortexPath, project);
-  if (typeof parsed === "string") return parsed;
-  if (!parsed.items.Queue.length) return `No queued items in ${project}.`;
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
 
-  const item = parsed.items.Queue.shift()!;
-  item.section = "Active";
-  item.checked = false;
-  parsed.items.Active.push(item);
-  writeBacklogDoc(parsed);
-  return `Moved next queue item to Active in ${project}: ${item.line}`;
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (typeof parsed === "string") return parsed;
+    if (!parsed.items.Queue.length) return `No queued items in ${project}.`;
+
+    const item = parsed.items.Queue.shift()!;
+    item.section = "Active";
+    item.checked = false;
+    parsed.items.Active.push(item);
+    writeBacklogDoc(parsed);
+    return `Moved next queue item to Active in ${project}: ${item.line}`;
+  });
 }
 
 export function tidyBacklogDone(cortexPath: string, project: string, keep: number = 30, dryRun?: boolean): string {
-  const parsed = readBacklog(cortexPath, project);
-  if (typeof parsed === "string") return parsed;
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
 
-  const safeKeep = Number.isFinite(keep) ? Math.max(0, Math.floor(keep)) : 30;
-  if (parsed.items.Done.length <= safeKeep) {
-    return `No tidy needed for ${project}. Done=${parsed.items.Done.length}, keep=${safeKeep}.`;
-  }
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (typeof parsed === "string") return parsed;
 
-  const archived = parsed.items.Done.slice(safeKeep);
+    const safeKeep = Number.isFinite(keep) ? Math.max(0, Math.floor(keep)) : 30;
+    if (parsed.items.Done.length <= safeKeep) {
+      return `No tidy needed for ${project}. Done=${parsed.items.Done.length}, keep=${safeKeep}.`;
+    }
 
-  if (dryRun) {
-    return `[dry-run] Would archive ${archived.length} done item(s) for ${project}, keeping ${safeKeep}.`;
-  }
+    const archived = parsed.items.Done.slice(safeKeep);
 
-  parsed.items.Done = parsed.items.Done.slice(0, safeKeep);
+    if (dryRun) {
+      return `[dry-run] Would archive ${archived.length} done item(s) for ${project}, keeping ${safeKeep}.`;
+    }
 
-  const archiveFile = backlogArchivePath(cortexPath, project);
-  fs.mkdirSync(path.dirname(archiveFile), { recursive: true });
-  const stamp = new Date().toISOString();
-  const lines = archived.map((item) => `- [x] ${item.line}${item.context ? `\n  Context: ${item.context}` : ""}`);
-  const block = `## ${stamp}\n\n${lines.join("\n")}\n\n`;
-  const prior = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, "utf8") : `# ${project} backlog archive\n\n`;
-  fs.writeFileSync(archiveFile, prior + block);
+    parsed.items.Done = parsed.items.Done.slice(0, safeKeep);
 
-  writeBacklogDoc(parsed);
-  return `Tidied ${project}: archived ${archived.length} done item(s), kept ${safeKeep}.`;
+    const archiveFile = backlogArchivePath(cortexPath, project);
+    fs.mkdirSync(path.dirname(archiveFile), { recursive: true });
+    const stamp = new Date().toISOString();
+    const lines = archived.map((item) => `- [x] ${item.line}${item.context ? `\n  Context: ${item.context}` : ""}`);
+    const block = `## ${stamp}\n\n${lines.join("\n")}\n\n`;
+    const prior = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, "utf8") : `# ${project} backlog archive\n\n`;
+    fs.writeFileSync(archiveFile, prior + block);
+
+    writeBacklogDoc(parsed);
+    return `Tidied ${project}: archived ${archived.length} done item(s), kept ${safeKeep}.`;
+  });
 }
 
 export function backlogMarkdown(doc: BacklogDoc): string {
@@ -572,37 +594,48 @@ export function approveMemoryQueueItem(cortexPath: string, project: string, matc
   const writeDenied = checkMemoryPermission(cortexPath, "write");
   if (writeDenied) return writeDenied;
 
-  const found = findQueueByMatch(cortexPath, project, match);
-  if (typeof found === "string") return found;
+  const ensured = ensureProject(cortexPath, project);
+  if (ensured.error) return ensured.error;
+  const qPath = queuePath(cortexPath, project);
+  return withFileLock(qPath, () => {
+    const found = findQueueByMatch(cortexPath, project, match);
+    if (typeof found === "string") return found;
 
-  const workflow = getMemoryWorkflowPolicy(cortexPath);
-  const riskyBySection = workflow.riskySections.includes(found.item.section);
-  const riskyByConfidence = found.item.confidence !== undefined && found.item.confidence < workflow.lowConfidenceThreshold;
-  if (workflow.requireMaintainerApproval && (riskyBySection || riskyByConfidence)) {
-    const pinDenied = checkMemoryPermission(cortexPath, "pin");
-    if (pinDenied) return `${CortexError.PERMISSION_DENIED}: approval requires maintainer/admin role for risky memory entries`;
-  }
+    const workflow = getMemoryWorkflowPolicy(cortexPath);
+    const riskyBySection = workflow.riskySections.includes(found.item.section);
+    const riskyByConfidence = found.item.confidence !== undefined && found.item.confidence < workflow.lowConfidenceThreshold;
+    if (workflow.requireMaintainerApproval && (riskyBySection || riskyByConfidence)) {
+      const pinDenied = checkMemoryPermission(cortexPath, "pin");
+      if (pinDenied) return `${CortexError.PERMISSION_DENIED}: approval requires maintainer/admin role for risky memory entries`;
+    }
 
-  const add = addLearningToFile(cortexPath, project, found.item.text);
-  if (add.startsWith("Permission denied") || add.startsWith("Invalid")) return add;
+    const learningsPath = path.join(ensured.dir!, "LEARNINGS.md");
+    const add = withFileLock(learningsPath, () => addLearningToFile(cortexPath, project, found.item.text));
+    if (add.startsWith("Permission denied") || add.startsWith("Invalid") || add.startsWith("LOCK_TIMEOUT")) return add;
 
-  found.all.splice(found.index, 1);
-  rewriteQueue(cortexPath, project, found.all);
-  appendAuditLog(cortexPath, "approve_memory", `project=${project} item=${JSON.stringify(found.item.text)}`);
-  return `Approved memory in ${project}: ${found.item.text}`;
+    found.all.splice(found.index, 1);
+    rewriteQueue(cortexPath, project, found.all);
+    appendAuditLog(cortexPath, "approve_memory", `project=${project} item=${JSON.stringify(found.item.text)}`);
+    return `Approved memory in ${project}: ${found.item.text}`;
+  });
 }
 
 export function rejectMemoryQueueItem(cortexPath: string, project: string, match: string): string {
   const denial = checkMemoryPermission(cortexPath, "queue");
   if (denial) return denial;
 
-  const found = findQueueByMatch(cortexPath, project, match);
-  if (typeof found === "string") return found;
+  const ensured = ensureProject(cortexPath, project);
+  if (ensured.error) return ensured.error;
+  const qPath = queuePath(cortexPath, project);
+  return withFileLock(qPath, () => {
+    const found = findQueueByMatch(cortexPath, project, match);
+    if (typeof found === "string") return found;
 
-  found.all.splice(found.index, 1);
-  rewriteQueue(cortexPath, project, found.all);
-  appendAuditLog(cortexPath, "reject_memory", `project=${project} item=${JSON.stringify(found.item.text)}`);
-  return `Rejected memory in ${project}: ${found.item.text}`;
+    found.all.splice(found.index, 1);
+    rewriteQueue(cortexPath, project, found.all);
+    appendAuditLog(cortexPath, "reject_memory", `project=${project} item=${JSON.stringify(found.item.text)}`);
+    return `Rejected memory in ${project}: ${found.item.text}`;
+  });
 }
 
 export function editMemoryQueueItem(cortexPath: string, project: string, match: string, newText: string): string {
@@ -612,25 +645,41 @@ export function editMemoryQueueItem(cortexPath: string, project: string, match: 
   const trimmed = newText.trim();
   if (!trimmed) return "New memory text cannot be empty.";
 
-  const found = findQueueByMatch(cortexPath, project, match);
-  if (typeof found === "string") return found;
+  const ensured = ensureProject(cortexPath, project);
+  if (ensured.error) return ensured.error;
+  const qPath = queuePath(cortexPath, project);
+  return withFileLock(qPath, () => {
+    const found = findQueueByMatch(cortexPath, project, match);
+    if (typeof found === "string") return found;
 
-  const date = found.item.date === "unknown" ? new Date().toISOString().slice(0, 10) : found.item.date;
-  found.item.text = trimmed;
-  found.item.line = `- [${date}] ${found.item.text}`;
-  found.all[found.index] = found.item;
-  rewriteQueue(cortexPath, project, found.all);
-  appendAuditLog(cortexPath, "edit_memory", `project=${project} item=${JSON.stringify(found.item.text)}`);
-  return `Edited memory in ${project}: ${found.item.text}`;
+    const date = found.item.date === "unknown" ? new Date().toISOString().slice(0, 10) : found.item.date;
+    found.item.text = trimmed;
+    found.item.line = `- [${date}] ${found.item.text}`;
+    found.all[found.index] = found.item;
+    rewriteQueue(cortexPath, project, found.all);
+    appendAuditLog(cortexPath, "edit_memory", `project=${project} item=${JSON.stringify(found.item.text)}`);
+    return `Edited memory in ${project}: ${found.item.text}`;
+  });
 }
 
 export function listMachines(cortexPath: string): Record<string, string> | string {
   const machinesPath = path.join(cortexPath, "machines.yaml");
   if (!fs.existsSync(machinesPath)) return `${CortexError.FILE_NOT_FOUND}: machines.yaml`;
-  const raw = fs.readFileSync(machinesPath, "utf8");
-  const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA }) as Record<string, string> | null;
-  if (!parsed || typeof parsed !== "object") return "machines.yaml is empty or invalid.";
-  return parsed;
+  try {
+    const raw = fs.readFileSync(machinesPath, "utf8");
+    const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "machines.yaml is empty or invalid.";
+
+    const cleaned: Record<string, string> = {};
+    for (const [machine, profile] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof machine !== "string" || !machine.trim()) continue;
+      if (typeof profile !== "string" || !profile.trim()) continue;
+      cleaned[machine] = profile;
+    }
+    return cleaned;
+  } catch {
+    return `MALFORMED_YAML: machines.yaml`;
+  }
 }
 
 function writeMachines(cortexPath: string, data: Record<string, string>): void {
@@ -650,11 +699,14 @@ export function setMachineProfile(cortexPath: string, machine: string, profile: 
     if (!exists) return `Profile "${profile}" does not exist.`;
   }
 
-  const current = listMachines(cortexPath);
-  const data = typeof current === "string" ? {} : current;
-  data[machine] = profile;
-  writeMachines(cortexPath, data);
-  return `Mapped machine ${machine} -> ${profile}.`;
+  const machinesPath = path.join(cortexPath, "machines.yaml");
+  return withFileLock(machinesPath, () => {
+    const current = listMachines(cortexPath);
+    const data = typeof current === "string" ? {} : current;
+    data[machine] = profile;
+    writeMachines(cortexPath, data);
+    return `Mapped machine ${machine} -> ${profile}.`;
+  });
 }
 
 export function listProfiles(cortexPath: string): ProfileInfo[] | string {
@@ -665,13 +717,22 @@ export function listProfiles(cortexPath: string): ProfileInfo[] | string {
 
   for (const file of files) {
     const full = path.join(profilesDir, file);
-    const raw = fs.readFileSync(full, "utf8");
-    const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA }) as Record<string, unknown> | null;
-    const name = (parsed?.name as string) || file.replace(/\.yaml$/, "");
-    const projects = Array.isArray(parsed?.projects)
-      ? (parsed?.projects as unknown[]).map((project) => String(project)).filter(Boolean)
-      : [];
-    profiles.push({ name, file: full, projects });
+    try {
+      const raw = fs.readFileSync(full, "utf8");
+      const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+      const data = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+      const name = (typeof data?.name === "string" && data.name.trim())
+        ? data.name
+        : file.replace(/\.yaml$/, "");
+      const projects = Array.isArray(data?.projects)
+        ? (data.projects as unknown[]).map((project) => String(project)).filter(Boolean)
+        : [];
+      profiles.push({ name, file: full, projects });
+    } catch {
+      return `MALFORMED_YAML: profiles/${file}`;
+    }
   }
 
   return profiles;
@@ -692,9 +753,16 @@ export function addProjectToProfile(cortexPath: string, profile: string, project
   const current = profiles.find((p) => p.name === profile);
   if (!current) return `Profile "${profile}" not found.`;
 
-  const projects = current.projects.includes(project) ? current.projects : [...current.projects, project];
-  writeProfile(current.file, current.name, projects);
-  return `Added ${project} to profile ${profile}.`;
+  return withFileLock(current.file, () => {
+    const refreshed = listProfiles(cortexPath);
+    if (typeof refreshed === "string") return refreshed;
+    const latest = refreshed.find((p) => p.name === profile);
+    if (!latest) return `Profile "${profile}" not found.`;
+
+    const projects = latest.projects.includes(project) ? latest.projects : [...latest.projects, project];
+    writeProfile(latest.file, latest.name, projects);
+    return `Added ${project} to profile ${profile}.`;
+  });
 }
 
 export function removeProjectFromProfile(cortexPath: string, profile: string, project: string): string {
@@ -703,9 +771,16 @@ export function removeProjectFromProfile(cortexPath: string, profile: string, pr
   const current = profiles.find((p) => p.name === profile);
   if (!current) return `Profile "${profile}" not found.`;
 
-  const projects = current.projects.filter((p) => p !== project);
-  writeProfile(current.file, current.name, projects);
-  return `Removed ${project} from profile ${profile}.`;
+  return withFileLock(current.file, () => {
+    const refreshed = listProfiles(cortexPath);
+    if (typeof refreshed === "string") return refreshed;
+    const latest = refreshed.find((p) => p.name === profile);
+    if (!latest) return `Profile "${profile}" not found.`;
+
+    const projects = latest.projects.filter((p) => p !== project);
+    writeProfile(latest.file, latest.name, projects);
+    return `Removed ${project} from profile ${profile}.`;
+  });
 }
 
 export function listProjectCards(cortexPath: string, profile?: string): ProjectCard[] {
@@ -780,8 +855,10 @@ export function saveShellState(cortexPath: string, state: ShellState): void {
 
 export function resetShellState(cortexPath: string): string {
   const file = shellStatePath(cortexPath);
-  if (fs.existsSync(file)) fs.unlinkSync(file);
-  return "Shell state reset.";
+  return withFileLock(file, () => {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    return "Shell state reset.";
+  });
 }
 
 export function readRuntimeHealth(cortexPath: string) {

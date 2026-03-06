@@ -267,6 +267,19 @@ cortex extract-memories [project]    # mine git + GitHub signals into candidates
 cortex migrate-findings <project>    # promote legacy findings docs
 ```
 
+Wave 1 migration and safety:
+
+```bash
+cortex maintain migrate governance --dry-run   # preview governance schema upgrades
+cortex maintain migrate governance             # apply governance schema upgrades
+cortex maintain migrate data <project> --dry-run
+cortex maintain migrate all <project> --dry-run
+```
+
+For destructive maintenance (`maintain prune`, `maintain consolidate`, and non-dry-run migrations), run `--dry-run` first. Write paths that rewrite `LEARNINGS.md` create/update `LEARNINGS.md.bak` and report changed backup paths (for example, `Updated backups (1): <project>/LEARNINGS.md.bak`); `--dry-run` does not create backups.
+
+Locking behavior: daily background maintenance uses `.quality-YYYY-MM-DD.lock` to prevent duplicate runs on the same day (stale locks are recovered automatically), and markdown mutations use per-file `.lock` files with timeout + stale-lock recovery.
+
 Policy tuning:
 
 ```bash
@@ -276,6 +289,40 @@ cortex memory-access get|set ...     # role permissions
 cortex index-policy get|set ...      # indexer include/exclude globs
 cortex mcp-mode on|off|status       # toggle MCP integration
 cortex hooks-mode on|off|status     # toggle hook execution
+```
+
+### Access control (RBAC)
+
+Cortex reads role assignments from `.governance/access-control.json` and enforces least privilege by default.
+
+Roles:
+- `admin`: full access (`read`, `write`, `queue`, `pin`, `delete`, `policy`)
+- `maintainer`: everything except `policy` updates
+- `contributor`: `read`, `write`, `queue`
+- `viewer`: `read` only
+
+Permission model:
+- Policy changes (`memory-access set`, `memory-policy set`, `memory-workflow set`) require `admin`.
+- Actor identity resolves from `CORTEX_ACTOR`, then `USER`/`USERNAME`, then OS username.
+- Unknown actors are treated as `viewer`.
+- Role resolution order is `admin` -> `maintainer` -> `contributor` -> `viewer` (if duplicated across lists).
+
+Config expectations:
+- File path: `.governance/access-control.json`
+- Shape: JSON object with optional `schemaVersion` and role arrays: `admins`, `maintainers`, `contributors`, `viewers`
+- Role array values should be non-empty actor IDs (for example usernames or service identities)
+- Keep each actor in only one role list to avoid ambiguity
+
+Example:
+
+```json
+{
+  "schemaVersion": 1,
+  "admins": ["alice"],
+  "maintainers": ["team-leads"],
+  "contributors": ["dev1", "dev2"],
+  "viewers": ["ci-bot"]
+}
 ```
 
 ### Feature flags

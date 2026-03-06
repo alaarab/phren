@@ -32,6 +32,46 @@ How data flows through the system, from user prompt to persistent memory.
  +--------------------+     +-------------------+
 ```
 
+## End-to-End Data Flow Loop (Practical View)
+
+This is the core runtime loop from one prompt to the next:
+
+```
+[1] Hooks Trigger
+    SessionStart / UserPromptSubmit / Stop
+        |
+        v
+[2] Retrieval Path
+    hook-context + hook-prompt
+    -> keyword extraction + synonym expansion
+    -> FTS5 search over ~/.cortex markdown state
+    -> top snippets injected into model context
+        |
+        v
+[3] Governance Path
+    trust checks before injection
+    -> citation validity + confidence decay + policy thresholds
+    -> low-confidence or stale items filtered/queued
+        |
+        v
+[4] Persistence Path
+    MCP tool writes (learnings/backlog/memories)
+    + Stop hook git add/commit/push
+    -> updated markdown + governance config become source of truth
+        |
+        +---------------------------------------------+
+                                                      |
+                                                      v
+                                        Next UserPromptSubmit reads
+                                        the newly persisted state
+```
+
+In practice:
+1. A user prompt triggers `UserPromptSubmit`, which runs fast retrieval against the cached FTS5 index.
+2. Matching memories are filtered by governance rules before any context injection.
+3. During the turn, MCP tools can add or update memory/backlog files in `~/.cortex/<project>/`.
+4. `Stop` persists those file changes through git, making them available for the next retrieval cycle.
+
 ## Hook Pipeline
 
 ### SessionStart

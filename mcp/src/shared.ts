@@ -85,6 +85,7 @@ export interface IndexPolicy {
 }
 
 export interface RuntimeHealth {
+  schemaVersion?: number;
   lastSessionStartAt?: string;
   lastPromptAt?: string;
   lastStopAt?: string;
@@ -112,6 +113,11 @@ interface CanonicalLock {
   hash: string;
   snapshot: string;
   updatedAt: string;
+}
+
+interface VersionedEntriesFile<T> {
+  schemaVersion?: number;
+  entries: Record<string, T>;
 }
 
 export const GOVERNANCE_SCHEMA_VERSION = 1;
@@ -160,6 +166,20 @@ const DEFAULT_ACCESS: AccessControl = {
   viewers: [],
 };
 
+const DEFAULT_RUNTIME_HEALTH: RuntimeHealth = {
+  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+};
+
+const DEFAULT_MEMORY_SCORES_FILE: VersionedEntriesFile<MemoryScore> = {
+  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+  entries: {},
+};
+
+const DEFAULT_CANONICAL_LOCKS_FILE: VersionedEntriesFile<CanonicalLock> = {
+  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+  entries: {},
+};
+
 function governanceDir(cortexPath: string): string {
   return path.join(cortexPath, ".governance");
 }
@@ -180,23 +200,119 @@ export function withDefaults<T extends object>(data: Partial<T>, defaults: T): T
   return merged as T;
 }
 
-type GovernanceSchema = "access-control" | "memory-policy" | "memory-workflow-policy" | "index-policy";
+type GovernanceSchema =
+  | "access-control"
+  | "memory-policy"
+  | "memory-workflow-policy"
+  | "index-policy"
+  | "runtime-health"
+  | "memory-scores"
+  | "canonical-locks";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
+  return !("schemaVersion" in data) || typeof data.schemaVersion === "number";
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === "string");
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function pickNumber(value: unknown, fallback: number): number {
+  return isFiniteNumber(value) ? value : fallback;
+}
+
+function pickBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function cleanStringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const cleaned = value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  return cleaned.length ? cleaned : [...fallback];
+}
+
+function isMemoryScore(value: unknown): value is MemoryScore {
+  if (!isRecord(value)) return false;
+  return isFiniteNumber(value.impressions)
+    && isFiniteNumber(value.helpful)
+    && isFiniteNumber(value.repromptPenalty)
+    && isFiniteNumber(value.regressionPenalty)
+    && typeof value.lastUsedAt === "string";
+}
+
+function isCanonicalLock(value: unknown): value is CanonicalLock {
+  if (!isRecord(value)) return false;
+  return typeof value.hash === "string"
+    && typeof value.snapshot === "string"
+    && typeof value.updatedAt === "string";
+}
+
+function isVersionedEntries(data: Record<string, unknown>): boolean {
+  return "entries" in data || "schemaVersion" in data;
+}
+
+function entriesObject(data: Record<string, unknown>): Record<string, unknown> {
+  if (isRecord(data.entries)) return data.entries;
+  return data;
+}
 
 const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unknown>) => boolean> = {
   "access-control": (d) =>
-    ["admins", "maintainers", "contributors", "viewers"].every(
-      (k) => !(k in d) || Array.isArray(d[k])
+    hasValidSchemaVersion(d) && ["admins", "maintainers", "contributors", "viewers"].every(
+      (k) => !(k in d) || isStringArray(d[k])
     ),
   "memory-policy": (d) =>
-    ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"].every(
-      (k) => !(k in d) || typeof d[k] === "number"
-    ),
+    hasValidSchemaVersion(d)
+    && ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"].every(
+      (k) => !(k in d) || isFiniteNumber(d[k])
+    )
+    && (!("decay" in d) || (() => {
+      if (!isRecord(d.decay)) return false;
+      const decay = d.decay;
+      return ["d30", "d60", "d90", "d120"].every((k) => !(k in decay) || isFiniteNumber(decay[k]));
+    })()),
   "memory-workflow-policy": (d) =>
-    (!("riskySections" in d) || Array.isArray(d.riskySections)),
+    hasValidSchemaVersion(d)
+    && (!("requireMaintainerApproval" in d) || typeof d.requireMaintainerApproval === "boolean")
+    && (!("lowConfidenceThreshold" in d) || isFiniteNumber(d.lowConfidenceThreshold))
+    && (!("riskySections" in d) || isStringArray(d.riskySections)),
   "index-policy": (d) =>
-    ["includeGlobs", "excludeGlobs"].every(
-      (k) => !(k in d) || Array.isArray(d[k])
-    ),
+    hasValidSchemaVersion(d)
+    && ["includeGlobs", "excludeGlobs"].every((k) => !(k in d) || isStringArray(d[k]))
+    && (!("includeHidden" in d) || typeof d.includeHidden === "boolean"),
+  "runtime-health": (d) =>
+    hasValidSchemaVersion(d)
+    && (!("lastSessionStartAt" in d) || typeof d.lastSessionStartAt === "string")
+    && (!("lastPromptAt" in d) || typeof d.lastPromptAt === "string")
+    && (!("lastStopAt" in d) || typeof d.lastStopAt === "string")
+    && (!("lastAutoSave" in d) || (isRecord(d.lastAutoSave)
+      && typeof d.lastAutoSave.at === "string"
+      && ["clean", "saved-local", "saved-pushed", "error"].includes(String(d.lastAutoSave.status))
+      && (!("detail" in d.lastAutoSave) || typeof d.lastAutoSave.detail === "string")))
+    && (!("lastGovernance" in d) || (isRecord(d.lastGovernance)
+      && typeof d.lastGovernance.at === "string"
+      && ["ok", "error"].includes(String(d.lastGovernance.status))
+      && typeof d.lastGovernance.detail === "string")),
+  "memory-scores": (d) => {
+    if (isVersionedEntries(d) && !hasValidSchemaVersion(d)) return false;
+    if (isVersionedEntries(d) && !isRecord(d.entries)) return false;
+    const entries = entriesObject(d);
+    return Object.values(entries).every((entry) => isMemoryScore(entry));
+  },
+  "canonical-locks": (d) => {
+    if (isVersionedEntries(d) && !hasValidSchemaVersion(d)) return false;
+    if (isVersionedEntries(d) && !isRecord(d.entries)) return false;
+    const entries = entriesObject(d);
+    return Object.values(entries).every((entry) => isCanonicalLock(entry));
+  },
 };
 
 const GOVERNANCE_FILE_SCHEMAS: Record<string, GovernanceSchema> = {
@@ -204,6 +320,9 @@ const GOVERNANCE_FILE_SCHEMAS: Record<string, GovernanceSchema> = {
   "memory-policy.json": "memory-policy",
   "memory-workflow-policy.json": "memory-workflow-policy",
   "index-policy.json": "index-policy",
+  "runtime-health.json": "runtime-health",
+  "memory-scores.json": "memory-scores",
+  "canonical-locks.json": "canonical-locks",
 };
 
 export function validateGovernanceJson(filePath: string, schema: GovernanceSchema): boolean {
@@ -227,6 +346,122 @@ export function validateGovernanceJson(filePath: string, schema: GovernanceSchem
   }
 }
 
+function extractGovernanceVersion(schema: GovernanceSchema, data: Record<string, unknown>): number {
+  if (schema === "memory-scores" || schema === "canonical-locks") {
+    return isVersionedEntries(data) && typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
+  }
+  return typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
+}
+
+function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
+  const normalized: RuntimeHealth = { schemaVersion: GOVERNANCE_SCHEMA_VERSION };
+  if (typeof data.lastSessionStartAt === "string") normalized.lastSessionStartAt = data.lastSessionStartAt;
+  if (typeof data.lastPromptAt === "string") normalized.lastPromptAt = data.lastPromptAt;
+  if (typeof data.lastStopAt === "string") normalized.lastStopAt = data.lastStopAt;
+  if (isRecord(data.lastAutoSave) && typeof data.lastAutoSave.at === "string" && ["clean", "saved-local", "saved-pushed", "error"].includes(String(data.lastAutoSave.status))) {
+    normalized.lastAutoSave = {
+      at: data.lastAutoSave.at,
+      status: data.lastAutoSave.status as "clean" | "saved-local" | "saved-pushed" | "error",
+      detail: typeof data.lastAutoSave.detail === "string" ? data.lastAutoSave.detail : undefined,
+    };
+  }
+  if (isRecord(data.lastGovernance) && typeof data.lastGovernance.at === "string" && ["ok", "error"].includes(String(data.lastGovernance.status)) && typeof data.lastGovernance.detail === "string") {
+    normalized.lastGovernance = {
+      at: data.lastGovernance.at,
+      status: data.lastGovernance.status as "ok" | "error",
+      detail: data.lastGovernance.detail,
+    };
+  }
+  return normalized;
+}
+
+function normalizeAccessControl(data: Record<string, unknown>): AccessControl {
+  return {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    admins: cleanStringArray(data.admins, DEFAULT_ACCESS.admins || []),
+    maintainers: cleanStringArray(data.maintainers, DEFAULT_ACCESS.maintainers || []),
+    contributors: cleanStringArray(data.contributors, DEFAULT_ACCESS.contributors || []),
+    viewers: cleanStringArray(data.viewers, DEFAULT_ACCESS.viewers || []),
+  };
+}
+
+function normalizeMemoryPolicy(data: Record<string, unknown>): MemoryPolicy {
+  const decay = isRecord(data.decay) ? data.decay : {};
+  return {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    ttlDays: pickNumber(data.ttlDays, DEFAULT_POLICY.ttlDays),
+    retentionDays: pickNumber(data.retentionDays, DEFAULT_POLICY.retentionDays),
+    autoAcceptThreshold: pickNumber(data.autoAcceptThreshold, DEFAULT_POLICY.autoAcceptThreshold),
+    minInjectConfidence: pickNumber(data.minInjectConfidence, DEFAULT_POLICY.minInjectConfidence),
+    decay: {
+      d30: pickNumber(decay.d30, DEFAULT_POLICY.decay.d30),
+      d60: pickNumber(decay.d60, DEFAULT_POLICY.decay.d60),
+      d90: pickNumber(decay.d90, DEFAULT_POLICY.decay.d90),
+      d120: pickNumber(decay.d120, DEFAULT_POLICY.decay.d120),
+    },
+  };
+}
+
+function normalizeWorkflowPolicy(data: Record<string, unknown>): MemoryWorkflowPolicy {
+  const validSections = new Set(["Review", "Stale", "Conflicts"]);
+  const riskySections = Array.isArray(data.riskySections)
+    ? data.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => validSections.has(String(s)))
+    : [];
+  return {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    requireMaintainerApproval: pickBoolean(data.requireMaintainerApproval, DEFAULT_WORKFLOW_POLICY.requireMaintainerApproval),
+    lowConfidenceThreshold: pickNumber(data.lowConfidenceThreshold, DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold),
+    riskySections: riskySections.length ? riskySections : [...DEFAULT_WORKFLOW_POLICY.riskySections],
+  };
+}
+
+function normalizeIndexPolicy(data: Record<string, unknown>): IndexPolicy {
+  return {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    includeGlobs: cleanStringArray(data.includeGlobs, DEFAULT_INDEX_POLICY.includeGlobs),
+    excludeGlobs: cleanStringArray(data.excludeGlobs, DEFAULT_INDEX_POLICY.excludeGlobs),
+    includeHidden: pickBoolean(data.includeHidden, DEFAULT_INDEX_POLICY.includeHidden),
+  };
+}
+
+function normalizeMemoryScoresFile(data: Record<string, unknown>): VersionedEntriesFile<MemoryScore> {
+  const entries = entriesObject(data);
+  const out: Record<string, MemoryScore> = {};
+  for (const [key, value] of Object.entries(entries)) {
+    if (isMemoryScore(value)) out[key] = value;
+  }
+  return { schemaVersion: GOVERNANCE_SCHEMA_VERSION, entries: out };
+}
+
+function normalizeCanonicalLocksFile(data: Record<string, unknown>): VersionedEntriesFile<CanonicalLock> {
+  const entries = entriesObject(data);
+  const out: Record<string, CanonicalLock> = {};
+  for (const [key, value] of Object.entries(entries)) {
+    if (isCanonicalLock(value)) out[key] = value;
+  }
+  return { schemaVersion: GOVERNANCE_SCHEMA_VERSION, entries: out };
+}
+
+function defaultGovernanceForSchema(schema: GovernanceSchema): Record<string, unknown> {
+  if (schema === "access-control") return { ...DEFAULT_ACCESS };
+  if (schema === "memory-policy") return { ...DEFAULT_POLICY };
+  if (schema === "memory-workflow-policy") return { ...DEFAULT_WORKFLOW_POLICY };
+  if (schema === "index-policy") return { ...DEFAULT_INDEX_POLICY };
+  if (schema === "runtime-health") return { ...DEFAULT_RUNTIME_HEALTH };
+  if (schema === "memory-scores") return { ...DEFAULT_MEMORY_SCORES_FILE };
+  return { ...DEFAULT_CANONICAL_LOCKS_FILE };
+}
+
+function normalizeGovernanceForSchema(schema: GovernanceSchema, data: Record<string, unknown>): Record<string, unknown> {
+  if (schema === "access-control") return normalizeAccessControl(data) as unknown as Record<string, unknown>;
+  if (schema === "memory-policy") return normalizeMemoryPolicy(data) as unknown as Record<string, unknown>;
+  if (schema === "memory-workflow-policy") return normalizeWorkflowPolicy(data) as unknown as Record<string, unknown>;
+  if (schema === "index-policy") return normalizeIndexPolicy(data) as unknown as Record<string, unknown>;
+  if (schema === "runtime-health") return normalizeRuntimeHealth(data) as unknown as Record<string, unknown>;
+  if (schema === "memory-scores") return normalizeMemoryScoresFile(data) as unknown as Record<string, unknown>;
+  return normalizeCanonicalLocksFile(data) as unknown as Record<string, unknown>;
+}
+
 function readJsonFile<T>(filePath: string, fallback: T): T {
   try {
     if (!fs.existsSync(filePath)) return fallback;
@@ -238,7 +473,7 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
     }
     const raw = fs.readFileSync(filePath, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const fileVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 0;
+    const fileVersion = schema ? extractGovernanceVersion(schema, parsed) : (typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 0);
     if (fileVersion > GOVERNANCE_SCHEMA_VERSION) {
       debugLog(`Warning: ${filePath} has schemaVersion ${fileVersion}, expected <= ${GOVERNANCE_SCHEMA_VERSION}. Consider updating cortex.`);
     }
@@ -268,50 +503,127 @@ function actorName(): string {
   }
 }
 
-/**
- * Check governance file schema versions and apply any needed migrations.
- * Currently validates versions only; the structure supports future migrations.
- */
-export function migrateGovernanceFiles(cortexPath: string): string[] {
+export interface GovernanceMigrationOptions {
+  dryRun?: boolean;
+}
+
+export interface GovernanceMigrationResult {
+  file: string;
+  schema: GovernanceSchema;
+  action: "missing" | "up-to-date" | "migrated" | "invalid-fallback" | "skipped-newer-version" | "error";
+  fromVersion: number | null;
+  toVersion: number;
+  changed: boolean;
+  detail?: string;
+}
+
+export interface GovernanceMigrationReport {
+  schemaVersion: number;
+  dryRun: boolean;
+  migratedFiles: string[];
+  results: GovernanceMigrationResult[];
+}
+
+export function migrateGovernance(cortexPath: string, options: GovernanceMigrationOptions = {}): GovernanceMigrationReport {
+  const dryRun = !!options.dryRun;
+  const report: GovernanceMigrationReport = {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    dryRun,
+    migratedFiles: [],
+    results: [],
+  };
   const govDir = governanceDir(cortexPath);
-  if (!fs.existsSync(govDir)) return [];
 
-  const files = [
-    { name: "memory-policy.json", defaults: DEFAULT_POLICY },
-    { name: "access-control.json", defaults: DEFAULT_ACCESS },
-    { name: "memory-workflow-policy.json", defaults: DEFAULT_WORKFLOW_POLICY },
-    { name: "index-policy.json", defaults: DEFAULT_INDEX_POLICY },
-  ];
-
-  const migrated: string[] = [];
-
-  for (const { name, defaults } of files) {
-    const filePath = path.join(govDir, name);
-    if (!fs.existsSync(filePath)) continue;
+  for (const [fileName, schema] of Object.entries(GOVERNANCE_FILE_SCHEMAS)) {
+    const filePath = path.join(govDir, fileName);
+    if (!fs.existsSync(filePath)) {
+      report.results.push({
+        file: fileName,
+        schema,
+        action: "missing",
+        fromVersion: null,
+        toVersion: GOVERNANCE_SCHEMA_VERSION,
+        changed: false,
+      });
+      continue;
+    }
 
     try {
       const raw = fs.readFileSync(filePath, "utf8");
-      const data = JSON.parse(raw) as Record<string, unknown>;
-      const fileVersion = typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
-
-      if (fileVersion > GOVERNANCE_SCHEMA_VERSION) {
-        debugLog(`${name} has schemaVersion ${fileVersion} (newer than ${GOVERNANCE_SCHEMA_VERSION}), skipping migration`);
+      const parsed = JSON.parse(raw);
+      if (!isRecord(parsed)) {
+        const fallback = defaultGovernanceForSchema(schema);
+        if (!dryRun) writeJsonFile(filePath, fallback);
+        report.results.push({
+          file: fileName,
+          schema,
+          action: "invalid-fallback",
+          fromVersion: null,
+          toVersion: GOVERNANCE_SCHEMA_VERSION,
+          changed: true,
+          detail: "file is not a JSON object",
+        });
+        report.migratedFiles.push(fileName);
         continue;
       }
 
-      if (fileVersion < GOVERNANCE_SCHEMA_VERSION) {
-        const merged = withDefaults(data as any, defaults as any);
-        merged.schemaVersion = GOVERNANCE_SCHEMA_VERSION;
-        writeJsonFile(filePath, merged);
-        migrated.push(name);
-        debugLog(`Migrated ${name} from schemaVersion ${fileVersion} to ${GOVERNANCE_SCHEMA_VERSION}`);
+      const fromVersion = extractGovernanceVersion(schema, parsed);
+      if (fromVersion > GOVERNANCE_SCHEMA_VERSION) {
+        report.results.push({
+          file: fileName,
+          schema,
+          action: "skipped-newer-version",
+          fromVersion,
+          toVersion: fromVersion,
+          changed: false,
+          detail: `file schemaVersion ${fromVersion} is newer than supported ${GOVERNANCE_SCHEMA_VERSION}`,
+        });
+        continue;
       }
+
+      const valid = GOVERNANCE_VALIDATORS[schema](parsed);
+      const next = valid
+        ? normalizeGovernanceForSchema(schema, parsed)
+        : defaultGovernanceForSchema(schema);
+      const changed = JSON.stringify(parsed) !== JSON.stringify(next);
+      const action = valid ? (changed ? "migrated" : "up-to-date") : "invalid-fallback";
+
+      if (changed) {
+        if (!dryRun) writeJsonFile(filePath, next);
+        report.migratedFiles.push(fileName);
+      }
+
+      report.results.push({
+        file: fileName,
+        schema,
+        action,
+        fromVersion,
+        toVersion: GOVERNANCE_SCHEMA_VERSION,
+        changed,
+        detail: valid ? undefined : "failed schema validation; defaulted to safe shape",
+      });
     } catch (err: any) {
-      debugLog(`migrateGovernanceFiles: failed to process ${name}: ${err.message}`);
+      report.results.push({
+        file: fileName,
+        schema,
+        action: "error",
+        fromVersion: null,
+        toVersion: GOVERNANCE_SCHEMA_VERSION,
+        changed: false,
+        detail: err.message,
+      });
+      debugLog(`migrateGovernance: failed to process ${fileName}: ${err.message}`);
     }
   }
 
-  return migrated;
+  return report;
+}
+
+/**
+ * Backward-compatible wrapper returning only migrated files.
+ */
+export function migrateGovernanceFiles(cortexPath: string): string[] {
+  return migrateGovernance(cortexPath).migratedFiles;
 }
 
 function accessFile(cortexPath: string): string {
@@ -474,12 +786,15 @@ export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy
 }
 
 export function getRuntimeHealth(cortexPath: string): RuntimeHealth {
-  return readJsonFile<RuntimeHealth>(runtimeHealthFile(cortexPath), {});
+  const parsed = readJsonFile<Record<string, unknown>>(runtimeHealthFile(cortexPath), {});
+  if (!isRecord(parsed)) return { ...DEFAULT_RUNTIME_HEALTH };
+  return normalizeRuntimeHealth(parsed);
 }
 
 export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHealth>): RuntimeHealth {
   const current = getRuntimeHealth(cortexPath);
   const next: RuntimeHealth = {
+    schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     ...current,
     ...patch,
     lastAutoSave: patch.lastAutoSave ?? current.lastAutoSave,
@@ -495,17 +810,23 @@ let _scoresCachePath: string | null = null;
 function loadMemoryScores(cortexPath: string): Record<string, MemoryScore> {
   const file = scoreFile(cortexPath);
   if (_scoresCache && _scoresCachePath === file) return _scoresCache;
-  _scoresCache = readJsonFile<Record<string, MemoryScore>>(file, {});
+  const parsed = readJsonFile<Record<string, unknown>>(file, {});
+  _scoresCache = isRecord(parsed) ? normalizeMemoryScoresFile(parsed).entries : {};
   _scoresCachePath = file;
   return _scoresCache;
 }
 
 function loadCanonicalLocks(cortexPath: string): Record<string, CanonicalLock> {
-  return readJsonFile<Record<string, CanonicalLock>>(lockFile(cortexPath), {});
+  const parsed = readJsonFile<Record<string, unknown>>(lockFile(cortexPath), {});
+  if (!isRecord(parsed)) return {};
+  return normalizeCanonicalLocksFile(parsed).entries;
 }
 
 function saveCanonicalLocks(cortexPath: string, locks: Record<string, CanonicalLock>) {
-  writeJsonFile(lockFile(cortexPath), locks);
+  writeJsonFile(lockFile(cortexPath), {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    entries: locks,
+  } satisfies VersionedEntriesFile<CanonicalLock>);
 }
 
 function hashContent(content: string): string {
@@ -515,12 +836,18 @@ function hashContent(content: string): string {
 function saveMemoryScores(cortexPath: string, scores: Record<string, MemoryScore>) {
   _scoresCache = scores;
   _scoresCachePath = scoreFile(cortexPath);
-  writeJsonFile(_scoresCachePath, scores);
+  writeJsonFile(_scoresCachePath, {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    entries: scores,
+  } satisfies VersionedEntriesFile<MemoryScore>);
 }
 
 export function flushMemoryScores(cortexPath: string): void {
   if (_scoresCache && _scoresCachePath === scoreFile(cortexPath)) {
-    writeJsonFile(_scoresCachePath, _scoresCache);
+    writeJsonFile(_scoresCachePath, {
+      schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+      entries: _scoresCache,
+    } satisfies VersionedEntriesFile<MemoryScore>);
   }
 }
 
@@ -807,26 +1134,30 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
     }
     const profilePath = path.join(cortexPath, "profiles", `${profile}.yaml`);
     if (fs.existsSync(profilePath)) {
-      const data = yaml.load(fs.readFileSync(profilePath, "utf-8")) as Record<string, unknown>;
-      const projects = data?.projects;
-      if (Array.isArray(projects)) {
-        const listed = projects
-          .map((p: unknown) => {
-            const name = String(p);
-            if (!isValidProjectName(name)) {
-              console.error(`Skipping invalid project name in profile: ${name}`);
-              return null;
-            }
-            return safeProjectPath(cortexPath, name);
-          })
-          .filter((p): p is string => p !== null && fs.existsSync(p));
+      try {
+        const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
+        const projects = isRecord(data) ? data.projects : undefined;
+        if (Array.isArray(projects)) {
+          const listed = projects
+            .map((p: unknown) => {
+              const name = String(p);
+              if (!isValidProjectName(name)) {
+                console.error(`Skipping invalid project name in profile: ${name}`);
+                return null;
+              }
+              return safeProjectPath(cortexPath, name);
+            })
+            .filter((p): p is string => p !== null && fs.existsSync(p));
 
-        // Shared spaces are always visible when present.
-        const sharedDirs = ["shared", "org"]
-          .map((name) => safeProjectPath(cortexPath, name))
-          .filter((p): p is string => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
+          // Shared spaces are always visible when present.
+          const sharedDirs = ["shared", "org"]
+            .map((name) => safeProjectPath(cortexPath, name))
+            .filter((p): p is string => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
 
-        return [...new Set([...listed, ...sharedDirs])];
+          return [...new Set([...listed, ...sharedDirs])];
+        }
+      } catch {
+        console.error(`Ignoring malformed profile YAML: ${profilePath}`);
       }
     }
   }
@@ -1004,9 +1335,14 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
 
 // Extract rows from a db.exec result, or null if empty
 export function queryRows(db: any, sql: string, params: (string | number)[]): any[][] | null {
-  const results = db.exec(sql, params);
-  if (!results.length || !results[0].values.length) return null;
-  return results[0].values;
+  try {
+    const results = db.exec(sql, params);
+    if (!Array.isArray(results) || !results.length || !results[0]?.values?.length) return null;
+    return results[0].values;
+  } catch (err: any) {
+    debugLog(`queryRows failed: ${err?.message || "unknown error"}`);
+    return null;
+  }
 }
 
 // Extract a snippet around the match

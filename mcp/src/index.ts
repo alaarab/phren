@@ -7,62 +7,50 @@ if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] 
   console.log(`cortex - Long-term memory for Claude Code
 
 Usage:
-  npx @alaarab/cortex init [--machine <name>] [--profile <name>] [--mcp on|off]
-                                                 Set up cortex in ~/.cortex
-                                                 --mcp on|off: MCP tools enabled/disabled (default on)
-                                                 --apply-starter-update: refresh global/CLAUDE.md + global skills from latest starter
-  npx @alaarab/cortex status                     Show cortex health, active project, and stats
-  npx @alaarab/cortex uninstall                  Remove cortex MCP config and hooks
-  npx @alaarab/cortex mcp-mode [on|off|status]   Toggle MCP integration without reinstalling
-  npx @alaarab/cortex hooks-mode [on|off|status] Toggle hook execution without removing hook wiring
-  npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean] [--all-tools] [--mcp on|off]
-                                                 Sync profile, symlinks, hooks, and context (replaces link.sh)
-                                                 --all-tools: configure hooks for all agents (default: auto-detect)
-  npx @alaarab/cortex search <query> [--project <name>] [--type <type>] [--limit <n>] [--all]
-                                                 Search your knowledge base (or browse a project with --project)
-  npx @alaarab/cortex shell                      Open interactive shell (also default with no args in a terminal)
-  npx @alaarab/cortex update                     Update cortex to latest version
-  npx @alaarab/cortex skill-list                   List all installed skills
-  npx @alaarab/cortex backlog                      Cross-project backlog view (active + queued items)
-  npx @alaarab/cortex add-learning <project> "<insight>"
-                                                 Add a learning to a project
-  npx @alaarab/cortex hook-prompt                (used by Claude Code UserPromptSubmit hook)
-  npx @alaarab/cortex hook-session-start         (used by lifecycle SessionStart hooks)
-  npx @alaarab/cortex hook-stop                  (used by lifecycle Stop/sessionEnd hooks)
-  npx @alaarab/cortex hook-context               (used by Claude Code SessionStart hook)
-  npx @alaarab/cortex extract-memories [project] Auto-generate memory candidates from git history
-  npx @alaarab/cortex govern-memories [project]  Queue stale/conflicting/low-value memory items
-  npx @alaarab/cortex pin-memory <project> "<memory>"
-                                                 Pin canonical memory for a project
-  npx @alaarab/cortex verify                     Quick check that init completed successfully
-  npx @alaarab/cortex doctor [--fix]             Health-check setup; with --fix run self-heal
-  npx @alaarab/cortex memory-ui [--port=3499]    Open lightweight memory review UI
-  npx @alaarab/cortex quality-feedback --key=<k> --type=helpful|reprompt|regression
-                                                 Record memory usefulness feedback
-  npx @alaarab/cortex prune-memories [project]   Delete stale memory entries by retention policy
-  npx @alaarab/cortex consolidate-memories [project]
-                                                 Deduplicate and consolidate LEARNINGS.md bullets
-  npx @alaarab/cortex migrate-findings <project> [--pin] [--dry-run]
-                                                 Promote legacy findings docs into LEARNINGS/CANONICAL
-  npx @alaarab/cortex index-policy [get|set ...]
-                                                 Configure index include/exclude policy (hidden docs)
-  npx @alaarab/cortex memory-policy [get|set ...]
-                                                 Read/update retention and scoring policy
-  npx @alaarab/cortex memory-workflow [get|set ...]
-                                                 Read/update risky-memory approval workflow policy
-  npx @alaarab/cortex memory-access [get|set ...]
-                                                 Read/update role-based memory access control
+  cortex                                 Open interactive shell
+  cortex init [--machine <n>] [--profile <n>] [--mcp on|off]
+                                         Set up cortex in ~/.cortex
+  cortex status                          Health, active project, stats
+  cortex search <query> [--project <n>] [--type <t>] [--limit <n>]
+                                         Search your knowledge base
+  cortex add-learning <project> "..."    Save an insight
+  cortex pin-memory <project> "..."      Pin a canonical memory
+  cortex backlog                         Cross-project backlog view
+  cortex skill-list                      List installed skills
+  cortex doctor [--fix]                  Health check and self-heal
+  cortex memory-ui [--port=3499]         Memory review web UI
+  cortex update                          Update to latest version
 
-MCP server mode (used by Claude Code automatically):
-  npx @alaarab/cortex [cortex-path]
+Configuration:
+  cortex config policy [get|set ...]     Retention, TTL, confidence, decay
+  cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds
+  cortex config access [get|set ...]     Role-based permissions
+  cortex config index [get|set ...]      Indexer include/exclude globs
+  cortex config machines                 Registered machines
+  cortex config profiles                 Profiles and projects
 
-Environment variables:
+Maintenance:
+  cortex maintain govern [project]       Queue stale/low-value memories for review
+  cortex maintain prune [project]        Delete expired entries
+  cortex maintain consolidate [project]  Deduplicate LEARNINGS.md
+  cortex maintain migrate <project> [--pin] [--dry-run]
+                                         Promote legacy findings into LEARNINGS/CANONICAL
+  cortex maintain extract [project]      Mine git/GitHub signals
+  cortex migrate-findings <project> [--pin] [--dry-run]
+                                         Legacy alias for maintain migrate
+
+Setup:
+  cortex link [--machine <n>] [--profile <n>]
+                                         Sync profile, symlinks, hooks
+  cortex mcp-mode [on|off|status]        Toggle MCP integration
+  cortex hooks-mode [on|off|status]      Toggle hook execution
+  cortex verify                          Check init completed OK
+  cortex uninstall                       Remove cortex config and hooks
+
+Environment:
   CORTEX_PATH     Override cortex directory (default: ~/.cortex)
-  CORTEX_PROFILE  Active profile name (filters which projects are indexed)
-  CORTEX_DEBUG    Set to 1 to enable debug logging to ~/.cortex/debug.log
-  CORTEX_CONTEXT_TOKEN_BUDGET   Max approx tokens injected by hook-prompt (default: 550)
-  CORTEX_CONTEXT_SNIPPET_LINES  Max lines per injected snippet (default: 6)
-  CORTEX_CONTEXT_SNIPPET_CHARS  Max chars per injected snippet (default: 520)
+  CORTEX_PROFILE  Active profile name
+  CORTEX_DEBUG    Enable debug logging (set to 1)
 `);
   process.exit(0);
 }
@@ -175,17 +163,23 @@ const CLI_COMMANDS = [
   "search",
   "shell",
   "update",
+  "config",
+  "maintain",
   "hook-prompt",
   "hook-session-start",
   "hook-stop",
   "hook-context",
   "add-learning",
-  "extract-memories",
-  "govern-memories",
   "pin-memory",
   "doctor",
   "memory-ui",
   "quality-feedback",
+  "skill-list",
+  "backlog",
+  "background-maintenance",
+  // Legacy aliases (still work, route to old handlers)
+  "extract-memories",
+  "govern-memories",
   "prune-memories",
   "consolidate-memories",
   "migrate-findings",
@@ -193,9 +187,6 @@ const CLI_COMMANDS = [
   "memory-policy",
   "memory-workflow",
   "memory-access",
-  "background-maintenance",
-  "skill-list",
-  "backlog",
 ];
 if (CLI_COMMANDS.includes(process.argv[2])) {
   const { runCliCommand } = await import("./cli.js");
@@ -214,8 +205,6 @@ import {
   addBacklogItem as addBacklogItemStore,
   backlogMarkdown,
   completeBacklogItem as completeBacklogItemStore,
-  listMachines as listMachinesStore,
-  listProfiles as listProfilesStore,
   readBacklog,
   readBacklogs,
   removeLearning as removeLearningStore,
@@ -230,22 +219,7 @@ import {
   autoMergeConflicts,
   debugLog,
   upsertCanonicalMemory,
-  filterTrustedLearningsDetailed,
-  appendMemoryQueue,
-  appendAuditLog,
-  getMemoryPolicy,
-  getMemoryWorkflowPolicy,
-  updateMemoryPolicy,
-  updateMemoryWorkflowPolicy,
-  getAccessControl,
-  updateAccessControl,
-  pruneDeadMemories,
-  consolidateProjectLearnings,
   recordMemoryFeedback,
-  enforceCanonicalLocks,
-  getIndexPolicy,
-  updateIndexPolicy,
-  migrateLegacyFindings,
 } from "./shared.js";
 
 // MCP mode: first non-flag arg is the cortex path
@@ -297,226 +271,9 @@ async function main() {
     }
   );
 
-  server.registerTool(
-    "govern_memories",
-    {
-      title: "◆ cortex · govern",
-      description:
-        "Scan LEARNINGS.md entries and queue stale/citation-conflicting/low-value memory items in MEMORY_QUEUE.md.",
-      inputSchema: z.object({
-        project: z.string().optional().describe("Optional project name; omit to scan all indexed projects."),
-      }),
-    },
-    async ({ project }) => {
-      const projects = project
-        ? [project]
-        : (queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []) ?? []).map((r) => r[0] as string);
-      const policy = getMemoryPolicy(cortexPath);
-      const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
-
-      let staleCount = 0;
-      let conflictCount = 0;
-      let reviewCount = 0;
-      for (const proj of projects) {
-        const learningsFile = path.join(cortexPath, proj, "LEARNINGS.md");
-        if (!fs.existsSync(learningsFile)) continue;
-        const content = fs.readFileSync(learningsFile, "utf8");
-        const trust = filterTrustedLearningsDetailed(content, {
-          ttlDays: Number.isNaN(ttlDays) ? policy.ttlDays : ttlDays,
-          minConfidence: policy.minInjectConfidence,
-          decay: policy.decay,
-        });
-        const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
-        const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);
-        staleCount += appendMemoryQueue(cortexPath, proj, "Stale", stale);
-        conflictCount += appendMemoryQueue(cortexPath, proj, "Conflicts", conflicts);
-        const lowValue = content.split("\n")
-          .filter((l) => l.startsWith("- "))
-          .filter((l) => /(fixed stuff|updated things|misc|temp|wip|quick note)/i.test(l) || l.length < 16);
-        reviewCount += appendMemoryQueue(cortexPath, proj, "Review", lowValue);
-        consolidateProjectLearnings(cortexPath, proj);
-      }
-
-      appendAuditLog(
-        cortexPath,
-        "govern_memories_mcp",
-        `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
-      );
-      enforceCanonicalLocks(cortexPath, project);
-      return textResponse(
-        `Governed memories across ${projects.length} project(s): stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`
-      );
-    }
-  );
-
-  server.registerTool(
-    "memory_policy",
-    {
-      title: "◆ cortex · policy",
-      description:
-        "Read or update memory governance policy (retention, ttl, confidence thresholds, decay).",
-      inputSchema: z.object({
-        mode: z.enum(["get", "set"]).describe("get returns policy, set applies provided fields."),
-        ttlDays: z.number().optional(),
-        retentionDays: z.number().optional(),
-        autoAcceptThreshold: z.number().optional(),
-        minInjectConfidence: z.number().optional(),
-        decay_d30: z.number().optional(),
-        decay_d60: z.number().optional(),
-        decay_d90: z.number().optional(),
-        decay_d120: z.number().optional(),
-      }),
-    },
-    async ({ mode, ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay_d30, decay_d60, decay_d90, decay_d120 }) => {
-      if (mode === "get") {
-        return textResponse(JSON.stringify(getMemoryPolicy(cortexPath), null, 2));
-      }
-      const decayPatch: Record<string, number> = {};
-      if (decay_d30 !== undefined) decayPatch.d30 = decay_d30;
-      if (decay_d60 !== undefined) decayPatch.d60 = decay_d60;
-      if (decay_d90 !== undefined) decayPatch.d90 = decay_d90;
-      if (decay_d120 !== undefined) decayPatch.d120 = decay_d120;
-      const result = updateMemoryPolicy(cortexPath, {
-        ttlDays,
-        retentionDays,
-        autoAcceptThreshold,
-        minInjectConfidence,
-        decay: Object.keys(decayPatch).length ? (decayPatch as any) : undefined,
-      });
-      if (typeof result === "string") return textResponse(result);
-      return textResponse(JSON.stringify(result, null, 2));
-    }
-  );
-
-  server.registerTool(
-    "memory_workflow",
-    {
-      title: "◆ cortex · workflow",
-      description:
-        "Read or update risky-memory approval workflow policy (approval gate, confidence threshold, risky sections).",
-      inputSchema: z.object({
-        mode: z.enum(["get", "set"]).describe("get returns workflow policy, set applies provided fields."),
-        requireMaintainerApproval: z.boolean().optional(),
-        lowConfidenceThreshold: z.number().optional(),
-        riskySections: z.array(z.enum(["Review", "Stale", "Conflicts"])).optional(),
-      }),
-    },
-    async ({ mode, requireMaintainerApproval, lowConfidenceThreshold, riskySections }) => {
-      if (mode === "get") {
-        return textResponse(JSON.stringify(getMemoryWorkflowPolicy(cortexPath), null, 2));
-      }
-      const result = updateMemoryWorkflowPolicy(cortexPath, {
-        requireMaintainerApproval,
-        lowConfidenceThreshold,
-        riskySections,
-      });
-      if (typeof result === "string") return textResponse(result);
-      return textResponse(JSON.stringify(result, null, 2));
-    }
-  );
-
-  server.registerTool(
-    "index_policy",
-    {
-      title: "◆ cortex · index policy",
-      description:
-        "Read or update indexer include/exclude controls, including explicit hidden-doc coverage policy.",
-      inputSchema: z.object({
-        mode: z.enum(["get", "set"]).describe("get returns current index policy, set applies provided fields."),
-        includeGlobs: z.array(z.string()).optional(),
-        excludeGlobs: z.array(z.string()).optional(),
-        includeHidden: z.boolean().optional(),
-      }),
-    },
-    async ({ mode, includeGlobs, excludeGlobs, includeHidden }) => {
-      if (mode === "get") {
-        return textResponse(JSON.stringify(getIndexPolicy(cortexPath), null, 2));
-      }
-      const result = updateIndexPolicy(cortexPath, {
-        includeGlobs,
-        excludeGlobs,
-        includeHidden,
-      });
-      if (typeof result === "string") return textResponse(result);
-      return textResponse(JSON.stringify(result, null, 2));
-    }
-  );
-
-  server.registerTool(
-    "migrate_legacy_findings",
-    {
-      title: "◆ cortex · migrate findings",
-      description:
-        "Promote legacy findings/retro docs into LEARNINGS.md and optionally CANONICAL_MEMORIES.md.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        pinCanonical: z.boolean().optional().describe("When true, pin high-signal migrated findings as canonical memories."),
-        dryRun: z.boolean().optional().describe("Preview how many findings would be migrated without writing files."),
-      }),
-    },
-    async ({ project, pinCanonical, dryRun }) => {
-      const result = migrateLegacyFindings(cortexPath, project, {
-        pinCanonical: pinCanonical ?? false,
-        dryRun: dryRun ?? false,
-      });
-      return textResponse(result);
-    }
-  );
-
-  server.registerTool(
-    "prune_memories",
-    {
-      title: "◆ cortex · prune",
-      description: "Delete stale memory entries based on retention policy.",
-      inputSchema: z.object({
-        project: z.string().optional().describe("Optional project name; omit to prune all projects."),
-        dry_run: z.boolean().optional().describe("When true, preview what would be pruned without modifying files."),
-      }),
-    },
-    async ({ project, dry_run }) => {
-      return textResponse(pruneDeadMemories(cortexPath, project, dry_run));
-    }
-  );
-
-  server.registerTool(
-    "memory_access",
-    {
-      title: "◆ cortex · access",
-      description: "Read or update role-based memory access control (admins/maintainers/contributors/viewers).",
-      inputSchema: z.object({
-        mode: z.enum(["get", "set"]).describe("get returns current access control, set updates role lists."),
-        admins: z.array(z.string()).optional(),
-        maintainers: z.array(z.string()).optional(),
-        contributors: z.array(z.string()).optional(),
-        viewers: z.array(z.string()).optional(),
-      }),
-    },
-    async ({ mode, admins, maintainers, contributors, viewers }) => {
-      if (mode === "get") return textResponse(JSON.stringify(getAccessControl(cortexPath), null, 2));
-      const updated = updateAccessControl(cortexPath, { admins, maintainers, contributors, viewers });
-      if (typeof updated === "string") return textResponse(updated);
-      return textResponse(JSON.stringify(updated, null, 2));
-    }
-  );
-
-  server.registerTool(
-    "consolidate_memories",
-    {
-      title: "◆ cortex · consolidate",
-      description: "Deduplicate LEARNINGS.md bullets for one project or all projects.",
-      inputSchema: z.object({
-        project: z.string().optional().describe("Optional project name; omit to consolidate all indexed projects."),
-        dry_run: z.boolean().optional().describe("When true, preview what would change without modifying files."),
-      }),
-    },
-    async ({ project, dry_run }) => {
-      const projects = project
-        ? [project]
-        : (queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []) ?? []).map((r) => r[0] as string);
-      const out = projects.map((p) => consolidateProjectLearnings(cortexPath, p, dry_run));
-      return textResponse(out.join("\n"));
-    }
-  );
+  // Governance, policy, and maintenance tools moved to CLI:
+  //   cortex config [policy|workflow|access|index|machines|profiles]
+  //   cortex maintain [govern|prune|consolidate|migrate|extract]
 
   server.registerTool(
     "memory_feedback",
@@ -696,37 +453,7 @@ async function main() {
     }
   );
 
-  server.registerTool(
-    "list_machines",
-    {
-      title: "◆ cortex · machines",
-      description: "Show which machines are registered and which profile each uses. Useful for understanding the multi-machine setup.",
-      inputSchema: z.object({}),
-    },
-    async () => {
-      const machines = listMachinesStore(cortexPath);
-      if (typeof machines === "string") return textResponse(machines);
-      const lines = Object.entries(machines).map(([machine, prof]) => `- ${machine}: ${prof}`);
-      return textResponse(`# Registered Machines\n\n${lines.join("\n")}`);
-    }
-  );
-
-  server.registerTool(
-    "list_profiles",
-    {
-      title: "◆ cortex · profiles",
-      description: "Show all profiles and which projects each includes. Profiles control which projects are visible on each machine.",
-      inputSchema: z.object({}),
-    },
-    async () => {
-      const profiles = listProfilesStore(cortexPath);
-      if (typeof profiles === "string") return textResponse(profiles);
-      const parts = profiles.map((profileInfo) => {
-        return `## ${profileInfo.name}\n${profileInfo.projects.map((p) => `- ${p}`).join("\n") || "(no projects)"}`;
-      });
-      return textResponse(`# Profiles\n\n${parts.join("\n\n")}`);
-    }
-  );
+  // list_machines and list_profiles moved to CLI: cortex config machines|profiles
 
   server.registerTool(
     "get_backlog",

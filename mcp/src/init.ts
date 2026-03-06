@@ -326,12 +326,29 @@ export function ensureGovernanceFiles(cortexPath: string) {
       }, null, 2) + "\n"
     );
   }
-  if (!fs.existsSync(runtimeHealth)) {
-    fs.writeFileSync(runtimeHealth, JSON.stringify({}, null, 2) + "\n");
-  }
 
   // Migrate existing files that lack schemaVersion or have an older version
   migrateGovernanceFiles(cortexPath);
+
+  // Runtime health is intentionally permissive; add schema metadata only when safe.
+  if (!fs.existsSync(runtimeHealth)) {
+    fs.writeFileSync(runtimeHealth, JSON.stringify({ schemaVersion: sv }, null, 2) + "\n");
+  } else {
+    try {
+      const current = JSON.parse(fs.readFileSync(runtimeHealth, "utf8"));
+      if (current && typeof current === "object" && !Array.isArray(current)) {
+        const existingSchema = typeof current.schemaVersion === "number" ? current.schemaVersion : 0;
+        if (existingSchema < sv) {
+          fs.writeFileSync(
+            runtimeHealth,
+            JSON.stringify({ ...current, schemaVersion: sv }, null, 2) + "\n"
+          );
+        }
+      }
+    } catch {
+      // Keep malformed runtime health file untouched for compatibility/safety.
+    }
+  }
 }
 
 function isCortexCommand(command: string): boolean {
@@ -614,14 +631,15 @@ export interface InitOptions {
 
 export async function runInit(opts: InitOptions = {}) {
   const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
-  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
-  const hooksEnabled = getHooksEnabledPreference(cortexPath);
-  const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
-  const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
 
   if (fs.existsSync(cortexPath)) {
     const entries = fs.readdirSync(cortexPath);
     if (entries.length > 0) {
+      ensureGovernanceFiles(cortexPath);
+      const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
+      const hooksEnabled = getHooksEnabledPreference(cortexPath);
+      const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
+      const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
       log(`\ncortex already exists at ${cortexPath}`);
       log(`Updating configuration...\n`);
       log(`  MCP mode: ${mcpLabel}`);
@@ -665,7 +683,6 @@ export async function runInit(opts: InitOptions = {}) {
         log(`  Hooks are disabled by preference (run: npx @alaarab/cortex hooks-mode on)`);
       }
 
-      ensureGovernanceFiles(cortexPath);
       const prefs = readInstallPreferences(cortexPath);
       const previousVersion = prefs.installedVersion;
       if (isVersionNewer(VERSION, previousVersion)) {
@@ -747,6 +764,11 @@ export async function runInit(opts: InitOptions = {}) {
   // Update machines.yaml with hostname (--machine overrides auto-detected hostname)
   const effectiveMachine = opts.machine || os.hostname();
   updateMachinesYaml(cortexPath, opts.machine, opts.profile);
+  ensureGovernanceFiles(cortexPath);
+  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
+  const hooksEnabled = getHooksEnabledPreference(cortexPath);
+  const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
+  const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
   log(`  Updated machines.yaml with hostname "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
@@ -793,7 +815,6 @@ export async function runInit(opts: InitOptions = {}) {
     log(`  Hooks are disabled by preference (run: npx @alaarab/cortex hooks-mode on)`);
   }
 
-  ensureGovernanceFiles(cortexPath);
   writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, installedVersion: VERSION });
 
   // Post-init verification

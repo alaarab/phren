@@ -22,6 +22,32 @@ To remove everything:
 npx @alaarab/cortex uninstall
 ```
 
+## Migration and Safety
+
+Use migration commands when upgrading old governance/data layouts:
+
+```bash
+# preview governance schema migrations (no writes)
+cortex maintain migrate governance --dry-run
+
+# apply governance schema migrations
+cortex maintain migrate governance
+
+# preview legacy findings migration for one project
+cortex maintain migrate data <project> --dry-run
+
+# migrate legacy findings and pin high-signal entries as canonical
+cortex maintain migrate data <project> --pin
+
+# run both governance + data migration paths
+cortex maintain migrate all <project> --dry-run
+
+# equivalent alias for data migration
+cortex migrate-findings <project> --dry-run
+```
+
+Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `LEARNINGS.md`, cortex creates/updates `LEARNINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/LEARNINGS.md.bak`). `--dry-run` previews changes without creating backups.
+
 ## MCP Tools (22)
 
 ### Search and Browse

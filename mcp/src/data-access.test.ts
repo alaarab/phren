@@ -3,6 +3,22 @@ import {
   readBacklog,
   addBacklogItem,
   completeBacklogItem,
+  updateBacklogItem,
+  workNextBacklogItem,
+  tidyBacklogDone,
+  readMemoryQueue,
+  approveMemoryQueueItem,
+  rejectMemoryQueueItem,
+  editMemoryQueueItem,
+  listMachines,
+  setMachineProfile,
+  listProfiles,
+  addProjectToProfile,
+  removeProjectFromProfile,
+  listProjectCards,
+  loadShellState,
+  saveShellState,
+  resetShellState,
   readLearnings,
   addLearning,
   removeLearning,
@@ -10,6 +26,7 @@ import {
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { spawn } from "child_process";
 
 function grantAdminAccess(cortexDir: string, actor = "vitest-admin"): string {
   const govDir = path.join(cortexDir, ".governance");
@@ -30,6 +47,24 @@ function grantAdminAccess(cortexDir: string, actor = "vitest-admin"): string {
 let tmpDir: string;
 let projectDir: string;
 const PROJECT = "testproject";
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+
+function runDataAccessWorker(code: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["--import", "tsx", "-e", code], {
+      cwd: REPO_ROOT,
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("close", (codeNum) => {
+      resolve({ exitCode: codeNum ?? 1, stdout, stderr });
+    });
+  });
+}
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-da-test-"));
@@ -205,6 +240,54 @@ describe("completeBacklogItem", () => {
   });
 });
 
+describe("backlog mutation helpers", () => {
+  it("updateBacklogItem updates priority/context/section in one call", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const msg = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", {
+      priority: "high",
+      context: "protect burst traffic",
+      section: "active",
+    });
+    expect(msg).toContain("Updated item");
+
+    const after = readBacklog(tmpDir, PROJECT);
+    if (typeof after === "string") return;
+    expect(after.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(false);
+    const moved = after.items.Active.find((i) => i.line.includes("Add rate limiting"));
+    expect(moved).toBeDefined();
+    expect(moved?.priority).toBe("high");
+    expect(moved?.context).toContain("burst traffic");
+  });
+
+  it("tidyBacklogDone writes archive and trims done list", () => {
+    const content = `# testproject backlog
+
+## Active
+
+## Queue
+
+## Done
+
+- [x] done A
+- [x] done B
+- [x] done C
+`;
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
+    const msg = tidyBacklogDone(tmpDir, PROJECT, 1);
+    expect(msg).toContain("archived 2");
+
+    const after = readBacklog(tmpDir, PROJECT);
+    if (typeof after === "string") return;
+    expect(after.items.Done).toHaveLength(1);
+
+    const archive = path.join(tmpDir, ".governance", "backlog-archive", `${PROJECT}.md`);
+    expect(fs.existsSync(archive)).toBe(true);
+    const archiveContent = fs.readFileSync(archive, "utf8");
+    expect(archiveContent).toContain("done B");
+    expect(archiveContent).toContain("done C");
+  });
+});
+
 describe("readLearnings", () => {
   it("parses dated entries with citations", () => {
     fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
@@ -312,6 +395,161 @@ describe("removeLearning", () => {
   });
 });
 
+describe("memory queue helpers", () => {
+  beforeEach(() => {
+    const queue = `# testproject Memory Queue
+
+## Review
+
+- [2026-03-01] cleanup flaky test [confidence 0.4]
+
+## Stale
+
+- [2025-01-01] old stale memory
+
+## Conflicts
+
+- [2026-03-02] conflicting guidance
+`;
+    fs.writeFileSync(path.join(projectDir, "MEMORY_QUEUE.md"), queue);
+  });
+
+  it("readMemoryQueue parses sections and confidence", () => {
+    const items = readMemoryQueue(tmpDir, PROJECT);
+    expect(Array.isArray(items)).toBe(true);
+    if (!Array.isArray(items)) return;
+    expect(items).toHaveLength(3);
+    expect(items[0].section).toBe("Review");
+    expect(items[0].confidence).toBe(0.4);
+  });
+
+  it("approveMemoryQueueItem adds learning and removes queue item", () => {
+    const msg = approveMemoryQueueItem(tmpDir, PROJECT, "cleanup flaky");
+    expect(msg).toContain("Approved memory");
+
+    const queueAfter = readMemoryQueue(tmpDir, PROJECT);
+    if (Array.isArray(queueAfter)) {
+      expect(queueAfter.some((i) => i.text.includes("cleanup flaky"))).toBe(false);
+    }
+
+    const learnings = readLearnings(tmpDir, PROJECT);
+    if (Array.isArray(learnings)) {
+      expect(learnings.some((i) => i.text.includes("cleanup flaky"))).toBe(true);
+    }
+  });
+
+  it("rejectMemoryQueueItem removes the matched queue item", () => {
+    const msg = rejectMemoryQueueItem(tmpDir, PROJECT, "conflicting guidance");
+    expect(msg).toContain("Rejected memory");
+    const queueAfter = readMemoryQueue(tmpDir, PROJECT);
+    if (!Array.isArray(queueAfter)) return;
+    expect(queueAfter.some((i) => i.text.includes("conflicting guidance"))).toBe(false);
+  });
+
+  it("editMemoryQueueItem rewrites the item text", () => {
+    const msg = editMemoryQueueItem(tmpDir, PROJECT, "old stale memory", "updated stale memory");
+    expect(msg).toContain("Edited memory");
+    const queueAfter = readMemoryQueue(tmpDir, PROJECT);
+    if (!Array.isArray(queueAfter)) return;
+    expect(queueAfter.some((i) => i.text.includes("updated stale memory"))).toBe(true);
+  });
+});
+
+describe("machines, profiles, and shell state", () => {
+  beforeEach(() => {
+    fs.mkdirSync(path.join(tmpDir, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "machine-a: personal\n");
+    fs.writeFileSync(path.join(tmpDir, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - testproject\n");
+  });
+
+  it("lists and updates machines", () => {
+    const listed = listMachines(tmpDir);
+    expect(typeof listed).not.toBe("string");
+    if (typeof listed === "string") return;
+    expect(listed["machine-a"]).toBe("personal");
+
+    const msg = setMachineProfile(tmpDir, "machine-b", "personal");
+    expect(msg).toContain("Mapped machine machine-b");
+    const after = listMachines(tmpDir);
+    if (typeof after === "string") return;
+    expect(after["machine-b"]).toBe("personal");
+  });
+
+  it("returns FILE_NOT_FOUND when machines.yaml is missing", () => {
+    fs.unlinkSync(path.join(tmpDir, "machines.yaml"));
+    const listed = listMachines(tmpDir);
+    expect(typeof listed).toBe("string");
+    expect(listed).toContain("FILE_NOT_FOUND");
+  });
+
+  it("returns MALFORMED_YAML for invalid machines.yaml", () => {
+    fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "machine-a: [\n");
+    const listed = listMachines(tmpDir);
+    expect(typeof listed).toBe("string");
+    expect(listed).toContain("MALFORMED_YAML");
+  });
+
+  it("lists profiles and mutates profile projects", () => {
+    const listed = listProfiles(tmpDir);
+    expect(typeof listed).not.toBe("string");
+    if (typeof listed === "string") return;
+    expect(listed[0].name).toBe("personal");
+
+    const addMsg = addProjectToProfile(tmpDir, "personal", "another-proj");
+    expect(addMsg).toContain("Added another-proj");
+    const removeMsg = removeProjectFromProfile(tmpDir, "personal", "another-proj");
+    expect(removeMsg).toContain("Removed another-proj");
+  });
+
+  it("returns FILE_NOT_FOUND when profiles directory is missing", () => {
+    fs.rmSync(path.join(tmpDir, "profiles"), { recursive: true, force: true });
+    const listed = listProfiles(tmpDir);
+    expect(typeof listed).toBe("string");
+    expect(listed).toContain("FILE_NOT_FOUND");
+  });
+
+  it("returns MALFORMED_YAML for invalid profile yaml", () => {
+    fs.writeFileSync(path.join(tmpDir, "profiles", "personal.yaml"), "name: personal\nprojects: [\n");
+    const listed = listProfiles(tmpDir);
+    expect(typeof listed).toBe("string");
+    expect(listed).toContain("MALFORMED_YAML");
+  });
+
+  it("listProjectCards includes summary/docs", () => {
+    fs.writeFileSync(path.join(projectDir, "summary.md"), "# testproject\n\nQuick summary line\n");
+    fs.writeFileSync(path.join(projectDir, "CLAUDE.md"), "# testproject\n");
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+
+    const cards = listProjectCards(tmpDir);
+    const card = cards.find((c) => c.name === PROJECT);
+    expect(card).toBeDefined();
+    expect(card?.summary).toContain("Quick summary");
+    expect(card?.docs).toContain("backlog.md");
+  });
+
+  it("save/load/reset shell state round trips", () => {
+    saveShellState(tmpDir, {
+      version: 1,
+      view: "Backlog",
+      project: PROJECT,
+      filter: "auth",
+      page: 2,
+      perPage: 25,
+    });
+    const loaded = loadShellState(tmpDir);
+    expect(loaded.view).toBe("Backlog");
+    expect(loaded.project).toBe(PROJECT);
+    expect(loaded.filter).toBe("auth");
+    expect(loaded.page).toBe(2);
+    expect(loaded.perPage).toBe(25);
+
+    const msg = resetShellState(tmpDir);
+    expect(msg).toContain("reset");
+    const fallback = loadShellState(tmpDir);
+    expect(fallback.view).toBe("Projects");
+  });
+});
+
 describe("file locking", () => {
   it("two sequential addBacklogItem calls produce both items", () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
@@ -387,5 +625,90 @@ describe("file locking", () => {
     removeLearning(tmpDir, PROJECT, "anything");
 
     expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("returns lock timeout and does not write backlog changes under lock contention", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
+
+    process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "150";
+    process.env.CORTEX_FILE_LOCK_POLL_MS = "25";
+    const before = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    const msg = addBacklogItem(tmpDir, PROJECT, "Blocked by lock");
+    const after = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
+    delete process.env.CORTEX_FILE_LOCK_POLL_MS;
+    fs.unlinkSync(lockPath);
+
+    expect(msg).toContain("LOCK_TIMEOUT");
+    expect(after).toBe(before);
+    expect(after).not.toContain("Blocked by lock");
+  });
+
+  it("prevents workNextBacklogItem mutation when backlog lock times out", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
+
+    process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "150";
+    process.env.CORTEX_FILE_LOCK_POLL_MS = "25";
+    const msg = workNextBacklogItem(tmpDir, PROJECT);
+    delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
+    delete process.env.CORTEX_FILE_LOCK_POLL_MS;
+    fs.unlinkSync(lockPath);
+
+    expect(msg).toContain("LOCK_TIMEOUT");
+
+    const after = readBacklog(tmpDir, PROJECT);
+    if (typeof after === "string") return;
+    expect(after.items.Active.some((i) => i.line.includes("Add rate limiting"))).toBe(false);
+    expect(after.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(true);
+  });
+
+  it("allows concurrent backlog writes from two processes without data loss", async () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+
+    const mkCode = (item: string) =>
+      `import { addBacklogItem } from ${JSON.stringify(path.join(REPO_ROOT, "mcp/src/data-access.ts"))};` +
+      `process.env.CORTEX_ACTOR='vitest-admin';` +
+      `const out=addBacklogItem(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
+      `console.log(out); if(out.includes('LOCK_TIMEOUT')) process.exit(2);`;
+
+    const [a, b] = await Promise.all([
+      runDataAccessWorker(mkCode("Concurrent item A")),
+      runDataAccessWorker(mkCode("Concurrent item B")),
+    ]);
+
+    expect(a.exitCode).toBe(0);
+    expect(b.exitCode).toBe(0);
+
+    const after = readBacklog(tmpDir, PROJECT);
+    if (typeof after === "string") return;
+    const lines = after.items.Queue.map((i) => i.line);
+    expect(lines).toContain("Concurrent item A");
+    expect(lines).toContain("Concurrent item B");
+  });
+
+  it("allows concurrent learning writes from two processes without data loss", async () => {
+    const mkCode = (text: string) =>
+      `import { addLearning } from ${JSON.stringify(path.join(REPO_ROOT, "mcp/src/data-access.ts"))};` +
+      `process.env.CORTEX_ACTOR='vitest-admin';` +
+      `const out=addLearning(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(text)});` +
+      `console.log(out); if(out.includes('LOCK_TIMEOUT')) process.exit(2);`;
+
+    const [a, b] = await Promise.all([
+      runDataAccessWorker(mkCode("Concurrent learning A")),
+      runDataAccessWorker(mkCode("Concurrent learning B")),
+    ]);
+
+    expect(a.exitCode).toBe(0);
+    expect(b.exitCode).toBe(0);
+
+    const result = readLearnings(tmpDir, PROJECT);
+    if (!Array.isArray(result)) return;
+    const texts = result.map((l) => l.text);
+    expect(texts.some((t) => t.includes("Concurrent learning A"))).toBe(true);
+    expect(texts.some((t) => t.includes("Concurrent learning B"))).toBe(true);
   });
 });
