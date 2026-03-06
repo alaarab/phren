@@ -674,6 +674,7 @@ export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boo
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
   const home = os.homedir();
   const candidates = [
+    path.join(home, ".copilot", "mcp-config.json"),
     path.join(home, ".github", "mcp.json"),
     path.join(home, ".config", "github-copilot", "mcp.json"),
     path.join(home, "Library", "Application Support", "github-copilot", "mcp.json"),
@@ -682,13 +683,24 @@ export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boo
   const existing = pickExistingFile(candidates);
   const copilotInstalled =
     Boolean(existing) ||
+    fs.existsSync(path.join(home, ".copilot")) ||
     fs.existsSync(path.join(home, ".github")) ||
     fs.existsSync(path.join(home, ".config", "github-copilot")) ||
     fs.existsSync(path.join(home, "Library", "Application Support", "github-copilot")) ||
     fs.existsSync(path.join(home, "AppData", "Roaming", "github-copilot")) ||
     commandExists("gh");
   if (!copilotInstalled) return "no_copilot";
-  return configureMcpAtPath(existing || candidates[0], mcpEnabled, "servers", cortexPath);
+  // Always ensure ~/.copilot/mcp-config.json is configured when .copilot dir exists
+  // (Copilot CLI v0.0.423+ reads from this path, not ~/.github/mcp.json)
+  const copilotCliConfig = candidates[0];
+  if (fs.existsSync(path.join(home, ".copilot"))) {
+    configureMcpAtPath(copilotCliConfig, mcpEnabled, "servers", cortexPath);
+  }
+  // Also update any other existing config file
+  if (existing && existing !== copilotCliConfig) {
+    configureMcpAtPath(existing, mcpEnabled, "servers", cortexPath);
+  }
+  return configureMcpAtPath(existing || copilotCliConfig, mcpEnabled, "servers", cortexPath);
 }
 
 export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
@@ -1484,6 +1496,7 @@ export async function runUninstall() {
 
   // Remove from Copilot CLI MCP config
   const copilotCandidates = [
+    path.join(home, ".copilot", "mcp-config.json"),
     path.join(home, ".github", "mcp.json"),
     path.join(home, ".config", "github-copilot", "mcp.json"),
     path.join(home, "Library", "Application Support", "github-copilot", "mcp.json"),
