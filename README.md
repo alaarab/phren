@@ -26,15 +26,31 @@ Project knowledge, lessons learned, task queues: all in markdown files you own. 
 
 ---
 
+## What's new in v2
+
+**Memory governance.** Learnings now have confidence scores that decay over time. Stale, conflicting, or low-value entries get flagged for review instead of silently polluting your context. You set the retention policy, the TTL, the decay curve. Cortex enforces it.
+
+**Trust filtering.** Before any memory gets injected into a prompt, it passes through a trust gate. Entries below your confidence threshold are held back. Entries with broken citations are quarantined. The agent only sees what you've decided is reliable.
+
+**Interactive shell.** `cortex` in a terminal opens a TUI with six views: Projects, Backlog, Learnings, Memory Queue, Machines, Health. Navigate with single keys, triage your memory queue, manage backlogs, run health checks. Works on every machine, no browser needed.
+
+**Quality feedback loop.** When an injected memory helps, mark it helpful. When it causes a bad response, mark it as a regression. Those signals feed back into confidence scoring, so the system learns which memories actually matter.
+
+---
+
 ## What makes this different
 
 ### It runs itself
 
-Other memory tools need the agent to remember to call them. Cortex hooks into the agent's lifecycle directly. Every prompt you type, the hook searches your knowledge base. If it finds something relevant, it injects that context before the agent starts thinking. If not, nothing gets added. When the session ends, anything written down gets committed and pushed. You never do either of those things manually.
+Other memory tools need the agent to remember to call them. Cortex hooks into the agent's lifecycle directly. Every prompt you type, the hook searches your knowledge base and injects matching context before the agent starts thinking. When the session ends, anything written down gets committed and pushed. You never do either of those things manually.
+
+Before injection, every learning passes through trust filtering: confidence scoring, citation validation, and staleness checks. Only entries above your threshold make it into the prompt. Stale or conflicting memories get routed to a review queue instead.
+
+When learnings accumulate past the consolidation threshold (25 entries, or 60 days plus 10 entries), cortex flags it once per session and suggests consolidation. Old entries get archived, duplicates get merged, cross-project patterns get promoted to global knowledge.
 
 ### It's just files
 
-No database service. No vector store. No account or API key. Your knowledge lives in markdown files in a git repo you own. `git log` shows how it grew. `git diff` shows what changed. If something is wrong, open a file and fix it.
+No database service. No vector store. No account or API key. Your knowledge lives in markdown files in a git repo you own. `git log` shows how it grew. `git diff` shows what changed. Governance policies live in `.governance/` as JSON files you can edit by hand.
 
 ### Search that doesn't need exact words
 
@@ -46,7 +62,7 @@ Push your cortex to a private repo. Clone it on a new machine, run init, done. P
 
 ### Builds over time
 
-When the agent figures out a tricky pattern or hits a subtle bug, it writes that down. Next session, next week, next machine: that knowledge is there. The longer you use it, the more useful it gets.
+When the agent figures out a tricky pattern or hits a subtle bug, it writes that down. Next session, next week, next machine: that knowledge is there. Memories that prove useful gain confidence. Memories that cause problems lose it. The longer you use it, the sharper it gets.
 
 ---
 
@@ -60,10 +76,20 @@ That's it. This:
 - Creates `~/.cortex` with starter templates
 - Registers MCP for detected tools (Claude Code, VS Code, Copilot CLI, Cursor, Codex)
 - Sets up hooks for automatic context injection and auto-save
-- Configures hooks for any other detected agents (Copilot CLI, Cursor, Codex)
 - Registers your machine
 
-Restart your agent. Your next prompt will already have context.
+After init, you'll see something like:
+
+```
+  cortex initialized
+  Path:    ~/.cortex
+  Machine: work-laptop
+  Profile: personal (6 projects)
+  MCP:     registered for Claude Code
+  Hooks:   prompt injection, auto-save, session lifecycle
+
+  Restart your agent. Your next prompt will already have context.
+```
 
 If you want hooks-only mode (no MCP tools), install with:
 
@@ -74,10 +100,10 @@ npx @alaarab/cortex init --mcp off
 You can toggle later anytime:
 
 ```bash
-npx @alaarab/cortex mcp-mode on    # recommended
-npx @alaarab/cortex mcp-mode off   # hooks-only fallback
-npx @alaarab/cortex hooks-mode off # disable hook execution temporarily
-npx @alaarab/cortex hooks-mode on  # re-enable hooks
+cortex mcp-mode on       # recommended: MCP + hooks
+cortex mcp-mode off      # hooks-only fallback
+cortex hooks-mode off    # disable hook execution temporarily
+cortex hooks-mode on     # re-enable hooks
 ```
 
 ### Sync across machines
@@ -103,6 +129,7 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 | `CLAUDE.md` | Full context: architecture, commands, conventions |
 | `KNOWLEDGE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
 | `LEARNINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
+| `CANONICAL_MEMORIES.md` | Pinned high-signal memories that bypass decay |
 | `backlog.md` | Task queue that persists across sessions |
 | `.claude/skills/` | Project-specific slash commands |
 
@@ -110,108 +137,158 @@ Each project gets its own directory. Start with `CLAUDE.md` and add the rest as 
 
 ## How it runs itself
 
-Before the agent sees your message, a hook extracts keywords, searches your cortex, and injects matching results as context. Generic replies, short acks, unrelated questions: nothing gets added. When something matches, it's up to the top 3 results, constrained by a prompt token budget (default ~550 tokens).
+### Prompt injection
+
+Before the agent sees your message, a hook extracts keywords, searches your cortex, and injects matching results as context. Generic replies, short acks, unrelated questions: nothing gets added. When something matches, it pulls up to 3 results, constrained by a token budget (default ~550 tokens).
+
+Every injected learning passes through trust filtering first. The filter checks:
+- **Confidence score** against your minimum threshold (default 0.6)
+- **Age decay** on a configurable curve (30/60/90/120 day breakpoints)
+- **Citation validity** for entries that reference specific files or commits
+
+Entries that fail any check get routed to the memory queue for human review.
+
+### Auto-save
 
 After each response, a hook checks for cortex changes. Anything new (a learning, a backlog update) gets committed and pushed. You don't save manually.
 
+### Context recovery
+
 When the context window fills and resets, a hook re-injects your project summary, recent learnings, and active backlog so the agent doesn't lose the thread.
+
+### Consolidation
+
+When learnings accumulate past the threshold, cortex flags it once per session. The `/cortex-consolidate` skill archives old entries, merges duplicates, and promotes patterns that appear in 3+ projects to global knowledge.
 
 ---
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Twenty-two tools available:
+The server indexes your cortex into a local SQLite FTS5 database. Twenty-two tools, grouped by what they do:
 
-**Search and browse:**
-- `search_cortex(query, type?, limit?, project?)` with automatic synonym expansion
-- `get_project_summary(name)` for a project's summary card and file list
-- `list_projects()` for everything in your active profile
-- `list_machines()` shows registered machines and their profiles
-- `list_profiles()` shows all profiles and which projects each includes
+### Search and browse
 
-**Backlog management:**
-- `get_backlog(project?)` reads tasks for one or all projects
-- `add_backlog_item(project, item)` adds to the Queue section
-- `complete_backlog_item(project, item)` matches by text, moves to Done
-- `update_backlog_item(project, item, updates)` changes priority, context, or section
+| Tool | What it does |
+|------|-------------|
+| `search_cortex` | FTS5 search with synonym expansion. Filters by project, type, limit. |
+| `get_project_summary` | Summary card and file list for a project. |
+| `list_projects` | Everything in your active profile. |
+| `list_machines` | Registered machines and their profiles. |
+| `list_profiles` | All profiles and which projects each includes. |
 
-**Learning capture:**
-- `add_learning(project, learning, citation_file?, citation_line?, citation_repo?, citation_commit?)` appends under today's date with optional citation metadata
-- `remove_learning(project, learning)` removes by matching text
-- `save_learnings(message?)` commits and pushes all changes
-- `pin_memory(project, memory)` writes canonical/pinned memory entries
-- `migrate_legacy_findings(project, pinCanonical?, dryRun?)` promotes legacy findings docs into LEARNINGS/CANONICAL
+### Backlog management
 
-**Memory governance and quality:**
-- `govern_memories(project?)` queues stale/conflicting/low-value entries for review
-- `memory_policy(mode, ...)` gets/sets retention, ttl, decay, and confidence thresholds
-- `memory_workflow(mode, ...)` gets/sets risky-memory approval workflow settings
-- `memory_access(mode, ...)` gets/sets role-based permissions
-- `prune_memories(project?)` deletes expired entries by retention policy
-- `consolidate_memories(project?)` deduplicates and rewrites LEARNINGS.md
-- `memory_feedback(key, feedback)` records helpful/reprompt/regression outcomes
-- `index_policy(mode, ...)` configures include/exclude globs and hidden-doc indexing policy
+| Tool | What it does |
+|------|-------------|
+| `get_backlog` | Read tasks for one or all projects. |
+| `add_backlog_item` | Add a task to the Queue section. |
+| `complete_backlog_item` | Match by text, move to Done. |
+| `update_backlog_item` | Change priority, context, or section. |
 
-### CLI subcommands
+### Learning capture
 
-For scripting, hooks, and quick lookups:
+| Tool | What it does |
+|------|-------------|
+| `add_learning` | Append under today's date with optional citation metadata. |
+| `remove_learning` | Remove by matching text. |
+| `save_learnings` | Commit and push all changes. |
+
+### Memory governance
+
+| Tool | What it does |
+|------|-------------|
+| `pin_memory` | Write canonical/pinned memory that bypasses decay. |
+| `govern_memories` | Queue stale/conflicting/low-value entries for review. |
+| `prune_memories` | Delete expired entries by retention policy. |
+| `consolidate_memories` | Deduplicate and rewrite LEARNINGS.md. |
+| `memory_feedback` | Record helpful/reprompt/regression outcomes. |
+| `migrate_legacy_findings` | Promote legacy findings docs into LEARNINGS/CANONICAL. |
+| `memory_policy` | Get/set retention, TTL, decay, confidence thresholds. |
+| `memory_workflow` | Get/set risky-memory approval workflow settings. |
+| `memory_access` | Get/set role-based permissions. |
+| `index_policy` | Configure include/exclude globs and hidden-doc indexing. |
+
+---
+
+## Interactive shell
+
+`cortex` in a terminal opens the shell. Six views, single-key navigation:
+
+| Key | View |
+|-----|------|
+| `p` | Projects |
+| `b` | Backlog |
+| `l` | Learnings |
+| `m` | Memory Queue |
+| `h` | Health |
+| `/` | Filter current view |
+| `:` | Command palette |
+| `q` | Quit |
+
+### Palette commands
+
+**Backlog:** `:add`, `:complete`, `:move`, `:reprioritize`, `:context`, `:work next`, `:tidy`
+
+**Learnings:** `:learn add`, `:learn remove`
+
+**Memory queue:** `:mq approve`, `:mq reject`, `:mq edit`
+
+**Governance:** `:govern`, `:consolidate`
+
+**Infrastructure:** `:run fix`, `:relink`, `:rerun hooks`, `:update`
+
+**Navigation:** `:open <project>`, `:page next`, `:page prev`, `:per-page <n>`, `:reset`
+
+The shell is the universal interface. It works the same on every machine, for every agent. If you can open a terminal, you can manage your cortex.
+
+---
+
+## CLI
+
+For scripting, hooks, and quick lookups from the terminal:
 
 ```bash
 cortex                               # interactive shell (TTY default)
-cortex shell                         # explicit shell mode
-cortex update                        # update to latest cortex version
 cortex search "rate limiting"        # FTS5 search with synonym expansion
-cortex hook-prompt                   # reads stdin JSON, outputs context block
-cortex hook-session-start            # lifecycle preflight: pull/check/schedule governance
-cortex hook-stop                     # lifecycle autosave with runtime status tracking
-cortex hook-context                  # project context for current directory
 cortex add-learning <project> "..."  # append a learning from the terminal
 cortex pin-memory <project> "..."    # promote canonical memory
-cortex migrate-findings <project> [--pin] [--dry-run]
-cortex extract-memories [project]    # mine git + GitHub signals into candidates
-cortex govern-memories [project]     # queue stale/conflicting/low-value memories
 cortex doctor [--fix]                # health checks + optional self-heal
-cortex memory-ui [--port=3499]       # lightweight review UI
-cortex quality-feedback --key=<k> --type=helpful|reprompt|regression
-cortex prune-memories [project]      # delete stale memory entries
-cortex consolidate-memories [project]
-cortex index-policy get|set ...      # index include/exclude policy (hidden docs, globs)
-cortex memory-policy get|set ...     # retention/decay/confidence tuning
-cortex memory-workflow get|set ...   # approval workflow tuning
-cortex memory-access get|set ...     # role permissions
-cortex mcp-mode on|off|status        # toggle MCP integration anytime
-cortex hooks-mode on|off|status      # toggle hook execution anytime
+cortex memory-ui [--port=3499]       # lightweight review UI in the browser
+cortex update                        # update to latest version
 ```
 
-### Feature flags and rollout controls
-
-These are optional env vars for staged rollout and large-repo safety:
+Governance commands:
 
 ```bash
-# Toggle automatic mining from git/GitHub during hook-prompt (default: on)
-export CORTEX_FEATURE_AUTO_EXTRACT=0
-
-# Toggle detached daily governance maintenance jobs (default: on)
-export CORTEX_FEATURE_DAILY_MAINTENANCE=0
-
-# GitHub mining resilience controls (defaults shown)
-export CORTEX_GH_TIMEOUT_MS=10000
-export CORTEX_GH_RETRIES=2
-export CORTEX_GH_PR_LIMIT=40
-export CORTEX_GH_RUN_LIMIT=25
-export CORTEX_GH_ISSUE_LIMIT=25
+cortex govern-memories [project]     # queue stale/conflicting memories
+cortex prune-memories [project]      # delete expired entries
+cortex consolidate-memories [project] # deduplicate LEARNINGS.md
+cortex extract-memories [project]    # mine git + GitHub signals into candidates
+cortex migrate-findings <project>    # promote legacy findings docs
 ```
 
-### Interactive shell
+Policy tuning:
 
-`cortex` opens an interactive shell in terminal contexts. It includes six views (`Projects`, `Backlog`, `Learnings`, `Memory Queue`, `Machines/Profiles`, `Health`) with `:command` palette actions and global shortcuts (`p b l m h / : q`).
+```bash
+cortex memory-policy get|set ...     # retention, decay, confidence
+cortex memory-workflow get|set ...   # approval gates
+cortex memory-access get|set ...     # role permissions
+cortex index-policy get|set ...      # indexer include/exclude globs
+cortex mcp-mode on|off|status       # toggle MCP integration
+cortex hooks-mode on|off|status     # toggle hook execution
+```
 
-Key workflows:
-- Backlog board read/write (`add`, `move`, `complete`, `reprioritize`, `context`)
-- Lifecycle helpers (`work next`, `tidy`)
-- Learnings write/remove
-- Memory queue triage (`approve`, `reject`, `edit`)
-- Health remediation (`run fix`, `relink`, `rerun hooks`, `update`)
+### Feature flags
+
+Optional env vars for staged rollout and large-repo safety:
+
+```bash
+CORTEX_FEATURE_AUTO_EXTRACT=0       # toggle git/GitHub mining in hook-prompt
+CORTEX_FEATURE_DAILY_MAINTENANCE=0  # toggle detached daily governance jobs
+CORTEX_GH_TIMEOUT_MS=10000          # GitHub mining timeout
+CORTEX_GH_RETRIES=2                 # GitHub mining retry count
+CORTEX_GH_PR_LIMIT=40               # max PRs to scan
+```
 
 ---
 
@@ -221,21 +298,21 @@ Cortex hooks are plain shell commands. Init auto-detects which tools you have an
 
 | Agent | Context injection | Auto-save | MCP tools | Instruction files |
 |-------|:-----------------:|:---------:|:---------:|:-----------------:|
-| Claude Code | ✓ | ✓ | ✓ | `CLAUDE.md` |
-| GitHub Copilot CLI | ✓ | ✓ | ✓ | `copilot-instructions.md` |
-| Cursor | ✓ | ✓ | ✓ | — |
-| OpenAI Codex | ✓ | ✓ | ✓ | `AGENTS.md` |
-| Any agentskills tool | ✓ | ✓ | — | via `cortex.SKILL.md` |
+| Claude Code | yes | yes | yes | `CLAUDE.md` |
+| GitHub Copilot CLI | yes | yes | yes | `copilot-instructions.md` |
+| Cursor | yes | yes | yes | via hooks |
+| OpenAI Codex | yes | yes | yes | `AGENTS.md` |
+| Any agentskills tool | yes | yes | no | via `cortex.SKILL.md` |
 
-**Claude Code** — full hook support plus MCP. Init writes `~/.claude/settings.json`.
+**Claude Code** gets full hook support plus MCP. Init writes `~/.claude/settings.json`.
 
-**GitHub Copilot CLI** — hooks written to `~/.github/hooks/cortex.json`. Global `CLAUDE.md` is also symlinked as `~/.github/copilot-instructions.md`. Per-project `CLAUDE.md` is also symlinked as `.github/copilot-instructions.md` in each project.
+**GitHub Copilot CLI** gets hooks written to `~/.github/hooks/cortex.json`. Per-project `CLAUDE.md` is symlinked as `.github/copilot-instructions.md`.
 
-**Cursor** — hooks written to `~/.cursor/hooks.json`. Cursor has no session-start hook, so context re-injection after compaction isn't available, but prompt injection and auto-save both work.
+**Cursor** gets hooks written to `~/.cursor/hooks.json`. No session-start hook available, but prompt injection and auto-save both work.
 
-**OpenAI Codex** — hooks written to `codex.json` in your cortex directory. Per-project `CLAUDE.md` is also symlinked as `AGENTS.md` in each project.
+**OpenAI Codex** gets hooks written to `codex.json` in your cortex directory. Per-project `CLAUDE.md` is symlinked as `AGENTS.md`.
 
-**Any agentskills-compatible tool** — `cortex link` writes `cortex.SKILL.md` to your cortex root with hook frontmatter. Any tool following the [Agent Skills spec](https://agentskills.io/specification) picks this up automatically.
+The shell works regardless of which agent you use. If your agent supports MCP, cortex uses it. If it only supports hooks, that works too. The memory layer is the same either way.
 
 ---
 
@@ -276,10 +353,10 @@ Four skills for the things that can't be automatic:
 
 | Skill | What it does |
 |-------|-------------|
-| `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. Multi-machine sync needs a manual trigger. |
+| `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. |
 | `/cortex-init` | Scaffold a new project. Creates summary.md, CLAUDE.md, backlog, adds to your profile. |
 | `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
-| `/cortex-consolidate` | Read learnings across all projects and surface patterns that repeat. Needs human judgment about which patterns matter. |
+| `/cortex-consolidate` | Read learnings across all projects and surface patterns that repeat. |
 
 Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlinks them to `~/.claude/skills/` so they're available everywhere.
 
@@ -287,14 +364,29 @@ Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlin
 
 ## Building your own
 
-Fork this repo. The split is clean: framework (`cortex link`, `mcp/`, `global/skills/`) on one side, your data (project directories, `machines.yaml`, `profiles/`) on the other.
+Cortex is installed via npm. Your data lives in `~/.cortex`, separate from the package. The split is clean: framework (`cortex link`, `mcp/`, `global/skills/`) on one side, your data (project directories, `machines.yaml`, `profiles/`) on the other.
 
 ```bash
-git clone git@github.com:YOU/cortex.git ~/cortex
-cd ~/cortex && npx @alaarab/cortex link
+npx @alaarab/cortex init
 ```
 
-Or let Claude scaffold a project: `/cortex-init my-project` creates the files, asks which profile to add it to, and commits.
+That creates `~/.cortex` with starter templates. From there, add projects:
+
+```bash
+# Let Claude scaffold it
+/cortex-init my-project
+
+# Or create manually
+mkdir ~/.cortex/my-project
+echo "# my-project" > ~/.cortex/my-project/CLAUDE.md
+```
+
+To contribute to cortex itself:
+
+```bash
+git clone https://github.com/alaarab/cortex.git
+cd cortex && npm install && npm run build && npm test
+```
 
 ---
 

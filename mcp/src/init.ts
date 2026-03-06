@@ -4,6 +4,7 @@ import * as os from "os";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { buildLifecycleCommands, configureAllHooks } from "./hooks.js";
+import { EXEC_TIMEOUT_QUICK_MS, GOVERNANCE_SCHEMA_VERSION, migrateGovernanceFiles } from "./shared.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..", "..");
@@ -173,7 +174,7 @@ function patchJsonFile(filePath: string, patch: (data: Record<string, any>) => v
 
 function commandExists(cmd: string): boolean {
   try {
-    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"] });
+    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
     return true;
   } catch {
     return false;
@@ -270,6 +271,7 @@ function resolveEntryScript(): string {
 export function ensureGovernanceFiles(cortexPath: string) {
   const govDir = path.join(cortexPath, ".governance");
   fs.mkdirSync(govDir, { recursive: true });
+  const sv = GOVERNANCE_SCHEMA_VERSION;
   const policy = path.join(govDir, "memory-policy.json");
   const access = path.join(govDir, "access-control.json");
   const workflow = path.join(govDir, "memory-workflow-policy.json");
@@ -280,6 +282,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
     fs.writeFileSync(
       policy,
       JSON.stringify({
+        schemaVersion: sv,
         ttlDays: 120,
         retentionDays: 365,
         autoAcceptThreshold: 0.75,
@@ -293,6 +296,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
     fs.writeFileSync(
       access,
       JSON.stringify({
+        schemaVersion: sv,
         admins: [user],
         maintainers: [],
         contributors: [],
@@ -304,6 +308,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
     fs.writeFileSync(
       workflow,
       JSON.stringify({
+        schemaVersion: sv,
         requireMaintainerApproval: true,
         lowConfidenceThreshold: 0.7,
         riskySections: ["Stale", "Conflicts"],
@@ -314,6 +319,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
     fs.writeFileSync(
       indexPolicy,
       JSON.stringify({
+        schemaVersion: sv,
         includeGlobs: ["**/*.md", ".claude/skills/**/*.md"],
         excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
         includeHidden: false,
@@ -323,6 +329,9 @@ export function ensureGovernanceFiles(cortexPath: string) {
   if (!fs.existsSync(runtimeHealth)) {
     fs.writeFileSync(runtimeHealth, JSON.stringify({}, null, 2) + "\n");
   }
+
+  // Migrate existing files that lack schemaVersion or have an older version
+  migrateGovernanceFiles(cortexPath);
 }
 
 function isCortexCommand(command: string): boolean {
@@ -539,6 +548,63 @@ function updateMachinesYaml(cortexPath: string, machine?: string, profile?: stri
   }
 }
 
+export interface PostInitCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: PostInitCheck[] } {
+  const checks: PostInitCheck[] = [];
+
+  // Check MCP config in Claude settings
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  let mcpOk = false;
+  let hooksOk = false;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    mcpOk = Boolean(cfg.mcpServers?.cortex || cfg.servers?.cortex);
+    const hooks = cfg.hooks || {};
+    const hasPrompt = JSON.stringify(hooks.UserPromptSubmit || []).includes("hook-prompt");
+    const hasStop = JSON.stringify(hooks.Stop || []).includes("hook-stop") || JSON.stringify(hooks.Stop || []).includes("auto-save");
+    const hasStart = JSON.stringify(hooks.SessionStart || []).includes("hook-session-start") || JSON.stringify(hooks.SessionStart || []).includes("doctor --fix");
+    hooksOk = hasPrompt && hasStop && hasStart;
+  } catch {
+    // settings.json missing or unreadable
+  }
+  checks.push({
+    name: "mcp-config",
+    ok: mcpOk,
+    detail: mcpOk ? "MCP server registered in Claude settings" : "MCP server not found in ~/.claude/settings.json",
+  });
+  checks.push({
+    name: "hooks-registered",
+    ok: hooksOk,
+    detail: hooksOk ? "All lifecycle hooks registered" : "One or more hooks missing from ~/.claude/settings.json",
+  });
+
+  // Check ~/.cortex/global/ exists with CLAUDE.md
+  const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
+  const globalOk = fs.existsSync(globalClaude);
+  checks.push({
+    name: "global-claude",
+    ok: globalOk,
+    detail: globalOk ? "global/CLAUDE.md exists" : "global/CLAUDE.md missing",
+  });
+
+  // Check governance directory
+  const govDir = path.join(cortexPath, ".governance");
+  const govOk = fs.existsSync(govDir);
+  checks.push({
+    name: "governance",
+    ok: govOk,
+    detail: govOk ? ".governance/ directory exists" : ".governance/ directory missing",
+  });
+
+  const ok = checks.every((c) => c.ok);
+  return { ok, checks };
+}
+
 export interface InitOptions {
   machine?: string;
   profile?: string;
@@ -616,7 +682,14 @@ export async function runInit(opts: InitOptions = {}) {
       }
       writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, installedVersion: VERSION });
 
-      log(`\nDone. Restart your coding agent(s) to pick up changes.\n`);
+      // Post-update verification
+      log(`\nVerifying setup...`);
+      const verify = runPostInitVerify(cortexPath);
+      for (const check of verify.checks) {
+        log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
+      }
+
+      log(`\nDone. Restart your coding agent to pick up changes.\n`);
       return;
     }
   }
@@ -723,22 +796,33 @@ export async function runInit(opts: InitOptions = {}) {
   ensureGovernanceFiles(cortexPath);
   writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, installedVersion: VERSION });
 
-  log(`\nDone. Your knowledge base is at ${cortexPath}\n`);
-  log(`Next steps:`);
-  log(`  1. Create a private GitHub repo and push your cortex:`);
+  // Post-init verification
+  log(`\nVerifying setup...`);
+  const verify = runPostInitVerify(cortexPath);
+  for (const check of verify.checks) {
+    log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
+  }
+
+  log(`\nWhat was created:`);
+  log(`  ${cortexPath}/global/CLAUDE.md    Global instructions loaded in every session`);
+  log(`  ${cortexPath}/global/skills/      Cortex slash commands`);
+  log(`  ${cortexPath}/profiles/           Machine-to-project mappings`);
+  log(`  ${cortexPath}/.governance/        Memory governance policies`);
+
+  log(`\nNext steps:`);
+  log(`  1. Restart your coding agent to activate cortex`);
+  log(`     (close and reopen Claude Code, or start a new session)`);
+  log(`  2. Create a private GitHub repo and push your cortex:`);
   log(`     cd ${cortexPath}`);
-  log(`     git init`);
-  log(`     git add .`);
-  log(`     git commit -m "Initial cortex setup"`);
+  log(`     git init && git add . && git commit -m "Initial cortex setup"`);
   log(`     git remote add origin git@github.com:YOUR_USERNAME/cortex.git`);
   log(`     git push -u origin main`);
-  if (mcpEnabled) {
-    log(`  2. Restart your coding agent(s) to activate MCP changes`);
-  } else {
-    log(`  2. Restart your coding agent(s) to use hooks-only mode (no MCP tools)`);
-    log(`     Turn MCP on later: npx @alaarab/cortex mcp-mode on`);
+  if (!mcpEnabled) {
+    log(`  3. Turn MCP on later: npx @alaarab/cortex mcp-mode on`);
   }
-  log(`  3. Open a project and run /cortex-init <name> to add it\n`);
+  log(`  4. Open a project and run /cortex-init <name> to add it`);
+  log(`  5. Run \`npx @alaarab/cortex verify\` to check everything is wired up`);
+  log(``);
 }
 
 export async function runMcpMode(modeArg?: string) {

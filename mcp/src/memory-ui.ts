@@ -9,6 +9,7 @@ import {
 import {
   approveMemoryQueueItem,
   editMemoryQueueItem,
+  readMemoryQueue,
   rejectMemoryQueueItem,
 } from "./data-access.js";
 import { isValidProjectName } from "./utils.js";
@@ -16,42 +17,6 @@ import { isValidProjectName } from "./utils.js";
 export interface MemoryUiOptions {
   authToken?: string;
   csrfTokens?: Set<string>;
-}
-
-interface QueueItem {
-  section: "Review" | "Stale" | "Conflicts";
-  line: string;
-  text: string;
-  date: string;
-}
-
-function queuePath(cortexPath: string, project: string): string {
-  return path.join(cortexPath, project, "MEMORY_QUEUE.md");
-}
-
-function parseQueueItems(cortexPath: string, project: string): QueueItem[] {
-  const file = queuePath(cortexPath, project);
-  if (!fs.existsSync(file)) return [];
-  const lines = fs.readFileSync(file, "utf8").split("\n");
-  let section: QueueItem["section"] = "Review";
-  const items: QueueItem[] = [];
-
-  for (const line of lines) {
-    if (line.trim() === "## Review") section = "Review";
-    if (line.trim() === "## Stale") section = "Stale";
-    if (line.trim() === "## Conflicts") section = "Conflicts";
-    if (!line.startsWith("- ")) continue;
-    const m = line.match(/^- \[(\d{4}-\d{2}-\d{2})\]\s*(.+)$/);
-    if (!m) continue;
-    items.push({
-      section,
-      line,
-      date: m[1],
-      text: m[2],
-    });
-  }
-
-  return items;
 }
 
 function recentUsage(cortexPath: string): string[] {
@@ -87,7 +52,9 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   const hiddenFields = csrfField + authField;
 
   for (const project of projects) {
-    const items = parseQueueItems(cortexPath, project);
+    const result = readMemoryQueue(cortexPath, project);
+    // TODO (#85): readMemoryQueue returns QueueItem[] | string; migrate to CortexResult<T>
+    const items = Array.isArray(result) ? result : [];
     if (!items.length) continue;
     for (const item of items) {
       rows.push(`

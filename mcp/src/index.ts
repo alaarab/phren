@@ -11,6 +11,7 @@ Usage:
                                                  Set up cortex in ~/.cortex
                                                  --mcp on|off: MCP tools enabled/disabled (default on)
                                                  --apply-starter-update: refresh global/CLAUDE.md + global skills from latest starter
+  npx @alaarab/cortex status                     Show cortex health, active project, and stats
   npx @alaarab/cortex uninstall                  Remove cortex MCP config and hooks
   npx @alaarab/cortex mcp-mode [on|off|status]   Toggle MCP integration without reinstalling
   npx @alaarab/cortex hooks-mode [on|off|status] Toggle hook execution without removing hook wiring
@@ -21,6 +22,8 @@ Usage:
                                                  Search your knowledge base (or browse a project with --project)
   npx @alaarab/cortex shell                      Open interactive shell (also default with no args in a terminal)
   npx @alaarab/cortex update                     Update cortex to latest version
+  npx @alaarab/cortex skill-list                   List all installed skills
+  npx @alaarab/cortex backlog                      Cross-project backlog view (active + queued items)
   npx @alaarab/cortex add-learning <project> "<insight>"
                                                  Add a learning to a project
   npx @alaarab/cortex hook-prompt                (used by Claude Code UserPromptSubmit hook)
@@ -31,6 +34,7 @@ Usage:
   npx @alaarab/cortex govern-memories [project]  Queue stale/conflicting/low-value memory items
   npx @alaarab/cortex pin-memory <project> "<memory>"
                                                  Pin canonical memory for a project
+  npx @alaarab/cortex verify                     Quick check that init completed successfully
   npx @alaarab/cortex doctor [--fix]             Health-check setup; with --fix run self-heal
   npx @alaarab/cortex memory-ui [--port=3499]    Open lightweight memory review UI
   npx @alaarab/cortex quality-feedback --key=<k> --type=helpful|reprompt|regression
@@ -86,6 +90,26 @@ if (process.argv[2] === "uninstall") {
   const { runUninstall } = await import("./init.js");
   await runUninstall();
   process.exit(0);
+}
+
+if (process.argv[2] === "status") {
+  const { runStatus } = await import("./status.js");
+  await runStatus();
+  process.exit(0);
+}
+
+if (process.argv[2] === "verify") {
+  const { runPostInitVerify } = await import("./init.js");
+  const cortexPath = process.env.CORTEX_PATH || os.homedir() + "/.cortex";
+  const result = runPostInitVerify(cortexPath);
+  console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
+  for (const check of result.checks) {
+    console.log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
+  }
+  if (!result.ok) {
+    console.log(`\nRun \`npx @alaarab/cortex init\` to fix setup issues.`);
+  }
+  process.exit(result.ok ? 0 : 1);
 }
 
 if (process.argv[2] === "mcp-mode") {
@@ -170,6 +194,8 @@ const CLI_COMMANDS = [
   "memory-workflow",
   "memory-access",
   "background-maintenance",
+  "skill-list",
+  "backlog",
 ];
 if (CLI_COMMANDS.includes(process.argv[2])) {
   const { runCliCommand } = await import("./cli.js");
@@ -444,10 +470,11 @@ async function main() {
       description: "Delete stale memory entries based on retention policy.",
       inputSchema: z.object({
         project: z.string().optional().describe("Optional project name; omit to prune all projects."),
+        dry_run: z.boolean().optional().describe("When true, preview what would be pruned without modifying files."),
       }),
     },
-    async ({ project }) => {
-      return textResponse(pruneDeadMemories(cortexPath, project));
+    async ({ project, dry_run }) => {
+      return textResponse(pruneDeadMemories(cortexPath, project, dry_run));
     }
   );
 
@@ -479,13 +506,14 @@ async function main() {
       description: "Deduplicate LEARNINGS.md bullets for one project or all projects.",
       inputSchema: z.object({
         project: z.string().optional().describe("Optional project name; omit to consolidate all indexed projects."),
+        dry_run: z.boolean().optional().describe("When true, preview what would change without modifying files."),
       }),
     },
-    async ({ project }) => {
+    async ({ project, dry_run }) => {
       const projects = project
         ? [project]
         : (queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []) ?? []).map((r) => r[0] as string);
-      const out = projects.map((p) => consolidateProjectLearnings(cortexPath, p));
+      const out = projects.map((p) => consolidateProjectLearnings(cortexPath, p, dry_run));
       return textResponse(out.join("\n"));
     }
   );
@@ -845,13 +873,14 @@ async function main() {
     async ({ message }) => {
       const { execFileSync } = await import("child_process");
       const commitMsg = message || "update cortex";
+      const DEFAULT_GIT_TIMEOUT = 30_000;
       const runGit = (args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}): string => execFileSync(
         "git",
         args,
         {
           cwd: cortexPath,
           encoding: "utf8",
-          timeout: opts.timeout,
+          timeout: opts.timeout ?? DEFAULT_GIT_TIMEOUT,
           env: opts.env,
           stdio: ["ignore", "pipe", "pipe"],
         }

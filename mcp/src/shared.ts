@@ -13,6 +13,21 @@ import { isValidProjectName, safeProjectPath } from "./utils.js";
 const require = createRequire(import.meta.url);
 const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<any>;
 
+// Default timeout for execFileSync calls (30s for most operations, 10s for quick probes like `which`)
+export const EXEC_TIMEOUT_MS = 30_000;
+export const EXEC_TIMEOUT_QUICK_MS = 10_000;
+
+// Structured error codes for consistent error handling across data-access and MCP tools
+export const CortexError = {
+  PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
+  INVALID_PROJECT_NAME: "INVALID_PROJECT_NAME",
+  FILE_NOT_FOUND: "FILE_NOT_FOUND",
+  PERMISSION_DENIED: "PERMISSION_DENIED",
+  MALFORMED_JSON: "MALFORMED_JSON",
+} as const;
+
+export type CortexErrorCode = typeof CortexError[keyof typeof CortexError];
+
 // Debug logger - writes to ~/.cortex/debug.log when CORTEX_DEBUG=1
 export function debugLog(msg: string): void {
   if (!process.env.CORTEX_DEBUG) return;
@@ -27,6 +42,7 @@ type MemoryRole = "admin" | "maintainer" | "contributor" | "viewer";
 type MemoryAction = "read" | "write" | "queue" | "pin" | "policy" | "delete";
 
 interface AccessControl {
+  schemaVersion?: number;
   admins?: string[];
   maintainers?: string[];
   contributors?: string[];
@@ -41,6 +57,7 @@ export interface AccessControlPatch {
 }
 
 export interface MemoryPolicy {
+  schemaVersion?: number;
   ttlDays: number;
   retentionDays: number;
   autoAcceptThreshold: number;
@@ -54,12 +71,14 @@ export interface MemoryPolicy {
 }
 
 export interface MemoryWorkflowPolicy {
+  schemaVersion?: number;
   requireMaintainerApproval: boolean;
   lowConfidenceThreshold: number;
   riskySections: Array<"Review" | "Stale" | "Conflicts">;
 }
 
 export interface IndexPolicy {
+  schemaVersion?: number;
   includeGlobs: string[];
   excludeGlobs: string[];
   includeHidden: boolean;
@@ -95,7 +114,10 @@ interface CanonicalLock {
   updatedAt: string;
 }
 
+export const GOVERNANCE_SCHEMA_VERSION = 1;
+
 const DEFAULT_POLICY: MemoryPolicy = {
+  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   ttlDays: 120,
   retentionDays: 365,
   autoAcceptThreshold: 0.75,
@@ -109,12 +131,14 @@ const DEFAULT_POLICY: MemoryPolicy = {
 };
 
 const DEFAULT_WORKFLOW_POLICY: MemoryWorkflowPolicy = {
+  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   requireMaintainerApproval: true,
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
 };
 
 const DEFAULT_INDEX_POLICY: IndexPolicy = {
+  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   includeGlobs: [
     "**/*.md",
     ".claude/skills/**/*.md",
@@ -129,6 +153,7 @@ const DEFAULT_INDEX_POLICY: IndexPolicy = {
 };
 
 const DEFAULT_ACCESS: AccessControl = {
+  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   admins: [],
   maintainers: [],
   contributors: [],
@@ -139,11 +164,85 @@ function governanceDir(cortexPath: string): string {
   return path.join(cortexPath, ".governance");
 }
 
+/** Shallow-merge data onto defaults so missing keys get filled in. */
+export function withDefaults<T extends object>(data: Partial<T>, defaults: T): T {
+  const merged = { ...defaults } as Record<string, unknown>;
+  for (const key of Object.keys(data)) {
+    const val = data[key as keyof T];
+    if (val !== undefined && val !== null) {
+      if (typeof val === "object" && !Array.isArray(val) && typeof merged[key] === "object" && !Array.isArray(merged[key])) {
+        merged[key] = { ...(merged[key] as Record<string, unknown>), ...(val as Record<string, unknown>) };
+      } else {
+        merged[key] = val;
+      }
+    }
+  }
+  return merged as T;
+}
+
+type GovernanceSchema = "access-control" | "memory-policy" | "memory-workflow-policy" | "index-policy";
+
+const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unknown>) => boolean> = {
+  "access-control": (d) =>
+    ["admins", "maintainers", "contributors", "viewers"].every(
+      (k) => !(k in d) || Array.isArray(d[k])
+    ),
+  "memory-policy": (d) =>
+    ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"].every(
+      (k) => !(k in d) || typeof d[k] === "number"
+    ),
+  "memory-workflow-policy": (d) =>
+    (!("riskySections" in d) || Array.isArray(d.riskySections)),
+  "index-policy": (d) =>
+    ["includeGlobs", "excludeGlobs"].every(
+      (k) => !(k in d) || Array.isArray(d[k])
+    ),
+};
+
+const GOVERNANCE_FILE_SCHEMAS: Record<string, GovernanceSchema> = {
+  "access-control.json": "access-control",
+  "memory-policy.json": "memory-policy",
+  "memory-workflow-policy.json": "memory-workflow-policy",
+  "index-policy.json": "index-policy",
+};
+
+export function validateGovernanceJson(filePath: string, schema: GovernanceSchema): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return true;
+    const raw = fs.readFileSync(filePath, "utf8");
+    const data = JSON.parse(raw);
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+      debugLog(`validateGovernanceJson: ${filePath} is not a JSON object`);
+      return false;
+    }
+    const validator = GOVERNANCE_VALIDATORS[schema];
+    if (!validator(data as Record<string, unknown>)) {
+      debugLog(`validateGovernanceJson: ${filePath} failed ${schema} schema check`);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    debugLog(`validateGovernanceJson parse error for ${filePath}: ${err.message}`);
+    return false;
+  }
+}
+
 function readJsonFile<T>(filePath: string, fallback: T): T {
   try {
     if (!fs.existsSync(filePath)) return fallback;
+    const basename = path.basename(filePath);
+    const schema = GOVERNANCE_FILE_SCHEMAS[basename];
+    if (schema && !validateGovernanceJson(filePath, schema)) {
+      debugLog(`readJsonFile: ${filePath} failed validation, using defaults`);
+      return fallback;
+    }
     const raw = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(raw) as T;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const fileVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 0;
+    if (fileVersion > GOVERNANCE_SCHEMA_VERSION) {
+      debugLog(`Warning: ${filePath} has schemaVersion ${fileVersion}, expected <= ${GOVERNANCE_SCHEMA_VERSION}. Consider updating cortex.`);
+    }
+    return parsed as T;
   } catch (err: any) {
     debugLog(`readJsonFile failed for ${filePath}: ${err.message}`);
     return fallback;
@@ -167,6 +266,52 @@ function actorName(): string {
     // os.userInfo() can throw in containers or sandboxed environments
     return "unknown";
   }
+}
+
+/**
+ * Check governance file schema versions and apply any needed migrations.
+ * Currently validates versions only; the structure supports future migrations.
+ */
+export function migrateGovernanceFiles(cortexPath: string): string[] {
+  const govDir = governanceDir(cortexPath);
+  if (!fs.existsSync(govDir)) return [];
+
+  const files = [
+    { name: "memory-policy.json", defaults: DEFAULT_POLICY },
+    { name: "access-control.json", defaults: DEFAULT_ACCESS },
+    { name: "memory-workflow-policy.json", defaults: DEFAULT_WORKFLOW_POLICY },
+    { name: "index-policy.json", defaults: DEFAULT_INDEX_POLICY },
+  ];
+
+  const migrated: string[] = [];
+
+  for (const { name, defaults } of files) {
+    const filePath = path.join(govDir, name);
+    if (!fs.existsSync(filePath)) continue;
+
+    try {
+      const raw = fs.readFileSync(filePath, "utf8");
+      const data = JSON.parse(raw) as Record<string, unknown>;
+      const fileVersion = typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
+
+      if (fileVersion > GOVERNANCE_SCHEMA_VERSION) {
+        debugLog(`${name} has schemaVersion ${fileVersion} (newer than ${GOVERNANCE_SCHEMA_VERSION}), skipping migration`);
+        continue;
+      }
+
+      if (fileVersion < GOVERNANCE_SCHEMA_VERSION) {
+        const merged = withDefaults(data as any, defaults as any);
+        merged.schemaVersion = GOVERNANCE_SCHEMA_VERSION;
+        writeJsonFile(filePath, merged);
+        migrated.push(name);
+        debugLog(`Migrated ${name} from schemaVersion ${fileVersion} to ${GOVERNANCE_SCHEMA_VERSION}`);
+      }
+    } catch (err: any) {
+      debugLog(`migrateGovernanceFiles: failed to process ${name}: ${err.message}`);
+    }
+  }
+
+  return migrated;
 }
 
 function accessFile(cortexPath: string): string {
@@ -212,7 +357,8 @@ function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRol
 }
 
 export function getAccessControl(cortexPath: string): AccessControl {
-  return readJsonFile<AccessControl>(accessFile(cortexPath), DEFAULT_ACCESS);
+  const parsed = readJsonFile<Partial<AccessControl>>(accessFile(cortexPath), {});
+  return withDefaults(parsed, DEFAULT_ACCESS);
 }
 
 export function updateAccessControl(cortexPath: string, patch: AccessControlPatch): AccessControl | string {
@@ -220,6 +366,7 @@ export function updateAccessControl(cortexPath: string, patch: AccessControlPatc
   if (denial) return denial;
   const current = getAccessControl(cortexPath);
   const next: AccessControl = {
+    schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     admins: patch.admins ?? current.admins ?? [],
     maintainers: patch.maintainers ?? current.maintainers ?? [],
     contributors: patch.contributors ?? current.contributors ?? [],
@@ -245,18 +392,7 @@ export function checkMemoryPermission(cortexPath: string, action: MemoryAction, 
 
 export function getMemoryPolicy(cortexPath: string): MemoryPolicy {
   const parsed = readJsonFile<Partial<MemoryPolicy>>(policyFile(cortexPath), {});
-  return {
-    ttlDays: parsed.ttlDays ?? DEFAULT_POLICY.ttlDays,
-    retentionDays: parsed.retentionDays ?? DEFAULT_POLICY.retentionDays,
-    autoAcceptThreshold: parsed.autoAcceptThreshold ?? DEFAULT_POLICY.autoAcceptThreshold,
-    minInjectConfidence: parsed.minInjectConfidence ?? DEFAULT_POLICY.minInjectConfidence,
-    decay: {
-      d30: parsed.decay?.d30 ?? DEFAULT_POLICY.decay.d30,
-      d60: parsed.decay?.d60 ?? DEFAULT_POLICY.decay.d60,
-      d90: parsed.decay?.d90 ?? DEFAULT_POLICY.decay.d90,
-      d120: parsed.decay?.d120 ?? DEFAULT_POLICY.decay.d120,
-    },
-  };
+  return withDefaults(parsed, DEFAULT_POLICY);
 }
 
 export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPolicy>): MemoryPolicy | string {
@@ -278,14 +414,12 @@ export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPoli
 
 export function getMemoryWorkflowPolicy(cortexPath: string): MemoryWorkflowPolicy {
   const parsed = readJsonFile<Partial<MemoryWorkflowPolicy>>(workflowPolicyFile(cortexPath), {});
-  const riskySections = Array.isArray(parsed.riskySections)
-    ? parsed.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(s)))
-    : DEFAULT_WORKFLOW_POLICY.riskySections;
-  return {
-    requireMaintainerApproval: parsed.requireMaintainerApproval ?? DEFAULT_WORKFLOW_POLICY.requireMaintainerApproval,
-    lowConfidenceThreshold: parsed.lowConfidenceThreshold ?? DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold,
-    riskySections: riskySections.length ? riskySections : DEFAULT_WORKFLOW_POLICY.riskySections,
-  };
+  const merged = withDefaults(parsed, DEFAULT_WORKFLOW_POLICY);
+  // Validate riskySections entries
+  const validSections = new Set(["Review", "Stale", "Conflicts"]);
+  merged.riskySections = merged.riskySections.filter((s) => validSections.has(s));
+  if (!merged.riskySections.length) merged.riskySections = DEFAULT_WORKFLOW_POLICY.riskySections;
+  return merged;
 }
 
 export function updateMemoryWorkflowPolicy(
@@ -299,6 +433,7 @@ export function updateMemoryWorkflowPolicy(
     ? patch.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(s)))
     : current.riskySections;
   const next: MemoryWorkflowPolicy = {
+    schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     requireMaintainerApproval: patch.requireMaintainerApproval ?? current.requireMaintainerApproval,
     lowConfidenceThreshold: patch.lowConfidenceThreshold ?? current.lowConfidenceThreshold,
     riskySections: riskySections.length ? riskySections : current.riskySections,
@@ -310,17 +445,13 @@ export function updateMemoryWorkflowPolicy(
 
 export function getIndexPolicy(cortexPath: string): IndexPolicy {
   const parsed = readJsonFile<Partial<IndexPolicy>>(indexPolicyFile(cortexPath), {});
-  const includeGlobs = Array.isArray(parsed.includeGlobs)
-    ? parsed.includeGlobs.filter((g): g is string => typeof g === "string" && g.trim().length > 0)
-    : DEFAULT_INDEX_POLICY.includeGlobs;
-  const excludeGlobs = Array.isArray(parsed.excludeGlobs)
-    ? parsed.excludeGlobs.filter((g): g is string => typeof g === "string" && g.trim().length > 0)
-    : DEFAULT_INDEX_POLICY.excludeGlobs;
-  return {
-    includeGlobs: includeGlobs.length ? includeGlobs : DEFAULT_INDEX_POLICY.includeGlobs,
-    excludeGlobs: excludeGlobs.length ? excludeGlobs : DEFAULT_INDEX_POLICY.excludeGlobs,
-    includeHidden: parsed.includeHidden ?? DEFAULT_INDEX_POLICY.includeHidden,
-  };
+  const merged = withDefaults(parsed, DEFAULT_INDEX_POLICY);
+  // Validate glob arrays: filter out non-strings and empty entries
+  merged.includeGlobs = merged.includeGlobs.filter((g) => typeof g === "string" && g.trim().length > 0);
+  merged.excludeGlobs = merged.excludeGlobs.filter((g) => typeof g === "string" && g.trim().length > 0);
+  if (!merged.includeGlobs.length) merged.includeGlobs = DEFAULT_INDEX_POLICY.includeGlobs;
+  if (!merged.excludeGlobs.length) merged.excludeGlobs = DEFAULT_INDEX_POLICY.excludeGlobs;
+  return merged;
 }
 
 export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy>): IndexPolicy | string {
@@ -328,6 +459,7 @@ export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy
   if (denial) return denial;
   const current = getIndexPolicy(cortexPath);
   const next: IndexPolicy = {
+    schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     includeGlobs: Array.isArray(patch.includeGlobs)
       ? patch.includeGlobs.filter((g): g is string => typeof g === "string" && g.trim().length > 0)
       : current.includeGlobs,
@@ -357,8 +489,15 @@ export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHe
   return next;
 }
 
+let _scoresCache: Record<string, MemoryScore> | null = null;
+let _scoresCachePath: string | null = null;
+
 function loadMemoryScores(cortexPath: string): Record<string, MemoryScore> {
-  return readJsonFile<Record<string, MemoryScore>>(scoreFile(cortexPath), {});
+  const file = scoreFile(cortexPath);
+  if (_scoresCache && _scoresCachePath === file) return _scoresCache;
+  _scoresCache = readJsonFile<Record<string, MemoryScore>>(file, {});
+  _scoresCachePath = file;
+  return _scoresCache;
 }
 
 function loadCanonicalLocks(cortexPath: string): Record<string, CanonicalLock> {
@@ -374,7 +513,15 @@ function hashContent(content: string): string {
 }
 
 function saveMemoryScores(cortexPath: string, scores: Record<string, MemoryScore>) {
-  writeJsonFile(scoreFile(cortexPath), scores);
+  _scoresCache = scores;
+  _scoresCachePath = scoreFile(cortexPath);
+  writeJsonFile(_scoresCachePath, scores);
+}
+
+export function flushMemoryScores(cortexPath: string): void {
+  if (_scoresCache && _scoresCachePath === scoreFile(cortexPath)) {
+    writeJsonFile(_scoresCachePath, _scoresCache);
+  }
 }
 
 function ensureScoreEntry(scores: Record<string, MemoryScore>, key: string): MemoryScore {
@@ -445,7 +592,7 @@ export function getMemoryQualityMultiplier(cortexPath: string, key: string): num
   return Math.max(0.2, Math.min(1.5, raw));
 }
 
-export function pruneDeadMemories(cortexPath: string, project?: string): string {
+export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?: boolean): string {
   const denial = checkMemoryPermission(cortexPath, "delete");
   if (denial) return denial;
   const policy = getMemoryPolicy(cortexPath);
@@ -454,6 +601,7 @@ export function pruneDeadMemories(cortexPath: string, project?: string): string 
     : getProjectDirs(cortexPath).filter((d) => path.basename(d) !== "global");
   let pruned = 0;
   const cutoffDays = policy.retentionDays;
+  const dryRunDetails: string[] = [];
 
   for (const dir of dirs) {
     const file = path.join(dir, "LEARNINGS.md");
@@ -478,6 +626,7 @@ export function pruneDeadMemories(cortexPath: string, project?: string): string 
         const age = Math.floor((Date.now() - Date.parse(`${currentDate}T00:00:00Z`)) / 86400000);
         if (!Number.isNaN(age) && age > cutoffDays) {
           pruned++;
+          if (dryRun) dryRunDetails.push(`[${path.basename(dir)}] ${line.slice(0, 80)}`);
           // Also drop citation line directly attached to this bullet.
           const nextLine = lines[i + 1] || "";
           if (nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
@@ -493,7 +642,15 @@ export function pruneDeadMemories(cortexPath: string, project?: string): string 
       }
       next.push(line);
     }
-    fs.writeFileSync(file, next.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+    if (!dryRun) {
+      fs.copyFileSync(file, file + ".bak");
+      fs.writeFileSync(file, next.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+    }
+  }
+
+  if (dryRun) {
+    const summary = `[dry-run] Would prune ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
+    return dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary;
   }
 
   appendAuditLog(cortexPath, "prune_memories", `project=${project || "all"} pruned=${pruned}`);
@@ -531,7 +688,7 @@ export function enforceCanonicalLocks(cortexPath: string, project?: string): str
   return `Canonical locks checked=${checked}, restored=${restored}`;
 }
 
-export function consolidateProjectLearnings(cortexPath: string, project: string): string {
+export function consolidateProjectLearnings(cortexPath: string, project: string, dryRun?: boolean): string {
   const denial = checkMemoryPermission(cortexPath, "delete");
   if (denial) return denial;
   if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
@@ -543,6 +700,8 @@ export function consolidateProjectLearnings(cortexPath: string, project: string)
   const byDate = new Map<string, Map<string, { bullet: string; citation?: string }>>();
   let currentDate: string | null = null;
   const title = lines.find((l) => l.startsWith("# ")) || `# ${project} LEARNINGS`;
+  let totalBullets = 0;
+  let uniqueBullets = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -553,12 +712,14 @@ export function consolidateProjectLearnings(cortexPath: string, project: string)
       continue;
     }
     if (line.startsWith("- ") && currentDate) {
+      totalBullets++;
       const key = line.trim().toLowerCase().replace(/\s+/g, " ");
       const nextLine = lines[i + 1] || "";
       const citation = nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/) ? nextLine : undefined;
       const existing = byDate.get(currentDate)!.get(key);
       if (!existing) {
         byDate.get(currentDate)!.set(key, { bullet: line, citation });
+        uniqueBullets++;
       } else if (!existing.citation && citation) {
         existing.citation = citation;
       }
@@ -567,6 +728,12 @@ export function consolidateProjectLearnings(cortexPath: string, project: string)
   }
 
   const dates = [...byDate.keys()].sort().reverse();
+  const duplicatesRemoved = totalBullets - uniqueBullets;
+
+  if (dryRun) {
+    return `[dry-run] ${project}: ${totalBullets} bullets, ${duplicatesRemoved} duplicate(s) would be removed, ${dates.length} date section(s).`;
+  }
+
   const out: string[] = [title, ""];
   for (const d of dates) {
     const items = [...(byDate.get(d)?.values() || [])];
@@ -578,6 +745,7 @@ export function consolidateProjectLearnings(cortexPath: string, project: string)
     }
     out.push("");
   }
+  fs.copyFileSync(file, file + ".bak");
   fs.writeFileSync(file, out.join("\n").trimEnd() + "\n");
   appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
   return `Consolidated learnings for ${project}.`;
@@ -1175,6 +1343,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
       cwd: cortexPath,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_MS,
     }).trim();
     conflictedFiles = out ? out.split("\n") : [];
   } catch (err: any) {
@@ -1207,7 +1376,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
         : mergeBacklog(versions.ours, versions.theirs);
 
       fs.writeFileSync(fullPath, merged);
-      execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"] });
+      execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: any) {
       debugLog(`Failed to auto-merge ${relFile}: ${err.message}`);
@@ -1220,7 +1389,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
 
 function getHeadCommit(cwd: string): string | undefined {
   try {
-    const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS }).trim();
     return commit || undefined;
   } catch {
     // Expected when cwd is not inside a git repo
@@ -1230,7 +1399,7 @@ function getHeadCommit(cwd: string): string | undefined {
 
 function getRepoRoot(cwd: string): string | undefined {
   try {
-    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS }).trim();
     return root || undefined;
   } catch {
     // Expected when cwd is not inside a git repo
@@ -1243,7 +1412,7 @@ function inferCitationLocation(repoPath: string, commit: string): { file?: strin
     const raw = execFileSync(
       "git",
       ["show", "--pretty=format:", "--unified=0", "--no-color", commit],
-      { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+      { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS }
     );
     let currentFile = "";
     for (const line of raw.split("\n")) {
@@ -1292,6 +1461,7 @@ function commitExists(repoPath: string, commit: string): boolean {
     execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], {
       cwd: repoPath,
       stdio: ["ignore", "ignore", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
     });
     return true;
   } catch {

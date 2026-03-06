@@ -108,13 +108,13 @@ describe("readBacklog", () => {
   it("returns an error string for an invalid project name", () => {
     const result = readBacklog(tmpDir, "../escape");
     expect(typeof result).toBe("string");
-    expect(result).toContain("Invalid project name");
+    expect(result).toContain("INVALID_PROJECT_NAME");
   });
 
   it("returns an error string for a missing project directory", () => {
     const result = readBacklog(tmpDir, "nonexistent");
     expect(typeof result).toBe("string");
-    expect(result).toContain("not found");
+    expect(result).toContain("PROJECT_NOT_FOUND");
   });
 
   it("handles a backlog with no items", () => {
@@ -236,7 +236,7 @@ describe("readLearnings", () => {
   it("returns an error string for a missing project", () => {
     const result = readLearnings(tmpDir, "nonexistent");
     expect(typeof result).toBe("string");
-    expect(result).toContain("not found");
+    expect(result).toContain("PROJECT_NOT_FOUND");
   });
 
   it("assigns sequential IDs", () => {
@@ -308,7 +308,7 @@ describe("removeLearning", () => {
 
   it("returns an error when LEARNINGS.md does not exist", () => {
     const msg = removeLearning(tmpDir, PROJECT, "anything");
-    expect(msg).toContain("No LEARNINGS.md found");
+    expect(msg).toContain("FILE_NOT_FOUND");
   });
 });
 

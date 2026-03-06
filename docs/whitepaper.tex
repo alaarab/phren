@@ -42,15 +42,15 @@
 \definecolor{scoreDark}{HTML}{134E4A}
 
 \title{\vspace{-1.2em}Long-Term Memory for Coding Agents\\
-\large Architecture Decision, Cost Model, and Comparative Evaluation}
+\large Architecture, Governance, Multi-Agent Coordination, and Comparative Evaluation}
 \author{Cortex Project}
-\date{March 6, 2026}
+\date{March 6, 2026 \quad\textbar\quad v2}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Persistent memory is now a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation and bounded prompt injection. It also compares this path to selected alternatives (Supermemory, claude-mem, GitHub Copilot Memory), provides a practical cost model, and defines a reproducible benchmark protocol. The central argument is operational: in real engineering teams, memory quality must be optimized jointly with auditability, governance, portability, and token predictability.
+Persistent memory is now a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. Version 2 adds a policy engine (retention, decay, access control), an interactive shell for direct memory management, index-level filtering, and first-class support for multi-agent coordination. The report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, provides a cost model, and defines a reproducible benchmark protocol. The central argument is operational: in real engineering teams, memory quality must be optimized jointly with auditability, governance, portability, and token predictability.
 \end{abstract}
 
 \section{Executive Summary}
@@ -66,22 +66,44 @@ Cortex optimizes for ownership and controllability. Alternatives can outperform 
 This report separates \textit{architecture judgments} from \textit{measured performance}; they are not interchangeable.
 
 \section{Decision Criteria}
-This report evaluates systems on six dimensions:
+This report evaluates systems on eight dimensions:
 \begin{enumerate}
   \item \textbf{Representation}: where memory lives and who owns it.
   \item \textbf{Capture path}: how memory is created (hooks/API/workers).
-  \item \textbf{Retrieval path}: ranking and injection behavior under budget.
-  \item \textbf{Governance}: forgetting, validation, and review controls.
+  \item \textbf{Retrieval path}: ranking, trust scoring, and injection under budget.
+  \item \textbf{Governance}: forgetting, validation, review, and policy controls.
   \item \textbf{Economics}: token overhead + human maintenance burden.
   \item \textbf{Portability}: migration risk and lock-in profile.
+  \item \textbf{Multi-agent readiness}: concurrent sessions, shared state, coordination.
+  \item \textbf{Operability}: CLI, shell, direct management without the model in the loop.
 \end{enumerate}
 
-\section{Cortex Architecture (Current)}
+\section{Cortex Architecture (v2)}
+
 \subsection{Storage and indexing}
-Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. This yields strong inspectability (diffs/history) and low platform lock-in.
+Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. The index is rebuilt on each session start from the file system, so markdown files remain the single source of truth. This yields strong inspectability (diffs, git history, plain-text grep) and low platform lock-in.
+
+\subsubsection{Index policy}
+v2 introduces a configurable index policy \cite{cortex-shared,cortex-index} that controls which files are indexed. Operators set \texttt{includeGlobs} (default: \texttt{**/*.md}, \texttt{.claude/skills/**/*.md}), \texttt{excludeGlobs} (default: \texttt{node\_modules}, \texttt{.git}), and an \texttt{includeHidden} flag. The index policy is stored in \texttt{.governance/index-policy.json} and is hashed into the index cache key, so changing the policy forces a clean rebuild. This prevents accidental indexing of vendor files or sensitive directories.
 
 \subsection{Lifecycle automation}
-Hook stages (prompt/session-start/session-stop) automate retrieval and persistence \cite{cortex-cli,cortex-hooks}. This reduces dependence on manual tool invocation and lowers workflow variance.
+Three hook stages automate retrieval and persistence \cite{cortex-cli,cortex-hooks}:
+\begin{enumerate}
+  \item \texttt{SessionStart}: pulls the cortex repo, injects project context.
+  \item \texttt{UserPromptSubmit}: extracts keywords from the prompt, searches the index, injects relevant snippets within the token budget. Also checks consolidation thresholds and fires a one-per-session notice if the project has accumulated enough new learnings.
+  \item \texttt{Stop}: auto-commits and pushes all cortex changes after every response, including subagent responses.
+\end{enumerate}
+This reduces dependence on manual tool invocation and lowers workflow variance.
+
+\subsection{Trust filtering and confidence scoring}
+Not all memories deserve equal weight. v2 applies a trust filter before injection \cite{cortex-shared}. Each learning entry is scored by:
+\begin{itemize}
+  \item \textbf{Age decay}: confidence degrades over configurable windows (\texttt{d30}, \texttt{d60}, \texttt{d90}, \texttt{d120}), with defaults at 1.0, 0.9, 0.75, and 0.5 respectively.
+  \item \textbf{Citation validity}: entries with valid file/line/commit citations score higher. Entries without citations receive a 0.8 multiplier.
+  \item \textbf{Minimum confidence}: entries below \texttt{minInjectConfidence} (default 0.35) are suppressed from injection entirely.
+  \item \textbf{Staleness}: entries older than \texttt{ttlDays} (default 120) are excluded.
+\end{itemize}
+The filter also strips archived entries (inside \texttt{<details>} blocks) so that consolidated history does not pollute active search results.
 
 \subsection{Bounded retrieval economics}
 Default injection controls are explicit and configurable \cite{cortex-cli,cortex-index}:
@@ -97,8 +119,58 @@ Upper bound for monthly injection cost:
 \]
 where \(N\) is prompt volume, \(T_b\) is configured budget cap, and \(p_{in}\) is input-token price.
 
-\subsection{Governance model}
-Cortex policy defaults include TTL/retention/confidence thresholds and decay windows (for example, \texttt{ttlDays=120}, \texttt{retentionDays=365}) \cite{cortex-shared}. Queue-based triage and role controls provide explicit quality gates.
+\subsection{Governance engine}
+v2 replaces ad-hoc policy defaults with a structured governance engine stored in \texttt{.governance/} \cite{cortex-shared}. Four policy files control different concerns:
+
+\subsubsection{Memory policy}
+\texttt{memory-policy.json} sets TTL (\texttt{ttlDays=120}), retention (\texttt{retentionDays=365}), auto-accept confidence threshold, minimum injection confidence, and the four-tier decay curve. Changes are audit-logged.
+
+\subsubsection{Workflow policy}
+\texttt{memory-workflow-policy.json} controls approval gates: whether new memories require maintainer approval, which queue sections (\texttt{Review}, \texttt{Stale}, \texttt{Conflicts}) trigger review, and the low-confidence threshold that routes entries to the queue instead of direct acceptance.
+
+\subsubsection{Access control}
+\texttt{access-control.json} implements role-based permissions with four roles: \texttt{admin}, \texttt{maintainer}, \texttt{contributor}, \texttt{viewer}. Each role maps to a set of allowed actions (\texttt{read}, \texttt{write}, \texttt{queue}, \texttt{pin}, \texttt{policy}, \texttt{delete}). Admins can do everything. Maintainers cannot change policy. Contributors can read, write, and queue. Viewers can only read. The system resolves the current actor's role and rejects unauthorized operations before they execute.
+
+\subsubsection{Canonical locks}
+Pinned (canonical) memories are protected by content hashes stored in \texttt{canonical-locks.json}. This prevents accidental overwrite of high-value entries during consolidation or bulk operations.
+
+\subsubsection{Audit trail}
+All governance mutations (policy changes, access updates, memory approvals/rejections, index policy changes) are appended to \texttt{memory-usage.log} with timestamps. This provides a complete, human-readable audit trail without requiring database queries.
+
+\subsection{Memory quality feedback loop}
+v2 tracks per-entry quality scores \cite{cortex-shared}: impressions (how often injected), helpful count, reprompt penalty, and regression penalty. The \texttt{quality-feedback} CLI command and \texttt{memory\_feedback} MCP tool record outcomes. Over time, entries that cause regressions or repeated reprompts lose injection priority, while frequently helpful entries gain weight. This closes the loop between injection and actual usefulness.
+
+\section{Interactive Shell}
+v2 adds a terminal-native shell (\texttt{cortex shell}) that provides direct access to memory operations without requiring an LLM in the loop \cite{cortex-cli}. The shell exposes six views navigable by single keystrokes:
+
+\begin{itemize}
+  \item \textbf{Projects}: list all projects in the active profile.
+  \item \textbf{Backlog}: view, add, complete, reprioritize, and move tasks between sections (Active, Queue, Done).
+  \item \textbf{Learnings}: browse and manage learning entries per project.
+  \item \textbf{Memory Queue}: triage pending memories (approve, reject, edit).
+  \item \textbf{Machines/Profiles}: map hostnames to profiles, add or remove projects from profiles.
+  \item \textbf{Health}: runtime diagnostics, doctor checks, relink, hook re-execution.
+\end{itemize}
+
+A palette system (\texttt{:command}) supports structured operations: \texttt{:add}, \texttt{:complete}, \texttt{:move}, \texttt{:govern}, \texttt{:consolidate}, \texttt{:learn add}, \texttt{:mq approve}, and more. Filtering (\texttt{/keyword}) and pagination (\texttt{:page next}) handle large datasets.
+
+The shell persists its state (current view, selected project, page, filter) across invocations, so operators can return to where they left off. This matters for daily triage workflows where an engineer reviews queued memories, approves or rejects a few, then returns later.
+
+The design goal is operational: memory governance should not require starting a coding session. An engineer should be able to run \texttt{cortex shell}, review what accumulated overnight, and clean it up before any agent touches it.
+
+\section{Multi-Agent Coordination}
+Modern coding workflows frequently involve multiple agents running concurrently: a lead agent coordinating several specialists, each working on a different file or subsystem. Memory systems that assume a single serial session break under this pattern.
+
+Cortex handles multi-agent use through three mechanisms:
+
+\subsection{Shared git-backed state}
+All agents in a team read and write the same \texttt{\textasciitilde/.cortex} directory. Because the storage layer is the file system (not an in-process database), concurrent reads are safe. Write contention is managed by git: the Stop hook commits and pushes after every response, and the SessionStart hook pulls at session start. Short-lived branches or merge conflicts are resolved at the git layer, not the application layer.
+
+\subsection{Skill-driven coordination}
+Cortex skills (stored in \texttt{\textasciitilde/.cortex/global/skills/}) define reusable agent behaviors. A \texttt{/swarm} skill, for example, reads backlog items and spawns team agents that self-assign tasks, report back via messaging, and share learnings through the same cortex instance. The skill system is just markdown files with structured instructions, so teams can version and review coordination patterns like any other code.
+
+\subsection{Hook isolation}
+Each agent session gets its own hook execution context. The consolidation notice fires once per session (tracked via \texttt{.noticed-\{session\_id\}} files), so parallel agents do not spam each other with duplicate prompts. The Stop hook fires after every response including subagent responses, which means learnings captured by a specialist agent are committed immediately, not batched until the lead agent finishes.
 
 \section{API vs MCP vs Local}
 These concepts are often mixed:
@@ -107,7 +179,7 @@ These concepts are often mixed:
   \item \textbf{Local vs API} is a storage/compute decision (where memory runs).
 \end{itemize}
 
-Cortex is \textit{local memory + MCP interface + lifecycle hooks}. So a local system can still expose MCP tools.
+Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local system can still expose MCP tools. The 22 MCP tools cover search, backlog management, learning capture, and the full governance surface (policy, workflow, access control, index policy).
 
 \section{Comparative Assessment}
 \textit{Evidence window: public documentation/changelogs available as of March 6, 2026.}
@@ -123,6 +195,10 @@ Cortex is \textit{local memory + MCP interface + lifecycle hooks}. So a local sy
 \begin{itemize}
   \item Cortex default injection controls: token budget \(\approx 550\), snippet lines \(6\), snippet chars \(520\) \cite{cortex-cli,cortex-index}.
   \item Cortex governance defaults: \texttt{ttlDays=120}, \texttt{retentionDays=365} \cite{cortex-shared}.
+  \item Trust filter defaults: decay curve \(1.0 / 0.9 / 0.75 / 0.5\) at 30/60/90/120 days, \texttt{minInjectConfidence=0.35}, citation-absent multiplier \(0.8\) \cite{cortex-shared}.
+  \item Access control: 4 roles (admin, maintainer, contributor, viewer) with 6 action types \cite{cortex-shared}.
+  \item MCP tool surface: 22 tools across search, backlog, learning, and governance categories \cite{cortex-index}.
+  \item Interactive shell: 6 views, palette commands, persistent state across invocations \cite{cortex-shell}.
   \item Claude Opus 4.6 announcement includes a 1M-token context window (beta) \cite{anthropic-opus46}.
 \end{itemize}
 No comparable public p95 coding-latency benchmark exists across all systems/models, so cross-system speed claims must be measured directly.
@@ -133,18 +209,18 @@ No comparable public p95 coding-latency benchmark exists across all systems/mode
 \scriptsize
 \setlength{\tabcolsep}{3pt}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{lcccccc}
+\begin{tabular}{lccccccccc}
 \toprule
-\textbf{System} & \textbf{Setup} & \textbf{Token} & \textbf{Governance} & \textbf{Audit} & \textbf{Ops} & \textbf{Lock-in} \\
+\textbf{System} & \textbf{Setup} & \textbf{Token} & \textbf{Governance} & \textbf{Audit} & \textbf{Trust} & \textbf{Multi-Agent} & \textbf{Shell/CLI} & \textbf{Ops} & \textbf{Lock-in} \\
 \midrule
-Cortex & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreHi}L \\
-Supermemory & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreHi}L & \cellcolor{scoreLow}H \\
-claude-mem & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M/H & \cellcolor{scoreMed}M/H & \cellcolor{scoreLow}H & \cellcolor{scoreMed}M \\
-Copilot Memory & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreHi}L & \cellcolor{scoreLow}H \\
+Cortex v2 & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreHi}L \\
+Supermemory & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}L & \cellcolor{scoreLow}H \\
+claude-mem & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M/H & \cellcolor{scoreMed}M/H & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}H & \cellcolor{scoreMed}M \\
+Copilot Memory & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}L & \cellcolor{scoreLow}H \\
 \bottomrule
 \end{tabular}
 }
-\caption{Architecture-level scorecard from documented behavior (H=high, M=medium, L=low). Not a substitute for empirical benchmark results.}
+\caption{Architecture-level scorecard from documented behavior (H=high, M=medium, L=low). Three new columns for v2: Trust (confidence scoring and decay), Multi-Agent (concurrent session support), Shell/CLI (model-free management). Not a substitute for empirical benchmark results.}
 \label{tab:scorecard}
 \end{table*}
 
@@ -195,8 +271,10 @@ Manual interventions / 100 tasks & Governance burden and operator effort \\
 \subsection{Choose Cortex when}
 \begin{itemize}
   \item memory ownership, auditability, and portability are hard constraints,
-  \item you need explicit token-budget controls,
-  \item your team can operate lightweight local workflows.
+  \item you need explicit token-budget controls and trust-scored retrieval,
+  \item multiple agents share a codebase and need concurrent memory access,
+  \item governance matters: role-based access, approval workflows, audit trails,
+  \item you want direct memory management through a terminal shell, not just through the model.
 \end{itemize}
 
 \subsection{Choose alternatives when}
@@ -237,7 +315,11 @@ For each model, report both:
 \end{itemize}
 
 \section{Conclusion}
-The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex is a strong default when the organization optimizes for inspectability, policy control, and low lock-in. Managed alternatives remain strong choices where integration speed and platform convenience dominate.
+The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. v2 pushes Cortex further toward production readiness: trust filtering reduces noise in injected context, the governance engine gives teams real policy control, and the interactive shell makes daily memory management possible without starting an LLM session.
+
+Multi-agent support is increasingly non-optional. As coding workflows move from single-agent to team-based coordination, memory systems that assume serial sessions become a bottleneck. Cortex's git-backed architecture handles this naturally: concurrent reads are safe, writes are serialized through commits, and hook isolation prevents cross-agent interference.
+
+Managed alternatives remain strong choices where integration speed and platform convenience dominate. The right answer depends on which constraints are binding.
 
 \subsection*{Can tradeoffs disappear?}
 Not fully. Some tradeoffs are structural (ownership vs managed convenience). But many are reducible with engineering: startup caching, tighter ranking, model-specific token budgets, and async governance paths. The practical goal is not ``zero tradeoffs''; it is a better frontier for your constraints.
@@ -280,6 +362,8 @@ Not fully. Some tradeoffs are structural (ownership vs managed convenience). But
 \bibitem{cortex-shared} Cortex source: \texttt{mcp/src/shared.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/shared.ts}
 \bibitem{cortex-hooks} Cortex source: \texttt{mcp/src/hooks.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/hooks.ts}
 \bibitem{cortex-index} Cortex source: \texttt{mcp/src/index.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/index.ts}
+\bibitem{cortex-shell} Cortex source: \texttt{mcp/src/shell.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/shell.ts}
+\bibitem{cortex-data} Cortex source: \texttt{mcp/src/data-access.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/data-access.ts}
 \end{thebibliography}
 \fussy
 

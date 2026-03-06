@@ -1,0 +1,14 @@
+cortex - Long-term memory for AI coding agents.
+
+Install: npx @alaarab/cortex init
+
+Key features:
+- Automatic context injection into every prompt via lifecycle hooks
+- 22 MCP tools for search, backlog management, learning capture, and memory governance
+- Memory governance with confidence decay, trust filtering, and quality feedback
+- Interactive terminal shell with six views (Projects, Backlog, Learnings, Memory Queue, Machines, Health)
+- Multi-agent support: Claude Code, Copilot CLI, Cursor, OpenAI Codex
+
+Docs: https://alaarab.github.io/cortex/
+Full LLM reference: https://alaarab.github.io/cortex/llms-full.txt
+npm: https://www.npmjs.com/package/@alaarab/cortex

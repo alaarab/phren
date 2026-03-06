@@ -5,15 +5,13 @@ import {
   addLearningToFile,
   appendAuditLog,
   checkMemoryPermission,
+  CortexError,
   getMemoryWorkflowPolicy,
   getProjectDirs,
   getRuntimeHealth,
   validateBacklogFormat,
 } from "./shared.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
-
-// TODO(v2): Many functions return `string` for errors and a typed object for success.
-// Replace with a Result<T, E> type or throw typed errors for clearer call-site handling.
 
 function withFileLock<T>(filePath: string, fn: () => T): T {
   const lockPath = filePath + ".lock";
@@ -134,10 +132,10 @@ function parseContext(lines: string[], idx: number): { context?: string; consume
 }
 
 function ensureProject(cortexPath: string, project: string): { dir?: string; error?: string } {
-  if (!isValidProjectName(project)) return { error: `Invalid project name: "${project}".` };
+  if (!isValidProjectName(project)) return { error: `${CortexError.INVALID_PROJECT_NAME}: "${project}"` };
   const dir = safeProjectPath(cortexPath, project);
-  if (!dir) return { error: `Invalid project name: "${project}".` };
-  if (!fs.existsSync(dir)) return { error: `Project "${project}" not found in cortex.` };
+  if (!dir) return { error: `${CortexError.INVALID_PROJECT_NAME}: "${project}"` };
+  if (!fs.existsSync(dir)) return { error: `${CortexError.PROJECT_NOT_FOUND}: "${project}"` };
   return { dir };
 }
 
@@ -238,12 +236,14 @@ function backlogArchivePath(cortexPath: string, project: string): string {
   return path.join(cortexPath, ".governance", "backlog-archive", `${project}.md`);
 }
 
+// TODO (#85): Migrate readBacklog, addBacklogItem, completeBacklogItem, readMemoryQueue
+// to return CortexResult<T> instead of T | string so callers can distinguish errors structurally.
 export function readBacklog(cortexPath: string, project: string): BacklogDoc | string {
   const ensured = ensureProject(cortexPath, project);
   if (ensured.error) return ensured.error;
 
   const backlogPath = backlogFilePath(cortexPath, project);
-  if (!backlogPath) return `Invalid project name: "${project}".`;
+  if (!backlogPath) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
 
   if (!fs.existsSync(backlogPath)) {
     return {
@@ -274,7 +274,7 @@ export function readBacklogs(cortexPath: string, profile?: string): BacklogDoc[]
 
 export function addBacklogItem(cortexPath: string, project: string, item: string): string {
   const bPath = backlogFilePath(cortexPath, project);
-  if (!bPath) return `Invalid project name: "${project}".`;
+  if (!bPath) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
 
   return withFileLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
@@ -295,7 +295,7 @@ export function addBacklogItem(cortexPath: string, project: string, item: string
 
 export function completeBacklogItem(cortexPath: string, project: string, match: string): string {
   const bPath = backlogFilePath(cortexPath, project);
-  if (!bPath) return `Invalid project name: "${project}".`;
+  if (!bPath) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
 
   return withFileLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
@@ -320,7 +320,7 @@ export function updateBacklogItem(
   updates: { priority?: string; context?: string; section?: string }
 ): string {
   const bPath = backlogFilePath(cortexPath, project);
-  if (!bPath) return `Invalid project name: "${project}".`;
+  if (!bPath) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
 
   return withFileLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
@@ -378,7 +378,7 @@ export function workNextBacklogItem(cortexPath: string, project: string): string
   return `Moved next queue item to Active in ${project}: ${item.line}`;
 }
 
-export function tidyBacklogDone(cortexPath: string, project: string, keep: number = 30): string {
+export function tidyBacklogDone(cortexPath: string, project: string, keep: number = 30, dryRun?: boolean): string {
   const parsed = readBacklog(cortexPath, project);
   if (typeof parsed === "string") return parsed;
 
@@ -388,6 +388,11 @@ export function tidyBacklogDone(cortexPath: string, project: string, keep: numbe
   }
 
   const archived = parsed.items.Done.slice(safeKeep);
+
+  if (dryRun) {
+    return `[dry-run] Would archive ${archived.length} done item(s) for ${project}, keeping ${safeKeep}.`;
+  }
+
   parsed.items.Done = parsed.items.Done.slice(0, safeKeep);
 
   const archiveFile = backlogArchivePath(cortexPath, project);
@@ -442,9 +447,9 @@ export function readLearnings(cortexPath: string, project: string): LearningItem
 }
 
 export function addLearning(cortexPath: string, project: string, learning: string): string {
-  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  if (!isValidProjectName(project)) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
   const resolved = safeProjectPath(cortexPath, project);
-  if (!resolved) return `Invalid project name: "${project}".`;
+  if (!resolved) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
   const learningsPath = path.join(resolved, "LEARNINGS.md");
 
   return withFileLock(learningsPath, () => addLearningToFile(cortexPath, project, learning));
@@ -455,7 +460,7 @@ export function removeLearning(cortexPath: string, project: string, match: strin
   if (ensured.error) return ensured.error;
 
   const learningsPath = path.join(ensured.dir!, "LEARNINGS.md");
-  if (!fs.existsSync(learningsPath)) return `No LEARNINGS.md found for "${project}".`;
+  if (!fs.existsSync(learningsPath)) return `${CortexError.FILE_NOT_FOUND}: LEARNINGS.md for "${project}"`;
 
   return withFileLock(learningsPath, () => {
     const lines = fs.readFileSync(learningsPath, "utf8").split("\n");
@@ -575,7 +580,7 @@ export function approveMemoryQueueItem(cortexPath: string, project: string, matc
   const riskyByConfidence = found.item.confidence !== undefined && found.item.confidence < workflow.lowConfidenceThreshold;
   if (workflow.requireMaintainerApproval && (riskyBySection || riskyByConfidence)) {
     const pinDenied = checkMemoryPermission(cortexPath, "pin");
-    if (pinDenied) return "Approval requires maintainer/admin role for risky memory entries.";
+    if (pinDenied) return `${CortexError.PERMISSION_DENIED}: approval requires maintainer/admin role for risky memory entries`;
   }
 
   const add = addLearningToFile(cortexPath, project, found.item.text);
@@ -621,7 +626,7 @@ export function editMemoryQueueItem(cortexPath: string, project: string, match: 
 
 export function listMachines(cortexPath: string): Record<string, string> | string {
   const machinesPath = path.join(cortexPath, "machines.yaml");
-  if (!fs.existsSync(machinesPath)) return "No machines.yaml found.";
+  if (!fs.existsSync(machinesPath)) return `${CortexError.FILE_NOT_FOUND}: machines.yaml`;
   const raw = fs.readFileSync(machinesPath, "utf8");
   const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA }) as Record<string, string> | null;
   if (!parsed || typeof parsed !== "object") return "machines.yaml is empty or invalid.";
@@ -654,7 +659,7 @@ export function setMachineProfile(cortexPath: string, machine: string, profile: 
 
 export function listProfiles(cortexPath: string): ProfileInfo[] | string {
   const profilesDir = path.join(cortexPath, "profiles");
-  if (!fs.existsSync(profilesDir)) return "No profiles directory found.";
+  if (!fs.existsSync(profilesDir)) return `${CortexError.FILE_NOT_FOUND}: profiles directory`;
   const files = fs.readdirSync(profilesDir).filter((file) => file.endsWith(".yaml")).sort();
   const profiles: ProfileInfo[] = [];
 
@@ -681,7 +686,7 @@ function writeProfile(file: string, name: string, projects: string[]): void {
 }
 
 export function addProjectToProfile(cortexPath: string, profile: string, project: string): string {
-  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  if (!isValidProjectName(project)) return `${CortexError.INVALID_PROJECT_NAME}: "${project}"`;
   const profiles = listProfiles(cortexPath);
   if (typeof profiles === "string") return profiles;
   const current = profiles.find((p) => p.name === profile);
