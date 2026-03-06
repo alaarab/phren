@@ -24,6 +24,82 @@ export function detectInstalledTools(): Set<string> {
   return tools;
 }
 
+function resolveToolBinary(tool: string): string | null {
+  try {
+    const wrapperPath = path.resolve(path.join(os.homedir(), ".local", "bin", tool));
+    const raw = execSync(`which -a ${tool}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const candidates = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+    for (const candidate of candidates) {
+      const resolved = path.resolve(candidate);
+      if (resolved !== wrapperPath) return candidate;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function installSessionWrapper(tool: string, cortexPath: string): boolean {
+  const realBinary = resolveToolBinary(tool);
+  if (!realBinary) return false;
+
+  const localBinDir = path.join(os.homedir(), ".local", "bin");
+  const wrapperPath = path.join(localBinDir, tool);
+
+  const escapedBinary = realBinary.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const content = `#!/usr/bin/env bash
+set -u
+
+REAL_BIN="${escapedBinary}"
+CORTEX_PATH="\${CORTEX_PATH:-${escapedCortex}}"
+
+if [ ! -x "$REAL_BIN" ]; then
+  echo "cortex wrapper error: real ${tool} binary not executable: $REAL_BIN" >&2
+  exit 127
+fi
+
+case "\${1:-}" in
+  -h|--help|help|-V|--version|version|completion)
+    exec "$REAL_BIN" "$@"
+    ;;
+esac
+
+run_with_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$1" "\${@:2}" || true
+  else
+    "\${@:2}" || true
+  fi
+}
+
+cd "$CORTEX_PATH" 2>/dev/null || true
+run_with_timeout 8s git pull --rebase --quiet
+run_with_timeout 12s npx @alaarab/cortex doctor --fix >/dev/null 2>&1
+
+"$REAL_BIN" "$@"
+status=$?
+
+cd "$CORTEX_PATH" 2>/dev/null || true
+if ! git diff --quiet 2>/dev/null; then
+  git add -A
+  git commit -m 'auto-save cortex' >/dev/null 2>&1 || true
+  run_with_timeout 8s git push >/dev/null 2>&1
+fi
+
+exit $status
+`;
+
+  try {
+    fs.mkdirSync(localBinDir, { recursive: true });
+    fs.writeFileSync(wrapperPath, content);
+    fs.chmodSync(wrapperPath, 0o755);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // tools param accepts either a pre-computed Set (from link) or a boolean (from init)
 export function configureAllHooks(cortexPath: string, tools: Set<string> | boolean = false): string[] {
   const configured: string[] = [];
@@ -53,6 +129,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
       fs.writeFileSync(copilotFile, JSON.stringify(config, null, 2));
       configured.push("Copilot CLI");
     } catch { /* best effort */ }
+    installSessionWrapper("copilot", cortexPath);
   }
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
@@ -91,6 +168,7 @@ export function configureAllHooks(cortexPath: string, tools: Set<string> | boole
       fs.writeFileSync(codexFile, JSON.stringify(config, null, 2));
       configured.push("Codex");
     } catch { /* best effort */ }
+    installSessionWrapper("codex", cortexPath);
   }
 
   return configured;

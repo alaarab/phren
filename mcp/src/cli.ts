@@ -26,7 +26,7 @@ import {
   consolidateProjectLearnings,
   enforceCanonicalLocks,
 } from "./shared.js";
-import { sanitizeFts5Query, expandSynonyms, extractKeywords } from "./utils.js";
+import { sanitizeFts5Query, expandSynonyms, extractKeywords, isValidProjectName } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync, execSync, spawn } from "child_process";
@@ -37,10 +37,133 @@ import { startMemoryUi } from "./memory-ui.js";
 const cortexPath = findCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
 
+const SEARCH_TYPE_ALIASES: Record<string, string> = {
+  skills: "skill",
+};
+const SEARCH_TYPES = new Set([
+  "claude",
+  "summary",
+  "learnings",
+  "knowledge",
+  "backlog",
+  "changelog",
+  "canonical",
+  "memory-queue",
+  "skill",
+  "other",
+]);
+
+interface SearchOptions {
+  query: string;
+  limit: number;
+  project?: string;
+  type?: string;
+}
+
+function printSearchUsage() {
+  console.error("Usage:");
+  console.error("  cortex search <query> [--project <name>] [--type <type>] [--limit <n>] [--all]");
+  console.error("  cortex search --project <name> [--type <type>] [--limit <n>] [--all]");
+  console.error("  type: claude|summary|learnings|knowledge|backlog|changelog|canonical|memory-queue|skill|other");
+}
+
+function parseSearchArgs(args: string[]): SearchOptions | null {
+  const queryParts: string[] = [];
+  let project: string | undefined;
+  let type: string | undefined;
+  let limit = 10;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === "--help" || arg === "-h") {
+      printSearchUsage();
+      return null;
+    }
+
+    if (arg === "--all") {
+      limit = 100;
+      continue;
+    }
+
+    const [flag, inlineValue] = arg.startsWith("--") ? arg.split("=", 2) : [arg, undefined];
+    const readValue = () => {
+      if (inlineValue !== undefined) return inlineValue;
+      const next = args[i + 1];
+      if (!next || next.startsWith("-")) {
+        console.error(`Missing value for ${flag}`);
+        printSearchUsage();
+        process.exit(1);
+      }
+      i++;
+      return next;
+    };
+
+    if (flag === "--project") {
+      project = readValue();
+      continue;
+    }
+    if (flag === "--type") {
+      type = readValue();
+      continue;
+    }
+    if (flag === "--limit") {
+      const parsed = Number.parseInt(readValue(), 10);
+      if (Number.isNaN(parsed) || parsed < 1 || parsed > 200) {
+        console.error("Invalid --limit value. Use an integer between 1 and 200.");
+        process.exit(1);
+      }
+      limit = parsed;
+      continue;
+    }
+
+    if (arg.startsWith("-")) {
+      console.error(`Unknown search flag: ${arg}`);
+      printSearchUsage();
+      process.exit(1);
+    }
+
+    queryParts.push(arg);
+  }
+
+  if (project && !isValidProjectName(project)) {
+    console.error(`Invalid project name: "${project}"`);
+    process.exit(1);
+  }
+
+  let normalizedType: string | undefined;
+  if (type) {
+    normalizedType = SEARCH_TYPE_ALIASES[type.toLowerCase()] || type.toLowerCase();
+    if (!SEARCH_TYPES.has(normalizedType)) {
+      console.error(`Invalid --type value: "${type}"`);
+      printSearchUsage();
+      process.exit(1);
+    }
+  }
+
+  const query = queryParts.join(" ").trim();
+  if (!query && !project) {
+    console.error("Provide a query, or pass --project to browse a project's indexed docs.");
+    printSearchUsage();
+    process.exit(1);
+  }
+
+  return {
+    query,
+    limit,
+    project,
+    type: normalizedType,
+  };
+}
+
 export async function runCliCommand(command: string, args: string[]) {
   switch (command) {
     case "search":
-      return handleSearch(args.join(" "));
+      {
+        const opts = parseSearchArgs(args);
+        if (!opts) return;
+        return handleSearch(opts);
+      }
     case "hook-prompt":
       return handleHookPrompt();
     case "hook-context":
@@ -370,33 +493,59 @@ function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string
   }
 }
 
-async function handleSearch(rawQuery: string) {
-  if (!rawQuery.trim()) {
-    console.error("Usage: cortex search <query>");
-    process.exit(1);
-  }
-
+async function handleSearch(opts: SearchOptions) {
   const db = await buildIndex(cortexPath, profile);
-  const safeQuery = expandSynonyms(sanitizeFts5Query(rawQuery));
-  if (!safeQuery) {
-    console.error("Query empty after sanitization.");
-    process.exit(1);
-  }
 
   try {
-    const rows = queryRows(
-      db,
-      "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 3",
-      [safeQuery]
-    );
+    let sql = "SELECT project, filename, type, content, path FROM docs";
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (opts.query) {
+      const safeQuery = expandSynonyms(sanitizeFts5Query(opts.query));
+      if (!safeQuery) {
+        console.error("Query empty after sanitization.");
+        process.exit(1);
+      }
+      where.push("docs MATCH ?");
+      params.push(safeQuery);
+    }
+    if (opts.project) {
+      where.push("project = ?");
+      params.push(opts.project);
+    }
+    if (opts.type) {
+      where.push("type = ?");
+      params.push(opts.type);
+    }
+
+    if (where.length > 0) {
+      sql += ` WHERE ${where.join(" AND ")}`;
+    }
+    sql += opts.query ? " ORDER BY rank LIMIT ?" : " ORDER BY project, type, filename LIMIT ?";
+    params.push(opts.limit);
+
+    const rows = queryRows(db, sql, params);
 
     if (!rows) {
+      const scope = [
+        opts.query ? `query "${opts.query}"` : undefined,
+        opts.project ? `project "${opts.project}"` : undefined,
+        opts.type ? `type "${opts.type}"` : undefined,
+      ].filter(Boolean).join(", ");
+      console.log(scope ? `No results found for ${scope}.` : "No results found.");
       process.exit(0);
+    }
+
+    if (opts.project && !opts.query) {
+      console.log(`Browsing ${rows.length} document(s) in project "${opts.project}"`);
+      if (opts.type) console.log(`Type filter: ${opts.type}`);
+      console.log();
     }
 
     for (const row of rows) {
       const [project, filename, docType, content] = row as string[];
-      const snippet = extractSnippet(content, rawQuery);
+      const snippet = extractSnippet(content, opts.query, 7);
       console.log(`[${project}/${filename}] (${docType})`);
       console.log(snippet);
       console.log();

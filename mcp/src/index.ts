@@ -15,7 +15,8 @@ Usage:
   npx @alaarab/cortex link [--machine <n>] [--profile <n>] [--register] [--task debugging|planning|clean] [--all-tools] [--mcp on|off]
                                                  Sync profile, symlinks, hooks, and context (replaces link.sh)
                                                  --all-tools: configure hooks for all agents (default: auto-detect)
-  npx @alaarab/cortex search <query>             Search your knowledge base
+  npx @alaarab/cortex search <query> [--project <name>] [--type <type>] [--limit <n>] [--all]
+                                                 Search your knowledge base (or browse a project with --project)
   npx @alaarab/cortex add-learning <project> "<insight>"
                                                  Add a learning to a project
   npx @alaarab/cortex hook-prompt                (used by Claude Code UserPromptSubmit hook)
@@ -397,28 +398,44 @@ async function main() {
       inputSchema: z.object({
         query: z.string().describe("Search query (supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes)"),
         limit: z.number().min(1).max(20).optional().describe("Max results to return (1-20, default 5)"),
+        project: z.string().optional().describe("Filter by project name."),
         type: z.enum(["claude", "learnings", "knowledge", "skills", "summary", "backlog", "changelog", "canonical", "memory-queue", "skill", "other"])
           .optional()
           .describe("Filter by document type: claude, learnings, knowledge, summary, backlog, skill"),
       }),
     },
-    async ({ query, limit, type }) => {
+    async ({ query, limit, project, type }) => {
       try {
         const maxResults = limit ?? 5;
         const filterType = type === "skills" ? "skill" : type;
+        const filterProject = project?.trim();
+        if (filterProject && !isValidProjectName(filterProject)) {
+          return textResponse(`Invalid project name: "${project}"`);
+        }
         const safeQuery = expandSynonyms(sanitizeFts5Query(query));
 
         if (!safeQuery) return textResponse("Search query is empty after sanitization.");
 
-        const sql = filterType
-          ? `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND type = ? ORDER BY rank LIMIT ?`
-          : `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT ?`;
-        const params: (string | number)[] = filterType
-          ? [safeQuery, filterType, maxResults]
-          : [safeQuery, maxResults];
+        let sql = "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ?";
+        const params: (string | number)[] = [safeQuery];
+        if (filterProject) {
+          sql += " AND project = ?";
+          params.push(filterProject);
+        }
+        if (filterType) {
+          sql += " AND type = ?";
+          params.push(filterType);
+        }
+        sql += " ORDER BY rank LIMIT ?";
+        params.push(maxResults);
 
         const rows = queryRows(db, sql, params);
-        if (!rows) return textResponse(`No results found for "${query}"`);
+        if (!rows) {
+          const scope: string[] = [`"${query}"`];
+          if (filterProject) scope.push(`project=${filterProject}`);
+          if (filterType) scope.push(`type=${filterType}`);
+          return textResponse(`No results found for ${scope.join(", ")}`);
+        }
 
         const formatted = rows.map((row: any[]) => {
           const [project, filename, docType, content, filePath] = row as string[];
@@ -426,7 +443,10 @@ async function main() {
           return `### ${project}/${filename} (${docType})\n${snippet}\n\n\`${filePath}\``;
         });
 
-        return textResponse(`Found ${rows.length} result(s) for "${query}":\n\n${formatted.join("\n\n---\n\n")}`);
+        const scope: string[] = [`"${query}"`];
+        if (filterProject) scope.push(`project=${filterProject}`);
+        if (filterType) scope.push(`type=${filterType}`);
+        return textResponse(`Found ${rows.length} result(s) for ${scope.join(", ")}:\n\n${formatted.join("\n\n---\n\n")}`);
       } catch (err: any) {
         return textResponse(`Search error: ${err.message}`);
       }
