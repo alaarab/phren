@@ -31,6 +31,7 @@ const FILE_TYPE_MAP: Record<string, string> = {
 function classifyFile(filename: string, relPath: string): string {
   const mapped = FILE_TYPE_MAP[filename.toLowerCase()];
   if (mapped) return mapped;
+  if (relPath.includes("knowledge/") || relPath.includes("knowledge\\")) return "knowledge";
   if (relPath.includes("skills/") || relPath.includes("skills\\")) return "skill";
   return "other";
 }

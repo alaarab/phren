@@ -711,6 +711,40 @@ export function upsertCanonicalMemory(cortexPath: string, project: string, memor
   return `Pinned canonical memory in ${project}.`;
 }
 
+export function isDuplicateLearning(existingContent: string, newLearning: string, threshold = 0.6): boolean {
+  const normalize = (text: string): string[] => {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 2);
+  };
+
+  const newWords = normalize(newLearning);
+  if (newWords.length === 0) return false;
+  const newSet = new Set(newWords);
+
+  const bullets = existingContent.split("\n").filter(l => l.startsWith("- "));
+  for (const bullet of bullets) {
+    const existingWords = normalize(bullet);
+    if (existingWords.length === 0) continue;
+    const existingSet = new Set(existingWords);
+
+    let overlap = 0;
+    for (const w of newSet) {
+      if (existingSet.has(w)) overlap++;
+    }
+
+    const smaller = Math.min(newSet.size, existingSet.size);
+    if (smaller > 0 && overlap / smaller > threshold) {
+      debugLog(`duplicate-detection: skipping learning, ${Math.round((overlap / smaller) * 100)}% overlap with existing: "${bullet.slice(0, 80)}"`);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function addLearningToFile(
   cortexPath: string,
   project: string,
@@ -757,6 +791,11 @@ export function addLearningToFile(
 
   const content = fs.readFileSync(learningsPath, "utf8");
 
+  if (isDuplicateLearning(content, bullet)) {
+    debugLog(`add_learning: skipped duplicate for "${project}": ${bullet.slice(0, 80)}`);
+    return `Skipped duplicate learning for "${project}": already exists with similar wording.`;
+  }
+
   const issues = validateLearningsFormat(content);
   if (issues.length > 0) {
     debugLog(`LEARNINGS.md format warnings for "${project}": ${issues.join("; ")}`);
@@ -785,5 +824,202 @@ export function addLearningToFile(
     "add_learning",
     `project=${project} citation_commit=${citation.commit ?? "none"} citation_file=${citation.file ?? "none"}`
   );
+
+  // Size cap: auto-archive oldest entries when LEARNINGS.md exceeds the cap
+  const DEFAULT_LEARNINGS_CAP = 20;
+  const cap = Number.parseInt(process.env.CORTEX_LEARNINGS_CAP || "", 10) || DEFAULT_LEARNINGS_CAP;
+  const afterContent = fs.readFileSync(learningsPath, "utf8");
+  const activeCount = countActiveLearnings(afterContent);
+  if (activeCount > cap) {
+    const archived = autoArchiveToKnowledge(cortexPath, project, cap);
+    if (archived > 0) {
+      debugLog(`Size cap: archived ${archived} oldest entries for "${project}" (cap=${cap})`);
+    }
+  }
+
   return `Added learning to ${project}: ${bullet} (with citation metadata)`;
+}
+
+// ── Knowledge tier helpers ───────────────────────────────────────────────────
+
+const TOPIC_PATTERNS: Array<{ topic: string; keywords: RegExp }> = [
+  { topic: "architecture", keywords: /\b(architecture|design|structure|pattern|layer|module|component|system|schema|model|migration|database|api|endpoint|route)\b/i },
+  { topic: "workflow", keywords: /\b(workflow|deploy|ci|cd|pipeline|build|release|publish|test|lint|script|hook|git|branch|merge|npm|package)\b/i },
+  { topic: "gotchas", keywords: /\b(gotcha|caveat|bug|workaround|hack|issue|problem|error|fail|break|crash|conflict|race|edge case|timeout|memory leak)\b/i },
+  { topic: "patterns", keywords: /\b(convention|style|naming|format|import|export|type|interface|class|function|async|promise|callback|event|signal|state)\b/i },
+];
+
+function classifyTopic(bullet: string): string {
+  for (const { topic, keywords } of TOPIC_PATTERNS) {
+    if (keywords.test(bullet)) return topic;
+  }
+  return "general";
+}
+
+/**
+ * Count active (non-archived) learning entries in LEARNINGS.md content.
+ * Entries inside <details> blocks are considered archived.
+ */
+export function countActiveLearnings(content: string): number {
+  let inDetails = false;
+  let count = 0;
+  for (const line of content.split("\n")) {
+    if (line.includes("<details>")) { inDetails = true; continue; }
+    if (line.includes("</details>")) { inDetails = false; continue; }
+    if (!inDetails && line.startsWith("- ")) count++;
+  }
+  return count;
+}
+
+interface ParsedEntry {
+  date: string;
+  bullet: string;
+  citation?: string;
+  lineIndex: number;
+}
+
+/**
+ * Parse active (non-archived) entries from LEARNINGS.md, oldest first.
+ */
+function parseActiveEntries(content: string): ParsedEntry[] {
+  const lines = content.split("\n");
+  const entries: ParsedEntry[] = [];
+  let currentDate = "";
+  let inDetails = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes("<details>")) { inDetails = true; continue; }
+    if (line.includes("</details>")) { inDetails = false; continue; }
+    if (inDetails) continue;
+
+    const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+    if (heading) { currentDate = heading[1]; continue; }
+
+    if (line.startsWith("- ") && currentDate) {
+      const next = lines[i + 1] || "";
+      const hasCitation = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->/.test(next);
+      entries.push({
+        date: currentDate,
+        bullet: line,
+        citation: hasCitation ? next : undefined,
+        lineIndex: i,
+      });
+      if (hasCitation) i++;
+    }
+  }
+
+  // Sort oldest first (earliest date, then by line order within that date)
+  entries.sort((a, b) => a.date.localeCompare(b.date) || a.lineIndex - b.lineIndex);
+  return entries;
+}
+
+/**
+ * Archive the oldest entries from LEARNINGS.md into knowledge/{topic}.md files.
+ * Keeps `keepCount` most recent entries, archives the rest grouped by topic.
+ * Returns the number of entries archived.
+ */
+export function autoArchiveToKnowledge(
+  cortexPath: string,
+  project: string,
+  keepCount: number,
+): number {
+  if (!isValidProjectName(project)) return 0;
+  const resolvedDir = safeProjectPath(cortexPath, project);
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return 0;
+  const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
+  if (!fs.existsSync(learningsPath)) return 0;
+
+  const content = fs.readFileSync(learningsPath, "utf8");
+  const entries = parseActiveEntries(content);
+  if (entries.length <= keepCount) return 0;
+
+  const toArchive = entries.slice(0, entries.length - keepCount);
+  const toKeep = new Set(entries.slice(entries.length - keepCount).map(e => e.lineIndex));
+
+  // Group archived entries by topic
+  const byTopic = new Map<string, ParsedEntry[]>();
+  for (const entry of toArchive) {
+    const topic = classifyTopic(entry.bullet);
+    if (!byTopic.has(topic)) byTopic.set(topic, []);
+    byTopic.get(topic)!.push(entry);
+  }
+
+  // Write to knowledge/{topic}.md
+  const knowledgeDir = path.join(resolvedDir, "knowledge");
+  fs.mkdirSync(knowledgeDir, { recursive: true });
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const [topic, topicEntries] of byTopic) {
+    const filePath = path.join(knowledgeDir, `${topic}.md`);
+    let existing = "";
+    if (fs.existsSync(filePath)) {
+      existing = fs.readFileSync(filePath, "utf8");
+    } else {
+      existing = `# ${project} - ${topic}\n`;
+    }
+
+    const newSection = [`\n## Archived ${today}\n`];
+    for (const entry of topicEntries) {
+      newSection.push(entry.bullet);
+    }
+    newSection.push("");
+
+    fs.writeFileSync(filePath, existing.trimEnd() + "\n" + newSection.join("\n"));
+  }
+
+  // Remove archived entries from LEARNINGS.md
+  const lines = content.split("\n");
+  const archiveLineSet = new Set<number>();
+  for (const entry of toArchive) {
+    archiveLineSet.add(entry.lineIndex);
+    if (entry.citation) archiveLineSet.add(entry.lineIndex + 1);
+  }
+
+  const filtered = lines.filter((_, i) => !archiveLineSet.has(i));
+
+  // Clean up empty date sections
+  const cleaned: string[] = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const line = filtered[i];
+    const isDateHeading = /^## \d{4}-\d{2}-\d{2}$/.test(line);
+    if (isDateHeading) {
+      // Check if next non-empty lines have any bullets
+      let hasBullets = false;
+      for (let j = i + 1; j < filtered.length; j++) {
+        const next = filtered[j].trim();
+        if (!next) continue;
+        if (next.startsWith("## ") || next.startsWith("# ")) break;
+        if (next.startsWith("- ")) { hasBullets = true; break; }
+        break;
+      }
+      if (!hasBullets) continue;
+    }
+    cleaned.push(line);
+  }
+
+  // Write consolidation marker
+  const marker = `<!-- consolidated: ${today} -->`;
+  const markerIdx = cleaned.findIndex(l => l.includes("consolidated:"));
+  if (markerIdx >= 0) {
+    cleaned[markerIdx] = marker;
+  } else {
+    // Insert after title
+    const titleIdx = cleaned.findIndex(l => l.startsWith("# "));
+    if (titleIdx >= 0) {
+      cleaned.splice(titleIdx + 1, 0, "", marker);
+    }
+  }
+
+  const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
+  fs.writeFileSync(tmpPath, cleaned.join("\n"));
+  fs.renameSync(tmpPath, learningsPath);
+
+  appendAuditLog(
+    cortexPath,
+    "auto_archive_knowledge",
+    `project=${project} archived=${toArchive.length} topics=${[...byTopic.keys()].join(",")}`
+  );
+
+  return toArchive.length;
 }

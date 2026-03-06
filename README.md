@@ -189,14 +189,13 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 | `search_knowledge` | FTS5 search with synonym expansion. Filters by project, type, limit. |
 | `get_project_summary` | Summary card and file list for a project. |
 | `list_projects` | Everything in your active profile. |
-| `list_machines` | Registered machines and their profiles. |
-| `list_profiles` | All profiles and which projects each includes. |
+| `get_learnings` | Read recent learnings for a project without a search query. |
 
 ### Backlog management
 
 | Tool | What it does |
 |------|-------------|
-| `get_backlog` | Read tasks for one or all projects. |
+| `get_backlog` | Read tasks for one or all projects, or fetch a single item by ID or text. |
 | `add_backlog_item` | Add a task to the Queue section. |
 | `complete_backlog_item` | Match by text, move to Done. |
 | `update_backlog_item` | Change priority, context, or section. |
@@ -209,20 +208,22 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 | `remove_learning` | Remove by matching text. |
 | `push_changes` | Commit and push all changes. |
 
-### Memory management
+### Memory quality
 
 | Tool | What it does |
 |------|-------------|
 | `pin_memory` | Write canonical/pinned memory that bypasses decay. |
-| `govern_memories` | Queue stale/conflicting/low-value entries for review. |
-| `prune_memories` | Delete expired entries by retention policy. |
-| `consolidate_memories` | Deduplicate and rewrite LEARNINGS.md. |
 | `memory_feedback` | Record helpful/reprompt/regression outcomes. |
-| `migrate_legacy_findings` | Promote legacy findings docs into LEARNINGS/CANONICAL. |
-| `memory_policy` | Get/set retention, TTL, decay, confidence thresholds. |
-| `memory_workflow` | Get/set approval workflow settings. |
-| `memory_access` | Get/set role-based permissions. |
-| `index_policy` | Configure include/exclude globs and hidden-doc indexing. |
+
+### Data management
+
+| Tool | What it does |
+|------|-------------|
+| `export_project` | Export project data as portable JSON. |
+| `import_project` | Import project from exported JSON. |
+| `manage_project` | Archive or unarchive a project. |
+
+Governance, policy, and maintenance tools are CLI-only (see `cortex config` and `cortex maintain`).
 
 ---
 

@@ -787,14 +787,22 @@ function applyTemplate(projectDir: string, templateName: string, projectName: st
   const templateDir = path.join(TEMPLATES_DIR, templateName);
   if (!fs.existsSync(templateDir)) return false;
   fs.mkdirSync(projectDir, { recursive: true });
-  for (const entry of fs.readdirSync(templateDir, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    const src = path.join(templateDir, entry.name);
-    const dest = path.join(projectDir, entry.name);
-    let content = fs.readFileSync(src, "utf8");
-    content = content.replace(/\{\{project\}\}/g, projectName);
-    fs.writeFileSync(dest, content);
+  function copyTemplateDir(srcDir: string, destDir: string) {
+    fs.mkdirSync(destDir, { recursive: true });
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      const src = path.join(srcDir, entry.name);
+      const dest = path.join(destDir, entry.name);
+      if (entry.isDirectory()) {
+        copyTemplateDir(src, dest);
+      } else {
+        let content = fs.readFileSync(src, "utf8");
+        content = content.replace(/\{\{project\}\}/g, projectName);
+        content = content.replace(/\{\{date\}\}/g, new Date().toISOString().slice(0, 10));
+        fs.writeFileSync(dest, content);
+      }
+    }
   }
+  copyTemplateDir(templateDir, projectDir);
   return true;
 }
 

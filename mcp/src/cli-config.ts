@@ -223,7 +223,7 @@ function handleConfigTelemetry(args: string[]) {
     case "on":
       setTelemetryEnabled(cortexPath, true);
       console.log("Telemetry enabled. Local usage stats will be collected.");
-      console.log("No data is sent externally. Stats are stored in .governance/telemetry.json.");
+      console.log("No data is sent externally. Stats are stored in .runtime/telemetry.json.");
       return;
     case "off":
       setTelemetryEnabled(cortexPath, false);

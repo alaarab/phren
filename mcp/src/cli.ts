@@ -8,6 +8,7 @@ import {
   getProjectDirs,
   recordMemoryFeedback,
   flushMemoryScores,
+  runtimeFile,
   EXEC_TIMEOUT_MS,
 } from "./shared.js";
 import { buildRobustFtsQuery, isValidProjectName, STOP_WORDS } from "./utils.js";
@@ -32,6 +33,7 @@ export {
   selectSnippets,
   buildHookOutput,
   trackSessionMetrics,
+  filterBacklogByPriority,
   type HookPromptInput,
   type SelectedSnippet,
 } from "./cli-hooks.js";
@@ -105,7 +107,7 @@ interface SearchHistoryEntry {
 }
 
 function historyFile(): string {
-  return path.join(cortexPath, ".governance", "search-history.jsonl");
+  return runtimeFile(cortexPath, "search-history.jsonl");
 }
 
 function readSearchHistory(): SearchHistoryEntry[] {

@@ -1896,7 +1896,7 @@ describe("CLI integration: search history", () => {
       ["search", "cache", "--project", "hist-proj", "--type", "learnings"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
-    const historyPath = path.join(cortexDir, ".governance", "search-history.jsonl");
+    const historyPath = path.join(cortexDir, ".runtime", "search-history.jsonl");
     expect(fs.existsSync(historyPath)).toBe(true);
     const lines = fs.readFileSync(historyPath, "utf8").trim().split("\n");
     const entry = JSON.parse(lines[lines.length - 1]);

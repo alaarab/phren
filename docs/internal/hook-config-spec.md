@@ -222,7 +222,7 @@ CORTEX_PATH="<escaped-path>" npx @alaarab/cortex <subcommand>
 {
   "mcpEnabled": true,
   "hooksEnabled": true,
-  "installedVersion": "1.10.2",
+  "installedVersion": "1.11.0",
   "updatedAt": "2026-03-06T00:00:00.000Z"
 }
 ```

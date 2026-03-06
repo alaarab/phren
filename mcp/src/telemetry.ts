@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { runtimeFile } from "./shared.js";
 
 interface TelemetryConfig {
   enabled: boolean;
@@ -19,12 +20,27 @@ interface TelemetryData {
   stats: UsageStats;
 }
 
+// In-memory buffer to batch disk writes
+let buffer: TelemetryData | null = null;
+let bufferPath: string | null = null;
+let pendingEvents = 0;
+const FLUSH_THRESHOLD = 10;
+
 function telemetryPath(cortexPath: string): string {
-  return path.join(cortexPath, ".governance", "telemetry.json");
+  return runtimeFile(cortexPath, "telemetry.json");
 }
 
-function loadTelemetry(cortexPath: string): TelemetryData {
+// Migrate legacy .governance/telemetry.json to .runtime/
+function migrateLegacy(cortexPath: string, newPath: string): void {
+  const legacyPath = path.join(cortexPath, ".governance", "telemetry.json");
+  if (fs.existsSync(legacyPath) && !fs.existsSync(newPath)) {
+    try { fs.renameSync(legacyPath, newPath); } catch { /* best effort */ }
+  }
+}
+
+function loadFromDisk(cortexPath: string): TelemetryData {
   const file = telemetryPath(cortexPath);
+  migrateLegacy(cortexPath, file);
   const defaults: TelemetryData = {
     config: { enabled: false },
     stats: { toolCalls: {}, cliCommands: {}, errors: 0, sessions: 0, lastActive: "" },
@@ -41,10 +57,38 @@ function loadTelemetry(cortexPath: string): TelemetryData {
   }
 }
 
+function loadTelemetry(cortexPath: string): TelemetryData {
+  if (buffer && bufferPath === cortexPath) return buffer;
+  const data = loadFromDisk(cortexPath);
+  buffer = data;
+  bufferPath = cortexPath;
+  return data;
+}
+
 function saveTelemetry(cortexPath: string, data: TelemetryData): void {
-  const file = telemetryPath(cortexPath);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+  buffer = data;
+  bufferPath = cortexPath;
+  pendingEvents++;
+  if (pendingEvents >= FLUSH_THRESHOLD) {
+    flushTelemetry();
+  }
+}
+
+export function flushTelemetry(): void {
+  if (!buffer || !bufferPath || pendingEvents === 0) return;
+  const file = telemetryPath(bufferPath);
+  try {
+    fs.writeFileSync(file, JSON.stringify(buffer, null, 2) + "\n");
+  } catch { /* best effort */ }
+  pendingEvents = 0;
+}
+
+// Register flush on process exit
+let exitHookRegistered = false;
+function ensureExitHook(): void {
+  if (exitHookRegistered) return;
+  exitHookRegistered = true;
+  process.on("exit", () => flushTelemetry());
 }
 
 export function isTelemetryEnabled(cortexPath: string): boolean {
@@ -57,12 +101,17 @@ export function setTelemetryEnabled(cortexPath: string, enabled: boolean): void 
   if (enabled && !data.config.enabledAt) {
     data.config.enabledAt = new Date().toISOString();
   }
-  saveTelemetry(cortexPath, data);
+  // Config changes flush immediately
+  buffer = data;
+  bufferPath = cortexPath;
+  pendingEvents = 1;
+  flushTelemetry();
 }
 
 export function trackToolCall(cortexPath: string, toolName: string): void {
   const data = loadTelemetry(cortexPath);
   if (!data.config.enabled) return;
+  ensureExitHook();
   data.stats.toolCalls[toolName] = (data.stats.toolCalls[toolName] || 0) + 1;
   data.stats.lastActive = new Date().toISOString();
   saveTelemetry(cortexPath, data);
@@ -71,6 +120,7 @@ export function trackToolCall(cortexPath: string, toolName: string): void {
 export function trackCliCommand(cortexPath: string, command: string): void {
   const data = loadTelemetry(cortexPath);
   if (!data.config.enabled) return;
+  ensureExitHook();
   data.stats.cliCommands[command] = (data.stats.cliCommands[command] || 0) + 1;
   data.stats.lastActive = new Date().toISOString();
   saveTelemetry(cortexPath, data);
@@ -79,6 +129,7 @@ export function trackCliCommand(cortexPath: string, command: string): void {
 export function trackError(cortexPath: string): void {
   const data = loadTelemetry(cortexPath);
   if (!data.config.enabled) return;
+  ensureExitHook();
   data.stats.errors += 1;
   saveTelemetry(cortexPath, data);
 }
@@ -86,6 +137,7 @@ export function trackError(cortexPath: string): void {
 export function trackSession(cortexPath: string): void {
   const data = loadTelemetry(cortexPath);
   if (!data.config.enabled) return;
+  ensureExitHook();
   data.stats.sessions += 1;
   data.stats.lastActive = new Date().toISOString();
   saveTelemetry(cortexPath, data);
@@ -121,5 +173,16 @@ export function getTelemetrySummary(cortexPath: string): string {
 export function resetTelemetry(cortexPath: string): void {
   const data = loadTelemetry(cortexPath);
   data.stats = { toolCalls: {}, cliCommands: {}, errors: 0, sessions: 0, lastActive: "" };
-  saveTelemetry(cortexPath, data);
+  // Reset flushes immediately
+  buffer = data;
+  bufferPath = cortexPath;
+  pendingEvents = 1;
+  flushTelemetry();
+}
+
+// Reset internal buffer state (for testing)
+export function _resetBuffer(): void {
+  buffer = null;
+  bufferPath = null;
+  pendingEvents = 0;
 }

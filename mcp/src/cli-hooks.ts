@@ -232,6 +232,26 @@ function compactSnippet(snippet: string, maxLines: number, maxChars: number): st
   return out;
 }
 
+// ── Backlog priority filtering ───────────────────────────────────────────────
+
+const PRIORITY_TAG_RE = /\[(high|medium|low)\]/i;
+
+export function filterBacklogByPriority(items: string[], allowedPriorities?: string[]): string[] {
+  const envPriorities = process.env.CORTEX_BACKLOG_PRIORITY;
+  const allowed = new Set(
+    (allowedPriorities || (envPriorities ? envPriorities.split(",").map(s => s.trim().toLowerCase()) : ["high", "medium"]))
+  );
+
+  return items.filter(item => {
+    const match = item.match(PRIORITY_TAG_RE);
+    if (!match) {
+      // Items without a priority tag pass through if high/medium are allowed (default behavior)
+      return allowed.has("high") || allowed.has("medium");
+    }
+    return allowed.has(match[1].toLowerCase());
+  });
+}
+
 // ── Session metrics ──────────────────────────────────────────────────────────
 
 interface SessionMetric {
@@ -856,7 +876,42 @@ export async function handleHookPrompt() {
     stage.selectMs = Date.now() - tSelect0;
     if (!selected.length) process.exit(0);
 
-    const parts = buildHookOutput(selected, usedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, cortexPath, sessionId);
+    // Injection budget: cap total injected tokens across all content
+    const maxInjectTokens = clampInt(process.env.CORTEX_MAX_INJECT_TOKENS, 2000, 200, 20000);
+    let budgetSelected = selected;
+    let budgetUsedTokens = usedTokens;
+    if (budgetUsedTokens > maxInjectTokens) {
+      // Priority order: active learnings first, then search results, then knowledge/
+      const priorityOrder = (s: SelectedSnippet): number => {
+        if (s.doc.type === "learnings") return 0;
+        if (s.doc.type === "canonical") return 1;
+        if (s.doc.type === "summary" || s.doc.type === "claude") return 2;
+        if (s.doc.type === "knowledge") return 4;
+        return 3;
+      };
+      const sorted = [...budgetSelected].sort((a, b) => priorityOrder(a) - priorityOrder(b));
+      const kept: SelectedSnippet[] = [];
+      let runningTokens = 36;
+      for (const s of sorted) {
+        const est = approximateTokens(s.snippet) + 14;
+        if (runningTokens + est <= maxInjectTokens || kept.length === 0) {
+          kept.push(s);
+          runningTokens += est;
+        }
+      }
+      budgetSelected = kept;
+      budgetUsedTokens = runningTokens;
+      debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
+    }
+
+    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, cortexPath, sessionId);
+    // Add budget info to trace
+    if (parts.length > 0) {
+      const traceIdx = parts.findIndex(p => p.includes("trace:"));
+      if (traceIdx !== -1) {
+        parts[traceIdx] = parts[traceIdx].replace(/tokens/, `budget=${budgetUsedTokens}/${maxInjectTokens};tokens`);
+      }
+    }
 
     const changedCount = gitCtx?.changedFiles.size ?? 0;
     if (sessionId) {
@@ -974,10 +1029,12 @@ export async function handleHookContext() {
     );
     if (backlogRow) {
       const content = backlogRow[0][0] as string;
-      const activeItems = content.split("\n").filter(l => l.startsWith("- ")).slice(0, 5);
-      if (activeItems.length > 0) {
+      const activeItems = content.split("\n").filter(l => l.startsWith("- "));
+      const filtered = filterBacklogByPriority(activeItems);
+      const trimmed = filtered.slice(0, 5);
+      if (trimmed.length > 0) {
         parts.push("## Active backlog");
-        parts.push(activeItems.join("\n"));
+        parts.push(trimmed.join("\n"));
         parts.push("");
       }
     }
