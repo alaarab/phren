@@ -1,21 +1,37 @@
 # Changelog
 
-## [Unreleased]
+## [1.11.0] - 2026-03-06
 
 ### Added
-- Wave 1 backlog delivery:
-  - #77: Added CI hardening gates for lint/test/package and docs validation.
-  - #251: Added structured shell/API error codes for more predictable automation handling.
-  - #223: Added schema/versioning guardrails for safer config and metadata evolution.
-  - #252: Added dry-run coverage for destructive lifecycle/governance operations.
-  - #225: Added OSS contributor docs (`CONTRIBUTING.md`, `SECURITY.md`, API references).
-  - #222: Added docs refresh across README, site, and whitepaper v2 artifacts.
-  - #264: Rewrote starter template with guided tour, day-to-day workflow, and P0/P1/P2 backlog examples.
-  - #265: Init success output now mentions agent restart and points to README for a guided tour.
-  - #166: Added test coverage for shell backlog subsection headers (P0, P1, P2 display).
-  - #176/#177: Verified Copilot and Cursor hook schema validation (already implemented).
-  - #276/#277/#279: Updated whitepaper architecture sections, fixed MCP tool count, regenerated PDF.
-  - #195: Added Keep a Changelog comparison links for all versions.
+- Project templates for `init`: four built-in templates (python-project, monorepo, library, frontend), each with CLAUDE.md, LEARNINGS.md, summary.md, and backlog.md. Use `--template <name>` during init.
+- `--from-existing <path>` flag on init: bootstrap a cortex project from an existing directory that already has a CLAUDE.md.
+- `@import` syntax in indexed documents: `@import shared/file.md` resolves relative to the cortex global directory, with cycle detection and depth cap.
+- `knowledge/` directory support: files in a project's `knowledge/` subdirectory are classified as `knowledge` type in the FTS index.
+- Backlog done-section stripping: completed backlog items (under `## Done`) are excluded from the FTS index to reduce noise.
+- Search history: `cortex search --history` shows recent searches, `--from-history <n>` re-runs a previous query. History stored in `.runtime/search-history.jsonl`.
+- Opt-in telemetry: local-only usage stats (tool call counts, CLI command counts, sessions, errors) stored in `.runtime/telemetry.json`. Disabled by default, enable with `cortex config telemetry on`.
+- Data portability MCP tools: `export_project` (export as JSON), `import_project` (import from JSON), `manage_project` (archive/unarchive).
+- `cortex verify` command: post-init verification that checks MCP config, hooks, global files, governance config, FTS index, and hook entrypoint.
+- `cortex uninstall` command: removes MCP server entries and hooks from all detected agent configs.
+- `cortex status` command: shows active project, profile, MCP/hooks state, project stats, and telemetry summary.
+- CI hardening: GitHub Actions workflow for build, test, and package smoke checks with strict TypeScript unused-symbol gates.
+- Schema versioning for governance config files with migration support (`cortex maintain migrate governance`).
+- Structured error codes in shell and API for more predictable automation handling.
+- Dry-run coverage for destructive lifecycle and governance operations.
+- OSS contributor docs: `CONTRIBUTING.md`, `SECURITY.md`, and API references.
+- Keep a Changelog comparison links for all versions.
+
+### Changed
+- MCP tool count: 14 to 16 (added `export_project`, `import_project`, `manage_project`; moved governance tools to CLI-only).
+- `search_cortex` renamed to `search_knowledge` (old name still works as alias).
+- Starter template rewritten with guided tour, day-to-day workflow, and P0/P1/P2 backlog examples.
+- Init success output now mentions agent restart and points to README for a guided tour.
+- Shared module split: `shared.ts` split into `shared.ts`, `shared-content.ts`, `shared-governance.ts`, and `shared-index.ts` for maintainability.
+- Test count: 296 to 686 tests across 14 test files.
+- Whitepaper architecture sections updated, MCP tool count corrected, PDF regenerated.
+
+### Fixed
+- Copilot and Cursor hook schema validation (verified working in both agents).
 
 ## [1.10.2] - 2026-03-06
 
@@ -352,7 +368,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, backlog, pipeline, release, creative
 - `@alaarab/cortex` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.10.2...HEAD
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/alaarab/cortex/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/alaarab/cortex/compare/v1.10.0...v1.10.2
 [1.10.0]: https://github.com/alaarab/cortex/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/alaarab/cortex/compare/v1.8.6...v1.9.0

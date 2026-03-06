@@ -51,6 +51,7 @@ import {
   cortexOk,
   cortexErr,
   resolveImports,
+  isDuplicateLearning,
 } from "./shared.js";
 import { isValidProjectName } from "./utils.js";
 import { grantAdmin, makeTempDir } from "./test-helpers.js";
@@ -374,6 +375,61 @@ describe("addLearningToFile", () => {
     grantAdmin(cortex);
     const result = addLearningToFile(cortex, "../etc", "bad");
     expect(result).toContain("Invalid project name");
+  });
+
+  it("skips duplicate learnings with high word overlap", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const today = new Date().toISOString().slice(0, 10);
+    makeProject(cortex, "dupeproj", {
+      "LEARNINGS.md": `# dupeproj LEARNINGS\n\n## ${today}\n\n- The auth middleware runs before rate limiting and order matters\n`,
+    });
+
+    const result = addLearningToFile(cortex, "dupeproj", "The auth middleware runs before rate limiting, order matters");
+    expect(result).toContain("Skipped duplicate");
+  });
+
+  it("allows non-duplicate learnings through", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const today = new Date().toISOString().slice(0, 10);
+    makeProject(cortex, "dupeproj2", {
+      "LEARNINGS.md": `# dupeproj2 LEARNINGS\n\n## ${today}\n\n- The auth middleware runs before rate limiting\n`,
+    });
+
+    const result = addLearningToFile(cortex, "dupeproj2", "Database indexes need to be rebuilt after migration");
+    expect(result).toContain("Added learning");
+  });
+});
+
+// --- isDuplicateLearning ---
+
+describe("isDuplicateLearning", () => {
+  it("detects duplicates with >60% word overlap", () => {
+    const existing = "- The auth middleware runs before rate limiting and order matters\n- Use parameterized queries for SQL";
+    expect(isDuplicateLearning(existing, "- The auth middleware runs before rate limiting, order matters")).toBe(true);
+  });
+
+  it("allows non-duplicates through", () => {
+    const existing = "- The auth middleware runs before rate limiting\n- Use parameterized queries for SQL";
+    expect(isDuplicateLearning(existing, "- Database indexes need rebuilding after schema migration")).toBe(false);
+  });
+
+  it("returns false for empty content", () => {
+    expect(isDuplicateLearning("", "- Some new learning")).toBe(false);
+    expect(isDuplicateLearning("# Title\n", "- Some new learning")).toBe(false);
+  });
+
+  it("returns false for empty learning", () => {
+    expect(isDuplicateLearning("- existing bullet", "")).toBe(false);
+  });
+
+  it("respects custom threshold", () => {
+    const existing = "- The auth middleware runs before rate limiting and order matters";
+    // With a very high threshold, partial matches should not count
+    expect(isDuplicateLearning(existing, "- database indexes rebuild after migration", 0.3)).toBe(false);
+    // With a low threshold, even small overlap triggers duplicate
+    expect(isDuplicateLearning(existing, "- auth middleware should validate tokens before rate limiting", 0.3)).toBe(true);
   });
 });
 

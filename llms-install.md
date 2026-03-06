@@ -71,7 +71,8 @@ Learnings are captured automatically during the session and committed when the s
 Running `npx @alaarab/cortex init` also registers Claude Code hooks:
 
 - **UserPromptSubmit**: Injects relevant cortex context into every prompt automatically
-- **Stop**: Auto-commits and pushes cortex changes when a session ends
+- **Stop**: Auto-commits and pushes cortex changes after every response
+- **SessionStart**: Pulls latest cortex changes and injects project context
 
 ## CLI subcommands
 
@@ -82,15 +83,30 @@ cortex hook-context                  # project context for cwd (used after compa
 cortex add-learning <project> "..."  # append a learning via CLI
 ```
 
-## Available MCP tools
+## Available MCP tools (16)
 
+**Search and browse:**
 - `search_knowledge(query, type?, limit?, project?)`: full-text search across all project knowledge. `type` filter: `claude`, `learnings`, `knowledge`, `summary`, `backlog`, `skill`.
 - `get_project_summary(name)`: fetch the summary for a specific project
 - `list_projects()`: list all projects in your knowledge base
-- `get_backlog(project?)`: fetch open tasks for a project (or all projects)
+- `get_learnings(project, limit?)`: read recent learnings for a project without a search query
+
+**Backlog management:**
+- `get_backlog(project?, id?, item?)`: fetch open tasks for a project (or all projects), or a single item by ID or text
 - `add_backlog_item(project, item)`: add a task to a project's backlog queue
 - `complete_backlog_item(project, item)`: match a task by text and move it to Done
 - `update_backlog_item(project, item, updates)`: update a task's priority, context, or section
-- `add_learning(project, insight)`: append a learning to LEARNINGS.md under today's date
+
+**Learning capture:**
+- `add_learning(project, learning, citation?)`: append a learning to LEARNINGS.md under today's date with optional citation
 - `remove_learning(project, text)`: remove a learning by matching text
 - `push_changes(message?)`: commit and push all cortex changes
+
+**Memory quality:**
+- `pin_memory(project, memory)`: write canonical/pinned memory that bypasses decay
+- `memory_feedback(key, feedback)`: record helpful/reprompt/regression outcomes
+
+**Data management:**
+- `export_project(project)`: export project data as portable JSON
+- `import_project(data)`: import project from exported JSON
+- `manage_project(project, action)`: archive or unarchive a project

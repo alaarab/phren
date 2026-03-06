@@ -49,7 +49,7 @@ cortex migrate-findings <project> --dry-run
 
 Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `LEARNINGS.md`, cortex creates/updates `LEARNINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/LEARNINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (22)
+## MCP Tools (16)
 
 ### Search and Browse
 
@@ -58,14 +58,13 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 | `search_knowledge` | `query`, `type?`, `limit?`, `project?` | FTS5 full-text search across your knowledge base. Supports AND, OR, NOT, phrase matching. |
 | `get_project_summary` | `name` | Returns a project's summary card, CLAUDE.md path, and list of indexed files. |
 | `list_projects` | (none) | Lists all projects in the active profile with doc badges and brief descriptions. |
-| `list_machines` | (none) | Shows registered machines and which profile each uses. |
-| `list_profiles` | (none) | Shows all profiles and their project lists. |
+| `get_learnings` | `project`, `limit?` | Read recent learnings without a search query. |
 
 ### Backlog Management
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_backlog` | `project?` | Read the backlog for one project, or all projects if omitted. |
+| `get_backlog` | `project?`, `id?`, `item?` | Read the backlog for one project, or all projects if omitted. Fetch a single item by ID or text. |
 | `add_backlog_item` | `project`, `item` | Append a task to a project's backlog Queue section. |
 | `complete_backlog_item` | `project`, `item` | Move a backlog item to Done by text match. |
 | `update_backlog_item` | `project`, `item`, `updates` | Update an item's priority, context, or section. |
@@ -78,25 +77,22 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 | `remove_learning` | `project`, `learning` | Remove a learning by text match. Use when an insight is wrong or outdated. |
 | `push_changes` | `message?` | Commit and push all cortex changes. Retries with rebase on push conflicts. |
 
-### Memory Governance
+### Memory Quality
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `pin_memory` | `project`, `memory` | Promote an important memory into CANONICAL_MEMORIES.md for priority retrieval. |
-| `govern_memories` | `project?` | Scan learnings and queue stale, citation-conflicting, or low-value entries into MEMORY_QUEUE.md. Also runs deduplication. |
-| `prune_memories` | `project?` | Delete expired entries based on retention policy. |
-| `consolidate_memories` | `project?` | Deduplicate LEARNINGS.md bullets for one or all projects. |
 | `memory_feedback` | `key`, `feedback` | Record whether an injected memory was `helpful`, a `reprompt`, or a `regression`. |
-| `migrate_legacy_findings` | `project`, `pinCanonical?`, `dryRun?` | Promote legacy findings/retro docs into LEARNINGS.md and optionally CANONICAL_MEMORIES.md. |
 
-### Policy Configuration
+### Data Management
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `memory_policy` | `mode`, `ttlDays?`, `retentionDays?`, `autoAcceptThreshold?`, `minInjectConfidence?`, `decay_d30?`/`d60?`/`d90?`/`d120?` | Read or update retention, TTL, confidence thresholds, and decay curve. |
-| `memory_workflow` | `mode`, `requireMaintainerApproval?`, `lowConfidenceThreshold?`, `riskySections?` | Read or update the approval workflow for risky memory sections. |
-| `memory_access` | `mode`, `admins?`, `maintainers?`, `contributors?`, `viewers?` | Read or update role-based memory access control. |
-| `index_policy` | `mode`, `includeGlobs?`, `excludeGlobs?`, `includeHidden?` | Configure which files the indexer includes or excludes. |
+| `export_project` | `project` | Export a project's data (learnings, backlog, summary) as portable JSON. |
+| `import_project` | `data` | Import project data from a previously exported JSON payload. |
+| `manage_project` | `project`, `action` | Archive or unarchive a project. |
+
+Governance, policy, and maintenance tools are CLI-only. Use `cortex config` and `cortex maintain` commands.
 
 ## Lifecycle Hooks
 
@@ -136,7 +132,7 @@ Learnings lose confidence as they age. The default decay multipliers:
 | 90-120 days | 0.45 | Low confidence |
 | 120+ days | 0.0 | Expired (prunable) |
 
-These values are configurable via `memory_policy` or the `memory-policy.json` governance file.
+These values are configurable via `cortex config policy` or the `memory-policy.json` governance file.
 
 ### Citation Validation
 
@@ -148,7 +144,7 @@ Entries in `CANONICAL_MEMORIES.md` are protected from pruning and decay. Use `pi
 
 ### Audit Trail
 
-All governance actions (scans, prunes, migrations, feedback) are logged to `.governance/audit.log` with timestamps and actor information. The `CORTEX_ACTOR` env var identifies who performed the action.
+All governance actions (scans, prunes, migrations, feedback) are logged to `.runtime/audit.log` with timestamps and actor information. The `CORTEX_ACTOR` env var identifies who performed the action.
 
 ### Quality Feedback Loop
 

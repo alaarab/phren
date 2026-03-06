@@ -226,12 +226,25 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
 
 // ── Memory candidate scoring ─────────────────────────────────────────────────
 
+// Reject commit-message-style subjects that lack real insight.
+// Matches patterns like "Fix typo", "Add tests", "Update README", etc.
+const COMMIT_MSG_PREFIX = /^(fix|add|update|remove|delete|rename|move|bump|revert|merge|chore|refactor|style|docs|test|ci|build|release|wip)\b/i;
+
+// Insight keywords that indicate the entry has learning value even if short.
+const INSIGHT_KEYWORDS = /\b(workaround|must|avoid|regression|root cause|postmortem|incident|retry|timeout|gotcha|caveat|pitfall|breaking|migration|order matters|race condition|deadlock|flaky)\b/i;
+
 export function scoreMemoryCandidate(subject: string, body: string): { score: number; text: string } | null {
   const s = `${subject}\n${body}`.toLowerCase();
+
+  // Reject short commit-message-style entries unless they contain insight keywords
+  const combined = `${subject} ${body}`.trim();
+  if (combined.length < 50 && !INSIGHT_KEYWORDS.test(combined)) return null;
+  if (COMMIT_MSG_PREFIX.test(subject.trim()) && !INSIGHT_KEYWORDS.test(combined)) return null;
+
   const mergedPr = /merge pull request #\d+/.test(s);
   const ci = /(ci|workflow|pipeline|flake|test fail|build fail)/.test(s);
   const review = /(review|requested changes|address comments|nit|follow-up)/.test(s);
-  const learningSignal = /(fix|workaround|must|avoid|regression|root cause|postmortem|incident|retry|timeout)/.test(s);
+  const learningSignal = INSIGHT_KEYWORDS.test(s);
 
   let score = 0.35;
   if (mergedPr) score += 0.2;

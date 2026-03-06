@@ -96,8 +96,7 @@ export function debugLog(msg: string): void {
 
 export function appendIndexEvent(cortexPath: string, event: Record<string, unknown>): void {
   try {
-    const file = path.join(cortexPath, ".governance", "index-events.jsonl");
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const file = runtimeFile(cortexPath, "index-events.jsonl");
     fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
   } catch {
     // Observability should not break the indexer.
@@ -332,5 +331,8 @@ export {
   migrateLegacyFindings,
   upsertCanonicalMemory,
   addLearningToFile,
+  isDuplicateLearning,
   clearCitationCaches,
+  countActiveLearnings,
+  autoArchiveToKnowledge,
 } from "./shared-content.js";
