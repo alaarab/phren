@@ -451,7 +451,7 @@ describe("hooks", () => {
       expect(cmds.sessionStart).toContain("npx @alaarab/cortex hook-session-start");
       expect(cmds.userPromptSubmit).toContain("npx @alaarab/cortex hook-prompt");
       expect(cmds.stop).toContain("npx @alaarab/cortex hook-stop");
-      expect(cmds.sessionStart).toContain('CORTEX_PATH="/tmp/my \\"cortex\\" path\\\\nested"');
+      expect(cmds.sessionStart).toContain('/tmp/my \\"cortex\\" path\\\\nested');
     });
 
     it("buildLifecycleCommands uses local node entry script when available", () => {

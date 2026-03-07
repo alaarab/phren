@@ -30,7 +30,7 @@ export function clearCitationValidCache(): void {
 }
 
 /** @deprecated Legacy citation formats. Use `<!-- cortex:cite {...} -->` instead. */
-const CITATION_PATTERN = /<!-- source: ([^:]+):(\d+) -->|\[file:([^:]+):(\d+)\]/g;
+const CITATION_PATTERN = /<!-- source: ((?:[a-zA-Z]:[\\\/])?[^:]+):(\d+) -->|\[file:((?:[a-zA-Z]:[\\\/])?[^:]+):(\d+)\]/g;
 
 export interface ParsedCitation {
   file?: string;
