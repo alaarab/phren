@@ -145,6 +145,7 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
 
     const getRes2 = parseResult(await server.call("get_backlog", {
       project: "integ-proj",
+      status: "all",
     }));
     expect(getRes2.ok).toBe(true);
     const doneItems = getRes2.data.items?.Done || [];
