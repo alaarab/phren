@@ -60,13 +60,21 @@ export function buildHookOutput(
     parts.push("");
     for (const injected of indexEntries) {
       recordInjection(cortexPathLocal, injected.key, sessionId);
-      recordRetrieval(cortexPathLocal, injected.doc.path, injected.doc.type);
+      try {
+        recordRetrieval(cortexPathLocal, injected.doc.path ?? injected.doc.filename, injected.doc.type);
+      } catch {
+        // best-effort
+      }
     }
   } else {
     for (const injected of selected) {
       const { doc, snippet, key } = injected;
       recordInjection(cortexPathLocal, key, sessionId);
-      recordRetrieval(cortexPathLocal, doc.path, doc.type);
+      try {
+        recordRetrieval(cortexPathLocal, doc.path ?? doc.filename, doc.type);
+      } catch {
+        // best-effort
+      }
       parts.push(`[${getDocSourceKey(doc, cortexPathLocal)}] (${doc.type})`);
       parts.push(annotateStale(snippet));
       parts.push("");
