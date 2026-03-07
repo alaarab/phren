@@ -7,7 +7,7 @@
 
 # cortex
 
-**Long-term memory for your AI agents.**
+**Long-term memory for AI agents.**
 
 [![npm](https://img.shields.io/npm/v/@alaarab/cortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
 [![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fcortex-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/)
@@ -19,7 +19,7 @@ Supports Claude Code, Copilot CLI, Cursor, and Codex.
 
 <br>
 
-Project knowledge, lessons learned, task queues: all in markdown files you own. One command to set up. Zero commands to use after that. When your prompt mentions something cortex knows about, the context is there before the agent starts thinking.
+Project knowledge, lessons learned, task queues — stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
 
 > **Quick start:** `npx @alaarab/cortex init` -- takes 30 seconds, no account needed.
 
@@ -125,7 +125,7 @@ When the agent figures out a tricky pattern or hits a subtle bug, it writes that
 
 ## What lives in your cortex
 
-Each project gets its own directory. Start with `CLAUDE.md` and add the rest as the project grows.
+`cortex init` creates your knowledge base with starter templates. Each project gets its own directory — add files as the project grows.
 
 | File | What it's for |
 |------|--------------|
@@ -198,6 +198,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 | `get_backlog` | Read tasks for one or all projects, or fetch a single item by ID or text. |
 | `add_backlog_item` | Add a task to the Queue section. |
 | `complete_backlog_item` | Match by text, move to Done. |
+| `complete_backlog_items` | Bulk complete multiple items in one call. |
 | `update_backlog_item` | Change priority, context, or section. |
 
 ### Learning capture
@@ -205,7 +206,9 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 | Tool | What it does |
 |------|-------------|
 | `add_learning` | Append under today's date with optional citation metadata. |
+| `add_learnings` | Bulk add multiple learnings in one call. |
 | `remove_learning` | Remove by matching text. |
+| `remove_learnings` | Bulk remove multiple learnings in one call. |
 | `push_changes` | Commit and push all changes. |
 
 ### Memory quality
@@ -256,7 +259,7 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 
 **Infrastructure:** `:run fix`, `:relink`, `:rerun hooks`, `:update`
 
-**Navigation:** `:open <project>`, `:search <query>`, `:page next`, `:page prev`, `:per-page <n>`, `:reset`
+**Navigation:** `:open <project>`, `:search <query>`, `:reset`
 
 ### Shell git commands
 
