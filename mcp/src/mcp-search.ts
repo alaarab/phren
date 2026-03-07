@@ -116,6 +116,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ query, limit, project, type, tag, since }) => {
       try {
+        if (query.length > 1000) return jsonResponse({ ok: false, error: "Search query exceeds 1000 character limit." });
         const db = ctx.db();
         const maxResults = limit ?? 5;
         const filterType = type === "skills" ? "skill" : type;
