@@ -281,7 +281,7 @@ function mostRecentDate(content: string): string {
 }
 
 function crossProjectAgeMultiplier(doc: DocRow, detectedProject: string | null): number {
-  if (!detectedProject || doc.project === detectedProject) return 1;
+  if (doc.type !== "findings" || !detectedProject || doc.project === detectedProject) return 1;
 
   const decayDaysRaw = Number.parseInt(process.env.CORTEX_CROSS_PROJECT_DECAY_DAYS ?? "30", 10);
   const decayDays = Number.isFinite(decayDaysRaw) && decayDaysRaw > 0 ? decayDaysRaw : 30;
