@@ -304,101 +304,110 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   if (!schemaChanged && fs.existsSync(cacheFile)) {
     try {
       const cached = fs.readFileSync(cacheFile);
-      const db = new SQL.Database(cached);
+      let db: SqlJsDatabase | undefined;
+      let shouldCloseDb = true;
+      try {
+        db = new SQL.Database(cached);
 
-      // Compute current file hashes and determine what changed
-      const allFiles = collectAllFiles(cortexPath, profile);
-      const currentHashes: Record<string, string> = {};
-      const changedFiles: FileEntry[] = [];
-      const newFiles: FileEntry[] = [];
+        // Compute current file hashes and determine what changed
+        const allFiles = collectAllFiles(cortexPath, profile);
+        const currentHashes: Record<string, string> = {};
+        const changedFiles: FileEntry[] = [];
+        const newFiles: FileEntry[] = [];
 
-      for (const entry of allFiles) {
-        try {
-          const fileHash = hashFileContent(entry.fullPath);
-          currentHashes[entry.fullPath] = fileHash;
-          if (!(entry.fullPath in savedHashes)) {
-            newFiles.push(entry);
-          } else if (savedHashes[entry.fullPath] !== fileHash) {
-            changedFiles.push(entry);
-          }
-        } catch { /* skip unreadable */ }
-      }
-
-      // Check for files missing from the index (deleted files)
-      const currentPaths = new Set(Object.keys(currentHashes));
-      const missingFromIndex = Object.keys(savedHashes).filter(p => !currentPaths.has(p));
-
-      // Force full rebuild if >20% of saved files are missing
-      const totalSaved = Object.keys(savedHashes).length;
-      if (totalSaved > 0 && missingFromIndex.length / totalSaved > 0.2) {
-        debugLog(`>20% files missing (${missingFromIndex.length}/${totalSaved}), forcing full rebuild`);
-        db.close();
-        // Fall through to full rebuild below
-      } else if (changedFiles.length === 0 && newFiles.length === 0 && missingFromIndex.length === 0) {
-        // Nothing changed, pure cache hit
-        debugLog(`Loaded FTS index from cache (${hash.slice(0, 8)}) in ${Date.now() - t0}ms`);
-        appendIndexEvent(cortexPath, {
-          event: "build_index",
-          cache: "hit",
-          hash: hash.slice(0, 12),
-          elapsedMs: Date.now() - t0,
-          profile: profile || "",
-        });
-        return db;
-      } else {
-        // Incremental update: apply each file change atomically to avoid losing docs on crash.
-        const changedPaths = new Set(changedFiles.map(entry => entry.fullPath));
-        for (const missingPath of missingFromIndex) {
-          try { deleteEntityLinksForDocPath(db, cortexPath, missingPath); } catch { /* ignore */ }
-          try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch { /* ignore */ }
-        }
-
-        let updatedCount = 0;
-        for (const entry of [...changedFiles, ...newFiles]) {
-          db.run("BEGIN");
+        for (const entry of allFiles) {
           try {
-            if (changedPaths.has(entry.fullPath)) {
-              db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
-              deleteEntityLinksForDocPath(db, cortexPath, entry.fullPath, entry.project, entry.filename);
+            const fileHash = hashFileContent(entry.fullPath);
+            currentHashes[entry.fullPath] = fileHash;
+            if (!(entry.fullPath in savedHashes)) {
+              newFiles.push(entry);
+            } else if (savedHashes[entry.fullPath] !== fileHash) {
+              changedFiles.push(entry);
             }
-
-            if (insertFileIntoIndex(db, entry, cortexPath)) {
-              updatedCount++;
-              if (entry.type === "findings") {
-                try {
-                  const content = fs.readFileSync(entry.fullPath, "utf-8");
-                  extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
-                } catch { /* skip entity extraction errors */ }
-              }
-            }
-
-            db.run("COMMIT");
-          } catch (err: unknown) {
-            try { db.run("ROLLBACK"); } catch { /* ignore */ }
-            throw err;
-          }
+          } catch { /* skip unreadable */ }
         }
 
-        saveHashMap(cortexPath, currentHashes);
+        // Check for files missing from the index (deleted files)
+        const currentPaths = new Set(Object.keys(currentHashes));
+        const missingFromIndex = Object.keys(savedHashes).filter(p => !currentPaths.has(p));
 
-        // Save updated cache
-        try {
-          fs.mkdirSync(cacheDir, { recursive: true });
-          fs.writeFileSync(cacheFile, db.export());
-        } catch { /* best-effort */ }
+        // Force full rebuild if >20% of saved files are missing
+        const totalSaved = Object.keys(savedHashes).length;
+        if (totalSaved > 0 && missingFromIndex.length / totalSaved > 0.2) {
+          debugLog(`>20% files missing (${missingFromIndex.length}/${totalSaved}), forcing full rebuild`);
+          // Fall through to full rebuild below
+        } else if (changedFiles.length === 0 && newFiles.length === 0 && missingFromIndex.length === 0) {
+          // Nothing changed, pure cache hit
+          debugLog(`Loaded FTS index from cache (${hash.slice(0, 8)}) in ${Date.now() - t0}ms`);
+          appendIndexEvent(cortexPath, {
+            event: "build_index",
+            cache: "hit",
+            hash: hash.slice(0, 12),
+            elapsedMs: Date.now() - t0,
+            profile: profile || "",
+          });
+          shouldCloseDb = false;
+          return db;
+        } else {
+          // Incremental update: apply each file change atomically to avoid losing docs on crash.
+          const changedPaths = new Set(changedFiles.map(entry => entry.fullPath));
+          for (const missingPath of missingFromIndex) {
+            try { deleteEntityLinksForDocPath(db, cortexPath, missingPath); } catch { /* ignore */ }
+            try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch { /* ignore */ }
+          }
 
-        const incMs = Date.now() - t0;
-        debugLog(`Incremental FTS update: ${updatedCount} changed, ${missingFromIndex.length} removed in ${incMs}ms`);
-        appendIndexEvent(cortexPath, {
-          event: "build_index",
-          cache: "incremental",
-          hash: hash.slice(0, 12),
-          files: updatedCount,
-          removed: missingFromIndex.length,
-          elapsedMs: incMs,
-          profile: profile || "",
-        });
-        return db;
+          let updatedCount = 0;
+          for (const entry of [...changedFiles, ...newFiles]) {
+            db.run("BEGIN");
+            try {
+              if (changedPaths.has(entry.fullPath)) {
+                db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
+                deleteEntityLinksForDocPath(db, cortexPath, entry.fullPath, entry.project, entry.filename);
+              }
+
+              if (insertFileIntoIndex(db, entry, cortexPath)) {
+                updatedCount++;
+                if (entry.type === "findings") {
+                  try {
+                    const content = fs.readFileSync(entry.fullPath, "utf-8");
+                    extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
+                  } catch { /* skip entity extraction errors */ }
+                }
+              }
+
+              db.run("COMMIT");
+            } catch (err: unknown) {
+              try { db.run("ROLLBACK"); } catch { /* ignore */ }
+              throw err;
+            }
+          }
+
+          saveHashMap(cortexPath, currentHashes);
+
+          // Save updated cache
+          try {
+            fs.mkdirSync(cacheDir, { recursive: true });
+            fs.writeFileSync(cacheFile, db.export());
+          } catch { /* best-effort */ }
+
+          const incMs = Date.now() - t0;
+          debugLog(`Incremental FTS update: ${updatedCount} changed, ${missingFromIndex.length} removed in ${incMs}ms`);
+          appendIndexEvent(cortexPath, {
+            event: "build_index",
+            cache: "incremental",
+            hash: hash.slice(0, 12),
+            files: updatedCount,
+            removed: missingFromIndex.length,
+            elapsedMs: incMs,
+            profile: profile || "",
+          });
+          shouldCloseDb = false;
+          return db;
+        }
+      } finally {
+        if (shouldCloseDb) {
+          db?.close();
+        }
       }
     } catch {
       debugLog(`Cache load failed, rebuilding index`);
