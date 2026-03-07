@@ -243,13 +243,13 @@ export function upsertCanonical(cortexPath: string, project: string, memory: str
   const canonicalPath = path.join(resolvedDir, "CANONICAL_MEMORIES.md");
   const today = new Date().toISOString().slice(0, 10);
   const bullet = memory.startsWith("- ") ? memory : `- ${memory}`;
+  let canonicalContent = "";
 
   withFileLock(canonicalPath, () => {
     if (!fs.existsSync(canonicalPath)) {
-      fs.writeFileSync(
-        canonicalPath,
-        `# ${project} Canonical Memories\n\n## Pinned\n\n${bullet} _(pinned ${today})_\n`
-      );
+      const initial = `# ${project} Canonical Memories\n\n## Pinned\n\n${bullet} _(pinned ${today})_\n`;
+      fs.writeFileSync(canonicalPath, initial);
+      canonicalContent = initial;
     } else {
       const existing = fs.readFileSync(canonicalPath, "utf8");
       const line = `${bullet} _(pinned ${today})_`;
@@ -257,14 +257,17 @@ export function upsertCanonical(cortexPath: string, project: string, memory: str
         const updated = existing.includes("## Pinned")
           ? existing.replace("## Pinned", `## Pinned\n\n${line}`)
           : `${existing.trimEnd()}\n\n## Pinned\n\n${line}\n`;
+        const finalContent = updated.endsWith("\n") ? updated : updated + "\n";
         const tmpPath = canonicalPath + ".tmp";
-        fs.writeFileSync(tmpPath, updated.endsWith("\n") ? updated : updated + "\n");
+        fs.writeFileSync(tmpPath, finalContent);
         fs.renameSync(tmpPath, canonicalPath);
+        canonicalContent = finalContent;
+      } else {
+        canonicalContent = existing;
       }
     }
   });
 
-  const canonicalContent = fs.readFileSync(canonicalPath, "utf8");
   const locks = loadCanonicalLocks(cortexPath);
   const lockKey = `${project}/CANONICAL_MEMORIES.md`;
   locks[lockKey] = {
