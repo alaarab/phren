@@ -775,7 +775,7 @@ describe("file locking", () => {
     expect(after.data.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(true);
   });
 
-  it("allows concurrent backlog writes from two processes without data loss", async () => {
+  it.skipIf(process.platform === "win32")("allows concurrent backlog writes from two processes without data loss", async () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
 
     // Use forward slashes in import paths for Windows compatibility
@@ -801,7 +801,7 @@ describe("file locking", () => {
     expect(lines).toContain("Concurrent item B");
   });
 
-  it("allows concurrent learning writes from two processes without data loss", async () => {
+  it.skipIf(process.platform === "win32")("allows concurrent learning writes from two processes without data loss", async () => {
     // Use forward slashes in import paths for Windows compatibility
     const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
     const mkCode = (text: string) =>

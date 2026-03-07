@@ -101,11 +101,17 @@ describe("hooks", () => {
       const fakeBin = path.join(tmpRoot, "bin");
       fs.mkdirSync(fakeBin, { recursive: true });
       for (const tool of ["copilot", "cursor", "codex"]) {
-        const file = path.join(fakeBin, tool);
-        fs.writeFileSync(file, "#!/bin/sh\nexit 0\n");
-        fs.chmodSync(file, 0o755);
+        if (process.platform === "win32") {
+          // where.exe only finds files with PATHEXT extensions; use .cmd wrappers
+          fs.writeFileSync(path.join(fakeBin, `${tool}.cmd`), `@echo off\r\nexit /b 0\r\n`);
+        } else {
+          const file = path.join(fakeBin, tool);
+          fs.writeFileSync(file, "#!/bin/sh\nexit 0\n");
+          fs.chmodSync(file, 0o755);
+        }
       }
-      process.env.PATH = `${fakeBin}:${origPath || ""}`;
+      // Use path.delimiter so PATH uses ';' on Windows and ':' on Unix
+      process.env.PATH = `${fakeBin}${path.delimiter}${origPath || ""}`;
     }
 
     it("writes valid Copilot hook config with correct schema", () => {
@@ -405,11 +411,15 @@ describe("hooks", () => {
       const fakeBin = path.join(tmp.path, "bin");
       fs.mkdirSync(fakeBin, { recursive: true });
       for (const tool of ["github-copilot-cli", "cursor", "codex"]) {
-        const file = path.join(fakeBin, tool);
-        fs.writeFileSync(file, "#!/bin/sh\nexit 0\n");
-        fs.chmodSync(file, 0o755);
+        if (process.platform === "win32") {
+          fs.writeFileSync(path.join(fakeBin, `${tool}.cmd`), `@echo off\r\nexit /b 0\r\n`);
+        } else {
+          const file = path.join(fakeBin, tool);
+          fs.writeFileSync(file, "#!/bin/sh\nexit 0\n");
+          fs.chmodSync(file, 0o755);
+        }
       }
-      process.env.PATH = `${fakeBin}:${origPath || ""}`;
+      process.env.PATH = `${fakeBin}${path.delimiter}${origPath || ""}`;
 
       const detected = detectInstalledTools();
       expect(detected).toEqual(new Set(["copilot", "cursor", "codex"]));

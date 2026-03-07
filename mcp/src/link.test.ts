@@ -103,7 +103,7 @@ describe("link", () => {
       await runLink(cortexPath, { machine: "test-machine", profile: "test" });
 
       // Check MEMORY.md was created with displayName output
-      const projectKey = homeDir.replace(/[/\\]/g, "-").replace(/^-/, "");
+      const projectKey = homeDir.replace(/[/\\:]/g, "-").replace(/^-/, "");
       const memoryFile = path.join(
         homeDir, ".claude", "projects", projectKey, "memory", "MEMORY.md"
       );
@@ -307,7 +307,7 @@ describe("link", () => {
 
       await runLink(cortexPath, { machine: "test-machine", profile: "test" });
 
-      const projectKey = homeDir.replace(/[/\\]/g, "-").replace(/^-/, "");
+      const projectKey = homeDir.replace(/[/\\:]/g, "-").replace(/^-/, "");
       const memDir = path.join(homeDir, ".claude", "projects", projectKey, "memory");
       const perProject = path.join(memDir, "MEMORY-mem-project.md");
       expect(fs.existsSync(perProject)).toBe(true);
@@ -329,7 +329,7 @@ describe("link", () => {
       fs.writeFileSync(path.join(cortexProject, "summary.md"), "**What:** Preserve project\n");
 
       // Pre-populate MEMORY.md with custom header
-      const projectKey = homeDir.replace(/[/\\]/g, "-").replace(/^-/, "");
+      const projectKey = homeDir.replace(/[/\\:]/g, "-").replace(/^-/, "");
       const memDir = path.join(homeDir, ".claude", "projects", projectKey, "memory");
       fs.mkdirSync(memDir, { recursive: true });
       fs.writeFileSync(
@@ -380,7 +380,7 @@ describe("link", () => {
       }
 
       // MEMORY.md should list both
-      const projectKey = homeDir.replace(/[/\\]/g, "-").replace(/^-/, "");
+      const projectKey = homeDir.replace(/[/\\:]/g, "-").replace(/^-/, "");
       const memFile = path.join(homeDir, ".claude", "projects", projectKey, "memory", "MEMORY.md");
       const content = fs.readFileSync(memFile, "utf8");
       expect(content).toContain("Proj A");
