@@ -252,6 +252,7 @@ import {
   upsertCanonicalMemory,
   recordMemoryFeedback,
   flushMemoryScores,
+  runtimeDir,
   EXEC_TIMEOUT_MS,
 } from "./shared.js";
 import { runCustomHooks } from "./hooks.js";
@@ -276,11 +277,30 @@ function textResponse(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
+function cleanStaleLocks(cortexPath: string): void {
+  const dir = runtimeDir(cortexPath);
+  try {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir)) {
+      if (!entry.endsWith(".lock")) continue;
+      const lockPath = path.join(dir, entry);
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > 600_000) {
+          fs.unlinkSync(lockPath);
+          debugLog(`Cleaned stale lock: ${entry}`);
+        }
+      } catch { /* lock may have been removed concurrently */ }
+    }
+  } catch { /* best effort */ }
+}
+
 function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
   return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
 }
 
 async function main() {
+  cleanStaleLocks(cortexPath);
   let db = await buildIndex(cortexPath, profile);
   let writeQueue: Promise<void> = Promise.resolve();
   async function rebuildIndex() {
@@ -688,6 +708,30 @@ async function main() {
   );
 
   server.registerTool(
+    "add_backlog_items",
+    {
+      title: "◆ cortex · add tasks (bulk)",
+      description: "Append multiple tasks to a project's backlog.md in one call. Adds to the Queue section.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        items: z.array(z.string()).describe("List of tasks to add."),
+      }),
+    },
+    async ({ project, items }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const results: { item: string; ok: boolean; message: string }[] = [];
+        for (const item of items) {
+          const result = addBacklogItemStore(cortexPath, project, item);
+          results.push({ item, ok: result.ok, message: result.ok ? result.data : result.error ?? "unknown error" });
+        }
+        const succeeded = results.filter((r) => r.ok).length;
+        return jsonResponse({ ok: succeeded > 0, message: `Added ${succeeded} of ${items.length} items to ${project} backlog`, data: { project, results } });
+      });
+    }
+  );
+
+  server.registerTool(
     "complete_backlog_item",
     {
       title: "◆ cortex · done",
@@ -855,6 +899,7 @@ async function main() {
       }),
     },
     async ({ project, learning }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = removeLearningStore(cortexPath, project, learning);
         await rebuildIndex();
@@ -970,7 +1015,11 @@ async function main() {
           if (pushed) {
             return jsonResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). Pushed to remote.`, data: { files: changedFiles, pushed: true } });
           } else {
-            return jsonResponse({ ok: true, message: `Saved ${changedFiles} changed file(s) locally. Push failed: ${lastPushError}`, data: { files: changedFiles, pushed: false, pushError: lastPushError } });
+            return jsonResponse({
+              ok: true,
+              message: `Changes were committed but push failed.\n\nGit error: ${lastPushError}\n\nRun 'git push' manually from your cortex directory.`,
+              data: { files: changedFiles, pushed: false, pushError: lastPushError },
+            });
           }
         } catch (err: any) {
           return jsonResponse({ ok: false, error: `Save failed: ${err.message}` });

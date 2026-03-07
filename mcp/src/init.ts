@@ -5,6 +5,7 @@ import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { buildLifecycleCommands, configureAllHooks } from "./hooks.js";
 import { debugLog, EXEC_TIMEOUT_QUICK_MS, GOVERNANCE_SCHEMA_VERSION, migrateGovernanceFiles } from "./shared.js";
+import { isValidProjectName } from "./utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..", "..");
@@ -1018,6 +1019,11 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   const mcp: McpMode = (mcpAnswer === "n" || mcpAnswer === "no") ? "off" : "on";
 
   const projectAnswer = (await ask(`\nFirst project name (or press Enter to use "my-first-project"): `)).trim();
+  if (projectAnswer && !isValidProjectName(projectAnswer)) {
+    log(`Invalid project name "${projectAnswer}". Use lowercase letters, numbers, and hyphens (max 100 chars).`);
+    rl.close();
+    process.exit(1);
+  }
   const projectName = projectAnswer || undefined;
 
   rl.close();
@@ -1182,6 +1188,20 @@ export async function runInit(opts: InitOptions = {}) {
   log("\nSetting up cortex...\n");
 
   const walkthroughProject = opts._walkthroughProject;
+  if (walkthroughProject) {
+    if (!walkthroughProject.trim()) {
+      console.error("Error: project name cannot be empty.");
+      process.exit(1);
+    }
+    if (walkthroughProject.length > 100) {
+      console.error("Error: project name must be 100 characters or fewer.");
+      process.exit(1);
+    }
+    if (!isValidProjectName(walkthroughProject)) {
+      console.error(`Error: invalid project name "${walkthroughProject}". Use lowercase letters, numbers, and hyphens.`);
+      process.exit(1);
+    }
+  }
   const firstProjectName = walkthroughProject || "my-first-project";
 
   // Copy bundled starter to ~/.cortex
