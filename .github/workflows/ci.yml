@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - name: Publish dry-run
+        run: npm publish --dry-run
 
   lint:
     runs-on: ubuntu-latest

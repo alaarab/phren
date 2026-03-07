@@ -1,7 +1,7 @@
 {
   "name": "@alaarab/cortex",
   "version": "1.12.10",
-  "description": "Long-term memory for Claude Code",
+  "description": "Long-term memory for AI agents — stored as markdown in a git repo you own.",
   "type": "module",
   "bin": {
     "cortex": "mcp/dist/index.js"
@@ -37,7 +37,7 @@
     "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "keywords": [
     "claude",
