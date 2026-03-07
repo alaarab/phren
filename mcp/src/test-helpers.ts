@@ -10,7 +10,14 @@ export function makeTempDir(prefix: string): { path: string; cleanup: () => void
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   return {
     path: dir,
-    cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
+    cleanup: () => {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // On Windows, SQLite WAL files or antivirus scans can briefly lock files
+        // after a process exits, causing ENOTEMPTY/EBUSY. Safe to ignore for temp dirs.
+      }
+    },
   };
 }
 
