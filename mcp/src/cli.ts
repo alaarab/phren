@@ -79,6 +79,7 @@ import {
   handleWorkflowPolicy,
   handleAccessControl,
 } from "./cli-config.js";
+import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 
 let _cortexPath: string | undefined;
 function getCortexPath(): string {
@@ -370,6 +371,10 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleMaintain(args);
     case "skill-list":
       return handleSkillList();
+    case "skills":
+      return handleSkillsNamespace(args);
+    case "hooks":
+      return handleHooksNamespace(args);
     case "backlog":
       return handleBacklogView();
     case "quickstart":
@@ -405,7 +410,7 @@ async function handleSearch(opts: SearchOptions) {
     const params: Array<string | number> = [];
 
     if (opts.query) {
-      const safeQuery = buildRobustFtsQuery(opts.query);
+      const safeQuery = buildRobustFtsQuery(opts.query, opts.project);
       if (!safeQuery) {
         console.error("Query empty after sanitization.");
         process.exit(1);
@@ -598,14 +603,168 @@ async function handleUpdate(args: string[]) {
   console.log(result);
 }
 
+const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
+type HookToolName = typeof HOOK_TOOLS[number];
+
+function printSkillsUsage() {
+  console.log("Usage:");
+  console.log("  cortex skills list");
+  console.log("  cortex skills add <project> <path>");
+  console.log("  cortex skills remove <project> <name>");
+}
+
+function printHooksUsage() {
+  console.log("Usage:");
+  console.log("  cortex hooks list");
+  console.log("  cortex hooks enable <tool>");
+  console.log("  cortex hooks disable <tool>");
+  console.log("  tools: claude|copilot|cursor|codex");
+}
+
+function normalizeHookTool(raw: string | undefined): HookToolName | null {
+  if (!raw) return null;
+  const tool = raw.toLowerCase();
+  return HOOK_TOOLS.includes(tool as HookToolName) ? tool as HookToolName : null;
+}
+
+function handleSkillsNamespace(args: string[]) {
+  const subcommand = args[0];
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    printSkillsUsage();
+    return;
+  }
+
+  if (subcommand === "list") {
+    handleSkillList();
+    return;
+  }
+
+  if (subcommand === "add") {
+    const project = args[1];
+    const skillPath = args[2];
+    if (!project || !skillPath) {
+      printSkillsUsage();
+      process.exit(1);
+    }
+    if (!isValidProjectName(project)) {
+      console.error(`Invalid project name: "${project}"`);
+      process.exit(1);
+    }
+
+    const source = path.resolve(skillPath.replace(/^~/, os.homedir()));
+    if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
+      console.error(`Skill file not found: ${source}`);
+      process.exit(1);
+    }
+
+    const baseName = path.basename(source);
+    const fileName = baseName.toLowerCase().endsWith(".md") ? baseName : `${baseName}.md`;
+    const destDir = path.join(getCortexPath(), project, ".claude", "skills");
+    const dest = path.join(destDir, fileName);
+    fs.mkdirSync(destDir, { recursive: true });
+
+    if (fs.existsSync(dest)) {
+      console.error(`Skill already exists: ${dest}`);
+      process.exit(1);
+    }
+
+    try {
+      fs.symlinkSync(source, dest);
+      console.log(`Linked skill ${fileName} into ${project}.`);
+    } catch {
+      fs.copyFileSync(source, dest);
+      console.log(`Copied skill ${fileName} into ${project}.`);
+    }
+    return;
+  }
+
+  if (subcommand === "remove") {
+    const project = args[1];
+    const name = args[2];
+    if (!project || !name) {
+      printSkillsUsage();
+      process.exit(1);
+    }
+    if (!isValidProjectName(project)) {
+      console.error(`Invalid project name: "${project}"`);
+      process.exit(1);
+    }
+
+    const dest = path.join(getCortexPath(), project, ".claude", "skills", `${name.replace(/\.md$/i, "")}.md`);
+    if (!fs.existsSync(dest)) {
+      console.error(`Skill not found: ${dest}`);
+      process.exit(1);
+    }
+
+    fs.unlinkSync(dest);
+    console.log(`Removed skill ${name.replace(/\.md$/i, "")}.md from ${project}.`);
+    return;
+  }
+
+  console.error(`Unknown skills subcommand: ${subcommand}`);
+  printSkillsUsage();
+  process.exit(1);
+}
+
+function handleHooksNamespace(args: string[]) {
+  const subcommand = args[0];
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    printHooksUsage();
+    return;
+  }
+
+  if (subcommand === "list") {
+    const prefs = readInstallPreferences(getCortexPath());
+    const hooksEnabled = prefs.hooksEnabled !== false;
+    const toolPrefs = prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {};
+    const rows = HOOK_TOOLS.map((tool) => ({
+      tool,
+      hookType: "lifecycle",
+      status: hooksEnabled && toolPrefs[tool] !== false ? "enabled" : "disabled",
+    }));
+
+    console.log(`Tool      Hook Type  Status`);
+    console.log(`--------  ---------  --------`);
+    for (const row of rows) {
+      console.log(`${row.tool.padEnd(8)}  ${row.hookType.padEnd(9)}  ${row.status}`);
+    }
+    return;
+  }
+
+  if (subcommand === "enable" || subcommand === "disable") {
+    const tool = normalizeHookTool(args[1]);
+    if (!tool) {
+      printHooksUsage();
+      process.exit(1);
+    }
+
+    const prefs = readInstallPreferences(getCortexPath());
+    writeInstallPreferences(getCortexPath(), {
+      hookTools: {
+        ...(prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {}),
+        [tool]: subcommand === "enable",
+      },
+    } satisfies Partial<InstallPreferences>);
+    console.log(`${subcommand === "enable" ? "Enabled" : "Disabled"} hooks for ${tool}.`);
+    return;
+  }
+
+  console.error(`Unknown hooks subcommand: ${subcommand}`);
+  printHooksUsage();
+  process.exit(1);
+}
+
 function handleSkillList() {
   const sources: Array<{ name: string; source: string; format: "flat" | "folder"; path: string }> = [];
+  const seenPaths = new Set<string>();
 
   function collectSkills(root: string, sourceLabel: string) {
     if (!fs.existsSync(root)) return;
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
       const entryPath = path.join(root, entry.name);
       if (entry.isFile() && entry.name.endsWith(".md")) {
+        if (seenPaths.has(entryPath)) continue;
+        seenPaths.add(entryPath);
         sources.push({
           name: entry.name.replace(/\.md$/, ""),
           source: sourceLabel,
@@ -617,6 +776,8 @@ function handleSkillList() {
       if (entry.isDirectory()) {
         const skillFile = path.join(entryPath, "SKILL.md");
         if (!fs.existsSync(skillFile)) continue;
+        if (seenPaths.has(skillFile)) continue;
+        seenPaths.add(skillFile);
         sources.push({
           name: entry.name,
           source: sourceLabel,
@@ -634,8 +795,8 @@ function handleSkillList() {
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
     if (projectName === "global") continue;
-    const projectSkillsDir = path.join(dir, "skills");
-    collectSkills(projectSkillsDir, projectName);
+    collectSkills(path.join(dir, "skills"), projectName);
+    collectSkills(path.join(dir, ".claude", "skills"), projectName);
   }
 
   if (!sources.length) {

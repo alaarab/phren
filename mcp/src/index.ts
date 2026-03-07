@@ -32,6 +32,12 @@ Usage:
   cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--from-existing <path>] [--dry-run] [-y]
                                          Set up cortex (templates: python-project, monorepo, library, frontend)
   cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
+  cortex skills list                     List installed skills
+  cortex skills add <project> <path>    Link or copy a skill file into one project
+  cortex skills remove <project> <name> Remove a project skill by name
+  cortex hooks list                      Show hook tool preferences
+  cortex hooks enable <tool>             Enable hooks for one tool
+  cortex hooks disable <tool>            Disable hooks for one tool
   cortex status                          Health, active project, stats
   cortex search <query> [--project <n>] [--type <t>] [--limit <n>]
                                          Search your cortex
@@ -221,6 +227,8 @@ const CLI_COMMANDS = [
   "review-ui",
   "quality-feedback",
   "skill-list",
+  "skills",
+  "hooks",
   "detect-skills",
   "backlog",
   "quickstart",

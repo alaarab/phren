@@ -130,7 +130,7 @@ function mergeUniqueDocs(primary: DocRow[] | null, secondary: DocRow[]): DocRow[
 function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: string | null): DocRow[] {
   const queryTokens = tokenizeForOverlap(prompt);
   if (!queryTokens.length) return [];
-  const sampleLimit = project ? 180 : 260;
+  const sampleLimit = 100;
   const docs = project
     ? queryDocRows(
       db,
@@ -149,7 +149,7 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
       const score = overlapScore(queryTokens, corpus);
       return { doc, score };
     })
-    .filter((x) => x.score >= 0.15)
+    .filter((x) => x.score >= 0.25)
     .sort((a, b) => b.score - a.score)
     .slice(0, 8)
     .map((x) => x.doc);
@@ -280,6 +280,29 @@ function mostRecentDate(content: string): string {
   return matches.map((m) => m.slice(3)).sort().reverse()[0];
 }
 
+function crossProjectAgeMultiplier(doc: DocRow, detectedProject: string | null): number {
+  if (!detectedProject || doc.project === detectedProject) return 1;
+
+  const decayDaysRaw = Number.parseInt(process.env.CORTEX_CROSS_PROJECT_DECAY_DAYS ?? "30", 10);
+  const decayDays = Number.isFinite(decayDaysRaw) && decayDaysRaw > 0 ? decayDaysRaw : 30;
+  const latest = mostRecentDate(doc.content);
+  const todayUtc = Date.UTC(
+    new Date().getUTCFullYear(),
+    new Date().getUTCMonth(),
+    new Date().getUTCDate()
+  );
+
+  let ageInDays = 90;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(latest) && latest !== "0000-00-00") {
+    const entryUtc = Date.parse(`${latest}T00:00:00Z`);
+    if (!Number.isNaN(entryUtc)) {
+      ageInDays = Math.max(0, Math.floor((todayUtc - entryUtc) / 86_400_000));
+    }
+  }
+
+  return Math.max(0.1, 1 - (ageInDays / decayDays));
+}
+
 export function rankResults(
   rows: DocRow[],
   intent: string,
@@ -336,31 +359,52 @@ export function rankResults(
       if (byDate !== 0) return byDate;
     }
 
+    const changedFiles = gitCtx?.changedFiles || new Set<string>();
+    const globBoostA = getProjectGlobBoost(cortexPathLocal, a.project, cwd, gitCtx?.changedFiles);
+    const globBoostB = getProjectGlobBoost(cortexPathLocal, b.project, cwd, gitCtx?.changedFiles);
+    const keyA = entryScoreKey(a.project, a.filename, a.content);
+    const keyB = entryScoreKey(b.project, b.filename, b.content);
+    const entityA = entityBoostPaths.has(a.path) ? 1.3 : 1;
+    const entityB = entityBoostPaths.has(b.path) ? 1.3 : 1;
+    const scoreA = (
+      intentBoost(intent, a.type) +
+      fileRelevanceBoost(a.path, changedFiles) +
+      branchMatchBoost(a.content, gitCtx?.branch) +
+      globBoostA +
+      getQualityMultiplier(cortexPathLocal, keyA) +
+      entityA -
+      lowValuePenalty(a.content, a.type)
+    ) * crossProjectAgeMultiplier(a, detectedProject);
+    const scoreB = (
+      intentBoost(intent, b.type) +
+      fileRelevanceBoost(b.path, changedFiles) +
+      branchMatchBoost(b.content, gitCtx?.branch) +
+      globBoostB +
+      getQualityMultiplier(cortexPathLocal, keyB) +
+      entityB -
+      lowValuePenalty(b.content, b.type)
+    ) * crossProjectAgeMultiplier(b, detectedProject);
+    const scoreDelta = scoreB - scoreA;
+    if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
+
     const intentDelta = intentBoost(intent, b.type) - intentBoost(intent, a.type);
     if (intentDelta !== 0) return intentDelta;
 
-    const changedFiles = gitCtx?.changedFiles || new Set<string>();
     const fileDelta = fileRelevanceBoost(b.path, changedFiles) - fileRelevanceBoost(a.path, changedFiles);
     if (fileDelta !== 0) return fileDelta;
 
     const branchDelta = branchMatchBoost(b.content, gitCtx?.branch) - branchMatchBoost(a.content, gitCtx?.branch);
     if (branchDelta !== 0) return branchDelta;
 
-    const globBoostA = getProjectGlobBoost(cortexPathLocal, a.project, cwd, gitCtx?.changedFiles);
-    const globBoostB = getProjectGlobBoost(cortexPathLocal, b.project, cwd, gitCtx?.changedFiles);
     const globDelta = globBoostB - globBoostA;
     if (Math.abs(globDelta) > 0.01) return globDelta;
 
-    const keyA = entryScoreKey(a.project, a.filename, a.content);
-    const keyB = entryScoreKey(b.project, b.filename, b.content);
     const qualityDelta = getQualityMultiplier(cortexPathLocal, keyB) - getQualityMultiplier(cortexPathLocal, keyA);
     if (qualityDelta !== 0) return qualityDelta;
 
     const penaltyDelta = lowValuePenalty(a.content, a.type) - lowValuePenalty(b.content, b.type);
     if (penaltyDelta !== 0) return penaltyDelta;
 
-    const entityA = entityBoostPaths.has(a.path) ? 1.3 : 1;
-    const entityB = entityBoostPaths.has(b.path) ? 1.3 : 1;
     if (entityB !== entityA) return entityB - entityA;
 
     return 0;

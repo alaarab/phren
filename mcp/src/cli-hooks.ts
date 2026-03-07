@@ -163,7 +163,7 @@ export async function handleHookPrompt() {
   const detectedProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
   if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
 
-  const safeQuery = buildRobustFtsQuery(keywords);
+  const safeQuery = buildRobustFtsQuery(keywords, detectedProject);
   if (!safeQuery) process.exit(0);
 
   try {

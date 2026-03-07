@@ -1,5 +1,8 @@
+import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
+import * as yaml from "js-yaml";
+import { findCortexPath } from "./shared.js";
 
 // ── Shared Git helper ────────────────────────────────────────────────────────
 
@@ -288,16 +291,56 @@ export function sanitizeFts5Query(raw: string): string {
   return q.trim();
 }
 
+function parseSynonymsYaml(filePath: string): Record<string, string[]> {
+  if (!fs.existsSync(filePath)) return {};
+  try {
+    const parsed = yaml.load(fs.readFileSync(filePath, "utf8"), { schema: yaml.CORE_SCHEMA });
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+    const loaded: Record<string, string[]> = {};
+    for (const [rawKey, value] of Object.entries(parsed)) {
+      const key = String(rawKey).trim().toLowerCase();
+      if (!key || !Array.isArray(value)) continue;
+      const synonyms = value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.replace(/"/g, "").trim())
+        .filter((item) => item.length > 1);
+      if (synonyms.length > 0) loaded[key] = synonyms;
+    }
+    return loaded;
+  } catch {
+    return {};
+  }
+}
+
+function loadUserSynonyms(project?: string | null): Record<string, string[]> {
+  const cortexPath = findCortexPath();
+  if (!cortexPath) return {};
+
+  const globalSynonyms = parseSynonymsYaml(path.join(cortexPath, "global", "synonyms.yaml"));
+  if (!project || !isValidProjectName(project)) return globalSynonyms;
+
+  const projectSynonyms = parseSynonymsYaml(path.join(cortexPath, project, "synonyms.yaml"));
+  return {
+    ...globalSynonyms,
+    ...projectSynonyms,
+  };
+}
+
 // Build a defensive FTS5 MATCH query:
 // - sanitizes user input
 // - extracts bigrams and treats them as quoted phrases
 // - expands known synonyms (capped at 10 total terms)
 // - applies AND between core terms, with synonyms as OR alternatives
-export function buildRobustFtsQuery(raw: string): string {
+export function buildRobustFtsQuery(raw: string, project?: string | null): string {
   const MAX_TOTAL_TERMS = 10;
   const MAX_SYNONYM_GROUPS = 3;
   const safe = sanitizeFts5Query(raw);
   if (!safe) return "";
+  const synonymsMap = {
+    ...SYNONYMS,
+    ...loadUserSynonyms(project),
+  };
 
   const baseWords = safe.split(/\s+/).filter((t) => t.length > 1);
   if (baseWords.length === 0) return "";
@@ -309,12 +352,11 @@ export function buildRobustFtsQuery(raw: string): string {
   }
 
   // Determine which words are consumed by bigrams that match synonym keys
-  const lowered = safe.toLowerCase();
   const consumedIndices = new Set<number>();
   const matchedBigrams: string[] = [];
   for (let i = 0; i < bigrams.length; i++) {
     const bg = bigrams[i].toLowerCase();
-    if (SYNONYMS[bg]) {
+    if (synonymsMap[bg]) {
       consumedIndices.add(i);
       consumedIndices.add(i + 1);
       matchedBigrams.push(bigrams[i]);
@@ -353,8 +395,8 @@ export function buildRobustFtsQuery(raw: string): string {
     const termText = coreTerm.slice(1, -1).toLowerCase(); // strip quotes
     const synonyms: string[] = [];
 
-    if (groupsExpanded < MAX_SYNONYM_GROUPS && SYNONYMS[termText]) {
-      for (const syn of SYNONYMS[termText]) {
+    if (groupsExpanded < MAX_SYNONYM_GROUPS && synonymsMap[termText]) {
+      for (const syn of synonymsMap[termText]) {
         if (totalTermCount >= MAX_TOTAL_TERMS) break;
         const cleanSyn = syn.replace(/"/g, "").trim();
         if (cleanSyn.length > 1) {

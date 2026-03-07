@@ -9,6 +9,7 @@ import { errorMessage } from "./utils.js";
 export interface InstallPreferences {
   mcpEnabled?: boolean;
   hooksEnabled?: boolean;
+  hookTools?: Record<string, boolean>;
   installedVersion?: string;
   updatedAt?: string;
 }

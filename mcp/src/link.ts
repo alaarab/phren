@@ -78,6 +78,15 @@ export interface DoctorResult {
   checks: Array<{ name: string; ok: boolean; detail: string }>;
 }
 
+interface ProjectConfig {
+  skills?: boolean;
+  hooks?: {
+    UserPromptSubmit?: boolean;
+    Stop?: boolean;
+    SessionStart?: boolean;
+  };
+}
+
 // ── Helpers (exported for link-doctor) ──────────────────────────────────────
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -182,6 +191,17 @@ function currentPackageVersion(): string | null {
   } catch (err: unknown) {
     debugLog(`currentPackageVersion: failed to read package.json: ${err instanceof Error ? err.message : String(err)}`);
     return null;
+  }
+}
+
+function readProjectConfig(cortexPath: string, project: string): ProjectConfig {
+  const configPath = path.join(cortexPath, project, "cortex.project.yaml");
+  if (!fs.existsSync(configPath)) return {};
+  try {
+    const parsed = yaml.load(fs.readFileSync(configPath, "utf8"), { schema: yaml.CORE_SCHEMA });
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProjectConfig : {};
+  } catch {
+    return {};
   }
 }
 
@@ -368,7 +388,8 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
 
   // Project-level skills
   const projectSkills = path.join(cortexPath, project, ".claude", "skills");
-  if (fs.existsSync(projectSkills)) {
+  const config = readProjectConfig(cortexPath, project);
+  if (config.skills !== false && fs.existsSync(projectSkills)) {
     const targetSkills = path.join(target, ".claude", "skills");
     linkSkillsDir(projectSkills, targetSkills, cortexPath, symlinkFile);
   }
