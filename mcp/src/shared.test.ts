@@ -7,7 +7,6 @@ import {
   findCortexPathWithArg,
   collectNativeMemoryFiles,
   CortexError,
-  isCortexError,
   cortexOk,
   cortexErr,
   ensureCortexPath,
@@ -2272,11 +2271,6 @@ describe("CortexResult helpers", () => {
     if (!result.ok) expect(result.code).toBeUndefined();
   });
 
-  it("isCortexError distinguishes strings from objects", () => {
-    expect(isCortexError("error message")).toBe(true);
-    expect(isCortexError({ items: [] })).toBe(false);
-    expect(isCortexError([])).toBe(false);
-  });
 });
 
 // ─── collectNativeMemoryFiles ──────────────────────────────────────────────
