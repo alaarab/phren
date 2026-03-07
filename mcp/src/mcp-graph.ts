@@ -1,14 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { McpContext } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import { isValidProjectName } from "./utils.js";
 import { queryDocBySourceKey, queryRows, queryEntityLinks } from "./shared-index.js";
 import { runtimeFile } from "./shared.js";
+import { withFileLock } from "./shared-governance.js";
 
-function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
-}
+
 
 export function register(server: McpServer, ctx: McpContext): void {
 
@@ -60,7 +59,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const rows = queryRows(db, sql, params);
       if (!rows || rows.length === 0) {
-        return jsonResponse({ ok: true, data: [], message: `No entities matching "${query}".` });
+        return mcpResponse({ ok: true, data: [], message: `No entities matching "${query}".` });
       }
 
       const entities = rows.map(r => ({
@@ -69,7 +68,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         refCount: Number(r[2]),
       }));
 
-      return jsonResponse({ ok: true, data: entities });
+      return mcpResponse({ ok: true, data: entities });
     },
   );
 
@@ -101,7 +100,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       relatedDocs = relatedDocs.slice(0, max);
 
       if (relatedDocs.length === 0) {
-        return jsonResponse({ ok: true, data: [], message: `No docs found referencing "${entity}".` });
+        return mcpResponse({ ok: true, data: [], message: `No docs found referencing "${entity}".` });
       }
 
       const results: { sourceDoc: string; snippet: string }[] = [];
@@ -111,7 +110,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         results.push({ sourceDoc: doc, snippet });
       }
 
-      return jsonResponse({ ok: true, data: results });
+      return mcpResponse({ ok: true, data: results });
     },
   );
 
@@ -163,7 +162,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const rows = queryRows(db, sql, params);
       if (!rows || rows.length === 0) {
-        return jsonResponse({ ok: true, data: [], message: "No entities in the graph." });
+        return mcpResponse({ ok: true, data: [], message: "No entities in the graph." });
       }
 
       const entities = rows.map(r => ({
@@ -173,7 +172,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         docs: String(r[3] || "").split(",").filter(Boolean),
       }));
 
-      return jsonResponse({ ok: true, data: entities });
+      return mcpResponse({ ok: true, data: entities });
     },
   );
 
@@ -194,7 +193,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, finding_text, entity, relation }) => {
       if (!isValidProjectName(project)) {
-        return jsonResponse({ ok: false, error: `Invalid project: "${project}"` });
+        return mcpResponse({ ok: false, error: `Invalid project: "${project}"` });
       }
 
       return ctx.withWriteQueue(async () => {
@@ -208,7 +207,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         } catch { /* ignore */ }
         const entityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [entityName, "library"]);
         if (!entityResult?.length || !entityResult[0]?.values?.length) {
-          return jsonResponse({ ok: false, error: "Failed to create entity." });
+          return mcpResponse({ ok: false, error: "Failed to create entity." });
         }
         const targetId = Number(entityResult[0].values[0][0]);
 
@@ -216,11 +215,11 @@ export function register(server: McpServer, ctx: McpContext): void {
         const sourceDoc = `${project}/FINDINGS.md`;
         const docCheck = queryRows(db, "SELECT content FROM docs WHERE project = ? AND filename = 'FINDINGS.md' LIMIT 1", [project]);
         if (!docCheck || docCheck.length === 0) {
-          return jsonResponse({ ok: false, error: `No FINDINGS.md found for project "${project}".` });
+          return mcpResponse({ ok: false, error: `No FINDINGS.md found for project "${project}".` });
         }
         const content = String(docCheck[0][0]);
         if (!content.toLowerCase().includes(finding_text.toLowerCase())) {
-          return jsonResponse({ ok: false, error: `Finding text not found in ${project}/FINDINGS.md.` });
+          return mcpResponse({ ok: false, error: `Finding text not found in ${project}/FINDINGS.md.` });
         }
 
         // 3. Find or create document entity
@@ -229,7 +228,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         } catch { /* ignore */ }
         const docEntityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
         if (!docEntityResult?.length || !docEntityResult[0]?.values?.length) {
-          return jsonResponse({ ok: false, error: "Failed to create document entity." });
+          return mcpResponse({ ok: false, error: "Failed to create document entity." });
         }
         const sourceId = Number(docEntityResult[0].values[0][0]);
 
@@ -240,30 +239,34 @@ export function register(server: McpServer, ctx: McpContext): void {
             [sourceId, targetId, relType, sourceDoc],
           );
         } catch {
-          return jsonResponse({ ok: false, error: "Failed to insert entity link." });
+          return mcpResponse({ ok: false, error: "Failed to insert entity link." });
         }
 
         // 4b. Persist manual link so it survives index rebuilds
         const manualLinksPath = runtimeFile(ctx.cortexPath, "manual-links.json");
         try {
-          let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
-          if (fs.existsSync(manualLinksPath)) {
-            existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8"));
-          }
-          const newEntry = { entity: entityName, entityType: "library", sourceDoc, relType };
-          const alreadyStored = existing.some(
-            (e) => e.entity === newEntry.entity && e.sourceDoc === newEntry.sourceDoc && e.relType === newEntry.relType
-          );
-          if (!alreadyStored) {
-            existing.push(newEntry);
-            fs.writeFileSync(manualLinksPath, JSON.stringify(existing, null, 2));
-          }
+          withFileLock(manualLinksPath, () => {
+            let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
+            if (fs.existsSync(manualLinksPath)) {
+              try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch { /* corrupt file — start fresh */ }
+            }
+            const newEntry = { entity: entityName, entityType: "library", sourceDoc, relType };
+            const alreadyStored = existing.some(
+              (e) => e.entity === newEntry.entity && e.sourceDoc === newEntry.sourceDoc && e.relType === newEntry.relType
+            );
+            if (!alreadyStored) {
+              existing.push(newEntry);
+              const tmpPath = manualLinksPath + ".tmp";
+              fs.writeFileSync(tmpPath, JSON.stringify(existing, null, 2));
+              fs.renameSync(tmpPath, manualLinksPath);
+            }
+          });
         } catch { /* non-fatal — link is still in DB for this session */ }
 
         // 5. Rebuild index to refresh
         await ctx.rebuildIndex();
 
-        return jsonResponse({
+        return mcpResponse({
           ok: true,
           message: `Linked "${entity}" to ${sourceDoc} with relation "${relType}".`,
         });

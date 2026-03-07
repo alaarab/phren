@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { McpContext } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -17,9 +17,7 @@ interface SessionState {
   findingsAdded: number;
 }
 
-function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
-}
+
 
 function sessionStateFile(cortexPath: string): string {
   return runtimeFile(cortexPath, "session-state.json");
@@ -121,7 +119,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       ? `Session started (${startedSession.sessionId.slice(0, 8)}).\n\n${parts.join("\n\n")}`
       : `Session started (${startedSession.sessionId.slice(0, 8)}). No prior context found.`;
 
-    return jsonResponse({ ok: true, message, data: { sessionId: startedSession.sessionId, project: activeProject } });
+    return mcpResponse({ ok: true, message, data: { sessionId: startedSession.sessionId, project: activeProject } });
   });
 
   server.registerTool("session_end", {
@@ -142,13 +140,13 @@ export function register(server: McpServer, ctx: McpContext): void {
       writeSessionStateFile(file, next);
       return { state, next };
     });
-    if (!ended) return jsonResponse({ ok: false, error: "No active session. Call session_start first." });
+    if (!ended) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
     const { state, next: endedState } = ended;
 
     const durationMs = new Date(endedState.endedAt!).getTime() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);
 
-    return jsonResponse({
+    return mcpResponse({
       ok: true,
       message: `Session ended. Duration: ~${durationMins} min. ${state.findingsAdded} finding(s) added.${summary ? " Summary saved for next session." : ""}`,
       data: { sessionId: state.sessionId, durationMins, findingsAdded: state.findingsAdded },
@@ -161,7 +159,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     inputSchema: z.object({}),
   }, async () => {
     const state = readSessionStateLocked(cortexPath);
-    if (!state) return jsonResponse({ ok: true, message: "No active session. Call session_start to begin.", data: null });
+    if (!state) return mcpResponse({ ok: true, message: "No active session. Call session_start to begin.", data: null });
 
     const durationMs = Date.now() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);
@@ -175,6 +173,6 @@ export function register(server: McpServer, ctx: McpContext): void {
     ];
     if (state.summary) parts.push(`Prior summary: ${state.summary}`);
 
-    return jsonResponse({ ok: true, message: parts.join("\n"), data: state });
+    return mcpResponse({ ok: true, message: parts.join("\n"), data: state });
   });
 }

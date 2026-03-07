@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
-import { isValidProjectName, safeProjectPath } from "./utils.js";
+import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import {
   debugLog,
   withDefaults,
@@ -346,8 +346,8 @@ export function validateGovernanceJson(filePath: string, schema: GovernanceSchem
       return false;
     }
     return true;
-  } catch (err: any) {
-    debugLog(`validateGovernanceJson parse error for ${filePath}: ${err.message}`);
+  } catch (err: unknown) {
+    debugLog(`validateGovernanceJson parse error for ${filePath}: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -455,8 +455,8 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
       debugLog(`Warning: ${filePath} has schemaVersion ${fileVersion}, expected <= ${GOVERNANCE_SCHEMA_VERSION}. Consider updating cortex.`);
     }
     return parsed as T;
-  } catch (err: any) {
-    debugLog(`readJsonFile failed for ${filePath}: ${err.message}`);
+  } catch (err: unknown) {
+    debugLog(`readJsonFile failed for ${filePath}: ${errorMessage(err)}`);
     return fallback;
   }
 }
@@ -526,8 +526,8 @@ function actorName(): string {
   if (envActor) return envActor;
   try {
     return os.userInfo().username;
-  } catch (err: any) {
-    debugLog(`actorName: os.userInfo() failed, using "unknown": ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`actorName: os.userInfo() failed, using "unknown": ${errorMessage(err)}`);
     return "unknown";
   }
 }
@@ -629,7 +629,7 @@ export function migrateGovernance(cortexPath: string, options: GovernanceMigrati
         changed,
         detail: valid ? undefined : "failed schema validation; defaulted to safe shape",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       report.results.push({
         file: fileName,
         schema,
@@ -637,9 +637,9 @@ export function migrateGovernance(cortexPath: string, options: GovernanceMigrati
         fromVersion: null,
         toVersion: GOVERNANCE_SCHEMA_VERSION,
         changed: false,
-        detail: err.message,
+        detail: errorMessage(err),
       });
-      debugLog(`migrateGovernance: failed to process ${fileName}: ${err.message}`);
+      debugLog(`migrateGovernance: failed to process ${fileName}: ${errorMessage(err)}`);
     }
   }
 
@@ -978,8 +978,8 @@ export function recordInjection(cortexPath: string, key: string, sessionId?: str
       const lines = content.split("\n");
       fs.writeFileSync(logFile, lines.slice(-500).join("\n"));
     }
-  } catch (err: any) {
-    debugLog(`Usage log rotation failed: ${err.message}`);
+  } catch (err: unknown) {
+    debugLog(`Usage log rotation failed: ${errorMessage(err)}`);
   }
 }
 
@@ -1064,8 +1064,9 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
   const denial = checkPermission(cortexPath, "delete");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   const policy = getRetentionPolicy(cortexPath);
+  if (project && !isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const dirs = project
-    ? [path.join(cortexPath, project)]
+    ? (() => { const p = safeProjectPath(cortexPath, project); return p ? [p] : []; })()
     : getProjectDirs(cortexPath).filter((d) => path.basename(d) !== "global");
   let pruned = 0;
   const cutoffDays = policy.retentionDays;
@@ -1091,7 +1092,7 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
         continue;
       }
       if (line.startsWith("- ") && !inDetails && currentDate) {
-        const age = Math.floor((Date.now() - Date.parse(`${currentDate}T00:00:00Z`)) / 86400000);
+        const age = Math.floor((Date.now() - Date.parse(`${currentDate}T00:00:00Z`)) / 86_400_000);
         if (!Number.isNaN(age) && age > cutoffDays) {
           pruned++;
           if (dryRun) dryRunDetails.push(`[${path.basename(dir)}] ${line.slice(0, 80)}`);

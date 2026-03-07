@@ -123,14 +123,14 @@ describe("getProjectGlobBoost", () => {
 // ── Task #7: Citation validation ────────────────────────────────────────────
 
 describe("parseCitations", () => {
-  it("parses <!-- source: file:line --> format", () => {
+  it("parses <!-- source: file:line --> format with legacy marker", () => {
     const citations = parseCitations("Some text <!-- source: /foo/bar.ts:42 --> more text");
-    expect(citations).toEqual([{ file: "/foo/bar.ts", line: 42 }]);
+    expect(citations).toEqual([{ file: "/foo/bar.ts", line: 42, legacy: true }]);
   });
 
-  it("parses [file:path:line] format", () => {
+  it("parses [file:path:line] format with legacy marker", () => {
     const citations = parseCitations("Check [file:/src/utils.ts:10] for details");
-    expect(citations).toEqual([{ file: "/src/utils.ts", line: 10 }]);
+    expect(citations).toEqual([{ file: "/src/utils.ts", line: 10, legacy: true }]);
   });
 
   it("returns empty for no citations", () => {
@@ -141,9 +141,10 @@ describe("parseCitations", () => {
     const text = "See <!-- source: a.ts:1 --> and [file:b.ts:2]";
     const citations = parseCitations(text);
     expect(citations).toHaveLength(2);
+    expect(citations.every(c => c.legacy)).toBe(true);
   });
 
-  it("parses cortex citation comments", () => {
+  it("parses cortex citation comments without legacy marker", () => {
     const citations = parseCitations('Insight <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/demo.ts","line":3} -->');
     expect(citations).toEqual([
       {
@@ -154,6 +155,15 @@ describe("parseCitations", () => {
         },
       },
     ]);
+    expect(citations[0].legacy).toBeUndefined();
+  });
+
+  it("marks legacy <!-- source: ... --> citation with deprecation marker", () => {
+    const citations = parseCitations("insight <!-- source: /tmp/test.ts:5 -->");
+    expect(citations).toHaveLength(1);
+    expect(citations[0].legacy).toBe(true);
+    expect(citations[0].file).toBe("/tmp/test.ts");
+    expect(citations[0].line).toBe(5);
   });
 });
 
@@ -214,10 +224,11 @@ describe("annotateStale", () => {
     expect(result).toContain("[citation stale]");
   });
 
-  it("returns snippet unchanged when citation is valid", () => {
+  it("appends [legacy format] when valid legacy citation is used", () => {
     const snippet = `insight <!-- source: ${tmpFile}:1 -->`;
     const result = annotateStale(snippet);
     expect(result).not.toContain("[citation stale]");
+    expect(result).toContain("[legacy format]");
   });
 
   it("marks cortex citation comments stale when validation fails", () => {

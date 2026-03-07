@@ -62,9 +62,19 @@ export interface LifecycleCommands {
 
 export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
   const entry = resolveCliEntryScript();
+  const isWindows = process.platform === "win32";
+
   if (entry) {
     const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    if (isWindows) {
+      return {
+        sessionStart: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-session-start`,
+        userPromptSubmit: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-prompt`,
+        stop: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-stop`,
+        hookTool: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-tool`,
+      };
+    }
     return {
       sessionStart: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-session-start`,
       userPromptSubmit: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-prompt`,
@@ -74,6 +84,14 @@ export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
   }
 
   const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  if (isWindows) {
+    return {
+      sessionStart: `set "CORTEX_PATH=${escapedCortex}" && npx @alaarab/cortex hook-session-start`,
+      userPromptSubmit: `set "CORTEX_PATH=${escapedCortex}" && npx @alaarab/cortex hook-prompt`,
+      stop: `set "CORTEX_PATH=${escapedCortex}" && npx @alaarab/cortex hook-stop`,
+      hookTool: `set "CORTEX_PATH=${escapedCortex}" && npx @alaarab/cortex hook-tool`,
+    };
+  }
   return {
     sessionStart: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-session-start`,
     userPromptSubmit: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-prompt`,
@@ -280,9 +298,13 @@ export function runCustomHooks(
   const matching = hooks.filter((h) => h.event === event);
   const errors: string[] = [];
 
+  const isWindows = process.platform === "win32";
+  const shellCmd = isWindows ? "cmd" : "sh";
+
   for (const hook of matching) {
+    const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];
     try {
-      execFileSync("sh", ["-c", hook.command], {
+      execFileSync(shellCmd, shellArgs, {
         cwd: cortexPath,
         encoding: "utf8",
         timeout: hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT,

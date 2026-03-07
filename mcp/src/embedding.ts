@@ -114,6 +114,45 @@ export async function getApiEmbedding(
 }
 
 /**
+ * Get embeddings for multiple texts in a single API call.
+ * The OpenAI embeddings API supports array input natively.
+ */
+export async function getApiEmbeddings(
+  texts: string[],
+  apiKey: string,
+  model: string = "text-embedding-3-small"
+): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  if (texts.length === 1) return [await getApiEmbedding(texts[0], apiKey, model)];
+
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      input: texts,
+      model,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Embedding API error ${response.status}: ${body}`);
+  }
+
+  const data = await response.json() as { data: Array<{ index: number; embedding: number[] }> };
+  if (!data.data?.length) {
+    throw new Error("Embedding API returned unexpected format");
+  }
+
+  // Sort by index to ensure order matches input
+  const sorted = data.data.sort((a, b) => a.index - b.index);
+  return sorted.map(d => d.embedding);
+}
+
+/**
  * Stub for local ONNX embedding — not yet supported.
  */
 export async function getLocalEmbedding(_text: string): Promise<number[]> {
@@ -129,7 +168,7 @@ export async function getCachedEmbedding(
   apiKey: string,
   model: string
 ): Promise<number[]> {
-  const hash = sha256(text);
+  const hash = sha256(`${model}:${text}`);
   const cache = loadCache(cortexPath);
   const cached = cache.get(hash);
   if (cached) return cached;
@@ -137,6 +176,49 @@ export async function getCachedEmbedding(
   const embedding = await getApiEmbedding(text, apiKey, model);
   appendCache(cortexPath, hash, model, embedding);
   return embedding;
+}
+
+/**
+ * Get embeddings for multiple texts with caching. Batches uncached texts into single API calls.
+ */
+export async function getCachedEmbeddings(
+  cortexPath: string,
+  texts: string[],
+  apiKey: string,
+  model: string
+): Promise<number[][]> {
+  if (texts.length === 0) return [];
+
+  const cache = loadCache(cortexPath);
+  const results: (number[] | null)[] = texts.map(text => {
+    const hash = sha256(`${model}:${text}`);
+    return cache.get(hash) ?? null;
+  });
+
+  const uncachedIndices: number[] = [];
+  const uncachedTexts: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    if (results[i] === null) {
+      uncachedIndices.push(i);
+      uncachedTexts.push(texts[i]);
+    }
+  }
+
+  if (uncachedTexts.length > 0) {
+    const BATCH_SIZE = 20;
+    for (let start = 0; start < uncachedTexts.length; start += BATCH_SIZE) {
+      const batch = uncachedTexts.slice(start, start + BATCH_SIZE);
+      const batchEmbeddings = await getApiEmbeddings(batch, apiKey, model);
+      for (let j = 0; j < batch.length; j++) {
+        const idx = uncachedIndices[start + j];
+        results[idx] = batchEmbeddings[j];
+        const hash = sha256(`${model}:${batch[j]}`);
+        appendCache(cortexPath, hash, model, batchEmbeddings[j]);
+      }
+    }
+  }
+
+  return results as number[][];
 }
 
 /**

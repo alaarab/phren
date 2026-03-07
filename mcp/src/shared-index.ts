@@ -14,7 +14,13 @@ import {
 } from "./shared.js";
 import { getIndexPolicy } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
-import { STOP_WORDS } from "./utils.js";
+import { cosineFallback, COSINE_CANDIDATE_CAP } from "./shared-search-fallback.js";
+import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs } from "./shared-entity-graph.js";
+
+// Re-export for backward compatibility
+export { porterStem } from "./shared-stemmer.js";
+export { cosineFallback, COSINE_CANDIDATE_CAP } from "./shared-search-fallback.js";
+export { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs } from "./shared-entity-graph.js";
 
 export type SqlValue = string | number | null | Uint8Array;
 export type DbRow = SqlValue[];
@@ -82,7 +88,7 @@ export function resolveImports(
       return `<!-- @import cycle: ${trimmed} -->`;
     }
 
-    if (!normalized.startsWith(path.resolve(cortexPath) + path.sep)) {
+    if (!normalized.startsWith(path.resolve(cortexPath, "global") + path.sep)) {
       return `<!-- @import blocked: path traversal -->`;
     }
 
@@ -90,9 +96,10 @@ export function resolveImports(
       if (!fs.existsSync(normalized)) {
         return `<!-- @import not found: ${trimmed} -->`;
       }
-      currentSeen.add(normalized);
+      const childSeen = new Set(currentSeen);
+      childSeen.add(normalized);
       const imported = fs.readFileSync(normalized, "utf-8");
-      return resolveImports(imported, cortexPath, currentSeen, currentDepth + 1);
+      return resolveImports(imported, cortexPath, childSeen, currentDepth + 1);
     } catch {
       return `<!-- @import error: ${trimmed} -->`;
     }
@@ -146,6 +153,26 @@ function computeCortexHash(cortexPath: string, profile?: string): string {
     try {
       const stat = fs.statSync(mem.fullPath);
       hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.size}`);
+    } catch { /* skip */ }
+  }
+  // Include global/ files (pulled via @import) so changes invalidate the cache
+  const globalDir = path.join(cortexPath, "global");
+  if (fs.existsSync(globalDir)) {
+    const globalFiles = globSync("**/*.md", { cwd: globalDir, nodir: true }).sort();
+    for (const f of globalFiles) {
+      try {
+        const fp = path.join(globalDir, f);
+        const stat = fs.statSync(fp);
+        hash.update(`global:${f}:${stat.mtimeMs}:${stat.size}`);
+      } catch { /* skip */ }
+    }
+  }
+  // Include manual entity links so graph changes invalidate the cache
+  const manualLinksPath = runtimeFile(cortexPath, "manual-links.json");
+  if (fs.existsSync(manualLinksPath)) {
+    try {
+      const stat = fs.statSync(manualLinksPath);
+      hash.update(`manual-links:${stat.mtimeMs}:${stat.size}`);
     } catch { /* skip */ }
   }
   if (profile) hash.update(`profile:${profile}`);
@@ -238,9 +265,13 @@ function collectAllFiles(cortexPath: string, profile?: string): FileEntry[] {
       });
       for (const rel of matched) mdFilesSet.add(rel);
     }
-    for (const relFile of [...mdFilesSet].sort()) {
-      const fullPath = path.join(dir, relFile);
+    const relFiles = [...mdFilesSet].sort();
+    // Q1: if both LEARNINGS.md (legacy) and FINDINGS.md (canonical) exist, skip LEARNINGS.md
+    const hasFindingsMd = relFiles.some(f => path.basename(f).toLowerCase() === "findings.md");
+    for (const relFile of relFiles) {
       const filename = path.basename(relFile);
+      if (hasFindingsMd && filename.toLowerCase() === "learnings.md") continue;
+      const fullPath = path.join(dir, relFile);
       const type = classifyFile(filename, relFile);
       entries.push({ fullPath, project: projectName, filename, type, relFile });
     }
@@ -361,8 +392,9 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
             db.run("BEGIN");
             try {
               if (changedPaths.has(entry.fullPath)) {
+                const sourceDocKey = getEntrySourceDocKey(entry, cortexPath);
+                db.run("DELETE FROM entity_links WHERE source_doc = ?", [sourceDocKey]);
                 db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
-                deleteEntityLinksForDocPath(db, cortexPath, entry.fullPath, entry.project, entry.filename);
               }
 
               if (insertFileIntoIndex(db, entry, cortexPath)) {
@@ -371,7 +403,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
                   try {
                     const content = fs.readFileSync(entry.fullPath, "utf-8");
                     extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
-                  } catch { /* skip entity extraction errors */ }
+                  } catch (err: unknown) { debugLog(`entity extraction failed: ${err instanceof Error ? err.message : String(err)}`); }
                 }
               }
 
@@ -463,7 +495,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         try {
           const content = fs.readFileSync(entry.fullPath, "utf-8");
           extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
-        } catch { /* skip entity extraction errors */ }
+        } catch (err: unknown) { debugLog(`entity extraction failed: ${err instanceof Error ? err.message : String(err)}`); }
       }
     }
   }
@@ -575,7 +607,15 @@ export function queryDocRows(db: SqlJsDatabase, sql: string, params: (string | n
 export function queryDocBySourceKey(db: SqlJsDatabase, cortexPath: string, sourceKey: string): DocRow | null {
   const match = sourceKey.match(/^([^/]+)\/(.+)$/);
   if (!match) return null;
-  const [, project] = match;
+  const [, project, rest] = match;
+  // Try direct filename lookup first — O(1) for the common case of unique filenames per project
+  const filename = rest.includes("/") ? path.basename(rest) : rest;
+  const directRows = queryDocRows(db,
+    "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND filename = ?",
+    [project, filename]
+  );
+  if (directRows?.length === 1) return directRows[0];
+  // Fall back to full project scan for exact source key match (handles duplicate filenames)
   const rows = queryDocRows(
     db,
     "SELECT project, filename, type, content, path FROM docs WHERE project = ?",
@@ -594,328 +634,6 @@ export function queryRows(db: SqlJsDatabase, sql: string, params: (string | numb
     debugLog(`queryRows failed: ${err instanceof Error ? err.message : "unknown error"}`);
     return null;
   }
-}
-
-const HYBRID_SEARCH_FLAG = "CORTEX_FEATURE_HYBRID_SEARCH";
-const COSINE_FALLBACK_THRESHOLD = 3;
-const COSINE_SIMILARITY_MIN = 0.15;
-const COSINE_MAX_CORPUS = 10000;
-
-/**
- * Porter stemmer implementation for English words.
- * Based on the Porter (1980) algorithm.
- */
-export function porterStem(word: string): string {
-  if (word.length <= 2) return word;
-
-  function isConsonant(w: string, i: number): boolean {
-    const c = w[i];
-    if (c === 'a' || c === 'e' || c === 'i' || c === 'o' || c === 'u') return false;
-    if (c === 'y') return i === 0 ? true : !isConsonant(w, i - 1);
-    return true;
-  }
-
-  function measure(stem: string): number {
-    if (stem.length === 0) return 0;
-    let m = 0;
-    let i = 0;
-    // skip initial consonants
-    while (i < stem.length && isConsonant(stem, i)) i++;
-    while (i < stem.length) {
-      // count vowel sequence
-      while (i < stem.length && !isConsonant(stem, i)) i++;
-      if (i >= stem.length) break;
-      m++;
-      // count consonant sequence
-      while (i < stem.length && isConsonant(stem, i)) i++;
-    }
-    return m;
-  }
-
-  function hasVowel(stem: string): boolean {
-    for (let i = 0; i < stem.length; i++) {
-      if (!isConsonant(stem, i)) return true;
-    }
-    return false;
-  }
-
-  function endsDoubleConsonant(w: string): boolean {
-    if (w.length < 2) return false;
-    return w[w.length - 1] === w[w.length - 2] && isConsonant(w, w.length - 1);
-  }
-
-  function endsCVC(w: string): boolean {
-    if (w.length < 3) return false;
-    const l = w.length;
-    if (!isConsonant(w, l - 1) || isConsonant(w, l - 2) || !isConsonant(w, l - 3)) return false;
-    const last = w[l - 1];
-    return last !== 'w' && last !== 'x' && last !== 'y';
-  }
-
-  function endsWith(w: string, suffix: string): string | null {
-    if (w.length < suffix.length) return null;
-    if (w.endsWith(suffix)) return w.slice(0, -suffix.length);
-    return null;
-  }
-
-  let w = word;
-
-  // Step 1a
-  if (w.endsWith("sses")) {
-    w = w.slice(0, -2);
-  } else if (w.endsWith("ies")) {
-    w = w.slice(0, -2);
-  } else if (!w.endsWith("ss") && w.endsWith("s") && w.length > 2) {
-    w = w.slice(0, -1);
-  }
-
-  // Step 1b
-  let step1bExtra = false;
-  if (w.endsWith("eed")) {
-    const stem = w.slice(0, -3);
-    if (measure(stem) > 0) w = w.slice(0, -1); // eed -> ee
-  } else {
-    let stemFound: string | null = null;
-    if (w.endsWith("ed")) {
-      stemFound = w.slice(0, -2);
-    } else if (w.endsWith("ing")) {
-      stemFound = w.slice(0, -3);
-    }
-    if (stemFound !== null && hasVowel(stemFound)) {
-      w = stemFound;
-      step1bExtra = true;
-    }
-  }
-
-  if (step1bExtra) {
-    if (w.endsWith("at") || w.endsWith("bl") || w.endsWith("iz")) {
-      w += "e";
-    } else if (endsDoubleConsonant(w) && !w.endsWith("l") && !w.endsWith("s") && !w.endsWith("z")) {
-      w = w.slice(0, -1);
-    } else if (measure(w) === 1 && endsCVC(w)) {
-      w += "e";
-    }
-  }
-
-  // Step 1c
-  if (w.endsWith("y") && w.length > 2 && hasVowel(w.slice(0, -1))) {
-    w = w.slice(0, -1) + "i";
-  }
-
-  // Step 2
-  const step2Map: Record<string, string> = {
-    ational: "ate", tional: "tion", enci: "ence", anci: "ance",
-    izer: "ize", abli: "able", alli: "al", entli: "ent", eli: "e",
-    ousli: "ous", ization: "ize", ation: "ate", ator: "ate",
-    alism: "al", iveness: "ive", fulness: "ful", ousness: "ous",
-    aliti: "al", iviti: "ive", biliti: "ble",
-  };
-  for (const [suffix, replacement] of Object.entries(step2Map)) {
-    const stem = endsWith(w, suffix);
-    if (stem !== null && measure(stem) > 0) {
-      w = stem + replacement;
-      break;
-    }
-  }
-
-  // Step 3
-  const step3Map: Record<string, string> = {
-    icate: "ic", ative: "", iciti: "ic",
-    ical: "ic", ful: "", ness: "",
-  };
-  for (const [suffix, replacement] of Object.entries(step3Map)) {
-    const stem = endsWith(w, suffix);
-    if (stem !== null && measure(stem) > 0) {
-      w = stem + replacement;
-      break;
-    }
-  }
-
-  // Step 4
-  const step4Suffixes = [
-    "al", "ance", "ence", "er", "ic", "able", "ible", "ant",
-    "ement", "ment", "ent", "ion", "ou", "ism", "ate", "iti",
-    "ous", "ive", "ize",
-  ];
-  for (const suffix of step4Suffixes) {
-    const stem = endsWith(w, suffix);
-    if (stem !== null && measure(stem) > 1) {
-      if (suffix === "ion") {
-        if (stem.endsWith("s") || stem.endsWith("t")) {
-          w = stem;
-        }
-      } else {
-        w = stem;
-      }
-      break;
-    }
-  }
-
-  // Step 5a
-  if (w.endsWith("e")) {
-    const stem = w.slice(0, -1);
-    const m = measure(stem);
-    if (m > 1 || (m === 1 && !endsCVC(stem))) {
-      w = stem;
-    }
-  }
-
-  // Step 5b
-  if (measure(w) > 1 && endsDoubleConsonant(w) && w.endsWith("l")) {
-    w = w.slice(0, -1);
-  }
-
-  return w;
-}
-
-/**
- * Tokenize text into non-stop-word tokens for TF-IDF computation, with stemming.
- */
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .split(/\s+/)
-    .filter(w => w.length > 1 && !STOP_WORDS.has(w))
-    .map(w => porterStem(w));
-}
-
-/**
- * Compute TF-IDF cosine similarity scores for a query against a corpus of documents.
- * Returns an array of similarity scores in the same order as docs.
- */
-function tfidfCosine(docs: string[], query: string): number[] {
-  const queryTokens = tokenize(query);
-  if (queryTokens.length === 0) return docs.map(() => 0);
-
-  // Collect all unique terms from query + all docs
-  const allTokens = new Set<string>(queryTokens);
-  const docTokenLists: string[][] = docs.map(d => {
-    const tokens = tokenize(d);
-    for (const t of tokens) allTokens.add(t);
-    return tokens;
-  });
-
-  // Build a Set per document for O(1) term lookups
-  const docTokenSets: Set<string>[] = docTokenLists.map(tokens => new Set(tokens));
-
-  const terms = [...allTokens];
-  const N = docs.length;
-
-  // Compute document frequency for each term
-  const df = new Map<string, number>();
-  for (const term of terms) {
-    let count = 0;
-    for (const docSet of docTokenSets) {
-      if (docSet.has(term)) count++;
-    }
-    df.set(term, count);
-  }
-
-  function buildVector(tokens: string[]): number[] {
-    const tf = new Map<string, number>();
-    for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
-    return terms.map(term => {
-      const termTf = (tf.get(term) ?? 0) / (tokens.length || 1);
-      const idf = Math.log((N + 1) / ((df.get(term) ?? 0) + 1)) + 1;
-      return termTf * idf;
-    });
-  }
-
-  function cosine(a: number[], b: number[]): number {
-    let dot = 0, normA = 0, normB = 0;
-    for (let i = 0; i < a.length; i++) {
-      dot += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-    const denom = Math.sqrt(normA) * Math.sqrt(normB);
-    return denom === 0 ? 0 : dot / denom;
-  }
-
-  const queryVec = buildVector(queryTokens);
-  return docTokenLists.map(docTokens => cosine(queryVec, buildVector(docTokens)));
-}
-
-/**
- * Cosine fallback search: when FTS5 returns fewer than COSINE_FALLBACK_THRESHOLD results,
- * load all docs and rank by TF-IDF cosine similarity.
- * Only activated when CORTEX_FEATURE_HYBRID_SEARCH=1 and corpus size <= COSINE_MAX_CORPUS.
- * Returns DocRow[] ranked by similarity (threshold > COSINE_SIMILARITY_MIN), excluding already-found rowids.
- */
-export function cosineFallback(
-  db: SqlJsDatabase,
-  query: string,
-  excludeRowids: Set<number>,
-  limit: number
-): DocRow[] {
-  // Feature flag guard — default off
-  const flagVal = process.env[HYBRID_SEARCH_FLAG];
-  if (!flagVal || ["0", "false", "off", "no"].includes(flagVal.trim().toLowerCase())) {
-    return [];
-  }
-
-  // Count total docs to guard against large corpora
-  let totalDocs = 0;
-  try {
-    const countResult = db.exec("SELECT COUNT(*) FROM docs");
-    if (countResult?.length && countResult[0]?.values?.length) {
-      totalDocs = Number(countResult[0].values[0][0]);
-    }
-  } catch {
-    return [];
-  }
-
-  if (totalDocs > COSINE_MAX_CORPUS) {
-    debugLog(`cosineFallback: corpus size ${totalDocs} exceeds ${COSINE_MAX_CORPUS}, skipping`);
-    return [];
-  }
-
-  // Load all docs
-  let allRows: DbRow[] | null = null;
-  try {
-    const results = db.exec("SELECT rowid, project, filename, type, content, path FROM docs");
-    if (!Array.isArray(results) || !results.length || !results[0]?.values?.length) return [];
-    allRows = results[0].values;
-  } catch {
-    return [];
-  }
-
-  // Separate rowids, DocRows, and content strings for scoring
-  const rowids: number[] = [];
-  const docContents: string[] = [];
-  const docMeta: { project: string; filename: string; type: string; content: string; path: string }[] = [];
-
-  for (const row of allRows ?? []) {
-    const rowid = Number(row[0]);
-    if (excludeRowids.has(rowid)) continue;
-    rowids.push(rowid);
-    const content = String(row[4]);
-    docContents.push(content);
-    docMeta.push({
-      project: String(row[1]),
-      filename: String(row[2]),
-      type: String(row[3]),
-      content,
-      path: String(row[5]),
-    });
-  }
-
-  if (docContents.length === 0) return [];
-
-  const scores = tfidfCosine(docContents, query);
-
-  // Collect scored results above threshold
-  const scored: { score: number; doc: DocRow }[] = [];
-  for (let i = 0; i < scores.length; i++) {
-    if (scores[i] > COSINE_SIMILARITY_MIN) {
-      scored.push({ score: scores[i], doc: docMeta[i] });
-    }
-  }
-
-  // Sort descending by score and return top-limit
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map(s => s.doc);
 }
 
 export function extractSnippet(content: string, query: string, lines: number = 5): string {
@@ -1006,111 +724,3 @@ export function detectProject(cortexPath: string, cwd: string, profile?: string)
   return null;
 }
 
-// ── Entity graph helpers ──────────────────────────────────────────────────────
-
-const ENTITY_PATTERNS = [
-  // import/require patterns: import X from 'pkg' or require('pkg')
-  /(?:import\s+.*?\s+from\s+['"])(@?[\w\-/]+)(?:['"])/g,
-  /(?:require\s*\(\s*['"])(@?[\w\-/]+)(?:['"]\s*\))/g,
-  // @scope/package patterns in text
-  /@[\w-]+\/[\w-]+/g,
-  // Known library/tool names mentioned in prose (case-insensitive word boundaries)
-  /\b(React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Django|Flask|Rails|Spring|Redis|Postgres|PostgreSQL|MySQL|MongoDB|SQLite|Docker|Kubernetes|Terraform|AWS|GCP|Azure|Vercel|Netlify|Prisma|TypeORM|Sequelize|Jest|Vitest|Cypress|Playwright|Webpack|Vite|ESLint|Prettier|GraphQL|gRPC|Kafka|RabbitMQ|Elasticsearch|Nginx|Caddy|Node\.js|Deno|Bun|Python|Rust|Go|Java|TypeScript|Zod|Drizzle|tRPC|Tailwind|shadcn)\b/gi,
-];
-
-function extractEntityNames(content: string): string[] {
-  const found = new Set<string>();
-  for (const pattern of ENTITY_PATTERNS) {
-    const regex = new RegExp(pattern.source, pattern.flags);
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(content)) !== null) {
-      const name = match[1] || match[0];
-      if (name && name.length > 1 && name.length < 100) {
-        found.add(name.toLowerCase());
-      }
-    }
-  }
-  return [...found];
-}
-
-function getOrCreateEntity(db: SqlJsDatabase, name: string, type: string): number {
-  try {
-    db.run("INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)", [name, type]);
-  } catch { /* ignore duplicate */ }
-  const result = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [name, type]);
-  if (result?.length && result[0]?.values?.length) {
-    return Number(result[0].values[0][0]);
-  }
-  return -1;
-}
-
-function extractAndLinkEntities(db: SqlJsDatabase, content: string, sourceDoc: string): void {
-  const entityNames = extractEntityNames(content);
-  if (entityNames.length === 0) return;
-
-  const docEntityId = getOrCreateEntity(db, sourceDoc, "document");
-  if (docEntityId === -1) return;
-
-  for (const name of entityNames) {
-    const entityId = getOrCreateEntity(db, name, "library");
-    if (entityId === -1) continue;
-    try {
-      db.run(
-        "INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)",
-        [docEntityId, entityId, "mentions", sourceDoc]
-      );
-    } catch { /* ignore */ }
-  }
-}
-
-/**
- * Query related entities for a given name.
- */
-export function queryEntityLinks(db: SqlJsDatabase, name: string): { related: string[] } {
-  const related: string[] = [];
-  try {
-    // Find the entity
-    const entityResult = db.exec("SELECT id FROM entities WHERE name = ?", [name.toLowerCase()]);
-    if (!entityResult?.length || !entityResult[0]?.values?.length) return { related };
-    const entityId = Number(entityResult[0].values[0][0]);
-
-    // Find related entities through links (both directions)
-    const links = db.exec(
-      `SELECT DISTINCT e.name FROM entity_links el JOIN entities e ON (el.target_id = e.id OR el.source_id = e.id)
-       WHERE (el.source_id = ? OR el.target_id = ?) AND e.id != ?`,
-      [entityId, entityId, entityId]
-    );
-    if (links?.length && links[0]?.values?.length) {
-      for (const row of links[0].values) {
-        related.push(String(row[0]));
-      }
-    }
-  } catch { /* ignore query errors */ }
-  return { related };
-}
-
-export function getEntityBoostDocs(db: SqlJsDatabase, query: string, _cortexPath: string): Set<string> {
-  const entityNames: string[] = [];
-  try {
-    const rows = db.exec("SELECT name FROM entities WHERE length(name) > 2")[0]?.values ?? [];
-    for (const [name] of rows) {
-      if (typeof name === 'string' && query.toLowerCase().includes(name.toLowerCase())) {
-        entityNames.push(name);
-      }
-    }
-  } catch { return new Set(); }
-
-  const boostDocs = new Set<string>();
-  for (const name of entityNames) {
-    try {
-      const rows = db.exec(
-        "SELECT DISTINCT el.source_doc FROM entity_links el JOIN entities e ON el.target_id = e.id WHERE e.name = ? COLLATE NOCASE",
-        [name]
-      )[0]?.values ?? [];
-      for (const [doc] of rows) {
-        if (typeof doc === 'string') boostDocs.add(doc);
-      }
-    } catch { /* skip */ }
-  }
-  return boostDocs;
-}

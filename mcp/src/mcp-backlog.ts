@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { McpContext } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import { isValidProjectName } from "./utils.js";
@@ -13,10 +13,6 @@ import {
   readBacklogs,
   updateBacklogItem as updateBacklogItemStore,
 } from "./data-access.js";
-
-function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
-}
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, profile, withWriteQueue } = ctx;
@@ -35,18 +31,18 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, id, item }) => {
       // Single item lookup
       if (id || item) {
-        if (!project) return jsonResponse({ ok: false, error: "Provide `project` when looking up a single item." });
-        if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
+        if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         const result = readBacklog(cortexPath, project);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
         const match = all.find((entry) =>
           (id && entry.id.toLowerCase() === id.toLowerCase()) ||
           (item && entry.line.trim() === item.trim())
         );
-        if (!match) return jsonResponse({ ok: false, error: `No backlog item found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
-        return jsonResponse({
+        if (!match) return mcpResponse({ ok: false, error: `No backlog item found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
+        return mcpResponse({
           ok: true,
           message: `${match.id}: ${match.line} (${match.section})`,
           data: { project, id: match.id, section: match.section, checked: match.checked, line: match.line, context: match.context || null, priority: match.priority || null },
@@ -55,20 +51,20 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       // Full backlog for one project
       if (project) {
-        if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         const result = readBacklog(cortexPath, project);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
-        if (!fs.existsSync(doc.path)) return jsonResponse({ ok: true, message: `No backlog found for "${project}".`, data: { project, items: { Active: [], Queue: [], Done: [] } } });
-        return jsonResponse({ ok: true, message: `## ${project}\n${backlogMarkdown(doc)}`, data: { project, items: doc.items, issues: doc.issues } });
+        if (!fs.existsSync(doc.path)) return mcpResponse({ ok: true, message: `No backlog found for "${project}".`, data: { project, items: { Active: [], Queue: [], Done: [] } } });
+        return mcpResponse({ ok: true, message: `## ${project}\n${backlogMarkdown(doc)}`, data: { project, items: doc.items, issues: doc.issues } });
       }
 
       // All projects
       const docs = readBacklogs(cortexPath, profile);
-      if (!docs.length) return jsonResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
+      if (!docs.length) return mcpResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
       const parts = docs.map((doc) => `## ${doc.project}\n${backlogMarkdown(doc)}`);
       const projectData = docs.map((doc) => ({ project: doc.project, items: doc.items, issues: doc.issues }));
-      return jsonResponse({ ok: true, message: parts.join("\n\n"), data: { projects: projectData } });
+      return mcpResponse({ ok: true, message: parts.join("\n\n"), data: { projects: projectData } });
     }
   );
 
@@ -83,11 +79,11 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, item }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = addBacklogItemStore(cortexPath, project, item);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
-        return jsonResponse({ ok: true, message: result.data, data: { project, item } });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
   );
@@ -103,12 +99,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, items }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = addBacklogItemsBatch(cortexPath, project, items);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, errors } = result.data;
-        return jsonResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} items to ${project} backlog`, data: { project, added, errors } });
+        return mcpResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} items to ${project} backlog`, data: { project, added, errors } });
       });
     }
   );
@@ -124,11 +120,11 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, item }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = completeBacklogItemStore(cortexPath, project, item);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
-        return jsonResponse({ ok: true, message: result.data, data: { project, item } });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
   );
@@ -144,12 +140,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, items }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = completeBacklogItemsBatch(cortexPath, project, items);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { completed, errors } = result.data;
-        return jsonResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
+        return mcpResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
       });
     }
   );
@@ -170,11 +166,11 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, item, updates }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = updateBacklogItemStore(cortexPath, project, item, updates);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
-        return jsonResponse({ ok: true, message: result.data, data: { project, item, updates } });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
       });
     }
   );

@@ -89,8 +89,14 @@ export function parseCitationComment(line: string): FindingCitation | null {
 
 function resolveCitationFile(citation: FindingCitation): string | null {
   if (!citation.file) return null;
+  if (citation.repo) {
+    const resolved = path.resolve(citation.repo, citation.file);
+    const repoRoot = path.resolve(citation.repo);
+    // Require resolved path to stay inside the repo to prevent file probing
+    if (resolved !== repoRoot && !resolved.startsWith(repoRoot + path.sep)) return null;
+    return resolved;
+  }
   if (path.isAbsolute(citation.file)) return citation.file;
-  if (citation.repo) return path.resolve(citation.repo, citation.file);
   return path.resolve(citation.file);
 }
 

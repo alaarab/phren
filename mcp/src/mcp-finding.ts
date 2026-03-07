@@ -1,12 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { McpContext } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import {
-  removeFinding as removeLearningStore,
-} from "./data-access.js";
+  removeFinding as removeFindingCore,
+  removeFindings as removeFindingsCore,
+} from "./core-finding.js";
 import {
   debugLog,
   EXEC_TIMEOUT_MS,
@@ -21,9 +22,7 @@ import {
 import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings } from "./mcp-session.js";
 
-function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
-}
+
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, withWriteQueue, rebuildIndex } = ctx;
@@ -53,14 +52,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, finding, citation, findingType }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      if (finding.length > 5000) return jsonResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (finding.length > 5000) return mcpResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
       return withWriteQueue(async () => {
         try {
           const taggedFinding = findingType ? `[${findingType}] ${finding}` : finding;
           // Semantic dedup pre-check (async, feature-flagged)
           if (await checkSemanticDedup(cortexPath, project, taggedFinding)) {
-            return jsonResponse({ ok: true, message: `Skipped semantic duplicate finding for "${project}".` });
+            return mcpResponse({ ok: true, message: `Skipped semantic duplicate finding for "${project}".` });
           }
           runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
           const result = addFindingToFile(cortexPath, project, taggedFinding, citation);
@@ -74,7 +73,7 @@ export function register(server: McpServer, ctx: McpContext): void {
               if (fs.existsSync(fp)) {
                 let content = fs.readFileSync(fp, "utf8");
                 const bulletPrefix = taggedFinding.startsWith("- ") ? taggedFinding.slice(0, 60) : `- ${taggedFinding.slice(0, 60)}`;
-                const idx = content.indexOf(bulletPrefix);
+                const idx = content.lastIndexOf(bulletPrefix);
                 if (idx >= 0) {
                   const lineEnd = content.indexOf("\n", idx);
                   const insertAt = lineEnd >= 0 ? lineEnd : content.length;
@@ -90,10 +89,10 @@ export function register(server: McpServer, ctx: McpContext): void {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
             incrementSessionFindings(cortexPath);
           }
-          return jsonResponse({ ok, message: result.ok ? result.data : result.error, data: ok ? { project, finding: taggedFinding } : undefined });
+          return mcpResponse({ ok, message: result.ok ? result.data : result.error, data: ok ? { project, finding: taggedFinding } : undefined });
         } catch (err: unknown) {
           if (err instanceof Error && err.message.includes("Rejected:")) {
-            return jsonResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+            return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
           }
           throw err;
         }
@@ -112,13 +111,13 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, findings }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      if (findings.length > 100) return jsonResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
-      if (findings.some((f) => f.length > 5000)) return jsonResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (findings.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
+      if (findings.some((f) => f.length > 5000)) return mcpResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
       return withWriteQueue(async () => {
         runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
         const result = addFindingsToFile(cortexPath, project, findings);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, skipped, rejected } = result.data;
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
@@ -126,7 +125,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
         await rebuildIndex();
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
-        return jsonResponse({ ok: added.length > 0, message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`, data: { project, added, skipped, rejected } });
+        return mcpResponse({ ok: added.length > 0, message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`, data: { project, added, skipped, rejected } });
       });
     }
   );
@@ -144,12 +143,11 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, finding }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = removeLearningStore(cortexPath, project, finding);
+        const result = removeFindingCore(cortexPath, project, finding);
         await rebuildIndex();
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
-        return jsonResponse({ ok: true, message: result.data, data: { project, finding } });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.message });
+        return mcpResponse({ ok: true, message: result.message, data: result.data });
       });
     }
   );
@@ -165,16 +163,11 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, findings }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const results: { finding: string; ok: boolean; message: string }[] = [];
-        for (const finding of findings) {
-          const result = removeLearningStore(cortexPath, project, finding);
-          results.push({ finding, ok: result.ok, message: result.ok ? result.data : result.error ?? "unknown error" });
-        }
+        const result = removeFindingsCore(cortexPath, project, findings);
         await rebuildIndex();
-        const succeeded = results.filter((r) => r.ok).length;
-        return jsonResponse({ ok: succeeded > 0, message: `Removed ${succeeded}/${findings.length} findings`, data: { project, results } });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.message });
+        return mcpResponse({ ok: result.ok, message: result.message, data: result.data });
       });
     }
   );
@@ -208,7 +201,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         try {
           const status = runGit(["status", "--porcelain"]);
-          if (!status) return jsonResponse({ ok: true, message: "Nothing to save. Cortex is up to date.", data: { files: 0, pushed: false } });
+          if (!status) return mcpResponse({ ok: true, message: "Nothing to save. Cortex is up to date.", data: { files: 0, pushed: false } });
           const files = status.split("\n").filter(Boolean);
           const projectNames = Array.from(
             new Set(
@@ -231,7 +224,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
           if (!hasRemote) {
             const changedFiles = status.split("\n").length;
-            return jsonResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). No remote configured, skipping push.`, data: { files: changedFiles, pushed: false } });
+            return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). No remote configured, skipping push.`, data: { files: changedFiles, pushed: false } });
           }
 
           let pushed = false;
@@ -276,16 +269,16 @@ export function register(server: McpServer, ctx: McpContext): void {
           const changedFiles = status.split("\n").length;
           runCustomHooks(cortexPath, "post-save", { CORTEX_FILES_CHANGED: String(changedFiles), CORTEX_PUSHED: String(pushed) });
           if (pushed) {
-            return jsonResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). Pushed to remote.`, data: { files: changedFiles, pushed: true } });
+            return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). Pushed to remote.`, data: { files: changedFiles, pushed: true } });
           } else {
-            return jsonResponse({
+            return mcpResponse({
               ok: true,
               message: `Changes were committed but push failed.\n\nGit error: ${lastPushError}\n\nRun 'git push' manually from your cortex directory.`,
               data: { files: changedFiles, pushed: false, pushError: lastPushError },
             });
           }
         } catch (err: unknown) {
-          return jsonResponse({ ok: false, error: `Save failed: ${err instanceof Error ? err.message : String(err)}` });
+          return mcpResponse({ ok: false, error: `Save failed: ${err instanceof Error ? err.message : String(err)}` });
         }
       });
     }

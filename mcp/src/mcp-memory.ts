@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { McpContext } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -10,9 +10,7 @@ import {
 } from "./shared-governance.js";
 import { upsertCanonical } from "./shared-content.js";
 
-function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
-}
+
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, withWriteQueue } = ctx;
@@ -31,8 +29,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, memory }) => {
       return withWriteQueue(async () => {
         const result = upsertCanonical(cortexPath, project, memory);
-        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
-        return jsonResponse({ ok: true, message: result.data, data: { project, memory } });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        return mcpResponse({ ok: true, message: result.data, data: { project, memory } });
       });
     }
   );
@@ -64,7 +62,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const entry = { key, feedback, weight, timestamp: new Date().toISOString() };
         fs.appendFileSync(scoresFile, JSON.stringify(entry) + "\n");
 
-        return jsonResponse({ ok: true, message: `Recorded feedback ${feedback} for ${key} (weight: ${weight})`, data: { key, feedback, weight } });
+        return mcpResponse({ ok: true, message: `Recorded feedback ${feedback} for ${key} (weight: ${weight})`, data: { key, feedback, weight } });
       });
     }
   );

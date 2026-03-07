@@ -143,27 +143,62 @@ export function extractConflictVersions(content: string): { ours: string; theirs
   return { ours: oursLines.join("\n"), theirs: theirsLines.join("\n") };
 }
 
-// Parse FINDINGS.md into a map of date -> bullet entries
+// Parse FINDINGS.md into a map of date -> finding blocks.
+// Each finding is a bullet line plus any immediately following HTML comment lines
+// (e.g. <!-- cortex:cite {...} -->). These are stored as multi-line strings and
+// deduplicated by the bullet text only, preserving provenance comments.
 function parseLearningsEntries(content: string): Map<string, string[]> {
   const entries = new Map<string, string[]>();
   let currentDate = "";
+  let currentBlock: string[] = [];
 
-  for (const line of content.split("\n")) {
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (line.startsWith("## ")) {
+      // Flush any pending block before switching date
+      if (currentBlock.length > 0 && currentDate) {
+        entries.get(currentDate)!.push(currentBlock.join("\n"));
+        currentBlock = [];
+      }
       const heading = line.slice(3).trim();
       if (/^\d{4}-\d{2}-\d{2}$/.test(heading)) {
         currentDate = heading;
         if (!entries.has(currentDate)) entries.set(currentDate, []);
       }
     } else if (line.startsWith("- ") && currentDate) {
-      entries.get(currentDate)!.push(line);
+      // Flush previous block
+      if (currentBlock.length > 0) {
+        entries.get(currentDate)!.push(currentBlock.join("\n"));
+      }
+      currentBlock = [line];
+    } else if (currentBlock.length > 0 && /^\s*<!--/.test(line)) {
+      // HTML comment continuation of current finding block
+      currentBlock.push(line);
+    } else {
+      // Non-comment, non-bullet line: flush any pending block
+      if (currentBlock.length > 0 && currentDate) {
+        entries.get(currentDate)!.push(currentBlock.join("\n"));
+        currentBlock = [];
+      }
     }
+  }
+  // Flush final block
+  if (currentBlock.length > 0 && currentDate) {
+    entries.get(currentDate)!.push(currentBlock.join("\n"));
   }
 
   return entries;
 }
 
-// Merge two FINDINGS.md versions: union entries per date, newest date first
+// Extract the bullet text from a finding block (first line) for dedup purposes
+function findingBulletText(block: string): string {
+  return block.split("\n")[0];
+}
+
+// Merge two FINDINGS.md versions: union entries per date, newest date first.
+// Deduplicates by bullet text only, keeping the comment lines from whichever
+// version is kept (ours takes priority).
 export function mergeFindings(ours: string, theirs: string): string {
   const ourEntries = parseLearningsEntries(ours);
   const theirEntries = parseLearningsEntries(theirs);
@@ -176,9 +211,30 @@ export function mergeFindings(ours: string, theirs: string): string {
   for (const date of allDates) {
     const ourItems = ourEntries.get(date) ?? [];
     const theirItems = theirEntries.get(date) ?? [];
-    const allItems = [...new Set([...ourItems, ...theirItems])];
-    if (allItems.length > 0) {
-      lines.push(`## ${date}`, "", ...allItems, "");
+
+    // Dedup by bullet text, ours wins on conflict
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const block of ourItems) {
+      const key = findingBulletText(block);
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(block);
+      }
+    }
+    for (const block of theirItems) {
+      const key = findingBulletText(block);
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(block);
+      }
+    }
+
+    if (merged.length > 0) {
+      lines.push(`## ${date}`, "");
+      for (const block of merged) {
+        lines.push(block, "");
+      }
     }
   }
 

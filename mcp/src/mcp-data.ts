@@ -1,14 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { McpContext } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName } from "./utils.js";
 import { readFindings, readBacklog } from "./data-access.js";
 
-function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
-}
+
 
 const importPayloadSchema = z.object({
   project: z.string(),
@@ -45,9 +43,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const projectDir = path.join(cortexPath, project);
-      if (!fs.existsSync(projectDir)) return jsonResponse({ ok: false, error: `Project "${project}" not found.` });
+      if (!fs.existsSync(projectDir)) return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
 
       const exported: Record<string, unknown> = { project, exportedAt: new Date().toISOString(), version: 1 };
 
@@ -56,6 +54,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const learningsResult = readFindings(cortexPath, project);
       if (learningsResult.ok) exported.learnings = learningsResult.data;
+      const findingsPath = path.join(projectDir, "FINDINGS.md");
+      if (fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
 
       const backlogResult = readBacklog(cortexPath, project);
       if (backlogResult.ok) exported.backlog = backlogResult.data.items;
@@ -63,7 +63,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const claudePath = path.join(projectDir, "CLAUDE.md");
       if (fs.existsSync(claudePath)) exported.claudeMd = fs.readFileSync(claudePath, "utf8");
 
-      return jsonResponse({ ok: true, message: `Exported project "${project}".`, data: exported });
+      return mcpResponse({ ok: true, message: `Exported project "${project}".`, data: exported });
     }
   );
 
@@ -82,23 +82,23 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           decoded = JSON.parse(rawData);
         } catch {
-          return jsonResponse({ ok: false, error: "Invalid JSON input." });
+          return mcpResponse({ ok: false, error: "Invalid JSON input." });
         }
 
         const parsedResult = importPayloadSchema.safeParse(decoded);
         if (!parsedResult.success) {
-          return jsonResponse({ ok: false, error: `Invalid import payload: ${parsedResult.error.issues[0]?.message ?? "schema validation failed"}` });
+          return mcpResponse({ ok: false, error: `Invalid import payload: ${parsedResult.error.issues[0]?.message ?? "schema validation failed"}` });
         }
 
         const parsed = parsedResult.data;
         if (!isValidProjectName(parsed.project)) {
-          return jsonResponse({ ok: false, error: `Invalid project name: "${parsed.project}"` });
+          return mcpResponse({ ok: false, error: `Invalid project name: "${parsed.project}"` });
         }
 
         const projectDir = path.join(cortexPath, parsed.project);
         const overwrite = parsed.overwrite === true;
         if (fs.existsSync(projectDir) && !overwrite) {
-          return jsonResponse({
+          return mcpResponse({
             ok: false,
             error: `Project "${parsed.project}" already exists. Re-run with "overwrite": true to replace it.`,
           });
@@ -154,7 +154,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             imported.push("CLAUDE.md");
           }
 
-          const findingsContent = buildFindingsContent();
+          const findingsRaw = (parsed as Record<string, unknown>).findingsRaw;
+          const findingsContent = typeof findingsRaw === "string" ? findingsRaw : buildFindingsContent();
           if (findingsContent) {
             fs.writeFileSync(path.join(stagedProjectDir, "FINDINGS.md"), findingsContent);
             imported.push("FINDINGS.md");
@@ -174,27 +175,37 @@ export function register(server: McpServer, ctx: McpContext): void {
             }
             fs.renameSync(stagedProjectDir, projectDir);
             cleanupDir(stagingRoot);
-            if (backupDir) cleanupDir(backupDir);
           } catch (error) {
             if (backupDir && fs.existsSync(backupDir) && !fs.existsSync(projectDir)) {
               fs.renameSync(backupDir, projectDir);
             }
             cleanupDir(stagingRoot);
-            return jsonResponse({
+            return mcpResponse({
               ok: false,
               error: error instanceof Error ? `Failed to finalize import: ${error.message}` : "Failed to finalize import.",
             });
           }
         } catch (error) {
           cleanupDir(stagingRoot);
-          return jsonResponse({
+          return mcpResponse({
             ok: false,
             error: error instanceof Error ? `Failed to stage import: ${error.message}` : "Failed to stage import.",
           });
         }
 
         await rebuildIndex();
-        return jsonResponse({
+        // Backup is only deleted after successful rebuild so we can restore on failure
+        if (overwrite) {
+          const backupToClean = path.join(cortexPath, `${parsed.project}.import-backup-`);
+          try {
+            for (const entry of fs.readdirSync(cortexPath)) {
+              if (entry.startsWith(`${parsed.project}.import-backup-`)) {
+                fs.rmSync(path.join(cortexPath, entry), { recursive: true, force: true });
+              }
+            }
+          } catch { /* best-effort cleanup */ }
+        }
+        return mcpResponse({
           ok: true,
           message: `Imported project "${parsed.project}": ${imported.join(", ")}`,
           data: { project: parsed.project, files: imported, overwrite },
@@ -214,21 +225,22 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, action }) => {
-      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
       const projectDir = path.join(cortexPath, project);
       const archiveDir = path.join(cortexPath, `${project}.archived`);
 
       if (action === "archive") {
         if (!fs.existsSync(projectDir)) {
-          return jsonResponse({ ok: false, error: `Project "${project}" not found.` });
+          return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
         }
         if (fs.existsSync(archiveDir)) {
-          return jsonResponse({ ok: false, error: `Archive "${project}.archived" already exists. Unarchive or remove it first.` });
+          return mcpResponse({ ok: false, error: `Archive "${project}.archived" already exists. Unarchive or remove it first.` });
         }
 
         fs.renameSync(projectDir, archiveDir);
         await rebuildIndex();
-        return jsonResponse({
+        return mcpResponse({
           ok: true,
           message: `Archived project "${project}". Data preserved at ${archiveDir}.`,
           data: { project, archivePath: archiveDir },
@@ -237,21 +249,22 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       // unarchive
       if (fs.existsSync(projectDir)) {
-        return jsonResponse({ ok: false, error: `Project "${project}" already exists as an active project.` });
+        return mcpResponse({ ok: false, error: `Project "${project}" already exists as an active project.` });
       }
       if (!fs.existsSync(archiveDir)) {
         const entries = fs.readdirSync(cortexPath).filter((e) => e.endsWith(".archived"));
         const available = entries.map((e) => e.replace(/\.archived$/, ""));
-        return jsonResponse({ ok: false, error: `No archive found for "${project}".`, data: { availableArchives: available } });
+        return mcpResponse({ ok: false, error: `No archive found for "${project}".`, data: { availableArchives: available } });
       }
 
       fs.renameSync(archiveDir, projectDir);
       await rebuildIndex();
-      return jsonResponse({
+      return mcpResponse({
         ok: true,
         message: `Unarchived project "${project}". It is now active again.`,
         data: { project, path: projectDir },
       });
+      }); // end withWriteQueue
     }
   );
 }

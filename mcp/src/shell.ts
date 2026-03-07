@@ -1,53 +1,18 @@
-import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import {
   addBacklogItem,
   addFinding,
-  addProjectToProfile,
-  approveQueueItem,
-  BacklogItem,
-  completeBacklogItem,
   editQueueItem,
-  listMachines,
-  listProfiles,
   listProjectCards,
   loadShellState,
-  pinBacklogItem,
-  readBacklog,
-  readFindings,
-  readReviewQueue,
-  readRuntimeHealth,
-  rejectQueueItem,
-  removeFinding,
-  removeProjectFromProfile,
-  resetShellState,
   saveShellState,
-  setMachineProfile,
   ShellState,
-  tidyBacklogDone,
-  unpinBacklogItem,
-  updateBacklogItem,
-  workNextBacklogItem,
 } from "./data-access.js";
-import { runDoctor } from "./link.js";
+import { style } from "./shell-render.js";
 import {
-  RESET,
-  style,
-  badge,
-  separator,
-  stripAnsi,
-  padToWidth,
-  truncateLine,
-  lineViewport,
-  shellHelpText,
-  clearScreen,
-  clearToEnd,
-} from "./shell-render.js";
-import {
-  SUB_VIEWS,
-  TAB_ICONS,
   MAX_UNDO_STACK,
+  TAB_ICONS,
   type UndoEntry,
   type ShellView,
   type ShellDeps,
@@ -56,55 +21,61 @@ import {
 export type { ShellView, ShellDeps } from "./shell-types.js";
 import {
   resultMsg,
-  editDistance,
-  tokenize,
-  backlogsByFilter,
-  queueByFilter,
-  expandIds,
-  normalizeSection,
-  resolveEntryScript,
   defaultRunHooks,
   defaultRunUpdate,
   defaultRunRelink,
 } from "./shell-palette.js";
+import { runDoctor } from "./link.js";
+import {
+  renderShell,
+  type SubsectionsCache,
+  type ViewContext,
+} from "./shell-view.js";
+import {
+  executePalette,
+  completeInput as completeInputFn,
+  getListItems,
+  handleNavigateKey,
+  type PaletteHost,
+  type NavigationHost,
+} from "./shell-input.js";
 
 // ── Shell class ──────────────────────────────────────────────────────────────
 
 export class CortexShell {
   private state: ShellState;
   private message = `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`;
-  private healthCache?: { at: number; result: DoctorResultLike };
-  private prevHealthView?: ShellView; // where to return when pressing Esc from Health
-  private showHelp = false;
+  healthCache?: { at: number; result: DoctorResultLike };
+  prevHealthView?: ShellView;
+  showHelp = false;
   private pendingConfirm?: { label: string; action: () => void };
   private undoStack: UndoEntry[] = [];
 
-  // ── Navigation state ──────────────────────────────────────────────────────
   private navMode: "navigate" | "input" = "navigate";
-  private inputBuf  = "";
-  private inputCtx  = ""; // 'filter' | 'command' | 'add' | 'learn-add' | 'mq-edit'
-  private inputMqId = ""; // id being edited in mq-edit mode
+  private inputBuf = "";
+  private inputCtx = "";
+  inputMqId = "";
   private cursorMap: Partial<Record<string, number>> = {};
-  private viewScrollMap: Partial<Record<string, number>> = {}; // stable scroll offset per view
-  private healthLineCount = 0; // cached line count for Health view cursor navigation
-  private _subsectionsCache: { project: string; map: Map<string, string> } | null = null;
+  private viewScrollMap: Partial<Record<string, number>> = {};
+  private healthLineCount = 0;
+  private _subsectionsCache: SubsectionsCache | null = null;
 
   get mode(): "navigate" | "input" { return this.navMode; }
-  get inputBuffer(): string         { return this.inputBuf; }
+  get inputBuffer(): string { return this.inputBuf; }
+  get filter(): string | undefined { return this.state.filter; }
 
   constructor(
-    private readonly cortexPath: string,
-    private readonly profile: string,
-    private readonly deps: ShellDeps = {
+    readonly cortexPath: string,
+    readonly profile: string,
+    readonly deps: ShellDeps = {
       runDoctor,
       runRelink: defaultRunRelink,
-      runHooks:  defaultRunHooks,
+      runHooks: defaultRunHooks,
       runUpdate: defaultRunUpdate,
     },
   ) {
     this.state = loadShellState(cortexPath);
     const cards = listProjectCards(cortexPath, profile);
-    // Always start at Projects view so user picks their project each session
     this.state.view = "Projects";
     if (!this.state.project && cards.length > 0) this.state.project = cards[0].name;
     this.message = this.state.project
@@ -112,35 +83,27 @@ export class CortexShell {
       : `  Press ${style.boldCyan("?")} for help`;
   }
 
-  close(): void {
-    saveShellState(this.cortexPath, this.state);
-  }
+  close(): void { saveShellState(this.cortexPath, this.state); }
+  setMessage(msg: string): void { this.message = msg; }
 
-  private setMessage(msg: string): void {
-    this.message = msg;
-  }
-
-  private confirmThen(label: string, action: () => void): void {
+  confirmThen(label: string, action: () => void): void {
     this.pendingConfirm = { label, action };
     this.setMessage(`${label}  ${style.boldCyan("y")} ${style.dim("confirm")}  ${style.boldCyan("n")} ${style.dim("cancel")}`);
   }
 
-  private setView(view: ShellView): void {
+  setView(view: ShellView): void {
     this.state.view = view;
-    // Reset scroll when entering a view fresh (cursor is already tracked separately)
     this.viewScrollMap[view] = 0;
     saveShellState(this.cortexPath, this.state);
   }
 
-  private setFilter(value: string): void {
+  setFilter(value: string): void {
     this.state.filter = value.trim() || undefined;
     saveShellState(this.cortexPath, this.state);
-    this.setMessage(this.state.filter
-      ? `  Filter: ${style.yellow(this.state.filter)}`
-      : "  Filter cleared.");
+    this.setMessage(this.state.filter ? `  Filter: ${style.yellow(this.state.filter)}` : "  Filter cleared.");
   }
 
-  private snapshotForUndo(label: string, file: string): void {
+  snapshotForUndo(label: string, file: string): void {
     try {
       if (fs.existsSync(file)) {
         const content = fs.readFileSync(file, "utf8");
@@ -150,1060 +113,144 @@ export class CortexShell {
     } catch { /* best effort */ }
   }
 
-  private popUndo(): string {
+  popUndo(): string {
     const entry = this.undoStack.pop();
     if (!entry) return "Nothing to undo.";
-    try {
-      fs.writeFileSync(entry.file, entry.content);
-      return `Undid: ${entry.label}`;
-    } catch (err: unknown) {
-      return `Undo failed: ${err instanceof Error ? err.message : String(err)}`;
-    }
+    try { fs.writeFileSync(entry.file, entry.content); return `Undid: ${entry.label}`; }
+    catch (err: unknown) { return `Undo failed: ${err instanceof Error ? err.message : String(err)}`; }
   }
 
-  private ensureProjectSelected(): string | null {
-    const selected = this.state.project;
-    if (!selected) {
+  ensureProjectSelected(): string | null {
+    if (!this.state.project) {
       this.setMessage("No project selected — open one from Projects view (↵) or use :open <project>");
       return null;
     }
-    return selected;
+    return this.state.project;
   }
 
-  // ── Cursor management ─────────────────────────────────────────────────────
+  invalidateSubsectionsCache(): void { this._subsectionsCache = null; }
 
-  private currentCursor(): number {
-    return this.cursorMap[this.state.view] ?? 0;
-  }
+  // ── Cursor management ────────────────────────────────────────────────────
 
-  private setCursor(n: number): void {
-    const count = this.listItemCount();
+  currentCursor(): number { return this.cursorMap[this.state.view] ?? 0; }
+  setCursor(n: number): void {
+    const count = this.getListItems().length;
     this.cursorMap[this.state.view] = count > 0 ? Math.max(0, Math.min(n, count - 1)) : 0;
   }
+  moveCursor(delta: number): void { this.setCursor(this.currentCursor() + delta); }
+  private currentScroll(): number { return this.viewScrollMap[this.state.view] ?? 0; }
+  private setScroll(n: number): void { this.viewScrollMap[this.state.view] = Math.max(0, n); }
 
-  private moveCursor(delta: number): void {
-    this.setCursor(this.currentCursor() + delta);
+  getListItems(): { id?: string; name?: string; text?: string; line?: string }[] {
+    return getListItems(this.cortexPath, this.profile, this.state, this.healthLineCount);
   }
 
-  private currentScroll(): number {
-    return this.viewScrollMap[this.state.view] ?? 0;
-  }
-
-  private setScroll(n: number): void {
-    this.viewScrollMap[this.state.view] = Math.max(0, n);
-  }
-
-  private listItemCount(): number {
-    return this.getListItems().length;
-  }
-
-  private getListItems(): { id?: string; name?: string; text?: string; line?: string }[] {
-    switch (this.state.view) {
-      case "Projects": {
-        const cards = listProjectCards(this.cortexPath, this.profile);
-        return this.state.filter
-          ? cards.filter((c) =>
-              `${c.name} ${c.summary} ${c.docs.join(" ")}`.toLowerCase().includes(this.state.filter!.toLowerCase()),
-            )
-          : cards;
-      }
-      case "Backlog": {
-        const project = this.state.project;
-        if (!project) return [];
-        const result = readBacklog(this.cortexPath, project);
-        if (!result.ok) return [];
-        // Cursor only navigates Active + Queue (not Done)
-        const active = this.state.filter
-          ? backlogsByFilter(result.data.items.Active, this.state.filter)
-          : result.data.items.Active;
-        const queue = this.state.filter
-          ? backlogsByFilter(result.data.items.Queue, this.state.filter)
-          : result.data.items.Queue;
-        return [...active, ...queue];
-      }
-      case "Findings": {
-        const project = this.state.project;
-        if (!project) return [];
-        const result = readFindings(this.cortexPath, project);
-        if (!result.ok) return [];
-        return this.state.filter
-          ? result.data.filter((i) =>
-              `${i.id} ${i.date} ${i.text}`.toLowerCase().includes(this.state.filter!.toLowerCase()),
-            )
-          : result.data;
-      }
-      case "Review Queue": {
-        const project = this.state.project;
-        if (!project) return [];
-        const result = readReviewQueue(this.cortexPath, project);
-        if (!result.ok) return [];
-        return this.state.filter ? queueByFilter(result.data, this.state.filter) : result.data;
-      }
-      case "Health":
-        // Health uses cursor as line scroll position; return dummy items for cursor clamping
-        return Array.from({ length: Math.max(1, this.healthLineCount) }, (_, i) => ({ id: String(i) }));
-      default:
-        return [];
-    }
-  }
-
-  // ── Activation (Enter key) ────────────────────────────────────────────────
-
-  private async activateSelected(): Promise<void> {
-    const cursor = this.currentCursor();
-    const items  = this.getListItems();
-    const item   = items[cursor];
-    if (!item) return;
-
-    switch (this.state.view) {
-      case "Projects":
-        if (item.name) {
-          this.state.project = item.name;
-          saveShellState(this.cortexPath, this.state);
-          this.setView("Backlog");
-          this.setMessage(`  ${style.green("●")} ${style.boldCyan(item.name)}`);
-        }
-        break;
-
-      case "Backlog":
-        if (item.id) {
-          const project = this.ensureProjectSelected();
-          if (!project) return;
-          const file = path.join(this.cortexPath, project, "backlog.md");
-          this.confirmThen(`Complete ${style.dim(item.id)} "${item.line}"?`, () => {
-            this.snapshotForUndo(`complete ${item.id}`, file);
-            const r = completeBacklogItem(this.cortexPath, project, item.id!);
-            this.invalidateSubsectionsCache();
-            this.setMessage(`  ${resultMsg(r)}`);
-            this.setCursor(Math.max(0, cursor - 1));
-          });
-        }
-        break;
-
-      case "Findings":
-        if (item.text) {
-          // Enter previews the learning — use 'd' or Delete key to remove
-          this.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}`);
-        }
-        break;
-
-      case "Review Queue":
-        if (item.text) {
-          // Enter previews the item — use 'a' to approve, 'r' to reject
-          this.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}  ${style.dim("[ a approve · r reject ]")}`);
-        }
-        break;
-    }
-  }
-
-  // ── View-specific action keys ─────────────────────────────────────────────
-
-  private async doViewAction(key: string): Promise<void> {
-    const cursor  = this.currentCursor();
-    const items   = this.getListItems();
-    const item    = items[cursor];
-    const project = this.state.project;
-
-    switch (this.state.view) {
-      case "Backlog":
-        if (key === "a") {
-          this.startInput("add", "");
-        } else if (key === "d" && item?.id) {
-          if (!project) { this.setMessage("Select a project first."); return; }
-          const file = path.join(this.cortexPath, project, "backlog.md");
-          // Toggle: if Active → Queue, if Queue → Active
-          const backlogResult = readBacklog(this.cortexPath, project);
-          const isActive = backlogResult.ok && backlogResult.data.items.Active.some((i: BacklogItem) => i.id === item.id);
-          const targetSection = isActive ? "Queue" : "Active";
-          this.snapshotForUndo(`move ${item.id} → ${targetSection.toLowerCase()}`, file);
-          const r = updateBacklogItem(this.cortexPath, project, item.id, { section: targetSection });
-          this.invalidateSubsectionsCache();
-          this.setMessage(`  ${resultMsg(r)}`);
-        }
-        break;
-
-      case "Findings":
-        if (key === "a") {
-          this.startInput("learn-add", "");
-        } else if ((key === "d" || key === "\x7f") && item?.text) {
-          if (!project) { this.setMessage("Select a project first."); return; }
-          this.confirmThen(`Delete finding ${style.dim(item.id ?? "")}?`, () => {
-            const file = path.join(this.cortexPath, project!, "FINDINGS.md");
-            this.snapshotForUndo(`remove finding ${item.id ?? ''}`, file);
-            const r = removeFinding(this.cortexPath, project!, item.text!);
-            this.setMessage(`  ${resultMsg(r)}`);
-            this.setCursor(Math.max(0, cursor - 1));
-          });
-        }
-        break;
-
-      case "Review Queue":
-        if (key === "a" && item?.id) {
-          if (!project) { this.setMessage("Select a project first."); return; }
-          this.confirmThen(`Approve ${style.dim(item.id)} "${item.text}"?`, () => {
-            const r = approveQueueItem(this.cortexPath, project!, item.id!);
-            this.setMessage(`  ${resultMsg(r)}`);
-            this.setCursor(Math.max(0, cursor - 1));
-          });
-        } else if (key === "r" && item?.id) {
-          if (!project) { this.setMessage("Select a project first."); return; }
-          this.confirmThen(`Reject ${style.dim(item.id)} "${item.text}"?`, () => {
-            const r = rejectQueueItem(this.cortexPath, project!, item.id!);
-            this.setMessage(`  ${resultMsg(r)}`);
-            this.setCursor(Math.max(0, cursor - 1));
-          });
-        } else if (key === "e" && item?.id) {
-          this.inputMqId = item.id;
-          this.startInput("mq-edit", item.text || "");
-        }
-        break;
-    }
-  }
-
-  // ── Input mode ────────────────────────────────────────────────────────────
-
-  private startInput(ctx: string, initial: string): void {
-    this.navMode  = "input";
-    this.inputCtx = ctx;
-    this.inputBuf = initial;
-  }
-
-  private cancelInput(): void {
-    this.navMode  = "navigate";
-    this.inputBuf = "";
-    this.inputCtx = "";
-    this.setMessage("  Cancelled.");
-  }
+  startInput(ctx: string, initial: string): void { this.navMode = "input"; this.inputCtx = ctx; this.inputBuf = initial; }
+  private cancelInput(): void { this.navMode = "navigate"; this.inputBuf = ""; this.inputCtx = ""; this.setMessage("  Cancelled."); }
 
   private async submitInput(): Promise<void> {
     const buf = this.inputBuf;
     const ctx = this.inputCtx;
-    this.navMode  = "navigate";
-    this.inputBuf = "";
-    this.inputCtx = "";
-
-    if (!buf.trim() && ctx !== "command") {
-      this.setMessage("  Nothing entered.");
-      return;
-    }
-
+    this.navMode = "navigate"; this.inputBuf = ""; this.inputCtx = "";
+    if (!buf.trim() && ctx !== "command") { this.setMessage("  Nothing entered."); return; }
     switch (ctx) {
-      case "filter":
-        this.setFilter(buf);
-        break;
-
-      case "command":
-        await this.executePalette(buf.startsWith(":") ? buf.slice(1) : buf);
-        break;
-
-      case "add": {
-        const project = this.ensureProjectSelected();
-        if (!project) return;
-        const r = addBacklogItem(this.cortexPath, project, buf);
-        this.setMessage(`  ${resultMsg(r)}`);
-        break;
-      }
-
-      case "learn-add": {
-        const project = this.ensureProjectSelected();
-        if (!project) return;
-        const r = addFinding(this.cortexPath, project, buf);
-        this.setMessage(`  ${resultMsg(r)}`);
-        break;
-      }
-
-      case "mq-edit": {
-        const project = this.ensureProjectSelected();
-        if (!project) return;
-        const r = editQueueItem(this.cortexPath, project, this.inputMqId, buf);
-        this.setMessage(`  ${resultMsg(r)}`);
-        this.inputMqId = "";
-        break;
-      }
+      case "filter": this.setFilter(buf); break;
+      case "command": await this.runPalette(buf.startsWith(":") ? buf.slice(1) : buf); break;
+      case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addBacklogItem(this.cortexPath, p, buf))}`); break; }
+      case "learn-add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addFinding(this.cortexPath, p, buf))}`); break; }
+      case "mq-edit": { const p = this.ensureProjectSelected(); if (!p) return; const r = editQueueItem(this.cortexPath, p, this.inputMqId, buf); this.setMessage(`  ${resultMsg(r)}`); this.inputMqId = ""; break; }
     }
   }
 
-  // ── Tab switching ─────────────────────────────────────────────────────────
-
-  private nextTab(): void {
-    if (this.state.view === "Projects" || this.state.view === "Health") return;
-    const idx  = SUB_VIEWS.indexOf(this.state.view as typeof SUB_VIEWS[number]);
-    const next = SUB_VIEWS[(idx + 1) % SUB_VIEWS.length];
-    if (next) { this.setView(next); this.setMessage(`  ${TAB_ICONS[next]} ${next}`); }
-  }
-
-  private prevTab(): void {
-    if (this.state.view === "Projects" || this.state.view === "Health") return;
-    const idx  = SUB_VIEWS.indexOf(this.state.view as typeof SUB_VIEWS[number]);
-    const prev = SUB_VIEWS[(idx - 1 + SUB_VIEWS.length) % SUB_VIEWS.length];
-    if (prev) { this.setView(prev); this.setMessage(`  ${TAB_ICONS[prev]} ${prev}`); }
-  }
-
-  // ── Raw key handling ──────────────────────────────────────────────────────
+  // ── Raw key handling ───────────────────────────────────────────────────
 
   async handleRawKey(key: string): Promise<boolean> {
-    // Ctrl-C / Ctrl-D always exit
     if (key === "\x03" || key === "\x04") return false;
-
-    // Pending confirm: y/n only
     if (this.pendingConfirm) {
-      const pending = this.pendingConfirm;
-      this.pendingConfirm = undefined;
-      if (key.toLowerCase() === "y") {
-        pending.action();
-      } else {
-        this.setMessage("  Cancelled.");
-      }
+      const pending = this.pendingConfirm; this.pendingConfirm = undefined;
+      if (key.toLowerCase() === "y") { pending.action(); } else { this.setMessage("  Cancelled."); }
       return true;
     }
-
-    // Any key dismisses help overlay
     if (this.showHelp) {
       this.showHelp = false;
       this.setMessage(`  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`);
       return true;
     }
-
-    return this.navMode === "input"
-      ? this.handleInputKey(key)
-      : this.handleNavigateKey(key);
-  }
-
-  private showCursorPosition(): void {
-    const count = this.listItemCount();
-    if (count === 0) return;
-    const cursor = this.currentCursor();
-    const items  = this.getListItems();
-    const item   = items[cursor];
-    const label  = item?.name ?? item?.line ?? item?.text ?? "";
-    const short  = label.length > 50 ? label.slice(0, 48) + "…" : label;
-    this.setMessage(`  ${style.dim(`${cursor + 1} / ${count}`)}${short ? `  ${style.dimItalic(short)}` : ""}`);
-  }
-
-  private async handleNavigateKey(key: string): Promise<boolean> {
-    // Arrow keys
-    if (key === "\x1b[A") { this.moveCursor(-1);  this.showCursorPosition(); return true; } // up
-    if (key === "\x1b[B") { this.moveCursor(1);   this.showCursorPosition(); return true; } // down
-    if (key === "\x1b[D") { // left
-      if (this.state.view === "Projects") { this.setMessage(`  ${style.dim("press ↵ to open a project first")}`); }
-      else { this.prevTab(); }
-      return true;
-    }
-    if (key === "\x1b[C") { // right
-      if (this.state.view === "Projects") { this.setMessage(`  ${style.dim("press ↵ to open a project first")}`); }
-      else { this.nextTab(); }
-      return true;
-    }
-
-    // Page up / page down
-    if (key === "\x1b[5~") { this.moveCursor(-10); this.showCursorPosition(); return true; }
-    if (key === "\x1b[6~") { this.moveCursor(10);  this.showCursorPosition(); return true; }
-
-    // Home / End
-    if (key === "\x1b[H" || key === "\x1b[1~") { this.setCursor(0);                         this.showCursorPosition(); return true; }
-    if (key === "\x1b[F" || key === "\x1b[4~") { this.setCursor(this.listItemCount() - 1);  this.showCursorPosition(); return true; }
-
-    // Tab / Shift-Tab for view cycling
-    if (key === "\t")     { this.nextTab(); return true; }
-    if (key === "\x1b[Z") { this.prevTab(); return true; }
-
-    // Quit
-    if (key === "q" || key === "Q") return false;
-
-    // Enter
-    if (key === "\r" || key === "\n") {
-      await this.activateSelected();
-      return true;
-    }
-
-    // Help toggle
-    if (key === "?") {
-      this.showHelp = !this.showHelp;
-      this.setMessage(this.showHelp
-        ? "  Showing help — press any key to dismiss"
-        : `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`);
-      return true;
-    }
-
-    // Filter
-    if (key === "/") {
-      this.startInput("filter", this.state.filter || "");
-      return true;
-    }
-
-    // Command palette
-    if (key === ":") {
-      this.startInput("command", "");
-      return true;
-    }
-
-    // Escape: clear filter → back from Health → back to Projects → quit hint
-    if (key === "\x1b") {
-      if (this.state.filter) {
-        this.setFilter("");
-      } else if (this.state.view === "Health") {
-        const returnTo = this.prevHealthView ?? "Projects";
-        this.setView(returnTo);
-        this.prevHealthView = undefined;
-        this.setMessage(`  ${TAB_ICONS[returnTo] ?? TAB_ICONS.Projects} ${returnTo}`);
-      } else if (this.state.view !== "Projects") {
-        this.setView("Projects");
-        this.setMessage(`  ${TAB_ICONS.Projects} ${style.dim("select a project")}`);
-      } else {
-        this.setMessage(`  ${style.dim("press")} ${style.boldCyan("q")} ${style.dim("to quit")}`);
-      }
-      return true;
-    }
-
-    // Single-letter view shortcuts (p goes home; b/l/m/h need a project)
-    if (key === "p") { this.setView("Projects");     this.setMessage(`  ${TAB_ICONS.Projects} Projects`);          return true; }
-    if (key === "b") {
-      if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Backlog");      this.setMessage(`  ${TAB_ICONS.Backlog} Backlog`);            return true;
-    }
-    if (key === "l") {
-      if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Findings");    this.setMessage(`  ${TAB_ICONS.Findings} Findings`);        return true;
-    }
-    if (key === "m") {
-      if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true;
-    }
-    if (key === "h") {
-      this.prevHealthView = this.state.view === "Health" ? this.prevHealthView : this.state.view;
-      this.healthCache = undefined;
-      this.setView("Health");
-      this.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`);
-      return true;
-    }
-
-    // View-specific action keys
-    if (["a", "d", "r", "e", "\x7f"].includes(key)) {
-      await this.doViewAction(key);
-      return true;
-    }
-
-    return true;
+    return this.navMode === "input" ? this.handleInputKey(key) : handleNavigateKey(this.asNavigationHost(), key);
   }
 
   private async handleInputKey(key: string): Promise<boolean> {
-    if (key === "\x03") return false; // Ctrl-C
-
-    if (key === "\x1b") {
-      // Check if it's a lone Escape (not the start of an escape sequence)
-      this.cancelInput();
-      return true;
-    }
-
-    if (key === "\r" || key === "\n") {
-      await this.submitInput();
-      return true;
-    }
-
-    // Backspace
-    if (key === "\x7f" || key === "\x08") {
-      this.inputBuf = this.inputBuf.slice(0, -1);
-      return true;
-    }
-
-    // Ignore escape sequences (arrow keys etc.) in input mode
+    if (key === "\x03") return false;
+    if (key === "\x1b") { this.cancelInput(); return true; }
+    if (key === "\r" || key === "\n") { await this.submitInput(); return true; }
+    if (key === "\x7f" || key === "\x08") { this.inputBuf = this.inputBuf.slice(0, -1); return true; }
     if (key.startsWith("\x1b[")) return true;
-
-    // Printable characters
-    if (key.length === 1 && key.charCodeAt(0) >= 32) {
-      this.inputBuf += key;
-      return true;
-    }
-
+    if (key.length === 1 && key.charCodeAt(0) >= 32) { this.inputBuf += key; return true; }
     return true;
   }
 
-  // ── Tab bar ───────────────────────────────────────────────────────────────
-
-  private renderTabBar(): string {
-    const cols = process.stdout.columns || 80;
-
-    if (this.state.view === "Health") {
-      // Global view — not project-scoped
-      const label = `${TAB_ICONS.Health} Health`;
-      return `  ${style.boldCyan(label)}\n${separator(cols)}`;
-    }
-
-    if (this.state.view === "Projects") {
-      // Level 0: just show Projects tab
-      const label = `${TAB_ICONS.Projects} Projects`;
-      const tabLine = ` ${style.boldCyan(label)} `;
-      return `${tabLine}\n${separator(cols)}`;
-    }
-
-    // Level 1: show project name + sub-view tabs
-    const projectTag = this.state.project
-      ? `${style.cyan(this.state.project)} ${style.dim("›")} `
-      : "";
-    const tabs = SUB_VIEWS.map((v) => {
-      const icon  = TAB_ICONS[v] || "";
-      const label = `${icon} ${v}`;
-      return v === this.state.view
-        ? ` ${style.boldCyan(label)} `
-        : ` ${style.dim(label)} `;
-    });
-
-    const tabLine = `  ${projectTag}${tabs.join(style.dim("│"))}`;
-    return `${tabLine}\n${separator(cols)}`;
-  }
-
-  // ── Bottom bar ────────────────────────────────────────────────────────────
-
-  private renderBottomBar(): string {
-    const cols = process.stdout.columns || 80;
-    const sep  = separator(cols);
-    const dot  = style.dim("  ·  ");
-    const k    = (s: string) => style.boldCyan(s);
-    const d    = (s: string) => style.dim(s);
-
-    if (this.navMode === "input") {
-      const labels: Record<string, string> = {
-        filter:      "filter",
-        command:     "cmd",
-        add:         "add task",
-        "learn-add": "add finding",
-        "mq-edit":   "edit Memory Queue item",
-      };
-      const label = labels[this.inputCtx] || this.inputCtx;
-      return `${sep}\n  ${style.boldCyan(label + " ›")} ${this.inputBuf}${style.cyan("█")}`;
-    }
-
-    const viewHints: Record<string, string[]> = {
-      Projects:      [`${k("↵")} ${d("open project")}`],
-      Backlog:       [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
-      Findings:      [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
-      "Review Queue":[`${k("a")} ${d("keep")}`, `${k("r")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
-      Health:        [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
-    };
-
-    const extra = viewHints[this.state.view] ?? [];
-    const isSubView = this.state.view !== "Projects" && this.state.view !== "Health";
-    const nav   = isSubView
-      ? [`${k("←→")} ${d("tabs")}`, `${k("↑↓")} ${d("move")}`, `${k("esc")} ${d("back")}`]
-      : this.state.view === "Health"
-        ? []  // Health hints already in viewHints
-        : [`${k("↑↓")} ${d("move")}`];
-    const tail  = [`${k("h")} ${d("health")}`, `${k("/")} ${d("filter")}`, `${k(":")} ${d("cmd")}`, `${k("?")} ${d("help")}`, `${k("q")} ${d("quit")}`];
-
-    const hints = [...nav, ...extra, ...tail];
-    return `${sep}\n  ${hints.join(dot)}`;
-  }
-
-  // ── Content height ────────────────────────────────────────────────────────
-
-  private contentHeight(): number {
-    const rows = process.stdout.rows || 24;
-    // header(1) + tabbar+sep(2) + sep+message(2) + sep+bottombar(2) = 7
-    return Math.max(4, rows - 7);
-  }
-
-  // ── View renderers ────────────────────────────────────────────────────────
-
-  private renderProjectsView(cursor: number, height: number): string[] {
-    const cols  = process.stdout.columns || 80;
-    const cards = listProjectCards(this.cortexPath, this.profile);
-    const filtered = this.state.filter
-      ? cards.filter((c) =>
-          `${c.name} ${c.summary} ${c.docs.join(" ")}`.toLowerCase().includes(this.state.filter!.toLowerCase()),
-        )
-      : cards;
-
-    if (!filtered.length) {
-      return [style.dim("  No projects in this profile.")];
-    }
-
-    // Phase 1: build ALL lines, tracking cursor item's line span
-    const allLines: string[] = [];
-    let cursorFirstLine = 0;
-    let cursorLastLine  = 0;
-
-    for (let absIdx = 0; absIdx < filtered.length; absIdx++) {
-      const card       = filtered[absIdx];
-      const isSelected = absIdx === cursor;
-      if (isSelected) cursorFirstLine = allLines.length;
-      const isActive   = card.name === this.state.project;
-
-      const cursorChar = isSelected ? style.cyan("▶") : " ";
-      const bullet     = isActive ? style.green("●") : style.dim("○");
-      const nameStr    = isActive ? style.boldGreen(card.name) : style.bold(card.name);
-      const docsStr    = style.dim(`[${card.docs.join(" · ") || "no docs"}]`);
-
-      let nameRow    = `  ${cursorChar} ${bullet} ${nameStr}  ${docsStr}`;
-      let summaryRow = `        ${style.dim(card.summary || "")}`;
-
-      if (isSelected) {
-        nameRow    = `\x1b[7m${padToWidth(nameRow, cols)}${RESET}`;
-        summaryRow = `\x1b[7m${padToWidth(summaryRow, cols)}${RESET}`;
-      }
-
-      allLines.push(nameRow);
-      allLines.push(summaryRow);
-      if (isSelected) cursorLastLine = allLines.length - 1;
-    }
-
-    // Phase 2: stable edge-triggered scroll
-    const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
-    const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, this.currentScroll());
-    this.setScroll(vp.scrollStart);
-    const lines = vp.lines;
-
-    if (allLines.length > usableHeight) {
-      const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-      lines.push(style.dim(`  ─── ${cursor + 1}/${filtered.length}  ${pct}%`));
-    }
-
-    return lines;
-  }
-
-  private sectionBullet(title: string): { bullet: string; colorFn: (s: string) => string } {
-    switch (title) {
-      case "Active": return { bullet: style.green("●"),  colorFn: style.boldGreen };
-      case "Queue":  return { bullet: style.yellow("●"), colorFn: style.boldYellow };
-      case "Done":   return { bullet: style.gray("●"),   colorFn: style.dim };
-      default:       return { bullet: "●",               colorFn: style.bold };
-    }
-  }
-
-  private parseSubsections(backlogPath: string, project: string): Map<string, string> {
-    if (this._subsectionsCache?.project === project) return this._subsectionsCache.map;
-    const map = new Map<string, string>();
-    try {
-      const raw = fs.readFileSync(backlogPath, "utf8");
-      let currentSub = "";
-      for (const line of raw.split("\n")) {
-        const subMatch = line.match(/^###\s+(.+)/);
-        if (subMatch) { currentSub = subMatch[1].trim(); continue; }
-        if (line.match(/^##\s/)) { currentSub = ""; continue; }
-        if (line.startsWith("- ")) {
-          const body = line.replace(/^- \[[ x]\]\s*/, "").trim();
-          if (currentSub && body) map.set(body, currentSub);
-        }
-      }
-    } catch { /* best effort */ }
-    this._subsectionsCache = { project, map };
-    return map;
-  }
-
-  private invalidateSubsectionsCache(): void {
-    this._subsectionsCache = null;
-  }
-
-  private renderBacklogView(cursor: number, height: number): string[] {
-    const cols    = process.stdout.columns || 80;
-    const project = this.state.project;
-    if (!project) {
-      return [style.dim("  No project selected — navigate to Projects (← →) and press ↵")];
-    }
-
-    const result = readBacklog(this.cortexPath, project);
-    if (!result.ok) return [result.error];
-
-    const parsed   = result.data;
-    const warnings = parsed.issues.length
-      ? [`  ${style.yellow("⚠")}  ${style.yellow(parsed.issues.join("; "))}`, ""]
-      : [];
-
-    const backlogFile  = path.join(this.cortexPath, project, "backlog.md");
-    const subsections  = this.parseSubsections(backlogFile, project);
-
-    const active = this.state.filter
-      ? backlogsByFilter(parsed.items.Active, this.state.filter)
-      : parsed.items.Active;
-    const queue = this.state.filter
-      ? backlogsByFilter(parsed.items.Queue, this.state.filter)
-      : parsed.items.Queue;
-    const done = this.state.filter
-      ? backlogsByFilter(parsed.items.Done, this.state.filter)
-      : parsed.items.Done;
-    const flatItems = [...active, ...queue, ...done];
-
-    if (!flatItems.length) {
-      const hint = this.state.filter ? "  No items match the filter." : `  No backlog items. Press ${style.boldCyan("a")} to add one.`;
-      return [...warnings, style.dim(hint)];
-    }
-
-    const activeStart = 0;
-    const queueStart  = active.length;
-    const doneStart   = active.length + queue.length;
-
-    // Phase 1: build ALL lines, tracking cursor item's line span
-    const allLines: string[] = [];
-    let cursorFirstLine = 0;
-    let cursorLastLine  = 0;
-    let lastSection = "";
-    let lastSub     = "";
-
-    for (let absIdx = 0; absIdx < flatItems.length; absIdx++) {
-      const item       = flatItems[absIdx];
-      const isSelected = absIdx === cursor;
-      const isDone     = absIdx >= doneStart;
-
-      // Section header
-      const section = absIdx < queueStart ? "Active" : absIdx < doneStart ? "Queue" : "Done";
-      if (section !== lastSection) {
-        lastSection = section;
-        lastSub     = "";
-        const { bullet, colorFn } = this.sectionBullet(section);
-        allLines.push(`  ${bullet} ${colorFn(section)}`);
-      }
-
-      // Subsection header
-      const sub = subsections.get(item.line) || "";
-      if (sub && sub !== lastSub) {
-        lastSub = sub;
-        allLines.push(`    ${style.boldYellow(sub)}`);
-      }
-
-      if (isSelected) cursorFirstLine = allLines.length;
-
-      const idStr   = style.dim(item.id);
-      const pinTag  = item.pinned ? ` ${style.boldCyan("[pin]")}` : "";
-      const prioTag = item.priority && !isDone
-        ? ` ${item.priority === "high"
-            ? style.boldRed(`[${item.priority}]`)
-            : item.priority === "medium"
-              ? style.yellow(`[${item.priority}]`)
-              : style.dim(`[${item.priority}]`)}`
-        : "";
-      const check    = item.checked ? style.green("[✓]") : style.dim("[ ]");
-      const lineText = isDone ? style.dim(item.line) : item.line;
-
-      let row = `    ${idStr} ${check} ${lineText}${pinTag}${prioTag}`;
-      if (isSelected && !isDone) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
-      else row = truncateLine(row, cols);
-      allLines.push(row);
-
-      if (item.context) {
-        const ctx = `       ${style.dimItalic("→ " + item.context)}`;
-        allLines.push(isSelected && !isDone ? `\x1b[7m${padToWidth(ctx, cols)}${RESET}` : truncateLine(ctx, cols));
-      }
-
-      if (isSelected) cursorLastLine = allLines.length - 1;
-    }
-
-    // Phase 2: stable edge-triggered scroll
-    const usableHeight = Math.max(1, height - warnings.length - (allLines.length > height ? 1 : 0));
-    const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, this.currentScroll());
-    this.setScroll(vp.scrollStart);
-    const lines: string[] = [...warnings, ...vp.lines];
-
-    if (allLines.length > usableHeight) {
-      const navigable = active.length + queue.length;
-      const pct = navigable <= 1 ? 100 : Math.round((cursor / Math.max(navigable - 1, 1)) * 100);
-      lines.push(style.dim(`  ─── ${cursor + 1}/${navigable}  ${pct}%`));
-    }
-
-    return lines;
-  }
-
-  private renderLearningsView(cursor: number, height: number): string[] {
-    const cols    = process.stdout.columns || 80;
-    const project = this.state.project;
-    if (!project) return [style.dim("  No project selected.")];
-
-    const result = readFindings(this.cortexPath, project);
-    if (!result.ok) return [result.error];
-
-    const all = result.data;
-    const filtered = this.state.filter
-      ? all.filter((item) =>
-          `${item.id} ${item.date} ${item.text}`.toLowerCase().includes(this.state.filter!.toLowerCase()),
-        )
-      : all;
-
-    if (!filtered.length) {
-      return [style.dim(`  No findings yet. Press ${style.boldCyan("a")} to add one.`)];
-    }
-
-    // Phase 1: build ALL lines, tracking cursor item's line span
-    const allLines: string[] = [];
-    let cursorFirstLine = 0;
-    let cursorLastLine  = 0;
-
-    for (let absIdx = 0; absIdx < filtered.length; absIdx++) {
-      const item       = filtered[absIdx];
-      const isSelected = absIdx === cursor;
-
-      if (isSelected) cursorFirstLine = allLines.length;
-
-      const idStr   = style.dim(item.id.padEnd(4));
-      const dateStr = style.dim(`[${item.date}]`);
-
-      let row = `  ${idStr}  ${dateStr}  ${item.text}`;
-      if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
-      else row = truncateLine(row, cols);
-      allLines.push(row);
-
-      if (item.citation) {
-        const cite = `              ${style.italic(style.blue("↗ " + item.citation))}`;
-        allLines.push(isSelected ? `\x1b[7m${padToWidth(cite, cols)}${RESET}` : truncateLine(cite, cols));
-      }
-
-      if (isSelected) cursorLastLine = allLines.length - 1;
-    }
-
-    // Phase 2: stable edge-triggered scroll
-    const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
-    const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, this.currentScroll());
-    this.setScroll(vp.scrollStart);
-
-    if (allLines.length > usableHeight) {
-      const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-      vp.lines.push(style.dim(`  ─── ${cursor + 1}/${filtered.length}  ${pct}%`));
-    }
-
-    return vp.lines;
-  }
-
-  private queueSectionBadge(section: string): string {
-    switch (section.toLowerCase()) {
-      case "review":    return badge(section, style.yellow);
-      case "stale":     return badge(section, style.red);
-      case "conflicts": return badge(section, style.magenta);
-      default:          return badge(section, style.dim);
-    }
-  }
-
-  private renderMemoryQueueView(cursor: number, height: number): string[] {
-    const cols    = process.stdout.columns || 80;
-    const project = this.state.project;
-    if (!project) return [style.dim("  No project selected.")];
-
-    const result = readReviewQueue(this.cortexPath, project);
-    if (!result.ok) return [result.error];
-
-    const filtered = this.state.filter
-      ? queueByFilter(result.data, this.state.filter)
-      : result.data;
-
-    if (!filtered.length) {
-      return [style.dim("  No queued memory items. Run :govern to scan for stale entries.")];
-    }
-
-    // Phase 1: build ALL lines, tracking cursor item's line span
-    const allLines: string[] = [];
-    let cursorFirstLine = 0;
-    let cursorLastLine  = 0;
-    let currentSection = "";
-
-    for (let absIdx = 0; absIdx < filtered.length; absIdx++) {
-      const item       = filtered[absIdx];
-      const isSelected = absIdx === cursor;
-
-      if (item.section !== currentSection) {
-        currentSection = item.section;
-        allLines.push(`  ${this.queueSectionBadge(currentSection)} ${style.bold(currentSection)}`);
-      }
-
-      if (isSelected) cursorFirstLine = allLines.length;
-
-      const riskBadge = item.risky ? badge("risk", style.boldRed) : badge("ok", style.green);
-      const confStr   = item.confidence !== undefined
-        ? ` ${style.dim("conf=")}${
-            item.confidence >= 0.8 ? style.green(item.confidence.toFixed(2))
-            : item.confidence >= 0.6 ? style.yellow(item.confidence.toFixed(2))
-            : style.red(item.confidence.toFixed(2))}`
-        : "";
-
-      let metaRow = `    ${style.dim(item.id)}  ${riskBadge}  ${style.dim(`[${item.date}]`)}${confStr}`;
-      let textRow = `      ${item.text}`;
-
-      if (isSelected) {
-        metaRow = `\x1b[7m${padToWidth(metaRow, cols)}${RESET}`;
-        textRow = `\x1b[7m${padToWidth(textRow, cols)}${RESET}`;
-      } else {
-        metaRow = truncateLine(metaRow, cols);
-        textRow = truncateLine(textRow, cols);
-      }
-
-      allLines.push(metaRow);
-      allLines.push(textRow);
-
-      if (isSelected) cursorLastLine = allLines.length - 1;
-    }
-
-    // Phase 2: stable edge-triggered scroll
-    const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
-    const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, this.currentScroll());
-    this.setScroll(vp.scrollStart);
-
-    if (allLines.length > usableHeight) {
-      const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-      vp.lines.push(style.dim(`  ─── ${cursor + 1}/${filtered.length}  ${pct}%`));
-    }
-
-    return vp.lines;
-  }
-
-  private renderMachinesView(): string[] {
-    const machines = listMachines(this.cortexPath);
-    const profiles = listProfiles(this.cortexPath);
-    const lines: string[] = [];
-
-    lines.push(style.bold("  Machines"));
-    if (!machines.ok) {
-      lines.push(`    ${style.dim(machines.error)}`);
-    } else {
-      const entries = Object.entries(machines.data);
-      if (!entries.length) lines.push(`    ${style.dim("(none)")}`);
-      for (const [machine, prof] of entries) {
-        lines.push(`    ${style.bold(machine)} ${style.dim("→")} ${style.cyan(prof as string)}`);
-      }
-    }
-
-    lines.push("", style.bold("  Profiles"));
-    if (!profiles.ok) {
-      lines.push(`    ${style.dim(profiles.error)}`);
-    } else {
-      if (!profiles.data.length) lines.push(`    ${style.dim("(none)")}`);
-      for (const prof of profiles.data) {
-        lines.push(`    ${style.cyan(prof.name)}: ${prof.projects.join(", ") || style.dim("(no projects)")}`);
-      }
-    }
-
-    lines.push(
-      "",
-      `  ${style.dim(":machine map <hostname> <profile>")}`,
-      `  ${style.dim(":profile add-project|remove-project <profile> <project>")}`,
-    );
-
-    return lines;
-  }
+  // ── Doctor snapshot ────────────────────────────────────────────────────
 
   private async doctorSnapshot(): Promise<DoctorResultLike> {
-    if (this.healthCache && Date.now() - this.healthCache.at < 10_000) {
-      return this.healthCache.result;
-    }
+    if (this.healthCache && Date.now() - this.healthCache.at < 10_000) return this.healthCache.result;
     const result = await this.deps.runDoctor(this.cortexPath, false);
     this.healthCache = { at: Date.now(), result };
     return result;
   }
 
-  private async renderHealthView(cursor: number, height: number): Promise<string[]> {
-    const doctor  = await this.doctorSnapshot();
-    const runtime = readRuntimeHealth(this.cortexPath);
-    const allLines: string[] = [];
-
-    const statusIcon  = doctor.ok ? style.green("✓") : style.red("✗");
-    const statusLabel = doctor.ok ? style.boldGreen("healthy") : style.boldRed("issues found");
-    allLines.push(`  ${statusIcon}  ${style.bold("cortex")} ${statusLabel}`);
-    if (doctor.machine) allLines.push(`     ${style.dim("machine:")} ${style.bold(doctor.machine)}`);
-    if (doctor.profile) allLines.push(`     ${style.dim("profile:")} ${style.cyan(doctor.profile)}`);
-
-    allLines.push("", `  ${style.bold("Checks")}`);
-    for (const check of doctor.checks) {
-      const icon   = check.ok ? style.green("✓") : style.red("✗");
-      const status = check.ok ? style.dim("ok") : style.boldRed("fail");
-      allLines.push(`    ${icon} ${status}  ${check.name}: ${check.detail}`);
-    }
-
-    allLines.push("", `  ${style.bold("Runtime")}`);
-    allLines.push(`    ${style.dim("last hook:   ")} ${style.dim(runtime.lastPromptAt || "n/a")}`);
-    allLines.push(`    ${style.dim("last auto-save:  ")} ${style.dim(runtime.lastAutoSave?.at || "n/a")}  ${style.dim(runtime.lastAutoSave?.status || "")}`);
-    allLines.push(`    ${style.dim("last governance: ")} ${style.dim(runtime.lastGovernance?.at || "n/a")}  ${style.dim(runtime.lastGovernance?.status || "")}`);
-
-    allLines.push("", `  ${style.dim(":run fix  :relink  :rerun hooks  :update")}`);
-
-    this.healthLineCount = allLines.length;
-    if (allLines.length <= height) return allLines;
-
-    // Scrollable: cursor highlights current line
-    const cols = process.stdout.columns || 80;
-    const clampedCursor = Math.max(0, Math.min(cursor, allLines.length - 1));
-    // Apply highlight to cursor line
-    allLines[clampedCursor] = `\x1b[7m${padToWidth(allLines[clampedCursor], cols)}${RESET}`;
-    const vp = lineViewport(allLines, clampedCursor, clampedCursor, height - 1, this.currentScroll());
-    this.setScroll(vp.scrollStart);
-    const pct = allLines.length <= 1 ? 100 : Math.round((clampedCursor / (allLines.length - 1)) * 100);
-    vp.lines.push(style.dim(`  ─── ${clampedCursor + 1}/${allLines.length}  ${pct}%`));
-    return vp.lines;
-  }
-
-  // ── Main render ───────────────────────────────────────────────────────────
+  // ── Render (delegates to shell-view.ts) ────────────────────────────────
 
   async render(): Promise<string> {
-    const cols   = process.stdout.columns || 80;
-    const cursor = this.currentCursor();
-    const height = this.contentHeight();
-
-    // Header line
-    const projectLabel = this.state.project
-      ? `  ${style.dim("·")}  ${style.cyan(this.state.project)}`
-      : "";
-    const filterLabel = this.state.filter
-      ? `  ${style.dim("·")}  ${style.yellow("/" + this.state.filter)}`
-      : "";
-    const header = `  ${style.boldCyan("◆ cortex")}${projectLabel}${filterLabel}`;
-
-    // Tab bar
-    const tabBar = this.renderTabBar();
-
-    // Content
-    let contentLines: string[];
-    if (this.showHelp) {
-      contentLines = shellHelpText().split("\n");
-    } else {
-      switch (this.state.view) {
-        case "Projects":
-          contentLines = this.renderProjectsView(cursor, height);
-          break;
-        case "Backlog":
-          contentLines = this.renderBacklogView(cursor, height);
-          break;
-        case "Findings":
-          contentLines = this.renderLearningsView(cursor, height);
-          break;
-        case "Review Queue":
-          contentLines = this.renderMemoryQueueView(cursor, height);
-          break;
-        case "Machines/Profiles":
-          contentLines = this.renderMachinesView();
-          break;
-        case "Health":
-          contentLines = await this.renderHealthView(cursor, height);
-          break;
-        default:
-          contentLines = ["  Unknown view."];
-      }
-    }
-
-    // Clamp to available height; pad blank lines if content is shorter
-    const displayed = contentLines.slice(0, height);
-    while (displayed.length < height) displayed.push("");
-
-    // Message + bottom bar
-    const msgLine   = `  ${style.dimItalic(stripAnsi(this.message).trimStart() ? this.message : "")}`;
-    const bottomBar = this.renderBottomBar();
-
-    // Erase-to-EOL on each line so overwrite-in-place doesn't leave artifacts
-    // \x1b[K clears from cursor to end of line — width-independent
-    const parts = [header, tabBar, ...displayed, msgLine, bottomBar];
-    return parts.map(line => {
-      if (line.includes("\n")) {
-        return line.split("\n").map(sub => sub + "\x1b[K").join("\n");
-      }
-      return line + "\x1b[K";
-    }).join("\n") + "\n";
+    const ctx: ViewContext = {
+      cortexPath: this.cortexPath, profile: this.profile, state: this.state,
+      currentCursor: () => this.currentCursor(), currentScroll: () => this.currentScroll(),
+      setScroll: (n) => this.setScroll(n),
+    };
+    return renderShell(ctx, this.navMode, this.inputCtx, this.inputBuf, this.showHelp, this.message,
+      () => this.doctorSnapshot(), this._subsectionsCache,
+      (n) => { this.healthLineCount = n; }, (c) => { this._subsectionsCache = c; });
   }
 
-  // ── Backward-compat handleInput (used by tests) ───────────────────────────
+  // ── Navigation host adapter ────────────────────────────────────────────
+
+  private asNavigationHost(): NavigationHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    return {
+      cortexPath: this.cortexPath, profile: this.profile, state: this.state, deps: this.deps,
+      get showHelp() { return self.showHelp; }, set showHelp(v) { self.showHelp = v; },
+      get healthCache() { return self.healthCache; }, set healthCache(v) { self.healthCache = v; },
+      get prevHealthView() { return self.prevHealthView; }, set prevHealthView(v) { self.prevHealthView = v; },
+      get filter() { return self.state.filter; },
+      get inputMqId() { return self.inputMqId; }, set inputMqId(v) { self.inputMqId = v; },
+      setMessage: (msg) => this.setMessage(msg), setView: (view) => this.setView(view),
+      setFilter: (value) => this.setFilter(value),
+      confirmThen: (label, action) => this.confirmThen(label, action),
+      snapshotForUndo: (label, file) => this.snapshotForUndo(label, file),
+      ensureProjectSelected: () => this.ensureProjectSelected(),
+      invalidateSubsectionsCache: () => this.invalidateSubsectionsCache(),
+      popUndo: () => this.popUndo(),
+      currentCursor: () => this.currentCursor(),
+      setCursor: (n) => this.setCursor(n),
+      moveCursor: (delta) => this.moveCursor(delta),
+      getListItems: () => this.getListItems(),
+      startInput: (ctx, initial) => this.startInput(ctx, initial),
+    };
+  }
+
+  // ── Palette (delegates to shell-input.ts) ──────────────────────────────
+
+  private async runPalette(input: string): Promise<void> {
+    await executePalette(this.asNavigationHost(), input);
+  }
+
+  // ── Backward-compat handleInput (used by tests) ────────────────────────
 
   async handleInput(raw: string): Promise<boolean> {
     const input = raw.trim();
-
     if (this.pendingConfirm) {
-      const pending = this.pendingConfirm;
-      this.pendingConfirm = undefined;
-      if (input.toLowerCase() === "y") {
-        pending.action();
-      } else {
-        this.setMessage("  Cancelled.");
-      }
+      const pending = this.pendingConfirm; this.pendingConfirm = undefined;
+      if (input.toLowerCase() === "y") { pending.action(); } else { this.setMessage("  Cancelled."); }
       return true;
     }
     if (this.showHelp) {
@@ -1212,605 +259,24 @@ export class CortexShell {
       if (!input) return true;
     }
     if (!input) return true;
-
     if (["q", "quit", ":q", ":quit", ":exit"].includes(input.toLowerCase())) return false;
-
     if (input === "p") { this.setView("Projects"); this.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
-    if (input === "b") {
-      if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Backlog"); this.setMessage(`  ${TAB_ICONS.Backlog} Backlog`); return true;
-    }
-    if (input === "l") {
-      if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Findings"); this.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true;
-    }
-    if (input === "m") {
-      if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true;
-    }
-    if (input === "h") {
-      if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.healthCache = undefined; this.setView("Health"); this.setMessage(`  ${TAB_ICONS.Health} Health`); return true;
-    }
-
+    if (input === "b") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Backlog"); this.setMessage(`  ${TAB_ICONS.Backlog} Backlog`); return true; }
+    if (input === "l") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Findings"); this.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
+    if (input === "m") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
+    if (input === "h") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.healthCache = undefined; this.setView("Health"); this.setMessage(`  ${TAB_ICONS.Health} Health`); return true; }
     if (input.startsWith("/")) { this.setFilter(input.slice(1)); return true; }
-    if (input.startsWith(":")) { await this.executePalette(input.slice(1)); return true; }
-    await this.executePalette(input);
+    if (input.startsWith(":")) { await this.runPalette(input.slice(1)); return true; }
+    await this.runPalette(input);
     return true;
   }
 
-  // ── Tab completion (for readline fallback) ────────────────────────────────
-
-  private backlogIdCompletions(): string[] {
-    const project = this.state.project;
-    if (!project) return [];
-    const result = readBacklog(this.cortexPath, project);
-    if (!result.ok) return [];
-    return [
-      ...result.data.items.Active,
-      ...result.data.items.Queue,
-      ...result.data.items.Done,
-    ].map((item) => item.id);
-  }
-
-  private queueIdCompletions(): string[] {
-    const project = this.state.project;
-    if (!project) return [];
-    const result = readReviewQueue(this.cortexPath, project);
-    if (!result.ok) return [];
-    return result.data.map((item) => item.id);
-  }
-
   completeInput(line: string): string[] {
-    const commands = [
-      ":projects", ":backlog", ":learnings", ":findings", ":memory", ":machines", ":health",
-      ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
-      ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
-      ":mq approve", ":mq reject", ":mq edit", ":machine map",
-      ":profile add-project", ":profile remove-project",
-      ":run fix", ":relink", ":rerun hooks", ":update", ":govern", ":consolidate",
-      ":undo", ":diff", ":conflicts", ":reset", ":help",
-    ];
-
-    const trimmed = line.trimStart();
-    if (!trimmed.startsWith(":")) return [];
-    const after = trimmed.slice(1);
-    const parts = tokenize(after);
-    const endsWithSpace = /\s$/.test(trimmed);
-
-    if (parts.length === 0) return commands;
-    if (parts.length === 1 && !endsWithSpace) {
-      const prefix = `:${parts[0].toLowerCase()}`;
-      return commands.filter((c) => c.startsWith(prefix));
-    }
-
-    const cmd = parts[0].toLowerCase();
-    if (cmd === "open") {
-      return listProjectCards(this.cortexPath, this.profile).map((c) => `:open ${c.name}`);
-    }
-    if (["complete", "move", "reprioritize", "context", "pin", "unpin"].includes(cmd)) {
-      return this.backlogIdCompletions().map((id) => `:${cmd} ${id}`);
-    }
-    if (cmd === "mq" && ["approve", "reject", "edit"].includes((parts[1] || "").toLowerCase())) {
-      return this.queueIdCompletions().map((id) => `:mq ${parts[1].toLowerCase()} ${id}`);
-    }
-    if (cmd === "find" && (parts[1] || "").toLowerCase() === "remove") {
-      const project = this.state.project;
-      if (!project) return [];
-      const r = readFindings(this.cortexPath, project);
-      if (!r.ok) return [];
-      return r.data.map((item) => `:find remove ${item.id}`);
-    }
-
-    return commands;
-  }
-
-  // ── Command palette ───────────────────────────────────────────────────────
-
-  private async executePalette(input: string): Promise<void> {
-    const trimmed = input.trim();
-    if (!trimmed) return;
-    const parts   = tokenize(trimmed);
-    const command = (parts[0] || "").toLowerCase();
-
-    if (command === "help") {
-      this.showHelp = true;
-      this.setMessage("  Showing help — press any key to dismiss");
-      return;
-    }
-
-    if (command === "projects")  { this.setView("Projects");         this.setMessage(`  ${TAB_ICONS.Projects} Projects`);          return; }
-    if (command === "backlog")   { this.setView("Backlog");          this.setMessage(`  ${TAB_ICONS.Backlog} Backlog`);            return; }
-    if (command === "learnings" || command === "findings") { this.setView("Findings");        this.setMessage(`  ${TAB_ICONS.Findings} Findings`);        return; }
-    if (command === "memory")    { this.setView("Review Queue");     this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return; }
-    if (command === "machines")  { this.setView("Machines/Profiles"); this.setMessage("  Machines/Profiles"); return; }
-    if (command === "health") {
-      this.healthCache = undefined;
-      this.setView("Health");
-      this.setMessage(`  ${TAB_ICONS.Health} Health`);
-      return;
-    }
-
-    if (command === "open") {
-      const project = parts[1];
-      if (!project) { this.setMessage("  Usage: :open <project>"); return; }
-      const cards = listProjectCards(this.cortexPath, this.profile);
-      if (!cards.some((c) => c.name === project)) { this.setMessage(`  Unknown project: ${project}`); return; }
-      this.state.project = project;
-      saveShellState(this.cortexPath, this.state);
-      this.setMessage(`  ${style.green("●")} ${style.boldCyan(project)} — project context set`);
-      return;
-    }
-
-    if (command === "search") {
-      const query = trimmed.slice("search".length).trim();
-      if (!query) { this.setMessage("  Usage: :search <query>"); return; }
-      this.setMessage("  Searching…");
-      try {
-        const entry = resolveEntryScript();
-        const args  = [entry, "search", query, "--limit", "6"];
-        if (this.state.project) args.push("--project", this.state.project);
-        const out = execFileSync(process.execPath, args, {
-          cwd: this.cortexPath, encoding: "utf8", timeout: 60_000,
-          stdio: ["ignore", "pipe", "ignore"],
-        }).trim();
-        this.setMessage(out.split("\n").slice(0, 14).join("\n") || "  No results.");
-      } catch (err: unknown) {
-        this.setMessage(`  Search failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (command === "add") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      const text = trimmed.slice("add".length).trim();
-      if (!text) { this.setMessage("  Usage: :add <task>"); return; }
-      this.setMessage(`  ${resultMsg(addBacklogItem(this.cortexPath, project, text))}`);
-      return;
-    }
-
-    if (command === "complete") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      const match = parts.slice(1).join(" ").trim();
-      if (!match) { this.setMessage("  Usage: :complete <id|match>"); return; }
-      const ids = expandIds(match);
-      if (ids.length > 1) {
-        this.confirmThen(`Complete ${ids.length} items (${ids.join(", ")})?`, () => {
-          const file = path.join(this.cortexPath, project, "backlog.md");
-          this.snapshotForUndo(`complete ${ids.length} items`, file);
-          this.setMessage(ids.map((id) => resultMsg(completeBacklogItem(this.cortexPath, project, id))).join("; "));
-        });
-      } else {
-        this.confirmThen(`Complete "${match}"?`, () => {
-          const file = path.join(this.cortexPath, project, "backlog.md");
-          this.snapshotForUndo(`complete "${match}"`, file);
-          this.setMessage(`  ${resultMsg(completeBacklogItem(this.cortexPath, project, match))}`);
-        });
-      }
-      return;
-    }
-
-    if (command === "move") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      if (parts.length < 3) { this.setMessage("  Usage: :move <id|match> <active|queue|done>"); return; }
-      const section = normalizeSection(parts[parts.length - 1]);
-      if (!section) { this.setMessage("  Target section must be active|queue|done"); return; }
-      const match = parts.slice(1, -1).join(" ");
-      const ids   = expandIds(match);
-      if (ids.length > 1) {
-        const file = path.join(this.cortexPath, project, "backlog.md");
-        this.snapshotForUndo(`move ${ids.length} items to ${section}`, file);
-        this.setMessage(ids.map((id) => resultMsg(updateBacklogItem(this.cortexPath, project, id, { section }))).join("; "));
-      } else {
-        this.setMessage(`  ${resultMsg(updateBacklogItem(this.cortexPath, project, match, { section }))}`);
-      }
-      return;
-    }
-
-    if (command === "reprioritize") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      if (parts.length < 3) { this.setMessage("  Usage: :reprioritize <id|match> <high|medium|low>"); return; }
-      const priority = parts[parts.length - 1].toLowerCase();
-      if (!["high", "medium", "low"].includes(priority)) { this.setMessage("  Priority must be high|medium|low"); return; }
-      const match = parts.slice(1, -1).join(" ");
-      this.setMessage(`  ${resultMsg(updateBacklogItem(this.cortexPath, project, match, { priority }))}`);
-      return;
-    }
-
-    if (command === "context") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      if (parts.length < 3) { this.setMessage("  Usage: :context <id|match> <text>"); return; }
-      const match   = parts[1];
-      const context = parts.slice(2).join(" ");
-      this.setMessage(`  ${resultMsg(updateBacklogItem(this.cortexPath, project, match, { context }))}`);
-      return;
-    }
-
-    if (command === "pin") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      if (parts.length < 2) { this.setMessage("  Usage: :pin <id|match>"); return; }
-      this.setMessage(`  ${resultMsg(pinBacklogItem(this.cortexPath, project, parts.slice(1).join(" ")))}`);
-      return;
-    }
-
-    if (command === "unpin") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      if (parts.length < 2) { this.setMessage("  Usage: :unpin <id|match>"); return; }
-      this.setMessage(`  ${resultMsg(unpinBacklogItem(this.cortexPath, project, parts.slice(1).join(" ")))}`);
-      return;
-    }
-
-    if (command === "work" && parts[1]?.toLowerCase() === "next") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      this.setMessage(`  ${resultMsg(workNextBacklogItem(this.cortexPath, project))}`);
-      return;
-    }
-
-    if (command === "tidy") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      const keep = parts[1] ? Number.parseInt(parts[1], 10) : 30;
-      const file  = path.join(this.cortexPath, project, "backlog.md");
-      this.snapshotForUndo("tidy", file);
-      this.setMessage(`  ${resultMsg(tidyBacklogDone(this.cortexPath, project, Number.isNaN(keep) ? 30 : keep))}`);
-      return;
-    }
-
-    if (command === "learn" || command === "find") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      const action = (parts[1] || "").toLowerCase();
-      if (action === "add") {
-        const text = trimmed.split(/\s+/).slice(2).join(" ").trim();
-        if (!text) { this.setMessage("  Usage: :find add <text>"); return; }
-        this.setMessage(`  ${resultMsg(addFinding(this.cortexPath, project, text))}`);
-        return;
-      }
-      if (action === "remove") {
-        const match = parts.slice(2).join(" ").trim();
-        if (!match) { this.setMessage("  Usage: :find remove <id|match>"); return; }
-        this.confirmThen(`Remove finding "${match}"?`, () => {
-          const file = path.join(this.cortexPath, project!, "FINDINGS.md");
-          this.snapshotForUndo(`find remove "${match}"`, file);
-          this.setMessage(`  ${resultMsg(removeFinding(this.cortexPath, project!, match))}`);
-        });
-        return;
-      }
-      this.setMessage("  Usage: :find add <text> | :find remove <id|match>");
-      return;
-    }
-
-    if (command === "mq") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      const action = (parts[1] || "").toLowerCase();
-      if (action === "approve") {
-        const match = parts.slice(2).join(" ").trim();
-        if (!match) { this.setMessage("  Usage: :mq approve <id|match>"); return; }
-        const ids = expandIds(match);
-        this.setMessage(
-          ids.length > 1
-            ? ids.map((id) => resultMsg(approveQueueItem(this.cortexPath, project, id))).join("; ")
-            : `  ${resultMsg(approveQueueItem(this.cortexPath, project, match))}`,
-        );
-        return;
-      }
-      if (action === "reject") {
-        const match = parts.slice(2).join(" ").trim();
-        if (!match) { this.setMessage("  Usage: :mq reject <id|match>"); return; }
-        const ids = expandIds(match);
-        if (ids.length > 1) {
-          this.confirmThen(`Reject ${ids.length} items (${ids.join(", ")})?`, () => {
-            const file = path.join(this.cortexPath, project!, "MEMORY_QUEUE.md");
-            this.snapshotForUndo(`mq reject ${ids.length} items`, file);
-            this.setMessage(ids.map((id) => resultMsg(rejectQueueItem(this.cortexPath, project!, id))).join("; "));
-          });
-        } else {
-          this.confirmThen(`Reject "${match}"?`, () => {
-            const file = path.join(this.cortexPath, project!, "MEMORY_QUEUE.md");
-            this.snapshotForUndo(`mq reject "${match}"`, file);
-            this.setMessage(`  ${resultMsg(rejectQueueItem(this.cortexPath, project!, match))}`);
-          });
-        }
-        return;
-      }
-      if (action === "edit") {
-        if (parts.length < 4) { this.setMessage("  Usage: :mq edit <id|match> <text>"); return; }
-        this.setMessage(`  ${resultMsg(editQueueItem(this.cortexPath, project, parts[2], parts.slice(3).join(" ")))}`);
-        return;
-      }
-      this.setMessage("  Usage: :mq approve|reject|edit ...");
-      return;
-    }
-
-    if (command === "machine" && parts[1]?.toLowerCase() === "map") {
-      if (parts.length < 4) { this.setMessage("  Usage: :machine map <hostname> <profile>"); return; }
-      this.setMessage(`  ${resultMsg(setMachineProfile(this.cortexPath, parts[2], parts[3]))}`);
-      return;
-    }
-
-    if (command === "profile") {
-      const action  = (parts[1] || "").toLowerCase();
-      const profile = parts[2];
-      const project = parts[3];
-      if (!profile || !project) { this.setMessage("  Usage: :profile add-project|remove-project <profile> <project>"); return; }
-      if (action === "add-project") {
-        this.setMessage(`  ${resultMsg(addProjectToProfile(this.cortexPath, profile, project))}`);
-        return;
-      }
-      if (action === "remove-project") {
-        this.setMessage(`  ${resultMsg(removeProjectFromProfile(this.cortexPath, profile, project))}`);
-        return;
-      }
-      this.setMessage("  Usage: :profile add-project|remove-project <profile> <project>");
-      return;
-    }
-
-    if (command === "run" && parts[1]?.toLowerCase() === "fix") {
-      const t0     = Date.now();
-      const doctor = await this.deps.runDoctor(this.cortexPath, true);
-      this.healthCache = undefined;
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      this.setMessage(`  doctor --fix: ${doctor.ok ? style.green("ok") : style.red("issues remain")} (${elapsed}s)`);
-      return;
-    }
-
-    if (command === "relink") {
-      const t0 = Date.now();
-      const r  = await this.deps.runRelink(this.cortexPath);
-      this.setMessage(`  ${r} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-      return;
-    }
-
-    if (command === "rerun" && parts[1]?.toLowerCase() === "hooks") {
-      const t0 = Date.now();
-      const r  = await this.deps.runHooks(this.cortexPath);
-      this.healthCache = undefined;
-      this.setMessage(`  ${r} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-      return;
-    }
-
-    if (command === "update") {
-      const t0 = Date.now();
-      const r  = await this.deps.runUpdate();
-      this.setMessage(`  ${r} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-      return;
-    }
-
-    if (command === "govern") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      try {
-        const t0  = Date.now();
-        const out = execFileSync(process.execPath, [resolveEntryScript(), "govern-memories", project], {
-          cwd: this.cortexPath, encoding: "utf8", timeout: 60_000,
-          stdio: ["ignore", "pipe", "ignore"],
-        }).trim();
-        this.setMessage(`  ${out || "Governance scan completed."} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-      } catch (err: unknown) {
-        this.setMessage(`  Governance failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (command === "consolidate") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      try {
-        const t0  = Date.now();
-        const out = execFileSync(process.execPath, [resolveEntryScript(), "consolidate-memories", project], {
-          cwd: this.cortexPath, encoding: "utf8", timeout: 60_000,
-          stdio: ["ignore", "pipe", "ignore"],
-        }).trim();
-        this.setMessage(`  ${out || "Consolidation completed."} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-      } catch (err: unknown) {
-        this.setMessage(`  Consolidation failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (command === "conflicts") {
-      try {
-        const lines: string[] = [];
-        try {
-          const conflicted = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
-            cwd: this.cortexPath, encoding: "utf8", timeout: 10_000,
-            stdio: ["ignore", "pipe", "ignore"],
-          }).trim();
-          if (conflicted) {
-            lines.push(style.boldRed("  Unresolved conflicts:"));
-            for (const f of conflicted.split("\n").filter(Boolean)) {
-              lines.push(`    ${style.red("!")} ${f}`);
-            }
-          }
-        } catch { /* not a git repo */ }
-
-        const auditPath = path.join(this.cortexPath, ".governance", "audit.log");
-        if (fs.existsSync(auditPath)) {
-          const auditLines = fs.readFileSync(auditPath, "utf8").split("\n")
-            .filter((l) => l.includes("auto_merge"))
-            .slice(-10);
-          if (auditLines.length) {
-            lines.push(`  ${style.bold("Recent auto-merges:")}`);
-            for (const l of auditLines) lines.push(`    ${style.dim(l)}`);
-          }
-        }
-
-        const project = this.state.project;
-        if (project) {
-          const queueResult = readReviewQueue(this.cortexPath, project);
-          if (queueResult.ok) {
-            const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
-            if (conflictItems.length) {
-              lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in Memory Queue`)}  (:mq approve|reject)`);
-            }
-          }
-        }
-
-        this.setMessage(lines.length ? lines.join("\n") : "  No conflicts found.");
-      } catch (err: unknown) {
-        this.setMessage(`  Conflict check failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    if (command === "undo") {
-      this.setMessage(`  ${this.popUndo()}`);
-      return;
-    }
-
-    if (command === "diff") {
-      const project = this.ensureProjectSelected();
-      if (!project) return;
-      try {
-        const projectDir = path.join(this.cortexPath, project);
-        const diff = execFileSync("git", ["diff", "--no-color", "--", projectDir], {
-          cwd: this.cortexPath, encoding: "utf8", timeout: 10_000,
-          stdio: ["ignore", "pipe", "ignore"],
-        }).trim();
-        if (!diff) {
-          const staged = execFileSync("git", ["diff", "--cached", "--no-color", "--", projectDir], {
-            cwd: this.cortexPath, encoding: "utf8", timeout: 10_000,
-            stdio: ["ignore", "pipe", "ignore"],
-          }).trim();
-          this.setMessage(staged || "  No uncommitted changes.");
-        } else {
-          const lines = diff.split("\n").slice(0, 30);
-          if (diff.split("\n").length > 30) lines.push(style.dim(`... (${diff.split("\n").length - 30} more lines)`));
-          this.setMessage(lines.join("\n"));
-        }
-      } catch {
-        this.setMessage("  Not a git repository or git not available.");
-      }
-      return;
-    }
-
-    if (command === "reset") {
-      this.setMessage(`  ${resultMsg(resetShellState(this.cortexPath))}`);
-      this.state = loadShellState(this.cortexPath);
-      const cards = listProjectCards(this.cortexPath, this.profile);
-      this.state.project = cards[0]?.name;
-      return;
-    }
-
-    const suggestion = this.suggestCommand(command);
-    if (suggestion) {
-      this.setMessage(`  Unknown: ${trimmed} — did you mean :${suggestion}?`);
-    } else {
-      this.setMessage(`  Unknown: ${trimmed} — press ${style.boldCyan("?")} for help`);
-    }
-  }
-
-  private suggestCommand(input: string): string | undefined {
-    const known = [
-      "help", "projects", "backlog", "learnings", "memory", "machines", "health",
-      "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
-      "work next", "tidy", "learn add", "learn remove", "mq approve", "mq reject",
-      "mq edit", "machine map", "profile add-project", "profile remove-project",
-      "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
-      "undo", "diff", "conflicts", "reset",
-    ];
-    let best: string | undefined;
-    let bestDist = Infinity;
-    for (const cmd of known) {
-      const d = editDistance(input.toLowerCase(), cmd);
-      if (d < bestDist && d <= 2) { bestDist = d; best = cmd; }
-    }
-    return best;
+    return completeInputFn(line, this.cortexPath, this.profile, this.state);
   }
 }
 
-// ── Shell entry point (raw stdin) ─────────────────────────────────────────────
-
-export async function startShell(cortexPath: string, profile: string): Promise<void> {
-  const shell = new CortexShell(cortexPath, profile);
-
-  if (!process.stdin.isTTY) {
-    // Non-interactive fallback: readline mode for piped input / tests
-    const { createInterface } = await import("readline");
-    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const repaint = async () => {
-      clearScreen();
-      process.stdout.write(await shell.render());
-      rl.setPrompt(`\n${style.boldCyan(":cortex>")} `);
-      rl.prompt();
-    };
-    await repaint();
-    rl.on("line", async (line) => {
-      try {
-        const keep = await shell.handleInput(line);
-        if (!keep) { shell.close(); rl.close(); return; }
-      } catch (err: unknown) {
-        process.stdout.write(`\n${style.red("Error:")} ${String(err instanceof Error ? err.message : String(err))}\n`);
-      }
-      await repaint();
-    });
-    rl.on("SIGINT", () => { shell.close(); rl.close(); });
-    await new Promise<void>((resolve) => { rl.on("close", () => { shell.close(); resolve(); }); });
-    return;
-  }
-
-  // Raw stdin mode — full arrow-key TUI
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  process.stdin.setEncoding("utf8");
-
-  // Enter alternate screen buffer (prevents scrollback issues)
-  process.stdout.write("\x1b[?1049h");
-
-  let exiting = false;
-
-  const repaint = async () => {
-    clearScreen();
-    process.stdout.write(await shell.render());
-    clearToEnd();
-  };
-
-  await repaint();
-
-  const onData = async (key: string) => {
-    if (exiting) return;
-    try {
-      const keep = await shell.handleRawKey(key);
-      if (!keep) {
-        exiting = true;
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        process.stdin.removeListener("data", onData);
-        shell.close();
-        // Exit alternate screen buffer and restore terminal
-        process.stdout.write("\x1b[?1049l");
-        done();
-        return;
-      }
-      await repaint();
-    } catch (err: unknown) {
-      // TODO: type this properly — setMessage is private, so we access message directly
-      (shell as unknown as { message: string }).message = `Error: ${err instanceof Error ? err.message : String(err)}`;
-      await repaint();
-    }
-  };
-
-  let done: () => void;
-  const exitPromise = new Promise<void>((resolve) => { done = resolve; });
-
-  process.stdin.on("data", onData);
-
-  // Handle terminal resize
-  process.stdout.on("resize", async () => {
-    if (!exiting) await repaint();
-  });
-
-  await exitPromise;
-}
+export { startShell } from "./shell-entry.js";
 
 // ── Utilities exported for tests ──────────────────────────────────────────────
 

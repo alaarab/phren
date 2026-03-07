@@ -15,10 +15,11 @@ import {
   type DbRow,
 } from "./shared-index.js";
 import {
-  addFindingToFile,
   upsertCanonical,
 } from "./shared-content.js";
-import { buildRobustFtsQuery, isValidProjectName, STOP_WORDS } from "./utils.js";
+import { buildRobustFtsQuery, isValidProjectName } from "./utils.js";
+import { keywordFallbackSearch } from "./core-search.js";
+import { addFinding as addFindingCore } from "./core-finding.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -424,40 +425,10 @@ async function handleSearch(opts: SearchOptions) {
     let rows = queryRows(db, sql, params);
 
     if (!rows && opts.query) {
-      let fallbackSql = "SELECT project, filename, type, content, path FROM docs";
-      const fallbackParams: Array<string | number> = [];
-      const fbClauses: string[] = [];
-      if (opts.project) { fbClauses.push("project = ?"); fallbackParams.push(opts.project); }
-      if (opts.type) { fbClauses.push("type = ?"); fallbackParams.push(opts.type); }
-      if (fbClauses.length) fallbackSql += " WHERE " + fbClauses.join(" AND ");
-
-      const allRows = queryRows(db, fallbackSql, fallbackParams);
-      if (allRows) {
-        const terms = opts.query
-          .toLowerCase()
-          .replace(/[^\w\s-]/g, " ")
-          .split(/\s+/)
-          .filter(w => w.length > 1 && !STOP_WORDS.has(w));
-
-        if (terms.length > 0) {
-          const scored = allRows
-            .map((row: DbRow) => {
-              const content = (row[3] as string).toLowerCase();
-              let score = 0;
-              for (const term of terms) {
-                if (content.includes(term)) score++;
-              }
-              return { row, score };
-            })
-            .filter(r => r.score > 0)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, opts.limit);
-
-          if (scored.length > 0) {
-            rows = scored.map(s => s.row);
-            console.log("(keyword fallback)");
-          }
-        }
+      const fallbackRows = keywordFallbackSearch(db, opts.query, { project: opts.project, type: opts.type, limit: opts.limit });
+      if (fallbackRows) {
+        rows = fallbackRows;
+        console.log("(keyword fallback)");
       }
     }
 
@@ -497,12 +468,12 @@ async function handleAddFinding(project: string, learning: string) {
   }
 
   try {
-    const result = addFindingToFile(cortexPath, project, learning);
+    const result = addFindingCore(cortexPath, project, learning);
     if (!result.ok) {
-      console.error(result.error);
+      console.error(result.message);
       process.exit(1);
     }
-    console.log(result.data);
+    console.log(result.message);
   } catch (e: unknown) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
@@ -674,7 +645,7 @@ function handleDetectSkills(args: string[]) {
     }
   }
 
-  const untracked: Array<{ name: string; path: string }> = [];
+  const untracked: Array<{ name: string; path: string; isDir: boolean }> = [];
   for (const entry of fs.readdirSync(nativeSkillsDir)) {
     const entryPath = path.join(nativeSkillsDir, entry);
     const stat = fs.statSync(entryPath);
@@ -685,11 +656,11 @@ function handleDetectSkills(args: string[]) {
     const name = entry.replace(/\.md$/, "");
     if (trackedSkills.has(name)) continue;
     if (stat.isFile() && entry.endsWith(".md")) {
-      untracked.push({ name, path: entryPath });
+      untracked.push({ name, path: entryPath, isDir: false });
     } else if (stat.isDirectory()) {
       const skillFile = path.join(entryPath, "SKILL.md");
       if (fs.existsSync(skillFile)) {
-        untracked.push({ name, path: skillFile });
+        untracked.push({ name, path: entryPath, isDir: true });
       }
     }
   }
@@ -712,13 +683,20 @@ function handleDetectSkills(args: string[]) {
   fs.mkdirSync(globalSkillsDir, { recursive: true });
   let imported = 0;
   for (const skill of untracked) {
-    const dest = path.join(globalSkillsDir, `${skill.name}.md`);
+    const dest = skill.isDir
+      ? path.join(globalSkillsDir, skill.name)
+      : path.join(globalSkillsDir, `${skill.name}.md`);
     if (fs.existsSync(dest)) {
       console.log(`  skip ${skill.name} (already exists in global/skills/)`);
       continue;
     }
-    fs.copyFileSync(skill.path, dest);
-    console.log(`  imported ${skill.name} -> global/skills/${skill.name}.md`);
+    if (skill.isDir) {
+      fs.cpSync(skill.path, dest, { recursive: true });
+    } else {
+      fs.copyFileSync(skill.path, dest);
+    }
+    const destDisplay = skill.isDir ? `global/skills/${skill.name}/` : `global/skills/${skill.name}.md`;
+    console.log(`  imported ${skill.name} -> ${destDisplay}`);
     imported++;
   }
   console.log(`\nImported ${imported} skill(s). Run \`cortex link\` to activate.`);

@@ -263,7 +263,7 @@ const PACKAGE_VERSION = (() => {
 })();
 const profile = process.env.CORTEX_PROFILE || "";
 
-const STALE_LOCK_MS = 600_000; // 10 min — shared with consolidation lock in shared-content.ts
+const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
 
 function cleanStaleLocks(cortexPath: string): void {
   const dir = runtimeDir(cortexPath);
@@ -312,7 +312,8 @@ async function main() {
           ? error.stack || error.message
           : String(error);
         debugLog(`Write queue failed: ${message}`);
-        throw error;
+        // Do NOT rethrow here — reset queue to unblocked state so subsequent writes proceed.
+        // The caller receives the error via `run` directly.
       },
     );
     return run;
@@ -326,6 +327,10 @@ async function main() {
   // Track MCP tool calls for telemetry (opt-in only, best-effort)
   const { trackToolCall } = await import("./telemetry.js");
   const origRegisterTool = server.registerTool.bind(server);
+  // server.registerTool uses `any` for config/handler because @modelcontextprotocol/sdk
+  // exposes these as complex intersection types that TypeScript cannot easily parameterize.
+  // The real type safety comes from each domain module's z.object() inputSchema.
+  // TODO: tighten when SDK exposes simpler handler types.
   server.registerTool = function (name: string, config: any, handler: any) {
     const wrapped = async (...args: any[]) => {
       if (!indexReady || !db) {

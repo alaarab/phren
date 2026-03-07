@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
-import { checkPermission, loadCanonicalLocks, saveCanonicalLocks, hashContent } from "./shared-governance.js";
+import { checkPermission, loadCanonicalLocks, saveCanonicalLocks, hashContent, withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import { type FindingCitation, buildCitationComment, getHeadCommit, getRepoRoot, inferCitationLocation } from "./content-citation.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts } from "./content-dedup.js";
@@ -232,21 +232,25 @@ export function upsertCanonical(cortexPath: string, project: string, memory: str
   const today = new Date().toISOString().slice(0, 10);
   const bullet = memory.startsWith("- ") ? memory : `- ${memory}`;
 
-  if (!fs.existsSync(canonicalPath)) {
-    fs.writeFileSync(
-      canonicalPath,
-      `# ${project} Canonical Memories\n\n## Pinned\n\n${bullet} _(pinned ${today})_\n`
-    );
-  } else {
-    const content = fs.readFileSync(canonicalPath, "utf8");
-    const line = `${bullet} _(pinned ${today})_`;
-    if (!content.includes(bullet)) {
-      const updated = content.includes("## Pinned")
-        ? content.replace("## Pinned", `## Pinned\n\n${line}`)
-        : `${content.trimEnd()}\n\n## Pinned\n\n${line}\n`;
-      fs.writeFileSync(canonicalPath, updated.endsWith("\n") ? updated : updated + "\n");
+  withFileLock(canonicalPath, () => {
+    if (!fs.existsSync(canonicalPath)) {
+      fs.writeFileSync(
+        canonicalPath,
+        `# ${project} Canonical Memories\n\n## Pinned\n\n${bullet} _(pinned ${today})_\n`
+      );
+    } else {
+      const existing = fs.readFileSync(canonicalPath, "utf8");
+      const line = `${bullet} _(pinned ${today})_`;
+      if (!existing.includes(bullet)) {
+        const updated = existing.includes("## Pinned")
+          ? existing.replace("## Pinned", `## Pinned\n\n${line}`)
+          : `${existing.trimEnd()}\n\n## Pinned\n\n${line}\n`;
+        const tmpPath = canonicalPath + ".tmp";
+        fs.writeFileSync(tmpPath, updated.endsWith("\n") ? updated : updated + "\n");
+        fs.renameSync(tmpPath, canonicalPath);
+      }
     }
-  }
+  });
 
   const canonicalContent = fs.readFileSync(canonicalPath, "utf8");
   const locks = loadCanonicalLocks(cortexPath);
