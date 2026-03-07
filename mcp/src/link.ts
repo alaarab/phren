@@ -153,8 +153,8 @@ function findProjectDir(name: string): string | null {
     const candidate = path.join(base, name);
     try {
       if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
-    } catch (err: any) {
-      debugLog(`findProjectDir: failed to check ${candidate}: ${err?.message || err}`);
+    } catch (err: unknown) {
+      debugLog(`findProjectDir: failed to check ${candidate}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return null;
@@ -171,8 +171,8 @@ function currentPackageVersion(): string | null {
     const pkgPath = path.join(ROOT, "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string };
     return pkg.version || null;
-  } catch (err: any) {
-    debugLog(`currentPackageVersion: failed to read package.json: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`currentPackageVersion: failed to read package.json: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -188,8 +188,8 @@ function maybeOfferStarterTemplateUpdate(cortexPath: string) {
       log(`  Starter template update available: v${prefs.installedVersion} -> v${current}`);
       log(`  Run \`npx @alaarab/cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
     }
-  } catch (err: any) {
-    debugLog(`checkStarterVersionUpdate: failed to read preferences: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`checkStarterVersionUpdate: failed to read preferences: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -242,8 +242,8 @@ function setupSparseCheckout(cortexPath: string, projects: string[]) {
   try {
     execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
     execFileSync("git", ["pull", "--ff-only"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
-  } catch (err: any) {
-    debugLog(`setupSparseCheckout: git sparse-checkout or pull failed: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`setupSparseCheckout: git sparse-checkout or pull failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -288,8 +288,8 @@ function getPackageVersion(): string {
     const pkgPath = path.join(ROOT, "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return pkg.version || "1.0.0";
-  } catch (err: any) {
-    debugLog(`getPackageVersion: failed to read package.json: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`getPackageVersion: failed to read package.json: ${err instanceof Error ? err.message : String(err)}`);
     return "1.0.0";
   }
 }
@@ -423,8 +423,8 @@ export function parseSkillFrontmatter(content: string): { frontmatter: Record<st
   try {
     const parsed = yaml.load(match[1]) as Record<string, unknown>;
     return { frontmatter: parsed && typeof parsed === "object" ? parsed : null, body: match[2] };
-  } catch (err: any) {
-    debugLog(`parseSkillFrontmatter: malformed YAML frontmatter: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`parseSkillFrontmatter: malformed YAML frontmatter: ${err instanceof Error ? err.message : String(err)}`);
     return { frontmatter: null, body: content };
   }
 }
@@ -940,8 +940,8 @@ function isWrapperActive(tool: string): boolean {
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
     return path.resolve(resolved) === path.resolve(wrapperPath);
-  } catch (err: any) {
-    debugLog(`isWrapperActive: which ${tool} failed: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`isWrapperActive: which ${tool} failed: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
 }
@@ -1086,8 +1086,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   let globalLinkOk = false;
   try {
     globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
-  } catch (err: any) {
-    debugLog(`doctor: global CLAUDE.md symlink check failed: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`doctor: global CLAUDE.md symlink check failed: ${err instanceof Error ? err.message : String(err)}`);
     globalLinkOk = false;
   }
   checks.push({
@@ -1110,8 +1110,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       let ok = false;
       try {
         ok = fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(src);
-      } catch (err: any) {
-        debugLog(`doctor: symlink check failed for ${dest}: ${err?.message || err}`);
+      } catch (err: unknown) {
+        debugLog(`doctor: symlink check failed for ${dest}: ${err instanceof Error ? err.message : String(err)}`);
         ok = false;
       }
       checks.push({
@@ -1135,8 +1135,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     const stopHookOk = stopHooks.includes("hook-stop") || stopHooks.includes("auto-save");
     const startHookOk = startHooks.includes("hook-session-start") || startHooks.includes("doctor --fix");
     lifecycleOk = stopHookOk && startHookOk;
-  } catch (err: any) {
-    debugLog(`doctor: failed to read Claude settings for hook check: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`doctor: failed to read Claude settings for hook check: ${err instanceof Error ? err.message : String(err)}`);
     hookOk = false;
     lifecycleOk = false;
   }
@@ -1154,7 +1154,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   });
 
   const runtimeHealthPath = path.join(cortexPath, ".governance", "runtime-health.json");
-  let runtime: any = null;
+  let runtime: Record<string, unknown> | null = null;
   if (fs.existsSync(runtimeHealthPath)) {
     try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch { runtime = null; }
   }
@@ -1163,8 +1163,10 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     ok: Boolean(runtime),
     detail: runtime ? runtimeHealthPath : "missing or unreadable .governance/runtime-health.json",
   });
-  const autoSaveStatus = runtime?.lastAutoSave?.status as string | undefined;
-  const autoSaveAt = runtime?.lastAutoSave?.at as string | undefined;
+  const lastAutoSave = runtime?.["lastAutoSave"];
+  const autoSaveObj = isRecord(lastAutoSave) ? lastAutoSave : null;
+  const autoSaveStatus = typeof autoSaveObj?.["status"] === "string" ? autoSaveObj["status"] : undefined;
+  const autoSaveAt = typeof autoSaveObj?.["at"] === "string" ? autoSaveObj["at"] : undefined;
   checks.push({
     name: "runtime-auto-save",
     ok: autoSaveStatus === "saved-pushed" || autoSaveStatus === "saved-local" || autoSaveStatus === "clean",
@@ -1174,8 +1176,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   });
   checks.push({
     name: "runtime-prompt",
-    ok: Boolean(runtime?.lastPromptAt),
-    detail: runtime?.lastPromptAt ? `last prompt hook run @ ${runtime.lastPromptAt}` : "no prompt runtime record yet",
+    ok: Boolean(runtime?.["lastPromptAt"]),
+    detail: runtime?.["lastPromptAt"] ? `last prompt hook run @ ${runtime["lastPromptAt"]}` : "no prompt runtime record yet",
   });
 
   try {
@@ -1187,11 +1189,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       ok: Number.isFinite(count) && count >= 0,
       detail: `index query ok (docs=${count})`,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     checks.push({
       name: "fts-index",
       ok: false,
-      detail: `index build/query failed: ${err?.message || String(err)}`,
+      detail: `index build/query failed: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
 

@@ -29,8 +29,8 @@ export function getHeadCommit(cwd: string): string | undefined {
   try {
     const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS }).trim();
     return commit || undefined;
-  } catch (err: any) {
-    debugLog(`getHeadCommit: git rev-parse HEAD failed in ${cwd}: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`getHeadCommit: git rev-parse HEAD failed in ${cwd}: ${err instanceof Error ? err.message : String(err)}`);
     return undefined;
   }
 }
@@ -39,8 +39,8 @@ export function getRepoRoot(cwd: string): string | undefined {
   try {
     const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS }).trim();
     return root || undefined;
-  } catch (err: any) {
-    debugLog(`getRepoRoot: not a git repo or git unavailable in ${cwd}: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`getRepoRoot: not a git repo or git unavailable in ${cwd}: ${err instanceof Error ? err.message : String(err)}`);
     return undefined;
   }
 }
@@ -63,8 +63,8 @@ export function inferCitationLocation(repoPath: string, commit: string): { file?
         return { file: currentFile, line: Number.parseInt(hunk[1], 10) };
       }
     }
-  } catch (err: any) {
-    debugLog(`citationLocationFromCommit: git show failed: ${err.message}`);
+  } catch (err: unknown) {
+    debugLog(`citationLocationFromCommit: git show failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   return {};
 }
@@ -81,8 +81,8 @@ export function parseCitationComment(line: string): FindingCitation | null {
     if (!parsed || typeof parsed !== "object") return null;
     if (typeof parsed.created_at !== "string" || !parsed.created_at) return null;
     return parsed;
-  } catch (err: any) {
-    debugLog(`parseCitationComment: malformed citation JSON: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`parseCitationComment: malformed citation JSON: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -116,8 +116,8 @@ function commitExists(repoPath: string, commit: string): boolean {
     });
     commitExistsCache.set(key, true);
     return true;
-  } catch (err: any) {
-    debugLog(`commitExists: commit ${commit} not found in ${repoPath}: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`commitExists: commit ${commit} not found in ${repoPath}: ${err instanceof Error ? err.message : String(err)}`);
     commitExistsCache.set(key, false);
     return false;
   }
@@ -136,8 +136,8 @@ function cachedBlame(repoPath: string, relFile: string, line: number): string | 
     const first = out.split("\n")[0] || "";
     blameCache.set(key, first);
     return first;
-  } catch (err: any) {
-    debugLog(`cachedBlame: git blame failed for ${relFile}:${line}: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`cachedBlame: git blame failed for ${relFile}:${line}: ${err instanceof Error ? err.message : String(err)}`);
     blameCache.set(key, false);
     return false;
   }
