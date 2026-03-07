@@ -2,19 +2,23 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import {
-  addLearningToFile,
   appendAuditLog,
-  checkMemoryPermission,
   cortexErr,
   CortexError,
   cortexOk,
   type CortexResult,
   forwardErr,
-  getMemoryWorkflowPolicy,
   getProjectDirs,
-  getRuntimeHealth,
-  validateBacklogFormat,
 } from "./shared.js";
+import {
+  checkPermission,
+  getWorkflowPolicy,
+  getRuntimeHealth,
+} from "./shared-governance.js";
+import {
+  addFindingToFile,
+  validateBacklogFormat,
+} from "./shared-content.js";
 import { isValidProjectName, queueFilePath, safeProjectPath } from "./utils.js";
 
 function withFileLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
@@ -82,7 +86,7 @@ export interface BacklogDoc {
   path: string;
 }
 
-export interface LearningItem {
+export interface FindingItem {
   id: string;
   date: string;
   text: string;
@@ -113,7 +117,7 @@ export interface ProjectCard {
 
 export interface ShellState {
   version: number;
-  view: "Projects" | "Backlog" | "Learnings" | "Memory Queue" | "Machines/Profiles" | "Health";
+  view: "Projects" | "Backlog" | "Findings" | "Review Queue" | "Machines/Profiles" | "Health";
   project?: string;
   filter?: string;
   page?: number;
@@ -571,15 +575,17 @@ export function backlogMarkdown(doc: BacklogDoc): string {
   return renderBacklog(doc);
 }
 
-export function readLearnings(cortexPath: string, project: string): CortexResult<LearningItem[]> {
+export function readFindings(cortexPath: string, project: string): CortexResult<FindingItem[]> {
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const file = path.join(ensured.data, "LEARNINGS.md");
+  const findingsPath = path.join(ensured.data, 'FINDINGS.md');
+  const legacyPath = path.join(ensured.data, 'LEARNINGS.md');
+  const file = fs.existsSync(findingsPath) ? findingsPath : fs.existsSync(legacyPath) ? legacyPath : findingsPath;
   if (!fs.existsSync(file)) return cortexOk([]);
 
   const lines = fs.readFileSync(file, "utf8").split("\n");
-  const items: LearningItem[] = [];
+  const items: FindingItem[] = [];
   let date = "unknown";
   let index = 1;
 
@@ -606,33 +612,35 @@ export function readLearnings(cortexPath: string, project: string): CortexResult
   return cortexOk(items);
 }
 
-export function addLearning(cortexPath: string, project: string, learning: string): CortexResult<string> {
+export function addFinding(cortexPath: string, project: string, learning: string): CortexResult<string> {
   if (!isValidProjectName(project)) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
   const resolved = safeProjectPath(cortexPath, project);
   if (!resolved) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
-  const learningsPath = path.join(resolved, "LEARNINGS.md");
+  const findingsPath = path.join(resolved, "FINDINGS.md");
 
-  return withFileLock(learningsPath, () => addLearningToFile(cortexPath, project, learning));
+  return withFileLock(findingsPath, () => addFindingToFile(cortexPath, project, learning));
 }
 
-export function removeLearning(cortexPath: string, project: string, match: string): CortexResult<string> {
+export function removeFinding(cortexPath: string, project: string, match: string): CortexResult<string> {
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const learningsPath = path.join(ensured.data, "LEARNINGS.md");
-  if (!fs.existsSync(learningsPath)) return cortexErr(`No LEARNINGS.md file found for "${project}". Add a learning first with add_learning or :learn add.`, CortexError.FILE_NOT_FOUND);
+  const findingsPath = path.join(ensured.data, 'FINDINGS.md');
+  const legacyPath = path.join(ensured.data, 'LEARNINGS.md');
+  const filePath = fs.existsSync(findingsPath) ? findingsPath : fs.existsSync(legacyPath) ? legacyPath : findingsPath;
+  if (!fs.existsSync(filePath)) return cortexErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :learn add.`, CortexError.FILE_NOT_FOUND);
 
-  return withFileLock(learningsPath, () => {
-    const lines = fs.readFileSync(learningsPath, "utf8").split("\n");
+  return withFileLock(filePath, () => {
+    const lines = fs.readFileSync(filePath, "utf8").split("\n");
     const idx = lines.findIndex((line) => line.startsWith("- ") && line.toLowerCase().includes(match.toLowerCase()));
-    if (idx === -1) return cortexErr(`No learning matching "${match}" in project "${project}". Try a different search term or check :learnings view.`, CortexError.NOT_FOUND);
+    if (idx === -1) return cortexErr(`No finding matching "${match}" in project "${project}". Try a different search term or check :findings view.`, CortexError.NOT_FOUND);
 
     const citationComment = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/;
     const removeCount = citationComment.test(lines[idx + 1] || "") ? 2 : 1;
     const matched = lines[idx];
     lines.splice(idx, removeCount);
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    fs.writeFileSync(learningsPath, normalized);
+    fs.writeFileSync(filePath, normalized);
     return cortexOk(`Removed from ${project}: ${matched}`);
   });
 }
@@ -651,7 +659,7 @@ function parseQueueLine(line: string): { date?: string; text: string; confidence
   };
 }
 
-export function readMemoryQueue(cortexPath: string, project: string): CortexResult<QueueItem[]> {
+export function readReviewQueue(cortexPath: string, project: string): CortexResult<QueueItem[]> {
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
@@ -715,7 +723,7 @@ function rewriteQueue(cortexPath: string, project: string, items: QueueItem[]): 
 }
 
 function findQueueByMatch(cortexPath: string, project: string, match: string): CortexResult<{ item: QueueItem; all: QueueItem[]; index: number }> {
-  const items = readMemoryQueue(cortexPath, project);
+  const items = readReviewQueue(cortexPath, project);
   if (!items.ok) return forwardErr(items);
   const needle = match.toLowerCase();
   const index = items.data.findIndex(
@@ -725,10 +733,10 @@ function findQueueByMatch(cortexPath: string, project: string, match: string): C
   return cortexOk({ item: items.data[index], all: items.data, index });
 }
 
-export function approveMemoryQueueItem(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const queueDenied = checkMemoryPermission(cortexPath, "queue");
+export function approveQueueItem(cortexPath: string, project: string, match: string): CortexResult<string> {
+  const queueDenied = checkPermission(cortexPath, "queue");
   if (queueDenied) return cortexErr(queueDenied, CortexError.PERMISSION_DENIED);
-  const writeDenied = checkMemoryPermission(cortexPath, "write");
+  const writeDenied = checkPermission(cortexPath, "write");
   if (writeDenied) return cortexErr(writeDenied, CortexError.PERMISSION_DENIED);
 
   const ensured = ensureProject(cortexPath, project);
@@ -738,16 +746,16 @@ export function approveMemoryQueueItem(cortexPath: string, project: string, matc
     const found = findQueueByMatch(cortexPath, project, match);
     if (!found.ok) return forwardErr(found);
 
-    const workflow = getMemoryWorkflowPolicy(cortexPath);
+    const workflow = getWorkflowPolicy(cortexPath);
     const riskyBySection = workflow.riskySections.includes(found.data.item.section);
     const riskyByConfidence = found.data.item.confidence !== undefined && found.data.item.confidence < workflow.lowConfidenceThreshold;
     if (workflow.requireMaintainerApproval && (riskyBySection || riskyByConfidence)) {
-      const pinDenied = checkMemoryPermission(cortexPath, "pin");
+      const pinDenied = checkPermission(cortexPath, "pin");
       if (pinDenied) return cortexErr(`This memory is flagged as risky and requires a maintainer or admin to approve. Check your role in .governance/access-control.json.`, CortexError.PERMISSION_DENIED);
     }
 
-    const learningsPath = path.join(ensured.data, "LEARNINGS.md");
-    const add = withFileLock(learningsPath, () => addLearningToFile(cortexPath, project, found.data.item.text));
+    const findingsFilePath = path.join(ensured.data, "FINDINGS.md");
+    const add = withFileLock(findingsFilePath, () => addFindingToFile(cortexPath, project, found.data.item.text));
     if (!add.ok) return forwardErr(add);
 
     found.data.all.splice(found.data.index, 1);
@@ -757,8 +765,8 @@ export function approveMemoryQueueItem(cortexPath: string, project: string, matc
   });
 }
 
-export function rejectMemoryQueueItem(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const denial = checkMemoryPermission(cortexPath, "queue");
+export function rejectQueueItem(cortexPath: string, project: string, match: string): CortexResult<string> {
+  const denial = checkPermission(cortexPath, "queue");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
 
   const ensured = ensureProject(cortexPath, project);
@@ -775,8 +783,8 @@ export function rejectMemoryQueueItem(cortexPath: string, project: string, match
   });
 }
 
-export function editMemoryQueueItem(cortexPath: string, project: string, match: string, newText: string): CortexResult<string> {
-  const denial = checkMemoryPermission(cortexPath, "queue");
+export function editQueueItem(cortexPath: string, project: string, match: string, newText: string): CortexResult<string> {
+  const denial = checkPermission(cortexPath, "queue");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
 
   const trimmed = newText.trim();
@@ -937,7 +945,7 @@ export function listProjectCards(cortexPath: string, profile?: string): ProjectC
       .map((line) => line.trim())
       .find((line) => line && !line.startsWith("#")) || "";
 
-    const docs = ["CLAUDE.md", "LEARNINGS.md", "summary.md", "backlog.md", "MEMORY_QUEUE.md"]
+    const docs = ["CLAUDE.md", "FINDINGS.md", "LEARNINGS.md", "summary.md", "backlog.md", "MEMORY_QUEUE.md"]
       .filter((file) => fs.existsSync(path.join(dir, file)));
     cards.push({ name, summary, docs });
   }

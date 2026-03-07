@@ -1,27 +1,25 @@
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { fileURLToPath } from "url";
 import {
   addBacklogItem,
-  addLearning,
+  addFinding,
   addProjectToProfile,
-  approveMemoryQueueItem,
+  approveQueueItem,
   BacklogItem,
   completeBacklogItem,
-  editMemoryQueueItem,
+  editQueueItem,
   listMachines,
   listProfiles,
   listProjectCards,
   loadShellState,
   pinBacklogItem,
-  QueueItem,
   readBacklog,
-  readLearnings,
-  readMemoryQueue,
+  readFindings,
+  readReviewQueue,
   readRuntimeHealth,
-  rejectMemoryQueueItem,
-  removeLearning,
+  rejectQueueItem,
+  removeFinding,
   removeProjectFromProfile,
   resetShellState,
   saveShellState,
@@ -32,289 +30,43 @@ import {
   updateBacklogItem,
   workNextBacklogItem,
 } from "./data-access.js";
-import { runDoctor, runLink } from "./link.js";
-import { runCortexUpdate } from "./update.js";
-import { type CortexResult, EXEC_TIMEOUT_MS } from "./shared.js";
-
-function resultMsg(r: CortexResult<string>): string {
-  return r.ok ? r.data : r.error;
-}
-
-// ── ANSI utilities ──────────────────────────────────────────────────────────
-
-const ESC = "\x1b[";
-const RESET = `${ESC}0m`;
-
-const style = {
-  bold:        (s: string) => `${ESC}1m${s}${RESET}`,
-  dim:         (s: string) => `${ESC}2m${s}${RESET}`,
-  italic:      (s: string) => `${ESC}3m${s}${RESET}`,
-  cyan:        (s: string) => `${ESC}36m${s}${RESET}`,
-  green:       (s: string) => `${ESC}32m${s}${RESET}`,
-  yellow:      (s: string) => `${ESC}33m${s}${RESET}`,
-  red:         (s: string) => `${ESC}31m${s}${RESET}`,
-  magenta:     (s: string) => `${ESC}35m${s}${RESET}`,
-  blue:        (s: string) => `${ESC}34m${s}${RESET}`,
-  white:       (s: string) => `${ESC}37m${s}${RESET}`,
-  gray:        (s: string) => `${ESC}90m${s}${RESET}`,
-  boldCyan:    (s: string) => `${ESC}1;36m${s}${RESET}`,
-  boldGreen:   (s: string) => `${ESC}1;32m${s}${RESET}`,
-  boldYellow:  (s: string) => `${ESC}1;33m${s}${RESET}`,
-  boldRed:     (s: string) => `${ESC}1;31m${s}${RESET}`,
-  boldMagenta: (s: string) => `${ESC}1;35m${s}${RESET}`,
-  boldBlue:    (s: string) => `${ESC}1;34m${s}${RESET}`,
-  dimItalic:   (s: string) => `${ESC}2;3m${s}${RESET}`,
-  invert:      (s: string) => `${ESC}7m${s}${RESET}`,
-};
-
-function badge(label: string, colorFn: (s: string) => string): string {
-  return colorFn(`[${label}]`);
-}
-
-function separator(width = 50): string {
-  return style.dim("─".repeat(width));
-}
-
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
-}
-
-function padToWidth(s: string, width: number): string {
-  const visible = stripAnsi(s);
-  if (visible.length > width) return visible.slice(0, width - 1) + "…";
-  return s + " ".repeat(width - visible.length);
-}
-
-// ANSI handling: `s` may contain ANSI escape codes (styled text from the style.*
-// helpers). We measure visible width via stripAnsi, then if truncation is needed we
-// slice the *plain* text (discarding ANSI codes) to avoid cutting mid-escape. A
-// trailing reset is appended to guard against any residual SGR state from earlier
-// output on the same terminal line.
-function truncateLine(s: string, cols: number): string {
-  const visible = stripAnsi(s);
-  if (visible.length <= cols) return s;
-  return visible.slice(0, cols - 1) + "…" + "\x1b[0m";
-}
-
-// ── Tab layout ──────────────────────────────────────────────────────────────
-
-// Projects is level 0 (the home screen); these sub-views are level 1 (drill-down into a project)
-const SUB_VIEWS = ["Backlog", "Learnings", "Memory Queue", "Health"] as const;
-const TAB_ICONS: Record<string, string> = {
-  Projects:      "◉",
-  Backlog:       "▤",
-  Learnings:     "✦",
-  "Memory Queue": "◈",
-  Health:        "♡",
-};
-
-// ── Line-based viewport: edge-triggered scroll (stable, no jumpiness) ─────────
-
-function lineViewport(
-  allLines: string[],
-  cursorFirstLine: number,
-  cursorLastLine: number,
-  height: number,
-  prevStart: number,
-): { lines: string[]; scrollStart: number } {
-  if (allLines.length === 0 || height <= 0) return { lines: [], scrollStart: 0 };
-  if (allLines.length <= height) return { lines: allLines.slice(), scrollStart: 0 };
-
-  const first = Math.max(0, Math.min(cursorFirstLine, allLines.length - 1));
-  const last  = Math.max(first, Math.min(cursorLastLine, allLines.length - 1));
-  let start   = Math.max(0, prevStart);
-
-  // Scroll up if cursor is above viewport
-  if (first < start) start = first;
-  // Scroll down if cursor is below viewport
-  if (last >= start + height) start = last - height + 1;
-  // Clamp
-  start = Math.min(start, Math.max(0, allLines.length - height));
-
-  return { lines: allLines.slice(start, start + height), scrollStart: start };
-}
-
-// ── Help text ────────────────────────────────────────────────────────────────
-
-function shellHelpText(): string {
-  const hdr = (s: string) => style.bold(s);
-  const k   = (s: string) => style.boldCyan(s);
-  const d   = (s: string) => style.dim(s);
-  const cmd = (s: string) => style.cyan(s);
-
-  return [
-    "",
-    hdr("Navigation"),
-    `  ${k("← →")} ${d("switch tabs")}    ${k("↑ ↓")} ${d("move cursor")}    ${k("↵")} ${d("activate")}    ${k("q")} ${d("quit")}`,
-    `  ${k("/")} ${d("filter")}    ${k(":")} ${d("command palette")}    ${k("Esc")} ${d("cancel / clear filter")}    ${k("?")} ${d("toggle this help")}`,
-    "",
-    hdr("View-specific keys"),
-    `  ${style.bold("Projects")}     ${k("↵")} ${d("open project as context")}`,
-    `  ${style.bold("Backlog")}      ${k("a")} ${d("add task")}  ${k("d")} ${d("toggle active/queue")}  ${k("↵")} ${d("mark complete")}`,
-    `  ${style.bold("Learnings")}    ${k("a")} ${d("add learning")}  ${k("d")} ${d("delete selected")}`,
-    `  ${style.bold("Memory Queue")} ${k("a")} ${d("approve")}  ${k("r")} ${d("reject")}  ${k("e")} ${d("edit")}`,
-    "",
-    hdr("Palette commands  (:cmd)"),
-    `  ${cmd(":open <project>")}                             ${d("set active project context")}`,
-    `  ${cmd(":add <task>")}                                 ${d("add backlog item")}`,
-    `  ${cmd(":complete <id|match>")}                        ${d("mark done")}`,
-    `  ${cmd(":move <id|match> <active|queue|done>")}        ${d("move item")}`,
-    `  ${cmd(":reprioritize <id|match> <high|medium|low>")}`,
-    `  ${cmd(":context <id|match> <text>")}`,
-    `  ${cmd(":pin <id>")}  ${cmd(":unpin <id>")}  ${cmd(":work next")}  ${cmd(":tidy [keep]")}`,
-    `  ${cmd(":learn add <text>")}  ${cmd(":learn remove <id|match>")}`,
-    `  ${cmd(":mq approve|reject|edit <id>")}`,
-    `  ${cmd(":govern")}  ${cmd(":consolidate")}  ${cmd(":search <query>")}`,
-    `  ${cmd(":undo")}  ${cmd(":diff")}  ${cmd(":conflicts")}  ${cmd(":reset")}`,
-    `  ${cmd(":run fix")}  ${cmd(":relink")}  ${cmd(":rerun hooks")}  ${cmd(":update")}`,
-    `  ${cmd(":machines")}`,
-  ].join("\n");
-}
-
-// ── Infrastructure ───────────────────────────────────────────────────────────
-
-function resolveEntryScript(): string {
-  const current = fileURLToPath(import.meta.url);
-  return path.resolve(path.dirname(current), "index.js");
-}
-
-async function defaultRunHooks(cortexPath: string): Promise<string> {
-  const entry = resolveEntryScript();
-  execFileSync(process.execPath, [entry, "hook-session-start"], {
-    cwd: cortexPath,
-    stdio: "ignore",
-    timeout: EXEC_TIMEOUT_MS,
-  });
-  execFileSync(process.execPath, [entry, "hook-stop"], {
-    cwd: cortexPath,
-    stdio: "ignore",
-    timeout: EXEC_TIMEOUT_MS,
-  });
-  return "Lifecycle hooks rerun (session-start + stop).";
-}
-
-async function defaultRunUpdate(): Promise<string> {
-  return runCortexUpdate();
-}
-
-async function defaultRunRelink(cortexPath: string): Promise<string> {
-  await runLink(cortexPath, { register: false, allTools: true });
-  return "Relink completed for detected tools.";
-}
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface UndoEntry {
-  label: string;
-  file: string;
-  content: string;
-}
-
-const MAX_UNDO_STACK = 10;
-
-export type ShellView = ShellState["view"];
-
-export interface ShellDeps {
-  runDoctor: typeof runDoctor;
-  runRelink: (cortexPath: string) => Promise<string>;
-  runHooks:  (cortexPath: string) => Promise<string>;
-  runUpdate: () => Promise<string>;
-}
-
-interface DoctorCheck {
-  name: string;
-  ok: boolean;
-  detail: string;
-}
-
-interface DoctorResultLike {
-  ok: boolean;
-  machine?: string;
-  profile?: string;
-  checks: DoctorCheck[];
-}
-
-// ── Utility helpers ──────────────────────────────────────────────────────────
-
-function editDistance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-
-function tokenize(input: string): string[] {
-  const out: string[] = [];
-  let current = "";
-  let quote: '"' | "'" | null = null;
-  for (let i = 0; i < input.length; i++) {
-    const ch = input[i];
-    if ((ch === '"' || ch === "'") && (!quote || quote === ch)) {
-      quote = quote ? null : ch;
-      continue;
-    }
-    if (!quote && /\s/.test(ch)) {
-      if (current) { out.push(current); current = ""; }
-      continue;
-    }
-    current += ch;
-  }
-  if (current) out.push(current);
-  return out;
-}
-
-function backlogsByFilter(items: BacklogItem[], filter: string): BacklogItem[] {
-  const needle = filter.toLowerCase().trim();
-  if (!needle) return items;
-  return items.filter((item) =>
-    `${item.id} ${item.line} ${item.context || ""}`.toLowerCase().includes(needle),
-  );
-}
-
-function queueByFilter(items: QueueItem[], filter: string): QueueItem[] {
-  const needle = filter.toLowerCase().trim();
-  if (!needle) return items;
-  return items.filter((item) =>
-    `${item.id} ${item.section} ${item.text}`.toLowerCase().includes(needle),
-  );
-}
-
-
-function expandIds(input: string): string[] {
-  const parts = input.split(",").map((s) => s.trim()).filter(Boolean);
-  const result: string[] = [];
-  for (const part of parts) {
-    const rangeMatch = part.match(/^([AQD])(\d+)-\1?(\d+)$/i);
-    if (rangeMatch) {
-      const prefix = rangeMatch[1].toUpperCase();
-      const start  = Number.parseInt(rangeMatch[2], 10);
-      const end    = Number.parseInt(rangeMatch[3], 10);
-      for (let i = Math.min(start, end); i <= Math.max(start, end); i++) {
-        result.push(`${prefix}${i}`);
-      }
-    } else {
-      result.push(part);
-    }
-  }
-  return result;
-}
-
-function normalizeSection(sectionRaw: string): "Active" | "Queue" | "Done" | null {
-  const normalized = sectionRaw.toLowerCase();
-  if (["active", "a"].includes(normalized)) return "Active";
-  if (["queue", "queued", "q"].includes(normalized)) return "Queue";
-  if (["done", "d"].includes(normalized)) return "Done";
-  return null;
-}
+import { runDoctor } from "./link.js";
+import {
+  RESET,
+  style,
+  badge,
+  separator,
+  stripAnsi,
+  padToWidth,
+  truncateLine,
+  lineViewport,
+  shellHelpText,
+  clearScreen,
+  clearToEnd,
+} from "./shell-render.js";
+import {
+  SUB_VIEWS,
+  TAB_ICONS,
+  MAX_UNDO_STACK,
+  type UndoEntry,
+  type ShellView,
+  type ShellDeps,
+  type DoctorResultLike,
+} from "./shell-types.js";
+export type { ShellView, ShellDeps } from "./shell-types.js";
+import {
+  resultMsg,
+  editDistance,
+  tokenize,
+  backlogsByFilter,
+  queueByFilter,
+  expandIds,
+  normalizeSection,
+  resolveEntryScript,
+  defaultRunHooks,
+  defaultRunUpdate,
+  defaultRunRelink,
+} from "./shell-palette.js";
 
 // ── Shell class ──────────────────────────────────────────────────────────────
 
@@ -322,6 +74,7 @@ export class CortexShell {
   private state: ShellState;
   private message = `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`;
   private healthCache?: { at: number; result: DoctorResultLike };
+  private prevHealthView?: ShellView; // where to return when pressing Esc from Health
   private showHelp = false;
   private pendingConfirm?: { label: string; action: () => void };
   private undoStack: UndoEntry[] = [];
@@ -403,8 +156,8 @@ export class CortexShell {
     try {
       fs.writeFileSync(entry.file, entry.content);
       return `Undid: ${entry.label}`;
-    } catch (err: any) {
-      return `Undo failed: ${err?.message || err}`;
+    } catch (err: unknown) {
+      return `Undo failed: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 
@@ -468,10 +221,10 @@ export class CortexShell {
           : result.data.items.Queue;
         return [...active, ...queue];
       }
-      case "Learnings": {
+      case "Findings": {
         const project = this.state.project;
         if (!project) return [];
-        const result = readLearnings(this.cortexPath, project);
+        const result = readFindings(this.cortexPath, project);
         if (!result.ok) return [];
         return this.state.filter
           ? result.data.filter((i) =>
@@ -479,10 +232,10 @@ export class CortexShell {
             )
           : result.data;
       }
-      case "Memory Queue": {
+      case "Review Queue": {
         const project = this.state.project;
         if (!project) return [];
-        const result = readMemoryQueue(this.cortexPath, project);
+        const result = readReviewQueue(this.cortexPath, project);
         if (!result.ok) return [];
         return this.state.filter ? queueByFilter(result.data, this.state.filter) : result.data;
       }
@@ -498,7 +251,7 @@ export class CortexShell {
 
   private async activateSelected(): Promise<void> {
     const cursor = this.currentCursor();
-    const items  = this.getListItems() as any[];
+    const items  = this.getListItems();
     const item   = items[cursor];
     if (!item) return;
 
@@ -519,7 +272,7 @@ export class CortexShell {
           const file = path.join(this.cortexPath, project, "backlog.md");
           this.confirmThen(`Complete ${style.dim(item.id)} "${item.line}"?`, () => {
             this.snapshotForUndo(`complete ${item.id}`, file);
-            const r = completeBacklogItem(this.cortexPath, project, item.id);
+            const r = completeBacklogItem(this.cortexPath, project, item.id!);
             this.invalidateSubsectionsCache();
             this.setMessage(`  ${resultMsg(r)}`);
             this.setCursor(Math.max(0, cursor - 1));
@@ -527,14 +280,14 @@ export class CortexShell {
         }
         break;
 
-      case "Learnings":
+      case "Findings":
         if (item.text) {
           // Enter previews the learning — use 'd' or Delete key to remove
           this.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}`);
         }
         break;
 
-      case "Memory Queue":
+      case "Review Queue":
         if (item.text) {
           // Enter previews the item — use 'a' to approve, 'r' to reject
           this.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}  ${style.dim("[ a approve · r reject ]")}`);
@@ -547,7 +300,7 @@ export class CortexShell {
 
   private async doViewAction(key: string): Promise<void> {
     const cursor  = this.currentCursor();
-    const items   = this.getListItems() as any[];
+    const items   = this.getListItems();
     const item    = items[cursor];
     const project = this.state.project;
 
@@ -569,33 +322,33 @@ export class CortexShell {
         }
         break;
 
-      case "Learnings":
+      case "Findings":
         if (key === "a") {
           this.startInput("learn-add", "");
         } else if ((key === "d" || key === "\x7f") && item?.text) {
           if (!project) { this.setMessage("Select a project first."); return; }
-          this.confirmThen(`Delete learning ${style.dim(item.id)}?`, () => {
-            const file = path.join(this.cortexPath, project!, "LEARNINGS.md");
-            this.snapshotForUndo(`remove learning ${item.id}`, file);
-            const r = removeLearning(this.cortexPath, project!, item.text);
+          this.confirmThen(`Delete finding ${style.dim(item.id ?? "")}?`, () => {
+            const file = path.join(this.cortexPath, project!, "FINDINGS.md");
+            this.snapshotForUndo(`remove finding ${item.id ?? ''}`, file);
+            const r = removeFinding(this.cortexPath, project!, item.text!);
             this.setMessage(`  ${resultMsg(r)}`);
             this.setCursor(Math.max(0, cursor - 1));
           });
         }
         break;
 
-      case "Memory Queue":
+      case "Review Queue":
         if (key === "a" && item?.id) {
           if (!project) { this.setMessage("Select a project first."); return; }
           this.confirmThen(`Approve ${style.dim(item.id)} "${item.text}"?`, () => {
-            const r = approveMemoryQueueItem(this.cortexPath, project!, item.id);
+            const r = approveQueueItem(this.cortexPath, project!, item.id!);
             this.setMessage(`  ${resultMsg(r)}`);
             this.setCursor(Math.max(0, cursor - 1));
           });
         } else if (key === "r" && item?.id) {
           if (!project) { this.setMessage("Select a project first."); return; }
           this.confirmThen(`Reject ${style.dim(item.id)} "${item.text}"?`, () => {
-            const r = rejectMemoryQueueItem(this.cortexPath, project!, item.id);
+            const r = rejectQueueItem(this.cortexPath, project!, item.id!);
             this.setMessage(`  ${resultMsg(r)}`);
             this.setCursor(Math.max(0, cursor - 1));
           });
@@ -654,7 +407,7 @@ export class CortexShell {
       case "learn-add": {
         const project = this.ensureProjectSelected();
         if (!project) return;
-        const r = addLearning(this.cortexPath, project, buf);
+        const r = addFinding(this.cortexPath, project, buf);
         this.setMessage(`  ${resultMsg(r)}`);
         break;
       }
@@ -662,7 +415,7 @@ export class CortexShell {
       case "mq-edit": {
         const project = this.ensureProjectSelected();
         if (!project) return;
-        const r = editMemoryQueueItem(this.cortexPath, project, this.inputMqId, buf);
+        const r = editQueueItem(this.cortexPath, project, this.inputMqId, buf);
         this.setMessage(`  ${resultMsg(r)}`);
         this.inputMqId = "";
         break;
@@ -673,25 +426,17 @@ export class CortexShell {
   // ── Tab switching ─────────────────────────────────────────────────────────
 
   private nextTab(): void {
-    if (this.state.view === "Projects") return; // no left/right on project list
+    if (this.state.view === "Projects" || this.state.view === "Health") return;
     const idx  = SUB_VIEWS.indexOf(this.state.view as typeof SUB_VIEWS[number]);
     const next = SUB_VIEWS[(idx + 1) % SUB_VIEWS.length];
-    if (next) {
-      if (next === "Health") this.healthCache = undefined;
-      this.setView(next);
-      this.setMessage(`  ${TAB_ICONS[next]} ${next}`);
-    }
+    if (next) { this.setView(next); this.setMessage(`  ${TAB_ICONS[next]} ${next}`); }
   }
 
   private prevTab(): void {
-    if (this.state.view === "Projects") return; // no left/right on project list
+    if (this.state.view === "Projects" || this.state.view === "Health") return;
     const idx  = SUB_VIEWS.indexOf(this.state.view as typeof SUB_VIEWS[number]);
     const prev = SUB_VIEWS[(idx - 1 + SUB_VIEWS.length) % SUB_VIEWS.length];
-    if (prev) {
-      if (prev === "Health") this.healthCache = undefined;
-      this.setView(prev);
-      this.setMessage(`  ${TAB_ICONS[prev]} ${prev}`);
-    }
+    if (prev) { this.setView(prev); this.setMessage(`  ${TAB_ICONS[prev]} ${prev}`); }
   }
 
   // ── Raw key handling ──────────────────────────────────────────────────────
@@ -728,7 +473,7 @@ export class CortexShell {
     const count = this.listItemCount();
     if (count === 0) return;
     const cursor = this.currentCursor();
-    const items  = this.getListItems() as any[];
+    const items  = this.getListItems();
     const item   = items[cursor];
     const label  = item?.name ?? item?.line ?? item?.text ?? "";
     const short  = label.length > 50 ? label.slice(0, 48) + "…" : label;
@@ -792,10 +537,15 @@ export class CortexShell {
       return true;
     }
 
-    // Escape: clear filter → back to Projects → quit hint
+    // Escape: clear filter → back from Health → back to Projects → quit hint
     if (key === "\x1b") {
       if (this.state.filter) {
         this.setFilter("");
+      } else if (this.state.view === "Health") {
+        const returnTo = this.prevHealthView ?? "Projects";
+        this.setView(returnTo);
+        this.prevHealthView = undefined;
+        this.setMessage(`  ${TAB_ICONS[returnTo] ?? TAB_ICONS.Projects} ${returnTo}`);
       } else if (this.state.view !== "Projects") {
         this.setView("Projects");
         this.setMessage(`  ${TAB_ICONS.Projects} ${style.dim("select a project")}`);
@@ -813,17 +563,17 @@ export class CortexShell {
     }
     if (key === "l") {
       if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Learnings");    this.setMessage(`  ${TAB_ICONS.Learnings} Learnings`);        return true;
+      this.setView("Findings");    this.setMessage(`  ${TAB_ICONS.Findings} Findings`);        return true;
     }
     if (key === "m") {
       if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Memory Queue"); this.setMessage(`  ${TAB_ICONS["Memory Queue"]} Memory Queue`); return true;
+      this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true;
     }
     if (key === "h") {
-      if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
+      this.prevHealthView = this.state.view === "Health" ? this.prevHealthView : this.state.view;
       this.healthCache = undefined;
       this.setView("Health");
-      this.setMessage(`  ${TAB_ICONS.Health} Health`);
+      this.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`);
       return true;
     }
 
@@ -873,6 +623,12 @@ export class CortexShell {
   private renderTabBar(): string {
     const cols = process.stdout.columns || 80;
 
+    if (this.state.view === "Health") {
+      // Global view — not project-scoped
+      const label = `${TAB_ICONS.Health} Health`;
+      return `  ${style.boldCyan(label)}\n${separator(cols)}`;
+    }
+
     if (this.state.view === "Projects") {
       // Level 0: just show Projects tab
       const label = `${TAB_ICONS.Projects} Projects`;
@@ -910,7 +666,7 @@ export class CortexShell {
         filter:      "filter",
         command:     "cmd",
         add:         "add task",
-        "learn-add": "add learning",
+        "learn-add": "add finding",
         "mq-edit":   "edit Memory Queue item",
       };
       const label = labels[this.inputCtx] || this.inputCtx;
@@ -920,17 +676,19 @@ export class CortexShell {
     const viewHints: Record<string, string[]> = {
       Projects:      [`${k("↵")} ${d("open project")}`],
       Backlog:       [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
-      Learnings:     [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
-      "Memory Queue":[`${k("a")} ${d("keep")}`, `${k("r")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
-      Health:        [`${k("↑↓")} ${d("scroll")}`],
+      Findings:      [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
+      "Review Queue":[`${k("a")} ${d("keep")}`, `${k("r")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
+      Health:        [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
     };
 
     const extra = viewHints[this.state.view] ?? [];
-    const isSubView = this.state.view !== "Projects";
+    const isSubView = this.state.view !== "Projects" && this.state.view !== "Health";
     const nav   = isSubView
       ? [`${k("←→")} ${d("tabs")}`, `${k("↑↓")} ${d("move")}`, `${k("esc")} ${d("back")}`]
-      : [`${k("↑↓")} ${d("move")}`];
-    const tail  = [`${k("/")} ${d("filter")}`, `${k(":")} ${d("cmd")}`, `${k("?")} ${d("help")}`, `${k("q")} ${d("quit")}`];
+      : this.state.view === "Health"
+        ? []  // Health hints already in viewHints
+        : [`${k("↑↓")} ${d("move")}`];
+    const tail  = [`${k("h")} ${d("health")}`, `${k("/")} ${d("filter")}`, `${k(":")} ${d("cmd")}`, `${k("?")} ${d("help")}`, `${k("q")} ${d("quit")}`];
 
     const hints = [...nav, ...extra, ...tail];
     return `${sep}\n  ${hints.join(dot)}`;
@@ -1148,7 +906,7 @@ export class CortexShell {
     const project = this.state.project;
     if (!project) return [style.dim("  No project selected.")];
 
-    const result = readLearnings(this.cortexPath, project);
+    const result = readFindings(this.cortexPath, project);
     if (!result.ok) return [result.error];
 
     const all = result.data;
@@ -1159,7 +917,7 @@ export class CortexShell {
       : all;
 
     if (!filtered.length) {
-      return [style.dim(`  No learnings yet. Press ${style.boldCyan("a")} to add one.`)];
+      return [style.dim(`  No findings yet. Press ${style.boldCyan("a")} to add one.`)];
     }
 
     // Phase 1: build ALL lines, tracking cursor item's line span
@@ -1216,7 +974,7 @@ export class CortexShell {
     const project = this.state.project;
     if (!project) return [style.dim("  No project selected.")];
 
-    const result = readMemoryQueue(this.cortexPath, project);
+    const result = readReviewQueue(this.cortexPath, project);
     if (!result.ok) return [result.error];
 
     const filtered = this.state.filter
@@ -1397,10 +1155,10 @@ export class CortexShell {
         case "Backlog":
           contentLines = this.renderBacklogView(cursor, height);
           break;
-        case "Learnings":
+        case "Findings":
           contentLines = this.renderLearningsView(cursor, height);
           break;
-        case "Memory Queue":
+        case "Review Queue":
           contentLines = this.renderMemoryQueueView(cursor, height);
           break;
         case "Machines/Profiles":
@@ -1464,11 +1222,11 @@ export class CortexShell {
     }
     if (input === "l") {
       if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Learnings"); this.setMessage(`  ${TAB_ICONS.Learnings} Learnings`); return true;
+      this.setView("Findings"); this.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true;
     }
     if (input === "m") {
       if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
-      this.setView("Memory Queue"); this.setMessage(`  ${TAB_ICONS["Memory Queue"]} Memory Queue`); return true;
+      this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true;
     }
     if (input === "h") {
       if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; }
@@ -1498,16 +1256,16 @@ export class CortexShell {
   private queueIdCompletions(): string[] {
     const project = this.state.project;
     if (!project) return [];
-    const result = readMemoryQueue(this.cortexPath, project);
+    const result = readReviewQueue(this.cortexPath, project);
     if (!result.ok) return [];
     return result.data.map((item) => item.id);
   }
 
   completeInput(line: string): string[] {
     const commands = [
-      ":projects", ":backlog", ":learnings", ":memory", ":machines", ":health",
+      ":projects", ":backlog", ":learnings", ":findings", ":memory", ":machines", ":health",
       ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
-      ":unpin", ":context", ":work next", ":tidy", ":learn add", ":learn remove",
+      ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
       ":mq approve", ":mq reject", ":mq edit", ":machine map",
       ":profile add-project", ":profile remove-project",
       ":run fix", ":relink", ":rerun hooks", ":update", ":govern", ":consolidate",
@@ -1536,12 +1294,12 @@ export class CortexShell {
     if (cmd === "mq" && ["approve", "reject", "edit"].includes((parts[1] || "").toLowerCase())) {
       return this.queueIdCompletions().map((id) => `:mq ${parts[1].toLowerCase()} ${id}`);
     }
-    if (cmd === "learn" && (parts[1] || "").toLowerCase() === "remove") {
+    if (cmd === "find" && (parts[1] || "").toLowerCase() === "remove") {
       const project = this.state.project;
       if (!project) return [];
-      const r = readLearnings(this.cortexPath, project);
+      const r = readFindings(this.cortexPath, project);
       if (!r.ok) return [];
-      return r.data.map((item) => `:learn remove ${item.id}`);
+      return r.data.map((item) => `:find remove ${item.id}`);
     }
 
     return commands;
@@ -1563,8 +1321,8 @@ export class CortexShell {
 
     if (command === "projects")  { this.setView("Projects");         this.setMessage(`  ${TAB_ICONS.Projects} Projects`);          return; }
     if (command === "backlog")   { this.setView("Backlog");          this.setMessage(`  ${TAB_ICONS.Backlog} Backlog`);            return; }
-    if (command === "learnings") { this.setView("Learnings");        this.setMessage(`  ${TAB_ICONS.Learnings} Learnings`);        return; }
-    if (command === "memory")    { this.setView("Memory Queue");     this.setMessage(`  ${TAB_ICONS["Memory Queue"]} Memory Queue`); return; }
+    if (command === "learnings" || command === "findings") { this.setView("Findings");        this.setMessage(`  ${TAB_ICONS.Findings} Findings`);        return; }
+    if (command === "memory")    { this.setView("Review Queue");     this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return; }
     if (command === "machines")  { this.setView("Machines/Profiles"); this.setMessage("  Machines/Profiles"); return; }
     if (command === "health") {
       this.healthCache = undefined;
@@ -1597,8 +1355,8 @@ export class CortexShell {
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
         this.setMessage(out.split("\n").slice(0, 14).join("\n") || "  No results.");
-      } catch (err: any) {
-        this.setMessage(`  Search failed: ${err?.message || err}`);
+      } catch (err: unknown) {
+        this.setMessage(`  Search failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
@@ -1706,27 +1464,27 @@ export class CortexShell {
       return;
     }
 
-    if (command === "learn") {
+    if (command === "learn" || command === "find") {
       const project = this.ensureProjectSelected();
       if (!project) return;
       const action = (parts[1] || "").toLowerCase();
       if (action === "add") {
         const text = trimmed.split(/\s+/).slice(2).join(" ").trim();
-        if (!text) { this.setMessage("  Usage: :learn add <text>"); return; }
-        this.setMessage(`  ${resultMsg(addLearning(this.cortexPath, project, text))}`);
+        if (!text) { this.setMessage("  Usage: :find add <text>"); return; }
+        this.setMessage(`  ${resultMsg(addFinding(this.cortexPath, project, text))}`);
         return;
       }
       if (action === "remove") {
         const match = parts.slice(2).join(" ").trim();
-        if (!match) { this.setMessage("  Usage: :learn remove <id|match>"); return; }
-        this.confirmThen(`Remove learning "${match}"?`, () => {
-          const file = path.join(this.cortexPath, project!, "LEARNINGS.md");
-          this.snapshotForUndo(`learn remove "${match}"`, file);
-          this.setMessage(`  ${resultMsg(removeLearning(this.cortexPath, project!, match))}`);
+        if (!match) { this.setMessage("  Usage: :find remove <id|match>"); return; }
+        this.confirmThen(`Remove finding "${match}"?`, () => {
+          const file = path.join(this.cortexPath, project!, "FINDINGS.md");
+          this.snapshotForUndo(`find remove "${match}"`, file);
+          this.setMessage(`  ${resultMsg(removeFinding(this.cortexPath, project!, match))}`);
         });
         return;
       }
-      this.setMessage("  Usage: :learn add <text> | :learn remove <id|match>");
+      this.setMessage("  Usage: :find add <text> | :find remove <id|match>");
       return;
     }
 
@@ -1740,8 +1498,8 @@ export class CortexShell {
         const ids = expandIds(match);
         this.setMessage(
           ids.length > 1
-            ? ids.map((id) => resultMsg(approveMemoryQueueItem(this.cortexPath, project, id))).join("; ")
-            : `  ${resultMsg(approveMemoryQueueItem(this.cortexPath, project, match))}`,
+            ? ids.map((id) => resultMsg(approveQueueItem(this.cortexPath, project, id))).join("; ")
+            : `  ${resultMsg(approveQueueItem(this.cortexPath, project, match))}`,
         );
         return;
       }
@@ -1753,20 +1511,20 @@ export class CortexShell {
           this.confirmThen(`Reject ${ids.length} items (${ids.join(", ")})?`, () => {
             const file = path.join(this.cortexPath, project!, "MEMORY_QUEUE.md");
             this.snapshotForUndo(`mq reject ${ids.length} items`, file);
-            this.setMessage(ids.map((id) => resultMsg(rejectMemoryQueueItem(this.cortexPath, project!, id))).join("; "));
+            this.setMessage(ids.map((id) => resultMsg(rejectQueueItem(this.cortexPath, project!, id))).join("; "));
           });
         } else {
           this.confirmThen(`Reject "${match}"?`, () => {
             const file = path.join(this.cortexPath, project!, "MEMORY_QUEUE.md");
             this.snapshotForUndo(`mq reject "${match}"`, file);
-            this.setMessage(`  ${resultMsg(rejectMemoryQueueItem(this.cortexPath, project!, match))}`);
+            this.setMessage(`  ${resultMsg(rejectQueueItem(this.cortexPath, project!, match))}`);
           });
         }
         return;
       }
       if (action === "edit") {
         if (parts.length < 4) { this.setMessage("  Usage: :mq edit <id|match> <text>"); return; }
-        this.setMessage(`  ${resultMsg(editMemoryQueueItem(this.cortexPath, project, parts[2], parts.slice(3).join(" ")))}`);
+        this.setMessage(`  ${resultMsg(editQueueItem(this.cortexPath, project, parts[2], parts.slice(3).join(" ")))}`);
         return;
       }
       this.setMessage("  Usage: :mq approve|reject|edit ...");
@@ -1837,8 +1595,8 @@ export class CortexShell {
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
         this.setMessage(`  ${out || "Governance scan completed."} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-      } catch (err: any) {
-        this.setMessage(`  Governance failed: ${err?.message || err}`);
+      } catch (err: unknown) {
+        this.setMessage(`  Governance failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
@@ -1853,8 +1611,8 @@ export class CortexShell {
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
         this.setMessage(`  ${out || "Consolidation completed."} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-      } catch (err: any) {
-        this.setMessage(`  Consolidation failed: ${err?.message || err}`);
+      } catch (err: unknown) {
+        this.setMessage(`  Consolidation failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
@@ -1888,7 +1646,7 @@ export class CortexShell {
 
         const project = this.state.project;
         if (project) {
-          const queueResult = readMemoryQueue(this.cortexPath, project);
+          const queueResult = readReviewQueue(this.cortexPath, project);
           if (queueResult.ok) {
             const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
             if (conflictItems.length) {
@@ -1898,8 +1656,8 @@ export class CortexShell {
         }
 
         this.setMessage(lines.length ? lines.join("\n") : "  No conflicts found.");
-      } catch (err: any) {
-        this.setMessage(`  Conflict check failed: ${err?.message || err}`);
+      } catch (err: unknown) {
+        this.setMessage(`  Conflict check failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
@@ -1970,22 +1728,6 @@ export class CortexShell {
   }
 }
 
-// ── Terminal control ──────────────────────────────────────────────────────────
-
-function clearScreen(): void {
-  if (process.stdout.isTTY) {
-    // Move cursor to home and overwrite in place (no full clear = no flicker)
-    process.stdout.write("\x1b[H");
-  }
-}
-
-// Clear any leftover lines below the rendered content
-function clearToEnd(): void {
-  if (process.stdout.isTTY) {
-    process.stdout.write("\x1b[J");
-  }
-}
-
 // ── Shell entry point (raw stdin) ─────────────────────────────────────────────
 
 export async function startShell(cortexPath: string, profile: string): Promise<void> {
@@ -2006,8 +1748,8 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
       try {
         const keep = await shell.handleInput(line);
         if (!keep) { shell.close(); rl.close(); return; }
-      } catch (err: any) {
-        process.stdout.write(`\n${style.red("Error:")} ${String(err?.message || err)}\n`);
+      } catch (err: unknown) {
+        process.stdout.write(`\n${style.red("Error:")} ${String(err instanceof Error ? err.message : String(err))}\n`);
       }
       await repaint();
     });
@@ -2050,8 +1792,9 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
         return;
       }
       await repaint();
-    } catch (err: any) {
-      (shell as any).message = `Error: ${err?.message || err}`;
+    } catch (err: unknown) {
+      // TODO: type this properly — setMessage is private, so we access message directly
+      (shell as unknown as { message: string }).message = `Error: ${err instanceof Error ? err.message : String(err)}`;
       await repaint();
     }
   };

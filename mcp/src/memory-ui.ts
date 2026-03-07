@@ -9,14 +9,14 @@ import {
   runtimeDir,
 } from "./shared.js";
 import {
-  approveMemoryQueueItem,
-  editMemoryQueueItem,
-  readMemoryQueue,
-  rejectMemoryQueueItem,
+  approveQueueItem,
+  editQueueItem,
+  readReviewQueue,
+  rejectQueueItem,
 } from "./data-access.js";
 import { isValidProjectName } from "./utils.js";
 
-export interface MemoryUiOptions {
+export interface ReviewUiOptions {
   authToken?: string;
   csrfTokens?: Set<string>;
 }
@@ -45,6 +45,55 @@ function h(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+interface GraphNode {
+  id: string;
+  label: string;
+  group: "project" | "decision" | "pitfall" | "pattern";
+  refCount: number;
+}
+
+interface GraphLink {
+  source: string;
+  target: string;
+}
+
+function buildGraph(cortexPath: string): { nodes: GraphNode[]; links: GraphLink[] } {
+  const projects = getProjectDirs(cortexPath).map((p) => path.basename(p)).filter((p) => p !== "global");
+  const nodes: GraphNode[] = [];
+  const links: GraphLink[] = [];
+  const typeMap: Record<string, "decision" | "pitfall" | "pattern"> = {
+    decision: "decision",
+    pitfall: "pitfall",
+    pattern: "pattern",
+  };
+
+  for (const project of projects) {
+    const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
+    if (!fs.existsSync(findingsPath)) continue;
+
+    nodes.push({ id: project, label: project, group: "project", refCount: 1 });
+
+    const content = fs.readFileSync(findingsPath, "utf8");
+    const lines = content.split("\n");
+    const counts: Record<string, number> = {};
+
+    for (const line of lines) {
+      const match = line.match(/^-\s+\[(decision|pitfall|pattern)\]\s+(.+?)(?:\s*<!--.*-->)?$/);
+      if (!match) continue;
+      const tag = match[1] as "decision" | "pitfall" | "pattern";
+      const text = match[2].trim();
+      const label = text.length > 60 ? text.slice(0, 57) + "..." : text;
+      const nodeId = `${project}:${tag}:${nodes.length}`;
+
+      counts[tag] = (counts[tag] || 0) + 1;
+      nodes.push({ id: nodeId, label, group: typeMap[tag], refCount: counts[tag] });
+      links.push({ source: project, target: nodeId });
+    }
+  }
+
+  return { nodes, links };
+}
+
 function renderPage(cortexPath: string, csrfToken?: string, authToken?: string): string {
   const projects = getProjectDirs(cortexPath).map((p) => path.basename(p)).filter((p) => p !== "global");
   const usage = recentUsage(cortexPath);
@@ -56,7 +105,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   const hiddenFields = csrfField + authField;
 
   for (const project of projects) {
-    const queueResult = readMemoryQueue(cortexPath, project);
+    const queueResult = readReviewQueue(cortexPath, project);
     const items = queueResult.ok ? queueResult.data : [];
     if (!items.length) continue;
     for (const item of items) {
@@ -101,6 +150,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cortex Memory UI</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <style>
     :root {
       --bg: #f4efe6;
@@ -124,12 +174,34 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .card { background: white; border: 1px solid var(--line); padding: 12px; }
     .card h2 { margin: 0 0 8px 0; font-size: 16px; }
     .card ul { margin: 0; padding-left: 18px; max-height: 240px; overflow: auto; }
+    .tab-bar { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid var(--line); }
+    .tab-bar button { background: none; border: none; padding: 8px 16px; font-size: 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -2px; font-family: inherit; }
+    .tab-bar button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .tab-bar button:hover { color: var(--ink); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    #graph-panel { background: #1e1e2e; border-radius: 8px; border: 1px solid var(--line); overflow: hidden; }
+    #graph-svg { width: 100%; height: 600px; display: block; }
+    .graph-legend { display: flex; gap: 16px; padding: 10px 16px; background: #1e1e2e; border-top: 1px solid #333; }
+    .graph-legend span { display: flex; align-items: center; gap: 6px; color: #cdd6f4; font-size: 13px; }
+    .graph-legend span::before { content: ''; width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .legend-project::before { background: #7C3AED; }
+    .legend-decision::before { background: #2563EB; }
+    .legend-pitfall::before { background: #DC2626; }
+    .legend-pattern::before { background: #16A34A; }
     @media (max-width: 900px) { .panes { grid-template-columns: 1fr; } .actions { min-width: 0; } }
   </style>
 </head>
 <body>
   <h1>Cortex Memory Review</h1>
-  <div class="subtitle">Markdown is source-of-truth. Approve/reject/edit updates queue + learnings directly.</div>
+  <div class="subtitle">Markdown is source-of-truth. Approve/reject/edit updates queue + findings directly.</div>
+
+  <div class="tab-bar">
+    <button class="active" onclick="switchTab('review')">Review</button>
+    <button onclick="switchTab('graph')">Graph</button>
+  </div>
+
+  <div id="tab-review" class="tab-content active">
   <table>
     <thead>
       <tr><th>Project</th><th>Status</th><th>Date</th><th>Memory</th><th>Actions</th></tr>
@@ -149,11 +221,117 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       <ul>${usageItems || "<li>No usage events yet.</li>"}</ul>
     </div>
   </div>
+  </div>
+
+  <div id="tab-graph" class="tab-content">
+    <div id="graph-panel">
+      <svg id="graph-svg"></svg>
+      <div class="graph-legend">
+        <span class="legend-project">Project</span>
+        <span class="legend-decision">Decision</span>
+        <span class="legend-pitfall">Pitfall</span>
+        <span class="legend-pattern">Pattern</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+      document.querySelectorAll('.tab-bar button').forEach(function(el) { el.classList.remove('active'); });
+      document.getElementById('tab-' + tab).classList.add('active');
+      document.querySelector('.tab-bar button[onclick*="' + tab + '"]').classList.add('active');
+      if (tab === 'graph' && !window._graphLoaded) {
+        window._graphLoaded = true;
+        loadGraph();
+      }
+    }
+
+    function loadGraph() {
+      fetch('/api/graph').then(function(r) { return r.json(); }).then(function(data) {
+        var svg = d3.select('#graph-svg');
+        var container = document.getElementById('graph-panel');
+        var width = container.clientWidth || 900;
+        var height = 600;
+        svg.attr('viewBox', '0 0 ' + width + ' ' + height);
+
+        var colorMap = { project: '#7C3AED', decision: '#2563EB', pitfall: '#DC2626', pattern: '#16A34A' };
+
+        var g = svg.append('g');
+
+        var zoom = d3.zoom().scaleExtent([0.3, 4]).on('zoom', function(event) {
+          g.attr('transform', event.transform);
+        });
+        svg.call(zoom);
+
+        var simulation = d3.forceSimulation(data.nodes)
+          .force('link', d3.forceLink(data.links).id(function(d) { return d.id; }).distance(80))
+          .force('charge', d3.forceManyBody().strength(-200))
+          .force('center', d3.forceCenter(width / 2, height / 2))
+          .force('collision', d3.forceCollide().radius(30));
+
+        var link = g.append('g')
+          .selectAll('line')
+          .data(data.links)
+          .join('line')
+          .attr('stroke', '#555')
+          .attr('stroke-opacity', 0.4)
+          .attr('stroke-width', 1);
+
+        var node = g.append('g')
+          .selectAll('circle')
+          .data(data.nodes)
+          .join('circle')
+          .attr('r', function(d) { return Math.max(5, Math.sqrt(d.refCount) * 6); })
+          .attr('fill', function(d) { return colorMap[d.group] || '#888'; })
+          .attr('stroke', '#1e1e2e')
+          .attr('stroke-width', 1.5)
+          .call(d3.drag()
+            .on('start', function(event, d) {
+              if (!event.active) simulation.alphaTarget(0.3).restart();
+              d.fx = d.x; d.fy = d.y;
+            })
+            .on('drag', function(event, d) {
+              d.fx = event.x; d.fy = event.y;
+            })
+            .on('end', function(event, d) {
+              if (!event.active) simulation.alphaTarget(0);
+              d.fx = null; d.fy = null;
+            })
+          );
+
+        var label = g.append('g')
+          .selectAll('text')
+          .data(data.nodes)
+          .join('text')
+          .text(function(d) { return d.label; })
+          .attr('font-size', function(d) { return d.group === 'project' ? 13 : 10; })
+          .attr('font-weight', function(d) { return d.group === 'project' ? 'bold' : 'normal'; })
+          .attr('fill', '#cdd6f4')
+          .attr('dx', function(d) { return Math.max(5, Math.sqrt(d.refCount) * 6) + 4; })
+          .attr('dy', 4);
+
+        simulation.on('tick', function() {
+          link
+            .attr('x1', function(d) { return d.source.x; })
+            .attr('y1', function(d) { return d.source.y; })
+            .attr('x2', function(d) { return d.target.x; })
+            .attr('y2', function(d) { return d.target.y; });
+          node
+            .attr('cx', function(d) { return d.x; })
+            .attr('cy', function(d) { return d.y; });
+          label
+            .attr('x', function(d) { return d.x; })
+            .attr('y', function(d) { return d.y; });
+        });
+      });
+    }
+  </script>
 </body>
 </html>`;
 }
 
-export function createMemoryUiServer(cortexPath: string, opts?: MemoryUiOptions): http.Server {
+export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions): http.Server {
   const authToken = opts?.authToken;
   const csrfTokens = opts?.csrfTokens;
 
@@ -168,6 +346,13 @@ export function createMemoryUiServer(cortexPath: string, opts?: MemoryUiOptions)
       const html = renderPage(cortexPath, csrfToken, authToken);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(html);
+      return;
+    }
+
+    if (req.method === "GET" && url === "/api/graph") {
+      const graph = buildGraph(cortexPath);
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(graph));
       return;
     }
 
@@ -226,11 +411,11 @@ export function createMemoryUiServer(cortexPath: string, opts?: MemoryUiOptions)
 
         let result: import("./shared.js").CortexResult<string> = { ok: false, error: "unknown action" };
         if (url === "/approve") {
-          result = approveMemoryQueueItem(cortexPath, project, line);
+          result = approveQueueItem(cortexPath, project, line);
         } else if (url === "/reject") {
-          result = rejectMemoryQueueItem(cortexPath, project, line);
+          result = rejectQueueItem(cortexPath, project, line);
         } else if (url === "/edit") {
-          result = editMemoryQueueItem(cortexPath, project, line, newText);
+          result = editQueueItem(cortexPath, project, line, newText);
         }
 
         if (!result.ok) {
@@ -266,16 +451,16 @@ export function createMemoryUiServer(cortexPath: string, opts?: MemoryUiOptions)
   });
 }
 
-export async function startMemoryUi(cortexPath: string, port: number): Promise<void> {
+export async function startReviewUi(cortexPath: string, port: number): Promise<void> {
   const authToken = crypto.randomUUID();
   const csrfTokens = new Set<string>();
-  const server = createMemoryUiServer(cortexPath, { authToken, csrfTokens });
+  const server = createReviewUiServer(cortexPath, { authToken, csrfTokens });
 
   await new Promise<void>((resolve) => {
     server.listen(port, "127.0.0.1", () => resolve());
   });
 
-  process.stdout.write(`cortex memory-ui running at http://127.0.0.1:${port}\n`);
+  process.stdout.write(`cortex review-ui running at http://127.0.0.1:${port}\n`);
   process.stderr.write(`auth token: ${authToken}\n`);
 
   await new Promise<void>((resolve) => {

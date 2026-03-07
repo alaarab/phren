@@ -14,7 +14,7 @@ cortex follows [Semantic Versioning](https://semver.org/).
 
 - Removing or renaming an MCP tool
 - Removing or renaming a CLI command
-- Changing the LEARNINGS.md or backlog.md format in a way that breaks existing parsers
+- Changing the FINDINGS.md or backlog.md format in a way that breaks existing parsers
 - Data schema changes that require migration (e.g., governance config shape changes)
 - Dropping support for a previously supported agent (Claude Code, Copilot, Cursor, Codex)
 

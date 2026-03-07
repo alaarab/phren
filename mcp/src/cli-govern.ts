@@ -1,19 +1,24 @@
 import {
-  ensureCortexPath,
-  filterTrustedLearningsDetailed,
-  appendMemoryQueue,
   appendAuditLog,
-  getMemoryPolicy,
-  pruneDeadMemories,
-  consolidateProjectLearnings,
-  enforceCanonicalLocks,
-  migrateLegacyFindings,
-  migrateGovernanceFiles,
-  updateRuntimeHealth,
   runtimeFile,
   getProjectDirs,
-  GOVERNANCE_SCHEMA_VERSION,
+  ensureCortexPath,
 } from "./shared.js";
+import {
+  appendReviewQueue,
+  getRetentionPolicy,
+  consolidateProjectFindings,
+  migrateGovernanceFiles,
+  updateRuntimeHealth,
+  GOVERNANCE_SCHEMA_VERSION,
+  recordRetrieval,
+  pruneDeadMemories,
+  enforceCanonicalLocks,
+} from "./shared-governance.js";
+import {
+  filterTrustedFindingsDetailed,
+  migrateLegacyFindings,
+} from "./shared-content.js";
 import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
@@ -55,10 +60,10 @@ function parseProjectDryRunArgs(
   return { projectArg, dryRun };
 }
 
-function captureLearningBackups(projects: string[]): Map<string, number> {
+function captureFindingBackups(projects: string[]): Map<string, number> {
   const snapshots = new Map<string, number>();
   for (const project of projects) {
-    const backup = path.join(cortexPath, project, "LEARNINGS.md.bak");
+    const backup = path.join(cortexPath, project, "FINDINGS.md.bak");
     if (!fs.existsSync(backup)) continue;
     snapshots.set(backup, fs.statSync(backup).mtimeMs);
   }
@@ -68,7 +73,7 @@ function captureLearningBackups(projects: string[]): Map<string, number> {
 function summarizeBackupChanges(before: Map<string, number>, projects: string[]): string[] {
   const changed: string[] = [];
   for (const project of projects) {
-    const backup = path.join(cortexPath, project, "LEARNINGS.md.bak");
+    const backup = path.join(cortexPath, project, "FINDINGS.md.bak");
     if (!fs.existsSync(backup)) continue;
     const current = fs.statSync(backup).mtimeMs;
     const previous = before.get(backup);
@@ -98,7 +103,7 @@ interface GovernanceSummary {
 }
 
 export async function handleGovernMemories(projectArg?: string, silent: boolean = false, dryRun: boolean = false): Promise<GovernanceSummary> {
-  const policy = getMemoryPolicy(cortexPath);
+  const policy = getRetentionPolicy(cortexPath);
   const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
   const projects = projectArg
     ? [projectArg]
@@ -109,10 +114,10 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
   let reviewCount = 0;
 
   for (const project of projects) {
-    const learningsPath = path.join(cortexPath, project, "LEARNINGS.md");
+    const learningsPath = path.join(cortexPath, project, "FINDINGS.md");
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
-    const trust = filterTrustedLearningsDetailed(content, {
+    const trust = filterTrustedFindingsDetailed(content, {
       ttlDays: Number.isNaN(ttlDays) ? policy.ttlDays : ttlDays,
       minConfidence: policy.minInjectConfidence,
       decay: policy.decay,
@@ -129,9 +134,9 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
     reviewCount += lowValue.length;
 
     if (!dryRun) {
-      appendMemoryQueue(cortexPath, project, "Stale", stale);
-      appendMemoryQueue(cortexPath, project, "Conflicts", conflicts);
-      appendMemoryQueue(cortexPath, project, "Review", lowValue);
+      appendReviewQueue(cortexPath, project, "Stale", stale);
+      appendReviewQueue(cortexPath, project, "Conflicts", conflicts);
+      appendReviewQueue(cortexPath, project, "Review", lowValue);
     }
   }
 
@@ -142,7 +147,7 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
       `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
     );
     for (const project of projects) {
-      consolidateProjectLearnings(cortexPath, project);
+      consolidateProjectFindings(cortexPath, project);
     }
   }
   const lockSummary = dryRun ? "" : enforceCanonicalLocks(cortexPath, projectArg);
@@ -163,13 +168,92 @@ export async function handlePruneMemories(args: string[] = []) {
   const usage = "cortex prune-memories [project] [--dry-run]";
   const { projectArg, dryRun } = parseProjectDryRunArgs(args, "prune-memories", usage);
   const projects = targetProjects(projectArg);
-  const beforeBackups = dryRun ? new Map<string, number>() : captureLearningBackups(projects);
+  const beforeBackups = dryRun ? new Map<string, number>() : captureFindingBackups(projects);
   const result = pruneDeadMemories(cortexPath, projectArg, dryRun);
   if (!result.ok) {
     console.log(result.error);
     return;
   }
   console.log(result.data);
+
+  // TTL enforcement: move entries older than ttlDays that haven't been retrieved recently
+  const policy = getRetentionPolicy(cortexPath);
+  const ttlDays = policy.ttlDays;
+  const retrievalGraceDays = Math.floor(ttlDays / 2);
+  const now = Date.now();
+
+  // Load retrieval log once for all projects
+  const retrievalLogPath = path.join(cortexPath, ".runtime", "retrieval-log.jsonl");
+  let retrievalEntries: Array<{ file: string; section: string; retrievedAt: string }> = [];
+  if (fs.existsSync(retrievalLogPath)) {
+    try {
+      retrievalEntries = fs.readFileSync(retrievalLogPath, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map(line => { try { return JSON.parse(line); } catch { return null; } })
+        .filter((e): e is { file: string; section: string; retrievedAt: string } => e !== null);
+    } catch { /* best effort */ }
+  }
+
+  // Build map of last retrieval date by file+bullet key
+  const lastRetrievalByKey = new Map<string, number>();
+  for (const entry of retrievalEntries) {
+    const key = `${entry.file}:${entry.section}`;
+    const ts = Date.parse(entry.retrievedAt);
+    if (!Number.isNaN(ts)) {
+      const existing = lastRetrievalByKey.get(key) || 0;
+      if (ts > existing) lastRetrievalByKey.set(key, ts);
+    }
+  }
+
+  let ttlExpired = 0;
+  for (const project of projects) {
+    const learningsPath = path.join(cortexPath, project, "FINDINGS.md");
+    if (!fs.existsSync(learningsPath)) continue;
+    const content = fs.readFileSync(learningsPath, "utf8");
+    const lines = content.split("\n");
+    const expiredEntries: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Look for entries with <!-- created: YYYY-MM-DD --> timestamps
+      if (!line.startsWith("- ")) continue;
+      const createdMatch = line.match(/<!--\s*created:\s*(\d{4}-\d{2}-\d{2})\s*-->/);
+      if (!createdMatch) continue; // No timestamp, skip defensively
+
+      const createdDate = createdMatch[1];
+      const createdMs = Date.parse(`${createdDate}T00:00:00Z`);
+      if (Number.isNaN(createdMs)) continue;
+
+      const ageDays = Math.floor((now - createdMs) / 86400000);
+      if (ageDays <= ttlDays) continue;
+
+      // Check if retrieved within the grace period
+      const bulletText = line.slice(2).trim().slice(0, 100);
+      const retrievalKey = `${project}/FINDINGS.md:${bulletText}`;
+      const lastRetrieval = lastRetrievalByKey.get(retrievalKey) || 0;
+      const daysSinceRetrieval = lastRetrieval ? Math.floor((now - lastRetrieval) / 86400000) : Infinity;
+      if (daysSinceRetrieval <= retrievalGraceDays) continue;
+
+      expiredEntries.push(`[ttl-expired: ${createdDate}] ${line.slice(2).trim()}`);
+      ttlExpired++;
+    }
+
+    if (expiredEntries.length > 0 && !dryRun) {
+      appendReviewQueue(cortexPath, project, "Stale", expiredEntries);
+    }
+    if (expiredEntries.length > 0 && dryRun) {
+      for (const entry of expiredEntries) {
+        console.log(`[dry-run] [${project}] Would move to MEMORY_QUEUE: ${entry.slice(0, 120)}`);
+      }
+    }
+  }
+
+  if (ttlExpired > 0) {
+    const verb = dryRun ? "Would move" : "Moved";
+    console.log(`${verb} ${ttlExpired} TTL-expired entr${ttlExpired === 1 ? "y" : "ies"} to MEMORY_QUEUE.md`);
+  }
+
   if (dryRun) return;
   const backups = summarizeBackupChanges(beforeBackups, projects);
   if (!backups.length) return;
@@ -180,8 +264,8 @@ export async function handleConsolidateMemories(args: string[] = []) {
   const usage = "cortex consolidate-memories [project] [--dry-run]";
   const { projectArg, dryRun } = parseProjectDryRunArgs(args, "consolidate-memories", usage);
   const projects = targetProjects(projectArg);
-  const beforeBackups = dryRun ? new Map<string, number>() : captureLearningBackups(projects);
-  const results = projects.map((p) => consolidateProjectLearnings(cortexPath, p, dryRun));
+  const beforeBackups = dryRun ? new Map<string, number>() : captureFindingBackups(projects);
+  const results = projects.map((p) => consolidateProjectFindings(cortexPath, p, dryRun));
   console.log(results.map((r) => r.ok ? r.data : r.error).join("\n"));
   if (dryRun) return;
   const backups = summarizeBackupChanges(beforeBackups, projects);
@@ -362,13 +446,13 @@ Subcommands:
   cortex maintain prune [project] [--dry-run]
                                          Delete expired entries by retention policy
   cortex maintain consolidate [project] [--dry-run]
-                                         Deduplicate LEARNINGS.md bullets
+                                         Deduplicate FINDINGS.md bullets
   cortex maintain migrate governance [--dry-run]
                                          Upgrade governance policy file schemas
   cortex maintain migrate data <project> [--pin] [--dry-run]
   cortex maintain migrate all <project> [--pin] [--dry-run]
   cortex maintain migrate <project> [--pin] [--dry-run]  (legacy alias)
-                                         Promote legacy findings into LEARNINGS/CANONICAL
+                                         Promote legacy findings into FINDINGS/CANONICAL
   cortex maintain extract [project]      Mine git/GitHub signals into memory candidates
   cortex maintain restore [project]      List and restore from .bak files`);
       if (sub) {

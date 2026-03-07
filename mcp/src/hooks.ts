@@ -233,9 +233,9 @@ function isToolHookEnabled(cortexPath: string, tool: string): boolean {
 export type CustomHookEvent =
   | "pre-save"      // Before push_changes commits
   | "post-save"     // After push_changes pushes
-  | "post-search"   // After search_knowledge returns results
-  | "pre-learning"  // Before a learning is written to LEARNINGS.md
-  | "post-learning" // After a learning is written
+  | "post-search"   // After search_cortex returns results
+  | "pre-finding"   // Before a finding is written to FINDINGS.md
+  | "post-finding"  // After a finding is written
   | "pre-index"     // Before FTS index rebuild
   | "post-index";   // After FTS index rebuild
 
@@ -247,7 +247,7 @@ export interface CustomHookEntry {
 
 const VALID_HOOK_EVENTS = new Set<string>([
   "pre-save", "post-save", "post-search",
-  "pre-learning", "post-learning",
+  "pre-finding", "post-finding",
   "pre-index", "post-index",
 ]);
 
@@ -259,7 +259,7 @@ export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
     if (!Array.isArray(prefs.customHooks)) return [];
     return prefs.customHooks.filter(
-      (h: any) =>
+      (h: Record<string, unknown>) =>
         h &&
         typeof h.event === "string" &&
         VALID_HOOK_EVENTS.has(h.event) &&
@@ -289,8 +289,8 @@ export function runCustomHooks(
         env: { ...process.env, CORTEX_PATH: cortexPath, CORTEX_HOOK_EVENT: event, ...env },
         stdio: ["ignore", "ignore", "pipe"],
       });
-    } catch (err: any) {
-      errors.push(`${event}: ${hook.command}: ${err.message || String(err)}`);
+    } catch (err: unknown) {
+      errors.push(`${event}: ${hook.command}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -341,7 +341,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
     const cursorFile = path.join(os.homedir(), ".cursor", "hooks.json");
     try {
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
-      let existing: any = {};
+      let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch { /* new file */ }
       const config: CursorHookConfig = {
         ...existing,
@@ -362,7 +362,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
   if (detected.has("codex")) {
     const codexFile = path.join(cortexPath, "codex.json");
     try {
-      let existing: any = {};
+      let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch { /* new file */ }
       const config: CodexHookConfig = {
         ...existing,

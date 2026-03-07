@@ -59,7 +59,7 @@ describe("handleGovernMemories", () => {
     });
   });
 
-  it("returns zero counts when LEARNINGS.md does not exist", async () => {
+  it("returns zero counts when FINDINGS.md does not exist", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "myproject", { "SUMMARY.md": "# Summary" });
@@ -70,26 +70,26 @@ describe("handleGovernMemories", () => {
     expect(result.reviewCount).toBe(0);
   });
 
-  it("detects low-value learnings for review", async () => {
+  it("detects low-value findings for review", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const learnings = [
+    const findings = [
       "- fixed stuff",
-      "- This is a proper learning about architecture patterns",
+      "- This is a proper finding about architecture patterns",
       "- wip",
       "- temp",
     ].join("\n");
-    makeProject(cortex, "testproj", { "LEARNINGS.md": learnings });
+    makeProject(cortex, "testproj", { "FINDINGS.md": findings });
     const { handleGovernMemories } = await importGovern(cortex);
     const result = await handleGovernMemories("testproj", true);
     // "fixed stuff", "wip", "temp" should be flagged
     expect(result.reviewCount).toBeGreaterThanOrEqual(3);
   });
 
-  it("detects short learnings (<16 chars) for review", async () => {
+  it("detects short findings (<16 chars) for review", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- short\n- also tiny\n" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- short\n- also tiny\n" });
     const { handleGovernMemories } = await importGovern(cortex);
     const result = await handleGovernMemories("proj", true);
     expect(result.reviewCount).toBeGreaterThanOrEqual(1);
@@ -98,7 +98,7 @@ describe("handleGovernMemories", () => {
   it("dry-run does not write audit log or memory queue", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- fixed stuff\n" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- fixed stuff\n" });
     const { handleGovernMemories } = await importGovern(cortex);
     await handleGovernMemories("proj", true, true);
     const queuePath = path.join(cortex, "proj", "MEMORY_QUEUE.md");
@@ -108,7 +108,7 @@ describe("handleGovernMemories", () => {
   it("non-dry-run writes memory queue and audit log", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- fixed stuff\n" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- fixed stuff\n" });
     const { handleGovernMemories } = await importGovern(cortex);
     await handleGovernMemories("proj", true, false);
     const auditPath = path.join(cortex, ".runtime", "audit.log");
@@ -120,7 +120,7 @@ describe("handleGovernMemories", () => {
   it("returns correct project count for single project", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "alpha", { "LEARNINGS.md": "- good learning here about patterns\n" });
+    makeProject(cortex, "alpha", { "FINDINGS.md": "- good finding here about patterns\n" });
     const { handleGovernMemories } = await importGovern(cortex);
     const result = await handleGovernMemories("alpha", true);
     expect(result.projects).toBe(1);
@@ -133,7 +133,7 @@ describe("handleMaintain", () => {
   it("routes govern subcommand", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- a valid learning line\n" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- a valid finding line\n" });
     const { handleMaintain } = await importGovern(cortex);
     // Should not throw
     await handleMaintain(["govern", "proj", "--dry-run"]);
@@ -142,7 +142,7 @@ describe("handleMaintain", () => {
   it("routes prune subcommand without error", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- a learning\n" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- a finding\n" });
     const { handleMaintain } = await importGovern(cortex);
     await handleMaintain(["prune", "proj", "--dry-run"]);
   });
@@ -150,7 +150,7 @@ describe("handleMaintain", () => {
   it("routes consolidate subcommand without error", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- a learning\n" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- a finding\n" });
     const { handleMaintain } = await importGovern(cortex);
     await handleMaintain(["consolidate", "proj", "--dry-run"]);
   });
@@ -186,7 +186,7 @@ describe("handleBackgroundMaintenance", () => {
   it("writes quality marker and runtime health on success", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- a learning\n" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- a finding\n" });
     const { handleBackgroundMaintenance } = await importGovern(cortex);
     await handleBackgroundMaintenance("proj");
     // Check runtime health was updated
@@ -200,7 +200,7 @@ describe("handleBackgroundMaintenance", () => {
   it("writes audit log entry for background maintenance", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- learning\n" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- finding\n" });
     const { handleBackgroundMaintenance } = await importGovern(cortex);
     await handleBackgroundMaintenance("proj");
     const auditPath = path.join(cortex, ".runtime", "audit.log");
@@ -248,7 +248,7 @@ describe("handleMigrateFindings", () => {
     makeProject(cortex, "proj", { "FINDINGS.md": "# Findings\n- found something\n" });
     const { handleMigrateFindings } = await importGovern(cortex);
     await handleMigrateFindings(["proj", "--dry-run"]);
-    // LEARNINGS.md should not be created in dry-run
+    // FINDINGS.md should not be created in dry-run
     // (depends on migrateLegacyFindings behavior, but we verify no crash)
   });
 });
@@ -271,7 +271,7 @@ describe("handleMaintainMigrate", () => {
     const govDir = path.join(cortex, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
-      path.join(govDir, "memory-policy.json"),
+      path.join(govDir, "retention-policy.json"),
       JSON.stringify({ schemaVersion: 0, ttlDays: 90 })
     );
     const { handleMaintainMigrate } = await importGovern(cortex);

@@ -143,14 +143,14 @@ After syncing, check each active project in the cortex directory for missing fil
 
 **Recommended files** (note if missing, don't warn):
 - `backlog.md`: persistent task queue
-- `LEARNINGS.md`: captured session learnings
+- `FINDINGS.md`: captured session findings
 
 For each project in the profile, check `$CORTEX_DIR/<project>/` for these files and print:
 
 ```
 Project health:
   + my-app: all files present
-  ~ backend: missing recommended: LEARNINGS.md
+  ~ backend: missing recommended: FINDINGS.md
   ! new-project: missing required: summary.md, CLAUDE.md
 ```
 
@@ -173,7 +173,7 @@ Skipped (not in profile):
 
 Project health:
   + myapp: all files present
-  ~ api-server: missing recommended: LEARNINGS.md
+  ~ api-server: missing recommended: FINDINGS.md
 
 Context: ~/.cortex-context.md updated
 ```
@@ -243,7 +243,7 @@ When two machines edit the same cortex file before syncing, `git pull` will hit 
 
 **backlog.md**: Take both changes. Backlog items from both machines are valid. Concat them, deduplicate if needed, commit.
 
-**LEARNINGS.md**: Take both changes. Keep entries in chronological order. If both machines added entries on the same date, interleave or group them under the same date heading.
+**FINDINGS.md**: Take both changes. Keep entries in chronological order. If both machines added entries on the same date, interleave or group them under the same date heading.
 
 **CLAUDE.md**: Manual merge. Ask the user which version they want, or show both and let them pick. These files contain preferences and instructions where intent matters, so don't auto-resolve.
 
@@ -254,5 +254,5 @@ When two machines edit the same cortex file before syncing, `git pull` will hit 
 ## Related skills
 
 - `/cortex-init`: create a new project or set up cortex from scratch
-- `add_learning()`: capture learnings via MCP (synced across machines by `push_changes()`)
-- `/cortex-consolidate`: synthesize learnings across projects
+- `add_finding()`: capture findings via MCP (synced across machines by `push_changes()`)
+- `/cortex-consolidate`: synthesize findings across projects

@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { CortexShell } from "./shell.js";
-import { readBacklog, readLearnings, readMemoryQueue, loadShellState } from "./data-access.js";
+import { readBacklog, readFindings, readReviewQueue, loadShellState } from "./data-access.js";
 import { writeFile as write, makeTempDir } from "./test-helpers.js";
 
 interface TempContext {
@@ -38,13 +38,13 @@ function seedCortex(root: string): TempContext {
     ].join("\n")
   );
   write(
-    path.join(root, project, "LEARNINGS.md"),
+    path.join(root, project, "FINDINGS.md"),
     [
-      "# demo LEARNINGS",
+      "# demo FINDINGS",
       "",
       "## 2026-03-01",
       "",
-      "- Existing learning",
+      "- Existing finding",
       "  <!-- cortex:cite {\"created_at\":\"2026-03-01T00:00:00.000Z\"} -->",
       "",
     ].join("\n")
@@ -133,7 +133,7 @@ describe("CortexShell", () => {
 
     await shell.handleInput("l");
     output = await shell.render();
-    expect(output).toContain("✦ Learnings");
+    expect(output).toContain("✦ Findings");
     expect(output).toContain("demo");
 
     shell.close();
@@ -168,19 +168,19 @@ describe("CortexShell", () => {
     expect(fs.existsSync(archiveFile)).toBe(true);
   });
 
-  it("adds and removes learnings from shell commands", async () => {
+  it("adds and removes findings from shell commands", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
-    await shell.handleInput(":learn add Shell can write learnings");
+    await shell.handleInput(":find add Shell can write findings");
 
-    let learnings = readLearnings(dir, "demo");
-    expect(learnings.ok).toBe(true);
-    if (learnings.ok) expect(learnings.data.some((entry) => entry.text.includes("Shell can write learnings"))).toBe(true);
+    let findings = readFindings(dir, "demo");
+    expect(findings.ok).toBe(true);
+    if (findings.ok) expect(findings.data.some((entry) => entry.text.includes("Shell can write findings"))).toBe(true);
 
-    await shell.handleInput(":learn remove Shell can write learnings");
+    await shell.handleInput(":find remove Shell can write findings");
     await shell.handleInput("y");
-    learnings = readLearnings(dir, "demo");
-    if (learnings.ok) expect(learnings.data.some((entry) => entry.text.includes("Shell can write learnings"))).toBe(false);
+    findings = readFindings(dir, "demo");
+    if (findings.ok) expect(findings.data.some((entry) => entry.text.includes("Shell can write findings"))).toBe(false);
   });
 
   it("triages memory queue entries with approve/reject/edit", async () => {
@@ -191,12 +191,12 @@ describe("CortexShell", () => {
     await shell.handleInput(":mq reject stale memory");
     await shell.handleInput("y");
 
-    const queue = readMemoryQueue(dir, "demo");
+    const queue = readReviewQueue(dir, "demo");
     expect(queue.ok).toBe(true);
     if (queue.ok) expect(queue.data.length).toBe(0);
 
-    const learnings = readLearnings(dir, "demo");
-    if (learnings.ok) expect(learnings.data.some((entry) => entry.text.includes("keep this memory updated"))).toBe(true);
+    const findings = readFindings(dir, "demo");
+    if (findings.ok) expect(findings.data.some((entry) => entry.text.includes("keep this memory updated"))).toBe(true);
   });
 
   it("renders health dashboard and supports remediation commands", async () => {
@@ -249,8 +249,8 @@ describe("CortexShell", () => {
     expect(stateAfterBacklog.view).toBe("Backlog");
 
     await shell.handleInput("l");
-    const stateAfterLearnings = loadShellState(dir);
-    expect(stateAfterLearnings.view).toBe("Learnings");
+    const stateAfterFindings = loadShellState(dir);
+    expect(stateAfterFindings.view).toBe("Findings");
 
     await shell.handleInput("b");
     const stateBackAgain = loadShellState(dir);
@@ -306,7 +306,7 @@ describe("CortexShell", () => {
     await shell.handleInput(":open demo");
     await shell.handleInput("m");
     const output = await shell.render();
-    expect(output).toContain("◈ Memory Queue");
+    expect(output).toContain("◈ Review Queue");
     expect(output).toContain("Review");
     expect(output).toContain("Stale");
     expect(output).toMatch(/─{10,}/);

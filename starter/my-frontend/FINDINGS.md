@@ -1,6 +1,6 @@
-# my-frontend learnings
+# my-frontend findings
 
-Lessons accumulated over time. Captured automatically during sessions and committed on exit.
+Findings accumulated over time. Captured automatically during sessions and committed on exit.
 
 <!-- Example entry:
 ## 2026-03-04

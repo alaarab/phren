@@ -1,15 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { makeTempDir, writeFile, grantAdmin } from "./test-helpers.js";
 import {
   buildIndex,
+  buildSourceDocKey,
   queryRows,
   resolveImports,
   detectProject,
   extractSnippet,
   rowToDoc,
+  queryDocBySourceKey,
   queryDocRows,
+  porterStem,
 } from "./shared-index.js";
 
 let tmpDir: string;
@@ -43,6 +47,30 @@ afterEach(() => {
     tmpCleanup();
     tmpCleanup = undefined;
   }
+});
+
+// ── porterStem ───────────────────────────────────────────────────────────────
+
+describe("porterStem", () => {
+  it("stems 'running' to 'run'", () => {
+    expect(porterStem("running")).toBe("run");
+  });
+
+  it("stems 'argued' to 'argu'", () => {
+    expect(porterStem("argued")).toBe("argu");
+  });
+
+  it("stems 'generalization' to 'general'", () => {
+    expect(porterStem("generalization")).toBe("general");
+  });
+
+  it("stems 'relational' to 'relat'", () => {
+    expect(porterStem("relational")).toBe("relat");
+  });
+
+  it("stems 'conditional' to 'condit'", () => {
+    expect(porterStem("conditional")).toBe("condit");
+  });
 });
 
 // ── resolveImports ───────────────────────────────────────────────────────────
@@ -220,6 +248,39 @@ describe("detectProject", () => {
   });
 });
 
+describe("document source keys", () => {
+  it("uses project-relative paths for nested project files", () => {
+    const cortex = makeCortex();
+    const filePath = path.join(cortex, "alpha", "reference", "api", "auth.md");
+    expect(buildSourceDocKey("alpha", filePath, cortex, "auth.md")).toBe("alpha/reference/api/auth.md");
+  });
+
+  it("falls back to filename for native memory paths outside the project root", () => {
+    const cortex = makeCortex();
+    const filePath = path.join(os.tmpdir(), "native-findings.md");
+    expect(buildSourceDocKey("alpha", filePath, cortex, "FINDINGS.md")).toBe("alpha/FINDINGS.md");
+  });
+
+  it("finds docs by canonical source key instead of basename alone", async () => {
+    const cortex = makeCortex();
+    makeProject(cortex, "alpha", {
+      "reference/api/auth.md": "# API auth",
+      "reference/runbooks/auth.md": "# Runbook auth",
+    });
+
+    const db = await buildIndex(cortex);
+    try {
+      const apiDoc = queryDocBySourceKey(db, cortex, "alpha/reference/api/auth.md");
+      const runbookDoc = queryDocBySourceKey(db, cortex, "alpha/reference/runbooks/auth.md");
+      expect(apiDoc?.path).toContain(path.join("reference", "api", "auth.md"));
+      expect(runbookDoc?.path).toContain(path.join("reference", "runbooks", "auth.md"));
+      expect(apiDoc?.path).not.toBe(runbookDoc?.path);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 // ── buildIndex + queryRows ───────────────────────────────────────────────────
 
 describe("buildIndex", () => {
@@ -227,7 +288,7 @@ describe("buildIndex", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "proj", {
-      "LEARNINGS.md": "- SQLite uses WAL mode for concurrent reads",
+      "FINDINGS.md": "- SQLite uses WAL mode for concurrent reads",
       "SUMMARY.md": "# Project Summary\nThis is a test project.",
     });
     const db = await buildIndex(cortex);
@@ -242,8 +303,8 @@ describe("buildIndex", () => {
   it("indexes files from multiple projects", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "alpha", { "LEARNINGS.md": "- Alpha learning about caching" });
-    makeProject(cortex, "beta", { "LEARNINGS.md": "- Beta learning about routing" });
+    makeProject(cortex, "alpha", { "FINDINGS.md": "- Alpha finding about caching" });
+    makeProject(cortex, "beta", { "FINDINGS.md": "- Beta finding about routing" });
     const db = await buildIndex(cortex);
 
     const alphaRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ? AND project = ?", ["caching", "alpha"]);
@@ -258,7 +319,7 @@ describe("buildIndex", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "proj", {
-      "LEARNINGS.md": "- visible learning\n<details>\nxyzuniquehidden archived content\n</details>\n- another visible one",
+      "FINDINGS.md": "- visible finding\n<details>\nxyzuniquehidden archived content\n</details>\n- another visible one",
     });
     const db = await buildIndex(cortex);
     const hidden = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["xyzuniquehidden"]);
@@ -286,7 +347,7 @@ describe("buildIndex", () => {
   it("uses cached index on second build with same content", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- stable content" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- stable content" });
     const db1 = await buildIndex(cortex);
     db1.close();
     // Second build should hit cache (no way to assert directly, but should not error)
@@ -303,7 +364,7 @@ describe("queryRows", () => {
   it("returns null for no results", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- something" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- something" });
     const db = await buildIndex(cortex);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["zzzznonexistent"]);
     expect(rows).toBeNull();
@@ -313,7 +374,7 @@ describe("queryRows", () => {
   it("returns null on SQL error", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- data" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- data" });
     const db = await buildIndex(cortex);
     const rows = queryRows(db, "SELECT * FROM nonexistent_table", []);
     expect(rows).toBeNull();
@@ -323,7 +384,7 @@ describe("queryRows", () => {
   it("returns array of arrays for valid results", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- database patterns" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- database patterns" });
     const db = await buildIndex(cortex);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["database"]);
     expect(rows).not.toBeNull();
@@ -337,12 +398,12 @@ describe("queryRows", () => {
 
 describe("rowToDoc", () => {
   it("maps array to DocRow object", () => {
-    const row = ["myproject", "LEARNINGS.md", "learnings", "some content", "/path/to/file"];
+    const row = ["myproject", "FINDINGS.md", "findings", "some content", "/path/to/file"];
     const doc = rowToDoc(row);
     expect(doc).toEqual({
       project: "myproject",
-      filename: "LEARNINGS.md",
-      type: "learnings",
+      filename: "FINDINGS.md",
+      type: "findings",
       content: "some content",
       path: "/path/to/file",
     });
@@ -355,19 +416,19 @@ describe("queryDocRows", () => {
   it("returns DocRow objects for matching results", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- architecture decision records" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- architecture decision records" });
     const db = await buildIndex(cortex);
     const docs = queryDocRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["architecture"]);
     expect(docs).not.toBeNull();
     expect(docs![0].project).toBe("proj");
-    expect(docs![0].type).toBe("learnings");
+    expect(docs![0].type).toBe("findings");
     db.close();
   });
 
   it("returns null when no matches", async () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    makeProject(cortex, "proj", { "LEARNINGS.md": "- data" });
+    makeProject(cortex, "proj", { "FINDINGS.md": "- data" });
     const db = await buildIndex(cortex);
     const docs = queryDocRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["xyznonexistent"]);
     expect(docs).toBeNull();

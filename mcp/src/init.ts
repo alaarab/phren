@@ -4,7 +4,14 @@ import * as os from "os";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { buildLifecycleCommands, configureAllHooks } from "./hooks.js";
-import { debugLog, EXEC_TIMEOUT_QUICK_MS, GOVERNANCE_SCHEMA_VERSION, migrateGovernanceFiles } from "./shared.js";
+import {
+  debugLog,
+  EXEC_TIMEOUT_QUICK_MS,
+} from "./shared.js";
+import {
+  GOVERNANCE_SCHEMA_VERSION,
+  migrateGovernanceFiles,
+} from "./shared-governance.js";
 import { isValidProjectName, isFeatureEnabled } from "./utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -157,6 +164,20 @@ export function setHooksEnabledPreference(cortexPath: string, enabled: boolean):
 
 function log(msg: string) {
   process.stdout.write(msg + "\n");
+}
+
+async function confirmPrompt(message: string): Promise<boolean> {
+  // Skip prompt in CI or non-TTY environments
+  if (process.env.CI === "true" || !process.stdin.isTTY) return true;
+
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(`${message} [y/N] `, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes");
+    });
+  });
 }
 
 function patchJsonFile(filePath: string, patch: (data: Record<string, any>) => void) {
@@ -450,9 +471,9 @@ export function ensureGovernanceFiles(cortexPath: string) {
   const govDir = path.join(cortexPath, ".governance");
   fs.mkdirSync(govDir, { recursive: true });
   const sv = GOVERNANCE_SCHEMA_VERSION;
-  const policy = path.join(govDir, "memory-policy.json");
+  const policy = path.join(govDir, "retention-policy.json");
   const access = path.join(govDir, "access-control.json");
-  const workflow = path.join(govDir, "memory-workflow-policy.json");
+  const workflow = path.join(govDir, "workflow-policy.json");
   const indexPolicy = path.join(govDir, "index-policy.json");
   const runtimeHealth = path.join(govDir, "runtime-health.json");
 
@@ -858,7 +879,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "fts-index",
     ok: ftsOk,
     detail: ftsOk ? "Project directories found for indexing" : "No project directories found in cortex path",
-    fix: ftsOk ? undefined : "Create a project: `cortex add-learning my-project \"first insight\"`",
+    fix: ftsOk ? undefined : "Create a project: `cortex add-finding my-project \"first insight\"`",
   });
 
   // Check hook entrypoint resolves
@@ -980,10 +1001,10 @@ export function bootstrapFromExisting(cortexPath: string, projectPath: string): 
     `# ${projectName}\n\n**What:** Bootstrapped from ${resolvedPath}\n**Source CLAUDE.md:** ${claudeMdPath}\n\n${summaryLines.length > 1 ? summaryLines.slice(1).join("\n") : ""}\n`
   );
 
-  if (!fs.existsSync(path.join(projDir, "LEARNINGS.md"))) {
+  if (!fs.existsSync(path.join(projDir, "FINDINGS.md"))) {
     fs.writeFileSync(
-      path.join(projDir, "LEARNINGS.md"),
-      `# ${projectName} LEARNINGS\n\n<!-- Bootstrapped from ${claudeMdPath} -->\n`
+      path.join(projDir, "FINDINGS.md"),
+      `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${claudeMdPath} -->\n`
     );
   }
   if (!fs.existsSync(path.join(projDir, "backlog.md"))) {
@@ -1024,7 +1045,7 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   const profileAnswer = (await ask(`Profile name [personal]: `)).trim();
   const profile = profileAnswer || "personal";
 
-  log("\nMCP mode lets your AI agent call cortex tools directly (search, backlog, learnings).");
+  log("\nMCP mode lets your AI agent call cortex tools directly (search, backlog, findings).");
   log("This is the recommended setup and works with Claude Code, Cursor, Copilot CLI, and Codex.");
   log("Hooks-only mode injects context into prompts instead (works with any agent, but read-only).");
   const mcpAnswer = (await ask(`Enable MCP? [Y/n]: `)).trim().toLowerCase();
@@ -1115,6 +1136,21 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
 
+      // Confirmation prompt before writing config
+      if (!opts.yes) {
+        const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+        const modifications: string[] = [];
+        modifications.push(`  ${settingsPath}  (update MCP server + hooks)`);
+        log(`\nWill modify:`);
+        for (const mod of modifications) log(mod);
+
+        const confirmed = await confirmPrompt("\nProceed?");
+        if (!confirmed) {
+          log("Aborted.");
+          return;
+        }
+      }
+
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
       try {
         const status = configureClaude(cortexPath, { mcpEnabled, hooksEnabled });
@@ -1193,7 +1229,11 @@ export async function runInit(opts: InitOptions = {}) {
         }
       }
 
-      log(`\nDone. Restart your agent to pick up changes.\n`);
+      log(`\ncortex updated successfully`);
+      log(`\nNext steps:`);
+      log(`  1. Start a new Claude session -- hooks are now active`);
+      log(`  2. Run \`cortex doctor\` to verify everything is wired correctly`);
+      log(``);
       return;
   }
 
@@ -1273,15 +1313,15 @@ export async function runInit(opts: InitOptions = {}) {
     );
     fs.writeFileSync(
       path.join(cortexPath, firstProjectName, "summary.md"),
-      `# ${firstProjectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Gotcha:** the one thing that will bite you if you forget\n`
+      `# ${firstProjectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
     );
     fs.writeFileSync(
       path.join(cortexPath, firstProjectName, "CLAUDE.md"),
       `# ${firstProjectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
     );
     fs.writeFileSync(
-      path.join(cortexPath, firstProjectName, "LEARNINGS.md"),
-      `# ${firstProjectName} LEARNINGS\n\n<!-- Learnings are captured automatically during sessions and committed on exit -->\n`
+      path.join(cortexPath, firstProjectName, "FINDINGS.md"),
+      `# ${firstProjectName} FINDINGS\n\n<!-- Findings are captured automatically during sessions and committed on exit -->\n`
     );
     fs.writeFileSync(
       path.join(cortexPath, firstProjectName, "backlog.md"),
@@ -1301,6 +1341,19 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  Updated machines.yaml with hostname "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
+
+  // Confirmation prompt before writing agent config
+  if (!opts.yes) {
+    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    log(`\nWill modify:`);
+    log(`  ${settingsPath}  (add MCP server + hooks)`);
+
+    const confirmed = await confirmPrompt("\nProceed?");
+    if (!confirmed) {
+      log("Aborted.");
+      return;
+    }
+  }
 
   // Configure Claude Code
   try {
@@ -1365,19 +1418,20 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  ${cortexPath}/profiles/           Machine-to-project mappings`);
   log(`  ${cortexPath}/.governance/        Memory quality settings and config`);
 
+  log(`\ncortex initialized`);
   log(`\nNext steps:`);
-  log(`  1. Restart your agent to activate cortex`);
-  log(`     (close and reopen Claude Code, or start a new session)`);
-  log(`  2. Create a private GitHub repo and push your cortex:`);
+  log(`  1. Create your first project:`);
+  log(`     mkdir ${cortexPath}/my-project && touch ${cortexPath}/my-project/FINDINGS.md`);
+  log(`  2. Start a new Claude session -- hooks are now active`);
+  log(`  3. Run \`cortex doctor\` to verify everything is wired correctly`);
+  log(`  4. Create a private GitHub repo and push your cortex:`);
   log(`     cd ${cortexPath}`);
   log(`     git init && git add . && git commit -m "Initial cortex setup"`);
   log(`     git remote add origin git@github.com:YOUR_USERNAME/cortex.git`);
   log(`     git push -u origin main`);
   if (!mcpEnabled) {
-    log(`  3. Turn MCP on later: npx @alaarab/cortex mcp-mode on`);
+    log(`  5. Turn MCP on later: npx @alaarab/cortex mcp-mode on`);
   }
-  log(`  4. Open a project and run /cortex-init <name> to add it`);
-  log(`  5. Run \`npx @alaarab/cortex verify\` to check everything is wired up`);
   log(`\n  Read ${cortexPath}/README.md for a guided tour of each file.`);
 
   if (opts.fromExisting) {
@@ -1385,7 +1439,7 @@ export async function runInit(opts: InitOptions = {}) {
       const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting);
       log(`\nBootstrapped project "${projectName}" from ${opts.fromExisting}`);
       log(`  ${cortexPath}/${projectName}/CLAUDE.md`);
-      log(`  ${cortexPath}/${projectName}/LEARNINGS.md`);
+      log(`  ${cortexPath}/${projectName}/FINDINGS.md`);
       log(`  ${cortexPath}/${projectName}/backlog.md`);
       log(`  ${cortexPath}/${projectName}/summary.md`);
     } catch (e: any) {

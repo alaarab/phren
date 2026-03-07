@@ -974,25 +974,42 @@ section {
   min-height: 220px;
 }
 
-.demo-line {
+.demo-dyn-line {
+  margin-bottom: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  display: flex;
+  align-items: baseline;
+}
+
+.demo-dyn-cmd {
+  color: var(--text);
+}
+
+.demo-dyn-cursor {
+  color: var(--indigo);
+  opacity: 1;
+  animation: demoBlink 0.65s step-end infinite;
+  margin-left: 1px;
+}
+
+.demo-dyn-output {
+  padding-left: 72px;
   opacity: 0;
-  animation: demoFadeIn 0.4s ease forwards;
-  display: flex;
-  align-items: baseline;
+  transform: translateY(3px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
-.demo-line.demo-result {
-  display: flex;
-  align-items: baseline;
+.demo-dyn-output.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
-.demo-line-1 { animation-delay: 0.6s; }
-.demo-line-2 { animation-delay: 2.2s; }
-.demo-line-3 { animation-delay: 2.6s; }
-.demo-line-4 { animation-delay: 4.0s; }
-.demo-line-5 { animation-delay: 5.8s; }
-.demo-line-6 { animation-delay: 7.0s; }
-.demo-line-7 { animation-delay: 8.0s; }
+.demo-dyn-meta {
+  color: var(--text-dim);
+  font-size: 11px;
+  opacity: 0.55;
+}
 
 .demo-prompt {
   color: var(--indigo);
@@ -1000,23 +1017,6 @@ section {
   margin-right: 10px;
   white-space: nowrap;
   flex-shrink: 0;
-}
-
-.demo-typed {
-  color: var(--text);
-  display: inline-block;
-  overflow: hidden;
-  white-space: pre-wrap;
-  animation: demoFadeIn 0.4s ease forwards;
-}
-
-.demo-typed.active-cursor {
-  border-right: 2px solid var(--text-dim);
-  animation: demoFadeIn 0.4s ease forwards, demoBlink 0.8s step-end infinite;
-}
-
-.demo-result {
-  padding-left: 80px;
 }
 
 .demo-result-project {
@@ -1047,7 +1047,7 @@ section {
 }
 
 @keyframes demoBlink {
-  50% { border-color: transparent; }
+  50% { opacity: 0; }
 }
 
 /* --- CTA FOOTER --- */

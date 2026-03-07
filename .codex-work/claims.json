@@ -1,0 +1,11 @@
+{
+  "workers": {
+    "codex/task-docs": {
+      "task": "P3-DOCS",
+      "files": ["CLAUDE.md", "docs/llms.txt", "docs/llms-full.txt", "docs/api-reference.md"],
+      "worktree": "/tmp/cortex-codex-docs",
+      "status": "running",
+      "started": "2026-03-07"
+    }
+  }
+}

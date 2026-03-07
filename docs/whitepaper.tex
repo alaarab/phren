@@ -120,7 +120,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 % === STORAGE ===
 \node[store, right=1.1cm of fts] (md) {Markdown Files\\[-2pt]{\scriptsize \textasciitilde/.cortex/<project>/}};
 \node[store, above=0.55cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
-\node[store, below=0.55cm of md]  (mcp) {MCP Tools (19)\\[-2pt]{\scriptsize add\_learning, backlog, etc.}};
+\node[store, below=0.55cm of md]  (mcp) {MCP Tools (19)\\[-2pt]{\scriptsize add\_finding, backlog, etc.}};
 
 % === GOVERNANCE ===
 \node[gov, right=1.1cm of md] (pol) {Policy Engine\\[-2pt]{\scriptsize .governance/*.json}};
@@ -180,7 +180,7 @@ The governance engine lives in \texttt{.governance/} \cite{cortex-shared} and is
 
 \textbf{Memory policy} (\texttt{memory-policy.json}): TTL (\texttt{ttlDays=120}), retention (\texttt{retentionDays=365}), auto-accept confidence threshold, minimum injection confidence, and the four-tier decay curve. Changes are audit-logged.
 
-\textbf{Workflow policy} (\texttt{memory-workflow-policy.json}): approval gates controlling whether new memories require maintainer approval and which queue sections trigger review.
+\textbf{Workflow policy} (\texttt{workflow-policy.json}): approval gates controlling whether new memories require maintainer approval and which queue sections trigger review.
 
 \textbf{Access control} (\texttt{access-control.json}): role-based permissions with four roles: \texttt{admin}, \texttt{maintainer}, \texttt{contributor}, \texttt{viewer}. Each maps to a set of allowed actions (\texttt{read}, \texttt{write}, \texttt{queue}, \texttt{pin}, \texttt{policy}, \texttt{delete}). The system resolves the current actor's role and rejects unauthorized operations before they execute.
 
@@ -524,7 +524,7 @@ Honest systems documentation acknowledges what doesn't work well. Here is what C
 
 \textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure correctly. Default settings are reasonable, but teams that need custom TTL, role granularity, or approval workflows will spend time on configuration. There is no guided setup beyond the CLI commands.
 
-\textbf{No web-based review UI by default.} The \texttt{cortex memory-ui} command starts a local web UI, but it is not on by default. Memory triage is primarily a terminal workflow. Teams expecting a browser-based management interface will need to adapt.
+\textbf{No web-based review UI by default.} The \texttt{cortex review-ui} command starts a local web UI, but it is not on by default. Memory triage is primarily a terminal workflow. Teams expecting a browser-based management interface will need to adapt.
 
 \textbf{Portability is uni-directional for now.} Export/import works for project data, but migrating the governance configuration (policies, roles, canonical locks) to a different memory system is manual work. The format is not standardized across tools.
 

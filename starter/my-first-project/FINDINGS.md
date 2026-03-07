@@ -1,16 +1,16 @@
-# my-first-project learnings
+# my-first-project findings
 
-Lessons accumulated over time. Captured automatically during sessions and committed on exit.
+Findings accumulated over time. Captured automatically during sessions and committed on exit.
 
-<!-- How learnings work:
+<!-- How findings work:
 
 Cortex captures insights as you code. When Claude discovers something non-obvious
-(a gotcha, a pattern, a decision with context), it calls add_learning() and the
+(a pitfall, a pattern, a decision with context), it calls add_finding() and the
 insight lands here. The Stop hook auto-commits after every response.
 
 Entries are grouped by date. Old entries get confidence-decayed over time, so stale
-knowledge fades from retrieval naturally. You can remove wrong entries with
-remove_learning() or clean up bulk with `cortex shell` > :learn remove.
+findings fade from retrieval naturally. You can remove wrong entries with
+remove_finding() or clean up bulk with `cortex shell` > :find remove.
 
 Example entries (delete these once you have real ones):
 

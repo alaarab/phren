@@ -52,10 +52,10 @@ describe("selectSnippets", () => {
 
   it("selects up to 3 snippets within token budget", () => {
     const rows = [
-      makeDoc("proj", "a.md", "learnings", "- keyword one insight", "/a.md"),
-      makeDoc("proj", "b.md", "learnings", "- keyword two insight", "/b.md"),
-      makeDoc("proj", "c.md", "learnings", "- keyword three insight", "/c.md"),
-      makeDoc("proj", "d.md", "learnings", "- keyword four insight", "/d.md"),
+      makeDoc("proj", "a.md", "findings", "- keyword one insight", "/a.md"),
+      makeDoc("proj", "b.md", "findings", "- keyword two insight", "/b.md"),
+      makeDoc("proj", "c.md", "findings", "- keyword three insight", "/c.md"),
+      makeDoc("proj", "d.md", "findings", "- keyword four insight", "/d.md"),
     ];
     const { selected, usedTokens } = selectSnippets(rows, "keyword", 9999, 6, 520);
     expect(selected.length).toBeLessThanOrEqual(3);
@@ -66,8 +66,8 @@ describe("selectSnippets", () => {
   it("respects token budget and skips rows that exceed it", () => {
     const longContent = "- keyword " + "x".repeat(2000);
     const rows = [
-      makeDoc("proj", "big.md", "learnings", longContent, "/big.md"),
-      makeDoc("proj", "small.md", "learnings", "- keyword tiny", "/small.md"),
+      makeDoc("proj", "big.md", "findings", longContent, "/big.md"),
+      makeDoc("proj", "small.md", "findings", "- keyword tiny", "/small.md"),
     ];
     const { selected } = selectSnippets(rows, "keyword", 60, 6, 520);
     expect(selected.length).toBeGreaterThanOrEqual(1);
@@ -75,7 +75,7 @@ describe("selectSnippets", () => {
 
   it("returns empty when no rows have matching content", () => {
     const rows = [
-      makeDoc("proj", "empty.md", "learnings", "", "/empty.md"),
+      makeDoc("proj", "empty.md", "findings", "", "/empty.md"),
     ];
     const { selected } = selectSnippets(rows, "keyword", 550, 6, 520);
     expect(selected).toHaveLength(0);
@@ -110,9 +110,9 @@ describe("buildHookOutput", () => {
 
   it("includes status line, cortex-context tags, and trace", () => {
     const selected: SelectedSnippet[] = [{
-      doc: { project: "myproj", filename: "LEARNINGS.md", type: "learnings", content: "some content", path: "/path" },
+      doc: { project: "myproj", filename: "FINDINGS.md", type: "findings", content: "some content", path: "/path" },
       snippet: "- insight here",
-      key: "myproj:LEARNINGS.md:abc",
+      key: "myproj:FINDINGS.md:abc",
     }];
     const stage = { indexMs: 10, searchMs: 20, trustMs: 5, rankMs: 3, selectMs: 2 };
     const parts = buildHookOutput(selected, 80, "general", null, "myproj", stage, 550, cortexDir);
@@ -146,7 +146,7 @@ describe("buildHookOutput", () => {
 
   it("formats multiple results correctly", () => {
     const selected: SelectedSnippet[] = [
-      { doc: { project: "a", filename: "f1.md", type: "learnings", content: "c1", path: "/f1" }, snippet: "s1", key: "k1" },
+      { doc: { project: "a", filename: "f1.md", type: "findings", content: "c1", path: "/f1" }, snippet: "s1", key: "k1" },
       { doc: { project: "b", filename: "f2.md", type: "summary", content: "c2", path: "/f2" }, snippet: "s2", key: "k2" },
     ];
     const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
@@ -155,6 +155,54 @@ describe("buildHookOutput", () => {
     expect(parts[0]).toContain("2 results");
     expect(parts.some((p) => p.includes("[a/f1.md]"))).toBe(true);
     expect(parts.some((p) => p.includes("[b/f2.md]"))).toBe(true);
+  });
+
+  it("uses project-relative memory ids in compact index output", () => {
+    process.env.CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE = "1";
+    const selected: SelectedSnippet[] = [
+      {
+        doc: {
+          project: "alpha",
+          filename: "auth.md",
+          type: "reference",
+          content: "first",
+          path: path.join(cortexDir, "alpha", "reference", "api", "auth.md"),
+        },
+        snippet: "# API auth",
+        key: "k1",
+      },
+      {
+        doc: {
+          project: "alpha",
+          filename: "auth.md",
+          type: "reference",
+          content: "second",
+          path: path.join(cortexDir, "alpha", "reference", "runbooks", "auth.md"),
+        },
+        snippet: "# Runbook auth",
+        key: "k2",
+      },
+      {
+        doc: {
+          project: "alpha",
+          filename: "summary.md",
+          type: "summary",
+          content: "third",
+          path: path.join(cortexDir, "alpha", "summary.md"),
+        },
+        snippet: "# Summary",
+        key: "k3",
+      },
+    ];
+    const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
+
+    try {
+      const parts = buildHookOutput(selected, 100, "general", null, null, stage, 550, cortexDir);
+      expect(parts.some((p) => p.includes("[mem:alpha/reference/api/auth.md]"))).toBe(true);
+      expect(parts.some((p) => p.includes("[mem:alpha/reference/runbooks/auth.md]"))).toBe(true);
+    } finally {
+      delete process.env.CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE;
+    }
   });
 });
 
@@ -173,7 +221,7 @@ describe("applyTrustFilter", () => {
     cortexCleanup();
   });
 
-  it("passes through non-learnings rows unchanged", () => {
+  it("passes through non-findings rows unchanged", () => {
     const rows = [
       { project: "proj", filename: "summary.md", type: "summary", content: "project summary text", path: "/path" },
       { project: "proj", filename: "CLAUDE.md", type: "claude", content: "instructions", path: "/path2" },
@@ -183,40 +231,40 @@ describe("applyTrustFilter", () => {
     expect(result[0].content).toBe("project summary text");
   });
 
-  it("filters learnings rows through trust pipeline", () => {
-    const learningsContent = [
-      "# testproj LEARNINGS",
+  it("filters findings rows through trust pipeline", () => {
+    const findingsContent = [
+      "# testproj FINDINGS",
       "",
       "## 2026-03-01",
       "",
-      `- Fresh learning`,
+      `- Fresh finding`,
       `  <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z"} -->`,
       "",
     ].join("\n");
 
     const rows = [
-      { project: "testproj", filename: "LEARNINGS.md", type: "learnings", content: learningsContent, path: "/LEARNINGS.md" },
+      { project: "testproj", filename: "FINDINGS.md", type: "findings", content: findingsContent, path: "/FINDINGS.md" },
     ];
     const result = applyTrustFilter(rows, cortexDir, 365, 0.0, { enabled: false });
     expect(result).toHaveLength(1);
-    // Content should still contain the fresh learning
-    expect(result[0].content).toContain("Fresh learning");
+    // Content should still contain the fresh finding
+    expect(result[0].content).toContain("Fresh finding");
   });
 
-  it("removes learnings rows that become empty after trust filtering", () => {
-    // A learning from far in the past with very short TTL should be filtered out
-    const oldLearnings = [
-      "# testproj LEARNINGS",
+  it("removes findings rows that become empty after trust filtering", () => {
+    // A finding from far in the past with very short TTL should be filtered out
+    const oldFindings = [
+      "# testproj FINDINGS",
       "",
       "## 2020-01-01",
       "",
-      `- Ancient learning`,
+      `- Ancient finding`,
       `  <!-- cortex:cite {"created_at":"2020-01-01T00:00:00.000Z"} -->`,
       "",
     ].join("\n");
 
     const rows = [
-      { project: "testproj", filename: "LEARNINGS.md", type: "learnings", content: oldLearnings, path: "/LEARNINGS.md" },
+      { project: "testproj", filename: "FINDINGS.md", type: "findings", content: oldFindings, path: "/FINDINGS.md" },
     ];
     // Very short TTL should filter out old entries
     const result = applyTrustFilter(rows, cortexDir, 1, 0.99, { enabled: true, halfLifeDays: 30 });
@@ -224,7 +272,7 @@ describe("applyTrustFilter", () => {
     expect(result.length).toBeLessThanOrEqual(1);
     if (result.length === 1) {
       // If it survives, at least check that old content was removed
-      expect(result[0].content).not.toContain("Ancient learning");
+      expect(result[0].content).not.toContain("Ancient finding");
     }
   });
 });
@@ -244,7 +292,7 @@ describe("trackSessionMetrics", () => {
 
   it("creates session metrics file and tracks prompts", () => {
     const selected: SelectedSnippet[] = [{
-      doc: { project: "proj", filename: "f.md", type: "learnings", content: "content", path: "/f" },
+      doc: { project: "proj", filename: "f.md", type: "findings", content: "content", path: "/f" },
       snippet: "snippet",
       key: "proj:f.md:abc",
     }];
@@ -261,7 +309,7 @@ describe("trackSessionMetrics", () => {
 
   it("increments prompt count on repeated calls", () => {
     const selected: SelectedSnippet[] = [{
-      doc: { project: "proj", filename: "f.md", type: "learnings", content: "content", path: "/f" },
+      doc: { project: "proj", filename: "f.md", type: "findings", content: "content", path: "/f" },
       snippet: "snippet",
       key: "proj:f.md:abc",
     }];
@@ -283,7 +331,7 @@ describe("trackSessionMetrics", () => {
     }));
 
     const selected: SelectedSnippet[] = [{
-      doc: { project: "proj", filename: "f.md", type: "learnings", content: "c", path: "/f" },
+      doc: { project: "proj", filename: "f.md", type: "findings", content: "c", path: "/f" },
       snippet: "s",
       key: "k",
     }];

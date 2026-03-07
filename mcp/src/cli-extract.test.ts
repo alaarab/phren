@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseGitLogRecords, scoreMemoryCandidate, ghCachePath, mineGithubCandidates, runGhJson } from "./cli-extract.js";
+import { parseGitLogRecords, scoreFindingCandidate, ghCachePath, mineGithubCandidates, runGhJson } from "./cli-extract.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -17,13 +17,13 @@ vi.mock("./shared.js", async (importOriginal) => {
     ensureCortexPath: () => "/tmp/cortex-fake",
     detectProject: () => "test-proj",
     debugLog: () => {},
-    addLearningToFile: vi.fn(),
-    appendMemoryQueue: vi.fn(() => 1),
+    addFindingToFile: vi.fn(),
+    appendReviewQueue: vi.fn(() => 1),
     appendAuditLog: vi.fn(),
-    getMemoryPolicy: () => ({ autoAcceptThreshold: 0.8 }),
-    recordMemoryFeedback: vi.fn(),
-    flushMemoryScores: vi.fn(),
-    memoryScoreKey: (_p: string, _f: string, l: string) => `key:${l}`,
+    getRetentionPolicy: () => ({ autoAcceptThreshold: 0.8 }),
+    recordFeedback: vi.fn(),
+    flushEntryScores: vi.fn(),
+    entryScoreKey: (_p: string, _f: string, l: string) => `key:${l}`,
     EXEC_TIMEOUT_MS: 5000,
   };
 });
@@ -72,29 +72,29 @@ describe("parseGitLogRecords", () => {
   });
 });
 
-// ── scoreMemoryCandidate ─────────────────────────────────────────────────────
+// ── scoreFindingCandidate ─────────────────────────────────────────────────────
 
-describe("scoreMemoryCandidate", () => {
+describe("scoreFindingCandidate", () => {
   it("returns null for short commit-message-style entries", () => {
-    expect(scoreMemoryCandidate("Fix typo", "")).toBeNull();
-    expect(scoreMemoryCandidate("Add tests", "")).toBeNull();
-    expect(scoreMemoryCandidate("Update README", "")).toBeNull();
-    expect(scoreMemoryCandidate("Bump version", "")).toBeNull();
+    expect(scoreFindingCandidate("Fix typo", "")).toBeNull();
+    expect(scoreFindingCandidate("Add tests", "")).toBeNull();
+    expect(scoreFindingCandidate("Update README", "")).toBeNull();
+    expect(scoreFindingCandidate("Bump version", "")).toBeNull();
   });
 
   it("accepts short entries that contain insight keywords", () => {
-    const result = scoreMemoryCandidate("Fix workaround for auth", "");
+    const result = scoreFindingCandidate("Fix workaround for auth", "");
     expect(result).not.toBeNull();
     expect(result!.score).toBeGreaterThan(0.5);
   });
 
   it("returns null for very short entries without insight keywords", () => {
-    expect(scoreMemoryCandidate("Short", "")).toBeNull();
-    expect(scoreMemoryCandidate("A small change", "tiny")).toBeNull();
+    expect(scoreFindingCandidate("Short", "")).toBeNull();
+    expect(scoreFindingCandidate("A small change", "tiny")).toBeNull();
   });
 
   it("scores merged PR subjects higher", () => {
-    const result = scoreMemoryCandidate(
+    const result = scoreFindingCandidate(
       "Merge pull request #42 from user/fix-auth",
       "This fixes the authentication flow by adding retry logic for token refresh"
     );
@@ -103,7 +103,7 @@ describe("scoreMemoryCandidate", () => {
   });
 
   it("cleans up merge PR prefix from text", () => {
-    const result = scoreMemoryCandidate(
+    const result = scoreFindingCandidate(
       "Merge pull request #42 from user/branch Fix workaround for auth regression",
       ""
     );
@@ -113,7 +113,7 @@ describe("scoreMemoryCandidate", () => {
   });
 
   it("boosts score for CI-related entries", () => {
-    const ciResult = scoreMemoryCandidate(
+    const ciResult = scoreFindingCandidate(
       "Pipeline flake in nightly build causes random failures",
       "The CI pipeline has been flaking due to a test ordering issue"
     );
@@ -121,8 +121,8 @@ describe("scoreMemoryCandidate", () => {
     expect(ciResult!.score).toBeGreaterThanOrEqual(0.55);
   });
 
-  it("boosts score for learning signal keywords", () => {
-    const result = scoreMemoryCandidate(
+  it("boosts score for finding signal keywords", () => {
+    const result = scoreFindingCandidate(
       "Race condition in connection pool causes intermittent deadlock",
       "Must avoid concurrent access to the shared pool or a deadlock happens"
     );
@@ -132,7 +132,7 @@ describe("scoreMemoryCandidate", () => {
 
   it("caps score at 0.99", () => {
     // Combine all boosters
-    const result = scoreMemoryCandidate(
+    const result = scoreFindingCandidate(
       "Merge pull request #99 from dev/hotfix: CI pipeline workaround for flaky regression deadlock",
       "review requested changes: must avoid this gotcha caveat pitfall migration race condition"
     );
@@ -142,7 +142,7 @@ describe("scoreMemoryCandidate", () => {
 
   it("returns null when score stays below 0.5", () => {
     // A long enough entry but without any signal boosters
-    const result = scoreMemoryCandidate(
+    const result = scoreFindingCandidate(
       "Changed the color of the button from blue to green in the sidebar",
       ""
     );
@@ -150,7 +150,7 @@ describe("scoreMemoryCandidate", () => {
   });
 
   it("capitalizes the first letter of the cleaned text", () => {
-    const result = scoreMemoryCandidate(
+    const result = scoreFindingCandidate(
       "fix: workaround for the timeout issue in production deployment system",
       ""
     );
@@ -167,12 +167,12 @@ describe("COMMIT_MSG_PREFIX filter", () => {
   for (const prefix of prefixes) {
     it(`rejects "${prefix} something" without insight keywords`, () => {
       const subject = `${prefix} something in the codebase that is long enough to pass length check`;
-      expect(scoreMemoryCandidate(subject, "")).toBeNull();
+      expect(scoreFindingCandidate(subject, "")).toBeNull();
     });
 
     it(`accepts "${prefix} something" with insight keywords`, () => {
       const subject = `${prefix} workaround for regression`;
-      const result = scoreMemoryCandidate(subject, "");
+      const result = scoreFindingCandidate(subject, "");
       expect(result).not.toBeNull();
     });
   }

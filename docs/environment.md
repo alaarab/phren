@@ -27,10 +27,10 @@ These control how much context the UserPromptSubmit hook injects into each promp
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `CORTEX_MEMORY_TTL_DAYS` | integer | `120` | How many days before a learning is considered stale. Overrides the value in `memory-policy.json`. |
+| `CORTEX_MEMORY_TTL_DAYS` | integer | `120` | How many days before a finding is considered stale. Overrides the value in `memory-policy.json`. |
 | `CORTEX_MEMORY_AUTO_ACCEPT` | float | `0.75` | Confidence threshold for auto-accepting extracted memories. Below this, entries go to MEMORY_QUEUE.md for review. |
 | `CORTEX_MEMORY_EXTRACT_WINDOW_DAYS` | integer | `30` | How far back (in days) the `extract-memories` command looks in git and GitHub history. |
-| `CORTEX_LEARNINGS_CAP` | integer | `20` | Maximum learnings in LEARNINGS.md before auto-archival moves old entries to `knowledge/`. |
+| `CORTEX_FINDINGS_CAP` | integer | `20` | Maximum findings in FINDINGS.md before auto-archival moves old entries to `reference/`. |
 
 ## File Locking
 
@@ -52,6 +52,16 @@ These control the `gh` CLI calls used by `extract-memories` to pull signals from
 | `CORTEX_GH_RUN_LIMIT` | integer | `25` | Maximum number of recent CI workflow runs to fetch. Range: 5-200. |
 | `CORTEX_GH_ISSUE_LIMIT` | integer | `25` | Maximum number of recent issues to fetch. Range: 5-200. |
 
+## LLM Integration
+
+These control the optional LLM calls used for semantic dedup and conflict detection.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `CORTEX_LLM_ENDPOINT` | string | (none) | OpenAI-compatible endpoint URL for semantic dedup/conflict LLM calls. |
+| `CORTEX_LLM_KEY` | string | (none) | API key for LLM endpoint. Falls back to `OPENAI_API_KEY` then `ANTHROPIC_API_KEY`. |
+| `CORTEX_LLM_MODEL` | string | `gpt-4o-mini` / `claude-haiku-4-5-20251001` | Model name override. Default depends on whether the OpenAI or Anthropic path is used. |
+
 ## Feature Flags
 
 Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disable. Any other value (or unset) means enabled.
@@ -60,3 +70,6 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 |----------|---------|-------------|
 | `CORTEX_FEATURE_AUTO_EXTRACT` | enabled | Automatically extract memory candidates from git/GitHub signals once per session per project during hook-prompt. |
 | `CORTEX_FEATURE_DAILY_MAINTENANCE` | enabled | Schedule background maintenance (pruning, canonical lock enforcement, legacy migration) once per day during hook-session-start. |
+| `CORTEX_FEATURE_SEMANTIC_DEDUP` | disabled | Set to `1` to enable LLM-based paraphrase dedup when adding findings. |
+| `CORTEX_FEATURE_SEMANTIC_CONFLICT` | disabled | Set to `1` to enable LLM-based contradiction detection when adding findings. |
+| `CORTEX_FEATURE_GH_MINING` | disabled | Set to `1` to mine GitHub signals in `cortex maintain extract`. |

@@ -1,0 +1,181 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpContext } from "./mcp-types.js";
+import { z } from "zod";
+import * as fs from "fs";
+import { isValidProjectName } from "./utils.js";
+import {
+  addBacklogItem as addBacklogItemStore,
+  addBacklogItems as addBacklogItemsBatch,
+  backlogMarkdown,
+  completeBacklogItem as completeBacklogItemStore,
+  completeBacklogItems as completeBacklogItemsBatch,
+  readBacklog,
+  readBacklogs,
+  updateBacklogItem as updateBacklogItemStore,
+} from "./data-access.js";
+
+function jsonResponse(payload: { ok: boolean; data?: unknown; error?: string; message?: string }) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+}
+
+export function register(server: McpServer, ctx: McpContext): void {
+  const { cortexPath, profile, withWriteQueue } = ctx;
+
+  server.registerTool(
+    "get_backlog",
+    {
+      title: "◆ cortex · backlog",
+      description: "Get a project's backlog, all backlogs, or a single item. Omit all params for all projects. Pass project for that project's backlog. Pass id or item to fetch a single entry.",
+      inputSchema: z.object({
+        project: z.string().optional().describe("Project name. Omit to get all projects."),
+        id: z.string().optional().describe("Backlog item ID like A1, Q3, D2. Requires project."),
+        item: z.string().optional().describe("Exact backlog item text. Requires project."),
+      }),
+    },
+    async ({ project, id, item }) => {
+      // Single item lookup
+      if (id || item) {
+        if (!project) return jsonResponse({ ok: false, error: "Provide `project` when looking up a single item." });
+        if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        const result = readBacklog(cortexPath, project);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const doc = result.data;
+        const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
+        const match = all.find((entry) =>
+          (id && entry.id.toLowerCase() === id.toLowerCase()) ||
+          (item && entry.line.trim() === item.trim())
+        );
+        if (!match) return jsonResponse({ ok: false, error: `No backlog item found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
+        return jsonResponse({
+          ok: true,
+          message: `${match.id}: ${match.line} (${match.section})`,
+          data: { project, id: match.id, section: match.section, checked: match.checked, line: match.line, context: match.context || null, priority: match.priority || null },
+        });
+      }
+
+      // Full backlog for one project
+      if (project) {
+        if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        const result = readBacklog(cortexPath, project);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const doc = result.data;
+        if (!fs.existsSync(doc.path)) return jsonResponse({ ok: true, message: `No backlog found for "${project}".`, data: { project, items: { Active: [], Queue: [], Done: [] } } });
+        return jsonResponse({ ok: true, message: `## ${project}\n${backlogMarkdown(doc)}`, data: { project, items: doc.items, issues: doc.issues } });
+      }
+
+      // All projects
+      const docs = readBacklogs(cortexPath, profile);
+      if (!docs.length) return jsonResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
+      const parts = docs.map((doc) => `## ${doc.project}\n${backlogMarkdown(doc)}`);
+      const projectData = docs.map((doc) => ({ project: doc.project, items: doc.items, issues: doc.issues }));
+      return jsonResponse({ ok: true, message: parts.join("\n\n"), data: { projects: projectData } });
+    }
+  );
+
+  server.registerTool(
+    "add_backlog_item",
+    {
+      title: "◆ cortex · add task",
+      description: "Append a task to a project's backlog.md. Adds to the Queue section.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name (must match a directory in your cortex)."),
+        item: z.string().describe("The task to add."),
+      }),
+    },
+    async ({ project, item }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = addBacklogItemStore(cortexPath, project, item);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        return jsonResponse({ ok: true, message: result.data, data: { project, item } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "add_backlog_items",
+    {
+      title: "◆ cortex · add tasks (bulk)",
+      description: "Append multiple tasks to a project's backlog.md in one call. Adds to the Queue section.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        items: z.array(z.string()).describe("List of tasks to add."),
+      }),
+    },
+    async ({ project, items }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = addBacklogItemsBatch(cortexPath, project, items);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const { added, errors } = result.data;
+        return jsonResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} items to ${project} backlog`, data: { project, added, errors } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "complete_backlog_item",
+    {
+      title: "◆ cortex · done",
+      description: "Move a backlog item to the Done section by matching text.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Exact or partial text of the item to complete."),
+      }),
+    },
+    async ({ project, item }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = completeBacklogItemStore(cortexPath, project, item);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        return jsonResponse({ ok: true, message: result.data, data: { project, item } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "complete_backlog_items",
+    {
+      title: "◆ cortex · done (bulk)",
+      description: "Move multiple backlog items to Done in one call. Pass an array of partial item texts.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        items: z.array(z.string()).describe("List of partial item texts to complete."),
+      }),
+    },
+    async ({ project, items }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = completeBacklogItemsBatch(cortexPath, project, items);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const { completed, errors } = result.data;
+        return jsonResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "update_backlog_item",
+    {
+      title: "◆ cortex · update task",
+      description: "Update a backlog item's priority, context, or section by matching text.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial text to match against existing backlog items."),
+        updates: z.object({
+          priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
+          context: z.string().optional().describe("Text to append to (or create) the Context: line below the item."),
+          section: z.enum(["queue", "active", "done", "Queue", "Active", "Done"]).optional().describe("Move item to this section: Queue, Active, or Done."),
+        }).describe("Fields to update. All are optional."),
+      }),
+    },
+    async ({ project, item, updates }) => {
+      if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = updateBacklogItemStore(cortexPath, project, item, updates);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        return jsonResponse({ ok: true, message: result.data, data: { project, item, updates } });
+      });
+    }
+  );
+}

@@ -1,28 +1,46 @@
 import {
-  ensureCortexPath,
-  buildIndex,
-  extractSnippet,
-  queryRows,
-  queryDocRows,
-  detectProject,
-  checkConsolidationNeeded,
   debugLog,
-  filterTrustedLearningsDetailed,
-  appendMemoryQueue,
   appendAuditLog,
-  getMemoryPolicy,
-  recordMemoryInjection,
-  recordMemoryFeedback,
-  flushMemoryScores,
-  getMemoryQualityMultiplier,
-  memoryScoreKey,
-  updateRuntimeHealth,
   runtimeFile,
   sessionMarker,
   sessionsDir,
   EXEC_TIMEOUT_MS,
-  type DocRow,
+  ensureCortexPath,
 } from "./shared.js";
+import {
+  appendReviewQueue,
+  type RetentionPolicy,
+  getRetentionPolicy,
+  recordInjection,
+  recordRetrieval,
+  recordFeedback,
+  flushEntryScores,
+  getQualityMultiplier,
+  updateRuntimeHealth,
+  entryScoreKey,
+  withFileLock,
+} from "./shared-governance.js";
+import {
+  buildIndex,
+  queryRows,
+  queryDocRows,
+  detectProject,
+  type DocRow,
+  type SqlJsDatabase,
+  extractSnippet,
+  getDocSourceKey,
+} from "./shared-index.js";
+import {
+  checkConsolidationNeeded,
+  filterTrustedFindingsDetailed,
+  addFindingToFile,
+  KNOWN_OBSERVATION_TAGS,
+} from "./shared-content.js";
+import {
+  type FindingCitation,
+  parseCitationComment,
+  validateFindingCitation,
+} from "./content-citation.js";
 import { buildRobustFtsQuery, extractKeywords, STOP_WORDS, runGit, isFeatureEnabled, clampInt } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -31,6 +49,7 @@ import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
 import { getHooksEnabledPreference } from "./init.js";
 import { handleExtractMemories } from "./cli-extract.js";
+import { getEntityBoostDocs } from "./shared-index.js";
 
 const cortexPath = ensureCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
@@ -69,6 +88,163 @@ function branchTokens(branch: string): string[] {
     .filter((s) => s.length > 2 && !["main", "master", "feature", "fix", "bugfix", "hotfix"].includes(s));
 }
 
+// ── Glob matching and project frontmatter ────────────────────────────────────
+
+const projectGlobCache = new Map<string, string[] | null>();
+
+export function clearProjectGlobCache(): void {
+  projectGlobCache.clear();
+}
+
+function parseProjectGlobs(cortexPathLocal: string, project: string): string[] | null {
+  if (projectGlobCache.has(project)) return projectGlobCache.get(project)!;
+  const claudeMdPath = path.join(cortexPathLocal, project, "CLAUDE.md");
+  let globs: string[] | null = null;
+  try {
+    if (fs.existsSync(claudeMdPath)) {
+      const raw = fs.readFileSync(claudeMdPath, "utf8");
+      const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+      if (fmMatch) {
+        const fmBlock = fmMatch[1];
+        const globLine = fmBlock.match(/^globs:\s*$/m);
+        if (globLine) {
+          const lines = fmBlock.split("\n");
+          const idx = lines.findIndex((l) => /^globs:\s*$/.test(l));
+          if (idx >= 0) {
+            const items: string[] = [];
+            for (let i = idx + 1; i < lines.length; i++) {
+              const m = lines[i].match(/^\s+-\s+(.+)/);
+              if (m) items.push(m[1].trim().replace(/^["']|["']$/g, ""));
+              else break;
+            }
+            if (items.length > 0) globs = items;
+          }
+        } else {
+          const inlineMatch = fmBlock.match(/^globs:\s*\[([^\]]+)\]/m);
+          if (inlineMatch) {
+            globs = inlineMatch[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+          }
+        }
+      }
+    }
+  } catch {
+    // best effort
+  }
+  projectGlobCache.set(project, globs);
+  return globs;
+}
+
+function simpleGlobMatch(pattern: string, filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/");
+  const regex = pattern
+    .replace(/\\/g, "/")
+    .replace(/[.+^${}()|[\]]/g, "\\$&")
+    .replace(/\*\*/g, "\0")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, "[^/]")
+    .replace(/\0/g, ".*");
+  return new RegExp(`^${regex}$`).test(normalized) || new RegExp(`(^|/)${regex}$`).test(normalized);
+}
+
+export function getProjectGlobBoost(
+  cortexPathLocal: string,
+  project: string,
+  cwd: string | undefined,
+  changedFiles: Set<string> | undefined
+): number {
+  const globs = parseProjectGlobs(cortexPathLocal, project);
+  if (!globs) return 1.0;
+
+  const paths: string[] = [];
+  if (cwd) paths.push(cwd);
+  if (changedFiles) {
+    for (const f of changedFiles) paths.push(f);
+  }
+
+  for (const p of paths) {
+    for (const glob of globs) {
+      if (simpleGlobMatch(glob, p)) return 1.3;
+    }
+  }
+  return 0.7;
+}
+
+// ── Citation validation ──────────────────────────────────────────────────────
+
+const citationValidCache = new Map<string, boolean>();
+
+export function clearCitationValidCache(): void {
+  citationValidCache.clear();
+}
+
+const CITATION_PATTERN = /<!-- source: ([^:]+):(\d+) -->|\[file:([^:]+):(\d+)\]/g;
+
+interface ParsedCitation {
+  file?: string;
+  line?: number;
+  citation?: FindingCitation;
+}
+
+export function parseCitations(text: string): ParsedCitation[] {
+  const results: ParsedCitation[] = [];
+  let m: RegExpExecArray | null;
+  const re = new RegExp(CITATION_PATTERN.source, "g");
+  while ((m = re.exec(text)) !== null) {
+    const file = m[1] || m[3];
+    const line = parseInt(m[2] || m[4], 10);
+    if (file && !isNaN(line)) results.push({ file, line });
+  }
+  const citeRe = /<!--\s*cortex:cite\s+(\{[\s\S]*?\})\s*-->/g;
+  while ((m = citeRe.exec(text)) !== null) {
+    const parsed = parseCitationComment(m[0]);
+    if (parsed) results.push({ citation: parsed });
+  }
+  return results;
+}
+
+export function validateCitation(citation: ParsedCitation): boolean {
+  const key = citation.citation
+    ? JSON.stringify(citation.citation)
+    : `${citation.file}:${citation.line}`;
+  if (citationValidCache.has(key)) return citationValidCache.get(key)!;
+
+  let valid = false;
+  if (citation.citation) {
+    valid = validateFindingCitation(citation.citation);
+  } else if (citation.file && typeof citation.line === "number") {
+    try {
+      if (fs.existsSync(citation.file)) {
+        if (citation.line > 0) {
+          const content = fs.readFileSync(citation.file, "utf8");
+          const lines = content.split("\n");
+          if (citation.line <= lines.length) {
+            valid = true;
+          }
+        } else {
+          valid = true;
+        }
+      }
+    } catch {
+      valid = false;
+    }
+  }
+
+  citationValidCache.set(key, valid);
+  return valid;
+}
+
+export function annotateStale(snippet: string): string {
+  const citations = parseCitations(snippet);
+  if (citations.length === 0) return snippet;
+
+  for (const c of citations) {
+    if (!validateCitation(c)) {
+      return snippet + " [citation stale]";
+    }
+  }
+  return snippet;
+}
+
 // ── Intent and scoring helpers ───────────────────────────────────────────────
 
 export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "general" {
@@ -81,9 +257,9 @@ export function detectTaskIntent(prompt: string): "debug" | "review" | "build" |
 }
 
 function intentBoost(intent: string, docType: string): number {
-  if (intent === "debug" && (docType === "learnings" || docType === "knowledge")) return 3;
+  if (intent === "debug" && (docType === "findings" || docType === "reference")) return 3;
   if (intent === "review" && (docType === "canonical" || docType === "changelog")) return 3;
-  if (intent === "build" && (docType === "backlog" || docType === "knowledge")) return 2;
+  if (intent === "build" && (docType === "backlog" || docType === "reference")) return 2;
   if (intent === "docs" && (docType === "summary" || docType === "claude")) return 2;
   if (docType === "canonical") return 2;
   return 0;
@@ -111,7 +287,7 @@ function branchMatchBoost(content: string, branch: string | undefined): number {
 }
 
 function lowValuePenalty(content: string, docType: string): number {
-  if (docType !== "learnings") return 0;
+  if (docType !== "findings") return 0;
   const bullets = content.split("\n").filter((l) => l.startsWith("- "));
   if (bullets.length === 0) return 0;
   const defaults = ["fixed stuff", "updated things", "misc", "temp", "wip", "todo", "placeholder", "cleanup"];
@@ -167,7 +343,7 @@ function mergeUniqueDocs(primary: DocRow[] | null, secondary: DocRow[]): DocRow[
   return primary;
 }
 
-function semanticFallbackDocs(db: any, prompt: string, project?: string | null): DocRow[] {
+function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: string | null): DocRow[] {
   const queryTokens = tokenizeForOverlap(prompt);
   if (!queryTokens.length) return [];
   const sampleLimit = project ? 180 : 260;
@@ -247,8 +423,8 @@ function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMet
   if (!fs.existsSync(file)) return {};
   try {
     return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, SessionMetric>;
-  } catch (err: any) {
-    debugLog(`parseSessionMetrics: failed to read ${file}: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`parseSessionMetrics: failed to read ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return {};
   }
 }
@@ -257,6 +433,18 @@ function writeSessionMetrics(cortexPathLocal: string, data: Record<string, Sessi
   const file = path.join(cortexPathLocal, ".governance", "session-metrics.json");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+}
+
+function updateSessionMetrics(
+  cortexPathLocal: string,
+  updater: (data: Record<string, SessionMetric>) => void
+): void {
+  const file = path.join(cortexPathLocal, ".governance", "session-metrics.json");
+  withFileLock(file, () => {
+    const metrics = parseSessionMetrics(cortexPathLocal);
+    updater(metrics);
+    writeSessionMetrics(cortexPathLocal, metrics);
+  });
 }
 
 // ── Background maintenance ───────────────────────────────────────────────────
@@ -287,8 +475,8 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
       const ageMs = Date.now() - fs.statSync(markers.lock).mtimeMs;
       if (ageMs <= 2 * 60 * 60 * 1000) return false;
       fs.unlinkSync(markers.lock);
-    } catch (err: any) {
-      debugLog(`maybeRunBackgroundMaintenance: lock check failed: ${err?.message || err}`);
+    } catch (err: unknown) {
+      debugLog(`maybeRunBackgroundMaintenance: lock check failed: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }
@@ -340,8 +528,8 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
     fs.closeSync(logFd);
     child.unref();
     return true;
-  } catch (err: any) {
-    const errMsg = err?.message || String(err);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
     try {
       const logDir = path.join(cortexPathLocal, ".governance");
       fs.mkdirSync(logDir, { recursive: true });
@@ -377,8 +565,8 @@ async function runBestEffortGit(args: string[], cwd: string): Promise<{ ok: bool
         timeout: EXEC_TIMEOUT_MS,
       }).trim();
       return { ok: true, output };
-    } catch (err: any) {
-      const message = err?.message || String(err);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       if (attempt < retries && isTransientGitError(message)) {
         const delayMs = 500 * (attempt + 1);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -501,8 +689,8 @@ export function parseHookInput(raw: string): HookPromptInput | null {
     const prompt = data.prompt || "";
     if (!prompt.trim()) return null;
     return { prompt, cwd: data.cwd, sessionId: data.session_id };
-  } catch (err: any) {
-    debugLog(`parseHookInput: failed to parse hook JSON: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`parseHookInput: failed to parse hook JSON: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -511,7 +699,7 @@ export function parseHookInput(raw: string): HookPromptInput | null {
 const SHARED_PROJECTS = ["shared", "org"];
 
 export function searchDocuments(
-  db: any,
+  db: SqlJsDatabase,
   safeQuery: string,
   prompt: string,
   keywords: string,
@@ -561,17 +749,17 @@ export function applyTrustFilter(
   cortexPathLocal: string,
   ttlDays: number,
   minConfidence: number,
-  decay: any
+  decay: Partial<RetentionPolicy["decay"]>
 ): DocRow[] {
   return rows
     .map((doc) => {
-      if (doc.type !== "learnings") return doc;
-      const trust = filterTrustedLearningsDetailed(doc.content, { ttlDays, minConfidence, decay });
+      if (doc.type !== "findings") return doc;
+      const trust = filterTrustedFindingsDetailed(doc.content, { ttlDays, minConfidence, decay });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
         const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);
-        if (stale.length) appendMemoryQueue(cortexPathLocal, doc.project, "Stale", stale);
-        if (conflicts.length) appendMemoryQueue(cortexPathLocal, doc.project, "Conflicts", conflicts);
+        if (stale.length) appendReviewQueue(cortexPathLocal, doc.project, "Stale", stale);
+        if (conflicts.length) appendReviewQueue(cortexPathLocal, doc.project, "Conflicts", conflicts);
         appendAuditLog(
           cortexPathLocal,
           "trust_filter",
@@ -581,7 +769,7 @@ export function applyTrustFilter(
       return { ...doc, content: trust.content };
     })
     .filter((doc) => {
-      return doc.type !== "learnings" || Boolean(doc.content.trim());
+      return doc.type !== "findings" || Boolean(doc.content.trim());
     });
 }
 
@@ -597,7 +785,9 @@ export function rankResults(
   gitCtx: GitContext | null,
   detectedProject: string | null,
   cortexPathLocal: string,
-  db: any
+  db: SqlJsDatabase,
+  cwd?: string,
+  query?: string
 ): DocRow[] {
   let ranked = [...rows];
 
@@ -618,11 +808,19 @@ export function rankResults(
     if (canonicalRows) ranked = [...canonicalRows, ...ranked];
   }
 
+  // Entity graph boost: docs linked to entities mentioned in query get priority
+  const entityBoost = query ? getEntityBoostDocs(db, query, cortexPathLocal) : new Set<string>();
+  const entityBoostPaths = new Set<string>();
+  for (const doc of ranked) {
+    const docKey = `${doc.project}/${doc.filename}`;
+    if (entityBoost.has(docKey)) entityBoostPaths.add(doc.path);
+  }
+
   ranked.sort((a, b) => {
-    const isLearningsA = a.type === "learnings";
-    const isLearningsB = b.type === "learnings";
-    if (isLearningsA !== isLearningsB) return isLearningsA ? 1 : -1;
-    if (isLearningsA && isLearningsB) {
+    const isFindingsA = a.type === "findings";
+    const isFindingsB = b.type === "findings";
+    if (isFindingsA !== isFindingsB) return isFindingsA ? 1 : -1;
+    if (isFindingsA && isFindingsB) {
       const byDate = mostRecentDate(b.content).localeCompare(mostRecentDate(a.content));
       if (byDate !== 0) return byDate;
     }
@@ -637,13 +835,23 @@ export function rankResults(
     const branchDelta = branchMatchBoost(b.content, gitCtx?.branch) - branchMatchBoost(a.content, gitCtx?.branch);
     if (branchDelta !== 0) return branchDelta;
 
-    const keyA = memoryScoreKey(a.project, a.filename, a.content);
-    const keyB = memoryScoreKey(b.project, b.filename, b.content);
-    const qualityDelta = getMemoryQualityMultiplier(cortexPathLocal, keyB) - getMemoryQualityMultiplier(cortexPathLocal, keyA);
+    const globBoostA = getProjectGlobBoost(cortexPathLocal, a.project, cwd, gitCtx?.changedFiles);
+    const globBoostB = getProjectGlobBoost(cortexPathLocal, b.project, cwd, gitCtx?.changedFiles);
+    const globDelta = globBoostB - globBoostA;
+    if (Math.abs(globDelta) > 0.01) return globDelta;
+
+    const keyA = entryScoreKey(a.project, a.filename, a.content);
+    const keyB = entryScoreKey(b.project, b.filename, b.content);
+    const qualityDelta = getQualityMultiplier(cortexPathLocal, keyB) - getQualityMultiplier(cortexPathLocal, keyA);
     if (qualityDelta !== 0) return qualityDelta;
 
     const penaltyDelta = lowValuePenalty(a.content, a.type) - lowValuePenalty(b.content, b.type);
     if (penaltyDelta !== 0) return penaltyDelta;
+
+    // Entity graph boost: docs referencing query entities sort higher
+    const entityA = entityBoostPaths.has(a.path) ? 1.3 : 1;
+    const entityB = entityBoostPaths.has(b.path) ? 1.3 : 1;
+    if (entityB !== entityA) return entityB - entityA;
 
     return 0;
   });
@@ -655,9 +863,13 @@ export function rankResults(
   }
 
   if (gitCtx && gitCtx.changedFiles.size > 0) {
-    ranked = ranked.filter((r) => {
-      if (["summary", "canonical", "claude"].includes(r.type)) return true;
-      return fileRelevanceBoost(r.path, gitCtx.changedFiles) > 0 || branchMatchBoost(r.content, gitCtx.branch) > 0;
+    const FILE_MATCH_BOOST = 1.5;
+    ranked.sort((a, b) => {
+      const aMatch = fileRelevanceBoost(a.path, gitCtx.changedFiles) > 0 || branchMatchBoost(a.content, gitCtx.branch) > 0;
+      const bMatch = fileRelevanceBoost(b.path, gitCtx.changedFiles) > 0 || branchMatchBoost(b.content, gitCtx.branch) > 0;
+      const aScore = aMatch ? FILE_MATCH_BOOST : 1;
+      const bScore = bMatch ? FILE_MATCH_BOOST : 1;
+      return bScore - aScore;
     });
   }
 
@@ -688,7 +900,7 @@ export function selectSnippets(
       snippet = compactSnippet(snippet, 3, Math.floor(charBudget * 0.55));
       est = approximateTokens(snippet) + 14;
     }
-    const key = memoryScoreKey(doc.project, doc.filename, snippet);
+    const key = entryScoreKey(doc.project, doc.filename, snippet);
     selected.push({ doc, snippet, key });
     usedTokens += est;
     if (selected.length >= 3) break;
@@ -713,10 +925,10 @@ function buildOneLiner(snippet: string): string {
  * Format selected snippets as a compact memory index.
  * Format: [mem:N] Label: one-line summary
  */
-function buildCompactIndex(selected: SelectedSnippet[]): string[] {
+function buildCompactIndex(selected: SelectedSnippet[], cortexPathLocal: string): string[] {
   const lines: string[] = [];
   for (const { doc, snippet } of selected) {
-    const id = `mem:${doc.project}/${doc.filename}`;
+    const id = `mem:${getDocSourceKey(doc, cortexPathLocal)}`;
     const summary = buildOneLiner(snippet);
     lines.push(`[${id}] ${doc.type}: ${summary}`);
   }
@@ -746,23 +958,25 @@ export function buildHookOutput(
   if (useCompactIndex) {
     // Layer 1: compact index only — inject IDs + one-liners, at most 8 entries
     const indexEntries = selected.slice(0, 8);
-    const indexLines = buildCompactIndex(indexEntries);
-    parts.push("Memory index (use get_memory_detail to expand any entry):");
+    const indexLines = buildCompactIndex(indexEntries, cortexPathLocal);
+    parts.push("Context index (use get_detail to expand any entry):");
     for (const line of indexLines) {
       parts.push(line);
     }
     parts.push("");
     // Record injections for metrics without marking key as injected snippet
     for (const injected of indexEntries) {
-      recordMemoryInjection(cortexPathLocal, injected.key, sessionId);
+      recordInjection(cortexPathLocal, injected.key, sessionId);
+      recordRetrieval(cortexPathLocal, injected.doc.path, injected.doc.type);
     }
   } else {
     // Layer 2: full snippets (existing behavior for 1-2 results, or feature off)
     for (const injected of selected) {
       const { doc, snippet, key } = injected;
-      recordMemoryInjection(cortexPathLocal, key, sessionId);
-      parts.push(`[${doc.project}/${doc.filename}] (${doc.type})`);
-      parts.push(snippet);
+      recordInjection(cortexPathLocal, key, sessionId);
+      recordRetrieval(cortexPathLocal, doc.path, doc.type);
+      parts.push(`[${getDocSourceKey(doc, cortexPathLocal)}] (${doc.type})`);
+      parts.push(annotateStale(snippet));
       parts.push("");
     }
   }
@@ -789,38 +1003,38 @@ export function trackSessionMetrics(
   selected: SelectedSnippet[],
   changedCount: number
 ): void {
-  const metrics = parseSessionMetrics(cortexPathLocal);
-  if (!metrics[sessionId]) metrics[sessionId] = { prompts: 0, keys: {}, lastChangedCount: 0, lastKeys: [] };
-  metrics[sessionId].prompts += 1;
-  const injectedKeys: string[] = [];
-  for (const injected of selected) {
-    injectedKeys.push(injected.key);
-    const key = injected.key;
-    const seen = metrics[sessionId].keys[key] || 0;
-    metrics[sessionId].keys[key] = seen + 1;
-    if (seen >= 1) recordMemoryFeedback(cortexPathLocal, key, "reprompt");
-  }
-
-  const prevChanged = metrics[sessionId].lastChangedCount || 0;
-  const prevKeys = metrics[sessionId].lastKeys || [];
-  if (changedCount > prevChanged) {
-    for (const prevKey of prevKeys) {
-      recordMemoryFeedback(cortexPathLocal, prevKey, "helpful");
+  updateSessionMetrics(cortexPathLocal, (metrics) => {
+    if (!metrics[sessionId]) metrics[sessionId] = { prompts: 0, keys: {}, lastChangedCount: 0, lastKeys: [] };
+    metrics[sessionId].prompts += 1;
+    const injectedKeys: string[] = [];
+    for (const injected of selected) {
+      injectedKeys.push(injected.key);
+      const key = injected.key;
+      const seen = metrics[sessionId].keys[key] || 0;
+      metrics[sessionId].keys[key] = seen + 1;
+      if (seen >= 1) recordFeedback(cortexPathLocal, key, "reprompt");
     }
-  }
-  metrics[sessionId].lastChangedCount = changedCount;
-  metrics[sessionId].lastKeys = injectedKeys;
-  metrics[sessionId].lastSeen = new Date().toISOString();
 
-  const thirtyDaysAgo = Date.now() - 30 * 86400000;
-  for (const sid of Object.keys(metrics)) {
-    const seen = metrics[sid].lastSeen;
-    if (seen && new Date(seen).getTime() < thirtyDaysAgo) {
-      delete metrics[sid];
+    const relevantCount = selected.filter((s) => getQualityMultiplier(cortexPathLocal, s.key) > 0.5).length;
+    const prevRelevant = metrics[sessionId].lastChangedCount || 0;
+    const prevKeys = metrics[sessionId].lastKeys || [];
+    if (relevantCount > prevRelevant) {
+      for (const prevKey of prevKeys) {
+        recordFeedback(cortexPathLocal, prevKey, "helpful");
+      }
     }
-  }
+    metrics[sessionId].lastChangedCount = relevantCount;
+    metrics[sessionId].lastKeys = injectedKeys;
+    metrics[sessionId].lastSeen = new Date().toISOString();
 
-  writeSessionMetrics(cortexPathLocal, metrics);
+    const thirtyDaysAgo = Date.now() - 30 * 86400000;
+    for (const sid of Object.keys(metrics)) {
+      const seen = metrics[sid].lastSeen;
+      if (seen && new Date(seen).getTime() < thirtyDaysAgo) {
+        delete metrics[sid];
+      }
+    }
+  });
 }
 
 // ── handleHookPrompt: orchestrator using extracted stages ────────────────────
@@ -866,7 +1080,7 @@ export async function handleHookPrompt() {
     if (!rows || !rows.length) process.exit(0);
 
     const tTrust0 = Date.now();
-    const policy = getMemoryPolicy(cortexPath);
+    const policy = getRetentionPolicy(cortexPath);
     const memoryTtlDays = Number.parseInt(
       process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10
     );
@@ -884,14 +1098,14 @@ export async function handleHookPrompt() {
         try {
           await handleExtractMemories(detectedProject, cwd, true);
           fs.writeFileSync(marker, "");
-        } catch (err: any) {
-          debugLog(`auto-extract failed for ${detectedProject}: ${err?.message || err}`);
+        } catch (err: unknown) {
+          debugLog(`auto-extract failed for ${detectedProject}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }
 
     const tRank0 = Date.now();
-    rows = rankResults(rows, intent, gitCtx, detectedProject, cortexPath, db);
+    rows = rankResults(rows, intent, gitCtx, detectedProject, cortexPath, db, cwd, keywords);
     stage.rankMs = Date.now() - tRank0;
     if (!rows.length) process.exit(0);
 
@@ -909,12 +1123,12 @@ export async function handleHookPrompt() {
     let budgetSelected = selected;
     let budgetUsedTokens = usedTokens;
     if (budgetUsedTokens > maxInjectTokens) {
-      // Priority order: active learnings first, then search results, then knowledge/
+      // Priority order: findings first, then search results, then reference/
       const priorityOrder = (s: SelectedSnippet): number => {
-        if (s.doc.type === "learnings") return 0;
+        if (s.doc.type === "findings") return 0;
         if (s.doc.type === "canonical") return 1;
         if (s.doc.type === "summary" || s.doc.type === "claude") return 2;
-        if (s.doc.type === "knowledge") return 4;
+        if (s.doc.type === "reference") return 4;
         return 3;
       };
       const sorted = [...budgetSelected].sort((a, b) => priorityOrder(a) - priorityOrder(b));
@@ -946,7 +1160,7 @@ export async function handleHookPrompt() {
       trackSessionMetrics(cortexPath, sessionId, selected, changedCount);
     }
 
-    flushMemoryScores(cortexPath);
+    flushEntryScores(cortexPath);
     scheduleBackgroundMaintenance(cortexPath);
 
     const noticeFile = sessionId ? sessionMarker(cortexPath, `noticed-${sessionId}`) : null;
@@ -970,19 +1184,19 @@ export async function handleHookPrompt() {
           const fp = path.join(cortexPath, f);
           try { fs.unlinkSync(fp); } catch { /* best effort */ }
         }
-      } catch (err: any) {
-        debugLog(`stale notice cleanup failed: ${err?.message || err}`);
+      } catch (err: unknown) {
+        debugLog(`stale notice cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
       const needed = checkConsolidationNeeded(cortexPath, profile);
       if (needed.length > 0) {
         const notices = needed.map((n) => {
           const since = n.lastConsolidated ? ` since ${n.lastConsolidated}` : "";
-          return `  ${n.project}: ${n.entriesSince} new learnings${since}`;
+          return `  ${n.project}: ${n.entriesSince} new findings${since}`;
         });
         parts.push(`\u25c8 cortex \u00b7 consolidation ready`);
         parts.push(`<cortex-notice>`);
-        parts.push(`Learnings ready for consolidation:`);
+        parts.push(`Findings ready for consolidation:`);
         parts.push(notices.join("\n"));
         parts.push(`Run /cortex-consolidate when ready.`);
         parts.push(`</cortex-notice>`);
@@ -1001,8 +1215,8 @@ export async function handleHookPrompt() {
     }
 
     console.log(parts.join("\n"));
-  } catch (err: any) {
-    process.stderr.write("cortex hook-prompt error: " + String(err?.message || err) + "\n");
+  } catch (err: unknown) {
+    process.stderr.write("cortex hook-prompt error: " + (err instanceof Error ? err.message : String(err)) + "\n");
     process.exit(0);
   }
 }
@@ -1017,8 +1231,8 @@ export async function handleHookContext() {
     const input = fs.readFileSync(0, "utf-8");
     const data = JSON.parse(input);
     if (data.cwd) cwd = data.cwd;
-  } catch (err: any) {
-    debugLog(`hook-context: no stdin or invalid JSON, using cwd: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`hook-context: no stdin or invalid JSON, using cwd: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const project = detectProject(cortexPath, cwd, profile);
@@ -1035,16 +1249,16 @@ export async function handleHookContext() {
       parts.push("");
     }
 
-    const learningsRow = queryRows(
+    const findingsRow = queryRows(
       db,
-      "SELECT content FROM docs WHERE project = ? AND type = 'learnings'",
+      "SELECT content FROM docs WHERE project = ? AND type = 'findings'",
       [project]
     );
-    if (learningsRow) {
-      const content = learningsRow[0][0] as string;
+    if (findingsRow) {
+      const content = findingsRow[0][0] as string;
       const bullets = content.split("\n").filter(l => l.startsWith("- ")).slice(0, 10);
       if (bullets.length > 0) {
-        parts.push("## Recent learnings");
+        parts.push("## Recent findings");
         parts.push(bullets.join("\n"));
         parts.push("");
       }
@@ -1109,20 +1323,20 @@ export async function handleHookTool() {
     process.exit(0);
   }
 
-  let data: Record<string, any>;
+  let data: Record<string, unknown>;
   try {
-    data = JSON.parse(raw);
+    data = JSON.parse(raw) as Record<string, unknown>;
   } catch {
     process.exit(0);
   }
 
-  const toolName: string = data.tool_name ?? data.tool ?? "";
+  const toolName: string = String(data.tool_name ?? data.tool ?? "");
   if (!INTERESTING_TOOLS.has(toolName)) {
     process.exit(0);
   }
 
-  const sessionId: string | undefined = data.session_id;
-  const input: Record<string, any> = data.tool_input ?? {};
+  const sessionId: string | undefined = data.session_id as string | undefined;
+  const input: Record<string, unknown> = (data.tool_input ?? {}) as Record<string, unknown>;
 
   const entry: ToolLogEntry = {
     at: new Date().toISOString(),
@@ -1163,8 +1377,100 @@ export async function handleHookTool() {
     // best effort — never fail on logging
   }
 
+  // ── Auto-capture finding candidates ──
+  const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
+  const activeProject = cwd ? detectProject(cortexPath, cwd, profile) : null;
+
+  if (activeProject) {
+    try {
+      const candidates = extractToolFindings(toolName, input, responseStr);
+      for (const { text, confidence } of candidates) {
+        if (confidence >= 0.85) {
+          addFindingToFile(cortexPath, activeProject, text);
+          debugLog(`hook-tool: auto-added learning (conf=${confidence}): ${text.slice(0, 60)}`);
+        } else {
+          appendReviewQueue(cortexPath, activeProject, "Review", [text]);
+          debugLog(`hook-tool: queued candidate (conf=${confidence}): ${text.slice(0, 60)}`);
+        }
+      }
+    } catch (err: unknown) {
+      debugLog(`hook-tool: learning extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const elapsed = Date.now() - start;
   debugLog(`hook-tool: ${toolName} logged in ${elapsed}ms`);
 
   process.exit(0);
+}
+
+interface LearningCandidate {
+  text: string;
+  confidence: number;
+}
+
+const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\]\s*(.+)/i;
+
+export function extractToolFindings(
+  toolName: string,
+  input: Record<string, unknown>,
+  responseStr: string
+): LearningCandidate[] {
+  const candidates: LearningCandidate[] = [];
+
+  // Check for explicit observation tags in tool output (highest confidence)
+  const tagMatches = responseStr.matchAll(new RegExp(EXPLICIT_TAG_PATTERN.source, "gi"));
+  for (const m of tagMatches) {
+    const tag = m[1].toLowerCase();
+    const content = m[2].trim().slice(0, 200);
+    if (content) {
+      candidates.push({ text: `[${tag}] ${content}`, confidence: 0.85 });
+    }
+  }
+
+  // Edit/Write heuristics: TODO/FIXME or try/catch patterns
+  if (toolName === "Edit" || toolName === "Write") {
+    const changedContent = String(input.new_string ?? input.content ?? "");
+    const filePath = String(input.file_path ?? input.path ?? "unknown");
+    const filename = path.basename(filePath);
+    if (/\b(TODO|FIXME)\b/.test(changedContent)) {
+      const firstLine = changedContent.split("\n").find((l) => /\b(TODO|FIXME)\b/.test(l));
+      if (firstLine) {
+        candidates.push({
+          text: `[pitfall] ${filename}: ${firstLine.trim().slice(0, 150)}`,
+          confidence: 0.45,
+        });
+      }
+    }
+    if (/\btry\s*\{[\s\S]*?\bcatch\b/.test(changedContent)) {
+      const meaningfulLine = changedContent.split("\n").find(
+        (l) => l.trim().length > 10 && !/^\s*(try|catch|\{|\})/.test(l)
+      );
+      if (meaningfulLine) {
+        candidates.push({
+          text: `[pitfall] ${filename}: error handling added near "${meaningfulLine.trim().slice(0, 100)}"`,
+          confidence: 0.45,
+        });
+      }
+    }
+  }
+
+  // Bash errors
+  if (toolName === "Bash") {
+    const cmd = String(input.command ?? "").slice(0, 30);
+    const hasError = /(error|exception|failed|ENOENT|command not found|permission denied)/i.test(responseStr);
+    if (hasError && cmd) {
+      const firstErrorLine = responseStr.split("\n").find(
+        (l) => /(error|exception|failed|ENOENT|command not found|permission denied)/i.test(l)
+      );
+      if (firstErrorLine) {
+        candidates.push({
+          text: `[bug] command '${cmd}' failed: ${firstErrorLine.trim().slice(0, 150)}`,
+          confidence: 0.55,
+        });
+      }
+    }
+  }
+
+  return candidates;
 }

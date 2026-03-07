@@ -1,6 +1,6 @@
 # Shared context
 
-Files in this directory contain knowledge that applies to multiple projects. Instead of duplicating the same information in each project's CLAUDE.md, put it here and reference it.
+Files in this directory contain reference material that applies to multiple projects. Instead of duplicating the same information in each project's CLAUDE.md, put it here and reference it.
 
 ## How to use
 
@@ -21,5 +21,5 @@ The import path is relative to `~/.cortex/global/`. Imports are resolved recursi
 ## What doesn't go here
 
 - Project-specific config (that stays in `<project>/CLAUDE.md`)
-- Learnings (those go in LEARNINGS.md files and get consolidated by `/cortex-consolidate`)
+- Findings (those go in FINDINGS.md files and get consolidated by `/cortex-consolidate`)
 - Skills (those go in `global/skills/`)

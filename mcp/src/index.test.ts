@@ -1,23 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "child_process";
 import { sanitizeFts5Query, isValidProjectName, safeProjectPath, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
+import { debugLog } from "./shared.js";
 import {
-  validateLearningsFormat,
-  validateBacklogFormat,
-  extractConflictVersions,
-  mergeLearnings,
-  mergeBacklog,
-  debugLog,
-  filterTrustedLearnings,
-  addLearningToFile,
-  pruneDeadMemories,
-  consolidateProjectLearnings,
-  getMemoryWorkflowPolicy,
-  updateMemoryWorkflowPolicy,
+  consolidateProjectFindings,
+  getWorkflowPolicy,
+  updateWorkflowPolicy,
   getIndexPolicy,
   updateIndexPolicy,
+  pruneDeadMemories,
+} from "./shared-governance.js";
+import {
+  validateFindingsFormat,
+  validateBacklogFormat,
+  mergeFindings,
+  mergeBacklog,
+  filterTrustedFindings,
+  addFindingToFile,
   migrateLegacyFindings,
-} from "./shared.js";
+  extractConflictVersions,
+} from "./shared-content.js";
 import { grantAdmin, makeTempDir } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -51,8 +53,8 @@ function setupCortexDirWithLegacyFindings(): { cortexDir: string; cleanup: () =>
   fs.mkdirSync(projectDir, { recursive: true });
   grantAdmin(cortexDir, "cli-test");
   fs.writeFileSync(
-    path.join(projectDir, "FINDINGS.md"),
-    "# Findings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
+    path.join(projectDir, "LEARNINGS.md"),
+    "# Learnings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
   );
 
   return {
@@ -284,20 +286,20 @@ describe("memory workflow policy", () => {
   });
 
   it("returns defaults when no workflow policy file exists", () => {
-    const policy = getMemoryWorkflowPolicy(cortexDir);
+    const policy = getWorkflowPolicy(cortexDir);
     expect(policy.requireMaintainerApproval).toBe(true);
     expect(policy.lowConfidenceThreshold).toBe(0.7);
     expect(policy.riskySections).toContain("Stale");
   });
 
   it("updates workflow policy with admin permission", () => {
-    const updated = updateMemoryWorkflowPolicy(cortexDir, {
+    const updated = updateWorkflowPolicy(cortexDir, {
       requireMaintainerApproval: false,
       lowConfidenceThreshold: 0.55,
       riskySections: ["Review", "Conflicts"],
     });
     expect(updated.ok).toBe(true);
-    const policy = getMemoryWorkflowPolicy(cortexDir);
+    const policy = getWorkflowPolicy(cortexDir);
     expect(policy.requireMaintainerApproval).toBe(false);
     expect(policy.lowConfidenceThreshold).toBe(0.55);
     expect(policy.riskySections).toEqual(["Review", "Conflicts"]);
@@ -350,7 +352,7 @@ describe("legacy findings migration", () => {
     process.env.CORTEX_ACTOR = originalActor;
   });
 
-  it("migrates legacy findings bullets into LEARNINGS and optionally canonical", () => {
+  it("migrates legacy findings bullets into FINDINGS and optionally canonical", () => {
     const tmp = makeTempDir("cortex-migrate-findings-");
     const project = "proj";
     const projectDir = path.join(tmp.path, project);
@@ -358,8 +360,8 @@ describe("legacy findings migration", () => {
     grantAdmin(tmp.path, "migrate-admin");
 
     fs.writeFileSync(
-      path.join(projectDir, "FINDINGS.md"),
-      "# Findings\n\n- Must pin this rule\n- Normal migration item\n"
+      path.join(projectDir, "LEARNINGS.md"),
+      "# Learnings\n\n- Must pin this rule\n- Normal migration item\n"
     );
 
     const dryRun = migrateLegacyFindings(tmp.path, project, { dryRun: true });
@@ -370,10 +372,10 @@ describe("legacy findings migration", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Migrated");
 
-    const learningsPath = path.join(projectDir, "LEARNINGS.md");
+    const findingsPath = path.join(projectDir, "FINDINGS.md");
     const canonicalPath = path.join(projectDir, "CANONICAL_MEMORIES.md");
-    expect(fs.existsSync(learningsPath)).toBe(true);
-    expect(fs.readFileSync(learningsPath, "utf8")).toContain("migrated from FINDINGS.md");
+    expect(fs.existsSync(findingsPath)).toBe(true);
+    expect(fs.readFileSync(findingsPath, "utf8")).toContain("migrated from LEARNINGS.md");
     expect(fs.existsSync(canonicalPath)).toBe(true);
     expect(fs.readFileSync(canonicalPath, "utf8")).toContain("Must pin this rule");
 
@@ -446,38 +448,38 @@ describe("index entry routing: maintain migrate", () => {
   });
 });
 
-describe("validateLearningsFormat", () => {
+describe("validateFindingsFormat", () => {
   it("returns no issues for valid content", () => {
-    const content = "# My Project LEARNINGS\n\n## 2024-01-15\n\n- Learned something\n";
-    expect(validateLearningsFormat(content)).toEqual([]);
+    const content = "# My Project FINDINGS\n\n## 2024-01-15\n\n- Learned something\n";
+    expect(validateFindingsFormat(content)).toEqual([]);
   });
 
   it("flags missing title heading", () => {
     const content = "## 2024-01-15\n\n- Learned something\n";
-    const issues = validateLearningsFormat(content);
+    const issues = validateFindingsFormat(content);
     expect(issues.some(i => i.includes("Missing title heading"))).toBe(true);
   });
 
   it("flags date headings in wrong format", () => {
-    const content = "# LEARNINGS\n\n## 01/15/2024\n\n- Something\n";
-    const issues = validateLearningsFormat(content);
+    const content = "# FINDINGS\n\n## 01/15/2024\n\n- Something\n";
+    const issues = validateFindingsFormat(content);
     expect(issues.some(i => i.includes("YYYY-MM-DD"))).toBe(true);
   });
 
   it("does not flag non-date section headings", () => {
-    const content = "# LEARNINGS\n\n## General Notes\n\n- Something\n";
-    expect(validateLearningsFormat(content)).toEqual([]);
+    const content = "# FINDINGS\n\n## General Notes\n\n- Something\n";
+    expect(validateFindingsFormat(content)).toEqual([]);
   });
 
   it("flags partial date strings that start with a digit", () => {
-    const content = "# LEARNINGS\n\n## 2024-1-5\n\n- Something\n";
-    const issues = validateLearningsFormat(content);
+    const content = "# FINDINGS\n\n## 2024-1-5\n\n- Something\n";
+    const issues = validateFindingsFormat(content);
     expect(issues.some(i => i.includes("YYYY-MM-DD"))).toBe(true);
   });
 
   it("returns no issues for multiple valid date headings", () => {
-    const content = "# LEARNINGS\n\n## 2024-01-15\n\n- A\n\n## 2024-01-16\n\n- B\n";
-    expect(validateLearningsFormat(content)).toEqual([]);
+    const content = "# FINDINGS\n\n## 2024-01-15\n\n- A\n\n## 2024-01-16\n\n- B\n";
+    expect(validateFindingsFormat(content)).toEqual([]);
   });
 });
 
@@ -555,42 +557,42 @@ describe("extractConflictVersions", () => {
   });
 });
 
-describe("mergeLearnings", () => {
+describe("mergeFindings", () => {
   it("combines entries from both sides", () => {
-    const ours = "# LEARNINGS\n\n## 2024-01-15\n\n- Ours entry\n";
-    const theirs = "# LEARNINGS\n\n## 2024-01-15\n\n- Their entry\n";
-    const merged = mergeLearnings(ours, theirs);
+    const ours = "# FINDINGS\n\n## 2024-01-15\n\n- Ours entry\n";
+    const theirs = "# FINDINGS\n\n## 2024-01-15\n\n- Their entry\n";
+    const merged = mergeFindings(ours, theirs);
     expect(merged).toContain("- Ours entry");
     expect(merged).toContain("- Their entry");
   });
 
   it("deduplicates identical entries", () => {
-    const entry = "# LEARNINGS\n\n## 2024-01-15\n\n- Same entry\n";
-    const merged = mergeLearnings(entry, entry);
+    const entry = "# FINDINGS\n\n## 2024-01-15\n\n- Same entry\n";
+    const merged = mergeFindings(entry, entry);
     const count = (merged.match(/- Same entry/g) || []).length;
     expect(count).toBe(1);
   });
 
   it("sorts dates newest first", () => {
-    const ours = "# LEARNINGS\n\n## 2024-01-01\n\n- Old\n";
-    const theirs = "# LEARNINGS\n\n## 2024-06-15\n\n- New\n";
-    const merged = mergeLearnings(ours, theirs);
+    const ours = "# FINDINGS\n\n## 2024-01-01\n\n- Old\n";
+    const theirs = "# FINDINGS\n\n## 2024-06-15\n\n- New\n";
+    const merged = mergeFindings(ours, theirs);
     expect(merged.indexOf("2024-06-15")).toBeLessThan(merged.indexOf("2024-01-01"));
   });
 
   it("merges entries from dates only present in one side", () => {
-    const ours = "# LEARNINGS\n\n## 2024-01-01\n\n- Only ours\n";
-    const theirs = "# LEARNINGS\n\n## 2024-06-15\n\n- Only theirs\n";
-    const merged = mergeLearnings(ours, theirs);
+    const ours = "# FINDINGS\n\n## 2024-01-01\n\n- Only ours\n";
+    const theirs = "# FINDINGS\n\n## 2024-06-15\n\n- Only theirs\n";
+    const merged = mergeFindings(ours, theirs);
     expect(merged).toContain("- Only ours");
     expect(merged).toContain("- Only theirs");
   });
 
   it("preserves the title line from ours", () => {
-    const ours = "# My Project LEARNINGS\n\n## 2024-01-01\n\n- A\n";
+    const ours = "# My Project FINDINGS\n\n## 2024-01-01\n\n- A\n";
     const theirs = "# Other Title\n\n## 2024-01-01\n\n- B\n";
-    const merged = mergeLearnings(ours, theirs);
-    expect(merged.startsWith("# My Project LEARNINGS")).toBe(true);
+    const merged = mergeFindings(ours, theirs);
+    expect(merged.startsWith("# My Project FINDINGS")).toBe(true);
   });
 });
 
@@ -629,7 +631,7 @@ describe("mergeBacklog", () => {
   });
 });
 
-describe("filterTrustedLearnings", () => {
+describe("filterTrustedFindings", () => {
   it("keeps recent legacy bullets and valid cited bullets", () => {
     const tmp = makeTempDir("cortex-cite-valid-");
     const file = path.join(tmp.path, "source.ts");
@@ -638,7 +640,7 @@ describe("filterTrustedLearnings", () => {
     const today = new Date().toISOString().slice(0, 10);
     const cited = `<!-- cortex:cite ${JSON.stringify({ created_at: new Date().toISOString(), file, line: 2 })} -->`;
     const content = [
-      "# Project LEARNINGS",
+      "# Project FINDINGS",
       "",
       `## ${today}`,
       "",
@@ -648,7 +650,7 @@ describe("filterTrustedLearnings", () => {
       "",
     ].join("\n");
 
-    const filtered = filterTrustedLearnings(content, 90);
+    const filtered = filterTrustedFindings(content, 90);
     expect(filtered).toContain("- Legacy entry");
     expect(filtered).toContain("- Cited entry");
 
@@ -657,7 +659,7 @@ describe("filterTrustedLearnings", () => {
 
   it("drops stale and invalid-citation bullets", () => {
     const content = [
-      "# Project LEARNINGS",
+      "# Project FINDINGS",
       "",
       "## 2000-01-01",
       "",
@@ -670,27 +672,27 @@ describe("filterTrustedLearnings", () => {
       "",
     ].join("\n");
 
-    const filtered = filterTrustedLearnings(content, 90);
+    const filtered = filterTrustedFindings(content, 90);
     expect(filtered).not.toContain("- Too old");
     expect(filtered).not.toContain("- Bad citation");
   });
 });
 
-describe("addLearningToFile", () => {
+describe("addFindingToFile", () => {
   const originalActor = process.env.CORTEX_ACTOR;
 
   afterEach(() => {
     process.env.CORTEX_ACTOR = originalActor;
   });
 
-  it("writes citation metadata alongside a new learning", () => {
-    const tmp = makeTempDir("cortex-add-learning-");
+  it("writes citation metadata alongside a new finding", () => {
+    const tmp = makeTempDir("cortex-add-finding-");
     const project = "proj";
     const projectDir = path.join(tmp.path, project);
     fs.mkdirSync(projectDir, { recursive: true });
     grantAdmin(tmp.path);
 
-    const result = addLearningToFile(tmp.path, project, "Remember to clear cache", {
+    const result = addFindingToFile(tmp.path, project, "Remember to clear cache", {
       file: "/tmp/source.ts",
       line: 12,
       commit: "abc123",
@@ -698,10 +700,10 @@ describe("addLearningToFile", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("added insight");
 
-    const learnings = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
-    expect(learnings).toContain("<!-- cortex:cite");
-    expect(learnings).toContain("\"file\":\"/tmp/source.ts\"");
-    expect(learnings).toContain("\"line\":12");
+    const findings = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
+    expect(findings).toContain("<!-- cortex:cite");
+    expect(findings).toContain("\"file\":\"/tmp/source.ts\"");
+    expect(findings).toContain("\"line\":12");
 
     tmp.cleanup();
   });
@@ -724,7 +726,7 @@ describe("memory maintenance", () => {
 
     const today = new Date().toISOString().slice(0, 10);
     const content = [
-      "# proj LEARNINGS",
+      "# proj FINDINGS",
       "",
       "## 2000-01-01",
       "",
@@ -738,12 +740,12 @@ describe("memory maintenance", () => {
       "  <!-- cortex:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
       "",
     ].join("\n");
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), content);
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), content);
 
     const result = pruneDeadMemories(cortexDir, project);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Pruned");
-    const next = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
+    const next = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
     expect(next).not.toContain("- Old bullet");
     expect(next).toContain("- Fresh bullet");
     // One citation remains (attached to fresh bullet); dangling citation is removed.
@@ -762,7 +764,7 @@ describe("memory maintenance", () => {
 
     const today = new Date().toISOString().slice(0, 10);
     const content = [
-      "# proj LEARNINGS",
+      "# proj FINDINGS",
       "",
       `## ${today}`,
       "",
@@ -771,12 +773,12 @@ describe("memory maintenance", () => {
       "  <!-- cortex:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
       "",
     ].join("\n");
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), content);
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), content);
 
-    const result = consolidateProjectLearnings(cortexDir, project);
+    const result = consolidateProjectFindings(cortexDir, project);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Consolidated");
-    const next = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
+    const next = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
     expect((next.match(/- Same bullet/g) || []).length).toBe(1);
     expect((next.match(/<!-- cortex:cite/g) || []).length).toBe(1);
 

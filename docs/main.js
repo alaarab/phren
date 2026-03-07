@@ -202,3 +202,123 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
   }, { threshold: 0.3 });
   obs.observe(card);
 })();
+
+// --- Typewriter demo terminal ---
+(function() {
+  const body = document.getElementById('demo-terminal-body');
+  if (!body) return;
+
+  const SCENES = [
+    {
+      cmd: 'search "rate limit retries"',
+      outputs: [
+        { type: 'result', project: 'api-gateway', text: 'retry after 429: exponential backoff with jitter, not fixed delay' },
+        { type: 'result', project: 'billing-svc', text: 'stripe webhook retry window is 72h, not 24h as docs suggest' },
+        { type: 'meta', text: '◆ 2 results · 11ms' },
+      ],
+    },
+    {
+      cmd: 'add-finding api-gateway "[pitfall] circuit breaker: 5 failures in 30s, not 10"',
+      outputs: [
+        { type: 'ok', text: 'saved to api-gateway' },
+      ],
+    },
+    {
+      cmd: 'doctor',
+      outputs: [
+        { type: 'ok', text: 'hooks wired (3/3)' },
+        { type: 'ok', text: 'MCP server registered' },
+        { type: 'ok', text: 'index built  (52 docs)' },
+        { type: 'ok', text: 'all 8 checks passed' },
+      ],
+    },
+  ];
+
+  const CHAR_BASE = 42;
+  const CHAR_JITTER = 28;
+  const PRE_OUTPUT = 340;
+  const BETWEEN = 110;
+  const SCENE_PAUSE = 1500;
+  const END_PAUSE = 2200;
+
+  let stopped = false;
+  let pending = [];
+
+  function wait(ms) {
+    return new Promise(r => { const t = setTimeout(r, ms); pending.push(t); });
+  }
+
+  function mkEl(tag, cls, text) {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+
+  async function typeCmd(text) {
+    const row = mkEl('div', 'demo-dyn-line');
+    row.appendChild(mkEl('span', 'demo-prompt', 'cortex >'));
+    const cmd = mkEl('span', 'demo-dyn-cmd', '');
+    row.appendChild(cmd);
+    const cur = mkEl('span', 'demo-dyn-cursor', '▋');
+    row.appendChild(cur);
+    body.appendChild(row);
+
+    for (const ch of text) {
+      if (stopped) return;
+      cmd.textContent += ch;
+      await wait(CHAR_BASE + Math.random() * CHAR_JITTER);
+    }
+    cur.remove();
+  }
+
+  function showOutput(out) {
+    const row = mkEl('div', 'demo-dyn-line demo-dyn-output');
+    if (out.type === 'result') {
+      row.appendChild(mkEl('span', 'demo-result-project', out.project));
+      row.appendChild(mkEl('span', 'demo-result-text', '  ' + out.text));
+    } else if (out.type === 'ok') {
+      row.appendChild(mkEl('span', 'demo-result-check', '+'));
+      row.appendChild(mkEl('span', 'demo-result-text', ' ' + out.text));
+    } else {
+      row.appendChild(mkEl('span', 'demo-dyn-meta', out.text));
+    }
+    body.appendChild(row);
+    requestAnimationFrame(() => requestAnimationFrame(() => row.classList.add('visible')));
+  }
+
+  async function runScene(scene) {
+    await typeCmd(scene.cmd);
+    await wait(PRE_OUTPUT);
+    for (const out of scene.outputs) {
+      if (stopped) return;
+      showOutput(out);
+      await wait(BETWEEN);
+    }
+    await wait(SCENE_PAUSE);
+  }
+
+  async function loop() {
+    while (!stopped) {
+      body.innerHTML = '';
+      for (const scene of SCENES) {
+        if (stopped) return;
+        await runScene(scene);
+      }
+      await wait(END_PAUSE);
+    }
+  }
+
+  // Start when section scrolls into view, once
+  const section = document.getElementById('demo');
+  if (!section) { loop(); return; }
+
+  let started = false;
+  const obs = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && !started) {
+      started = true;
+      loop();
+    }
+  }, { threshold: 0.25 });
+  obs.observe(section);
+})();

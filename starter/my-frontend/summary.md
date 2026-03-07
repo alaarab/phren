@@ -4,4 +4,4 @@
 **Stack:** React, TypeScript, Vite (or whatever you're using)
 **Status:** active
 **Run:** npm run dev
-**Gotcha:** API base URL set in .env.local: needs to match whatever port my-api runs on
+**Watch out:** API base URL set in .env.local: needs to match whatever port my-api runs on

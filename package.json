@@ -34,6 +34,7 @@
     "lint": "eslint mcp/src/ --ignore-pattern '*.test.ts'",
     "validate-docs": "bash scripts/validate-docs.sh",
     "test": "vitest run mcp/src",
+    "bench": "tsx mcp/bench/locomo-runner.ts --sessions 3",
     "prepublishOnly": "npm run build && npm test"
   },
   "engines": {

@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Cortex exposes 21 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
+Cortex exposes 28 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -14,20 +14,20 @@ Fetch the full content of a specific memory entry by its ID. This is Layer 3 of 
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `id` | string | yes | Memory ID in the format `mem:project/filename` (e.g. `mem:my-app/LEARNINGS.md`). Returned by the hook-prompt compact index. |
+| `id` | string | yes | Memory ID in the format `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by the hook-prompt compact index. |
 
 ---
 
-### `search_knowledge`
+### `search_cortex`
 
-Search the user's personal knowledge base using FTS5 full-text search with synonym expansion.
+Search the user's personal project store using FTS5 full-text search with synonym expansion.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | yes | Search query. Supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes. |
 | `limit` | number | no | Max results to return (1-20, default 5). |
 | `project` | string | no | Filter results to a specific project. |
-| `type` | enum | no | Filter by document type. One of: `claude`, `learnings`, `knowledge`, `skills`, `summary`, `backlog`, `changelog`, `canonical`, `memory-queue`, `skill`, `other`. |
+| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `reference`, `skills`, `summary`, `backlog`, `changelog`, `canonical`, `memory-queue`, `skill`, `other`. |
 
 ### `get_project_summary`
 
@@ -43,9 +43,9 @@ List all projects in the active cortex profile with a brief summary of each. Sho
 
 No parameters.
 
-### `get_learnings`
+### `get_findings`
 
-List recent learnings for a project without requiring a search query.
+List recent findings for a project without requiring a search query.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -122,44 +122,45 @@ The `updates` object accepts:
 
 ---
 
-## Learning Capture
+## Finding Capture
 
-### `add_learning`
+### `add_finding`
 
-Record a single insight to a project's LEARNINGS.md. Call this the moment you discover a non-obvious pattern, hit a subtle bug, or find a workaround.
+Record a single insight to a project's FINDINGS.md. Call this the moment you discover a non-obvious pattern, hit a subtle bug, or find a workaround.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `learning` | string | yes | The insight, as a single bullet point. Be specific enough to act on without extra context. |
+| `finding` | string | yes | The insight, as a single bullet point. Be specific enough to act on without extra context. |
 | `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit? }`. |
+| `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`. |
 
-### `add_learnings`
+### `add_findings`
 
-Record multiple insights to a project's LEARNINGS.md in one call. FTS index rebuilds once at the end.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `learnings` | string[] | yes | List of insights to record. |
-
-### `remove_learning`
-
-Remove a learning from LEARNINGS.md by matching text.
+Record multiple insights to a project's FINDINGS.md in one call. FTS index rebuilds once at the end.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `learning` | string | yes | Partial text to match against existing learnings. |
+| `findings` | string[] | yes | List of insights to record. |
 
-### `remove_learnings`
+### `remove_finding`
 
-Remove multiple learnings from a project's LEARNINGS.md in one call.
+Remove a finding from FINDINGS.md by matching text.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `learnings` | string[] | yes | List of partial texts to match and remove. |
+| `finding` | string | yes | Partial text to match against existing findings. |
+
+### `remove_findings`
+
+Remove multiple findings from a project's FINDINGS.md in one call.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `findings` | string[] | yes | List of partial texts to match and remove. |
 
 ### `push_changes`
 
@@ -197,7 +198,7 @@ Record feedback on whether an injected memory was helpful or noisy.
 
 ### `export_project`
 
-Export a project's data (learnings, backlog, summary, CLAUDE.md) as portable JSON.
+Export a project's data (findings, backlog, summary, CLAUDE.md) as portable JSON.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -219,6 +220,71 @@ Archive or unarchive a project. Archive renames the directory with `.archived` s
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `action` | enum | yes | `archive` or `unarchive`. |
+
+---
+
+## Entity Graph
+
+### `search_entities`
+
+Find entities and related docs by name.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Entity name to search for. |
+
+### `get_related_docs`
+
+Get docs linked to a named entity.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entity` | string | yes | Entity name to look up related documents for. |
+
+### `read_graph`
+
+Read the entity graph for a project or all projects.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Project name. Omit to read the graph across all projects. |
+
+### `link_findings`
+
+Manually link a finding to an entity. The link persists to `manual-links.json` and survives graph rebuilds.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `finding_text` | string | yes | Text of the finding to link. |
+| `entity` | string | yes | Entity name to link to. |
+| `relation` | string | no | Relationship type (e.g. "mentions", "implements"). |
+
+---
+
+## Session Management
+
+### `session_start`
+
+Mark the start of a session. Returns the prior session summary, recent findings, and active backlog. Designed for agents without lifecycle hooks.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Project name to scope the session to. |
+
+### `session_end`
+
+Mark the end of a session and save a summary for the next session. Reports duration and number of findings added during the session.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `summary` | string | no | Free-text summary of what was accomplished. |
+
+### `session_context`
+
+Get the current session state including project, duration, and findings added so far.
+
+No parameters.
 
 ---
 

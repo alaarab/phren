@@ -1,6 +1,6 @@
 # Installing cortex
 
-cortex is an MCP server that gives Claude persistent memory across sessions and machines.
+cortex is an MCP server that gives Claude persistent context across sessions and machines.
 
 ## Quickest setup
 
@@ -48,9 +48,9 @@ Add to `~/.config/Code/User/mcp.json` (Linux) or `~/Library/Application Support/
 }
 ```
 
-## Populating your knowledge base
+## Populating your project store
 
-After installation, cortex needs project knowledge to surface. The starter template at `~/.cortex` includes example projects. Replace them with your own:
+After installation, cortex needs project data to surface. The starter template at `~/.cortex` includes example projects. Replace them with your own:
 
 ```
 ~/.cortex/
@@ -58,13 +58,13 @@ After installation, cortex needs project knowledge to surface. The starter templ
   my-project/
     summary.md       <- one-paragraph project overview
     CLAUDE.md        <- full session context for this project
-    LEARNINGS.md     <- captured knowledge over time
+    FINDINGS.md      <- captured findings over time
     backlog.md       <- persistent task queue
 ```
 
 In Claude Code, run `/cortex-init <project-name>` to scaffold a new project entry.
 
-Learnings are captured automatically during the session and committed when the session ends.
+Findings are captured automatically during the session and committed when the session ends.
 
 ## Hooks (auto-inject, v1.7.0+)
 
@@ -80,16 +80,16 @@ Running `npx @alaarab/cortex init` also registers Claude Code hooks:
 cortex search "query"                # FTS5 search with synonym expansion
 cortex hook-prompt                   # stdin JSON -> context block (used by hooks)
 cortex hook-context                  # project context for cwd (used after compaction)
-cortex add-learning <project> "..."  # append a learning via CLI
+cortex add-finding <project> "..."   # append a finding via CLI
 ```
 
 ## Available MCP tools (19)
 
 **Search and browse:**
-- `search_knowledge(query, type?, limit?, project?)`: full-text search across all project knowledge. `type` filter: `claude`, `learnings`, `knowledge`, `summary`, `backlog`, `skill`.
+- `search_cortex(query, type?, limit?, project?)`: full-text search across all project data. `type` filter: `claude`, `findings`, `reference`, `summary`, `backlog`, `skill`.
 - `get_project_summary(name)`: fetch the summary for a specific project
-- `list_projects()`: list all projects in your knowledge base
-- `get_learnings(project, limit?)`: read recent learnings for a project without a search query
+- `list_projects()`: list all projects in your project store
+- `get_findings(project, limit?)`: read recent findings for a project without a search query
 
 **Backlog management:**
 - `get_backlog(project?, id?, item?)`: fetch open tasks for a project (or all projects), or a single item by ID or text
@@ -98,11 +98,11 @@ cortex add-learning <project> "..."  # append a learning via CLI
 - `complete_backlog_items(project, items[])`: bulk complete multiple items in one call
 - `update_backlog_item(project, item, updates)`: update a task's priority, context, or section
 
-**Learning capture:**
-- `add_learning(project, learning, citation?)`: append a learning to LEARNINGS.md under today's date with optional citation
-- `add_learnings(project, learnings[])`: bulk add multiple learnings in one call
-- `remove_learning(project, text)`: remove a learning by matching text
-- `remove_learnings(project, learnings[])`: bulk remove multiple learnings in one call
+**Finding capture:**
+- `add_finding(project, finding, citation?)`: append a finding to FINDINGS.md under today's date with optional citation
+- `add_findings(project, findings[])`: bulk add multiple findings in one call
+- `remove_finding(project, text)`: remove a finding by matching text
+- `remove_findings(project, findings[])`: bulk remove multiple findings in one call
 - `push_changes(message?)`: commit and push all cortex changes
 
 **Memory quality:**

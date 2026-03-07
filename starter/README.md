@@ -1,6 +1,6 @@
 # My Cortex
 
-Your personal knowledge base for [cortex](https://github.com/alaarab/cortex) 1.11.1, which gives Claude Code long-term memory across sessions and machines.
+Your personal project store for [cortex](https://github.com/alaarab/cortex) 1.11.1, which gives Claude Code persistent context across sessions and machines.
 
 ## Structure
 
@@ -14,7 +14,7 @@ Each subdirectory is a project. Add one for every codebase you work on.
 ├── my-project/
 │   ├── CLAUDE.md    # architecture, commands, key patterns
 │   ├── summary.md   # five-line project card
-│   ├── LEARNINGS.md # lessons accumulated over time
+│   ├── FINDINGS.md  # findings accumulated over time
 │   ├── backlog.md   # task queue that persists across sessions
 │   └── .claude/
 │       └── skills/  # project-specific skills
@@ -26,11 +26,11 @@ Each subdirectory is a project. Add one for every codebase you work on.
 
 New to cortex? Here's what each file does and when it matters.
 
-**summary.md** is the elevator pitch. Cortex shows this to Claude first so it knows what project it's working on. Keep it to 5 lines: what, stack, status, run command, biggest gotcha.
+**summary.md** is the elevator pitch. Cortex shows this to Claude first so it knows what project it's working on. Keep it to 5 lines: what, stack, status, run command, biggest finding.
 
 **CLAUDE.md** is the project bible. Commands, architecture, key patterns, things to never do. Claude reads this before making changes. The better this file is, the fewer mistakes Claude makes.
 
-**LEARNINGS.md** fills itself. As Claude discovers gotchas, patterns, and decisions during your sessions, it calls `add_learning()` and entries land here grouped by date. Old entries fade from retrieval over time. Wrong entries can be removed with `remove_learning()`.
+**FINDINGS.md** fills itself. As Claude discovers findings, patterns, and decisions during your sessions, it calls `add_finding()` and entries land here grouped by date. Old entries fade from retrieval over time. Wrong entries can be removed with `remove_finding()`.
 
 **backlog.md** is your task queue. Three sections: Active (working now), Queue (up next), Done (finished). Claude reads this to understand priorities and checks off tasks as it completes them. You can also manage it from `cortex shell`.
 
@@ -53,8 +53,8 @@ If you cloned manually:
 ## Day-to-day workflow
 
 1. **Start a session**: cortex auto-pulls and injects relevant context
-2. **Work normally**: Claude reads your project docs and uses past learnings
-3. **Learnings accumulate**: insights get saved to LEARNINGS.md automatically
+2. **Work normally**: Claude reads your project docs and uses past findings
+3. **Findings accumulate**: insights get saved to FINDINGS.md automatically
 4. **Session ends**: cortex auto-commits and pushes changes
 5. **Review occasionally**: run `cortex shell` to triage queued memories, manage backlogs, and check health
 

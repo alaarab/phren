@@ -1,6 +1,6 @@
 # Interactive Shell
 
-The cortex shell is a terminal UI for browsing and managing your knowledge base. It launches automatically when you run `cortex` with no arguments in a terminal, or explicitly with `cortex shell`.
+The cortex shell is a terminal UI for browsing and managing your project store. It launches automatically when you run `cortex` with no arguments in a terminal, or explicitly with `cortex shell`.
 
 ```bash
 npx @alaarab/cortex shell
@@ -12,7 +12,7 @@ The shell has six views. Switch between them with single-key shortcuts or palett
 
 ### Projects (`p`)
 
-Lists all indexed projects in the active profile. Each project shows its name, available doc types (CLAUDE.md, LEARNINGS, summary, backlog), and a brief description pulled from summary.md or CLAUDE.md.
+Lists all indexed projects in the active profile. Each project shows its name, available doc types (CLAUDE.md, FINDINGS, summary, backlog), and a brief description pulled from summary.md or CLAUDE.md.
 
 The currently selected project is marked with a green dot. Use `:open <project>` to change the active project context, which persists across all views.
 
@@ -20,9 +20,9 @@ The currently selected project is marked with a green dot. Use `:open <project>`
 
 Shows the selected project's backlog.md parsed into three sections: Active, Queue, and Done. Each item has an auto-generated ID for easy reference in commands.
 
-### Learnings (`l`)
+### Findings (`l`)
 
-Lists entries from the selected project's LEARNINGS.md with dates and optional citations. Entries are shown with their auto-generated IDs for use with `:learn remove`.
+Lists entries from the selected project's FINDINGS.md with dates and optional citations. Entries are shown with their auto-generated IDs for use with `:find remove`.
 
 ### Memory Queue (`m`)
 
@@ -42,7 +42,7 @@ Runs doctor checks and shows results alongside runtime health data: last hook ru
 |-----|--------|
 | `p` | Switch to Projects view |
 | `b` | Switch to Backlog view |
-| `l` | Switch to Learnings view |
+| `l` | Switch to Findings view |
 | `m` | Switch to Memory Queue view |
 | `h` | Switch to Health view |
 | `q` | Quit the shell |
@@ -72,18 +72,18 @@ All palette commands start with `:`. You can also type them without the colon pr
 | `:work next` | Move the top Queue item to Active |
 | `:tidy [keep]` | Archive old Done items (default: keep last 30) |
 
-### Learnings
+### Findings
 
 | Command | Description |
 |---------|-------------|
-| `:learn add <text>` | Append a learning to the selected project |
-| `:learn remove <id\|match>` | Remove a learning by ID or text match |
+| `:find add <text>` | Append a finding to the selected project |
+| `:find remove <id\|match>` | Remove a finding by ID or text match |
 
 ### Memory Queue Triage
 
 | Command | Description |
 |---------|-------------|
-| `:mq approve <id\|match>` | Approve a queued memory item (promotes to LEARNINGS.md) |
+| `:mq approve <id\|match>` | Approve a queued memory item (promotes to FINDINGS.md) |
 | `:mq reject <id\|match>` | Reject a queued memory item (removes it) |
 | `:mq edit <id\|match> <text>` | Edit a queued memory item's text |
 

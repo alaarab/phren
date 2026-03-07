@@ -19,7 +19,7 @@ Supports Claude Code, Copilot CLI, Cursor, and Codex.
 
 <br>
 
-Project knowledge, lessons learned, task queues — stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
+Project knowledge, field findings, task queues — stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
 
 > **Quick start:** `npx @alaarab/cortex init` -- takes 30 seconds, no account needed.
 
@@ -98,9 +98,9 @@ On a new machine: clone, run init, done.
 
 ## What's new
 
-- **Bulk MCP tools** -- `add_learnings`, `add_backlog_items`, `complete_backlog_items`, `remove_learnings` for batch operations
-- **TUI shell** -- interactive terminal UI with Backlog, Learnings, Memory Queue, and Health tabs (`cortex shell`)
-- **Tiered knowledge** -- `knowledge/` subdirectories for deep reference docs, indexed separately from learnings
+- **Bulk MCP tools** -- `add_findings`, `add_backlog_items`, `complete_backlog_items`, `remove_findings` for batch operations
+- **TUI shell** -- interactive terminal UI with Backlog, Findings, Memory Queue, and Health tabs (`cortex shell`)
+- **Tiered reference** -- `reference/` subdirectories for deep reference docs, indexed separately from findings
 - **FTS5 full-text search** with synonym expansion and keyword extraction
 - **Multi-agent governance** -- role-based access control for teams (admins, maintainers, contributors, viewers)
 - **Starter templates** -- `cortex init --template python-project|monorepo|library|frontend`
@@ -123,14 +123,14 @@ On a new machine: clone, run init, done.
 
 ## What lives in your cortex
 
-`cortex init` creates your knowledge base with starter templates. Each project gets its own directory — add files as the project grows.
+`cortex init` creates your project store with starter templates. Each project gets its own directory — add files as the project grows.
 
 | File | What it's for |
 |------|--------------|
-| `summary.md` | Five-line card: what, stack, status, how to run, the gotcha |
+| `summary.md` | Five-line card: what, stack, status, how to run, the finding |
 | `CLAUDE.md` | Full context: architecture, commands, conventions |
-| `KNOWLEDGE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
-| `LEARNINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
+| `REFERENCE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
+| `FINDINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
 | `CANONICAL_MEMORIES.md` | Pinned high-signal memories that bypass decay |
 | `backlog.md` | Task queue that persists across sessions |
 | `MEMORY_QUEUE.md` | Items waiting for your review (see [Memory queue](#memory-queue) below) |
@@ -144,11 +144,11 @@ On a new machine: clone, run init, done.
 
 **Auto-save.** After each response, changes get committed and pushed automatically.
 
-**Context recovery.** When the context window resets, a hook re-injects your project summary, recent learnings, and active backlog.
+**Context recovery.** When the context window resets, a hook re-injects your project summary, recent findings, and active backlog.
 
-**Consolidation.** When learnings accumulate past the threshold, cortex flags it once per session. The `/cortex-consolidate` skill archives old entries and promotes cross-project patterns to global knowledge.
+**Consolidation.** When findings accumulate past the threshold, cortex flags it once per session. The `/cortex-consolidate` skill archives old entries and promotes cross-project patterns to global findings.
 
-**Memory queue.** Learnings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
+**Memory queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
 
 ---
 
@@ -160,10 +160,10 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 
 | Tool | What it does |
 |------|-------------|
-| `search_knowledge` | FTS5 search with synonym expansion. Filters by project, type, limit. |
+| `search_cortex` | FTS5 search with synonym expansion. Filters by project, type, limit. |
 | `get_project_summary` | Summary card and file list for a project. |
 | `list_projects` | Everything in your active profile. |
-| `get_learnings` | Read recent learnings for a project without a search query. |
+| `get_findings` | Read recent findings for a project without a search query. |
 
 ### Backlog management
 
@@ -176,14 +176,14 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 | `complete_backlog_items` | Bulk complete multiple items in one call. |
 | `update_backlog_item` | Change priority, context, or section. |
 
-### Learning capture
+### Finding capture
 
 | Tool | What it does |
 |------|-------------|
-| `add_learning` | Append under today's date with optional citation metadata. |
-| `add_learnings` | Bulk add multiple learnings in one call. |
-| `remove_learning` | Remove by matching text. |
-| `remove_learnings` | Bulk remove multiple learnings in one call. |
+| `add_finding` | Append under today's date with optional citation metadata. Accepts optional `findingType` (`decision`, `pitfall`, `pattern`) to prefix the finding inline. |
+| `add_findings` | Bulk add multiple findings in one call. |
+| `remove_finding` | Remove by matching text. |
+| `remove_findings` | Bulk remove multiple findings in one call. |
 | `push_changes` | Commit and push all changes. |
 
 ### Memory quality
@@ -201,6 +201,23 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 | `import_project` | Import project from exported JSON. |
 | `manage_project` | Archive or unarchive a project. |
 
+### Entity graph
+
+| Tool | What it does |
+|------|-------------|
+| `search_entities` | Find entities and related docs by name. |
+| `get_related_docs` | Get docs linked to a named entity. |
+| `read_graph` | Read the entity graph for a project or all projects. |
+| `link_findings` | Manually link a finding to an entity. Persists to manual-links.json and survives rebuilds. |
+
+### Session management
+
+| Tool | What it does |
+|------|-------------|
+| `session_start` | Mark session start. Returns prior session summary, recent findings, and active backlog. |
+| `session_end` | Mark session end and save summary for next session. Reports duration and findings added. |
+| `session_context` | Get current session state: project, duration, findings added so far. |
+
 Governance, policy, and maintenance tools are CLI-only (see `cortex config` and `cortex maintain`).
 
 ---
@@ -213,7 +230,7 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 |-----|------|
 | `p` | Projects |
 | `b` | Backlog |
-| `l` | Learnings |
+| `l` | Findings |
 | `m` | Memory Queue |
 | `h` | Health |
 | `/` | Filter current view |
@@ -224,7 +241,7 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 
 **Backlog:** `:add`, `:complete`, `:move`, `:reprioritize`, `:context`, `:work next`, `:tidy`
 
-**Learnings:** `:learn add`, `:learn remove`
+**Findings:** `:find add`, `:find remove`
 
 **Memory queue:** `:mq approve`, `:mq reject`, `:mq edit`
 
@@ -247,10 +264,10 @@ For scripting, hooks, and quick lookups from the terminal:
 ```bash
 cortex                               # interactive shell (TTY default)
 cortex search "rate limiting"        # FTS5 search with synonym expansion
-cortex add-learning <project> "..."  # append a learning from the terminal
-cortex pin-memory <project> "..."    # promote canonical memory
+cortex add-finding <project> "..."   # append a finding from the terminal
+cortex pin <project> "..."           # promote canonical memory
 cortex doctor [--fix]                # health checks + optional self-heal
-cortex memory-ui [--port=3499]       # lightweight review UI in the browser
+cortex review-ui [--port=3499]       # lightweight review UI in the browser
 cortex update                        # update to latest version
 ```
 
@@ -343,7 +360,7 @@ Four skills for the things that can't be automatic:
 | `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. |
 | `/cortex-init` | Scaffold a new project. Creates summary.md, CLAUDE.md, backlog, adds to your profile. |
 | `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
-| `/cortex-consolidate` | Read learnings across all projects and surface patterns that repeat. |
+| `/cortex-consolidate` | Read findings across all projects and surface patterns that repeat. |
 
 Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlinks them to `~/.claude/skills/` so they're available everywhere.
 
@@ -369,9 +386,9 @@ Check that hooks are enabled: run `cortex status` and look at the Hooks line. If
 
 Run `cortex status` and check the MCP and MCP cfg lines. If MCP is off, run `cortex mcp-mode on`. If MCP is on but cfg shows "missing", run `cortex init` to reconfigure. For VS Code or Cursor, check that the MCP config was written to the right settings file.
 
-**"I saved a learning but can't find it"**
+**"I saved a finding but can't find it"**
 
-Learnings are scoped to a project. Run `cortex search "your term" --project <name>` to search within a specific project. If the learning was flagged by trust filtering, check the memory queue: `cortex` then press `m`, or search without a project filter.
+Findings are scoped to a project. Run `cortex search "your term" --project <name>` to search within a specific project. If the finding was flagged by trust filtering, check the memory queue: `cortex` then press `m`, or search without a project filter.
 
 **Doctor says FAIL on symlinks**
 
@@ -379,7 +396,7 @@ This usually means the project directory moved or the symlinks are stale. Run `c
 
 **Merge conflicts after pulling on a new machine**
 
-Run `cortex` and type `:conflicts` to see what conflicted. Cortex auto-merges most cases (backlog items, learnings), but if a manual merge is needed the conflict markers will show in the affected files.
+Run `cortex` and type `:conflicts` to see what conflicted. Cortex auto-merges most cases (backlog items, findings), but if a manual merge is needed the conflict markers will show in the affected files.
 
 ---
 

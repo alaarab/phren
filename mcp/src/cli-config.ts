@@ -1,15 +1,14 @@
+import { getProjectDirs, ensureCortexPath } from "./shared.js";
 import {
-  ensureCortexPath,
   getIndexPolicy,
   updateIndexPolicy,
-  getMemoryPolicy,
-  updateMemoryPolicy,
-  getMemoryWorkflowPolicy,
-  updateMemoryWorkflowPolicy,
+  getRetentionPolicy,
+  updateRetentionPolicy,
+  getWorkflowPolicy,
+  updateWorkflowPolicy,
   getAccessControl,
   updateAccessControl,
-  getProjectDirs,
-} from "./shared.js";
+} from "./shared-governance.js";
 import * as fs from "fs";
 import * as path from "path";
 import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "./data-access.js";
@@ -25,11 +24,11 @@ export async function handleConfig(args: string[]) {
   const rest = args.slice(1);
   switch (sub) {
     case "policy":
-      return handleMemoryPolicy(rest);
+      return handleRetentionPolicy(rest);
     case "workflow":
-      return handleMemoryWorkflow(rest);
+      return handleWorkflowPolicy(rest);
     case "access":
-      return handleMemoryAccess(rest);
+      return handleAccessControl(rest);
     case "index":
       return handleIndexPolicy(rest);
     case "machines":
@@ -96,13 +95,13 @@ export async function handleIndexPolicy(args: string[]) {
 
 // ── Memory policy ────────────────────────────────────────────────────────────
 
-export async function handleMemoryPolicy(args: string[]) {
+export async function handleRetentionPolicy(args: string[]) {
   if (!args.length || args[0] === "get") {
-    console.log(JSON.stringify(getMemoryPolicy(cortexPath), null, 2));
+    console.log(JSON.stringify(getRetentionPolicy(cortexPath), null, 2));
     return;
   }
   if (args[0] === "set") {
-    const patch: any = {};
+    const patch: Record<string, unknown> = {};
     for (const arg of args.slice(1)) {
       if (!arg.startsWith("--")) continue;
       const [k, v] = arg.slice(2).split("=");
@@ -111,12 +110,12 @@ export async function handleMemoryPolicy(args: string[]) {
       const value = Number.isNaN(num) ? v : num;
       if (k.startsWith("decay.")) {
         patch.decay = patch.decay || {};
-        patch.decay[k.slice("decay.".length)] = value;
+        (patch.decay as Record<string, unknown>)[k.slice("decay.".length)] = value;
       } else {
         patch[k] = value;
       }
     }
-    const result = updateMemoryPolicy(cortexPath, patch);
+    const result = updateRetentionPolicy(cortexPath, patch);
     if (!result.ok) {
       console.log(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -125,19 +124,19 @@ export async function handleMemoryPolicy(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: cortex memory-policy [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45]");
+  console.error("Usage: cortex config policy [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45]");
   process.exit(1);
 }
 
 // ── Memory workflow ──────────────────────────────────────────────────────────
 
-export async function handleMemoryWorkflow(args: string[]) {
+export async function handleWorkflowPolicy(args: string[]) {
   if (!args.length || args[0] === "get") {
-    console.log(JSON.stringify(getMemoryWorkflowPolicy(cortexPath), null, 2));
+    console.log(JSON.stringify(getWorkflowPolicy(cortexPath), null, 2));
     return;
   }
   if (args[0] === "set") {
-    const patch: any = {};
+    const patch: Record<string, unknown> = {};
     for (const arg of args.slice(1)) {
       if (!arg.startsWith("--")) continue;
       const [k, v] = arg.slice(2).split("=");
@@ -151,7 +150,7 @@ export async function handleMemoryWorkflow(args: string[]) {
         patch[k] = Number.isNaN(num) ? v : num;
       }
     }
-    const result = updateMemoryWorkflowPolicy(cortexPath, patch);
+    const result = updateWorkflowPolicy(cortexPath, patch);
     if (!result.ok) {
       console.log(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -160,19 +159,19 @@ export async function handleMemoryWorkflow(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: cortex memory-workflow [get|set --requireMaintainerApproval=true --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts]");
+  console.error("Usage: cortex config workflow [get|set --requireMaintainerApproval=true --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts]");
   process.exit(1);
 }
 
 // ── Memory access ────────────────────────────────────────────────────────────
 
-export async function handleMemoryAccess(args: string[]) {
+export async function handleAccessControl(args: string[]) {
   if (!args.length || args[0] === "get") {
     console.log(JSON.stringify(getAccessControl(cortexPath), null, 2));
     return;
   }
   if (args[0] === "set") {
-    const patch: any = {};
+    const patch: Record<string, unknown> = {};
     for (const arg of args.slice(1)) {
       if (!arg.startsWith("--")) continue;
       const [k, v] = arg.slice(2).split("=");
@@ -188,7 +187,7 @@ export async function handleMemoryAccess(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: cortex memory-access [get|set --admins=u1,u2 --maintainers=u3 --contributors=u4 --viewers=u5]");
+  console.error("Usage: cortex config access [get|set --admins=u1,u2 --maintainers=u3 --contributors=u4 --viewers=u5]");
   process.exit(1);
 }
 

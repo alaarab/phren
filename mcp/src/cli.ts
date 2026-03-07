@@ -1,16 +1,23 @@
 import {
-  ensureCortexPath,
-  buildIndex,
-  extractSnippet,
-  queryRows,
-  addLearningToFile,
-  upsertCanonicalMemory,
   getProjectDirs,
-  recordMemoryFeedback,
-  flushMemoryScores,
   runtimeFile,
   EXEC_TIMEOUT_MS,
+  ensureCortexPath,
 } from "./shared.js";
+import {
+  recordFeedback,
+  flushEntryScores,
+} from "./shared-governance.js";
+import {
+  buildIndex,
+  queryRows,
+  extractSnippet,
+  type DbRow,
+} from "./shared-index.js";
+import {
+  addFindingToFile,
+  upsertCanonical,
+} from "./shared-content.js";
 import { buildRobustFtsQuery, isValidProjectName, STOP_WORDS } from "./utils.js";
 import * as fs from "fs";
 import * as os from "os";
@@ -18,7 +25,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 
 import { runDoctor } from "./link.js";
-import { startMemoryUi } from "./memory-ui.js";
+import { startReviewUi } from "./memory-ui.js";
 import { startShell } from "./shell.js";
 import { runCortexUpdate } from "./update.js";
 import { readBacklogs } from "./data-access.js";
@@ -34,10 +41,17 @@ export {
   buildHookOutput,
   trackSessionMetrics,
   filterBacklogByPriority,
+  parseCitations,
+  validateCitation,
+  annotateStale,
+  getProjectGlobBoost,
+  clearProjectGlobCache,
+  clearCitationValidCache,
+  extractToolFindings,
   type HookPromptInput,
   type SelectedSnippet,
 } from "./cli-hooks.js";
-export { scoreMemoryCandidate } from "./cli-extract.js";
+export { scoreFindingCandidate } from "./cli-extract.js";
 
 import {
   handleHookPrompt,
@@ -60,9 +74,9 @@ import {
 import {
   handleConfig,
   handleIndexPolicy,
-  handleMemoryPolicy,
-  handleMemoryWorkflow,
-  handleMemoryAccess,
+  handleRetentionPolicy,
+  handleWorkflowPolicy,
+  handleAccessControl,
 } from "./cli-config.js";
 
 const cortexPath = ensureCortexPath();
@@ -76,8 +90,8 @@ const SEARCH_TYPE_ALIASES: Record<string, string> = {
 const SEARCH_TYPES = new Set([
   "claude",
   "summary",
-  "learnings",
-  "knowledge",
+  "findings",
+  "reference",
   "backlog",
   "changelog",
   "canonical",
@@ -163,7 +177,7 @@ function printSearchUsage() {
   console.error("  cortex search --project <name> [--type <type>] [--limit <n>] [--all]");
   console.error("  cortex search --history                    Show recent searches");
   console.error("  cortex search --from-history <n>           Re-run search #n from history");
-  console.error("  type: claude|summary|learnings|knowledge|backlog|changelog|canonical|memory-queue|skill|other");
+  console.error("  type: claude|summary|findings|reference|backlog|changelog|canonical|memory-queue|skill|other");
 }
 
 function parseSearchArgs(args: string[]): SearchOptions | null {
@@ -313,14 +327,14 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleHookContext();
     case "hook-tool":
       return handleHookTool();
-    case "add-learning":
-      return handleAddLearning(args[0], args.slice(1).join(" "));
+    case "add-finding":
+      return handleAddFinding(args[0], args.slice(1).join(" "));
     case "extract-memories":
       return handleExtractMemories(args[0]);
     case "govern-memories":
       return handleGovernMemories(args[0]);
-    case "pin-memory":
-      return handlePinMemory(args[0], args.slice(1).join(" "));
+    case "pin":
+      return handlePinCanonical(args[0], args.slice(1).join(" "));
     case "doctor":
       return handleDoctor(args);
     case "quality-feedback":
@@ -333,13 +347,13 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleMigrateFindings(args);
     case "index-policy":
       return handleIndexPolicy(args);
-    case "memory-policy":
-      return handleMemoryPolicy(args);
-    case "memory-workflow":
-      return handleMemoryWorkflow(args);
-    case "memory-access":
-      return handleMemoryAccess(args);
-    case "memory-ui":
+    case "policy":
+      return handleRetentionPolicy(args);
+    case "workflow":
+      return handleWorkflowPolicy(args);
+    case "access":
+      return handleAccessControl(args);
+    case "review-ui":
       return handleMemoryUi(args);
     case "shell":
       return handleShell(args);
@@ -427,7 +441,7 @@ async function handleSearch(opts: SearchOptions) {
 
         if (terms.length > 0) {
           const scored = allRows
-            .map((row: any[]) => {
+            .map((row: DbRow) => {
               const content = (row[3] as string).toLowerCase();
               let score = 0;
               for (const term of terms) {
@@ -470,35 +484,59 @@ async function handleSearch(opts: SearchOptions) {
       console.log(snippet);
       console.log();
     }
-  } catch (err: any) {
-    console.error(`Search error: ${err.message}`);
+  } catch (err: unknown) {
+    console.error(`Search error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 }
 
-async function handleAddLearning(project: string, learning: string) {
+async function handleAddFinding(project: string, learning: string) {
   if (!project || !learning) {
-    console.error('Usage: cortex add-learning <project> "<insight>"');
+    console.error('Usage: cortex add-finding <project> "<insight>"');
     process.exit(1);
   }
 
-  const result = addLearningToFile(cortexPath, project, learning);
-  console.log(result.ok ? result.data : result.error);
+  try {
+    const result = addFindingToFile(cortexPath, project, learning);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    console.log(result.data);
+  } catch (e: unknown) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
 }
 
-async function handlePinMemory(project: string, memory: string) {
+async function handlePinCanonical(project: string, memory: string) {
   if (!project || !memory) {
-    console.error('Usage: cortex pin-memory <project> "<memory>"');
+    console.error('Usage: cortex pin <project> "<memory>"');
     process.exit(1);
   }
-  const result = upsertCanonicalMemory(cortexPath, project, memory);
+  const result = upsertCanonical(cortexPath, project, memory);
   console.log(result.ok ? result.data : result.error);
 }
 
 async function handleDoctor(args: string[]) {
   const fix = args.includes("--fix");
   const checkData = args.includes("--check-data");
+  const agentsOnly = args.includes("--agents");
   const result = await runDoctor(cortexPath, fix, checkData);
+  if (agentsOnly) {
+    // Filter to only agent-related checks
+    const agentChecks = result.checks.filter((c) =>
+      c.name.includes("cursor") || c.name.includes("copilot") || c.name.includes("codex") || c.name.includes("windsurf")
+    );
+    console.log(`cortex doctor --agents: ${agentChecks.every((c) => c.ok) ? "all configured" : "some not configured"}`);
+    for (const check of agentChecks) {
+      console.log(`- ${check.ok ? "ok" : "not configured"} ${check.name}: ${check.detail}`);
+    }
+    if (agentChecks.length === 0) {
+      console.log("No agent integrations detected. Run `cortex init` to configure.");
+    }
+    process.exit(agentChecks.every((c) => c.ok) ? 0 : 1);
+  }
   console.log(`cortex doctor: ${result.ok ? "ok" : "issues found"}`);
   if (result.machine) console.log(`machine: ${result.machine}`);
   if (result.profile) console.log(`profile: ${result.profile}`);
@@ -512,11 +550,11 @@ async function handleQualityFeedback(args: string[]) {
   const key = args.find((a) => a.startsWith("--key="))?.slice("--key=".length);
   const feedback = args.find((a) => a.startsWith("--type="))?.slice("--type=".length) as "helpful" | "reprompt" | "regression" | undefined;
   if (!key || !feedback || !["helpful", "reprompt", "regression"].includes(feedback)) {
-    console.error("Usage: cortex quality-feedback --key=<memory-key> --type=helpful|reprompt|regression");
+    console.error("Usage: cortex quality-feedback --key=<entry-key> --type=helpful|reprompt|regression");
     process.exit(1);
   }
-  recordMemoryFeedback(cortexPath, key, feedback);
-  flushMemoryScores(cortexPath);
+  recordFeedback(cortexPath, key, feedback);
+  flushEntryScores(cortexPath);
   console.log(`Recorded feedback: ${feedback} for ${key}`);
 }
 
@@ -524,7 +562,7 @@ async function handleMemoryUi(args: string[]) {
   const portArg = args.find((a) => a.startsWith("--port="));
   const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
   const safePort = Number.isNaN(port) ? 3499 : port;
-  await startMemoryUi(cortexPath, safePort);
+  await startReviewUi(cortexPath, safePort);
 }
 
 async function handleShell(args: string[]) {
@@ -787,10 +825,10 @@ async function handleDebugInjection(args: string[]) {
       return;
     }
     console.log(out);
-  } catch (err: any) {
-    const stderr = String(err?.stderr || "").trim();
+  } catch (err: unknown) {
+    const stderr = err instanceof Error && "stderr" in err ? String((err as NodeJS.ErrnoException & { stderr?: unknown }).stderr || "").trim() : "";
     if (stderr) console.error(stderr);
-    console.error(`debug-injection failed: ${err?.message || String(err)}`);
+    console.error(`debug-injection failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 }

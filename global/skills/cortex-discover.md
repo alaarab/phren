@@ -43,7 +43,7 @@ for dir in "$CORTEX_DIR"/*/; do
 
   [ -f "$dir/CLAUDE.md" ]    && echo "$PROJECT: has CLAUDE.md"    || echo "$PROJECT: MISSING CLAUDE.md"
   [ -f "$dir/summary.md" ]   && echo "$PROJECT: has summary.md"   || echo "$PROJECT: MISSING summary.md"
-  [ -f "$dir/LEARNINGS.md" ] && echo "$PROJECT: has LEARNINGS.md" || echo "$PROJECT: MISSING LEARNINGS.md"
+  [ -f "$dir/FINDINGS.md" ] && echo "$PROJECT: has FINDINGS.md" || echo "$PROJECT: MISSING FINDINGS.md"
   [ -f "$dir/backlog.md" ]   && echo "$PROJECT: has backlog.md"   || echo "$PROJECT: MISSING backlog.md"
 done
 ```
@@ -58,9 +58,9 @@ for dir in */; do
   PROJECT=$(basename "$dir")
   [ "$PROJECT" = "global" ] || [ "$PROJECT" = "profiles" ] && continue
 
-  if [ -f "$dir/LEARNINGS.md" ]; then
-    LAST_MODIFIED=$(git log -1 --format="%cr" -- "$dir/LEARNINGS.md" 2>/dev/null || stat -c %Y "$dir/LEARNINGS.md" 2>/dev/null || stat -f %m "$dir/LEARNINGS.md" 2>/dev/null)
-    echo "$PROJECT/LEARNINGS.md: last updated $LAST_MODIFIED"
+  if [ -f "$dir/FINDINGS.md" ]; then
+    LAST_MODIFIED=$(git log -1 --format="%cr" -- "$dir/FINDINGS.md" 2>/dev/null || stat -c %Y "$dir/FINDINGS.md" 2>/dev/null || stat -f %m "$dir/FINDINGS.md" 2>/dev/null)
+    echo "$PROJECT/FINDINGS.md: last updated $LAST_MODIFIED"
   fi
 
   if [ -f "$dir/CLAUDE.md" ]; then
@@ -74,9 +74,9 @@ Flag anything not updated in 30+ days as stale.
 
 ### 4. Detect skill gaps
 
-Look at patterns in backlog.md files and LEARNINGS.md files across projects. A skill gap is when:
+Look at patterns in backlog.md files and FINDINGS.md files across projects. A skill gap is when:
 - Multiple projects repeat the same manual process (e.g., "remember to update the changelog," which should be a skill)
-- A LEARNINGS.md entry says "next time, do X first," which is a skill waiting to happen
+- A FINDINGS.md entry says "next time, do X first," which is a skill waiting to happen
 - A backlog item keeps getting deferred, and might need a skill to make it easier
 
 Also check global/skills/ to see what skills exist, and whether any project's workflow isn't covered.
@@ -104,7 +104,7 @@ What:
 Stack:
 Status: active
 Run:
-Gotcha:
+Watch out:
 ```
 
 Want me to fill this in for myapp?
@@ -121,7 +121,7 @@ If yes, gather the 5 fields from the user and write the file to `$CORTEX_DIR/mya
 
 Projects without core files:
 
-| Project | CLAUDE.md | summary.md | LEARNINGS.md | backlog.md |
+| Project | CLAUDE.md | summary.md | FINDINGS.md | backlog.md |
 |---------|-----------|------------|--------------|------------|
 | myapp   | ok        | MISSING    | MISSING      | ok         |
 | api     | ok        | ok         | ok           | MISSING    |
@@ -129,14 +129,14 @@ Projects without core files:
 ## Section 2: Stale content
 
 Files not updated in 30+ days:
-- my-app/LEARNINGS.md: last updated 45 days ago
+- my-app/FINDINGS.md: last updated 45 days ago
 - frontend/CLAUDE.md: last updated 62 days ago
 
 ## Section 3: Skill gaps
 
 Things you do repeatedly that could be skills:
 - "Update changelog before release" appears in 3 project backlogs. Consider a `/changelog` skill.
-- my-app LEARNINGS.md mentions "always run parity check" 4 times. Already have `/parity`, but it's not in the workflow skill.
+- my-app FINDINGS.md mentions "always run parity check" 4 times. Already have `/parity`, but it's not in the workflow skill.
 
 ## Section 4: Backlog health
 
@@ -150,13 +150,13 @@ Stuck items:
 
 ## Top 3 things to work on next
 
-1. **Add LEARNINGS.md to myapp.** You've been working on it actively but capturing nothing. Use `add_learning()` during your next session.
+1. **Add FINDINGS.md to myapp.** You've been working on it actively but capturing nothing. Use `add_finding()` during your next session.
 2. **Unstick api-server backlog.** 5 items, 0 completed. Either work them or trim them. Stale backlogs are worse than no backlog.
 3. **Create a `/changelog` skill.** You're doing it manually in 3 projects. 15 minutes to write the skill saves hours over time.
 ```
 
 The "Top 3" section is the most important part. Make these:
-- Concrete (not "improve documentation" but "add LEARNINGS.md to myapp")
+- Concrete (not "improve documentation" but "add FINDINGS.md to myapp")
 - Prioritized (highest impact first)
 - Actionable (someone could start right now)
 
@@ -170,6 +170,6 @@ The "Top 3" section is the most important part. Make these:
 ## Related skills
 
 - `/cortex-init`: scaffold missing files for a project
-- `add_learning()`: capture learnings via MCP (fixes "missing LEARNINGS.md")
+- `add_finding()`: capture findings via MCP (fixes "missing FINDINGS.md")
 - `/cortex-consolidate`: synthesize cross-project patterns
 - `/backlog`: work on stuck backlog items

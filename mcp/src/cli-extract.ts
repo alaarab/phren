@@ -1,16 +1,18 @@
 import {
-  ensureCortexPath,
   debugLog,
-  detectProject,
-  addLearningToFile,
-  appendMemoryQueue,
   appendAuditLog,
-  getMemoryPolicy,
-  recordMemoryFeedback,
-  flushMemoryScores,
-  memoryScoreKey,
   EXEC_TIMEOUT_MS,
+  ensureCortexPath,
 } from "./shared.js";
+import {
+  appendReviewQueue,
+  getRetentionPolicy,
+  recordFeedback,
+  flushEntryScores,
+  entryScoreKey,
+} from "./shared-governance.js";
+import { detectProject } from "./shared-index.js";
+import { addFindingToFile } from "./shared-content.js";
 import { commandExists } from "./hooks.js";
 import { runGit as runGitShared, isFeatureEnabled, clampInt } from "./utils.js";
 import * as fs from "fs";
@@ -215,9 +217,9 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
 const COMMIT_MSG_PREFIX = /^(fix|add|update|remove|delete|rename|move|bump|revert|merge|chore|refactor|style|docs|test|ci|build|release|wip)\b/i;
 
 // Insight keywords that indicate the entry has learning value even if short.
-const INSIGHT_KEYWORDS = /\b(workaround|must|avoid|regression|root cause|postmortem|incident|retry|timeout|gotcha|caveat|pitfall|breaking|migration|order matters|race condition|deadlock|flaky)\b/i;
+const INSIGHT_KEYWORDS = /\b(workaround|must|avoid|regression|root cause|postmortem|incident|retry|timeout|pitfall|caveat|breaking|migration|order matters|race condition|deadlock|flaky)\b/i;
 
-export function scoreMemoryCandidate(subject: string, body: string): { score: number; text: string } | null {
+export function scoreFindingCandidate(subject: string, body: string): { score: number; text: string } | null {
   const s = `${subject}\n${body}`.toLowerCase();
 
   // Reject short commit-message-style entries unless they contain insight keywords
@@ -264,7 +266,7 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
   }
 
   const days = Number.parseInt(process.env.CORTEX_MEMORY_EXTRACT_WINDOW_DAYS || "30", 10);
-  const threshold = Number.parseFloat(process.env.CORTEX_MEMORY_AUTO_ACCEPT || String(getMemoryPolicy(cortexPath).autoAcceptThreshold));
+  const threshold = Number.parseFloat(process.env.CORTEX_MEMORY_AUTO_ACCEPT || String(getRetentionPolicy(cortexPath).autoAcceptThreshold));
   const records = parseGitLogRecords(repoRoot, Number.isNaN(days) ? 30 : days);
   const ghCandidates = isFeatureEnabled("CORTEX_FEATURE_GH_MINING", false)
     ? await mineGithubCandidates(repoRoot)
@@ -273,17 +275,17 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
   let accepted = 0;
   let queued = 0;
   for (const rec of records) {
-    const candidate = scoreMemoryCandidate(rec.subject, rec.body);
+    const candidate = scoreFindingCandidate(rec.subject, rec.body);
     if (!candidate) continue;
     const line = `${candidate.text} (source commit ${rec.hash.slice(0, 8)})`;
     if (candidate.score >= threshold) {
-      addLearningToFile(cortexPath, project, line, {
+      addFindingToFile(cortexPath, project, line, {
         repo: repoRoot,
         commit: rec.hash,
       });
       accepted++;
     } else {
-      const qr1 = appendMemoryQueue(cortexPath, project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
+      const qr1 = appendReviewQueue(cortexPath, project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
       if (qr1.ok) queued += qr1.data;
     }
   }
@@ -291,23 +293,23 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
   for (const c of ghCandidates) {
     const line = `${c.text}${c.commit ? ` (source commit ${c.commit.slice(0, 8)})` : ""}`;
     if (c.text.startsWith("CI failure pattern:")) {
-      const key = memoryScoreKey(project, "LEARNINGS.md", line);
-      recordMemoryFeedback(cortexPath, key, "regression");
+      const key = entryScoreKey(project, "FINDINGS.md", line);
+      recordFeedback(cortexPath, key, "regression");
     }
     if (c.score >= threshold) {
-      addLearningToFile(cortexPath, project, line, {
+      addFindingToFile(cortexPath, project, line, {
         repo: repoRoot,
         commit: c.commit,
         file: c.file,
       });
       accepted++;
     } else {
-      const qr2 = appendMemoryQueue(cortexPath, project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
+      const qr2 = appendReviewQueue(cortexPath, project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
       if (qr2.ok) queued += qr2.data;
     }
   }
 
-  flushMemoryScores(cortexPath);
+  flushEntryScores(cortexPath);
   appendAuditLog(cortexPath, "extract_memories", `project=${project} accepted=${accepted} queued=${queued} window_days=${days}`);
   if (!silent) console.log(`Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, window=${days}d`);
 }

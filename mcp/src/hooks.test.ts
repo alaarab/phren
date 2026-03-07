@@ -577,15 +577,15 @@ describe("hooks", () => {
         path.join(cortexPath, ".governance", "install-preferences.json"),
         JSON.stringify({
           customHooks: [
-            { event: "post-learning", command: "touch post-learning-ran" },
+            { event: "post-finding", command: "touch post-finding-ran" },
             { event: "pre-save", command: "echo not-this-one" },
           ],
         })
       );
-      const result = runCustomHooks(cortexPath, "post-learning");
+      const result = runCustomHooks(cortexPath, "post-finding");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(0);
-      expect(fs.existsSync(path.join(cortexPath, "post-learning-ran"))).toBe(true);
+      expect(fs.existsSync(path.join(cortexPath, "post-finding-ran"))).toBe(true);
     });
 
     it("runCustomHooks passes environment variables", () => {

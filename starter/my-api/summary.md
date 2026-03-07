@@ -4,4 +4,4 @@
 **Stack:** Node.js, Express, PostgreSQL (or whatever you're using)
 **Status:** active
 **Run:** npm run dev
-**Gotcha:** .env not committed: copy .env.example and fill in secrets before first run
+**Watch out:** .env not committed: copy .env.example and fill in secrets before first run

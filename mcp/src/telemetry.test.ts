@@ -53,13 +53,13 @@ describe("telemetry", () => {
     fs.mkdirSync(legacyDir, { recursive: true });
     const legacyData = {
       config: { enabled: true, enabledAt: "2025-01-01T00:00:00.000Z" },
-      stats: { toolCalls: { search_knowledge: 5 }, cliCommands: {}, errors: 0, sessions: 2, lastActive: "" },
+      stats: { toolCalls: { search_cortex: 5 }, cliCommands: {}, errors: 0, sessions: 2, lastActive: "" },
     };
     fs.writeFileSync(path.join(legacyDir, "telemetry.json"), JSON.stringify(legacyData));
 
     expect(isTelemetryEnabled(tmpDir)).toBe(true);
     const summary = getTelemetrySummary(tmpDir);
-    expect(summary).toContain("search_knowledge: 5");
+    expect(summary).toContain("search_cortex: 5");
     expect(summary).toContain("Sessions: 2");
   });
 
@@ -73,7 +73,7 @@ describe("telemetry", () => {
   });
 
   it("does not track when disabled", () => {
-    trackToolCall(tmpDir, "search_knowledge");
+    trackToolCall(tmpDir, "search_cortex");
     trackCliCommand(tmpDir, "search");
     trackError(tmpDir);
     trackSession(tmpDir);
@@ -114,16 +114,16 @@ describe("telemetry", () => {
 
   it("tracks tool calls when enabled", () => {
     setTelemetryEnabled(tmpDir, true);
-    trackToolCall(tmpDir, "search_knowledge");
-    trackToolCall(tmpDir, "search_knowledge");
-    trackToolCall(tmpDir, "add_learning");
+    trackToolCall(tmpDir, "search_cortex");
+    trackToolCall(tmpDir, "search_cortex");
+    trackToolCall(tmpDir, "add_finding");
     flushTelemetry();
 
     const data = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".runtime", "telemetry.json"), "utf8")
     );
-    expect(data.stats.toolCalls.search_knowledge).toBe(2);
-    expect(data.stats.toolCalls.add_learning).toBe(1);
+    expect(data.stats.toolCalls.search_cortex).toBe(2);
+    expect(data.stats.toolCalls.add_finding).toBe(1);
   });
 
   it("tracks CLI commands when enabled", () => {
@@ -168,7 +168,7 @@ describe("telemetry", () => {
 
   it("resets stats without changing config", () => {
     setTelemetryEnabled(tmpDir, true);
-    trackToolCall(tmpDir, "search_knowledge");
+    trackToolCall(tmpDir, "search_cortex");
     trackSession(tmpDir);
     trackError(tmpDir);
     flushTelemetry();
@@ -192,15 +192,15 @@ describe("telemetry", () => {
 
   it("returns usage summary when enabled with data", () => {
     setTelemetryEnabled(tmpDir, true);
-    trackToolCall(tmpDir, "search_knowledge");
-    trackToolCall(tmpDir, "search_knowledge");
+    trackToolCall(tmpDir, "search_cortex");
+    trackToolCall(tmpDir, "search_cortex");
     trackCliCommand(tmpDir, "doctor");
     trackSession(tmpDir);
 
     const summary = getTelemetrySummary(tmpDir);
     expect(summary).toContain("enabled");
     expect(summary).toContain("Sessions: 1");
-    expect(summary).toContain("search_knowledge: 2");
+    expect(summary).toContain("search_cortex: 2");
     expect(summary).toContain("doctor: 1");
   });
 

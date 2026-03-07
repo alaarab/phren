@@ -55,7 +55,7 @@ This is the core runtime loop from one prompt to the next:
         |
         v
 [4] Persistence Path
-    MCP tool writes (learnings/backlog/memories)
+    MCP tool writes (findings/backlog/memories)
     + Stop hook git add/commit/push
     -> updated markdown + governance config become source of truth
         |
@@ -82,7 +82,7 @@ Runs once when a Claude Code session begins.
 SessionStart
   |
   +-> git pull --rebase ~/.cortex
-  |     (sync latest knowledge from remote)
+  |     (sync latest from remote)
   |
   +-> hook-context
         |
@@ -128,7 +128,7 @@ Stop
   +-> git commit (if changes exist)
   +-> git push (if remote configured)
         retry with pull --rebase on conflict
-        auto-merge LEARNINGS.md / backlog.md if possible
+        auto-merge FINDINGS.md / backlog.md if possible
 ```
 
 ## MCP Server
@@ -140,11 +140,11 @@ Claude Code <--stdio--> cortex-mcp
                           |
           +---------------+---------------+
           |               |               |
-     Search/Browse   Backlog CRUD       Learning Capture
-     - search_knowledge - get_backlog   - add_learning(s)
-     - get_project      - add_item     - remove_learning(s)
+     Search/Browse   Backlog CRUD       Finding Capture
+     - search_cortex    - get_backlog   - add_finding(s)
+     - get_project      - add_item     - remove_finding(s)
      - list_projects    - complete(s)  - push_changes
-     - get_learnings    - update
+     - get_findings     - update
           |
      Memory Quality     Data Management
      - pin_memory       - export_project
@@ -166,16 +166,16 @@ All state lives in `~/.cortex/` as plain files, committed to git.
   <project>/
     CLAUDE.md              # project instructions
     summary.md             # one-liner + stack description
-    LEARNINGS.md           # captured insights (with citation comments)
+    FINDINGS.md            # captured insights (with citation comments)
     CANONICAL_MEMORIES.md  # pinned high-signal memories
     MEMORY_QUEUE.md        # pending review (stale/conflicts/low-value)
     backlog.md             # task tracking (Active/Queue/Done)
   global/
     CLAUDE.md              # cross-project instructions
-    LEARNINGS.md           # cross-project insights
+    FINDINGS.md            # cross-project insights
   .governance/
     memory-policy.json     # retention, ttl, decay, confidence
-    memory-workflow.json   # approval gates for risky entries
+    workflow-policy.json   # approval gates for risky entries
     access-control.json    # role-based permissions
     index-policy.json      # include/exclude globs
     shell-state.json       # interactive shell persistence
@@ -200,12 +200,12 @@ Query:
 
 ## Memory Governance
 
-Automated quality control for LEARNINGS.md entries.
+Automated quality control for FINDINGS.md entries.
 
 ```
 cortex maintain govern
   |
-  +-> scan LEARNINGS.md for each project
+  +-> scan FINDINGS.md for each project
   |
   +-> trust filter
   |     stale: older than ttlDays without recent citation
@@ -218,5 +218,5 @@ cortex maintain govern
   |
   +-> enforce canonical locks (pinned entries stay)
 
-approve/reject/edit queue items via MCP tools or memory-ui
+approve/reject/edit queue items via MCP tools or review-ui
 ```

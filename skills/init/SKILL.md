@@ -63,7 +63,7 @@ What: <one sentence about what this project does>
 Stack: <languages, frameworks, key deps>
 Status: <active / maintenance / new / archived>
 Run: <the main command to start it, e.g. "npm run dev">
-Gotcha: <the one thing that trips people up>
+Watch out: <the one thing that trips people up>
 ```
 
 Ask the user for these if you can't figure them out from the project directory. If the project directory exists on disk (e.g. `~/<project-name>/`), read its package.json, pyproject.toml, README, or similar to pre-fill.

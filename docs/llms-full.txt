@@ -6,101 +6,132 @@ Quick start:
   This creates ~/.cortex, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Restart your agent after init. Context injection starts immediately.
 
-MCP Tools (22):
+MCP Tools (28):
 
   Search and browse:
-    search_knowledge(query, type?, limit?, project?) - FTS5 search with synonym expansion
+    search_cortex(query, type?, limit?, project?) - FTS5 search with synonym expansion
+    get_memory_detail(id) - fetch full content of a memory by id (e.g. mem:project/filename)
     get_project_summary(name) - project summary card and file list
     list_projects() - all projects in active profile
-    list_machines() - registered machines and their profiles
-    list_profiles() - all profiles and which projects each includes
 
   Backlog management:
-    get_backlog(project?) - read tasks for one or all projects
+    get_backlog(project?, id?, item?) - read backlog, or fetch a single item by ID or text
     add_backlog_item(project, item) - add task to Queue section
+    add_backlog_items(project, items[]) - bulk add multiple tasks
     complete_backlog_item(project, item) - match by text, move to Done
+    complete_backlog_items(project, items[]) - bulk complete multiple items
     update_backlog_item(project, item, updates) - change priority, context, or section
 
-  Learning capture:
-    add_learning(project, learning, citation?: { file?, line?, repo?, commit? }) - append learning with optional citation
-    remove_learning(project, learning) - remove by matching text
+  Finding capture:
+    add_finding(project, finding, citation?, findingType?) - append finding with optional citation and type tag
+      findingType: "decision" | "pitfall" | "pattern"
+    add_findings(project, findings[]) - bulk add multiple findings
+    remove_finding(project, finding) - remove by matching text
+    remove_findings(project, findings[]) - bulk remove multiple findings
     push_changes(message?) - commit and push all cortex changes
 
-  Memory governance:
+  Entity graph:
+    search_entities(name) - find entities and their related docs
+    get_related_docs(entity) - get docs linked to a named entity
+    read_graph(project?) - read the entity graph for a project or all projects
+    link_findings(project, finding_text, entity, relation?) - manually link a finding to an entity
+
+  Session management (for agents without hooks):
+    session_start(project?) - mark session start, retrieve prior session context
+    session_end(summary?) - mark session end, save summary for next session
+    session_context() - get current session state (project, duration, findings added)
+
+  Memory quality:
     pin_memory(project, memory) - write canonical/pinned memory that bypasses decay
-    govern_memories(project?) - queue stale/conflicting/low-value entries for review
-    prune_memories(project?) - delete expired entries by retention policy
-    consolidate_memories(project?) - deduplicate and rewrite LEARNINGS.md
     memory_feedback(key, feedback) - record helpful/reprompt/regression outcomes
-    migrate_legacy_findings(project, pinCanonical?, dryRun?) - promote legacy findings into LEARNINGS/CANONICAL
-    memory_policy(mode, ...) - get/set retention, TTL, decay, confidence thresholds
-    memory_workflow(mode, ...) - get/set risky-memory approval workflow settings
-    memory_access(mode, ...) - get/set role-based permissions
-    index_policy(mode, ...) - configure include/exclude globs and hidden-doc indexing
+
+  Data management:
+    export_project(project) - export project data as portable JSON
+    import_project(data) - import project from exported JSON
+    manage_project(project, action) - archive or unarchive a project
 
 CLI Commands:
 
   cortex                               - interactive shell (TTY default)
   cortex shell                         - explicit shell mode
   cortex search <query>                - FTS5 search with synonym expansion
-  cortex add-learning <project> "..."  - append a learning from the terminal
-  cortex pin-memory <project> "..."    - promote canonical memory
-  cortex doctor [--fix]                - health checks with optional self-heal
-  cortex memory-ui [--port=3499]       - lightweight memory review UI
+  cortex add-finding <project> "..."   - append a finding from the terminal
+  cortex pin <project> "..."           - promote canonical memory
+  cortex backlog                       - cross-project backlog view
+  cortex skill-list                    - list installed skills
+  cortex doctor [--fix] [--agents]     - health checks with optional self-heal
+  cortex review-ui [--port=3499]       - lightweight memory review UI
+  cortex status                        - health, active project, stats
   cortex update                        - update to latest version
-  cortex govern-memories [project]     - queue stale/conflicting memories
-  cortex prune-memories [project]      - delete expired entries
-  cortex consolidate-memories [project]- deduplicate LEARNINGS.md
-  cortex extract-memories [project]    - mine git and GitHub signals into candidates
-  cortex migrate-findings <project>    - promote legacy findings docs
-  cortex memory-policy get|set ...     - retention, decay, confidence tuning
-  cortex memory-workflow get|set ...   - approval workflow tuning
-  cortex memory-access get|set ...     - role permissions
-  cortex index-policy get|set ...      - indexer include/exclude globs
-  cortex mcp-mode on|off|status       - toggle MCP integration
-  cortex hooks-mode on|off|status     - toggle hook execution
-  cortex quality-feedback --key=<k> --type=helpful|reprompt|regression - record memory feedback
+  cortex verify                        - post-init verification
+
+  cortex config policy get|set ...     - retention, TTL, decay, confidence
+  cortex config workflow get|set ...   - approval workflow settings
+  cortex config access get|set ...     - role-based permissions
+  cortex config index get|set ...      - indexer include/exclude globs
+  cortex config machines               - registered machines
+  cortex config profiles               - profiles and projects
+
+  cortex maintain govern [project]     - queue stale/conflicting memories
+  cortex maintain prune [project]      - delete expired entries
+  cortex maintain consolidate [project]- deduplicate FINDINGS.md
+  cortex maintain extract [project]    - mine git and GitHub signals
+  cortex maintain migrate <project>    - promote legacy findings
+
+  cortex mcp-mode on|off|status        - toggle MCP integration
+  cortex hooks-mode on|off|status      - toggle hook execution
 
 Environment Variables:
 
   CORTEX_PATH                    - override cortex directory (default: ~/.cortex)
   CORTEX_PROFILE                 - active profile name (filters indexed projects)
   CORTEX_ACTOR                   - identity for access control and audit logging
-  CORTEX_DEBUG                   - set to 1 for debug logging to ~/.cortex/debug.log
+  CORTEX_DEBUG                   - set to 1 for debug logging to ~/.cortex/.runtime/debug.log
   CORTEX_CONTEXT_TOKEN_BUDGET    - max approx tokens injected by hook-prompt (default: 550)
   CORTEX_CONTEXT_SNIPPET_LINES   - max lines per injected snippet (default: 6)
   CORTEX_CONTEXT_SNIPPET_CHARS   - max chars per injected snippet (default: 520)
   CORTEX_FEATURE_AUTO_EXTRACT    - toggle git/GitHub mining in hook-prompt (default: on, set 0 to disable)
   CORTEX_FEATURE_DAILY_MAINTENANCE - toggle detached daily governance (default: on, set 0 to disable)
-  CORTEX_GH_TIMEOUT_MS           - GitHub mining timeout (default: 10000)
-  CORTEX_GH_RETRIES              - GitHub mining retries (default: 2)
-  CORTEX_GH_PR_LIMIT             - max PRs to scan (default: 40)
-  CORTEX_GH_RUN_LIMIT            - max CI runs to scan (default: 25)
-  CORTEX_GH_ISSUE_LIMIT          - max issues to scan (default: 25)
+  CORTEX_FINDINGS_CAP            - max active findings before auto-archiving (default: 20)
+  CORTEX_LLM_ENDPOINT            - OpenAI-compatible endpoint for semantic dedup/conflict
+  CORTEX_LLM_KEY                 - API key for LLM endpoint (or OPENAI_API_KEY)
+  CORTEX_LLM_MODEL               - model name for LLM endpoint
+  CORTEX_EMBEDDING_PROVIDER      - "api" or unset; enables semantic search fallback
+  CORTEX_FEATURE_SEMANTIC_DEDUP  - set 1 to enable LLM-based paraphrase dedup
+  CORTEX_FEATURE_SEMANTIC_CONFLICT - set 1 to enable LLM-based contradiction detection
 
 Key File Locations:
 
-  ~/.cortex/                     - cortex root directory
-  ~/.cortex/machines.yaml        - hostname-to-profile mapping
-  ~/.cortex/profiles/            - profile YAML files listing projects per profile
-  ~/.cortex/<project>/summary.md - five-line project summary card
-  ~/.cortex/<project>/CLAUDE.md  - full project context (architecture, commands, conventions)
-  ~/.cortex/<project>/KNOWLEDGE.md - deep reference (API details, data models)
-  ~/.cortex/<project>/LEARNINGS.md - bugs, patterns, things to avoid
-  ~/.cortex/<project>/CANONICAL_MEMORIES.md - pinned high-signal memories
-  ~/.cortex/<project>/backlog.md - task queue across sessions
+  ~/.cortex/                          - cortex root directory
+  ~/.cortex/machines.yaml             - hostname-to-profile mapping
+  ~/.cortex/profiles/                 - profile YAML files listing projects per profile
+  ~/.cortex/<project>/summary.md      - five-line project summary card
+  ~/.cortex/<project>/CLAUDE.md       - full project context (architecture, commands, conventions)
+  ~/.cortex/<project>/reference/      - deep reference docs (API details, data models)
+  ~/.cortex/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
+  ~/.cortex/<project>/backlog.md      - task queue across sessions
   ~/.cortex/<project>/MEMORY_QUEUE.md - items pending human review
-  ~/.cortex/.governance/         - governance policy JSON files
-  ~/.cortex/global/skills/       - personal workflow slash commands
-  ~/.cortex/global/CLAUDE.md     - user-level agent instructions
+  ~/.cortex/.runtime/                 - audit.log, search history, caches
+  ~/.cortex/.governance/              - governance policy JSON files
+  ~/.cortex/global/skills/            - personal workflow slash commands
+  ~/.cortex/global/CLAUDE.md          - user-level agent instructions
+
+Finding Tags:
+
+  Findings can be tagged with [decision], [pitfall], or [pattern]:
+    [decision] architectural choice with rationale
+    [pitfall]  bug or gotcha to avoid
+    [pattern]  reusable approach that works well
+  Use findingType param in add_finding, or prefix manually: "- [pitfall] ..."
+  Tags are filterable in search_cortex via the type parameter.
 
 Agent Support:
 
   Claude Code    - full hooks + MCP, writes ~/.claude/settings.json
-  Copilot CLI    - hooks in ~/.github/hooks/cortex.json, symlinks copilot-instructions.md
-  Cursor         - hooks in ~/.cursor/hooks.json (no session-start hook)
-  OpenAI Codex   - hooks in codex.json, symlinks AGENTS.md
-  Agentskills    - cortex.SKILL.md in cortex root
+  Cursor         - MCP only via ~/.cursor/mcp.json (no auto hooks)
+  VS Code Copilot- MCP only via ~/.config/Code/User/mcp.json
+  Codex CLI      - MCP only via ~/.codex/config.json
+  Windsurf       - manual MCP setup (see docs/ide-setup.md)
 
 Docs: https://alaarab.github.io/cortex/
 Source: https://github.com/alaarab/cortex

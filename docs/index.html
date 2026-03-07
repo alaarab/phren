@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cortex: Long-term memory for your AI agents</title>
-  <meta name="description" content="Git-backed knowledge base for your AI agents. Works with Claude Code, GitHub Copilot, Cursor, Codex, and more. Relevant context injects automatically. Learnings save automatically. One command to set up." />
+  <meta name="description" content="Git-backed project store for your AI agents. Works with Claude Code, GitHub Copilot, Cursor, Codex, and more. Relevant context injects automatically. Findings save automatically. One command to set up." />
   <meta property="og:title" content="Cortex: Long-term memory for your AI agents" />
-  <meta property="og:description" content="Git-backed knowledge base for your AI agents. Works with Claude Code, GitHub Copilot, Cursor, Codex, and more. Context injects when your prompt matches. Learnings save automatically when the session ends." />
+  <meta property="og:description" content="Git-backed project store for your AI agents. Works with Claude Code, GitHub Copilot, Cursor, Codex, and more. Context injects when your prompt matches. Findings save automatically when the session ends." />
   <meta property="og:type" content="website" />
   <link rel="stylesheet" href="style.css">
 </head>
@@ -261,7 +261,7 @@
 
       <h1 class="hero-title">Long-term memory<br>for <em>your AI agents.</em></h1>
 
-      <p class="hero-sub">Your prompt hits the index. Matching context shows up in Claude's window. Learnings save when the session ends. One command to set up.</p>
+      <p class="hero-sub">Your prompt hits the index. Matching context shows up in Claude's window. Findings save when the session ends. One command to set up.</p>
 
       <div class="hero-actions">
         <a href="#install" class="btn-primary">
@@ -316,8 +316,8 @@
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
           </div>
-          <div class="step-title">Create your knowledge base</div>
-          <p class="step-desc">A folder of markdown files at <code style="font-size:12px;color:var(--copper-mid)">~/.cortex</code>. Project notes, learnings, backlog. Anything Claude should know. It's just a git repo you own.</p>
+          <div class="step-title">Create your project store</div>
+          <p class="step-desc">A folder of markdown files at <code style="font-size:12px;color:var(--copper-mid)">~/.cortex</code>. Project notes, findings, backlog. Anything Claude should know. It's just a git repo you own.</p>
           <span class="step-code">~/.cortex/</span>
         </div>
         <div class="step reveal reveal-delay-2">
@@ -326,7 +326,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
           </div>
           <div class="step-title">One command sets everything up</div>
-          <p class="step-desc">Creates your knowledge base, registers the MCP server, and sets up hooks for Claude Code, Copilot, Cursor, and Codex. Restart your agent and you're done.</p>
+          <p class="step-desc">Creates your project store, registers the MCP server, and sets up hooks for Claude Code, Copilot, Cursor, and Codex. Restart your agent and you're done.</p>
           <span class="step-code">npx @alaarab/cortex init</span>
         </div>
         <div class="step reveal reveal-delay-3">
@@ -335,7 +335,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
           <div class="step-title">Knowledge compounds</div>
-          <p class="step-desc">Claude captures learnings as it works. When the session ends, a hook commits and pushes. Next session, next machine: it's all there.</p>
+          <p class="step-desc">Claude captures findings as it works. When the session ends, a hook commits and pushes. Next session, next machine: it's all there.</p>
           <span class="step-code">automatic</span>
         </div>
       </div>
@@ -416,7 +416,7 @@
         </div>
         <div class="ref-entry">
           <dt>Search is keyword-based.</dt>
-          <dd>FTS5 finds what you wrote, not what you meant. "component flickering" won't match a learning about "React re-render loops." Synonym expansion helps, but write learnings with the words you'll search for later.</dd>
+          <dd>FTS5 finds what you wrote, not what you meant. "component flickering" won't match a finding about "React re-render loops." Synonym expansion helps, but write findings with the words you'll search for later.</dd>
         </div>
         <div class="ref-entry">
           <dt>550 tokens per prompt. That's it.</dt>
@@ -424,7 +424,7 @@
         </div>
         <div class="ref-entry">
           <dt>Everything is a text file.</dt>
-          <dd><code>~/.cortex/project/LEARNINGS.md</code> is just markdown. No database, no binary blobs. You can read it, edit it, grep it, pipe it. If cortex disappears tomorrow, your data doesn't.</dd>
+          <dd><code>~/.cortex/project/FINDINGS.md</code> is just markdown. No database, no binary blobs. You can read it, edit it, grep it, pipe it. If cortex disappears tomorrow, your data doesn't.</dd>
         </div>
         <div class="ref-entry">
           <dt>Old memories fade.</dt>
@@ -453,7 +453,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
           <div class="bento-card-title">Search, not load</div>
-          <p class="bento-card-desc">Claude searches your knowledge base instead of loading everything upfront. Synonym expansion means "throttling" also finds "rate limit" and "429".</p>
+          <p class="bento-card-desc">Claude searches your project store instead of loading everything upfront. Synonym expansion means "throttling" also finds "rate limit" and "429".</p>
           <div class="token-bars">
             <div class="token-bar-row">
               <div class="token-bar-label">Without</div>
@@ -501,7 +501,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
           </div>
           <div class="bento-card-title">Automatic context</div>
-          <p class="bento-card-desc">Before each prompt, hooks search your knowledge base and inject what matches. Nothing if nothing matches, top 3 results (~400 tokens) if something does. Learnings auto-commit when the session ends. You don't do anything.</p>
+          <p class="bento-card-desc">Before each prompt, hooks search your project store and inject what matches. Nothing if nothing matches, top 3 results (~400 tokens) if something does. Findings auto-commit when the session ends. You don't do anything.</p>
           <div class="bento-stat">
             <div class="bento-stat-num">∞</div>
             <div class="bento-stat-label">sessions of context,<br>there next time you open Claude</div>
@@ -535,7 +535,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
           </div>
           <div class="feature-card-title">Quality controls</div>
-          <p class="feature-card-desc">Confidence scoring, feedback loops (helpful / reprompt / regression), and citation tracking. Every learning traces back to the code that prompted it.</p>
+          <p class="feature-card-desc">Confidence scoring, feedback loops (helpful / reprompt / regression), and citation tracking. Every finding traces back to the code that prompted it.</p>
           <div class="feature-card-link"><a href="#know">How it works</a></div>
         </div>
 
@@ -553,7 +553,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           </div>
           <div class="feature-card-title">Interactive shell</div>
-          <p class="feature-card-desc">Search, add learnings, pin memories, run doctor checks, review governance queues. All from a single <code style="font-size:12px;color:var(--copper-mid)">cortex</code> command with tab completion and history.</p>
+          <p class="feature-card-desc">Search, add findings, pin memories, run doctor checks, review governance queues. All from a single <code style="font-size:12px;color:var(--copper-mid)">cortex</code> command with tab completion and history.</p>
           <div class="feature-card-link"><a href="#demo">See it in action</a></div>
         </div>
 
@@ -562,7 +562,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
           <div class="feature-card-title">Multi-machine sync</div>
-          <p class="feature-card-desc">Machine profiles, hostname-based config, and git-backed sync. Start on your laptop, pick up on your desktop. Same knowledge base, different machines.</p>
+          <p class="feature-card-desc">Machine profiles, hostname-based config, and git-backed sync. Start on your laptop, pick up on your desktop. Same project store, different machines.</p>
           <div class="feature-card-link"><a href="#install">Get started</a></div>
         </div>
 
@@ -593,36 +593,7 @@
           <div class="terminal-dot terminal-dot-green"></div>
           <span class="terminal-title">cortex shell</span>
         </div>
-        <div class="demo-terminal-body">
-          <div class="demo-line demo-line-1">
-            <span class="demo-prompt">cortex &gt;</span>
-            <span class="demo-typed" style="--chars:26">search rate limit retries</span>
-          </div>
-          <div class="demo-line demo-result demo-line-2">
-            <span class="demo-result-project">api-gateway</span>
-            <span class="demo-result-text">retry after 429 uses exponential backoff with jitter, not fixed delay</span>
-          </div>
-          <div class="demo-line demo-result demo-line-3">
-            <span class="demo-result-project">billing-svc</span>
-            <span class="demo-result-text">stripe webhook retry window is 72h, not 24h as docs suggest</span>
-          </div>
-          <div class="demo-line demo-line-4">
-            <span class="demo-prompt">cortex &gt;</span>
-            <span class="demo-typed" style="--chars:35">add-learning api-gateway &quot;circuit<br>&nbsp;&nbsp;breaker threshold is 5 failures<br>&nbsp;&nbsp;in 30s, not 10&quot;</span>
-          </div>
-          <div class="demo-line demo-result demo-line-5">
-            <span class="demo-result-check">+</span>
-            <span class="demo-result-text">learning added to api-gateway</span>
-          </div>
-          <div class="demo-line demo-line-6">
-            <span class="demo-prompt">cortex &gt;</span>
-            <span class="demo-typed" style="--chars:6">doctor</span>
-          </div>
-          <div class="demo-line demo-result demo-line-7">
-            <span class="demo-result-check">+</span>
-            <span class="demo-result-text">all 8 checks passed</span>
-          </div>
-        </div>
+        <div class="demo-terminal-body" id="demo-terminal-body"></div>
       </div>
     </div>
   </section>
@@ -633,7 +604,7 @@
       <div class="install-header reveal">
         <div class="section-label">Get started</div>
         <h2 class="section-title">One command.</h2>
-        <p class="section-sub" style="margin-top:12px">Sets up your knowledge base, configures the MCP server, and hooks into Claude Code, Copilot, Cursor, and Codex.</p>
+        <p class="section-sub" style="margin-top:12px">Sets up your project store, configures the MCP server, and hooks into Claude Code, Copilot, Cursor, and Codex.</p>
       </div>
 
       <div class="install-tabs-container">
@@ -737,7 +708,7 @@
       <div class="skills-header reveal">
         <div class="section-label">Skills</div>
         <h2 class="section-title">19 MCP tools. Four skills.<br>Add your own.</h2>
-        <p class="section-sub" style="margin-top:12px">The MCP server handles search, backlogs, learnings, and governance. These four skills are for things you kick off yourself. Your own go in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
+        <p class="section-sub" style="margin-top:12px">The MCP server handles search, backlogs, findings, and governance. These four skills are for things you kick off yourself. Your own go in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
       </div>
 
       <div class="skills-grid">
@@ -755,7 +726,7 @@
         </div>
         <div class="skill-card reveal reveal-delay-1">
           <div class="skill-name">/cortex-consolidate</div>
-          <div class="skill-desc">Find patterns across all your project LEARNINGS.md files. Finds what shows up in more than one place.</div>
+          <div class="skill-desc">Find patterns across all your project FINDINGS.md files. Finds what shows up in more than one place.</div>
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
@@ -812,6 +783,8 @@
       <a href="#features">Features</a>
       <span>•</span>
       <a href="https://github.com/alaarab/cortex/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+      <span>•</span>
+      <a href="ide-setup.md">IDE Setup Guide</a>
     </div>
   </footer>
 

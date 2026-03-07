@@ -35,7 +35,7 @@ export interface AccessControlPatch {
   viewers?: string[];
 }
 
-export interface MemoryPolicy {
+export interface RetentionPolicy {
   schemaVersion?: number;
   ttlDays: number;
   retentionDays: number;
@@ -49,7 +49,7 @@ export interface MemoryPolicy {
   };
 }
 
-export interface MemoryWorkflowPolicy {
+export interface WorkflowPolicy {
   schemaVersion?: number;
   requireMaintainerApproval: boolean;
   lowConfidenceThreshold: number;
@@ -80,7 +80,7 @@ export interface RuntimeHealth {
   };
 }
 
-export interface MemoryScore {
+export interface EntryScore {
   impressions: number;
   helpful: number;
   repromptPenalty: number;
@@ -101,7 +101,7 @@ interface VersionedEntriesFile<T> {
 
 export const GOVERNANCE_SCHEMA_VERSION = 1;
 
-const DEFAULT_POLICY: MemoryPolicy = {
+const DEFAULT_POLICY: RetentionPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   ttlDays: 120,
   retentionDays: 365,
@@ -115,9 +115,9 @@ const DEFAULT_POLICY: MemoryPolicy = {
   },
 };
 
-export const DEFAULT_MEMORY_POLICY = DEFAULT_POLICY;
+export const DEFAULT_RETENTION_POLICY = DEFAULT_POLICY;
 
-const DEFAULT_WORKFLOW_POLICY: MemoryWorkflowPolicy = {
+const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   requireMaintainerApproval: true,
   lowConfidenceThreshold: 0.7,
@@ -151,7 +151,7 @@ const DEFAULT_RUNTIME_HEALTH: RuntimeHealth = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
 };
 
-const DEFAULT_MEMORY_SCORES_FILE: VersionedEntriesFile<MemoryScore> = {
+const DEFAULT_MEMORY_SCORES_FILE: VersionedEntriesFile<EntryScore> = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   entries: {},
 };
@@ -167,8 +167,8 @@ function governanceDir(cortexPath: string): string {
 
 type GovernanceSchema =
   | "access-control"
-  | "memory-policy"
-  | "memory-workflow-policy"
+  | "retention-policy"
+  | "workflow-policy"
   | "index-policy"
   | "runtime-health"
   | "memory-scores"
@@ -200,7 +200,7 @@ function cleanStringArray(value: unknown, fallback: string[]): string[] {
   return cleaned.length ? cleaned : [...fallback];
 }
 
-function isMemoryScore(value: unknown): value is MemoryScore {
+function isEntryScore(value: unknown): value is EntryScore {
   if (!isRecord(value)) return false;
   return isFiniteNumber(value.impressions)
     && isFiniteNumber(value.helpful)
@@ -230,7 +230,7 @@ const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unkn
     hasValidSchemaVersion(d) && ["admins", "maintainers", "contributors", "viewers"].every(
       (k) => !(k in d) || isStringArray(d[k])
     ),
-  "memory-policy": (d) =>
+  "retention-policy": (d) =>
     hasValidSchemaVersion(d)
     && ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"].every(
       (k) => !(k in d) || isFiniteNumber(d[k])
@@ -240,7 +240,7 @@ const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unkn
       const decay = d.decay;
       return ["d30", "d60", "d90", "d120"].every((k) => !(k in decay) || isFiniteNumber(decay[k]));
     })()),
-  "memory-workflow-policy": (d) =>
+  "workflow-policy": (d) =>
     hasValidSchemaVersion(d)
     && (!("requireMaintainerApproval" in d) || typeof d.requireMaintainerApproval === "boolean")
     && (!("lowConfidenceThreshold" in d) || isFiniteNumber(d.lowConfidenceThreshold))
@@ -266,7 +266,7 @@ const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unkn
     if (isVersionedEntries(d) && !hasValidSchemaVersion(d)) return false;
     if (isVersionedEntries(d) && !isRecord(d.entries)) return false;
     const entries = entriesObject(d);
-    return Object.values(entries).every((entry) => isMemoryScore(entry));
+    return Object.values(entries).every((entry) => isEntryScore(entry));
   },
   "canonical-locks": (d) => {
     if (isVersionedEntries(d) && !hasValidSchemaVersion(d)) return false;
@@ -290,15 +290,15 @@ const GOVERNANCE_REGISTRY: Record<GovernanceSchema, GovernanceRegistryEntry> = {
     defaults: () => ({ ...DEFAULT_ACCESS }),
     normalize: (d) => normalizeAccessControl(d) as unknown as Record<string, unknown>,
   },
-  "memory-policy": {
-    file: "memory-policy.json",
-    validate: GOVERNANCE_VALIDATORS["memory-policy"],
+  "retention-policy": {
+    file: "retention-policy.json",
+    validate: GOVERNANCE_VALIDATORS["retention-policy"],
     defaults: () => ({ ...DEFAULT_POLICY }),
-    normalize: (d) => normalizeMemoryPolicy(d) as unknown as Record<string, unknown>,
+    normalize: (d) => normalizeRetentionPolicy(d) as unknown as Record<string, unknown>,
   },
-  "memory-workflow-policy": {
-    file: "memory-workflow-policy.json",
-    validate: GOVERNANCE_VALIDATORS["memory-workflow-policy"],
+  "workflow-policy": {
+    file: "workflow-policy.json",
+    validate: GOVERNANCE_VALIDATORS["workflow-policy"],
     defaults: () => ({ ...DEFAULT_WORKFLOW_POLICY }),
     normalize: (d) => normalizeWorkflowPolicy(d) as unknown as Record<string, unknown>,
   },
@@ -318,7 +318,7 @@ const GOVERNANCE_REGISTRY: Record<GovernanceSchema, GovernanceRegistryEntry> = {
     file: "memory-scores.json",
     validate: GOVERNANCE_VALIDATORS["memory-scores"],
     defaults: () => ({ ...DEFAULT_MEMORY_SCORES_FILE }),
-    normalize: (d) => normalizeVersionedEntries(d, isMemoryScore) as unknown as Record<string, unknown>,
+    normalize: (d) => normalizeVersionedEntries(d, isEntryScore) as unknown as Record<string, unknown>,
   },
   "canonical-locks": {
     file: "canonical-locks.json",
@@ -391,7 +391,7 @@ function normalizeAccessControl(data: Record<string, unknown>): AccessControl {
   };
 }
 
-function normalizeMemoryPolicy(data: Record<string, unknown>): MemoryPolicy {
+function normalizeRetentionPolicy(data: Record<string, unknown>): RetentionPolicy {
   const decay = isRecord(data.decay) ? data.decay : {};
   return {
     schemaVersion: GOVERNANCE_SCHEMA_VERSION,
@@ -408,7 +408,7 @@ function normalizeMemoryPolicy(data: Record<string, unknown>): MemoryPolicy {
   };
 }
 
-function normalizeWorkflowPolicy(data: Record<string, unknown>): MemoryWorkflowPolicy {
+function normalizeWorkflowPolicy(data: Record<string, unknown>): WorkflowPolicy {
   const validSections = new Set(["Review", "Stale", "Conflicts"]);
   const riskySections = Array.isArray(data.riskySections)
     ? data.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => validSections.has(String(s)))
@@ -461,12 +461,64 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
   }
 }
 
-function writeJsonFile(filePath: string, data: unknown): void {
+export function withFileLock<T>(filePath: string, fn: () => T): T {
+  const lockPath = filePath + ".lock";
+  const maxWait = Number.parseInt(process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS || "5000", 10) || 5000;
+  const pollInterval = Number.parseInt(process.env.CORTEX_FILE_LOCK_POLL_MS || "100", 10) || 100;
+  const staleThreshold = Number.parseInt(process.env.CORTEX_FILE_LOCK_STALE_MS || "30000", 10) || 30000;
+  const waiter = new Int32Array(new SharedArrayBuffer(4));
+  const sleep = (ms: number) => Atomics.wait(waiter, 0, 0, ms);
+
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  let waited = 0;
+  let hasLock = false;
+  while (waited < maxWait) {
+    try {
+      fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
+      hasLock = true;
+      break;
+    } catch {
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > staleThreshold) {
+          fs.unlinkSync(lockPath);
+          continue;
+        }
+      } catch {
+        sleep(pollInterval);
+        waited += pollInterval;
+        continue;
+      }
+      sleep(pollInterval);
+      waited += pollInterval;
+    }
+  }
+
+  if (!hasLock) {
+    const msg = `withFileLock: could not acquire lock for "${path.basename(filePath)}" within ${maxWait}ms`;
+    debugLog(msg);
+    throw new Error(msg);
+  }
+
+  try {
+    return fn();
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch { /* lock may not exist */ }
+  }
+}
+
+function writeJsonFileUnlocked(filePath: string, data: unknown): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = path.join(dir, `.tmp-${crypto.randomUUID()}`);
   fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n");
   fs.renameSync(tmpPath, filePath);
+}
+
+function writeJsonFile(filePath: string, data: unknown): void {
+  withFileLock(filePath, () => {
+    writeJsonFileUnlocked(filePath, data);
+  });
 }
 
 function actorName(): string {
@@ -606,6 +658,82 @@ function usageLogFile(cortexPath: string): string {
   return path.join(governanceDir(cortexPath), "memory-usage.log");
 }
 
+function scoresJournalFile(cortexPath: string): string {
+  const dir = path.join(cortexPath, ".runtime");
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, "scores.jsonl");
+}
+
+interface ScoreJournalEntry {
+  key: string;
+  delta: { impressions?: number; helpful?: number; repromptPenalty?: number; regressionPenalty?: number };
+  at: string;
+}
+
+function appendScoreJournal(cortexPath: string, key: string, delta: ScoreJournalEntry["delta"]): void {
+  const file = scoresJournalFile(cortexPath);
+  const entry: ScoreJournalEntry = { key, delta, at: new Date().toISOString() };
+  withFileLock(file, () => {
+    fs.appendFileSync(file, JSON.stringify(entry) + "\n");
+  });
+}
+
+function readScoreJournal(cortexPath: string): ScoreJournalEntry[] {
+  const file = scoresJournalFile(cortexPath);
+  if (!fs.existsSync(file)) return [];
+  try {
+    return fs.readFileSync(file, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map(line => {
+        try { return JSON.parse(line) as ScoreJournalEntry; }
+        catch { return null; }
+      })
+      .filter((e): e is ScoreJournalEntry => e !== null);
+  } catch {
+    return [];
+  }
+}
+
+function claimScoreJournal(cortexPath: string): ScoreJournalEntry[] {
+  const file = scoresJournalFile(cortexPath);
+  let claimedFile: string | null = null;
+  withFileLock(file, () => {
+    if (!fs.existsSync(file)) return;
+    claimedFile = `${file}.${crypto.randomUUID()}.claim`;
+    fs.renameSync(file, claimedFile);
+    fs.writeFileSync(file, "");
+  });
+  if (!claimedFile) return [];
+  try {
+    return fs.readFileSync(claimedFile, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map(line => {
+        try { return JSON.parse(line) as ScoreJournalEntry; }
+        catch { return null; }
+      })
+      .filter((e): e is ScoreJournalEntry => e !== null);
+  } catch {
+    return [];
+  } finally {
+    try { fs.unlinkSync(claimedFile); } catch { /* best effort */ }
+  }
+}
+
+function aggregateJournalScores(entries: ScoreJournalEntry[]): Record<string, { impressions: number; helpful: number; repromptPenalty: number; regressionPenalty: number }> {
+  const agg: Record<string, { impressions: number; helpful: number; repromptPenalty: number; regressionPenalty: number }> = {};
+  for (const entry of entries) {
+    if (!agg[entry.key]) agg[entry.key] = { impressions: 0, helpful: 0, repromptPenalty: 0, regressionPenalty: 0 };
+    const a = agg[entry.key];
+    if (entry.delta.impressions) a.impressions += entry.delta.impressions;
+    if (entry.delta.helpful) a.helpful += entry.delta.helpful;
+    if (entry.delta.repromptPenalty) a.repromptPenalty += entry.delta.repromptPenalty;
+    if (entry.delta.regressionPenalty) a.regressionPenalty += entry.delta.regressionPenalty;
+  }
+  return agg;
+}
+
 function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRole {
   const acl = readJsonFile<AccessControl>(govFile(cortexPath, "access-control"), DEFAULT_ACCESS);
   if ((acl.admins || []).includes(actor)) return "admin";
@@ -621,7 +749,7 @@ export function getAccessControl(cortexPath: string): AccessControl {
 }
 
 export function updateAccessControl(cortexPath: string, patch: AccessControlPatch): CortexResult<AccessControl> {
-  const denial = checkMemoryPermission(cortexPath, "policy");
+  const denial = checkPermission(cortexPath, "policy");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   const current = getAccessControl(cortexPath);
   const next: AccessControl = {
@@ -643,22 +771,22 @@ function can(role: MemoryRole, action: MemoryAction): boolean {
   return action === "read";
 }
 
-export function checkMemoryPermission(cortexPath: string, action: MemoryAction, actor?: string): string | null {
+export function checkPermission(cortexPath: string, action: MemoryAction, actor?: string): string | null {
   const role = resolveRole(cortexPath, actor);
   if (can(role, action)) return null;
   return `Permission denied for ${actor || actorName()} (role=${role}) on action=${action}.`;
 }
 
-export function getMemoryPolicy(cortexPath: string): MemoryPolicy {
-  const parsed = readJsonFile<Partial<MemoryPolicy>>(govFile(cortexPath, "memory-policy"), {});
+export function getRetentionPolicy(cortexPath: string): RetentionPolicy {
+  const parsed = readJsonFile<Partial<RetentionPolicy>>(govFile(cortexPath, "retention-policy"), {});
   return withDefaults(parsed, DEFAULT_POLICY);
 }
 
-export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPolicy>): CortexResult<MemoryPolicy> {
-  const denial = checkMemoryPermission(cortexPath, "policy");
+export function updateRetentionPolicy(cortexPath: string, patch: Partial<RetentionPolicy>): CortexResult<RetentionPolicy> {
+  const denial = checkPermission(cortexPath, "policy");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  const current = getMemoryPolicy(cortexPath);
-  const next: MemoryPolicy = {
+  const current = getRetentionPolicy(cortexPath);
+  const next: RetentionPolicy = {
     ...current,
     ...patch,
     decay: {
@@ -666,13 +794,13 @@ export function updateMemoryPolicy(cortexPath: string, patch: Partial<MemoryPoli
       ...(patch.decay || {}),
     },
   };
-  writeJsonFile(govFile(cortexPath, "memory-policy"), next);
+  writeJsonFile(govFile(cortexPath, "retention-policy"), next);
   appendAuditLog(cortexPath, "update_policy", JSON.stringify(next));
   return cortexOk(next);
 }
 
-export function getMemoryWorkflowPolicy(cortexPath: string): MemoryWorkflowPolicy {
-  const parsed = readJsonFile<Partial<MemoryWorkflowPolicy>>(govFile(cortexPath, "memory-workflow-policy"), {});
+export function getWorkflowPolicy(cortexPath: string): WorkflowPolicy {
+  const parsed = readJsonFile<Partial<WorkflowPolicy>>(govFile(cortexPath, "workflow-policy"), {});
   const merged = withDefaults(parsed, DEFAULT_WORKFLOW_POLICY);
   const validSections = new Set(["Review", "Stale", "Conflicts"]);
   merged.riskySections = merged.riskySections.filter((s) => validSections.has(s));
@@ -680,23 +808,23 @@ export function getMemoryWorkflowPolicy(cortexPath: string): MemoryWorkflowPolic
   return merged;
 }
 
-export function updateMemoryWorkflowPolicy(
+export function updateWorkflowPolicy(
   cortexPath: string,
-  patch: Partial<MemoryWorkflowPolicy>
-): CortexResult<MemoryWorkflowPolicy> {
-  const denial = checkMemoryPermission(cortexPath, "policy");
+  patch: Partial<WorkflowPolicy>
+): CortexResult<WorkflowPolicy> {
+  const denial = checkPermission(cortexPath, "policy");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  const current = getMemoryWorkflowPolicy(cortexPath);
+  const current = getWorkflowPolicy(cortexPath);
   const riskySections = Array.isArray(patch.riskySections)
     ? patch.riskySections.filter((s): s is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(s)))
     : current.riskySections;
-  const next: MemoryWorkflowPolicy = {
+  const next: WorkflowPolicy = {
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     requireMaintainerApproval: patch.requireMaintainerApproval ?? current.requireMaintainerApproval,
     lowConfidenceThreshold: patch.lowConfidenceThreshold ?? current.lowConfidenceThreshold,
     riskySections: riskySections.length ? riskySections : current.riskySections,
   };
-  writeJsonFile(govFile(cortexPath, "memory-workflow-policy"), next);
+  writeJsonFile(govFile(cortexPath, "workflow-policy"), next);
   appendAuditLog(cortexPath, "update_workflow_policy", JSON.stringify(next));
   return cortexOk(next);
 }
@@ -712,7 +840,7 @@ export function getIndexPolicy(cortexPath: string): IndexPolicy {
 }
 
 export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy>): CortexResult<IndexPolicy> {
-  const denial = checkMemoryPermission(cortexPath, "policy");
+  const denial = checkPermission(cortexPath, "policy");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   const current = getIndexPolicy(cortexPath);
   const next: IndexPolicy = {
@@ -737,27 +865,31 @@ export function getRuntimeHealth(cortexPath: string): RuntimeHealth {
 }
 
 export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHealth>): RuntimeHealth {
-  const current = getRuntimeHealth(cortexPath);
-  const next: RuntimeHealth = {
-    schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
-    ...current,
-    ...patch,
-    lastAutoSave: patch.lastAutoSave ?? current.lastAutoSave,
-    lastGovernance: patch.lastGovernance ?? current.lastGovernance,
-  };
-  writeJsonFile(govFile(cortexPath, "runtime-health"), next);
-  return next;
+  const file = govFile(cortexPath, "runtime-health");
+  return withFileLock(file, () => {
+    const parsed = readJsonFile<Record<string, unknown>>(file, {});
+    const current = isRecord(parsed) ? normalizeRuntimeHealth(parsed) : { ...DEFAULT_RUNTIME_HEALTH };
+    const next: RuntimeHealth = {
+      schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
+      ...current,
+      ...patch,
+      lastAutoSave: patch.lastAutoSave ?? current.lastAutoSave,
+      lastGovernance: patch.lastGovernance ?? current.lastGovernance,
+    };
+    writeJsonFileUnlocked(file, next);
+    return next;
+  });
 }
 
-let _scoresCache: Record<string, MemoryScore> | null = null;
+let _scoresCache: Record<string, EntryScore> | null = null;
 let _scoresCachePath: string | null = null;
 let _scoresDirty = false;
 
-function loadMemoryScores(cortexPath: string): Record<string, MemoryScore> {
+function loadEntryScores(cortexPath: string): Record<string, EntryScore> {
   const file = govFile(cortexPath, "memory-scores");
   if (_scoresCache && _scoresCachePath === file) return _scoresCache;
   const parsed = readJsonFile<Record<string, unknown>>(file, {});
-  _scoresCache = isRecord(parsed) ? normalizeVersionedEntries(parsed, isMemoryScore).entries : {};
+  _scoresCache = isRecord(parsed) ? normalizeVersionedEntries(parsed, isEntryScore).entries : {};
   _scoresCachePath = file;
   _scoresDirty = false;
   return _scoresCache;
@@ -780,23 +912,38 @@ export function hashContent(content: string): string {
   return crypto.createHash("sha256").update(content).digest("hex");
 }
 
-function saveMemoryScores(cortexPath: string, scores: Record<string, MemoryScore>) {
+function saveEntryScores(cortexPath: string, scores: Record<string, EntryScore>) {
   _scoresCache = scores;
   _scoresCachePath = govFile(cortexPath, "memory-scores");
   _scoresDirty = true;
 }
 
-export function flushMemoryScores(cortexPath: string): void {
+export function flushEntryScores(cortexPath: string): void {
+  const journalEntries = claimScoreJournal(cortexPath);
+  if (journalEntries.length > 0) {
+    const scores = loadEntryScores(cortexPath);
+    const agg = aggregateJournalScores(journalEntries);
+    for (const [key, deltas] of Object.entries(agg)) {
+      const entry = ensureScoreEntry(scores, key);
+      entry.impressions += deltas.impressions;
+      entry.helpful += deltas.helpful;
+      entry.repromptPenalty += deltas.repromptPenalty;
+      entry.regressionPenalty += deltas.regressionPenalty;
+    }
+    _scoresCache = scores;
+    _scoresDirty = true;
+  }
+
   if (_scoresDirty && _scoresCache && _scoresCachePath === govFile(cortexPath, "memory-scores")) {
     writeJsonFile(_scoresCachePath, {
       schemaVersion: GOVERNANCE_SCHEMA_VERSION,
       entries: _scoresCache,
-    } satisfies VersionedEntriesFile<MemoryScore>);
+    } satisfies VersionedEntriesFile<EntryScore>);
     _scoresDirty = false;
   }
 }
 
-function ensureScoreEntry(scores: Record<string, MemoryScore>, key: string): MemoryScore {
+function ensureScoreEntry(scores: Record<string, EntryScore>, key: string): EntryScore {
   if (!scores[key]) {
     scores[key] = {
       impressions: 0,
@@ -809,18 +956,14 @@ function ensureScoreEntry(scores: Record<string, MemoryScore>, key: string): Mem
   return scores[key];
 }
 
-export function memoryScoreKey(project: string, filename: string, snippet: string): string {
+export function entryScoreKey(project: string, filename: string, snippet: string): string {
   const short = snippet.replace(/\s+/g, " ").slice(0, 200);
   const digest = crypto.createHash("sha1").update(`${project}:${filename}:${short}`).digest("hex").slice(0, 12);
   return `${project}/${filename}:${digest}`;
 }
 
-export function recordMemoryInjection(cortexPath: string, key: string, sessionId?: string): void {
-  const scores = loadMemoryScores(cortexPath);
-  const entry = ensureScoreEntry(scores, key);
-  entry.impressions += 1;
-  entry.lastUsedAt = new Date().toISOString();
-  saveMemoryScores(cortexPath, scores);
+export function recordInjection(cortexPath: string, key: string, sessionId?: string): void {
+  appendScoreJournal(cortexPath, key, { impressions: 1 });
   const session = sessionId || "none";
   const logFile = usageLogFile(cortexPath);
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
@@ -840,34 +983,87 @@ export function recordMemoryInjection(cortexPath: string, key: string, sessionId
   }
 }
 
-export function recordMemoryFeedback(
+export function recordFeedback(
   cortexPath: string,
   key: string,
   feedback: "helpful" | "reprompt" | "regression"
 ): void {
-  const scores = loadMemoryScores(cortexPath);
-  const entry = ensureScoreEntry(scores, key);
-  if (feedback === "helpful") entry.helpful += 1;
-  if (feedback === "reprompt") entry.repromptPenalty += 1;
-  if (feedback === "regression") entry.regressionPenalty += 1;
-  saveMemoryScores(cortexPath, scores);
+  const delta: ScoreJournalEntry["delta"] = {};
+  if (feedback === "helpful") delta.helpful = 1;
+  if (feedback === "reprompt") delta.repromptPenalty = 1;
+  if (feedback === "regression") delta.regressionPenalty = 1;
+  appendScoreJournal(cortexPath, key, delta);
   appendAuditLog(cortexPath, "memory_feedback", `key=${key} feedback=${feedback}`);
 }
 
-export function getMemoryQualityMultiplier(cortexPath: string, key: string): number {
-  const scores = loadMemoryScores(cortexPath);
+export function getQualityMultiplier(cortexPath: string, key: string): number {
+  const scores = loadEntryScores(cortexPath);
   const entry = scores[key];
-  if (!entry) return 1;
-  const helpful = entry.helpful;
-  const penalties = entry.repromptPenalty + entry.regressionPenalty * 2;
+  let helpful = entry ? entry.helpful : 0;
+  let repromptPenalty = entry ? entry.repromptPenalty : 0;
+  let regressionPenalty = entry ? entry.regressionPenalty : 0;
+
+  // Include unflushed journal deltas
+  const journalEntries = readScoreJournal(cortexPath).filter(e => e.key === key);
+  for (const je of journalEntries) {
+    if (je.delta.helpful) helpful += je.delta.helpful;
+    if (je.delta.repromptPenalty) repromptPenalty += je.delta.repromptPenalty;
+    if (je.delta.regressionPenalty) regressionPenalty += je.delta.regressionPenalty;
+  }
+
+  if (!entry && journalEntries.length === 0) return 1;
+  const penalties = repromptPenalty + regressionPenalty * 2;
   const raw = 1 + helpful * 0.15 - penalties * 0.2;
   return Math.max(0.2, Math.min(1.5, raw));
 }
 
+interface RetrievalLogEntry {
+  file: string;
+  section: string;
+  retrievedAt: string;
+}
+
+export function recordRetrieval(cortexPath: string, file: string, section: string): void {
+  const dir = path.join(cortexPath, ".runtime");
+  fs.mkdirSync(dir, { recursive: true });
+  const logPath = path.join(dir, "retrieval-log.jsonl");
+  const entry: RetrievalLogEntry = { file, section, retrievedAt: new Date().toISOString() };
+  fs.appendFileSync(logPath, JSON.stringify(entry) + "\n");
+
+  // Truncate to last 1000 lines if >500KB (same pattern as audit log)
+  try {
+    const stat = fs.statSync(logPath);
+    if (stat.size > 500_000) {
+      const content = fs.readFileSync(logPath, "utf8");
+      const lines = content.split("\n").filter(Boolean);
+      fs.writeFileSync(logPath, lines.slice(-1000).join("\n") + "\n");
+    }
+  } catch {
+    // best effort
+  }
+}
+
+function readRetrievalLog(cortexPath: string): RetrievalLogEntry[] {
+  const logPath = path.join(cortexPath, ".runtime", "retrieval-log.jsonl");
+  if (!fs.existsSync(logPath)) return [];
+  try {
+    return fs.readFileSync(logPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map(line => {
+        try { return JSON.parse(line) as RetrievalLogEntry; }
+        catch { return null; }
+      })
+      .filter((e): e is RetrievalLogEntry => e !== null);
+  } catch {
+    return [];
+  }
+}
+
 export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?: boolean): CortexResult<string> {
-  const denial = checkMemoryPermission(cortexPath, "delete");
+  const denial = checkPermission(cortexPath, "delete");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  const policy = getMemoryPolicy(cortexPath);
+  const policy = getRetentionPolicy(cortexPath);
   const dirs = project
     ? [path.join(cortexPath, project)]
     : getProjectDirs(cortexPath).filter((d) => path.basename(d) !== "global");
@@ -876,7 +1072,7 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
   const dryRunDetails: string[] = [];
 
   for (const dir of dirs) {
-    const file = path.join(dir, "LEARNINGS.md");
+    const file = path.join(dir, "FINDINGS.md");
     if (!fs.existsSync(file)) continue;
     const content = fs.readFileSync(file, "utf8");
     const lines = content.split("\n");
@@ -949,7 +1145,7 @@ export function enforceCanonicalLocks(cortexPath: string, project?: string): str
     const currentHash = hashContent(content);
     if (currentHash === lock.hash) continue;
     fs.writeFileSync(file, lock.snapshot);
-    appendMemoryQueue(cortexPath, p, "Conflicts", ["Canonical memory drift detected and auto-restored"]);
+    appendReviewQueue(cortexPath, p, "Conflicts", ["Canonical memory drift detected and auto-restored"]);
     appendAuditLog(cortexPath, "canonical_restore", `project=${p}`);
     restored++;
   }
@@ -958,18 +1154,18 @@ export function enforceCanonicalLocks(cortexPath: string, project?: string): str
   return `Canonical locks checked=${checked}, restored=${restored}`;
 }
 
-export function consolidateProjectLearnings(cortexPath: string, project: string, dryRun?: boolean): CortexResult<string> {
-  const denial = checkMemoryPermission(cortexPath, "delete");
+export function consolidateProjectFindings(cortexPath: string, project: string, dryRun?: boolean): CortexResult<string> {
+  const denial = checkPermission(cortexPath, "delete");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const file = path.join(cortexPath, project, "LEARNINGS.md");
-  if (!fs.existsSync(file)) return cortexErr(`No LEARNINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
+  const file = path.join(cortexPath, project, "FINDINGS.md");
+  if (!fs.existsSync(file)) return cortexErr(`No FINDINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
 
   const raw = fs.readFileSync(file, "utf8");
   const lines = raw.split("\n");
   const byDate = new Map<string, Map<string, { bullet: string; citation?: string }>>();
   let currentDate: string | null = null;
-  const title = lines.find((l) => l.startsWith("# ")) || `# ${project} LEARNINGS`;
+  const title = lines.find((l) => l.startsWith("# ")) || `# ${project} Findings`;
   let totalBullets = 0;
   let uniqueBullets = 0;
 
@@ -1019,20 +1215,20 @@ export function consolidateProjectLearnings(cortexPath: string, project: string,
   fs.copyFileSync(file, file + ".bak");
   fs.writeFileSync(file, out.join("\n").trimEnd() + "\n");
   appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
-  return cortexOk(`Consolidated learnings for ${project}.`);
+  return cortexOk(`Consolidated findings for ${project}.`);
 }
 
 function normalizeBulletForQueue(line: string): string {
   return line.startsWith("- ") ? line.slice(2).trim() : line.trim();
 }
 
-export function appendMemoryQueue(
+export function appendReviewQueue(
   cortexPath: string,
   project: string,
   section: "Review" | "Stale" | "Conflicts",
   entries: string[]
 ): CortexResult<number> {
-  const denial = checkMemoryPermission(cortexPath, "queue");
+  const denial = checkPermission(cortexPath, "queue");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(cortexPath, project);

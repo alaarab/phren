@@ -155,7 +155,7 @@ export function ensureCortexPath(): string {
   fs.mkdirSync(defaultPath, { recursive: true });
   fs.writeFileSync(
     path.join(defaultPath, "README.md"),
-    `# My Cortex\n\nThis is your personal knowledge base. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md LEARNINGS.md backlog.md\n\`\`\`\n\nOr run \`/cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
+    `# My Cortex\n\nThis is your personal knowledge base. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md FINDINGS.md backlog.md\n\`\`\`\n\nOr run \`/cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
   );
   console.error(`Created ~/.cortex`);
   return defaultPath;
@@ -259,83 +259,3 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
     debugLog(`Audit log write failed: ${err.message}`);
   }
 }
-
-// Re-export everything from the focused modules so existing imports from "./shared.js" keep working.
-
-export {
-  type AccessControlPatch,
-  type MemoryPolicy,
-  type MemoryWorkflowPolicy,
-  type IndexPolicy,
-  type RuntimeHealth,
-  type MemoryScore,
-  type GovernanceMigrationOptions,
-  type GovernanceMigrationResult,
-  type GovernanceMigrationReport,
-  GOVERNANCE_SCHEMA_VERSION,
-  DEFAULT_MEMORY_POLICY,
-  validateGovernanceJson,
-  migrateGovernance,
-  migrateGovernanceFiles,
-  getAccessControl,
-  updateAccessControl,
-  checkMemoryPermission,
-  getMemoryPolicy,
-  updateMemoryPolicy,
-  getMemoryWorkflowPolicy,
-  updateMemoryWorkflowPolicy,
-  getIndexPolicy,
-  updateIndexPolicy,
-  getRuntimeHealth,
-  updateRuntimeHealth,
-  flushMemoryScores,
-  memoryScoreKey,
-  recordMemoryInjection,
-  recordMemoryFeedback,
-  getMemoryQualityMultiplier,
-  pruneDeadMemories,
-  enforceCanonicalLocks,
-  consolidateProjectLearnings,
-  appendMemoryQueue,
-  loadCanonicalLocks,
-  saveCanonicalLocks,
-  hashContent,
-} from "./shared-governance.js";
-
-export {
-  buildIndex,
-  type DocRow,
-  rowToDoc,
-  queryDocRows,
-  queryRows,
-  extractSnippet,
-  detectProject,
-  resolveImports,
-  cosineFallback,
-} from "./shared-index.js";
-
-export {
-  type ConsolidationNeeded,
-  type LearningCitation,
-  type LearningTrustIssue,
-  type TrustFilterOptions,
-  checkConsolidationNeeded,
-  validateLearningsFormat,
-  stripBacklogDoneSection,
-  validateBacklogFormat,
-  extractConflictVersions,
-  mergeLearnings,
-  mergeBacklog,
-  autoMergeConflicts,
-  filterTrustedLearnings,
-  filterTrustedLearningsDetailed,
-  migrateLegacyFindings,
-  upsertCanonicalMemory,
-  addLearningToFile,
-  addLearningsToFile,
-  isDuplicateLearning,
-  clearCitationCaches,
-  countActiveLearnings,
-  autoArchiveToKnowledge,
-  KNOWN_OBSERVATION_TAGS,
-} from "./shared-content.js";

@@ -2,7 +2,7 @@
 
 ## Before upgrading
 
-Back up your knowledge base:
+Back up your project store:
 
 ```bash
 cp -r ~/.cortex ~/.cortex-backup-$(date +%Y%m%d)
@@ -28,7 +28,7 @@ cortex doctor --fix
 This handles:
 - Legacy file locations to `.runtime/` and `.sessions/` subdirectories
 - Old hook formats to current lifecycle command format
-- Legacy findings to LEARNINGS.md entries
+- Legacy findings to FINDINGS.md entries
 - Stale symlinks to refreshed project links
 
 ## Manual steps

@@ -5,17 +5,17 @@ import * as os from "os";
 import * as path from "path";
 import * as http from "http";
 import * as querystring from "querystring";
-import { createMemoryUiServer } from "./memory-ui.js";
+import { createReviewUiServer } from "./memory-ui.js";
 
 function seedProject(root: string): void {
   write(
-    path.join(root, "demo", "LEARNINGS.md"),
+    path.join(root, "demo", "FINDINGS.md"),
     [
-      "# demo LEARNINGS",
+      "# demo FINDINGS",
       "",
       "## 2026-03-01",
       "",
-      "- Existing learning",
+      "- Existing finding",
       "",
     ].join("\n")
   );
@@ -75,7 +75,7 @@ async function postForm(
   });
 }
 
-describe.sequential("memory-ui server", () => {
+describe.sequential("review-ui server", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -83,19 +83,19 @@ describe.sequential("memory-ui server", () => {
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-memory-ui-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-review-ui-test-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "memory-ui-admin";
+    process.env.CORTEX_ACTOR = "review-ui-admin";
     write(
       path.join(tmpRoot, ".governance", "access-control.json"),
       JSON.stringify({
-        admins: ["memory-ui-admin"],
+        admins: ["review-ui-admin"],
         maintainers: [],
         contributors: [],
         viewers: [],
       }, null, 2) + "\n"
     );
-    server = createMemoryUiServer(tmpRoot);
+    server = createReviewUiServer(tmpRoot);
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -146,18 +146,18 @@ describe.sequential("memory-ui server", () => {
     expect(queueFinal).not.toContain("keep this memory updated");
     expect(queueFinal).not.toContain("Remove stale memory");
 
-    const learnings = fs.readFileSync(path.join(tmpRoot, "demo", "LEARNINGS.md"), "utf8");
-    expect(learnings).toContain("keep this memory updated");
+    const findings = fs.readFileSync(path.join(tmpRoot, "demo", "FINDINGS.md"), "utf8");
+    expect(findings).toContain("keep this memory updated");
   });
 
   it("returns 403 when contributor tries to approve risky queue item", async () => {
-    process.env.CORTEX_ACTOR = "memory-ui-contributor";
+    process.env.CORTEX_ACTOR = "review-ui-contributor";
     write(
       path.join(tmpRoot, ".governance", "access-control.json"),
       JSON.stringify({
         admins: [],
         maintainers: [],
-        contributors: ["memory-ui-contributor"],
+        contributors: ["review-ui-contributor"],
         viewers: [],
       }, null, 2) + "\n"
     );
@@ -234,7 +234,7 @@ describe.sequential("memory-ui server", () => {
   });
 });
 
-describe.sequential("memory-ui CSRF protection", () => {
+describe.sequential("review-ui CSRF protection", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -245,18 +245,18 @@ describe.sequential("memory-ui CSRF protection", () => {
   beforeEach(async () => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-csrf-test-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "memory-ui-admin";
+    process.env.CORTEX_ACTOR = "review-ui-admin";
     write(
       path.join(tmpRoot, ".governance", "access-control.json"),
       JSON.stringify({
-        admins: ["memory-ui-admin"],
+        admins: ["review-ui-admin"],
         maintainers: [],
         contributors: [],
         viewers: [],
       }, null, 2) + "\n"
     );
     csrfTokens = new Set<string>();
-    server = createMemoryUiServer(tmpRoot, { csrfTokens });
+    server = createReviewUiServer(tmpRoot, { csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });

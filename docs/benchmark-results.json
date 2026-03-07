@@ -1,0 +1,35 @@
+{
+  "runDate": "2026-03-07T06:41:27.582Z",
+  "totalSessions": 3,
+  "totalQuestions": 9,
+  "recall_at_1": 0.111,
+  "recall_at_3": 0.111,
+  "recall_at_5": 0.111,
+  "mrr": 0.111,
+  "sessions": [
+    {
+      "sessionId": "toy-1",
+      "questions": 3,
+      "recall_at_1": 0.333,
+      "recall_at_3": 0.333,
+      "recall_at_5": 0.333,
+      "mrr": 0.333
+    },
+    {
+      "sessionId": "toy-2",
+      "questions": 3,
+      "recall_at_1": 0,
+      "recall_at_3": 0,
+      "recall_at_5": 0,
+      "mrr": 0
+    },
+    {
+      "sessionId": "toy-3",
+      "questions": 3,
+      "recall_at_1": 0,
+      "recall_at_3": 0,
+      "recall_at_5": 0,
+      "mrr": 0
+    }
+  ]
+}

@@ -47,8 +47,8 @@ describe("CLI integration: search", () => {
     const projDir = path.join(cortexDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(
-      path.join(projDir, "LEARNINGS.md"),
-      "# test-proj LEARNINGS\n\n## 2025-01-01\n\n- Always restart the server after config changes\n"
+      path.join(projDir, "FINDINGS.md"),
+      "# test-proj FINDINGS\n\n## 2025-01-01\n\n- Always restart the server after config changes\n"
     );
     fs.writeFileSync(
       path.join(projDir, "summary.md"),
@@ -60,7 +60,7 @@ describe("CLI integration: search", () => {
     );
     fs.writeFileSync(
       path.join(projDir, "SEARCH_WEAK.md"),
-      "# Weak\n\nrestart notes only\n"
+      "# Weak\n\nrestart server notes\n"
     );
   });
 
@@ -147,7 +147,7 @@ describe("CLI integration: doctor", () => {
   });
 });
 
-describe("CLI integration: add-learning", () => {
+describe("CLI integration: add-finding", () => {
   let cortexDir: string;
   let cleanup: () => void;
 
@@ -159,23 +159,23 @@ describe("CLI integration: add-learning", () => {
 
   afterEach(() => cleanup());
 
-  it("writes a learning to LEARNINGS.md", () => {
+  it("writes a finding to FINDINGS.md", () => {
     const { stdout, exitCode } = runCli(
-      ["add-learning", "test-proj", "cache invalidation matters"],
+      ["add-finding", "test-proj", "cache invalidation matters"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("added insight");
 
-    const learningsPath = path.join(cortexDir, "test-proj", "LEARNINGS.md");
-    expect(fs.existsSync(learningsPath)).toBe(true);
-    const content = fs.readFileSync(learningsPath, "utf8");
+    const findingsPath = path.join(cortexDir, "test-proj", "FINDINGS.md");
+    expect(fs.existsSync(findingsPath)).toBe(true);
+    const content = fs.readFileSync(findingsPath, "utf8");
     expect(content).toContain("cache invalidation matters");
   });
 
-  it("exits with error when project or learning is missing", () => {
+  it("exits with error when project or finding is missing", () => {
     const { stderr, exitCode } = runCli(
-      ["add-learning"],
+      ["add-finding"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
@@ -183,7 +183,7 @@ describe("CLI integration: add-learning", () => {
   });
 });
 
-describe("CLI integration: pin-memory", () => {
+describe("CLI integration: pin", () => {
   let cortexDir: string;
   let cleanup: () => void;
 
@@ -197,7 +197,7 @@ describe("CLI integration: pin-memory", () => {
 
   it("writes a pinned memory to CANONICAL_MEMORIES.md", () => {
     const { stdout, exitCode } = runCli(
-      ["pin-memory", "test-proj", "always use UTC timestamps"],
+      ["pin", "test-proj", "always use UTC timestamps"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -211,7 +211,7 @@ describe("CLI integration: pin-memory", () => {
 
   it("exits with error when project or memory is missing", () => {
     const { stderr, exitCode } = runCli(
-      ["pin-memory"],
+      ["pin"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
@@ -228,8 +228,8 @@ describe("CLI integration: maintain migrate", () => {
     const projectDir = path.join(cortexDir, "test-proj");
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(
-      path.join(projectDir, "FINDINGS.md"),
-      "# Findings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
+      path.join(projectDir, "LEARNINGS.md"),
+      "# Learnings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
     );
   });
 
@@ -273,15 +273,15 @@ describe("CLI integration: destructive backup reporting", () => {
     const projectDir = path.join(cortexDir, "test-proj");
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(
-      path.join(projectDir, "LEARNINGS.md"),
-      "# test-proj LEARNINGS\n\n## 2020-01-01\n\n- old memory to prune\n\n## 2026-01-01\n\n- fresh memory\n"
+      path.join(projectDir, "FINDINGS.md"),
+      "# test-proj FINDINGS\n\n## 2020-01-01\n\n- old memory to prune\n\n## 2026-01-01\n\n- fresh memory\n"
     );
   });
 
   afterEach(() => cleanup());
 
   it("prune --dry-run does not create backups", () => {
-    const backupPath = path.join(cortexDir, "test-proj", "LEARNINGS.md.bak");
+    const backupPath = path.join(cortexDir, "test-proj", "FINDINGS.md.bak");
     const { stdout, exitCode } = runCli(
       ["maintain", "prune", "test-proj", "--dry-run"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
@@ -292,26 +292,26 @@ describe("CLI integration: destructive backup reporting", () => {
   });
 
   it("prune reports updated backup paths on write", () => {
-    const backupPath = path.join(cortexDir, "test-proj", "LEARNINGS.md.bak");
+    const backupPath = path.join(cortexDir, "test-proj", "FINDINGS.md.bak");
     const { stdout, exitCode } = runCli(
       ["maintain", "prune", "test-proj"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Pruned");
-    expect(stdout).toContain("Updated backups (1): test-proj/LEARNINGS.md.bak");
+    expect(stdout).toContain("Updated backups (1): test-proj/FINDINGS.md.bak");
     expect(fs.existsSync(backupPath)).toBe(true);
   });
 
   it("consolidate reports updated backup paths on write", () => {
-    const backupPath = path.join(cortexDir, "test-proj", "LEARNINGS.md.bak");
+    const backupPath = path.join(cortexDir, "test-proj", "FINDINGS.md.bak");
     const { stdout, exitCode } = runCli(
       ["maintain", "consolidate", "test-proj"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Consolidated learnings for test-proj.");
-    expect(stdout).toContain("Updated backups (1): test-proj/LEARNINGS.md.bak");
+    expect(stdout).toContain("Consolidated findings for test-proj.");
+    expect(stdout).toContain("Updated backups (1): test-proj/FINDINGS.md.bak");
     expect(fs.existsSync(backupPath)).toBe(true);
   });
 });
@@ -328,7 +328,7 @@ describe("CLI integration: search edge cases", () => {
     ({ cortexDir, cleanup } = setupCortexDir());
     const projDir = path.join(cortexDir, "alpha");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# alpha LEARNINGS\n\n## 2025-06-01\n\n- caching layer timeout fix\n- database connection pool sizing\n");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# alpha FINDINGS\n\n## 2025-06-01\n\n- caching layer timeout fix\n- database connection pool sizing\n");
     fs.writeFileSync(path.join(projDir, "summary.md"), "# alpha\n\n**What:** A caching project\n");
     fs.writeFileSync(path.join(projDir, "backlog.md"), "# alpha Backlog\n\n## Active\n\n- Implement retry logic\n\n## Queue\n\n- Refactor config loader\n\n## Done\n\n- Initial setup\n");
     fs.writeFileSync(path.join(projDir, "CANONICAL_MEMORIES.md"), "# Canonical\n\n- Always use UTC timestamps (pinned)\n");
@@ -337,13 +337,13 @@ describe("CLI integration: search edge cases", () => {
 
   afterEach(() => cleanup());
 
-  it("--type learnings filters to learnings docs only", () => {
+  it("--type findings filters to findings docs only", () => {
     const { stdout, exitCode } = runCli(
-      ["search", "caching", "--project", "alpha", "--type", "learnings"],
+      ["search", "caching", "--project", "alpha", "--type", "findings"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("LEARNINGS");
+    expect(stdout).toContain("FINDINGS");
   });
 
   it("--type skills is aliased to skill", () => {
@@ -686,7 +686,7 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain govern with no project governs all projects", () => {
     const projDir = path.join(cortexDir, "gov-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# gov-proj LEARNINGS\n\n## 2025-01-01\n\n- a useful insight\n");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-proj FINDINGS\n\n## 2025-01-01\n\n- a useful insight\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "govern"],
@@ -699,7 +699,7 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain govern with specific project", () => {
     const projDir = path.join(cortexDir, "gov-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# gov-proj LEARNINGS\n\n## 2025-01-01\n\n- a useful insight\n");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-proj FINDINGS\n\n## 2025-01-01\n\n- a useful insight\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "govern", "gov-proj"],
@@ -712,7 +712,7 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain govern --dry-run does not write queue files", () => {
     const projDir = path.join(cortexDir, "gov-dry");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# gov-dry LEARNINGS\n\n## 2020-01-01\n\n- wip\n- temp note\n");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-dry FINDINGS\n\n## 2020-01-01\n\n- wip\n- temp note\n");
 
     const queuePath = path.join(projDir, "MEMORY_QUEUE.md");
     expect(fs.existsSync(queuePath)).toBe(false);
@@ -731,7 +731,7 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain govern --dry-run with no project previews all", () => {
     const projDir = path.join(cortexDir, "gov-dry2");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# gov-dry2 LEARNINGS\n\n## 2025-01-01\n\n- useful thing\n");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-dry2 FINDINGS\n\n## 2025-01-01\n\n- useful thing\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "govern", "--dry-run"],
@@ -744,15 +744,15 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain consolidate --dry-run does not modify files", () => {
     const projDir = path.join(cortexDir, "cons-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# cons-proj LEARNINGS\n\n## 2025-01-01\n\n- insight one\n- insight two\n");
-    const before = fs.readFileSync(path.join(projDir, "LEARNINGS.md"), "utf8");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# cons-proj FINDINGS\n\n## 2025-01-01\n\n- insight one\n- insight two\n");
+    const before = fs.readFileSync(path.join(projDir, "FINDINGS.md"), "utf8");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "consolidate", "cons-proj", "--dry-run"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    const after = fs.readFileSync(path.join(projDir, "LEARNINGS.md"), "utf8");
+    const after = fs.readFileSync(path.join(projDir, "FINDINGS.md"), "utf8");
     expect(after).toBe(before);
   });
 
@@ -768,7 +768,7 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain migrate all runs both governance and data", () => {
     const projDir = path.join(cortexDir, "migrate-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n\n- Legacy finding one\n");
+    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- Legacy finding one\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "migrate", "all", "migrate-proj"],
@@ -782,7 +782,7 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain migrate legacy alias (just project name)", () => {
     const projDir = path.join(cortexDir, "legacy-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n\n- Legacy finding\n");
+    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- Legacy finding\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "migrate", "legacy-proj", "--dry-run"],
@@ -804,7 +804,7 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain consolidate with no project consolidates all", () => {
     const projDir = path.join(cortexDir, "multi-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# multi-proj LEARNINGS\n\n## 2025-01-01\n\n- fact\n");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# multi-proj FINDINGS\n\n## 2025-01-01\n\n- fact\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "consolidate"],
@@ -845,7 +845,7 @@ describe("CLI integration: quality-feedback", () => {
 
   it("records helpful feedback", () => {
     const { stdout, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/LEARNINGS.md:insight1", "--type=helpful"],
+      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight1", "--type=helpful"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -854,7 +854,7 @@ describe("CLI integration: quality-feedback", () => {
 
   it("records reprompt feedback", () => {
     const { stdout, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/LEARNINGS.md:insight2", "--type=reprompt"],
+      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight2", "--type=reprompt"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -863,7 +863,7 @@ describe("CLI integration: quality-feedback", () => {
 
   it("records regression feedback", () => {
     const { stdout, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/LEARNINGS.md:insight3", "--type=regression"],
+      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight3", "--type=regression"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -881,7 +881,7 @@ describe("CLI integration: quality-feedback", () => {
 
   it("exits with error on missing type", () => {
     const { stderr, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/LEARNINGS.md:insight"],
+      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
@@ -890,7 +890,7 @@ describe("CLI integration: quality-feedback", () => {
 
   it("exits with error on invalid type", () => {
     const { stderr, exitCode } = runCli(
-      ["quality-feedback", "--key=test-proj/LEARNINGS.md:insight", "--type=invalid"],
+      ["quality-feedback", "--key=test-proj/FINDINGS.md:insight", "--type=invalid"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
@@ -1043,10 +1043,10 @@ describe("CLI integration: unknown command", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// NEW TESTS: add-learning edge cases
+// NEW TESTS: add-finding edge cases
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("CLI integration: add-learning edge cases", () => {
+describe("CLI integration: add-finding edge cases", () => {
   let cortexDir: string;
   let cleanup: () => void;
 
@@ -1058,51 +1058,62 @@ describe("CLI integration: add-learning edge cases", () => {
 
   afterEach(() => cleanup());
 
-  it("adds learning with spaces in the text", () => {
+  it("adds finding with spaces in the text", () => {
     const { stdout, exitCode } = runCli(
-      ["add-learning", "learn-proj", "auth middleware runs before rate limiting, order matters"],
+      ["add-finding", "learn-proj", "auth middleware runs before rate limiting, order matters"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("added insight");
-    const content = fs.readFileSync(path.join(cortexDir, "learn-proj", "LEARNINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(cortexDir, "learn-proj", "FINDINGS.md"), "utf8");
     expect(content).toContain("auth middleware runs before rate limiting");
   });
 
-  it("creates LEARNINGS.md when it does not exist", () => {
-    const learningsPath = path.join(cortexDir, "learn-proj", "LEARNINGS.md");
-    expect(fs.existsSync(learningsPath)).toBe(false);
+  it("creates FINDINGS.md when it does not exist", () => {
+    const findingsPath = path.join(cortexDir, "learn-proj", "FINDINGS.md");
+    expect(fs.existsSync(findingsPath)).toBe(false);
 
     runCli(
-      ["add-learning", "learn-proj", "new insight"],
+      ["add-finding", "learn-proj", "new insight"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
 
-    expect(fs.existsSync(learningsPath)).toBe(true);
-    const content = fs.readFileSync(learningsPath, "utf8");
+    expect(fs.existsSync(findingsPath)).toBe(true);
+    const content = fs.readFileSync(findingsPath, "utf8");
     expect(content).toContain("new insight");
   });
 
-  it("appends to existing LEARNINGS.md", () => {
-    const learningsPath = path.join(cortexDir, "learn-proj", "LEARNINGS.md");
-    fs.writeFileSync(learningsPath, "# learn-proj LEARNINGS\n\n## 2025-01-01\n\n- existing insight\n");
+  it("appends to existing FINDINGS.md", () => {
+    const findingsPath = path.join(cortexDir, "learn-proj", "FINDINGS.md");
+    fs.writeFileSync(findingsPath, "# learn-proj FINDINGS\n\n## 2025-01-01\n\n- existing insight\n");
 
     runCli(
-      ["add-learning", "learn-proj", "second insight"],
+      ["add-finding", "learn-proj", "second insight"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
 
-    const content = fs.readFileSync(learningsPath, "utf8");
+    const content = fs.readFileSync(findingsPath, "utf8");
     expect(content).toContain("existing insight");
     expect(content).toContain("second insight");
+  });
+
+  it("exits cleanly with error message when finding contains a secret", () => {
+    const { stderr, stdout, exitCode } = runCli(
+      ["add-finding", "test-proj", "sk-ant-api03-fakesecretkey1234567890ABCDEFGHIJKLMN"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).not.toBe(0);
+    const output = stderr + stdout;
+    expect(output).toContain("secret");
+    expect(output).not.toMatch(/^\s+at /m);
   });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// NEW TESTS: pin-memory edge cases
+// NEW TESTS: pin edge cases
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("CLI integration: pin-memory edge cases", () => {
+describe("CLI integration: pin edge cases", () => {
   let cortexDir: string;
   let cleanup: () => void;
 
@@ -1116,7 +1127,7 @@ describe("CLI integration: pin-memory edge cases", () => {
 
   it("creates CANONICAL_MEMORIES.md with pinned content", () => {
     const { exitCode } = runCli(
-      ["pin-memory", "pin-proj", "never commit secrets to version control"],
+      ["pin", "pin-proj", "never commit secrets to version control"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -1129,11 +1140,11 @@ describe("CLI integration: pin-memory edge cases", () => {
 
   it("pinning same memory twice is idempotent", () => {
     runCli(
-      ["pin-memory", "pin-proj", "always validate input at boundaries"],
+      ["pin", "pin-proj", "always validate input at boundaries"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     runCli(
-      ["pin-memory", "pin-proj", "always validate input at boundaries"],
+      ["pin", "pin-proj", "always validate input at boundaries"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
 
@@ -1168,10 +1179,10 @@ describe("CLI integration: migrate-findings", () => {
     expect(stderr).toContain("Usage:");
   });
 
-  it("migrates FINDINGS.md into LEARNINGS.md", () => {
+  it("migrates LEARNINGS.md into FINDINGS.md", () => {
     const projDir = path.join(cortexDir, "mig-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n\n- Use explicit timezone handling\n- Retry transient failures\n");
+    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- Use explicit timezone handling\n- Retry transient failures\n");
 
     const { stdout, exitCode } = runCli(
       ["migrate-findings", "mig-proj"],
@@ -1184,7 +1195,7 @@ describe("CLI integration: migrate-findings", () => {
   it("--dry-run does not write files", () => {
     const projDir = path.join(cortexDir, "mig-proj2");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n\n- A finding\n");
+    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- A finding\n");
 
     const { stdout, exitCode } = runCli(
       ["migrate-findings", "mig-proj2", "--dry-run"],
@@ -1192,13 +1203,13 @@ describe("CLI integration: migrate-findings", () => {
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Found");
-    expect(fs.existsSync(path.join(projDir, "LEARNINGS.md"))).toBe(false);
+    expect(fs.existsSync(path.join(projDir, "FINDINGS.md"))).toBe(false);
   });
 
   it("--pin flag runs without error", () => {
     const projDir = path.join(cortexDir, "mig-proj3");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n\n- Important pattern\n");
+    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- Important pattern\n");
 
     const { stdout, exitCode } = runCli(
       ["migrate-findings", "mig-proj3", "--pin"],
@@ -1206,8 +1217,8 @@ describe("CLI integration: migrate-findings", () => {
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Migrated");
-    // LEARNINGS.md should be created from the findings
-    expect(fs.existsSync(path.join(projDir, "LEARNINGS.md"))).toBe(true);
+    // FINDINGS.md should be created from the findings
+    expect(fs.existsSync(path.join(projDir, "FINDINGS.md"))).toBe(true);
   });
 });
 
@@ -1266,7 +1277,7 @@ describe("CLI integration: inspect-index and debug-injection", () => {
     ({ cortexDir, cleanup } = setupCortexDir());
     const projDir = path.join(cortexDir, "idx-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# idx-proj LEARNINGS\n\n## 2025-01-01\n\n- indexed content here\n");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# idx-proj FINDINGS\n\n## 2025-01-01\n\n- indexed content here\n");
   });
 
   afterEach(() => cleanup());
@@ -1603,31 +1614,31 @@ describe("CLI integration: detect-skills", () => {
 
 // --- Unit tests for exported cli functions ---
 
-import { scoreMemoryCandidate, detectTaskIntent, selectSnippets } from "./cli.js";
-import type { DocRow } from "./shared.js";
+import { scoreFindingCandidate, detectTaskIntent, selectSnippets } from "./cli.js";
+import { DocRow } from "./shared-index.js";
 
-describe("scoreMemoryCandidate", () => {
+describe("scoreFindingCandidate", () => {
   it("returns null for low-signal commits", () => {
-    expect(scoreMemoryCandidate("update readme", "")).toBeNull();
+    expect(scoreFindingCandidate("update readme", "")).toBeNull();
   });
 
   it("scores fix commits above threshold", () => {
-    const result = scoreMemoryCandidate("fix: timeout on api calls causing retries", "root cause was missing keepalive");
+    const result = scoreFindingCandidate("fix: timeout on api calls causing retries", "root cause was missing keepalive");
     expect(result).not.toBeNull();
     expect(result!.score).toBeGreaterThanOrEqual(0.5);
     expect(result!.text).toBeTruthy();
   });
 
   it("scores merged PRs higher than plain commits", () => {
-    const merged = scoreMemoryCandidate("Merge pull request #42 from user/fix-timeout", "fix retry logic");
-    const plain = scoreMemoryCandidate("fix retry logic", "");
+    const merged = scoreFindingCandidate("Merge pull request #42 from user/fix-timeout", "fix retry logic");
+    const plain = scoreFindingCandidate("fix retry logic", "");
     expect(merged).not.toBeNull();
     expect(plain).not.toBeNull();
     expect(merged!.score).toBeGreaterThan(plain!.score);
   });
 
   it("caps score at 0.99", () => {
-    const result = scoreMemoryCandidate(
+    const result = scoreFindingCandidate(
       "Merge pull request #1 from user/fix-ci-timeout-regression",
       "CI pipeline flake fix: root cause was timeout regression in build step"
     );
@@ -1636,13 +1647,13 @@ describe("scoreMemoryCandidate", () => {
   });
 
   it("cleans merge PR prefix from text", () => {
-    const result = scoreMemoryCandidate("Merge pull request #42 from user/branch Fix timeout issue", "workaround applied");
+    const result = scoreFindingCandidate("Merge pull request #42 from user/branch Fix timeout issue", "workaround applied");
     expect(result).not.toBeNull();
     expect(result!.text).not.toMatch(/^Merge pull request/);
   });
 
   it("capitalizes first letter of cleaned text", () => {
-    const result = scoreMemoryCandidate("fix: handle edge case in retry", "regression found");
+    const result = scoreFindingCandidate("fix: handle edge case in retry", "regression found");
     expect(result).not.toBeNull();
     expect(result!.text[0]).toBe(result!.text[0].toUpperCase());
   });
@@ -1672,7 +1683,7 @@ describe("detectTaskIntent", () => {
 
 describe("selectSnippets", () => {
   function doc(overrides: Partial<DocRow> = {}): DocRow {
-    return { project: "project", filename: "file.md", type: "learnings", content: "", path: "/file.md", ...overrides };
+    return { project: "project", filename: "file.md", type: "findings", content: "", path: "/file.md", ...overrides };
   }
 
   it("selects snippets within token budget", () => {
@@ -1762,7 +1773,7 @@ describe("CLI integration: uninstall", () => {
   it("preserves cortex data directory", () => {
     const projDir = path.join(cortexDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n- test insight");
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n- test insight");
 
     runCli(
       ["init", "-y"],
@@ -1775,7 +1786,7 @@ describe("CLI integration: uninstall", () => {
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("NOT deleted");
-    expect(fs.existsSync(path.join(projDir, "LEARNINGS.md"))).toBe(true);
+    expect(fs.existsSync(path.join(projDir, "FINDINGS.md"))).toBe(true);
   });
 
   it("handles missing settings file gracefully", () => {
@@ -1835,8 +1846,8 @@ describe("CLI integration: search history", () => {
     const projDir = path.join(cortexDir, "hist-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(
-      path.join(projDir, "LEARNINGS.md"),
-      "# hist-proj LEARNINGS\n\n- Cache invalidation requires full restart\n"
+      path.join(projDir, "FINDINGS.md"),
+      "# hist-proj FINDINGS\n\n- Cache invalidation requires full restart\n"
     );
   });
 
@@ -1893,7 +1904,7 @@ describe("CLI integration: search history", () => {
 
   it("history stores project and type metadata", () => {
     runCli(
-      ["search", "cache", "--project", "hist-proj", "--type", "learnings"],
+      ["search", "cache", "--project", "hist-proj", "--type", "findings"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     const historyPath = path.join(cortexDir, ".runtime", "search-history.jsonl");
@@ -1902,7 +1913,7 @@ describe("CLI integration: search history", () => {
     const entry = JSON.parse(lines[lines.length - 1]);
     expect(entry.query).toBe("cache");
     expect(entry.project).toBe("hist-proj");
-    expect(entry.type).toBe("learnings");
+    expect(entry.type).toBe("findings");
   });
 });
 
@@ -1945,7 +1956,7 @@ describe("CLI integration: init --from-existing", () => {
 
     // Verify project files were created
     expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexDir, "my-app", "LEARNINGS.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexDir, "my-app", "FINDINGS.md"))).toBe(true);
     expect(fs.existsSync(path.join(cortexDir, "my-app", "backlog.md"))).toBe(true);
     expect(fs.existsSync(path.join(cortexDir, "my-app", "summary.md"))).toBe(true);
 

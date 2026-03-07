@@ -1,6 +1,6 @@
 # cortex: LLM Installation Guide
 
-cortex gives your AI agents persistent memory across sessions and machines. It runs as an MCP server and a set of lifecycle hooks.
+cortex gives your AI agents persistent context across sessions and machines. It runs as an MCP server and a set of lifecycle hooks.
 
 ## Quick Start
 
@@ -47,7 +47,7 @@ cortex maintain migrate all <project> --dry-run
 cortex migrate-findings <project> --dry-run
 ```
 
-Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `LEARNINGS.md`, cortex creates/updates `LEARNINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/LEARNINGS.md.bak`). `--dry-run` previews changes without creating backups.
+Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, cortex creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
 ## MCP Tools (19)
 
@@ -55,10 +55,10 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `search_knowledge` | `query`, `type?`, `limit?`, `project?` | FTS5 full-text search across your knowledge base. Supports AND, OR, NOT, phrase matching. |
+| `search_cortex` | `query`, `type?`, `limit?`, `project?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. |
 | `get_project_summary` | `name` | Returns a project's summary card, CLAUDE.md path, and list of indexed files. |
 | `list_projects` | (none) | Lists all projects in the active profile with doc badges and brief descriptions. |
-| `get_learnings` | `project`, `limit?` | Read recent learnings without a search query. |
+| `get_findings` | `project`, `limit?` | Read recent findings without a search query. |
 
 ### Backlog Management
 
@@ -70,14 +70,14 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 | `complete_backlog_items` | `project`, `items[]` | Bulk complete multiple items in one call. |
 | `update_backlog_item` | `project`, `item`, `updates` | Update an item's priority, context, or section. |
 
-### Learning Capture
+### Finding Capture
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `add_learning` | `project`, `learning`, `citation?: { file?, line?, repo?, commit? }` | Append an insight to LEARNINGS.md with optional source citation. |
-| `add_learnings` | `project`, `learnings[]` | Bulk add multiple learnings in one call. |
-| `remove_learning` | `project`, `learning` | Remove a learning by text match. Use when an insight is wrong or outdated. |
-| `remove_learnings` | `project`, `learnings[]` | Bulk remove multiple learnings in one call. |
+| `add_finding` | `project`, `finding`, `citation?: { file?, line?, repo?, commit? }` | Append an insight to FINDINGS.md with optional source citation. |
+| `add_findings` | `project`, `findings[]` | Bulk add multiple findings in one call. |
+| `remove_finding` | `project`, `finding` | Remove a finding by text match. Use when an insight is wrong or outdated. |
+| `remove_findings` | `project`, `findings[]` | Bulk remove multiple findings in one call. |
 | `push_changes` | `message?` | Commit and push all cortex changes. Retries with rebase on push conflicts. |
 
 ### Memory Quality
@@ -91,7 +91,7 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `export_project` | `project` | Export a project's data (learnings, backlog, summary) as portable JSON. |
+| `export_project` | `project` | Export a project's data (findings, backlog, summary) as portable JSON. |
 | `import_project` | `data` | Import project data from a previously exported JSON payload. |
 | `manage_project` | `project`, `action` | Archive or unarchive a project. |
 
@@ -125,7 +125,7 @@ cortex includes a trust filtering system that scores and ages memory entries bef
 
 ### Decay Curve
 
-Learnings lose confidence as they age. The default decay multipliers:
+Findings lose confidence as they age. The default decay multipliers:
 
 | Age | Multiplier | Effect |
 |-----|-----------|--------|
@@ -139,11 +139,11 @@ These values are configurable via `cortex config policy` or the `memory-policy.j
 
 ### Citation Validation
 
-Learnings can include source citations (`file:line@commit`). The trust filter validates that cited files exist and optionally checks git history. Entries with invalid citations are flagged and queued for review.
+Findings can include source citations (`file:line@commit`). The trust filter validates that cited files exist and optionally checks git history. Entries with invalid citations are flagged and queued for review.
 
 ### Canonical Locks
 
-Entries in `CANONICAL_MEMORIES.md` are protected from pruning and decay. Use `pin_memory` to promote high-value learnings that should persist indefinitely.
+Entries in `CANONICAL_MEMORIES.md` are protected from pruning and decay. Use `pin_memory` to promote high-value findings that should persist indefinitely.
 
 ### Audit Trail
 

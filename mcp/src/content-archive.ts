@@ -1,0 +1,235 @@
+import * as fs from "fs";
+import * as path from "path";
+import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, type CortexResult } from "./shared.js";
+import { isValidProjectName, safeProjectPath } from "./utils.js";
+
+// ── Reference tier helpers ───────────────────────────────────────────────────
+
+const TOPIC_KEYWORDS: Record<string, string[]> = {
+  api: ["api", "endpoint", "route", "rest", "graphql", "grpc", "request", "response", "http", "url", "webhook", "cors"],
+  database: ["database", "db", "sql", "query", "index", "migration", "schema", "table", "column", "postgres", "mysql", "sqlite", "mongo", "redis", "orm"],
+  performance: ["performance", "speed", "latency", "cache", "optimize", "memory", "cpu", "bottleneck", "profiling", "benchmark", "throughput", "lazy"],
+  security: ["security", "vulnerability", "xss", "csrf", "injection", "sanitize", "escape", "encrypt", "decrypt", "hash", "salt", "tls", "ssl"],
+  frontend: ["frontend", "ui", "ux", "css", "html", "dom", "render", "component", "layout", "responsive", "animation", "browser", "react", "vue", "angular"],
+  testing: ["test", "spec", "assert", "mock", "stub", "fixture", "coverage", "jest", "vitest", "playwright", "e2e", "unit", "integration"],
+  devops: ["deploy", "ci", "cd", "pipeline", "docker", "kubernetes", "container", "infra", "terraform", "aws", "cloud", "monitoring", "logging"],
+  architecture: ["architecture", "design", "pattern", "layer", "module", "system", "structure", "microservice", "monolith", "event-driven", "plugin"],
+  debugging: ["debug", "bug", "error", "crash", "fix", "issue", "stack", "trace", "breakpoint", "log", "workaround", "pitfall", "caveat"],
+  tooling: ["tool", "cli", "script", "build", "webpack", "vite", "eslint", "prettier", "npm", "package", "config", "plugin", "hook", "git"],
+  auth: ["auth", "login", "logout", "session", "token", "jwt", "oauth", "sso", "permission", "role", "access", "credential"],
+  data: ["data", "model", "schema", "serialize", "deserialize", "json", "csv", "transform", "validate", "parse", "format", "encode"],
+  mobile: ["mobile", "ios", "android", "react-native", "flutter", "native", "touch", "gesture", "push-notification", "app-store"],
+  ai_ml: ["ai", "ml", "model", "embedding", "vector", "llm", "prompt", "token", "inference", "training", "neural", "gpt", "claude"],
+  general: [],
+};
+
+function classifyTopic(bullet: string): string {
+  const lower = bullet.toLowerCase();
+  let bestTopic = "general";
+  let bestScore = 0;
+
+  for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
+    if (topic === "general") continue;
+    let score = 0;
+    for (const kw of keywords) {
+      if (lower.includes(kw)) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestTopic = topic;
+    }
+  }
+
+  return bestTopic;
+}
+
+/**
+ * Count active (non-archived) finding entries in FINDINGS.md content.
+ * Entries inside <details> blocks are considered archived.
+ */
+export function countActiveFindings(content: string): number {
+  let inDetails = false;
+  let count = 0;
+  for (const line of content.split("\n")) {
+    if (line.includes("<details>")) { inDetails = true; continue; }
+    if (line.includes("</details>")) { inDetails = false; continue; }
+    if (!inDetails && line.startsWith("- ")) count++;
+  }
+  return count;
+}
+
+interface ParsedEntry {
+  date: string;
+  bullet: string;
+  citation?: string;
+  lineIndex: number;
+}
+
+/**
+ * Parse active (non-archived) entries from FINDINGS.md, oldest first.
+ */
+function parseActiveEntries(content: string): ParsedEntry[] {
+  const lines = content.split("\n");
+  const entries: ParsedEntry[] = [];
+  let currentDate = "";
+  let inDetails = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes("<details>")) { inDetails = true; continue; }
+    if (line.includes("</details>")) { inDetails = false; continue; }
+    if (inDetails) continue;
+
+    const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+    if (heading) { currentDate = heading[1]; continue; }
+
+    if (line.startsWith("- ") && currentDate) {
+      const next = lines[i + 1] || "";
+      const hasCitation = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->/.test(next);
+      entries.push({
+        date: currentDate,
+        bullet: line,
+        citation: hasCitation ? next : undefined,
+        lineIndex: i,
+      });
+      if (hasCitation) i++;
+    }
+  }
+
+  // Sort oldest first (earliest date, then by line order within that date)
+  entries.sort((a, b) => a.date.localeCompare(b.date) || a.lineIndex - b.lineIndex);
+  return entries;
+}
+
+/**
+ * Archive the oldest entries from FINDINGS.md into reference/{topic}.md files.
+ * Keeps `keepCount` most recent entries, archives the rest grouped by topic.
+ * Returns the number of entries archived.
+ */
+export function autoArchiveToReference(
+  cortexPath: string,
+  project: string,
+  keepCount: number,
+): CortexResult<number> {
+  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
+  const resolvedDir = safeProjectPath(cortexPath, project);
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+  const learningsPath = path.join(resolvedDir, "FINDINGS.md");
+  if (!fs.existsSync(learningsPath)) return cortexOk(0);
+
+  // Consolidation lock to prevent concurrent runs (atomic create via wx flag)
+  const STALE_LOCK_MS = 600_000; // 10 min
+  const lockFile = runtimeFile(cortexPath, "consolidation.lock");
+  try {
+    fs.writeFileSync(lockFile, String(Date.now()), { flag: "wx" });
+  } catch (e: any) {
+    if (e?.code === "EEXIST") {
+      try {
+        const stat = fs.statSync(lockFile);
+        if (Date.now() - stat.mtimeMs < STALE_LOCK_MS) {
+          return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
+        }
+        // Stale lock, overwrite it
+        fs.writeFileSync(lockFile, String(Date.now()));
+      } catch { return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT); }
+    } else { throw e; }
+  }
+
+  try {
+  const content = fs.readFileSync(learningsPath, "utf8");
+  const entries = parseActiveEntries(content);
+  if (entries.length <= keepCount) return cortexOk(0);
+
+  const toArchive = entries.slice(0, entries.length - keepCount);
+  const toKeep = new Set(entries.slice(entries.length - keepCount).map(e => e.lineIndex));
+
+  // Group archived entries by topic
+  const byTopic = new Map<string, ParsedEntry[]>();
+  for (const entry of toArchive) {
+    const topic = classifyTopic(entry.bullet);
+    if (!byTopic.has(topic)) byTopic.set(topic, []);
+    byTopic.get(topic)!.push(entry);
+  }
+
+  // Write to reference/{topic}.md
+  const referenceDir = path.join(resolvedDir, "reference");
+  fs.mkdirSync(referenceDir, { recursive: true });
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const [topic, topicEntries] of byTopic) {
+    const filePath = path.join(referenceDir, `${topic}.md`);
+    let existing = "";
+    if (fs.existsSync(filePath)) {
+      existing = fs.readFileSync(filePath, "utf8");
+    } else {
+      existing = `# ${project} - ${topic}\n`;
+    }
+
+    const newSection = [`\n## Archived ${today}\n`];
+    for (const entry of topicEntries) {
+      newSection.push(entry.bullet);
+      if (entry.citation) newSection.push(entry.citation);
+    }
+    newSection.push("");
+
+    fs.writeFileSync(filePath, existing.trimEnd() + "\n" + newSection.join("\n"));
+  }
+
+  // Remove archived entries from FINDINGS.md
+  const lines = content.split("\n");
+  const archiveLineSet = new Set<number>();
+  for (const entry of toArchive) {
+    archiveLineSet.add(entry.lineIndex);
+    if (entry.citation) archiveLineSet.add(entry.lineIndex + 1);
+  }
+
+  const filtered = lines.filter((_, i) => !archiveLineSet.has(i));
+
+  // Clean up empty date sections
+  const cleaned: string[] = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const line = filtered[i];
+    const isDateHeading = /^## \d{4}-\d{2}-\d{2}$/.test(line);
+    if (isDateHeading) {
+      // Check if next non-empty lines have any bullets
+      let hasBullets = false;
+      for (let j = i + 1; j < filtered.length; j++) {
+        const next = filtered[j].trim();
+        if (!next) continue;
+        if (next.startsWith("## ") || next.startsWith("# ")) break;
+        if (next.startsWith("- ")) { hasBullets = true; break; }
+        break;
+      }
+      if (!hasBullets) continue;
+    }
+    cleaned.push(line);
+  }
+
+  // Write consolidation marker
+  const marker = `<!-- consolidated: ${today} -->`;
+  const markerIdx = cleaned.findIndex(l => l.includes("consolidated:"));
+  if (markerIdx >= 0) {
+    cleaned[markerIdx] = marker;
+  } else {
+    // Insert after title
+    const titleIdx = cleaned.findIndex(l => l.startsWith("# "));
+    if (titleIdx >= 0) {
+      cleaned.splice(titleIdx + 1, 0, "", marker);
+    }
+  }
+
+  const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
+  fs.writeFileSync(tmpPath, cleaned.join("\n"));
+  fs.renameSync(tmpPath, learningsPath);
+
+  appendAuditLog(
+    cortexPath,
+    "auto_archive_reference",
+    `project=${project} archived=${toArchive.length} topics=${[...byTopic.keys()].join(",")}`
+  );
+
+  return cortexOk(toArchive.length);
+  } finally {
+    try { fs.unlinkSync(lockFile); } catch { /* best-effort cleanup */ }
+  }
+}

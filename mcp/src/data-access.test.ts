@@ -8,10 +8,10 @@ import {
   pinBacklogItem,
   unpinBacklogItem,
   tidyBacklogDone,
-  readMemoryQueue,
-  approveMemoryQueueItem,
-  rejectMemoryQueueItem,
-  editMemoryQueueItem,
+  readReviewQueue,
+  approveQueueItem,
+  rejectQueueItem,
+  editQueueItem,
   listMachines,
   setMachineProfile,
   listProfiles,
@@ -21,9 +21,9 @@ import {
   loadShellState,
   saveShellState,
   resetShellState,
-  readLearnings,
-  addLearning,
-  removeLearning,
+  readFindings,
+  addFinding,
+  removeFinding,
 } from "./data-access.js";
 import { CortexError } from "./shared.js";
 import { grantAdmin, makeTempDir, resultMsg } from "./test-helpers.js";
@@ -85,7 +85,7 @@ const SAMPLE_BACKLOG = `# testproject backlog
 - [x] Set up CI pipeline
 `;
 
-const SAMPLE_LEARNINGS = `# testproject LEARNINGS
+const SAMPLE_FINDINGS = `# testproject FINDINGS
 
 ## 2026-03-01
 
@@ -394,10 +394,10 @@ describe("pin/unpin backlog items", () => {
   });
 });
 
-describe("readLearnings", () => {
+describe("readFindings", () => {
   it("parses dated entries with citations", () => {
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
-    const result = readLearnings(tmpDir, PROJECT);
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), SAMPLE_FINDINGS);
+    const result = readFindings(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -415,22 +415,22 @@ describe("readLearnings", () => {
     expect(result.data[2].text).toContain("vitest");
   });
 
-  it("returns an empty array when no LEARNINGS.md exists", () => {
-    const result = readLearnings(tmpDir, PROJECT);
+  it("returns an empty array when no FINDINGS.md exists", () => {
+    const result = readFindings(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toHaveLength(0);
   });
 
   it("returns an error for a missing project", () => {
-    const result = readLearnings(tmpDir, "nonexistent");
+    const result = readFindings(tmpDir, "nonexistent");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
   });
 
   it("assigns sequential IDs", () => {
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
-    const result = readLearnings(tmpDir, PROJECT);
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), SAMPLE_FINDINGS);
+    const result = readFindings(tmpDir, PROJECT);
     if (!result.ok) return;
     expect(result.data[0].id).toBe("L1");
     expect(result.data[1].id).toBe("L2");
@@ -438,12 +438,12 @@ describe("readLearnings", () => {
   });
 });
 
-describe("addLearning", () => {
-  it("creates LEARNINGS.md and appends under today's date", () => {
-    const msg = addLearning(tmpDir, PROJECT, "New insight about caching");
-    expect(resultMsg(msg)).toContain("Created LEARNINGS.md");
+describe("addFinding", () => {
+  it("creates FINDINGS.md and appends under today's date", () => {
+    const msg = addFinding(tmpDir, PROJECT, "New insight about caching");
+    expect(resultMsg(msg)).toContain("Created FINDINGS.md");
 
-    const result = readLearnings(tmpDir, PROJECT);
+    const result = readFindings(tmpDir, PROJECT);
     if (!result.ok) return;
     expect(result.data).toHaveLength(1);
     expect(result.data[0].text).toContain("caching");
@@ -452,51 +452,51 @@ describe("addLearning", () => {
     expect(result.data[0].date).toBe(today);
   });
 
-  it("appends to an existing LEARNINGS.md", () => {
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
-    const msg = addLearning(tmpDir, PROJECT, "Another insight");
+  it("appends to an existing FINDINGS.md", () => {
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), SAMPLE_FINDINGS);
+    const msg = addFinding(tmpDir, PROJECT, "Another insight");
     expect(resultMsg(msg).toLowerCase()).toContain("added");
 
-    const result = readLearnings(tmpDir, PROJECT);
+    const result = readFindings(tmpDir, PROJECT);
     if (!result.ok) return;
     expect(result.data.length).toBeGreaterThan(3);
-    // New learnings are inserted under today's date at the top of the file
+    // New findings are inserted under today's date at the top of the file
     const found = result.data.find((l) => l.text.includes("Another insight"));
     expect(found).toBeDefined();
     expect(found!.date).toBe(new Date().toISOString().slice(0, 10));
   });
 });
 
-describe("removeLearning", () => {
-  it("removes a matching learning entry", () => {
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
-    const msg = removeLearning(tmpDir, PROJECT, "WAL mode");
+describe("removeFinding", () => {
+  it("removes a matching finding entry", () => {
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), SAMPLE_FINDINGS);
+    const msg = removeFinding(tmpDir, PROJECT, "WAL mode");
     expect(resultMsg(msg)).toContain("Removed");
 
-    const result = readLearnings(tmpDir, PROJECT);
+    const result = readFindings(tmpDir, PROJECT);
     if (!result.ok) return;
     expect(result.data).toHaveLength(2);
     expect(result.data.every((l) => !l.text.includes("WAL mode"))).toBe(true);
   });
 
-  it("removes a learning along with its citation comment", () => {
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
-    const msg = removeLearning(tmpDir, PROJECT, "auth middleware");
+  it("removes a finding along with its citation comment", () => {
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), SAMPLE_FINDINGS);
+    const msg = removeFinding(tmpDir, PROJECT, "auth middleware");
     expect(resultMsg(msg)).toContain("Removed");
 
-    const content = fs.readFileSync(path.join(projectDir, "LEARNINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
     expect(content).not.toContain("auth middleware");
     expect(content).not.toContain("cortex:cite");
   });
 
-  it("returns an error when no learning matches", () => {
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), SAMPLE_LEARNINGS);
-    const msg = removeLearning(tmpDir, PROJECT, "nonexistent xyz");
-    expect(resultMsg(msg)).toContain("No learning matching");
+  it("returns an error when no finding matches", () => {
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), SAMPLE_FINDINGS);
+    const msg = removeFinding(tmpDir, PROJECT, "nonexistent xyz");
+    expect(resultMsg(msg)).toContain("No finding matching");
   });
 
-  it("returns an error when LEARNINGS.md does not exist", () => {
-    const msg = removeLearning(tmpDir, PROJECT, "anything");
+  it("returns an error when FINDINGS.md does not exist", () => {
+    const msg = removeFinding(tmpDir, PROJECT, "anything");
     expect(msg.ok).toBe(false);
     if (!msg.ok) expect(msg.code).toBe(CortexError.FILE_NOT_FOUND);
   });
@@ -521,8 +521,8 @@ describe("memory queue helpers", () => {
     fs.writeFileSync(path.join(projectDir, "MEMORY_QUEUE.md"), queue);
   });
 
-  it("readMemoryQueue parses sections and confidence", () => {
-    const result = readMemoryQueue(tmpDir, PROJECT);
+  it("readReviewQueue parses sections and confidence", () => {
+    const result = readReviewQueue(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toHaveLength(3);
@@ -530,33 +530,33 @@ describe("memory queue helpers", () => {
     expect(result.data[0].confidence).toBe(0.4);
   });
 
-  it("approveMemoryQueueItem adds learning and removes queue item", () => {
-    const msg = approveMemoryQueueItem(tmpDir, PROJECT, "cleanup flaky");
+  it("approveQueueItem adds finding and removes queue item", () => {
+    const msg = approveQueueItem(tmpDir, PROJECT, "cleanup flaky");
     expect(resultMsg(msg)).toContain("Approved memory");
 
-    const queueAfter = readMemoryQueue(tmpDir, PROJECT);
+    const queueAfter = readReviewQueue(tmpDir, PROJECT);
     if (queueAfter.ok) {
       expect(queueAfter.data.some((i) => i.text.includes("cleanup flaky"))).toBe(false);
     }
 
-    const learnings = readLearnings(tmpDir, PROJECT);
-    if (learnings.ok) {
-      expect(learnings.data.some((i) => i.text.includes("cleanup flaky"))).toBe(true);
+    const findings = readFindings(tmpDir, PROJECT);
+    if (findings.ok) {
+      expect(findings.data.some((i) => i.text.includes("cleanup flaky"))).toBe(true);
     }
   });
 
-  it("rejectMemoryQueueItem removes the matched queue item", () => {
-    const msg = rejectMemoryQueueItem(tmpDir, PROJECT, "conflicting guidance");
+  it("rejectQueueItem removes the matched queue item", () => {
+    const msg = rejectQueueItem(tmpDir, PROJECT, "conflicting guidance");
     expect(resultMsg(msg)).toContain("Rejected memory");
-    const queueAfter = readMemoryQueue(tmpDir, PROJECT);
+    const queueAfter = readReviewQueue(tmpDir, PROJECT);
     if (!queueAfter.ok) return;
     expect(queueAfter.data.some((i) => i.text.includes("conflicting guidance"))).toBe(false);
   });
 
-  it("editMemoryQueueItem rewrites the item text", () => {
-    const msg = editMemoryQueueItem(tmpDir, PROJECT, "old stale memory", "updated stale memory");
+  it("editQueueItem rewrites the item text", () => {
+    const msg = editQueueItem(tmpDir, PROJECT, "old stale memory", "updated stale memory");
     expect(resultMsg(msg)).toContain("Edited memory");
-    const queueAfter = readMemoryQueue(tmpDir, PROJECT);
+    const queueAfter = readReviewQueue(tmpDir, PROJECT);
     if (!queueAfter.ok) return;
     expect(queueAfter.data.some((i) => i.text.includes("updated stale memory"))).toBe(true);
   });
@@ -671,16 +671,16 @@ describe("file locking", () => {
     expect(lines).toContain("Second concurrent item");
   });
 
-  it("two sequential addLearning calls produce valid LEARNINGS.md", () => {
-    addLearning(tmpDir, PROJECT, "First learning");
-    addLearning(tmpDir, PROJECT, "Second learning");
+  it("two sequential addFinding calls produce valid FINDINGS.md", () => {
+    addFinding(tmpDir, PROJECT, "First finding");
+    addFinding(tmpDir, PROJECT, "Second finding");
 
-    const result = readLearnings(tmpDir, PROJECT);
+    const result = readFindings(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const texts = result.data.map((l) => l.text);
-    expect(texts.some((t) => t.includes("First learning"))).toBe(true);
-    expect(texts.some((t) => t.includes("Second learning"))).toBe(true);
+    expect(texts.some((t) => t.includes("First finding"))).toBe(true);
+    expect(texts.some((t) => t.includes("Second finding"))).toBe(true);
   });
 
   it("lock file is cleaned up after successful backlog write", () => {
@@ -692,11 +692,11 @@ describe("file locking", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
-  it("lock file is cleaned up after successful learning write", () => {
-    const learningsPath = path.join(projectDir, "LEARNINGS.md");
-    const lockPath = learningsPath + ".lock";
+  it("lock file is cleaned up after successful finding write", () => {
+    const findingsPath = path.join(projectDir, "FINDINGS.md");
+    const lockPath = findingsPath + ".lock";
 
-    addLearning(tmpDir, PROJECT, "Lock cleanup learning");
+    addFinding(tmpDir, PROJECT, "Lock cleanup finding");
 
     expect(fs.existsSync(lockPath)).toBe(false);
   });
@@ -724,12 +724,12 @@ describe("file locking", () => {
   });
 
   it("lock file is cleaned up even if the inner operation fails", () => {
-    const learningsPath = path.join(projectDir, "LEARNINGS.md");
-    const lockPath = learningsPath + ".lock";
+    const findingsPath = path.join(projectDir, "FINDINGS.md");
+    const lockPath = findingsPath + ".lock";
 
-    // removeLearning on nonexistent file: the operation returns an error string
+    // removeFinding on nonexistent file: the operation returns an error string
     // but should still clean up the lock
-    removeLearning(tmpDir, PROJECT, "anything");
+    removeFinding(tmpDir, PROJECT, "anything");
 
     expect(fs.existsSync(lockPath)).toBe(false);
   });
@@ -801,13 +801,13 @@ describe("file locking", () => {
     expect(lines).toContain("Concurrent item B");
   });
 
-  it.skipIf(process.platform === "win32")("allows concurrent learning writes from two processes without data loss", async () => {
+  it.skipIf(process.platform === "win32")("allows concurrent finding writes from two processes without data loss", async () => {
     // Use forward slashes in import paths for Windows compatibility
     const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
     const mkCode = (text: string) =>
-      `import { addLearning } from ${JSON.stringify(dataAccessPath)};` +
+      `import { addFinding } from ${JSON.stringify(dataAccessPath)};` +
       `process.env.CORTEX_ACTOR='vitest-admin';` +
-      `const out=addLearning(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(text)});` +
+      `const out=addFinding(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(text)});` +
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
     const [a, b] = await Promise.all([
@@ -818,7 +818,7 @@ describe("file locking", () => {
     expect(a.exitCode).toBe(0);
     expect(b.exitCode).toBe(0);
 
-    const result = readLearnings(tmpDir, PROJECT);
+    const result = readFindings(tmpDir, PROJECT);
     if (!result.ok) return;
     const texts = result.data.map((l) => l.text);
     expect(texts.some((t) => t.includes("writeFileSync with wx flag"))).toBe(true);
@@ -847,16 +847,16 @@ describe("structured error codes in data-access", () => {
     if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
   });
 
-  it("removeLearning returns NOT_FOUND for unmatched learning", () => {
-    // Ensure LEARNINGS.md exists so the search runs
-    fs.writeFileSync(path.join(projectDir, "LEARNINGS.md"), "# LEARNINGS\n\n## 2025-01-01\n\n- Existing learning\n");
-    const msg = removeLearning(tmpDir, PROJECT, "nonexistent-learning-xyz");
+  it("removeFinding returns NOT_FOUND for unmatched finding", () => {
+    // Ensure FINDINGS.md exists so the search runs
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# FINDINGS\n\n## 2025-01-01\n\n- Existing finding\n");
+    const msg = removeFinding(tmpDir, PROJECT, "nonexistent-finding-xyz");
     expect(msg.ok).toBe(false);
     if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
   });
 
-  it("editMemoryQueueItem returns EMPTY_INPUT for blank text", () => {
-    const msg = editMemoryQueueItem(tmpDir, PROJECT, "anything", "");
+  it("editQueueItem returns EMPTY_INPUT for blank text", () => {
+    const msg = editQueueItem(tmpDir, PROJECT, "anything", "");
     expect(msg.ok).toBe(false);
     if (!msg.ok) expect(msg.code).toBe(CortexError.EMPTY_INPUT);
   });

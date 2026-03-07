@@ -4,7 +4,7 @@ Install: npx @alaarab/cortex init
 
 Key features:
 - Automatic context injection into every prompt via lifecycle hooks
-- 22 MCP tools for search, backlog management, learning capture, and memory governance
+- 28 MCP tools for search, backlog management, learning capture, and memory governance
 - Memory governance with confidence decay, trust filtering, and quality feedback
 - Interactive terminal shell with six views (Projects, Backlog, Learnings, Memory Queue, Machines, Health)
 - Multi-agent support: Claude Code, Copilot CLI, Cursor, OpenAI Codex

@@ -22,17 +22,21 @@ import {
 } from "./init.js";
 import { buildLifecycleCommands, configureAllHooks, detectInstalledTools } from "./hooks.js";
 import {
-  buildIndex,
   debugLog,
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
   getProjectDirs,
   isRecord,
-  queryRows,
-  validateBacklogFormat,
-  validateGovernanceJson,
-  validateLearningsFormat,
 } from "./shared.js";
+import { validateGovernanceJson } from "./shared-governance.js";
+import {
+  buildIndex,
+  queryRows,
+} from "./shared-index.js";
+import {
+  validateBacklogFormat,
+  validateFindingsFormat,
+} from "./shared-content.js";
 
 interface ProfileData {
   name?: string;
@@ -243,13 +247,38 @@ function setupSparseCheckout(cortexPath: string, projects: string[]) {
   }
 }
 
-function symlinkFile(src: string, dest: string) {
+function symlinkFile(src: string, dest: string, managedRoot: string): boolean {
   try {
-    if (fs.lstatSync(dest)) fs.unlinkSync(dest);
+    const stat = fs.lstatSync(dest);
+    if (stat.isSymbolicLink()) {
+      const currentTarget = fs.readlinkSync(dest);
+      const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
+      const managedPrefix = path.resolve(managedRoot) + path.sep;
+      if (resolvedTarget === path.resolve(src)) return true;
+      if (!resolvedTarget.startsWith(managedPrefix)) {
+        log(`  preserve existing symlink: ${dest}`);
+        return false;
+      }
+      fs.unlinkSync(dest);
+    } else {
+      try {
+        if (stat.isFile() && fs.readFileSync(dest, "utf8") === fs.readFileSync(src, "utf8")) {
+          fs.unlinkSync(dest);
+        } else {
+          const kind = stat.isDirectory() ? "directory" : "file";
+          log(`  preserve existing ${kind}: ${dest}`);
+          return false;
+        }
+      } catch {
+        log(`  preserve existing file: ${dest}`);
+        return false;
+      }
+    }
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   fs.symlinkSync(src, dest);
+  return true;
 }
 
 // ── SKILL.md ──────────────────────────────────────────────────────────────────
@@ -274,7 +303,7 @@ function writeSkillMd(cortexPath: string) {
 
   const content = `---
 name: cortex
-description: Long-term memory for your AI agents with automatic context injection and learning capture
+description: Long-term memory for your AI agents with automatic context injection and finding capture
 version: "${version}"
 license: MIT
 hooks:
@@ -296,7 +325,7 @@ hooks:
 # cortex
 
 Long-term memory for your AI agents. Injects relevant project context at the start of
-each prompt and saves learnings at session end via git. Works with Claude Code, Copilot CLI,
+each prompt and saves findings at session end via git. Works with Claude Code, Copilot CLI,
 Cursor, Codex, and more.
 
 ## Lifecycle hooks
@@ -308,10 +337,10 @@ Cursor, Codex, and more.
 ## MCP tools (18)
 
 **Search and browse:**
-- \`search_knowledge\`: FTS5 search with synonym expansion across all project knowledge
+- \`search_cortex\`: FTS5 search with synonym expansion across all project knowledge
 - \`get_project_summary\`: project summary card and available docs
 - \`list_projects\`: all projects in the active profile
-- \`get_learnings\`: read recent learnings without a search query
+- \`get_findings\`: read recent findings without a search query
 
 **Backlog management:**
 - \`get_backlog\`: read tasks for one or all projects, or fetch a single item by ID or text
@@ -320,8 +349,8 @@ Cursor, Codex, and more.
 - \`update_backlog_item\`: change priority, context, or section
 
 **Learning capture:**
-- \`add_learning\`: append insight under today's date with optional citation metadata
-- \`remove_learning\`: remove a learning by matching text
+- \`add_finding\`: append insight under today's date with optional citation metadata
+- \`remove_finding\`: remove a finding by matching text
 - \`push_changes\`: commit and push all cortex changes
 - \`pin_memory\`: promote important memory into CANONICAL_MEMORIES.md
 - \`memory_feedback\`: record helpful/reprompt/regression outcomes
@@ -470,7 +499,7 @@ export function migrateSkillsToFolders(skillsDir: string): string[] {
   return migrated;
 }
 
-function linkSkillsDir(srcDir: string, destDir: string) {
+function linkSkillsDir(srcDir: string, destDir: string, managedRoot: string) {
   if (!fs.existsSync(srcDir)) return;
   fs.mkdirSync(destDir, { recursive: true });
 
@@ -480,12 +509,12 @@ function linkSkillsDir(srcDir: string, destDir: string) {
 
     if (stat.isFile() && entry.endsWith(".md")) {
       // Flat skill file: link directly
-      symlinkFile(srcPath, path.join(destDir, entry));
+      symlinkFile(srcPath, path.join(destDir, entry), managedRoot);
     } else if (stat.isDirectory()) {
       // Subfolder format: look for SKILL.md inside
       const skillFile = path.join(srcPath, "SKILL.md");
       if (fs.existsSync(skillFile)) {
-        symlinkFile(skillFile, path.join(destDir, `${entry}.md`));
+        symlinkFile(skillFile, path.join(destDir, `${entry}.md`), managedRoot);
       }
     }
   }
@@ -494,16 +523,16 @@ function linkSkillsDir(srcDir: string, destDir: string) {
 function linkGlobal(cortexPath: string, tools: Set<string>) {
   log("  global skills -> ~/.claude/skills/");
   const skillsDir = path.join(os.homedir(), ".claude", "skills");
-  linkSkillsDir(path.join(cortexPath, "global", "skills"), skillsDir);
+  linkSkillsDir(path.join(cortexPath, "global", "skills"), skillsDir, cortexPath);
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
-    symlinkFile(globalClaude, path.join(os.homedir(), ".claude", "CLAUDE.md"));
+    symlinkFile(globalClaude, path.join(os.homedir(), ".claude", "CLAUDE.md"), cortexPath);
     if (tools.has("copilot")) {
       try {
         const copilotInstrDir = path.join(os.homedir(), ".github");
         fs.mkdirSync(copilotInstrDir, { recursive: true });
-        symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"));
+        symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), cortexPath);
       } catch { /* best effort */ }
     }
   }
@@ -523,19 +552,19 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   if (!target) { log(`  skip ${project} (not found on disk)`); return; }
   log(`  ${project} -> ${target}`);
 
-  for (const f of ["CLAUDE.md", "KNOWLEDGE.md", "LEARNINGS.md"]) {
+  for (const f of ["CLAUDE.md", "REFERENCE.md", "FINDINGS.md"]) {
     const src = path.join(cortexPath, project, f);
     if (fs.existsSync(src)) {
-      symlinkFile(src, path.join(target, f));
+      symlinkFile(src, path.join(target, f), cortexPath);
       if (f === "CLAUDE.md") {
         if (tools.has("codex")) {
-          try { symlinkFile(src, path.join(target, "AGENTS.md")); } catch { /* best effort */ }
+          try { symlinkFile(src, path.join(target, "AGENTS.md"), cortexPath); } catch { /* best effort */ }
         }
         if (tools.has("copilot")) {
           try {
             const copilotDir = path.join(target, ".github");
             fs.mkdirSync(copilotDir, { recursive: true });
-            symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"));
+            symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"), cortexPath);
           } catch { /* best effort */ }
         }
       }
@@ -546,7 +575,7 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   const projectDir = path.join(cortexPath, project);
   if (fs.existsSync(projectDir)) {
     for (const f of fs.readdirSync(projectDir)) {
-      if (/^CLAUDE-.+\.md$/.test(f)) symlinkFile(path.join(projectDir, f), path.join(target, f));
+      if (/^CLAUDE-.+\.md$/.test(f)) symlinkFile(path.join(projectDir, f), path.join(target, f), cortexPath);
     }
   }
 
@@ -560,7 +589,7 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   const projectSkills = path.join(cortexPath, project, ".claude", "skills");
   if (fs.existsSync(projectSkills)) {
     const targetSkills = path.join(target, ".claude", "skills");
-    linkSkillsDir(projectSkills, targetSkills);
+    linkSkillsDir(projectSkills, targetSkills, cortexPath);
   }
 }
 
@@ -583,7 +612,7 @@ function writeContextFile(managedContent: string) {
 
 function formatMcpStatus(status: string): string {
   if (status === "installed" || status === "already_configured") {
-    return "MCP: active (search_knowledge, get_project_summary, list_projects)";
+    return "MCP: active (search_cortex, get_project_summary, list_projects)";
   }
   if (status === "disabled" || status === "already_disabled") {
     return "MCP: disabled (hooks-only fallback active)";
@@ -617,14 +646,14 @@ function writeContextDebugging(machine: string, profile: string, mcpStatus: stri
     `Profile: ${profile}`,
     `Last synced: ${new Date().toISOString().slice(0, 10)}`,
     ...(mcpLine ? [mcpLine] : []),
-  ].join("\n") + "\n\n## Project Learnings\n";
+  ].join("\n") + "\n\n## Project Findings\n";
 
   const MAX_FILE_BYTES = 50 * 1024;
   for (const project of projects) {
     if (project === "global") continue;
-    const learnings = path.join(cortexPath, project, "LEARNINGS.md");
-    if (fs.existsSync(learnings)) {
-      let body = fs.readFileSync(learnings, "utf8");
+    const findings = path.join(cortexPath, project, "FINDINGS.md");
+    if (fs.existsSync(findings)) {
+      let body = fs.readFileSync(findings, "utf8");
       if (body.length > MAX_FILE_BYTES) {
         // Keep only the most recent entries (end of file)
         body = body.slice(-MAX_FILE_BYTES);
@@ -697,7 +726,7 @@ function readBackNativeMemory(cortexPath: string, projects: string[]) {
     if (!notesMatch) continue;
 
     const notes = notesMatch[1]
-      .replace(/<!-- Session learnings, patterns, decisions -->\n?/, "")
+      .replace(/<!-- Session findings, patterns, decisions -->\n?/, "")
       .trim();
     if (!notes) continue;
 
@@ -744,7 +773,7 @@ function rebuildMemory(cortexPath: string, projects: string[]) {
   }
   managed += "\n<!-- cortex:projects:end -->";
 
-  const freshHeader = "# Root Memory\n\n## Machine Context\nRead `~/.cortex-context.md` for profile, active projects, last sync date.\n\n## Cross-Project Notes\n- Read a project's CLAUDE.md before making changes.\n- Per-project memory files (MEMORY-{name}.md) have commands, versions, gotchas.\n\n";
+  const freshHeader = "# Root Memory\n\n## Machine Context\nRead `~/.cortex-context.md` for profile, active projects, last sync date.\n\n## Cross-Project Notes\n- Read a project's CLAUDE.md before making changes.\n- Per-project memory files (MEMORY-{name}.md) have commands, versions, findings.\n\n";
   fs.writeFileSync(memoryFile, (header || freshHeader) + managed + "\n");
   log(`  rebuilt ${memoryFile} (pointer format)`);
 
@@ -754,7 +783,7 @@ function rebuildMemory(cortexPath: string, projects: string[]) {
     if (!fs.existsSync(summaryFile)) continue;
     const projectMemory = path.join(memoryDir, `MEMORY-${project}.md`);
     if (!fs.existsSync(projectMemory)) {
-      fs.writeFileSync(projectMemory, `# ${displayName(project)}\n\n${fs.readFileSync(summaryFile, "utf8")}\n\n## Notes\n<!-- Session learnings, patterns, decisions -->\n`);
+      fs.writeFileSync(projectMemory, `# ${displayName(project)}\n\n${fs.readFileSync(summaryFile, "utf8")}\n\n## Notes\n<!-- Session findings, patterns, decisions -->\n`);
       log(`  created ${projectMemory}`);
     }
   }
@@ -954,7 +983,7 @@ export function updateFileChecksums(cortexPath: string, profileName?: string): {
   const tracked: string[] = [];
   const dirs = getProjectDirs(cortexPath, profileName);
   for (const dir of dirs) {
-    for (const name of ["LEARNINGS.md", "backlog.md", "CANONICAL.md"]) {
+    for (const name of ["FINDINGS.md", "backlog.md", "CANONICAL.md"]) {
       const full = path.join(dir, name);
       if (!fs.existsSync(full)) continue;
       // Normalize to forward slashes for consistent keys across platforms
@@ -1074,7 +1103,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       checks.push({ name: `project-path:${project}`, ok: false, detail: "project directory not found on disk" });
       continue;
     }
-    for (const f of ["CLAUDE.md", "KNOWLEDGE.md", "LEARNINGS.md"]) {
+    for (const f of ["CLAUDE.md", "REFERENCE.md", "FINDINGS.md"]) {
       const src = path.join(cortexPath, project, f);
       if (!fs.existsSync(src)) continue;
       const dest = path.join(target, f);
@@ -1203,7 +1232,53 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     });
   }
 
+  // Detect unmigrated LEARNINGS.md files and knowledge/ directories
+  const projectDirs = fs.readdirSync(cortexPath).filter(d => !d.startsWith('.') && fs.statSync(path.join(cortexPath, d)).isDirectory());
+  for (const proj of projectDirs) {
+    const oldLearnings = path.join(cortexPath, proj, 'LEARNINGS.md');
+    if (fs.existsSync(oldLearnings)) {
+      checks.push({ name: `migrate:${proj}/LEARNINGS.md`, ok: false, detail: `${proj}/LEARNINGS.md → run --fix to migrate to FINDINGS.md` });
+    }
+    const oldKnowledge = path.join(cortexPath, proj, 'knowledge');
+    if (fs.existsSync(oldKnowledge)) {
+      checks.push({ name: `migrate:${proj}/knowledge`, ok: false, detail: `${proj}/knowledge/ → run --fix to migrate to reference/` });
+    }
+  }
+
   if (fix && profile && profileFile) {
+    // Migrate LEARNINGS.md → FINDINGS.md
+    for (const proj of projectDirs) {
+      const oldFile = path.join(cortexPath, proj, 'LEARNINGS.md');
+      const newFile = path.join(cortexPath, proj, 'FINDINGS.md');
+      if (fs.existsSync(oldFile) && !fs.existsSync(newFile)) {
+        fs.renameSync(oldFile, newFile);
+        console.log(`Migrated ${proj}/LEARNINGS.md → FINDINGS.md`);
+      }
+      // Migrate knowledge/ → reference/
+      const oldDir = path.join(cortexPath, proj, 'knowledge');
+      const newDir = path.join(cortexPath, proj, 'reference');
+      if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
+        fs.renameSync(oldDir, newDir);
+        console.log(`Migrated ${proj}/knowledge/ → reference/`);
+      }
+    }
+    // Migrate governance files
+    const govDir = path.join(cortexPath, '.governance');
+    if (fs.existsSync(govDir)) {
+      const govRenames: [string, string][] = [
+        ['memory-policy.json', 'retention-policy.json'],
+        ['memory-workflow-policy.json', 'workflow-policy.json'],
+      ];
+      for (const [old, next] of govRenames) {
+        const oldPath = path.join(govDir, old);
+        const newPath = path.join(govDir, next);
+        if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+          fs.renameSync(oldPath, newPath);
+          console.log(`Migrated .governance/${old} → ${next}`);
+        }
+      }
+    }
+
     await runLink(cortexPath, { machine, profile });
     checks.push({ name: "self-heal", ok: true, detail: "relinked hooks, symlinks, context, memory pointers" });
   } else if (fix) {
@@ -1233,10 +1308,10 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   }
 
   if (checkData) {
-    const governanceChecks: Array<{ file: string; schema: "access-control" | "memory-policy" | "memory-workflow-policy" | "index-policy" | "runtime-health" | "memory-scores" | "canonical-locks" }> = [
+    const governanceChecks: Array<{ file: string; schema: "access-control" | "retention-policy" | "workflow-policy" | "index-policy" | "runtime-health" | "memory-scores" | "canonical-locks" }> = [
       { file: "access-control.json", schema: "access-control" },
-      { file: "memory-policy.json", schema: "memory-policy" },
-      { file: "memory-workflow-policy.json", schema: "memory-workflow-policy" },
+      { file: "retention-policy.json", schema: "retention-policy" },
+      { file: "workflow-policy.json", schema: "workflow-policy" },
       { file: "index-policy.json", schema: "index-policy" },
       { file: "runtime-health.json", schema: "runtime-health" },
       { file: "memory-scores.json", schema: "memory-scores" },
@@ -1269,12 +1344,12 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
         });
       }
 
-      const learningsPath = path.join(projectDir, "LEARNINGS.md");
-      if (fs.existsSync(learningsPath)) {
-        const content = fs.readFileSync(learningsPath, "utf8");
-        const issues = validateLearningsFormat(content);
+      const findingsPath = path.join(projectDir, "FINDINGS.md");
+      if (fs.existsSync(findingsPath)) {
+        const content = fs.readFileSync(findingsPath, "utf8");
+        const issues = validateFindingsFormat(content);
         checks.push({
-          name: `data:learnings:${projectName}`,
+          name: `data:findings:${projectName}`,
           ok: issues.length === 0,
           detail: issues.length ? issues.join("; ") : "valid",
         });

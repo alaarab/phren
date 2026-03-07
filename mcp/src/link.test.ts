@@ -153,7 +153,7 @@ describe("link", () => {
       expect(fs.readlinkSync(linkedSkill)).toBe(path.join(skillsSrc, "SKILL.md"));
     });
 
-    it("symlinkFile overwrites existing symlink at destination", async () => {
+    it("preserves existing regular files at destination", async () => {
       setupProfile(["sym-project"]);
 
       const projectDir = path.join(tmpRoot, "projects", "sym-project");
@@ -164,18 +164,81 @@ describe("link", () => {
       fs.mkdirSync(cortexProject, { recursive: true });
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Real content");
 
-      // Create a stale symlink at destination
+      // Create a user-owned file at destination
       const destClaude = path.join(projectDir, "CLAUDE.md");
       fs.writeFileSync(destClaude, "stale");
 
       await runLink(cortexPath, { machine: "test-machine", profile: "test" });
 
-      // Should now be a symlink to the cortex source
+      expect(fs.lstatSync(destClaude).isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(destClaude, "utf8")).toBe("stale");
+    });
+
+    it("preserves existing non-cortex symlinks at destination", async () => {
+      setupProfile(["sym-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "sym-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "sym-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Real content");
+
+      const staleSource = path.join(tmpRoot, "stale.md");
+      fs.writeFileSync(staleSource, "# Stale");
+      const destClaude = path.join(projectDir, "CLAUDE.md");
+      fs.symlinkSync(staleSource, destClaude);
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      expect(fs.lstatSync(destClaude).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(destClaude, "utf8")).toBe("# Stale");
+    });
+
+    it("replaces existing cortex-managed symlinks at destination", async () => {
+      setupProfile(["managed-sym-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "managed-sym-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "managed-sym-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Real content");
+
+      const oldManagedSource = path.join(cortexPath, "old-managed.md");
+      fs.writeFileSync(oldManagedSource, "# Old managed");
+      const destClaude = path.join(projectDir, "CLAUDE.md");
+      fs.symlinkSync(oldManagedSource, destClaude);
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
       expect(fs.lstatSync(destClaude).isSymbolicLink()).toBe(true);
       expect(fs.readFileSync(destClaude, "utf8")).toBe("# Real content");
     });
 
-    it("linkProject creates KNOWLEDGE.md and LEARNINGS.md symlinks", async () => {
+    it("replaces identical managed file content with a symlink", async () => {
+      setupProfile(["identical-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "identical-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "identical-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Same content");
+
+      const destClaude = path.join(projectDir, "CLAUDE.md");
+      fs.writeFileSync(destClaude, "# Same content");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      expect(fs.lstatSync(destClaude).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(destClaude, "utf8")).toBe("# Same content");
+    });
+
+    it("linkProject creates REFERENCE.md and FINDINGS.md symlinks", async () => {
       setupProfile(["kb-project"]);
 
       const projectDir = path.join(tmpRoot, "projects", "kb-project");
@@ -185,14 +248,14 @@ describe("link", () => {
       const cortexProject = path.join(cortexPath, "kb-project");
       fs.mkdirSync(cortexProject, { recursive: true });
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
-      fs.writeFileSync(path.join(cortexProject, "KNOWLEDGE.md"), "# Knowledge base");
-      fs.writeFileSync(path.join(cortexProject, "LEARNINGS.md"), "# Learnings");
+      fs.writeFileSync(path.join(cortexProject, "REFERENCE.md"), "# Knowledge base");
+      fs.writeFileSync(path.join(cortexProject, "FINDINGS.md"), "# Findings");
 
       await runLink(cortexPath, { machine: "test-machine", profile: "test" });
 
-      expect(fs.lstatSync(path.join(projectDir, "KNOWLEDGE.md")).isSymbolicLink()).toBe(true);
-      expect(fs.lstatSync(path.join(projectDir, "LEARNINGS.md")).isSymbolicLink()).toBe(true);
-      expect(fs.readFileSync(path.join(projectDir, "KNOWLEDGE.md"), "utf8")).toBe("# Knowledge base");
+      expect(fs.lstatSync(path.join(projectDir, "REFERENCE.md")).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(projectDir, "FINDINGS.md")).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(projectDir, "REFERENCE.md"), "utf8")).toBe("# Knowledge base");
     });
 
     it("linkProject handles CLAUDE-*.md split files", async () => {
@@ -246,7 +309,7 @@ describe("link", () => {
       const cortexProject = path.join(cortexPath, "dbg-project");
       fs.mkdirSync(cortexProject, { recursive: true });
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
-      fs.writeFileSync(path.join(cortexProject, "LEARNINGS.md"), "# LEARNINGS\n\n## 2025-01-01\n\n- debug insight\n");
+      fs.writeFileSync(path.join(cortexProject, "FINDINGS.md"), "# FINDINGS\n\n## 2025-01-01\n\n- debug insight\n");
 
       const realContextFile = path.join(origHome!, ".cortex-context.md");
       await runLink(cortexPath, { machine: "test-machine", profile: "test", task: "debugging" });
@@ -405,6 +468,24 @@ describe("link", () => {
       expect(fs.existsSync(agentsMd)).toBe(true);
     });
 
+    it("allTools preserves an existing user-owned AGENTS.md", async () => {
+      setupProfile(["tool-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "tool-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+      fs.writeFileSync(path.join(projectDir, "AGENTS.md"), "local instructions");
+
+      const cortexProject = path.join(cortexPath, "tool-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Tool project");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test", allTools: true });
+
+      expect(fs.lstatSync(path.join(projectDir, "AGENTS.md")).isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(projectDir, "AGENTS.md"), "utf8")).toBe("local instructions");
+    });
+
     it("writes cortex.SKILL.md during link", async () => {
       setupProfile(["skill-test"]);
 
@@ -518,11 +599,11 @@ describe("link", () => {
 
     it("checkData detects invalid governance JSON", async () => {
       fs.writeFileSync(
-        path.join(cortexPath, ".governance", "memory-policy.json"),
+        path.join(cortexPath, ".governance", "retention-policy.json"),
         "{ invalid json"
       );
       const result = await runDoctor(cortexPath, false, true);
-      const policyCheck = result.checks.find(c => c.name === "data:governance:memory-policy.json");
+      const policyCheck = result.checks.find(c => c.name === "data:governance:retention-policy.json");
       expect(policyCheck).toBeDefined();
       expect(policyCheck!.ok).toBe(false);
     });
@@ -553,7 +634,7 @@ describe("link", () => {
       expect(backlogCheck!.ok).toBe(true);
     });
 
-    it("checkData validates learnings format", async () => {
+    it("checkData validates findings format", async () => {
       const profilesDir = path.join(cortexPath, "profiles");
       fs.mkdirSync(profilesDir, { recursive: true });
       fs.writeFileSync(
@@ -568,14 +649,14 @@ describe("link", () => {
       const projDir = path.join(cortexPath, "learn-proj");
       fs.mkdirSync(projDir, { recursive: true });
       fs.writeFileSync(
-        path.join(projDir, "LEARNINGS.md"),
-        "# learn-proj LEARNINGS\n\n## 2025-01-01\n\n- An insight\n"
+        path.join(projDir, "FINDINGS.md"),
+        "# learn-proj FINDINGS\n\n## 2025-01-01\n\n- An insight\n"
       );
 
       const result = await runDoctor(cortexPath, false, true);
-      const learningsCheck = result.checks.find(c => c.name === "data:learnings:learn-proj");
-      expect(learningsCheck).toBeDefined();
-      expect(learningsCheck!.ok).toBe(true);
+      const findingsCheck = result.checks.find(c => c.name === "data:findings:learn-proj");
+      expect(findingsCheck).toBeDefined();
+      expect(findingsCheck!.ok).toBe(true);
     });
 
     it("returns machine and profile in result", async () => {
@@ -785,7 +866,7 @@ hooks:
       cortex = tmp.path;
       fs.mkdirSync(path.join(cortex, "testproj"), { recursive: true });
       fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
-      fs.writeFileSync(path.join(cortex, "testproj", "LEARNINGS.md"), "# LEARNINGS\n\n- Test learning\n");
+      fs.writeFileSync(path.join(cortex, "testproj", "FINDINGS.md"), "# FINDINGS\n\n- Test finding\n");
       fs.writeFileSync(path.join(cortex, "testproj", "backlog.md"), "# backlog\n\n## Queue\n\n- Item\n");
     });
 
@@ -797,8 +878,8 @@ hooks:
       const storePath = path.join(cortex, ".governance", "file-checksums.json");
       expect(fs.existsSync(storePath)).toBe(true);
       const store = JSON.parse(fs.readFileSync(storePath, "utf8"));
-      expect(store["testproj/LEARNINGS.md"]).toBeDefined();
-      expect(store["testproj/LEARNINGS.md"].sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(store["testproj/FINDINGS.md"]).toBeDefined();
+      expect(store["testproj/FINDINGS.md"].sha256).toMatch(/^[a-f0-9]{64}$/);
     });
 
     it("verifyFileChecksums returns ok for unchanged files", () => {
@@ -809,18 +890,18 @@ hooks:
 
     it("verifyFileChecksums detects modified files", () => {
       updateFileChecksums(cortex);
-      fs.writeFileSync(path.join(cortex, "testproj", "LEARNINGS.md"), "# LEARNINGS\n\n- Modified\n");
+      fs.writeFileSync(path.join(cortex, "testproj", "FINDINGS.md"), "# FINDINGS\n\n- Modified\n");
       const results = verifyFileChecksums(cortex);
-      const learnings = results.find((r) => r.file.includes("LEARNINGS"));
-      expect(learnings?.status).toBe("mismatch");
+      const findings = results.find((r) => r.file.includes("FINDINGS"));
+      expect(findings?.status).toBe("mismatch");
     });
 
     it("verifyFileChecksums detects deleted files", () => {
       updateFileChecksums(cortex);
-      fs.unlinkSync(path.join(cortex, "testproj", "LEARNINGS.md"));
+      fs.unlinkSync(path.join(cortex, "testproj", "FINDINGS.md"));
       const results = verifyFileChecksums(cortex);
-      const learnings = results.find((r) => r.file.includes("LEARNINGS"));
-      expect(learnings?.status).toBe("missing");
+      const findings = results.find((r) => r.file.includes("FINDINGS"));
+      expect(findings?.status).toBe("missing");
     });
   });
 });

@@ -1,4 +1,4 @@
-# {{project}} Learnings
+# {{project}} Findings
 
 <!-- consolidated: 2024-01-01 -->
 

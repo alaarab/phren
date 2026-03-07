@@ -1,58 +1,64 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  buildIndex,
-  queryRows,
-  addLearningToFile,
-  checkConsolidationNeeded,
   findCortexPath,
-  ensureCortexPath,
-  detectProject,
   appendAuditLog,
-  consolidateProjectLearnings,
-  extractSnippet,
-  extractConflictVersions,
-  mergeLearnings,
-  mergeBacklog,
-  autoMergeConflicts,
-  filterTrustedLearningsDetailed,
-  recordMemoryInjection,
-  recordMemoryFeedback,
-  getMemoryQualityMultiplier,
-  memoryScoreKey,
-  checkMemoryPermission,
+  withDefaults,
+  getProjectDirs,
+  findCortexPathWithArg,
+  collectNativeMemoryFiles,
+  CortexError,
+  isCortexError,
+  cortexOk,
+  cortexErr,
+  ensureCortexPath,
+  parseCortexErrorCode,
+} from "./shared.js";
+import {
+  consolidateProjectFindings,
+  recordInjection,
+  recordFeedback,
+  getQualityMultiplier,
+  checkPermission,
   getAccessControl,
   updateAccessControl,
-  enforceCanonicalLocks,
-  upsertCanonicalMemory,
   migrateGovernance,
   validateGovernanceJson,
-  withDefaults,
-  validateLearningsFormat,
-  validateBacklogFormat,
-  stripBacklogDoneSection,
-  pruneDeadMemories,
-  getMemoryPolicy,
-  updateMemoryPolicy,
-  getMemoryWorkflowPolicy,
-  updateMemoryWorkflowPolicy,
+  getRetentionPolicy,
+  updateRetentionPolicy,
+  getWorkflowPolicy,
+  updateWorkflowPolicy,
   getIndexPolicy,
   updateIndexPolicy,
   getRuntimeHealth,
   updateRuntimeHealth,
-  migrateLegacyFindings,
-  appendMemoryQueue,
-  getProjectDirs,
-  flushMemoryScores,
-  findCortexPathWithArg,
-  collectNativeMemoryFiles,
-  CortexError,
-  parseCortexErrorCode,
-  isCortexError,
-  cortexOk,
-  cortexErr,
+  appendReviewQueue,
+  flushEntryScores,
+  entryScoreKey,
+  enforceCanonicalLocks,
+  pruneDeadMemories,
+} from "./shared-governance.js";
+import {
+  buildIndex,
+  queryRows,
+  detectProject,
   resolveImports,
-  isDuplicateLearning,
-} from "./shared.js";
+  extractSnippet,
+} from "./shared-index.js";
+import {
+  addFindingToFile,
+  checkConsolidationNeeded,
+  mergeFindings,
+  mergeBacklog,
+  autoMergeConflicts,
+  filterTrustedFindingsDetailed,
+  upsertCanonical,
+  validateFindingsFormat,
+  validateBacklogFormat,
+  stripBacklogDoneSection,
+  migrateLegacyFindings,
+  isDuplicateFinding,
+  extractConflictVersions,
+} from "./shared-content.js";
 import { isValidProjectName } from "./utils.js";
 import { grantAdmin, makeTempDir } from "./test-helpers.js";
 import * as path from "path";
@@ -246,7 +252,7 @@ describe("buildIndex and queryRows", () => {
   it("indexes markdown files and supports FTS5 search", async () => {
     const cortex = makeCortex();
     makeProject(cortex, "testproj", {
-      "LEARNINGS.md": "# testproj LEARNINGS\n\n## 2025-01-01\n\n- Always validate user input before processing\n",
+      "FINDINGS.md": "# testproj FINDINGS\n\n## 2025-01-01\n\n- Always validate user input before processing\n",
       "summary.md": "# testproj\n\nA test project for vitest.\n",
     });
 
@@ -255,7 +261,7 @@ describe("buildIndex and queryRows", () => {
     expect(rows).not.toBeNull();
     expect(rows!.length).toBeGreaterThanOrEqual(1);
     expect(rows![0][0]).toBe("testproj");
-    expect(rows![0][1]).toBe("LEARNINGS.md");
+    expect(rows![0][1]).toBe("FINDINGS.md");
     db.close();
   });
 
@@ -338,18 +344,18 @@ describe("extractSnippet", () => {
   });
 });
 
-// --- addLearningToFile ---
+// --- addFindingToFile ---
 
-describe("addLearningToFile", () => {
-  it("creates LEARNINGS.md if it does not exist", () => {
+describe("addFindingToFile", () => {
+  it("creates FINDINGS.md if it does not exist", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "newproj", { "summary.md": "# newproj\n" });
 
-    const result = addLearningToFile(cortex, "newproj", "Always use parameterized queries");
+    const result = addFindingToFile(cortex, "newproj", "Always use parameterized queries");
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Created LEARNINGS.md");
-    const content = fs.readFileSync(path.join(cortex, "newproj", "LEARNINGS.md"), "utf8");
+    if (result.ok) expect(result.data).toContain("Created FINDINGS.md");
+    const content = fs.readFileSync(path.join(cortex, "newproj", "FINDINGS.md"), "utf8");
     expect(content).toContain("- Always use parameterized queries");
     expect(content).toContain("cortex:cite");
   });
@@ -359,13 +365,13 @@ describe("addLearningToFile", () => {
     grantAdmin(cortex);
     const today = new Date().toISOString().slice(0, 10);
     makeProject(cortex, "myproj", {
-      "LEARNINGS.md": `# myproj LEARNINGS\n\n## ${today}\n\n- Existing learning\n`,
+      "FINDINGS.md": `# myproj FINDINGS\n\n## ${today}\n\n- Existing finding\n`,
     });
 
-    addLearningToFile(cortex, "myproj", "Second insight");
-    const content = fs.readFileSync(path.join(cortex, "myproj", "LEARNINGS.md"), "utf8");
+    addFindingToFile(cortex, "myproj", "Second insight");
+    const content = fs.readFileSync(path.join(cortex, "myproj", "FINDINGS.md"), "utf8");
     expect(content).toContain("- Second insight");
-    expect(content).toContain("- Existing learning");
+    expect(content).toContain("- Existing finding");
     // Should still have only one date heading for today
     const headingCount = (content.match(new RegExp(`## ${today}`, "g")) || []).length;
     expect(headingCount).toBe(1);
@@ -374,66 +380,66 @@ describe("addLearningToFile", () => {
   it("rejects invalid project names", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const result = addLearningToFile(cortex, "../etc", "bad");
+    const result = addFindingToFile(cortex, "../etc", "bad");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Invalid project name");
   });
 
-  it("skips duplicate learnings with high word overlap", () => {
+  it("skips duplicate findings with high word overlap", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     const today = new Date().toISOString().slice(0, 10);
     makeProject(cortex, "dupeproj", {
-      "LEARNINGS.md": `# dupeproj LEARNINGS\n\n## ${today}\n\n- The auth middleware runs before rate limiting and order matters\n`,
+      "FINDINGS.md": `# dupeproj FINDINGS\n\n## ${today}\n\n- The auth middleware runs before rate limiting and order matters\n`,
     });
 
-    const result = addLearningToFile(cortex, "dupeproj", "The auth middleware runs before rate limiting, order matters");
+    const result = addFindingToFile(cortex, "dupeproj", "The auth middleware runs before rate limiting, order matters");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Skipped duplicate");
   });
 
-  it("allows non-duplicate learnings through", () => {
+  it("allows non-duplicate findings through", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     const today = new Date().toISOString().slice(0, 10);
     makeProject(cortex, "dupeproj2", {
-      "LEARNINGS.md": `# dupeproj2 LEARNINGS\n\n## ${today}\n\n- The auth middleware runs before rate limiting\n`,
+      "FINDINGS.md": `# dupeproj2 FINDINGS\n\n## ${today}\n\n- The auth middleware runs before rate limiting\n`,
     });
 
-    const result = addLearningToFile(cortex, "dupeproj2", "Database indexes need to be rebuilt after migration");
+    const result = addFindingToFile(cortex, "dupeproj2", "Database indexes need to be rebuilt after migration");
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Added learning");
+    if (result.ok) expect(result.data).toContain("Added finding");
   });
 });
 
-// --- isDuplicateLearning ---
+// --- isDuplicateFinding ---
 
-describe("isDuplicateLearning", () => {
+describe("isDuplicateFinding", () => {
   it("detects duplicates with >60% word overlap", () => {
     const existing = "- The auth middleware runs before rate limiting and order matters\n- Use parameterized queries for SQL";
-    expect(isDuplicateLearning(existing, "- The auth middleware runs before rate limiting, order matters")).toBe(true);
+    expect(isDuplicateFinding(existing, "- The auth middleware runs before rate limiting, order matters")).toBe(true);
   });
 
   it("allows non-duplicates through", () => {
     const existing = "- The auth middleware runs before rate limiting\n- Use parameterized queries for SQL";
-    expect(isDuplicateLearning(existing, "- Database indexes need rebuilding after schema migration")).toBe(false);
+    expect(isDuplicateFinding(existing, "- Database indexes need rebuilding after schema migration")).toBe(false);
   });
 
   it("returns false for empty content", () => {
-    expect(isDuplicateLearning("", "- Some new learning")).toBe(false);
-    expect(isDuplicateLearning("# Title\n", "- Some new learning")).toBe(false);
+    expect(isDuplicateFinding("", "- Some new finding")).toBe(false);
+    expect(isDuplicateFinding("# Title\n", "- Some new finding")).toBe(false);
   });
 
-  it("returns false for empty learning", () => {
-    expect(isDuplicateLearning("- existing bullet", "")).toBe(false);
+  it("returns false for empty finding", () => {
+    expect(isDuplicateFinding("- existing bullet", "")).toBe(false);
   });
 
   it("respects custom threshold", () => {
     const existing = "- The auth middleware runs before rate limiting and order matters";
     // With a very high threshold, partial matches should not count
-    expect(isDuplicateLearning(existing, "- database indexes rebuild after migration", 0.3)).toBe(false);
+    expect(isDuplicateFinding(existing, "- database indexes rebuild after migration", 0.3)).toBe(false);
     // With a low threshold, even small overlap triggers duplicate
-    expect(isDuplicateLearning(existing, "- auth middleware should validate tokens before rate limiting", 0.3)).toBe(true);
+    expect(isDuplicateFinding(existing, "- auth middleware should validate tokens before rate limiting", 0.3)).toBe(true);
   });
 });
 
@@ -442,9 +448,9 @@ describe("isDuplicateLearning", () => {
 describe("checkConsolidationNeeded", () => {
   it("flags projects with 25+ entries since last consolidation", () => {
     const cortex = makeCortex();
-    const bullets = Array.from({ length: 26 }, (_, i) => `- Learning number ${i + 1}`).join("\n");
+    const bullets = Array.from({ length: 26 }, (_, i) => `- Finding number ${i + 1}`).join("\n");
     makeProject(cortex, "bigproj", {
-      "LEARNINGS.md": `# bigproj LEARNINGS\n\n## 2025-01-01\n\n${bullets}\n`,
+      "FINDINGS.md": `# bigproj FINDINGS\n\n## 2025-01-01\n\n${bullets}\n`,
     });
 
     const results = checkConsolidationNeeded(cortex);
@@ -456,7 +462,7 @@ describe("checkConsolidationNeeded", () => {
   it("does not flag projects under threshold", () => {
     const cortex = makeCortex();
     makeProject(cortex, "smallproj", {
-      "LEARNINGS.md": "# smallproj LEARNINGS\n\n## 2025-01-01\n\n- One learning\n- Two learning\n",
+      "FINDINGS.md": "# smallproj FINDINGS\n\n## 2025-01-01\n\n- One finding\n- Two finding\n",
     });
 
     const results = checkConsolidationNeeded(cortex);
@@ -465,10 +471,10 @@ describe("checkConsolidationNeeded", () => {
 
   it("counts only entries after the consolidation marker", () => {
     const cortex = makeCortex();
-    const oldBullets = Array.from({ length: 30 }, (_, i) => `- Old learning ${i}`).join("\n");
-    const newBullets = Array.from({ length: 5 }, (_, i) => `- New learning ${i}`).join("\n");
+    const oldBullets = Array.from({ length: 30 }, (_, i) => `- Old finding ${i}`).join("\n");
+    const newBullets = Array.from({ length: 5 }, (_, i) => `- New finding ${i}`).join("\n");
     makeProject(cortex, "markedproj", {
-      "LEARNINGS.md": `# markedproj LEARNINGS\n\n## 2024-01-01\n\n${oldBullets}\n\n<!-- consolidated: 2025-01-01 -->\n\n## 2025-02-01\n\n${newBullets}\n`,
+      "FINDINGS.md": `# markedproj FINDINGS\n\n## 2024-01-01\n\n${oldBullets}\n\n<!-- consolidated: 2025-01-01 -->\n\n## 2025-02-01\n\n${newBullets}\n`,
     });
 
     const results = checkConsolidationNeeded(cortex);
@@ -477,9 +483,9 @@ describe("checkConsolidationNeeded", () => {
 
   it("flags time-based consolidation (60+ days, 10+ entries)", () => {
     const cortex = makeCortex();
-    const bullets = Array.from({ length: 12 }, (_, i) => `- Learning ${i}`).join("\n");
+    const bullets = Array.from({ length: 12 }, (_, i) => `- Finding ${i}`).join("\n");
     makeProject(cortex, "oldproj", {
-      "LEARNINGS.md": `# oldproj LEARNINGS\n\n## 2024-06-01\n\n${bullets}\n\n<!-- consolidated: 2024-01-01 -->\n\n## 2024-06-15\n\n${bullets}\n`,
+      "FINDINGS.md": `# oldproj FINDINGS\n\n## 2024-06-01\n\n${bullets}\n\n<!-- consolidated: 2024-01-01 -->\n\n## 2024-06-15\n\n${bullets}\n`,
     });
 
     const results = checkConsolidationNeeded(cortex);
@@ -560,27 +566,27 @@ describe("appendAuditLog", () => {
   });
 });
 
-// --- consolidateProjectLearnings dedup ---
+// --- consolidateProjectFindings dedup ---
 
-describe("consolidateProjectLearnings", () => {
+describe("consolidateProjectFindings", () => {
   it("deduplicates entries with normalized whitespace", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "dedupproj", {
-      "LEARNINGS.md": [
-        "# dedupproj LEARNINGS",
+      "FINDINGS.md": [
+        "# dedupproj FINDINGS",
         "",
         "## 2025-01-01",
         "",
         "- Always  use   parameterized queries",
         "- Always use parameterized queries",
-        "- A different learning",
+        "- A different finding",
         "",
       ].join("\n"),
     });
 
-    consolidateProjectLearnings(cortex, "dedupproj");
-    const content = fs.readFileSync(path.join(cortex, "dedupproj", "LEARNINGS.md"), "utf8");
+    consolidateProjectFindings(cortex, "dedupproj");
+    const content = fs.readFileSync(path.join(cortex, "dedupproj", "FINDINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(2);
   });
@@ -589,8 +595,8 @@ describe("consolidateProjectLearnings", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "trailproj", {
-      "LEARNINGS.md": [
-        "# trailproj LEARNINGS",
+      "FINDINGS.md": [
+        "# trailproj FINDINGS",
         "",
         "## 2025-01-01",
         "",
@@ -600,8 +606,8 @@ describe("consolidateProjectLearnings", () => {
       ].join("\n"),
     });
 
-    consolidateProjectLearnings(cortex, "trailproj");
-    const content = fs.readFileSync(path.join(cortex, "trailproj", "LEARNINGS.md"), "utf8");
+    consolidateProjectFindings(cortex, "trailproj");
+    const content = fs.readFileSync(path.join(cortex, "trailproj", "FINDINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(1);
     expect(bullets[0]).toBe("- Use parameterized queries");
@@ -632,50 +638,50 @@ describe("RBAC and canonical locks", () => {
     rbacCleanup();
   });
 
-  describe("checkMemoryPermission", () => {
+  describe("checkPermission", () => {
     it("admin can perform any action", () => {
       setupAccess({ admins: ["alice"] });
       for (const action of ["read", "write", "queue", "pin", "policy", "delete"] as const) {
-        expect(checkMemoryPermission(cortex, action, "alice")).toBeNull();
+        expect(checkPermission(cortex, action, "alice")).toBeNull();
       }
     });
 
     it("maintainer can do everything except policy", () => {
       setupAccess({ maintainers: ["bob"] });
-      expect(checkMemoryPermission(cortex, "read", "bob")).toBeNull();
-      expect(checkMemoryPermission(cortex, "write", "bob")).toBeNull();
-      expect(checkMemoryPermission(cortex, "pin", "bob")).toBeNull();
-      expect(checkMemoryPermission(cortex, "delete", "bob")).toBeNull();
-      expect(checkMemoryPermission(cortex, "policy", "bob")).toContain("Permission denied");
+      expect(checkPermission(cortex, "read", "bob")).toBeNull();
+      expect(checkPermission(cortex, "write", "bob")).toBeNull();
+      expect(checkPermission(cortex, "pin", "bob")).toBeNull();
+      expect(checkPermission(cortex, "delete", "bob")).toBeNull();
+      expect(checkPermission(cortex, "policy", "bob")).toContain("Permission denied");
     });
 
     it("contributor can read, write, and queue but not pin, delete, or policy", () => {
       setupAccess({ contributors: ["carol"] });
-      expect(checkMemoryPermission(cortex, "read", "carol")).toBeNull();
-      expect(checkMemoryPermission(cortex, "write", "carol")).toBeNull();
-      expect(checkMemoryPermission(cortex, "queue", "carol")).toBeNull();
-      expect(checkMemoryPermission(cortex, "pin", "carol")).toContain("Permission denied");
-      expect(checkMemoryPermission(cortex, "delete", "carol")).toContain("Permission denied");
-      expect(checkMemoryPermission(cortex, "policy", "carol")).toContain("Permission denied");
+      expect(checkPermission(cortex, "read", "carol")).toBeNull();
+      expect(checkPermission(cortex, "write", "carol")).toBeNull();
+      expect(checkPermission(cortex, "queue", "carol")).toBeNull();
+      expect(checkPermission(cortex, "pin", "carol")).toContain("Permission denied");
+      expect(checkPermission(cortex, "delete", "carol")).toContain("Permission denied");
+      expect(checkPermission(cortex, "policy", "carol")).toContain("Permission denied");
     });
 
     it("viewer can only read", () => {
       setupAccess({ viewers: ["dave"] });
-      expect(checkMemoryPermission(cortex, "read", "dave")).toBeNull();
-      expect(checkMemoryPermission(cortex, "write", "dave")).toContain("Permission denied");
-      expect(checkMemoryPermission(cortex, "pin", "dave")).toContain("Permission denied");
-      expect(checkMemoryPermission(cortex, "policy", "dave")).toContain("Permission denied");
+      expect(checkPermission(cortex, "read", "dave")).toBeNull();
+      expect(checkPermission(cortex, "write", "dave")).toContain("Permission denied");
+      expect(checkPermission(cortex, "pin", "dave")).toContain("Permission denied");
+      expect(checkPermission(cortex, "policy", "dave")).toContain("Permission denied");
     });
 
     it("unknown actor gets viewer role (least privilege)", () => {
       setupAccess({ admins: ["alice"] });
-      expect(checkMemoryPermission(cortex, "read", "stranger")).toBeNull();
-      expect(checkMemoryPermission(cortex, "write", "stranger")).toContain("Permission denied");
+      expect(checkPermission(cortex, "read", "stranger")).toBeNull();
+      expect(checkPermission(cortex, "write", "stranger")).toContain("Permission denied");
     });
 
     it("denial message includes actor name and role", () => {
       setupAccess({ viewers: ["eve"] });
-      const denial = checkMemoryPermission(cortex, "write", "eve");
+      const denial = checkPermission(cortex, "write", "eve");
       expect(denial).toContain("eve");
       expect(denial).toContain("viewer");
       expect(denial).toContain("write");
@@ -726,13 +732,13 @@ describe("RBAC and canonical locks", () => {
     });
   });
 
-  describe("upsertCanonicalMemory", () => {
+  describe("upsertCanonical", () => {
     it("creates CANONICAL_MEMORIES.md and locks the entry", () => {
       setupAccess({ admins: ["test-admin"] });
       process.env.CORTEX_ACTOR = "test-admin";
       makeProject(cortex, "pinproj", { "summary.md": "# pinproj" });
 
-      const result = upsertCanonicalMemory(cortex, "pinproj", "Always run tests before pushing");
+      const result = upsertCanonical(cortex, "pinproj", "Always run tests before pushing");
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.data).toContain("Pinned");
 
@@ -756,8 +762,8 @@ describe("RBAC and canonical locks", () => {
       process.env.CORTEX_ACTOR = "test-admin";
       makeProject(cortex, "dupproj", { "summary.md": "# dupproj" });
 
-      upsertCanonicalMemory(cortex, "dupproj", "Unique insight");
-      upsertCanonicalMemory(cortex, "dupproj", "Unique insight");
+      upsertCanonical(cortex, "dupproj", "Unique insight");
+      upsertCanonical(cortex, "dupproj", "Unique insight");
 
       const canonical = fs.readFileSync(
         path.join(cortex, "dupproj", "CANONICAL_MEMORIES.md"),
@@ -772,7 +778,7 @@ describe("RBAC and canonical locks", () => {
       process.env.CORTEX_ACTOR = "readonly";
       makeProject(cortex, "nopinproj", { "summary.md": "# nopinproj" });
 
-      const result = upsertCanonicalMemory(cortex, "nopinproj", "Should be denied");
+      const result = upsertCanonical(cortex, "nopinproj", "Should be denied");
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain("Permission denied");
       expect(fs.existsSync(path.join(cortex, "nopinproj", "CANONICAL_MEMORIES.md"))).toBe(false);
@@ -803,21 +809,21 @@ describe("RBAC and canonical locks", () => {
   });
 });
 
-// --- filterTrustedLearningsDetailed ---
+// --- filterTrustedFindingsDetailed ---
 
-describe("filterTrustedLearningsDetailed", () => {
+describe("filterTrustedFindingsDetailed", () => {
   it("keeps fresh entries", () => {
     const today = new Date().toISOString().slice(0, 10);
-    const content = `# proj LEARNINGS\n\n## ${today}\n\n- Fresh learning\n`;
-    const result = filterTrustedLearningsDetailed(content, { ttlDays: 120 });
-    expect(result.content).toContain("- Fresh learning");
+    const content = `# proj FINDINGS\n\n## ${today}\n\n- Fresh finding\n`;
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 120 });
+    expect(result.content).toContain("- Fresh finding");
     expect(result.issues.length).toBe(0);
   });
 
   it("filters out entries older than ttlDays", () => {
-    const content = `# proj LEARNINGS\n\n## 2020-01-01\n\n- Ancient learning\n`;
-    const result = filterTrustedLearningsDetailed(content, { ttlDays: 120 });
-    expect(result.content).not.toContain("- Ancient learning");
+    const content = `# proj FINDINGS\n\n## 2020-01-01\n\n- Ancient finding\n`;
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 120 });
+    expect(result.content).not.toContain("- Ancient finding");
     expect(result.issues.length).toBe(1);
     expect(result.issues[0].reason).toBe("stale");
   });
@@ -826,8 +832,8 @@ describe("filterTrustedLearningsDetailed", () => {
     const d = new Date();
     d.setDate(d.getDate() - 100);
     const dateStr = d.toISOString().slice(0, 10);
-    const content = `# proj LEARNINGS\n\n## ${dateStr}\n\n- Aging learning without citation\n`;
-    const result = filterTrustedLearningsDetailed(content, { ttlDays: 200, minConfidence: 0.9 });
+    const content = `# proj FINDINGS\n\n## ${dateStr}\n\n- Aging finding without citation\n`;
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.9 });
     expect(result.issues.length).toBe(1);
     expect(result.issues[0].reason).toBe("stale");
   });
@@ -837,36 +843,36 @@ describe("filterTrustedLearningsDetailed", () => {
     d.setDate(d.getDate() - 50);
     const dateStr = d.toISOString().slice(0, 10);
     const content = [
-      "# proj LEARNINGS",
+      "# proj FINDINGS",
       "",
       `## ${dateStr}`,
       "",
-      "- Learning with citation",
+      "- Finding with citation",
       `  <!-- cortex:cite {"created_at":"${d.toISOString()}"} -->`,
       "",
     ].join("\n");
-    const result = filterTrustedLearningsDetailed(content, { ttlDays: 200, minConfidence: 0.3 });
-    expect(result.content).toContain("- Learning with citation");
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.3 });
+    expect(result.content).toContain("- Finding with citation");
   });
 
   it("accepts numeric ttlDays shorthand", () => {
-    const content = `# proj LEARNINGS\n\n## 2020-01-01\n\n- Old entry\n`;
-    const result = filterTrustedLearningsDetailed(content, 30);
+    const content = `# proj FINDINGS\n\n## 2020-01-01\n\n- Old entry\n`;
+    const result = filterTrustedFindingsDetailed(content, 30);
     expect(result.content).not.toContain("- Old entry");
     expect(result.issues.length).toBe(1);
   });
 });
 
-// --- recordMemoryInjection ---
+// --- recordInjection ---
 
-describe("recordMemoryInjection", () => {
+describe("recordInjection", () => {
   it("creates and updates score entries", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const key = "testproj/LEARNINGS.md:abc123";
+    const key = "testproj/FINDINGS.md:abc123";
 
-    recordMemoryInjection(cortex, key, "session-1");
-    flushMemoryScores(cortex);
+    recordInjection(cortex, key, "session-1");
+    flushEntryScores(cortex);
 
     const scoresPath = path.join(cortex, ".governance", "memory-scores.json");
     expect(fs.existsSync(scoresPath)).toBe(true);
@@ -874,8 +880,8 @@ describe("recordMemoryInjection", () => {
     expect(scores[key]).toBeDefined();
     expect(scores[key].impressions).toBe(1);
 
-    recordMemoryInjection(cortex, key, "session-2");
-    flushMemoryScores(cortex);
+    recordInjection(cortex, key, "session-2");
+    flushEntryScores(cortex);
     const scores2 = readVersionedEntries<any>(scoresPath);
     expect(scores2[key].impressions).toBe(2);
   });
@@ -883,9 +889,9 @@ describe("recordMemoryInjection", () => {
   it("appends to usage log", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const key = "testproj/LEARNINGS.md:def456";
+    const key = "testproj/FINDINGS.md:def456";
 
-    recordMemoryInjection(cortex, key, "sess-42");
+    recordInjection(cortex, key, "sess-42");
 
     const logPath = path.join(cortex, ".governance", "memory-usage.log");
     expect(fs.existsSync(logPath)).toBe(true);
@@ -896,17 +902,17 @@ describe("recordMemoryInjection", () => {
   });
 });
 
-// --- recordMemoryFeedback ---
+// --- recordFeedback ---
 
-describe("recordMemoryFeedback", () => {
+describe("recordFeedback", () => {
   it("records helpful feedback", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     const key = "proj/file:aaa";
 
-    recordMemoryInjection(cortex, key);
-    recordMemoryFeedback(cortex, key, "helpful");
-    flushMemoryScores(cortex);
+    recordInjection(cortex, key);
+    recordFeedback(cortex, key, "helpful");
+    flushEntryScores(cortex);
 
     const scores = readVersionedEntries<any>(
       path.join(cortex, ".governance", "memory-scores.json")
@@ -920,9 +926,9 @@ describe("recordMemoryFeedback", () => {
     grantAdmin(cortex);
     const key = "proj/file:bbb";
 
-    recordMemoryInjection(cortex, key);
-    recordMemoryFeedback(cortex, key, "reprompt");
-    flushMemoryScores(cortex);
+    recordInjection(cortex, key);
+    recordFeedback(cortex, key, "reprompt");
+    flushEntryScores(cortex);
 
     const scores = readVersionedEntries<any>(
       path.join(cortex, ".governance", "memory-scores.json")
@@ -935,9 +941,9 @@ describe("recordMemoryFeedback", () => {
     grantAdmin(cortex);
     const key = "proj/file:ccc";
 
-    recordMemoryInjection(cortex, key);
-    recordMemoryFeedback(cortex, key, "regression");
-    flushMemoryScores(cortex);
+    recordInjection(cortex, key);
+    recordFeedback(cortex, key, "regression");
+    flushEntryScores(cortex);
 
     const scores = readVersionedEntries<any>(
       path.join(cortex, ".governance", "memory-scores.json")
@@ -946,13 +952,13 @@ describe("recordMemoryFeedback", () => {
   });
 });
 
-// --- getMemoryQualityMultiplier ---
+// --- getQualityMultiplier ---
 
-describe("getMemoryQualityMultiplier", () => {
+describe("getQualityMultiplier", () => {
   it("returns 1 for unknown keys", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    expect(getMemoryQualityMultiplier(cortex, "unknown/key:xyz")).toBe(1);
+    expect(getQualityMultiplier(cortex, "unknown/key:xyz")).toBe(1);
   });
 
   it("returns > 1 for helpful memories", () => {
@@ -960,12 +966,12 @@ describe("getMemoryQualityMultiplier", () => {
     grantAdmin(cortex);
     const key = "proj/file:helpful";
 
-    recordMemoryInjection(cortex, key);
-    recordMemoryFeedback(cortex, key, "helpful");
-    recordMemoryFeedback(cortex, key, "helpful");
-    recordMemoryFeedback(cortex, key, "helpful");
+    recordInjection(cortex, key);
+    recordFeedback(cortex, key, "helpful");
+    recordFeedback(cortex, key, "helpful");
+    recordFeedback(cortex, key, "helpful");
 
-    const mult = getMemoryQualityMultiplier(cortex, key);
+    const mult = getQualityMultiplier(cortex, key);
     expect(mult).toBeGreaterThan(1);
   });
 
@@ -974,11 +980,11 @@ describe("getMemoryQualityMultiplier", () => {
     grantAdmin(cortex);
     const key = "proj/file:bad";
 
-    recordMemoryInjection(cortex, key);
-    recordMemoryFeedback(cortex, key, "regression");
-    recordMemoryFeedback(cortex, key, "reprompt");
+    recordInjection(cortex, key);
+    recordFeedback(cortex, key, "regression");
+    recordFeedback(cortex, key, "reprompt");
 
-    const mult = getMemoryQualityMultiplier(cortex, key);
+    const mult = getQualityMultiplier(cortex, key);
     expect(mult).toBeLessThan(1);
   });
 
@@ -987,30 +993,30 @@ describe("getMemoryQualityMultiplier", () => {
     grantAdmin(cortex);
 
     const goodKey = "proj/file:great";
-    recordMemoryInjection(cortex, goodKey);
-    for (let i = 0; i < 20; i++) recordMemoryFeedback(cortex, goodKey, "helpful");
-    expect(getMemoryQualityMultiplier(cortex, goodKey)).toBeLessThanOrEqual(1.5);
+    recordInjection(cortex, goodKey);
+    for (let i = 0; i < 20; i++) recordFeedback(cortex, goodKey, "helpful");
+    expect(getQualityMultiplier(cortex, goodKey)).toBeLessThanOrEqual(1.5);
 
     const badKey = "proj/file:terrible";
-    recordMemoryInjection(cortex, badKey);
-    for (let i = 0; i < 20; i++) recordMemoryFeedback(cortex, badKey, "regression");
-    expect(getMemoryQualityMultiplier(cortex, badKey)).toBeGreaterThanOrEqual(0.2);
+    recordInjection(cortex, badKey);
+    for (let i = 0; i < 20; i++) recordFeedback(cortex, badKey, "regression");
+    expect(getQualityMultiplier(cortex, badKey)).toBeGreaterThanOrEqual(0.2);
   });
 });
 
-// --- memoryScoreKey ---
+// --- entryScoreKey ---
 
-describe("memoryScoreKey", () => {
+describe("entryScoreKey", () => {
   it("generates a deterministic key", () => {
-    const k1 = memoryScoreKey("proj", "LEARNINGS.md", "some snippet");
-    const k2 = memoryScoreKey("proj", "LEARNINGS.md", "some snippet");
+    const k1 = entryScoreKey("proj", "FINDINGS.md", "some snippet");
+    const k2 = entryScoreKey("proj", "FINDINGS.md", "some snippet");
     expect(k1).toBe(k2);
-    expect(k1).toMatch(/^proj\/LEARNINGS\.md:[a-f0-9]{12}$/);
+    expect(k1).toMatch(/^proj\/FINDINGS\.md:[a-f0-9]{12}$/);
   });
 
   it("produces different keys for different snippets", () => {
-    const k1 = memoryScoreKey("proj", "LEARNINGS.md", "snippet one");
-    const k2 = memoryScoreKey("proj", "LEARNINGS.md", "snippet two");
+    const k1 = entryScoreKey("proj", "FINDINGS.md", "snippet one");
+    const k2 = entryScoreKey("proj", "FINDINGS.md", "snippet two");
     expect(k1).not.toBe(k2);
   });
 });
@@ -1086,42 +1092,42 @@ describe("extractConflictVersions", () => {
   });
 });
 
-// --- mergeLearnings ---
+// --- mergeFindings ---
 
-describe("mergeLearnings (shared.test)", () => {
+describe("mergeFindings (shared.test)", () => {
   it("combines entries from both sides under the same date", () => {
-    const ours = "# LEARNINGS\n\n## 2025-01-15\n\n- Our insight\n";
-    const theirs = "# LEARNINGS\n\n## 2025-01-15\n\n- Their insight\n";
-    const merged = mergeLearnings(ours, theirs);
+    const ours = "# FINDINGS\n\n## 2025-01-15\n\n- Our insight\n";
+    const theirs = "# FINDINGS\n\n## 2025-01-15\n\n- Their insight\n";
+    const merged = mergeFindings(ours, theirs);
     expect(merged).toContain("- Our insight");
     expect(merged).toContain("- Their insight");
   });
 
   it("deduplicates identical entries", () => {
-    const content = "# LEARNINGS\n\n## 2025-03-01\n\n- Same entry\n";
-    const merged = mergeLearnings(content, content);
+    const content = "# FINDINGS\n\n## 2025-03-01\n\n- Same entry\n";
+    const merged = mergeFindings(content, content);
     const count = (merged.match(/- Same entry/g) || []).length;
     expect(count).toBe(1);
   });
 
   it("sorts dates newest first", () => {
-    const ours = "# LEARNINGS\n\n## 2024-01-01\n\n- Old\n";
-    const theirs = "# LEARNINGS\n\n## 2025-06-15\n\n- New\n";
-    const merged = mergeLearnings(ours, theirs);
+    const ours = "# FINDINGS\n\n## 2024-01-01\n\n- Old\n";
+    const theirs = "# FINDINGS\n\n## 2025-06-15\n\n- New\n";
+    const merged = mergeFindings(ours, theirs);
     expect(merged.indexOf("2025-06-15")).toBeLessThan(merged.indexOf("2024-01-01"));
   });
 
   it("preserves the title from ours", () => {
-    const ours = "# My Project LEARNINGS\n\n## 2025-01-01\n\n- A\n";
+    const ours = "# My Project FINDINGS\n\n## 2025-01-01\n\n- A\n";
     const theirs = "# Other Title\n\n## 2025-01-01\n\n- B\n";
-    const merged = mergeLearnings(ours, theirs);
-    expect(merged.startsWith("# My Project LEARNINGS")).toBe(true);
+    const merged = mergeFindings(ours, theirs);
+    expect(merged.startsWith("# My Project FINDINGS")).toBe(true);
   });
 
   it("merges dates that only exist on one side", () => {
-    const ours = "# LEARNINGS\n\n## 2025-01-01\n\n- Ours only\n";
-    const theirs = "# LEARNINGS\n\n## 2025-02-01\n\n- Theirs only\n";
-    const merged = mergeLearnings(ours, theirs);
+    const ours = "# FINDINGS\n\n## 2025-01-01\n\n- Ours only\n";
+    const theirs = "# FINDINGS\n\n## 2025-02-01\n\n- Theirs only\n";
+    const merged = mergeFindings(ours, theirs);
     expect(merged).toContain("- Ours only");
     expect(merged).toContain("- Theirs only");
     expect(merged).toContain("## 2025-01-01");
@@ -1213,28 +1219,28 @@ describe("autoMergeConflicts", () => {
     expect(autoMergeConflicts(gitDir)).toBe(true);
   });
 
-  it("auto-merges a conflicted LEARNINGS.md", () => {
+  it("auto-merges a conflicted FINDINGS.md", () => {
     const { execFileSync } = require("child_process");
 
     // Create base commit with a shared file
-    commitFile(gitDir, "proj/LEARNINGS.md", "# proj LEARNINGS\n\n## 2025-01-01\n\n- Base entry\n", "base");
+    commitFile(gitDir, "proj/FINDINGS.md", "# proj FINDINGS\n\n## 2025-01-01\n\n- Base entry\n", "base");
 
     // Create a branch with a different entry
     execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-a"], { stdio: "pipe" });
     fs.writeFileSync(
-      path.join(gitDir, "proj", "LEARNINGS.md"),
-      "# proj LEARNINGS\n\n## 2025-01-01\n\n- Branch A entry\n"
+      path.join(gitDir, "proj", "FINDINGS.md"),
+      "# proj FINDINGS\n\n## 2025-01-01\n\n- Branch A entry\n"
     );
-    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/LEARNINGS.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/FINDINGS.md"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "branch-a change"], { stdio: "ignore" });
 
     // Go back to master and create a conflicting entry
     execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
     fs.writeFileSync(
-      path.join(gitDir, "proj", "LEARNINGS.md"),
-      "# proj LEARNINGS\n\n## 2025-01-01\n\n- Master entry\n"
+      path.join(gitDir, "proj", "FINDINGS.md"),
+      "# proj FINDINGS\n\n## 2025-01-01\n\n- Master entry\n"
     );
-    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/LEARNINGS.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/FINDINGS.md"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "master change"], { stdio: "ignore" });
 
     // Merge to create conflict
@@ -1249,14 +1255,14 @@ describe("autoMergeConflicts", () => {
       encoding: "utf8",
     }).trim();
 
-    if (!status.includes("LEARNINGS.md")) {
+    if (!status.includes("FINDINGS.md")) {
       return;
     }
 
     const resolved = autoMergeConflicts(gitDir);
     expect(resolved).toBe(true);
 
-    const content = fs.readFileSync(path.join(gitDir, "proj", "LEARNINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(gitDir, "proj", "FINDINGS.md"), "utf8");
     expect(content).toContain("Branch A entry");
     expect(content).toContain("Master entry");
     expect(content).not.toContain("<<<<<<<");
@@ -1382,31 +1388,31 @@ describe("withDefaults", () => {
   });
 });
 
-// --- validateLearningsFormat ---
+// --- validateFindingsFormat ---
 
-describe("validateLearningsFormat", () => {
+describe("validateFindingsFormat", () => {
   it("returns empty for valid format", () => {
-    const content = "# proj LEARNINGS\n\n## 2025-01-01\n\n- A learning\n";
-    const issues = validateLearningsFormat(content);
+    const content = "# proj FINDINGS\n\n## 2025-01-01\n\n- A finding\n";
+    const issues = validateFindingsFormat(content);
     expect(issues).toEqual([]);
   });
 
   it("flags missing title heading", () => {
-    const content = "## 2025-01-01\n\n- A learning\n";
-    const issues = validateLearningsFormat(content);
+    const content = "## 2025-01-01\n\n- A finding\n";
+    const issues = validateFindingsFormat(content);
     expect(issues.length).toBe(1);
     expect(issues[0]).toContain("Missing title");
   });
 
   it("flags bad date format in headings that start with digits", () => {
-    const content = "# LEARNINGS\n\n## 2025-1-1\n\n- A learning\n";
-    const issues = validateLearningsFormat(content);
+    const content = "# FINDINGS\n\n## 2025-1-1\n\n- A finding\n";
+    const issues = validateFindingsFormat(content);
     expect(issues.some(i => i.includes("YYYY-MM-DD"))).toBe(true);
   });
 
   it("does not flag non-date headings like ## Overview", () => {
-    const content = "# LEARNINGS\n\n## Overview\n\nSome text\n";
-    const issues = validateLearningsFormat(content);
+    const content = "# FINDINGS\n\n## Overview\n\nSome text\n";
+    const issues = validateFindingsFormat(content);
     expect(issues.length).toBe(0);
   });
 });
@@ -1458,11 +1464,11 @@ describe("pruneDeadMemories", () => {
     grantAdmin(cortex);
     const govDir = path.join(cortex, ".governance");
     fs.writeFileSync(
-      path.join(govDir, "memory-policy.json"),
+      path.join(govDir, "retention-policy.json"),
       JSON.stringify({ ttlDays: 120, retentionDays: 30, autoAcceptThreshold: 0.75, minInjectConfidence: 0.35, decay: { d30: 1, d60: 0.85, d90: 0.65, d120: 0.45 } }, null, 2) + "\n"
     );
     makeProject(cortex, "pruneproj", {
-      "LEARNINGS.md": "# pruneproj LEARNINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
+      "FINDINGS.md": "# pruneproj FINDINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
     });
 
     const result = pruneDeadMemories(cortex, "pruneproj", true);
@@ -1472,7 +1478,7 @@ describe("pruneDeadMemories", () => {
       expect(result.data).toContain("1");
     }
     // File should be unchanged in dry-run
-    const content = fs.readFileSync(path.join(cortex, "pruneproj", "LEARNINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(cortex, "pruneproj", "FINDINGS.md"), "utf8");
     expect(content).toContain("Very old entry");
   });
 
@@ -1481,20 +1487,20 @@ describe("pruneDeadMemories", () => {
     grantAdmin(cortex);
     const govDir = path.join(cortex, ".governance");
     fs.writeFileSync(
-      path.join(govDir, "memory-policy.json"),
+      path.join(govDir, "retention-policy.json"),
       JSON.stringify({ ttlDays: 120, retentionDays: 30, autoAcceptThreshold: 0.75, minInjectConfidence: 0.35, decay: { d30: 1, d60: 0.85, d90: 0.65, d120: 0.45 } }, null, 2) + "\n"
     );
     makeProject(cortex, "pruneproj", {
-      "LEARNINGS.md": "# pruneproj LEARNINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
+      "FINDINGS.md": "# pruneproj FINDINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
     });
 
     const result = pruneDeadMemories(cortex, "pruneproj");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Pruned 1");
-    const content = fs.readFileSync(path.join(cortex, "pruneproj", "LEARNINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(cortex, "pruneproj", "FINDINGS.md"), "utf8");
     expect(content).not.toContain("Very old entry");
     expect(content).toContain("Future entry");
-    expect(fs.existsSync(path.join(cortex, "pruneproj", "LEARNINGS.md.bak"))).toBe(true);
+    expect(fs.existsSync(path.join(cortex, "pruneproj", "FINDINGS.md.bak"))).toBe(true);
   });
 
   it("denies prune when actor lacks delete permission", () => {
@@ -1512,12 +1518,12 @@ describe("pruneDeadMemories", () => {
   });
 });
 
-// --- getMemoryPolicy / updateMemoryPolicy ---
+// --- getRetentionPolicy / updateRetentionPolicy ---
 
-describe("getMemoryPolicy and updateMemoryPolicy", () => {
+describe("getRetentionPolicy and updateRetentionPolicy", () => {
   it("returns defaults when no policy file exists", () => {
     const cortex = makeCortex();
-    const policy = getMemoryPolicy(cortex);
+    const policy = getRetentionPolicy(cortex);
     expect(policy.ttlDays).toBe(120);
     expect(policy.retentionDays).toBe(365);
     expect(policy.decay.d30).toBe(1.0);
@@ -1529,10 +1535,10 @@ describe("getMemoryPolicy and updateMemoryPolicy", () => {
     const govDir = path.join(cortex, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
-      path.join(govDir, "memory-policy.json"),
+      path.join(govDir, "retention-policy.json"),
       JSON.stringify({ ttlDays: 60 }, null, 2) + "\n"
     );
-    const policy = getMemoryPolicy(cortex);
+    const policy = getRetentionPolicy(cortex);
     expect(policy.ttlDays).toBe(60);
     expect(policy.retentionDays).toBe(365);
   });
@@ -1540,7 +1546,7 @@ describe("getMemoryPolicy and updateMemoryPolicy", () => {
   it("admin can update policy", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const result = updateMemoryPolicy(cortex, { ttlDays: 90 });
+    const result = updateRetentionPolicy(cortex, { ttlDays: 90 });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.ttlDays).toBe(90);
   });
@@ -1554,18 +1560,18 @@ describe("getMemoryPolicy and updateMemoryPolicy", () => {
       JSON.stringify({ contributors: ["dev"] }, null, 2) + "\n"
     );
     process.env.CORTEX_ACTOR = "dev";
-    const result = updateMemoryPolicy(cortex, { ttlDays: 1 });
+    const result = updateRetentionPolicy(cortex, { ttlDays: 1 });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Permission denied");
   });
 });
 
-// --- getMemoryWorkflowPolicy / updateMemoryWorkflowPolicy ---
+// --- getWorkflowPolicy / updateWorkflowPolicy ---
 
-describe("getMemoryWorkflowPolicy and updateMemoryWorkflowPolicy", () => {
+describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
   it("returns defaults when no file exists", () => {
     const cortex = makeCortex();
-    const wp = getMemoryWorkflowPolicy(cortex);
+    const wp = getWorkflowPolicy(cortex);
     expect(wp.requireMaintainerApproval).toBe(true);
     expect(wp.lowConfidenceThreshold).toBe(0.7);
     expect(wp.riskySections).toEqual(["Stale", "Conflicts"]);
@@ -1576,17 +1582,17 @@ describe("getMemoryWorkflowPolicy and updateMemoryWorkflowPolicy", () => {
     const govDir = path.join(cortex, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
-      path.join(govDir, "memory-workflow-policy.json"),
+      path.join(govDir, "workflow-policy.json"),
       JSON.stringify({ riskySections: ["Review", "BadSection", "Stale"] }, null, 2) + "\n"
     );
-    const wp = getMemoryWorkflowPolicy(cortex);
+    const wp = getWorkflowPolicy(cortex);
     expect(wp.riskySections).toEqual(["Review", "Stale"]);
   });
 
   it("admin can update workflow policy", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const result = updateMemoryWorkflowPolicy(cortex, { lowConfidenceThreshold: 0.5 });
+    const result = updateWorkflowPolicy(cortex, { lowConfidenceThreshold: 0.5 });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.lowConfidenceThreshold).toBe(0.5);
   });
@@ -1656,37 +1662,37 @@ describe("getRuntimeHealth and updateRuntimeHealth", () => {
 // --- migrateLegacyFindings ---
 
 describe("migrateLegacyFindings", () => {
-  it("migrates bullet entries from FINDINGS.md to LEARNINGS.md", () => {
+  it("migrates bullet entries from LEARNINGS.md to FINDINGS.md", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "legacyproj", {
-      "FINDINGS.md": "# Findings\n\n- Use explicit timezone handling\n- Retry transient failures\n",
+      "LEARNINGS.md": "# Learnings\n\n- Use explicit timezone handling\n- Retry transient failures\n",
     });
     const result = migrateLegacyFindings(cortex, "legacyproj");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Migrated 2 findings");
-    const learnings = fs.readFileSync(path.join(cortex, "legacyproj", "LEARNINGS.md"), "utf8");
-    expect(learnings).toContain("timezone handling");
-    expect(learnings).toContain("transient failures");
+    const findings = fs.readFileSync(path.join(cortex, "legacyproj", "FINDINGS.md"), "utf8");
+    expect(findings).toContain("timezone handling");
+    expect(findings).toContain("transient failures");
   });
 
   it("dry-run returns count without writing", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "dryproj", {
-      "FINDINGS.md": "# Findings\n\n- Finding one\n",
+      "LEARNINGS.md": "# Learnings\n\n- Finding one\n",
     });
     const result = migrateLegacyFindings(cortex, "dryproj", { dryRun: true });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Found 1 migratable");
-    expect(fs.existsSync(path.join(cortex, "dryproj", "LEARNINGS.md"))).toBe(false);
+    expect(fs.existsSync(path.join(cortex, "dryproj", "FINDINGS.md"))).toBe(false);
   });
 
   it("deduplicates findings across files", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "dedupfindings", {
-      "FINDINGS.md": "# Findings\n\n- Same insight\n",
+      "LEARNINGS.md": "# Learnings\n\n- Same insight\n",
       "LESSONS.md": "# Lessons\n\n- Same insight\n",
     });
     const result = migrateLegacyFindings(cortex, "dedupfindings");
@@ -1715,7 +1721,7 @@ describe("migrateLegacyFindings", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "pinfindings", {
-      "FINDINGS.md": "# Findings\n\n- Must always validate input\n- Some optional thing\n",
+      "LEARNINGS.md": "# Learnings\n\n- Must always validate input\n- Some optional thing\n",
     });
     const result = migrateLegacyFindings(cortex, "pinfindings", { pinCanonical: true });
     expect(result.ok).toBe(true);
@@ -1725,15 +1731,15 @@ describe("migrateLegacyFindings", () => {
   });
 });
 
-// --- appendMemoryQueue ---
+// --- appendReviewQueue ---
 
-describe("appendMemoryQueue", () => {
+describe("appendReviewQueue", () => {
   it("creates MEMORY_QUEUE.md if it does not exist", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "queueproj", { "summary.md": "# queueproj\n" });
 
-    const result = appendMemoryQueue(cortex, "queueproj", "Stale", ["Old memory"]);
+    const result = appendReviewQueue(cortex, "queueproj", "Stale", ["Old memory"]);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toBe(1);
     const content = fs.readFileSync(path.join(cortex, "queueproj", "MEMORY_QUEUE.md"), "utf8");
@@ -1746,8 +1752,8 @@ describe("appendMemoryQueue", () => {
     grantAdmin(cortex);
     makeProject(cortex, "dupqueue", { "summary.md": "# dupqueue\n" });
 
-    appendMemoryQueue(cortex, "dupqueue", "Review", ["Check this"]);
-    const result = appendMemoryQueue(cortex, "dupqueue", "Review", ["Check this"]);
+    appendReviewQueue(cortex, "dupqueue", "Review", ["Check this"]);
+    const result = appendReviewQueue(cortex, "dupqueue", "Review", ["Check this"]);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toBe(0);
   });
@@ -1756,7 +1762,7 @@ describe("appendMemoryQueue", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "emptyq", { "summary.md": "# emptyq\n" });
-    const emptyResult = appendMemoryQueue(cortex, "emptyq", "Stale", []);
+    const emptyResult = appendReviewQueue(cortex, "emptyq", "Stale", []);
     expect(emptyResult.ok).toBe(true);
     if (emptyResult.ok) expect(emptyResult.data).toBe(0);
   });
@@ -1764,7 +1770,7 @@ describe("appendMemoryQueue", () => {
   it("returns 0 for invalid project", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const badResult = appendMemoryQueue(cortex, "../bad", "Stale", ["entry"]);
+    const badResult = appendReviewQueue(cortex, "../bad", "Stale", ["entry"]);
     expect(badResult.ok).toBe(false);
   });
 });
@@ -1841,60 +1847,60 @@ describe("getProjectDirs", () => {
   });
 });
 
-// --- consolidateProjectLearnings additional ---
+// --- consolidateProjectFindings additional ---
 
-describe("consolidateProjectLearnings additional", () => {
+describe("consolidateProjectFindings additional", () => {
   it("supports dry-run mode", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "drycons", {
-      "LEARNINGS.md": "# drycons LEARNINGS\n\n## 2025-01-01\n\n- A\n- A\n- B\n",
+      "FINDINGS.md": "# drycons FINDINGS\n\n## 2025-01-01\n\n- A\n- A\n- B\n",
     });
-    const result = consolidateProjectLearnings(cortex, "drycons", true);
+    const result = consolidateProjectFindings(cortex, "drycons", true);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data).toContain("[dry-run]");
       expect(result.data).toContain("1 duplicate");
     }
     // File unchanged
-    const content = fs.readFileSync(path.join(cortex, "drycons", "LEARNINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(cortex, "drycons", "FINDINGS.md"), "utf8");
     expect(content.split("\n").filter(l => l.startsWith("- ")).length).toBe(3);
   });
 
   it("rejects invalid project name", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const result = consolidateProjectLearnings(cortex, "../bad");
+    const result = consolidateProjectFindings(cortex, "../bad");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Invalid project name");
   });
 
-  it("returns message when no LEARNINGS.md exists", () => {
+  it("returns message when no FINDINGS.md exists", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "emptycons", { "summary.md": "# emptycons\n" });
-    const result = consolidateProjectLearnings(cortex, "emptycons");
+    const result = consolidateProjectFindings(cortex, "emptycons");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("No LEARNINGS.md");
+    if (!result.ok) expect(result.error).toContain("No FINDINGS.md");
   });
 
   it("deduplicates entries that differ only by trailing whitespace", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "trailws", {
-      "LEARNINGS.md": [
-        "# trailws LEARNINGS",
+      "FINDINGS.md": [
+        "# trailws FINDINGS",
         "",
         "## 2025-01-01",
         "",
         "- Use parameterized queries   ",
         "- Use parameterized queries",
-        "- Another learning",
+        "- Another finding",
         "",
       ].join("\n"),
     });
-    consolidateProjectLearnings(cortex, "trailws");
-    const content = fs.readFileSync(path.join(cortex, "trailws", "LEARNINGS.md"), "utf8");
+    consolidateProjectFindings(cortex, "trailws");
+    const content = fs.readFileSync(path.join(cortex, "trailws", "FINDINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(2);
   });
@@ -1903,8 +1909,8 @@ describe("consolidateProjectLearnings additional", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "citecons", {
-      "LEARNINGS.md": [
-        "# citecons LEARNINGS",
+      "FINDINGS.md": [
+        "# citecons FINDINGS",
         "",
         "## 2025-01-01",
         "",
@@ -1914,42 +1920,42 @@ describe("consolidateProjectLearnings additional", () => {
         "",
       ].join("\n"),
     });
-    consolidateProjectLearnings(cortex, "citecons");
-    const content = fs.readFileSync(path.join(cortex, "citecons", "LEARNINGS.md"), "utf8");
+    consolidateProjectFindings(cortex, "citecons");
+    const content = fs.readFileSync(path.join(cortex, "citecons", "FINDINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(1);
     expect(content).toContain("cortex:cite");
   });
 });
 
-// --- filterTrustedLearningsDetailed (extended) ---
+// --- filterTrustedFindingsDetailed (extended) ---
 
-describe("filterTrustedLearningsDetailed (extended)", () => {
+describe("filterTrustedFindingsDetailed (extended)", () => {
   it("strips <details> blocks from input", () => {
     const content = [
-      "# proj LEARNINGS",
+      "# proj FINDINGS",
       "",
       "<details>",
       "## 2025-01-01",
-      "- Archived learning",
+      "- Archived finding",
       "</details>",
       "",
       "## 2025-06-01",
       "",
-      "- Active learning",
+      "- Active finding",
     ].join("\n");
-    const result = filterTrustedLearningsDetailed(content, { ttlDays: 365 });
-    expect(result.content).not.toContain("Archived learning");
-    expect(result.content).toContain("Active learning");
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 365 });
+    expect(result.content).not.toContain("Archived finding");
+    expect(result.content).toContain("Active finding");
   });
 
   it("respects custom decay parameters", () => {
     const d = new Date();
     d.setDate(d.getDate() - 50);
     const dateStr = d.toISOString().slice(0, 10);
-    const content = `# proj LEARNINGS\n\n## ${dateStr}\n\n- Decaying uncited learning\n`;
+    const content = `# proj FINDINGS\n\n## ${dateStr}\n\n- Decaying uncited finding\n`;
     // With aggressive decay and high minConfidence, this should be filtered
-    const result = filterTrustedLearningsDetailed(content, {
+    const result = filterTrustedFindingsDetailed(content, {
       ttlDays: 365,
       minConfidence: 0.9,
       decay: { d30: 1.0, d60: 0.5, d90: 0.3, d120: 0.1 },
@@ -1963,19 +1969,19 @@ describe("filterTrustedLearningsDetailed (extended)", () => {
     const d = new Date();
     d.setDate(d.getDate() - 50);
     const dateStr = d.toISOString().slice(0, 10);
-    const content = `# proj LEARNINGS\n\n## ${dateStr}\n\n- Learning without citation\n`;
-    const result = filterTrustedLearningsDetailed(content, {
+    const content = `# proj FINDINGS\n\n## ${dateStr}\n\n- Finding without citation\n`;
+    const result = filterTrustedFindingsDetailed(content, {
       ttlDays: 365,
       minConfidence: 0.3,
       decay: { d30: 1.0, d60: 1.0, d90: 0.9, d120: 0.8 },
     });
-    expect(result.content).toContain("Learning without citation");
+    expect(result.content).toContain("Finding without citation");
     expect(result.issues.length).toBe(0);
   });
 
   it("only emits date headings that have surviving entries", () => {
     const content = [
-      "# proj LEARNINGS",
+      "# proj FINDINGS",
       "",
       "## 2020-01-01",
       "",
@@ -1985,29 +1991,29 @@ describe("filterTrustedLearningsDetailed (extended)", () => {
       "",
       "- This survives",
     ].join("\n");
-    const result = filterTrustedLearningsDetailed(content, { ttlDays: 120 });
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 120 });
     expect(result.content).not.toContain("2020-01-01");
     expect(result.content).toContain("2099-01-01");
     expect(result.content).toContain("This survives");
   });
 
   it("handles content with no date headings gracefully", () => {
-    const content = "# proj LEARNINGS\n\nSome raw text without dates.\n";
-    const result = filterTrustedLearningsDetailed(content, { ttlDays: 120 });
+    const content = "# proj FINDINGS\n\nSome raw text without dates.\n";
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 120 });
     expect(result.issues.length).toBe(0);
   });
 
   it("marks invalid citation entries", () => {
     const today = new Date().toISOString().slice(0, 10);
     const content = [
-      "# proj LEARNINGS",
+      "# proj FINDINGS",
       "",
       `## ${today}`,
       "",
       "- Entry with bad citation",
       '  <!-- cortex:cite {"created_at":"2025-01-01T00:00:00.000Z","repo":"/nonexistent/path"} -->',
     ].join("\n");
-    const result = filterTrustedLearningsDetailed(content, { ttlDays: 365 });
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 365 });
     expect(result.issues.some(i => i.reason === "invalid_citation")).toBe(true);
   });
 });
@@ -2074,18 +2080,18 @@ describe("validateGovernanceJson (extended)", () => {
     expect(validateGovernanceJson(f, "access-control")).toBe(false);
   });
 
-  it("validates memory-policy with bad decay", () => {
+  it("validates retention-policy with bad decay", () => {
     const cortex = makeCortex();
     const f = path.join(cortex, "test.json");
     fs.writeFileSync(f, JSON.stringify({ decay: "not an object" }));
-    expect(validateGovernanceJson(f, "memory-policy")).toBe(false);
+    expect(validateGovernanceJson(f, "retention-policy")).toBe(false);
   });
 
-  it("validates memory-workflow-policy", () => {
+  it("validates workflow-policy", () => {
     const cortex = makeCortex();
     const f = path.join(cortex, "test.json");
     fs.writeFileSync(f, JSON.stringify({ requireMaintainerApproval: "not-bool" }));
-    expect(validateGovernanceJson(f, "memory-workflow-policy")).toBe(false);
+    expect(validateGovernanceJson(f, "workflow-policy")).toBe(false);
   });
 
   it("validates index-policy", () => {
@@ -2114,16 +2120,16 @@ describe("validateGovernanceJson (extended)", () => {
   });
 });
 
-// --- flushMemoryScores ---
+// --- flushEntryScores ---
 
-describe("flushMemoryScores", () => {
+describe("flushEntryScores", () => {
   it("writes cached scores to disk", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     const key = "proj/file:flush-test";
-    recordMemoryInjection(cortex, key);
-    // Scores are already on disk from recordMemoryInjection, but flushMemoryScores re-writes
-    flushMemoryScores(cortex);
+    recordInjection(cortex, key);
+    // Scores are already on disk from recordInjection, but flushEntryScores re-writes
+    flushEntryScores(cortex);
     const scoresPath = path.join(cortex, ".governance", "memory-scores.json");
     const raw = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
     expect(raw.entries[key]).toBeDefined();

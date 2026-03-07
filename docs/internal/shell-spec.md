@@ -1,7 +1,7 @@
 # Interactive Cortex Shell Spec
 
 ## Goal
-Ship an interactive `cortex` shell that makes backlog/learnings/memory operations fast without replacing markdown as the source of truth.
+Ship an interactive `cortex` shell that makes backlog/findings/memory operations fast without replacing markdown as the source of truth.
 
 ## Non-goals
 - Replace MCP tools or file-based workflows.
@@ -18,7 +18,7 @@ Ship an interactive `cortex` shell that makes backlog/learnings/memory operation
   - `cortex` (no args, TTY): interactive shell.
   - `cortex shell`: explicit interactive mode.
 - Views:
-  - `Projects`, `Backlog`, `Learnings`, `Memory Queue`, `Machines/Profiles`, `Health`.
+  - `Projects`, `Backlog`, `Findings`, `Memory Queue`, `Machines/Profiles`, `Health`.
 - Command model:
   - `:command` palette for actions.
   - `q` to quit.
@@ -26,7 +26,7 @@ Ship an interactive `cortex` shell that makes backlog/learnings/memory operation
 - Backlog writes:
   - add, move, complete, reprioritize, context edit.
   - helpers: `work next`, `tidy`.
-- Learnings writes:
+- Findings writes:
   - add and remove.
 - Memory queue triage:
   - approve, reject, edit.
@@ -37,15 +37,15 @@ Ship an interactive `cortex` shell that makes backlog/learnings/memory operation
 
 ## Architecture Contract
 - `mcp/src/shell.ts`: runtime loop, render pipeline, input dispatch.
-- `mcp/src/data-access.ts`: shared readers/writers for backlog, learnings, queue, machines/profiles, shell state.
-- Existing MCP backlog/learnings/machine/profile tools call the same data-access paths.
+- `mcp/src/data-access.ts`: shared readers/writers for backlog, findings, queue, machines/profiles, shell state.
+- Existing MCP backlog/findings/machine/profile tools call the same data-access paths.
 
 ## Acceptance Criteria
 - Shell starts with `cortex` in terminal and with `cortex shell`.
 - Keyboard map and command palette are visible in help.
 - Selected project persists across views and sessions.
 - Backlog updates in shell are reflected in `backlog.md` and MCP tools.
-- Learnings and memory queue actions mutate markdown safely.
+- Findings and memory queue actions mutate markdown safely.
 - Health view shows doctor checks + runtime health and remediation actions.
 - Test coverage includes navigation, writes, triage, health, stale-state regression.
 

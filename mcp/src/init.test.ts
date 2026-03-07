@@ -375,9 +375,9 @@ describe("ensureGovernanceFiles", () => {
     ensureGovernanceFiles(tmpDir);
     const govDir = path.join(tmpDir, ".governance");
 
-    expect(fs.existsSync(path.join(govDir, "memory-policy.json"))).toBe(true);
+    expect(fs.existsSync(path.join(govDir, "retention-policy.json"))).toBe(true);
     expect(fs.existsSync(path.join(govDir, "access-control.json"))).toBe(true);
-    expect(fs.existsSync(path.join(govDir, "memory-workflow-policy.json"))).toBe(true);
+    expect(fs.existsSync(path.join(govDir, "workflow-policy.json"))).toBe(true);
     expect(fs.existsSync(path.join(govDir, "index-policy.json"))).toBe(true);
     expect(fs.existsSync(path.join(govDir, "runtime-health.json"))).toBe(true);
   });
@@ -386,14 +386,14 @@ describe("ensureGovernanceFiles", () => {
     ensureGovernanceFiles(tmpDir);
     const govDir = path.join(tmpDir, ".governance");
 
-    const policy = JSON.parse(fs.readFileSync(path.join(govDir, "memory-policy.json"), "utf8"));
+    const policy = JSON.parse(fs.readFileSync(path.join(govDir, "retention-policy.json"), "utf8"));
     expect(policy.ttlDays).toBe(120);
     expect(policy.retentionDays).toBe(365);
 
     const access = JSON.parse(fs.readFileSync(path.join(govDir, "access-control.json"), "utf8"));
     expect(Array.isArray(access.admins)).toBe(true);
 
-    const workflow = JSON.parse(fs.readFileSync(path.join(govDir, "memory-workflow-policy.json"), "utf8"));
+    const workflow = JSON.parse(fs.readFileSync(path.join(govDir, "workflow-policy.json"), "utf8"));
     expect(workflow.requireMaintainerApproval).toBe(true);
 
     const indexPol = JSON.parse(fs.readFileSync(path.join(govDir, "index-policy.json"), "utf8"));
@@ -403,7 +403,7 @@ describe("ensureGovernanceFiles", () => {
   it("does not overwrite existing governance files", () => {
     const govDir = path.join(tmpDir, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
-    const policyPath = path.join(govDir, "memory-policy.json");
+    const policyPath = path.join(govDir, "retention-policy.json");
     fs.writeFileSync(policyPath, JSON.stringify({ ttlDays: 999 }, null, 2) + "\n");
 
     ensureGovernanceFiles(tmpDir);
@@ -445,7 +445,7 @@ describe("runInit walkthrough integration", () => {
     await runInit({ yes: true });
     expect(fs.existsSync(cortexPath)).toBe(true);
     // Should have governance files created
-    expect(fs.existsSync(path.join(cortexPath, ".governance", "memory-policy.json"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, ".governance", "retention-policy.json"))).toBe(true);
   });
 
   it("init output mentions restart requirement", async () => {
@@ -460,7 +460,7 @@ describe("runInit walkthrough integration", () => {
       process.stdout.write = origWrite;
     }
     const output = chunks.join("");
-    expect(output).toContain("Restart your agent");
+    expect(output).toContain("Start a new Claude session");
     expect(output).toContain("Next steps:");
   });
 

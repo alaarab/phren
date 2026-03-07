@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildRobustFtsQuery, sanitizeFts5Query, extractKeywords } from "./utils.js";
-import { extractSnippet } from "./shared.js";
+import { extractSnippet } from "./shared-index.js";
+
 
 describe("buildRobustFtsQuery edge cases", () => {
   it("deduplicates repeated terms", () => {
@@ -31,7 +32,8 @@ describe("buildRobustFtsQuery edge cases", () => {
     const manyTerms = Array.from({ length: 50 }, (_, i) => `term${i}`).join(" ");
     const result = buildRobustFtsQuery(manyTerms);
     expect(result.length).toBeGreaterThan(0);
-    expect(result).toContain("OR");
+    // Terms without synonym matches are AND'd together
+    expect(result).toContain("AND");
   });
 });
 

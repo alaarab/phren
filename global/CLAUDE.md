@@ -14,14 +14,14 @@
 
 These skills are available as a full set via cortex, or individually from the Claude skills marketplace. You don't need the full cortex setup to use skills marked with (standalone).
 
-### Cortex skills (manage your knowledge repo)
+### Cortex skills (manage your project store)
 
 | Skill | What it does |
 |-------|-------------|
 | `/cortex-sync` | Pull cortex to a new machine or push config changes back to the repo |
 | `/cortex-init` | Scaffold a new project with summary, CLAUDE.md, backlog |
 | `/cortex-discover` | Research what's missing in a project and surface gaps and opportunities |
-| `/cortex-consolidate` | Find patterns across all project LEARNINGS.md files |
+| `/cortex-consolidate` | Find patterns across all project FINDINGS.md files |
 
 ### Your own skills
 
@@ -37,12 +37,12 @@ Put personal workflow skills in `~/.cortex/global/skills/` and list them here. S
 <!-- If you use team agents, document your coordination pattern here. Example: -->
 <!-- "Never use fire-and-forget background agents. Always use TeamCreate/TaskCreate/SendMessage." -->
 
-## Knowledge repo
+## Project store
 
 All skills and project config live in `~/.cortex` (or wherever `CORTEX_DIR` points). This is a git repo that syncs across machines using profiles.
 
 - `~/.cortex/global/`: skills and config that apply everywhere
-- `~/.cortex/<project>/`: per-project CLAUDE.md, skills, backlog, learnings
+- `~/.cortex/<project>/`: per-project CLAUDE.md, skills, backlog, findings
 - `~/.cortex/profiles/`: YAML files mapping project sets to machine roles
 - `~/.cortex/machines.yaml`: maps machine hostnames to profiles
 
@@ -53,11 +53,17 @@ Run `/cortex-sync` to pull everything down or push changes back.
 The cortex MCP server is running. Use these tools proactively. Don't ask the user to re-explain things they've already documented.
 
 - **At session start:** call `list_projects()` to see what's active, then `get_project_summary(name)` for the relevant project
-- **When the user mentions a project, codebase, or task:** call `search_knowledge(query)` before asking questions
-- **When the user asks about commands, architecture, conventions, or past decisions:** call `search_knowledge(query)` first
+- **When the user mentions a project, codebase, or task:** call `search_cortex(query)` before asking questions
+- **When the user asks about commands, architecture, conventions, or past decisions:** call `search_cortex(query)` first
 - **When the user mentions a task or todo:** call `get_backlog(project)` to see what's already tracked
 - **When the user says they want to do something later:** call `add_backlog_item(project, item)` instead of listing it in chat
 - **When a task is finished:** offer to add any follow-ups to the backlog rather than leaving them in the conversation
+- **When you discover something about a codebase entity:** call `search_entities(name)` or `get_related_docs(entity)` to see what's already known
+- **To explore the knowledge graph:** call `read_graph(project?)` to see entities and their relationships
+- **To link a finding to an entity:** call `link_findings(project, finding_text, entity, relation?)` to persist a manual link
+- **At session start (if no lifecycle hooks):** call `session_start(project?)` to get prior session summary, recent findings, and active backlog
+- **At session end (if no lifecycle hooks):** call `session_end(summary?)` to save a summary for the next session
+- **To check session state:** call `session_context()` for current project, duration, and findings added so far
 
 The goal: Claude should already know the context before the user has to explain it. Backlogs stay in files, not buried in chat history.
 
