@@ -1,4 +1,4 @@
-cortex - Long-term memory for AI coding agents.
+cortex - Long-term memory for your AI agents.
 npm package: @alaarab/cortex
 
 Quick start:

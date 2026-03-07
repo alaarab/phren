@@ -460,7 +460,7 @@ describe("runInit walkthrough integration", () => {
       process.stdout.write = origWrite;
     }
     const output = chunks.join("");
-    expect(output).toContain("Restart your coding agent");
+    expect(output).toContain("Restart your agent");
     expect(output).toContain("Next steps:");
   });
 

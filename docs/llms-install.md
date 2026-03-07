@@ -1,6 +1,6 @@
 # cortex: LLM Installation Guide
 
-cortex gives AI coding agents persistent memory across sessions and machines. It runs as an MCP server and a set of lifecycle hooks.
+cortex gives your AI agents persistent memory across sessions and machines. It runs as an MCP server and a set of lifecycle hooks.
 
 ## Quick Start
 

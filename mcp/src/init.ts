@@ -1002,7 +1002,7 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string): Promise<string> => new Promise(r => rl.question(q, r));
 
-  log("\nWelcome to cortex. Let's set up persistent memory for your AI coding agents.\n");
+  log("\nWelcome to cortex. Let's set up persistent memory for your AI agents.\n");
 
   const defaultMachine = os.hostname();
   const machineAnswer = (await ask(`Machine name [${defaultMachine}]: `)).trim();
@@ -1175,7 +1175,7 @@ export async function runInit(opts: InitOptions = {}) {
         }
       }
 
-      log(`\nDone. Restart your coding agent to pick up changes.\n`);
+      log(`\nDone. Restart your agent to pick up changes.\n`);
       return;
   }
 
@@ -1334,7 +1334,7 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  ${cortexPath}/.governance/        Memory quality settings and config`);
 
   log(`\nNext steps:`);
-  log(`  1. Restart your coding agent to activate cortex`);
+  log(`  1. Restart your agent to activate cortex`);
   log(`     (close and reopen Claude Code, or start a new session)`);
   log(`  2. Create a private GitHub repo and push your cortex:`);
   log(`     cd ${cortexPath}`);

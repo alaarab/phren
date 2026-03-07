@@ -128,13 +128,13 @@ describe("CortexShell", () => {
     await shell.handleInput(":open demo");
     await shell.handleInput("b");
     let output = await shell.render();
-    expect(output).toContain("[Backlog]");
-    expect(output).toContain("Project: demo");
+    expect(output).toContain("▤ Backlog");
+    expect(output).toContain("demo");
 
     await shell.handleInput("l");
     output = await shell.render();
-    expect(output).toContain("[Learnings]");
-    expect(output).toContain("Project: demo");
+    expect(output).toContain("✦ Learnings");
+    expect(output).toContain("demo");
 
     shell.close();
     const state = loadShellState(dir);
@@ -203,13 +203,13 @@ describe("CortexShell", () => {
     const shell = createShell(dir);
     await shell.handleInput("h");
     let output = await shell.render();
-    expect(output).toContain("[Health]");
+    expect(output).toContain("♡ Health");
     expect(output).toContain("runtime-auto-save");
     expect(output).toContain("last auto-save");
 
     await shell.handleInput(":run fix");
     output = await shell.render();
-    expect(output).toContain("doctor --fix completed");
+    expect(output).toContain("doctor --fix:");
 
     await shell.handleInput(":update");
     output = await shell.render();
@@ -222,39 +222,39 @@ describe("CortexShell", () => {
 
     const shell = createShell(dir);
     const output = await shell.render();
-    expect(output).toContain("View: Backlog");
-    expect(output).toContain("Project: demo");
+    // Always starts at Projects view regardless of saved view state
+    expect(output).toContain("◉ Projects");
+    expect(output).toContain("demo");
   });
 
   it(":help renders help text as main content and clears on next input", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":help");
     let output = await shell.render();
-    expect(output).toContain("Palette Commands");
+    expect(output).toContain("Palette commands");
     expect(output).toContain("Navigation");
-    expect(output).toContain("Press any key to dismiss.");
+    expect(output).toContain("press any key to dismiss");
 
     await shell.handleInput("");
     output = await shell.render();
     expect(output).not.toContain("Palette Commands");
   });
 
-  it("preserves per-view page numbers when switching views", async () => {
+  it("switching views resets scroll and preserves cursor map", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
 
     await shell.handleInput("b");
-    await shell.handleInput(":page 3");
     const stateAfterBacklog = loadShellState(dir);
-    expect(stateAfterBacklog.page).toBe(3);
+    expect(stateAfterBacklog.view).toBe("Backlog");
 
     await shell.handleInput("l");
     const stateAfterLearnings = loadShellState(dir);
-    expect(stateAfterLearnings.page).toBe(1);
+    expect(stateAfterLearnings.view).toBe("Learnings");
 
     await shell.handleInput("b");
     const stateBackAgain = loadShellState(dir);
-    expect(stateBackAgain.page).toBe(3);
+    expect(stateBackAgain.view).toBe("Backlog");
   });
 
   it(":govern and :consolidate require a selected project", async () => {
@@ -269,11 +269,11 @@ describe("CortexShell", () => {
 
       await shell.handleInput(":govern");
       let output = await shell.render();
-      expect(output).toContain("Select a project first");
+      expect(output).toContain("No project selected");
 
       await shell.handleInput(":consolidate");
       output = await shell.render();
-      expect(output).toContain("Select a project first");
+      expect(output).toContain("No project selected");
     } finally {
       tmp.cleanup();
     }
@@ -306,7 +306,7 @@ describe("CortexShell", () => {
     await shell.handleInput(":open demo");
     await shell.handleInput("m");
     const output = await shell.render();
-    expect(output).toContain("[Memory Queue]");
+    expect(output).toContain("◈ Memory Queue");
     expect(output).toContain("Review");
     expect(output).toContain("Stale");
     expect(output).toMatch(/─{10,}/);

@@ -274,7 +274,7 @@ function writeSkillMd(cortexPath: string) {
 
   const content = `---
 name: cortex
-description: Long-term memory for AI coding agents with automatic context injection and learning capture
+description: Long-term memory for your AI agents with automatic context injection and learning capture
 version: "${version}"
 license: MIT
 hooks:
@@ -295,9 +295,9 @@ hooks:
 
 # cortex
 
-Long-term memory for AI coding agents. Injects relevant project context at the start of
+Long-term memory for your AI agents. Injects relevant project context at the start of
 each prompt and saves learnings at session end via git. Works with Claude Code, Copilot CLI,
-Cursor, and Codex.
+Cursor, Codex, and more.
 
 ## Lifecycle hooks
 
