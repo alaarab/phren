@@ -231,7 +231,7 @@ describe("filesystem fault injection", () => {
         addBacklogItem(tmpDir, PROJECT, "Should fail on read-only");
       } catch (err: any) {
         threw = true;
-        expect(err.code || err.message).toMatch(/EACCES|permission/i);
+        expect(err.code || err.message).toMatch(/EACCES|EPERM|permission/i);
       }
       // Either it threw (expected) or succeeded (e.g., running as root)
       expect(threw || true).toBe(true);

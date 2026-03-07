@@ -1,4 +1,4 @@
-import { getProjectDirs, ensureCortexPath } from "./shared.js";
+import { ensureCortexPath } from "./shared.js";
 import {
   getIndexPolicy,
   updateIndexPolicy,
@@ -9,18 +9,14 @@ import {
   getAccessControl,
   updateAccessControl,
 } from "./shared-governance.js";
-import * as fs from "fs";
-import * as path from "path";
 import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "./data-access.js";
-import { setTelemetryEnabled, isTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "./telemetry.js";
+import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "./telemetry.js";
 
 let _cortexPath: string | undefined;
 function getCortexPath(): string {
   if (!_cortexPath) _cortexPath = ensureCortexPath();
   return _cortexPath;
 }
-const profile = process.env.CORTEX_PROFILE || "";
-
 // ── Config router ────────────────────────────────────────────────────────────
 
 export async function handleConfig(args: string[]) {

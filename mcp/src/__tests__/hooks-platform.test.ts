@@ -57,9 +57,10 @@ describe("hooks platform compatibility", () => {
   describe("buildLifecycleCommands platform behavior", () => {
     it("generates hookTool command alongside other lifecycle commands", () => {
       const cmds = buildLifecycleCommands(cortexPath);
+      const pathInCmd = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       expect(cmds).toHaveProperty("hookTool");
       expect(cmds.hookTool).toContain("hook-tool");
-      expect(cmds.hookTool).toContain(cortexPath);
+      expect(cmds.hookTool).toContain(pathInCmd);
     });
 
     it("handles paths with spaces correctly", () => {
@@ -78,8 +79,9 @@ describe("hooks platform compatibility", () => {
 
     it("all four commands reference the same cortex path", () => {
       const cmds = buildLifecycleCommands(cortexPath);
+      const pathInCmd = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       for (const cmd of [cmds.sessionStart, cmds.userPromptSubmit, cmds.stop, cmds.hookTool]) {
-        expect(cmd).toContain(cortexPath);
+        expect(cmd).toContain(pathInCmd);
       }
     });
   });

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as path from "path";
 import { sanitizeFts5Query, buildRobustFtsQuery, extractKeywords, isValidProjectName, safeProjectPath, clampInt, isFeatureEnabled } from "./utils.js";
 
 describe("sanitizeFts5Query", () => {
@@ -75,12 +76,14 @@ describe("isValidProjectName", () => {
 });
 
 describe("safeProjectPath", () => {
+  const base = path.join(path.sep, "home", "user", ".cortex");
+
   it("rejects path escape", () => {
-    expect(safeProjectPath("/home/user/.cortex", "..", "..", "etc", "passwd")).toBe(null);
+    expect(safeProjectPath(base, "..", "..", "etc", "passwd")).toBe(null);
   });
 
   it("allows valid subpath", () => {
-    expect(safeProjectPath("/home/user/.cortex", "myproject")).toBe("/home/user/.cortex/myproject");
+    expect(safeProjectPath(base, "myproject")).toBe(path.join(base, "myproject"));
   });
 });
 
