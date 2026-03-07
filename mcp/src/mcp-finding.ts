@@ -78,7 +78,9 @@ export function register(server: McpServer, ctx: McpContext): void {
                   const lineEnd = content.indexOf("\n", idx);
                   const insertAt = lineEnd >= 0 ? lineEnd : content.length;
                   content = content.slice(0, insertAt) + " " + conflicts.annotations.join(" ") + " <!-- conflicts_checked: true -->" + content.slice(insertAt);
-                  fs.writeFileSync(fp, content);
+                  const tmpFp = fp + ".tmp";
+                  fs.writeFileSync(tmpFp, content);
+                  fs.renameSync(tmpFp, fp);
                 }
               }
             }
