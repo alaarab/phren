@@ -85,10 +85,15 @@ function padToWidth(s: string, width: number): string {
   return s + " ".repeat(width - visible.length);
 }
 
+// ANSI handling: `s` may contain ANSI escape codes (styled text from the style.*
+// helpers). We measure visible width via stripAnsi, then if truncation is needed we
+// slice the *plain* text (discarding ANSI codes) to avoid cutting mid-escape. A
+// trailing reset is appended to guard against any residual SGR state from earlier
+// output on the same terminal line.
 function truncateLine(s: string, cols: number): string {
   const visible = stripAnsi(s);
   if (visible.length <= cols) return s;
-  return visible.slice(0, cols - 1) + "…";
+  return visible.slice(0, cols - 1) + "…" + "\x1b[0m";
 }
 
 // ── Tab layout ──────────────────────────────────────────────────────────────
@@ -145,9 +150,9 @@ function shellHelpText(): string {
     "",
     hdr("View-specific keys"),
     `  ${style.bold("Projects")}     ${k("↵")} ${d("open project as context")}`,
-    `  ${style.bold("Backlog")}      ${k("a")} ${d("add task")}  ${k("d")} ${d("move to active")}  ${k("↵")} ${d("mark complete")}`,
+    `  ${style.bold("Backlog")}      ${k("a")} ${d("add task")}  ${k("d")} ${d("toggle active/queue")}  ${k("↵")} ${d("mark complete")}`,
     `  ${style.bold("Learnings")}    ${k("a")} ${d("add learning")}  ${k("d")} ${d("delete selected")}`,
-    `  ${style.bold("Memory")}       ${k("a")} ${d("approve")}  ${k("r")} ${d("reject")}  ${k("e")} ${d("edit")}`,
+    `  ${style.bold("Memory Queue")} ${k("a")} ${d("approve")}  ${k("r")} ${d("reject")}  ${k("e")} ${d("edit")}`,
     "",
     hdr("Palette commands  (:cmd)"),
     `  ${cmd(":open <project>")}                             ${d("set active project context")}`,
@@ -553,8 +558,12 @@ export class CortexShell {
         } else if (key === "d" && item?.id) {
           if (!project) { this.setMessage("Select a project first."); return; }
           const file = path.join(this.cortexPath, project, "backlog.md");
-          this.snapshotForUndo(`move ${item.id} → active`, file);
-          const r = updateBacklogItem(this.cortexPath, project, item.id, { section: "Active" });
+          // Toggle: if Active → Queue, if Queue → Active
+          const backlogResult = readBacklog(this.cortexPath, project);
+          const isActive = backlogResult.ok && backlogResult.data.items.Active.some((i: BacklogItem) => i.id === item.id);
+          const targetSection = isActive ? "Queue" : "Active";
+          this.snapshotForUndo(`move ${item.id} → ${targetSection.toLowerCase()}`, file);
+          const r = updateBacklogItem(this.cortexPath, project, item.id, { section: targetSection });
           this.invalidateSubsectionsCache();
           this.setMessage(`  ${resultMsg(r)}`);
         }
@@ -578,14 +587,18 @@ export class CortexShell {
       case "Memory Queue":
         if (key === "a" && item?.id) {
           if (!project) { this.setMessage("Select a project first."); return; }
-          const r = approveMemoryQueueItem(this.cortexPath, project, item.id);
-          this.setMessage(`  ${resultMsg(r)}`);
-          this.setCursor(Math.max(0, cursor - 1));
+          this.confirmThen(`Approve ${style.dim(item.id)} "${item.text}"?`, () => {
+            const r = approveMemoryQueueItem(this.cortexPath, project!, item.id);
+            this.setMessage(`  ${resultMsg(r)}`);
+            this.setCursor(Math.max(0, cursor - 1));
+          });
         } else if (key === "r" && item?.id) {
           if (!project) { this.setMessage("Select a project first."); return; }
-          const r = rejectMemoryQueueItem(this.cortexPath, project, item.id);
-          this.setMessage(`  ${resultMsg(r)}`);
-          this.setCursor(Math.max(0, cursor - 1));
+          this.confirmThen(`Reject ${style.dim(item.id)} "${item.text}"?`, () => {
+            const r = rejectMemoryQueueItem(this.cortexPath, project!, item.id);
+            this.setMessage(`  ${resultMsg(r)}`);
+            this.setCursor(Math.max(0, cursor - 1));
+          });
         } else if (key === "e" && item?.id) {
           this.inputMqId = item.id;
           this.startInput("mq-edit", item.text || "");
@@ -898,7 +911,7 @@ export class CortexShell {
         command:     "cmd",
         add:         "add task",
         "learn-add": "add learning",
-        "mq-edit":   "edit memory",
+        "mq-edit":   "edit Memory Queue item",
       };
       const label = labels[this.inputCtx] || this.inputCtx;
       return `${sep}\n  ${style.boldCyan(label + " ›")} ${this.inputBuf}${style.cyan("█")}`;
@@ -906,11 +919,11 @@ export class CortexShell {
 
     const viewHints: Record<string, string[]> = {
       Projects:      [`${k("↵")} ${d("open project")}`],
-      Backlog:       [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("→ start")}`],
+      Backlog:       [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
       Learnings:     [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
       "Memory Queue":[`${k("a")} ${d("keep")}`, `${k("r")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
       Health:        [`${k("↑↓")} ${d("scroll")}`],
-      "Machines/Profiles": [],
+      "Machines/Profiles": [`${k(":")} ${d(":machine map")}`, `${k(":")} ${d(":profile add-project")}`],
     };
 
     const extra = viewHints[this.state.view] ?? [];
@@ -1123,8 +1136,9 @@ export class CortexShell {
     const lines: string[] = [...warnings, ...vp.lines];
 
     if (allLines.length > usableHeight) {
-      const pct = flatItems.length <= 1 ? 100 : Math.round((cursor / (flatItems.length - 1)) * 100);
-      lines.push(style.dim(`  ─── ${cursor + 1}/${flatItems.length}  ${pct}%`));
+      const navigable = active.length + queue.length;
+      const pct = navigable <= 1 ? 100 : Math.round((cursor / Math.max(navigable - 1, 1)) * 100);
+      lines.push(style.dim(`  ─── ${cursor + 1}/${navigable}  ${pct}%`));
     }
 
     return lines;
@@ -1879,7 +1893,7 @@ export class CortexShell {
           if (queueResult.ok) {
             const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
             if (conflictItems.length) {
-              lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in memory queue`)}  (:mq approve|reject)`);
+              lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in Memory Queue`)}  (:mq approve|reject)`);
             }
           }
         }
