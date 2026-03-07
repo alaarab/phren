@@ -2,6 +2,9 @@ import { debugLog } from "./shared.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
 
+const PROSE_ENTITY_PATTERN =
+  /\b(React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Koa|Hapi|NestJS|Django|Flask|FastAPI|Rails|Spring|Laravel|Redis|Postgres|PostgreSQL|MySQL|MariaDB|SQLite|MongoDB|DynamoDB|Cassandra|Elasticsearch|Docker|Kubernetes|Terraform|Ansible|AWS|GCP|Azure|Vercel|Netlify|Cloudflare|Prisma|TypeORM|Sequelize|Drizzle|Mongoose|Jest|Vitest|Mocha|Cypress|Playwright|Puppeteer|Webpack|Vite|Rollup|esbuild|Turbopack|ESLint|Prettier|Babel|SWC|GraphQL|REST|gRPC|WebSocket|Kafka|RabbitMQ|NATS|Nginx|Caddy|Traefik|Node\.js|Deno|Bun|Python|Rust|Go|Java|Kotlin|Swift|TypeScript|JavaScript)\b/gi;
+
 const ENTITY_PATTERNS = [
   // import/require patterns: import X from 'pkg' or require('pkg')
   /(?:import\s+.*?\s+from\s+['"])(@?[\w\-/]+)(?:['"])/g,
@@ -9,7 +12,7 @@ const ENTITY_PATTERNS = [
   // @scope/package patterns in text
   /@[\w-]+\/[\w-]+/g,
   // Known library/tool names mentioned in prose (case-insensitive word boundaries)
-  /\b(React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Django|Flask|Rails|Spring|Redis|Postgres|PostgreSQL|MySQL|MongoDB|SQLite|Docker|Kubernetes|Terraform|AWS|GCP|Azure|Vercel|Netlify|Prisma|TypeORM|Sequelize|Jest|Vitest|Cypress|Playwright|Webpack|Vite|ESLint|Prettier|GraphQL|gRPC|Kafka|RabbitMQ|Elasticsearch|Nginx|Caddy|Node\.js|Deno|Bun|Python|Rust|Go|Java|TypeScript|Zod|Drizzle|tRPC|Tailwind|shadcn)\b/gi,
+  PROSE_ENTITY_PATTERN,
 ];
 
 function extractEntityNames(content: string): string[] {
