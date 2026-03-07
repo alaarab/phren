@@ -312,17 +312,20 @@ async function main() {
     if (writeQueueDepth >= MAX_QUEUE_DEPTH) {
       throw new Error(`Write queue full (${MAX_QUEUE_DEPTH} items). Try again shortly.`);
     }
-    writeQueueDepth++;
-    const run = writeQueue.then(() =>
-      Promise.race([
-        fn(),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Write timeout after 30s")), WRITE_TIMEOUT_MS))
-      ])
-    );
-    writeQueue = run.then(
-      () => { writeQueueDepth = Math.max(0, writeQueueDepth - 1); },
-      (error) => {
+    const run = writeQueue.then(async () => {
+      try {
+        return await Promise.race([
+          fn(),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Write timeout after 30s")), WRITE_TIMEOUT_MS))
+        ]);
+      } finally {
         writeQueueDepth = Math.max(0, writeQueueDepth - 1);
+      }
+    });
+    writeQueueDepth++;
+    writeQueue = run.then(
+      () => undefined,
+      (error): void => {
         const message = error instanceof Error
           ? error.stack || error.message
           : String(error);
