@@ -294,8 +294,17 @@ async function main() {
     runCustomHooks(cortexPath, "post-index");
   }
   async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = writeQueue.then(fn, fn);
-    writeQueue = run.then(() => undefined, () => undefined);
+    const run = writeQueue.then(() => fn());
+    writeQueue = run.then(
+      () => undefined,
+      (error) => {
+        const message = error instanceof Error
+          ? error.stack || error.message
+          : String(error);
+        debugLog(`Write queue failed: ${message}`);
+        throw error;
+      },
+    );
     return run;
   }
 
