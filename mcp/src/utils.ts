@@ -6,8 +6,9 @@ import { execFileSync } from "child_process";
 export function runGit(cwd: string, args: string[], timeoutMs: number, debugLogFn?: (msg: string) => void): string | null {
   try {
     return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: timeoutMs }).trim();
-  } catch (err: any) {
-    if (debugLogFn) debugLogFn(`runGit: git ${args[0]} failed in ${cwd}: ${err?.message || err}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (debugLogFn) debugLogFn(`runGit: git ${args[0]} failed in ${cwd}: ${msg}`);
     return null;
   }
 }
