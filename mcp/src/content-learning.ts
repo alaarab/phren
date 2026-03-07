@@ -12,10 +12,9 @@ import { countActiveFindings, autoArchiveToReference } from "./content-archive.j
 // Read legacy history files (LEARNINGS.md, etc.) as supplementary dedup/conflict context.
 // Never written to — used only as a read-only baseline when FINDINGS.md is being created or updated.
 function readLegacyHistoryContent(resolvedDir: string): string {
-  const candidates = ["LEARNINGS.md", "learnings.md", "LESSONS.md", "lessons.md", "POSTMORTEM.md", "postmortem.md", "RETRO.md", "retro.md"];
   const available = new Set(fs.readdirSync(resolvedDir).map(f => f.toLowerCase()));
   const parts: string[] = [];
-  for (const name of candidates) {
+  for (const name of LEGACY_FINDINGS_CANDIDATES) {
     if (available.has(name.toLowerCase())) {
       try { parts.push(fs.readFileSync(path.join(resolvedDir, name), "utf8")); } catch { /* best-effort */ }
     }
@@ -53,6 +52,19 @@ interface PreparedFinding {
   bullet: string;
   citationComment: string;
   tagWarning?: string;
+}
+
+interface AddFindingWriteResult {
+  content: string;
+  citation: FindingCitation;
+  tagWarning?: string;
+  created: boolean;
+  bullet: string;
+}
+
+interface AddFindingsWriteResult {
+  content: string;
+  wrote: boolean;
 }
 
 function buildFindingCitation(
@@ -282,20 +294,58 @@ export function addFindingToFile(
   // Secret/PII scan — reject before writing
   const nowIso = new Date().toISOString();
   const today = nowIso.slice(0, 10);
-  const cwd = process.cwd();
-  const inferredRepo = getRepoRoot(cwd);
+  const inferredRepo = citationInput?.repo || getRepoRoot(resolvedDir);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
+  const supersedesText = citationInput?.supersedes;
+  const normalizedForSupersedes = supersedesText
+    ? resolveCoref(normalizeObservationTags(learning).text, {
+        project,
+        file: citationInput?.file,
+      })
+    : undefined;
 
-  // Handle supersession if provided
-  if (citationInput?.supersedes) {
-    const supersedesText = citationInput.supersedes;
-    const normalizedForSupersedes = resolveCoref(normalizeObservationTags(learning).text, {
-      project,
-      file: citationInput?.file,
-    });
-    if (fs.existsSync(learningsPath)) {
-      const content = fs.readFileSync(learningsPath, "utf8");
-      const lines = content.split("\n");
+  const result: CortexResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
+    const preparedForNewFile = prepareFinding(learning, project, "", citationInput, nowIso, inferredRepo, headCommit);
+    if (!fs.existsSync(learningsPath)) {
+      if (preparedForNewFile.status === "rejected") {
+        throw new Error(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`);
+      }
+      if (preparedForNewFile.status === "duplicate") {
+        return cortexOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
+      }
+      if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+      const newContent = `# ${project} Findings\n\n## ${today}\n\n${preparedForNewFile.finding.bullet}\n${preparedForNewFile.finding.citationComment}\n`;
+      fs.writeFileSync(learningsPath, newContent);
+      return cortexOk({
+        content: newContent,
+        citation: buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit),
+        tagWarning: preparedForNewFile.finding.tagWarning,
+        created: true,
+        bullet: preparedForNewFile.finding.bullet,
+      });
+    }
+
+    const content = fs.readFileSync(learningsPath, "utf8");
+    const legacyHistory = opts?.skipLegacyDedup ? "" : readLegacyHistoryContent(resolvedDir);
+    const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
+
+    const prepared = prepareFinding(learning, project, fullHistory, citationInput, nowIso, inferredRepo, headCommit);
+    if (prepared.status === "rejected") {
+      throw new Error(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`);
+    }
+    if (prepared.status === "duplicate") {
+      debugLog(`add_finding: skipped duplicate for "${project}": ${learning.slice(0, 80)}`);
+      return cortexOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
+    }
+
+    const issues = validateFindingsFormat(content);
+    if (issues.length > 0) {
+      debugLog(`FINDINGS.md format warnings for "${project}": ${issues.join("; ")}`);
+    }
+
+    let updated = insertFindingIntoContent(content, today, prepared.finding.bullet, prepared.finding.citationComment);
+    if (supersedesText && normalizedForSupersedes) {
+      const lines = updated.split("\n");
       const needle = supersedesText.slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
       for (let i = 0; i < lines.length; i++) {
         if (!lines[i].startsWith("- ")) continue;
@@ -303,72 +353,36 @@ export function addFindingToFile(
         if (lineText === needle) {
           const newFirst60 = normalizedForSupersedes.replace(/^-\s+/, "").slice(0, 60);
           lines[i] = `${lines[i]} <!-- superseded_by: ${newFirst60} -->`;
-          const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
-          fs.writeFileSync(tmpPath, lines.join("\n"));
-          fs.renameSync(tmpPath, learningsPath);
+          updated = lines.join("\n");
           break;
         }
       }
     }
-  }
-  const preparedForNewFile = prepareFinding(learning, project, "", citationInput, nowIso, inferredRepo, headCommit);
-  if (!fs.existsSync(learningsPath)) {
-    if (preparedForNewFile.status === "rejected") {
-      throw new Error(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`);
-    }
-    if (preparedForNewFile.status === "duplicate") {
-      return cortexOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
-    }
-    if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
-    const newContent = `# ${project} Findings\n\n## ${today}\n\n${preparedForNewFile.finding.bullet}\n${preparedForNewFile.finding.citationComment}\n`;
-    const citation = buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit);
-    fs.writeFileSync(learningsPath, newContent);
-    appendAuditLog(
-      cortexPath,
-      "add_finding",
-      `project=${project} created=true citation_commit=${citation.commit ?? "none"} citation_file=${citation.file ?? "none"}`
-    );
-    const createdMsg = `Created FINDINGS.md for "${project}" and added insight.`;
-    return cortexOk(preparedForNewFile.finding.tagWarning ? `${createdMsg} Warning: ${preparedForNewFile.finding.tagWarning}` : createdMsg);
-  }
 
-  const content = fs.readFileSync(learningsPath, "utf8");
-  // Include legacy history (LEARNINGS.md etc.) as supplementary dedup/conflict context.
-  // Skipped during migration to avoid treating the source file as a duplicate baseline.
-  const legacyHistory = opts?.skipLegacyDedup ? "" : readLegacyHistoryContent(resolvedDir);
-  const fullHistory = legacyHistory ? content + "\n" + legacyHistory : content;
+    const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
+    fs.writeFileSync(tmpPath, updated);
+    fs.renameSync(tmpPath, learningsPath);
+    return cortexOk({
+      content: updated,
+      citation: buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit),
+      tagWarning: prepared.finding.tagWarning,
+      created: false,
+      bullet: prepared.finding.bullet,
+    });
+  });
 
-  const prepared = prepareFinding(learning, project, fullHistory, citationInput, nowIso, inferredRepo, headCommit);
-  if (prepared.status === "rejected") {
-    throw new Error(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`);
-  }
-  if (prepared.status === "duplicate") {
-    debugLog(`add_finding: skipped duplicate for "${project}": ${learning.slice(0, 80)}`);
-    return cortexOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
-  }
-
-  const issues = validateFindingsFormat(content);
-  if (issues.length > 0) {
-    debugLog(`FINDINGS.md format warnings for "${project}": ${issues.join("; ")}`);
-  }
-
-  const updated = insertFindingIntoContent(content, today, prepared.finding.bullet, prepared.finding.citationComment);
-  const citation = buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit);
-
-  const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, updated);
-  fs.renameSync(tmpPath, learningsPath);
+  if (!result.ok) return result;
+  if (typeof result.data === "string") return cortexOk(result.data);
 
   appendAuditLog(
     cortexPath,
     "add_finding",
-    `project=${project} citation_commit=${citation.commit ?? "none"} citation_file=${citation.file ?? "none"}`
+    `project=${project}${result.data.created ? " created=true" : ""} citation_commit=${result.data.citation.commit ?? "none"} citation_file=${result.data.citation.file ?? "none"}`
   );
 
-  // Size cap: auto-archive oldest entries when FINDINGS.md exceeds the cap
   const DEFAULT_FINDINGS_CAP = 20;
   const cap = Number.parseInt(process.env.CORTEX_FINDINGS_CAP || "", 10) || DEFAULT_FINDINGS_CAP;
-  const activeCount = countActiveFindings(updated);
+  const activeCount = countActiveFindings(result.data.content);
   if (activeCount > cap) {
     const archiveResult = autoArchiveToReference(cortexPath, project, cap);
     if (archiveResult.ok && archiveResult.data > 0) {
@@ -376,7 +390,6 @@ export function addFindingToFile(
     }
   }
 
-  // Consolidation trigger: warn when active findings exceed the consolidation cap
   const CONSOLIDATION_CAP = Number.parseInt(process.env.CORTEX_CONSOLIDATION_CAP || "", 10) || 150;
   let consolidationNotice = "";
   if (activeCount > CONSOLIDATION_CAP) {
@@ -389,8 +402,13 @@ export function addFindingToFile(
     consolidationNotice = ` Note: ${activeCount} active findings exceeds consolidation cap (${CONSOLIDATION_CAP}). Consider running consolidation.`;
   }
 
-  const addedMsg = `Added finding to ${project}: ${prepared.finding.bullet} (with citation metadata)`;
-  const fullMsg = prepared.finding.tagWarning ? `${addedMsg} Warning: ${prepared.finding.tagWarning}` : addedMsg;
+  if (result.data.created) {
+    const createdMsg = `Created FINDINGS.md for "${project}" and added insight.`;
+    return cortexOk(result.data.tagWarning ? `${createdMsg} Warning: ${result.data.tagWarning}` : createdMsg);
+  }
+
+  const addedMsg = `Added finding to ${project}: ${result.data.bullet} (with citation metadata)`;
+  const fullMsg = result.data.tagWarning ? `${addedMsg} Warning: ${result.data.tagWarning}` : addedMsg;
   return cortexOk(consolidationNotice ? `${fullMsg}${consolidationNotice}` : fullMsg);
 }
 
@@ -408,19 +426,45 @@ export function addFindingsToFile(
 
   const today = new Date().toISOString().slice(0, 10);
   const nowIso = new Date().toISOString();
-  const cwd = process.cwd();
-  const inferredRepo = getRepoRoot(cwd);
+  const inferredRepo = getRepoRoot(resolvedDir);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
 
   const added: string[] = [];
   const skipped: string[] = [];
   const rejected: { text: string; reason: string }[] = [];
 
-  if (!fs.existsSync(learningsPath)) {
-    if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
-    let content = `# ${project} Findings\n\n## ${today}\n`;
+  const contentResult: CortexResult<AddFindingsWriteResult> = withFileLock(learningsPath, () => {
+    if (!fs.existsSync(learningsPath)) {
+      if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+      let content = `# ${project} Findings\n\n## ${today}\n`;
+      for (const learning of learnings) {
+        const prepared = prepareFinding(learning, project, content, undefined, nowIso, inferredRepo, headCommit);
+        if (prepared.status === "rejected") {
+          rejected.push({ text: learning, reason: prepared.reason });
+          continue;
+        }
+        if (prepared.status === "duplicate") {
+          skipped.push(learning);
+          continue;
+        }
+        content = insertFindingIntoContent(content, today, prepared.finding.bullet, prepared.finding.citationComment);
+        if (prepared.finding.tagWarning) debugLog(`add_findings: ${prepared.finding.tagWarning}`);
+        added.push(learning);
+      }
+      if (added.length > 0) {
+        fs.writeFileSync(learningsPath, content.endsWith("\n") ? content : `${content}\n`);
+      }
+      return cortexOk({ content, wrote: added.length > 0 });
+    }
+
+    let content = fs.readFileSync(learningsPath, "utf8");
+    const legacyHistory = readLegacyHistoryContent(resolvedDir);
+    const issues = validateFindingsFormat(content);
+    if (issues.length > 0) debugLog(`FINDINGS.md format warnings for "${project}": ${issues.join("; ")}`);
+
     for (const learning of learnings) {
-      const prepared = prepareFinding(learning, project, content, undefined, nowIso, inferredRepo, headCommit);
+      const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
+      const prepared = prepareFinding(learning, project, fullHistory, undefined, nowIso, inferredRepo, headCommit);
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });
         continue;
@@ -433,45 +477,24 @@ export function addFindingsToFile(
       if (prepared.finding.tagWarning) debugLog(`add_findings: ${prepared.finding.tagWarning}`);
       added.push(learning);
     }
+
     if (added.length > 0) {
-      fs.writeFileSync(learningsPath, content.endsWith("\n") ? content : `${content}\n`);
-      appendAuditLog(cortexPath, "add_finding", `project=${project} count=${added.length} batch=true`);
+      const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
+      fs.writeFileSync(tmpPath, content);
+      fs.renameSync(tmpPath, learningsPath);
     }
-    return cortexOk({ added, skipped, rejected });
-  }
 
-  // Read once, apply all learnings, write once
-  let content = fs.readFileSync(learningsPath, "utf8");
-  // Include legacy history as supplementary dedup context (read-only)
-  const legacyHistory = readLegacyHistoryContent(resolvedDir);
-  const issues = validateFindingsFormat(content);
-  if (issues.length > 0) debugLog(`FINDINGS.md format warnings for "${project}": ${issues.join("; ")}`);
+    return cortexOk({ content, wrote: added.length > 0 });
+  });
 
-  for (const learning of learnings) {
-    const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
-    const prepared = prepareFinding(learning, project, fullHistory, undefined, nowIso, inferredRepo, headCommit);
-    if (prepared.status === "rejected") {
-      rejected.push({ text: learning, reason: prepared.reason });
-      continue;
-    }
-    if (prepared.status === "duplicate") {
-      skipped.push(learning);
-      continue;
-    }
-    content = insertFindingIntoContent(content, today, prepared.finding.bullet, prepared.finding.citationComment);
-    if (prepared.finding.tagWarning) debugLog(`add_findings: ${prepared.finding.tagWarning}`);
-    added.push(learning);
-  }
+  if (!contentResult.ok) return contentResult;
 
-  if (added.length > 0) {
-    const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
-    fs.writeFileSync(tmpPath, content);
-    fs.renameSync(tmpPath, learningsPath);
+  if (contentResult.data.wrote) {
     appendAuditLog(cortexPath, "add_finding", `project=${project} count=${added.length} batch=true`);
 
     const DEFAULT_FINDINGS_CAP = 20;
     const cap = Number.parseInt(process.env.CORTEX_FINDINGS_CAP || "", 10) || DEFAULT_FINDINGS_CAP;
-    if (countActiveFindings(content) > cap) {
+    if (countActiveFindings(contentResult.data.content) > cap) {
       const archiveResult = autoArchiveToReference(cortexPath, project, cap);
       if (archiveResult.ok && archiveResult.data > 0) {
         debugLog(`Size cap: archived ${archiveResult.data} oldest entries for "${project}" (cap=${cap})`);
