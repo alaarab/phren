@@ -19,7 +19,7 @@ Supports Claude Code, Copilot CLI, Cursor, and Codex.
 
 <br>
 
-Project knowledge, field findings, task queues — stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
+Project knowledge, field findings, task queues. Stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
 
 > **Quick start:** `npx @alaarab/cortex init` -- takes 30 seconds, no account needed.
 
@@ -98,24 +98,24 @@ On a new machine: clone, run init, done.
 
 ## What's new
 
-- **Bulk MCP tools** -- `add_findings`, `add_backlog_items`, `complete_backlog_items`, `remove_findings` for batch operations
-- **TUI shell** -- interactive terminal UI with Backlog, Findings, Memory Queue, and Health tabs (`cortex shell`)
-- **Tiered reference** -- `reference/` subdirectories for deep reference docs, indexed separately from findings
-- **FTS5 full-text search** with synonym expansion and keyword extraction
-- **Multi-agent governance** -- role-based access control for teams (admins, maintainers, contributors, viewers)
-- **Starter templates** -- `cortex init --template python-project|monorepo|library|frontend`
-- **Memory quality** -- confidence scoring, age decay, trust filtering, and a feedback loop
-- **Data portability** -- export/import projects as JSON, archive/unarchive projects
+- **Terminal shell**: open `cortex` and get tabs for Backlog, Findings, Memory Queue, and Health — no agent needed
+- **Synonym search**: type "throttling" and find "rate limit" and "429". You don't need to remember what you called it
+- **Bulk operations**: `add_findings`, `add_backlog_items`, `complete_backlog_items`, `remove_findings` for batch work
+- **Memory quality**: confidence scoring, age decay, and a feedback loop. Stale or low-signal entries stop appearing
+- **Starter templates**: `cortex init --template python-project|monorepo|library|frontend`
+- **Multi-agent access control**: four roles (admin, maintainer, contributor, viewer) for shared cortex repos
+- **Deep reference**: `reference/` subdirectories indexed separately so API docs don't drown out your findings
+- **Data portability**: export/import projects as JSON, archive/unarchive anytime
 
 ---
 
 ## What makes this different
 
-**It runs itself.** Hooks inject context before every prompt and auto-save after every response. No manual calls needed. Trust filtering gates what gets injected based on confidence, age decay, and citation validity.
+**It runs itself.** Hooks inject context before every prompt and auto-save after every response. Trust filtering checks confidence, age decay, and citation validity before anything lands in your context.
 
 **It's just files.** Markdown in a git repo you own. No database, no vector store, no account. `git log` shows how it grew.
 
-**Search that works.** Type "throttling" and it finds "rate limit" and "429". Synonym expansion means you don't need exact phrases.
+**Search that works.** Type "throttling" and it finds "rate limit" and "429". You don't need to remember what you called it.
 
 **Every machine, same brain.** Push to a private repo, clone on a new machine, run init. Profiles control which projects each machine sees.
 
@@ -131,7 +131,7 @@ On a new machine: clone, run init, done.
 | `CLAUDE.md` | Full context: architecture, commands, conventions |
 | `REFERENCE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
 | `FINDINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
-| `CANONICAL_MEMORIES.md` | Pinned high-signal memories that bypass decay |
+| `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
 | `backlog.md` | Task queue that persists across sessions |
 | `MEMORY_QUEUE.md` | Items waiting for your review (see [Memory queue](#memory-queue) below) |
 | `.claude/skills/` | Project-specific slash commands |
