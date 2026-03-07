@@ -136,18 +136,6 @@ function touchSentinel(cortexPath: string): void {
 }
 
 function computeCortexHash(cortexPath: string, profile?: string): string {
-  // Fast path: if sentinel file exists, use its mtime as the hash
-  const sentinelPath = path.join(cortexPath, ".runtime", "cortex-sentinel");
-  if (fs.existsSync(sentinelPath)) {
-    try {
-      const mtime = fs.statSync(sentinelPath).mtimeMs;
-      const hash = crypto.createHash("sha1");
-      hash.update(`sentinel:${mtime}`);
-      if (profile) hash.update(`profile:${profile}`);
-      return hash.digest("hex").slice(0, 16);
-    } catch { /* fall through to full computation */ }
-  }
-
   const projectDirs = getProjectDirs(cortexPath, profile);
   const policy = getIndexPolicy(cortexPath);
   const files: string[] = [];
@@ -194,6 +182,13 @@ function computeCortexHash(cortexPath: string, profile?: string): string {
     try {
       const stat = fs.statSync(manualLinksPath);
       hash.update(`manual-links:${stat.mtimeMs}:${stat.size}`);
+    } catch { /* skip */ }
+  }
+  const indexPolicyPath = path.join(cortexPath, ".governance", "index-policy.json");
+  if (fs.existsSync(indexPolicyPath)) {
+    try {
+      const stat = fs.statSync(indexPolicyPath);
+      hash.update(`index-policy-file:${stat.mtimeMs}:${stat.size}`);
     } catch { /* skip */ }
   }
   if (profile) hash.update(`profile:${profile}`);
@@ -794,4 +789,3 @@ export function detectProject(cortexPath: string, cwd: string, profile?: string)
   }
   return null;
 }
-
