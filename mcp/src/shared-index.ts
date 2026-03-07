@@ -346,11 +346,8 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         });
         return db;
       } else {
-        // Incremental update: delete changed/missing, re-insert changed/new
-        for (const entry of changedFiles) {
-          try { db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]); } catch { /* ignore */ }
-          try { deleteEntityLinksForDocPath(db, cortexPath, entry.fullPath, entry.project, entry.filename); } catch { /* ignore */ }
-        }
+        // Incremental update: apply each file change atomically to avoid losing docs on crash.
+        const changedPaths = new Set(changedFiles.map(entry => entry.fullPath));
         for (const missingPath of missingFromIndex) {
           try { deleteEntityLinksForDocPath(db, cortexPath, missingPath); } catch { /* ignore */ }
           try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch { /* ignore */ }
@@ -358,14 +355,27 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
 
         let updatedCount = 0;
         for (const entry of [...changedFiles, ...newFiles]) {
-          if (insertFileIntoIndex(db, entry, cortexPath)) {
-            updatedCount++;
-            if (entry.type === "findings") {
-              try {
-                const content = fs.readFileSync(entry.fullPath, "utf-8");
-                extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
-              } catch { /* skip entity extraction errors */ }
+          db.run("BEGIN");
+          try {
+            if (changedPaths.has(entry.fullPath)) {
+              db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
+              deleteEntityLinksForDocPath(db, cortexPath, entry.fullPath, entry.project, entry.filename);
             }
+
+            if (insertFileIntoIndex(db, entry, cortexPath)) {
+              updatedCount++;
+              if (entry.type === "findings") {
+                try {
+                  const content = fs.readFileSync(entry.fullPath, "utf-8");
+                  extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
+                } catch { /* skip entity extraction errors */ }
+              }
+            }
+
+            db.run("COMMIT");
+          } catch (err: unknown) {
+            try { db.run("ROLLBACK"); } catch { /* ignore */ }
+            throw err;
           }
         }
 
