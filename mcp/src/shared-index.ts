@@ -653,12 +653,15 @@ export function getDocSourceKey(doc: Pick<DocRow, "project" | "filename" | "path
 }
 
 export function rowToDoc(row: DbRow): DocRow {
+  if (!Array.isArray(row) || row.length < 5) {
+    throw new Error(`rowToDoc: expected ≥5 columns, got ${Array.isArray(row) ? row.length : typeof row}`);
+  }
   return {
-    project: row[0] as string,
-    filename: row[1] as string,
-    type: row[2] as string,
-    content: row[3] as string,
-    path: row[4] as string,
+    project: row[0] != null ? String(row[0]) : "",
+    filename: row[1] != null ? String(row[1]) : "",
+    type: row[2] != null ? String(row[2]) : "",
+    content: row[3] != null ? String(row[3]) : "",
+    path: row[4] != null ? String(row[4]) : "",
   };
 }
 
