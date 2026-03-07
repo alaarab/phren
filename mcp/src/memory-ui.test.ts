@@ -239,7 +239,7 @@ describe.sequential("review-ui CSRF protection", () => {
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
   let port = 0;
-  let csrfTokens: Set<string>;
+  let csrfTokens: Map<string, number>;
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
@@ -255,7 +255,7 @@ describe.sequential("review-ui CSRF protection", () => {
         viewers: [],
       }, null, 2) + "\n"
     );
-    csrfTokens = new Set<string>();
+    csrfTokens = new Map<string, number>();
     server = createReviewUiServer(tmpRoot, { csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
@@ -297,7 +297,7 @@ describe.sequential("review-ui CSRF protection", () => {
         res.on("end", () => resolve());
       }).on("error", reject);
     });
-    const token = [...csrfTokens][0];
+    const token = [...csrfTokens.keys()][0];
 
     const res = await postForm(port, "/approve", {
       _csrf: token,
@@ -333,7 +333,7 @@ describe.sequential("review-ui CSRF protection", () => {
         res.on("end", () => resolve());
       }).on("error", reject);
     });
-    const token = [...csrfTokens][0];
+    const token = [...csrfTokens.keys()][0];
 
     // First use succeeds
     const first = await postForm(port, "/reject", {

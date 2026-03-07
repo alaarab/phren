@@ -325,7 +325,7 @@ describe.sequential("review-ui combined CSRF + auth", () => {
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
   let port = 0;
-  let csrfTokens: Set<string>;
+  let csrfTokens: Map<string, number>;
   let authToken: string;
   const priorActor = process.env.CORTEX_ACTOR;
 
@@ -334,7 +334,7 @@ describe.sequential("review-ui combined CSRF + auth", () => {
     seedProject(tmpRoot);
     process.env.CORTEX_ACTOR = "review-ui-admin";
     grantAdmin(tmpRoot);
-    csrfTokens = new Set<string>();
+    csrfTokens = new Map<string, number>();
     authToken = "combined-auth-token";
     server = createReviewUiServer(tmpRoot, { authToken, csrfTokens });
     await new Promise<void>((resolve) => {
@@ -359,7 +359,7 @@ describe.sequential("review-ui combined CSRF + auth", () => {
   it("requires both auth and CSRF for POST to succeed", async () => {
     // Get CSRF token
     await httpGet(port, "/");
-    const token = [...csrfTokens][0];
+    const token = [...csrfTokens.keys()][0];
 
     // Missing auth -> 401
     const noAuth = await postForm(port, "/reject", {
@@ -382,7 +382,7 @@ describe.sequential("review-ui combined CSRF + auth", () => {
 
   it("succeeds when both auth and CSRF are correct", async () => {
     await httpGet(port, "/");
-    const token = [...csrfTokens][0];
+    const token = [...csrfTokens.keys()][0];
     const res = await postForm(port, "/approve", {
       _auth: authToken,
       _csrf: token,
