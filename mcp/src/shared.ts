@@ -45,12 +45,6 @@ export function forwardErr<T>(result: CortexResult<unknown>): CortexResult<T> {
   return { ok: false, error: "unexpected forward of ok result" };
 }
 
-// Type guard: returns true when result is a string error (legacy T | string pattern).
-// Useful during migration from T | string to CortexResult<T>.
-export function isCortexError<T>(result: T | string): result is string {
-  return typeof result === "string";
-}
-
 const ERROR_CODES = new Set(Object.values(CortexError));
 
 // Extract the error code from a legacy error string (e.g. "PROJECT_NOT_FOUND: ...").

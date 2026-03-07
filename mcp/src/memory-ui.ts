@@ -1,5 +1,6 @@
 import * as http from "http";
 import * as crypto from "crypto";
+import { timingSafeEqual } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as querystring from "querystring";
@@ -50,6 +51,14 @@ function getSubmittedAuthToken(req: http.IncomingMessage, url: string, parsedBod
   if (typeof bodyAuth === "string") return bodyAuth;
 
   return "";
+}
+
+function authTokensMatch(submitted: string, authToken?: string): boolean {
+  if (!authToken || !submitted) return false;
+  const submittedBuffer = Buffer.from(submitted);
+  const authTokenBuffer = Buffer.from(authToken);
+  if (submittedBuffer.length !== authTokenBuffer.length) return false;
+  return timingSafeEqual(submittedBuffer, authTokenBuffer);
 }
 
 function recentUsage(cortexPath: string): string[] {
@@ -377,7 +386,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     if (req.method === "GET" && url.startsWith("/api/graph")) {
       if (authToken) {
         const submitted = getSubmittedAuthToken(req, url);
-        if (submitted !== authToken) {
+        if (!authTokensMatch(submitted, authToken)) {
           res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
           res.end("Unauthorized");
           return;
@@ -412,7 +421,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
 
         if (authToken) {
           const submitted = getSubmittedAuthToken(req, url, parsed);
-          if (submitted !== authToken) {
+          if (!authTokensMatch(submitted, authToken)) {
             res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
             res.end("Unauthorized");
             return;
