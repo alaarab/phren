@@ -18,7 +18,38 @@ import { isValidProjectName } from "./utils.js";
 
 export interface ReviewUiOptions {
   authToken?: string;
-  csrfTokens?: Set<string>;
+  csrfTokens?: Map<string, number>;
+}
+
+const CSRF_TOKEN_TTL_MS = 15 * 60 * 1000;
+
+function pruneExpiredCsrfTokens(csrfTokens?: Map<string, number>): void {
+  if (!csrfTokens) return;
+  const now = Date.now();
+  for (const [token, createdAt] of csrfTokens) {
+    if (now - createdAt > CSRF_TOKEN_TTL_MS) csrfTokens.delete(token);
+  }
+}
+
+function setCommonHeaders(res: http.ServerResponse): void {
+  res.setHeader("Referrer-Policy", "no-referrer");
+}
+
+function getSubmittedAuthToken(req: http.IncomingMessage, url: string, parsedBody?: querystring.ParsedUrlQuery): string {
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === "string") {
+    const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (bearerMatch) return bearerMatch[1];
+  }
+
+  const query = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
+  const queryAuth = query._auth;
+  if (typeof queryAuth === "string") return queryAuth;
+
+  const bodyAuth = parsedBody?._auth;
+  if (typeof bodyAuth === "string") return bodyAuth;
+
+  return "";
 }
 
 function recentUsage(cortexPath: string): string[] {
@@ -328,12 +359,14 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
   const csrfTokens = opts?.csrfTokens;
 
   return http.createServer((req, res) => {
+    setCommonHeaders(res);
     const url = req.url || "/";
     if (req.method === "GET" && url === "/") {
+      pruneExpiredCsrfTokens(csrfTokens);
       let csrfToken: string | undefined;
       if (csrfTokens) {
         csrfToken = crypto.randomUUID();
-        csrfTokens.add(csrfToken);
+        csrfTokens.set(csrfToken, Date.now());
       }
       const html = renderPage(cortexPath, csrfToken, authToken);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -341,7 +374,15 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       return;
     }
 
-    if (req.method === "GET" && url === "/api/graph") {
+    if (req.method === "GET" && url.startsWith("/api/graph")) {
+      if (authToken) {
+        const submitted = getSubmittedAuthToken(req, url);
+        if (submitted !== authToken) {
+          res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
+          res.end("Unauthorized");
+          return;
+        }
+      }
       const graph = buildGraph(cortexPath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(graph));
@@ -370,18 +411,19 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
         const parsed = querystring.parse(body);
 
         if (authToken) {
-          const submitted = String(parsed._auth || "");
+          const submitted = getSubmittedAuthToken(req, url, parsed);
           if (submitted !== authToken) {
-            res.writeHead(401, { "content-type": "text/plain" });
+            res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
             res.end("Unauthorized");
             return;
           }
         }
 
         if (csrfTokens) {
+          pruneExpiredCsrfTokens(csrfTokens);
           const submitted = String(parsed._csrf || "");
           if (!submitted || !csrfTokens.delete(submitted)) {
-            res.writeHead(403, { "content-type": "text/plain" });
+            res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
             res.end("Invalid or missing CSRF token");
             return;
           }
@@ -391,12 +433,12 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
         const line = String(parsed.line || "");
         const newText = String(parsed.new_text || "");
         if (!project || !line) {
-          res.writeHead(400, { "content-type": "text/plain" });
+          res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
           res.end("Missing project/line");
           return;
         }
         if (!isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "text/plain" });
+          res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
           res.end("Invalid project name");
           return;
         }
@@ -445,7 +487,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
 
 export async function startReviewUi(cortexPath: string, port: number): Promise<void> {
   const authToken = crypto.randomUUID();
-  const csrfTokens = new Set<string>();
+  const csrfTokens = new Map<string, number>();
   const server = createReviewUiServer(cortexPath, { authToken, csrfTokens });
 
   await new Promise<void>((resolve) => {
