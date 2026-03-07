@@ -5,7 +5,7 @@ import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { buildLifecycleCommands, configureAllHooks } from "./hooks.js";
 import { debugLog, EXEC_TIMEOUT_QUICK_MS, GOVERNANCE_SCHEMA_VERSION, migrateGovernanceFiles } from "./shared.js";
-import { isValidProjectName } from "./utils.js";
+import { isValidProjectName, isFeatureEnabled } from "./utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..", "..");
@@ -559,10 +559,13 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
     // Hooks: update to latest version when enabled, otherwise remove cortex hooks.
     if (!data.hooks) data.hooks = {};
 
-    const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart", hookBody: { type: string; command: string; timeout?: number }) => {
+    const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", hookBody: { type: string; command: string; timeout?: number }) => {
       if (!Array.isArray(data.hooks[eventName])) data.hooks[eventName] = [];
       const eventHooks = data.hooks[eventName] as HookEntry[];
-      const marker = eventName === "UserPromptSubmit" ? "hook-prompt" : eventName === "Stop" ? "hook-stop" : "hook-session-start";
+      const marker = eventName === "UserPromptSubmit" ? "hook-prompt"
+        : eventName === "Stop" ? "hook-stop"
+        : eventName === "PostToolUse" ? "hook-tool"
+        : "hook-session-start";
       const legacyMarker = eventName === "Stop" ? "auto-save" : eventName === "SessionStart" ? "doctor --fix" : "hook-prompt";
       const existingIdx = eventHooks.findIndex(
         (h: HookEntry) => h?.hooks?.some(
@@ -580,6 +583,8 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
       else eventHooks.push(payload);
     };
 
+    const toolHookEnabled = hooksEnabled && isFeatureEnabled("CORTEX_FEATURE_TOOL_HOOK", false);
+
     if (hooksEnabled) {
       upsertCortexHook("UserPromptSubmit", {
         type: "command",
@@ -596,8 +601,15 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
         type: "command",
         command: lifecycle.sessionStart,
       });
+
+      if (toolHookEnabled) {
+        upsertCortexHook("PostToolUse", {
+          type: "command",
+          command: lifecycle.hookTool,
+        });
+      }
     } else {
-      for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart"] as const) {
+      for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const) {
         const hooks = data.hooks?.[hookEvent] as HookEntry[] | undefined;
         if (!Array.isArray(hooks)) continue;
         data.hooks[hookEvent] = hooks.filter(

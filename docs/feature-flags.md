@@ -41,6 +41,27 @@ The maintenance process runs independently and does not block the session. A mar
 export CORTEX_FEATURE_DAILY_MAINTENANCE=0
 ```
 
+## CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE
+
+**Default:** disabled
+
+When enabled, the `hook-prompt` lifecycle hook uses a 3-layer progressive disclosure strategy instead of injecting full memory snippets verbatim.
+
+**Layer 1 (always injected):** A compact memory index — one line per result with a `mem:project/filename` ID and a one-line summary (truncated at 80 chars). Injected into every hook-prompt response when 3 or more results are found.
+
+**Layer 2 (on-demand):** Full snippet injection. Still used automatically when 1-2 results are found (targeted queries don't need the index).
+
+**Layer 3 (by ID):** The `get_memory_detail` MCP tool fetches full content for any entry in the compact index by its `mem:project/filename` ID.
+
+**When to enable:**
+- If hook-prompt injections are consuming too many context tokens
+- In sessions where many knowledge entries match broad prompts
+- When you want Claude to decide which memories to expand rather than injecting all of them
+
+```bash
+export CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1
+```
+
 ## How Feature Flags Work
 
 The `isFeatureEnabled` function in `cli.ts` reads the named environment variable. If the value is `0`, `false`, `off`, or `no` (case-insensitive, trimmed), the feature is disabled. Any other value, or if the variable is not set, means the feature is enabled.

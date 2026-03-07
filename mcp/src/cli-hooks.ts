@@ -696,6 +696,33 @@ export function selectSnippets(
   return { selected, usedTokens };
 }
 
+// ── Progressive disclosure helpers ────────────────────────────────────────────
+
+/**
+ * Build a one-line summary from snippet content (truncated at 80 chars).
+ */
+function buildOneLiner(snippet: string): string {
+  const lines = snippet.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+  if (!lines.length) return "";
+  const first = lines[0].replace(/^[-*#>\s]+/, "").trim();
+  if (first.length <= 80) return first;
+  return first.slice(0, 79) + "\u2026";
+}
+
+/**
+ * Format selected snippets as a compact memory index.
+ * Format: [mem:N] Label: one-line summary
+ */
+function buildCompactIndex(selected: SelectedSnippet[]): string[] {
+  const lines: string[] = [];
+  for (const { doc, snippet } of selected) {
+    const id = `mem:${doc.project}/${doc.filename}`;
+    const summary = buildOneLiner(snippet);
+    lines.push(`[${id}] ${doc.type}: ${summary}`);
+  }
+  return lines;
+}
+
 export function buildHookOutput(
   selected: SelectedSnippet[],
   usedTokens: number,
@@ -712,13 +739,34 @@ export function buildHookOutput(
   const statusLine = `\u25c6 cortex${projectLabel} \u00b7 ${resultLabel}`;
 
   const parts: string[] = [statusLine, "<cortex-context>"];
-  for (const injected of selected) {
-    const { doc, snippet, key } = injected;
-    recordMemoryInjection(cortexPathLocal, key, sessionId);
-    parts.push(`[${doc.project}/${doc.filename}] (${doc.type})`);
-    parts.push(snippet);
+
+  // Progressive disclosure: compact index for 3+ results, full snippets for 1-2
+  const useCompactIndex = isFeatureEnabled("CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE", false) && selected.length >= 3;
+
+  if (useCompactIndex) {
+    // Layer 1: compact index only — inject IDs + one-liners, at most 8 entries
+    const indexEntries = selected.slice(0, 8);
+    const indexLines = buildCompactIndex(indexEntries);
+    parts.push("Memory index (use get_memory_detail to expand any entry):");
+    for (const line of indexLines) {
+      parts.push(line);
+    }
     parts.push("");
+    // Record injections for metrics without marking key as injected snippet
+    for (const injected of indexEntries) {
+      recordMemoryInjection(cortexPathLocal, injected.key, sessionId);
+    }
+  } else {
+    // Layer 2: full snippets (existing behavior for 1-2 results, or feature off)
+    for (const injected of selected) {
+      const { doc, snippet, key } = injected;
+      recordMemoryInjection(cortexPathLocal, key, sessionId);
+      parts.push(`[${doc.project}/${doc.filename}] (${doc.type})`);
+      parts.push(snippet);
+      parts.push("");
+    }
   }
+
   parts.push("</cortex-context>");
 
   const changedCount = gitCtx?.changedFiles.size ?? 0;
@@ -1032,4 +1080,91 @@ export async function handleHookContext() {
   if (parts.length > 2) {
     console.log(parts.join("\n"));
   }
+}
+
+// ── PostToolUse hook ─────────────────────────────────────────────────────────
+
+const INTERESTING_TOOLS = new Set(["Read", "Write", "Edit", "Bash", "Glob", "Grep"]);
+
+interface ToolLogEntry {
+  at: string;
+  session_id?: string;
+  tool: string;
+  file?: string;
+  command?: string;
+  error?: string;
+}
+
+export async function handleHookTool() {
+  if (!getHooksEnabledPreference(cortexPath)) {
+    process.exit(0);
+  }
+
+  const start = Date.now();
+
+  let raw = "";
+  try {
+    raw = fs.readFileSync(0, "utf-8");
+  } catch {
+    process.exit(0);
+  }
+
+  let data: Record<string, any>;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    process.exit(0);
+  }
+
+  const toolName: string = data.tool_name ?? data.tool ?? "";
+  if (!INTERESTING_TOOLS.has(toolName)) {
+    process.exit(0);
+  }
+
+  const sessionId: string | undefined = data.session_id;
+  const input: Record<string, any> = data.tool_input ?? {};
+
+  const entry: ToolLogEntry = {
+    at: new Date().toISOString(),
+    session_id: sessionId,
+    tool: toolName,
+  };
+
+  // Extract meaningful signals per tool type
+  if (toolName === "Read" || toolName === "Write" || toolName === "Edit") {
+    const filePath = input.file_path ?? input.path ?? undefined;
+    if (filePath) entry.file = String(filePath);
+  } else if (toolName === "Bash") {
+    const cmd = input.command ?? undefined;
+    if (cmd) entry.command = String(cmd).slice(0, 200);
+  } else if (toolName === "Glob") {
+    const pattern = input.pattern ?? undefined;
+    if (pattern) entry.file = String(pattern);
+  } else if (toolName === "Grep") {
+    const pattern = input.pattern ?? undefined;
+    const searchPath = input.path ?? undefined;
+    if (pattern) entry.command = `grep ${pattern}${searchPath ? ` in ${searchPath}` : ""}`.slice(0, 200);
+  }
+
+  // Capture errors from tool response
+  const responseStr = typeof data.tool_response === "string"
+    ? data.tool_response
+    : JSON.stringify(data.tool_response ?? "");
+  if (/(error|exception|failed|no such file|ENOENT)/i.test(responseStr)) {
+    entry.error = responseStr.slice(0, 300);
+  }
+
+  // Write compact log line
+  try {
+    const logFile = runtimeFile(cortexPath, "tool-log.jsonl");
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
+  } catch {
+    // best effort — never fail on logging
+  }
+
+  const elapsed = Date.now() - start;
+  debugLog(`hook-tool: ${toolName} logged in ${elapsed}ms`);
+
+  process.exit(0);
 }

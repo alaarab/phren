@@ -1,12 +1,22 @@
 # MCP API Reference
 
-Cortex exposes 20 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
+Cortex exposes 21 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
 ---
 
 ## Search and Browse
+
+### `get_memory_detail`
+
+Fetch the full content of a specific memory entry by its ID. This is Layer 3 of the progressive disclosure system: when `CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1`, the hook-prompt injects a compact memory index instead of full snippets for 3+ results. Use this tool to expand any entry from that index.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | yes | Memory ID in the format `mem:project/filename` (e.g. `mem:my-app/LEARNINGS.md`). Returned by the hook-prompt compact index. |
+
+---
 
 ### `search_knowledge`
 

@@ -57,6 +57,7 @@ export interface LifecycleCommands {
   sessionStart: string;
   userPromptSubmit: string;
   stop: string;
+  hookTool: string;
 }
 
 export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
@@ -68,6 +69,7 @@ export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
       sessionStart: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-session-start`,
       userPromptSubmit: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-prompt`,
       stop: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-stop`,
+      hookTool: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-tool`,
     };
   }
 
@@ -76,6 +78,7 @@ export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
     sessionStart: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-session-start`,
     userPromptSubmit: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-prompt`,
     stop: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-stop`,
+    hookTool: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-tool`,
   };
 }
 

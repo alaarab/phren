@@ -756,6 +756,46 @@ export function isDuplicateLearning(existingContent: string, newLearning: string
   return false;
 }
 
+// ── Typed observation tags ────────────────────────────────────────────────────
+
+export const KNOWN_OBSERVATION_TAGS = new Set([
+  "decision",
+  "gotcha",
+  "tradeoff",
+  "architecture",
+  "bug",
+]);
+
+/**
+ * Normalize known observation tags in learning text to lowercase.
+ * Returns the normalized text and a warning if unknown bracket tags are found.
+ */
+export function normalizeObservationTags(text: string): { text: string; warning?: string } {
+  // Normalize known tags to lowercase
+  let normalized = text.replace(/\[([a-zA-Z_-]+)\]/g, (_match, tag: string) => {
+    const lower = tag.toLowerCase();
+    if (KNOWN_OBSERVATION_TAGS.has(lower)) return `[${lower}]`;
+    return _match; // keep unknown tags as-is
+  });
+
+  // Detect unknown bracket tags for warning
+  const unknownTags: string[] = [];
+  const tagPattern = /\[([a-zA-Z_-]+)\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = tagPattern.exec(normalized)) !== null) {
+    const lower = m[1].toLowerCase();
+    if (!KNOWN_OBSERVATION_TAGS.has(lower)) {
+      unknownTags.push(m[0]);
+    }
+  }
+
+  const warning = unknownTags.length > 0
+    ? `Unknown tag(s) ${unknownTags.join(", ")} — known tags: ${[...KNOWN_OBSERVATION_TAGS].map(t => `[${t}]`).join(", ")}`
+    : undefined;
+
+  return { text: normalized, warning };
+}
+
 export function addLearningToFile(
   cortexPath: string,
   project: string,
@@ -770,7 +810,9 @@ export function addLearningToFile(
   const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
 
   const today = new Date().toISOString().slice(0, 10);
-  const bullet = learning.startsWith("- ") ? learning : `- ${learning}`;
+  // Normalize observation tags before storing
+  const { text: normalizedLearning, warning: tagWarning } = normalizeObservationTags(learning);
+  const bullet = normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`;
   const nowIso = new Date().toISOString();
   const cwd = process.cwd();
   const inferredRepo = getRepoRoot(cwd);
@@ -797,7 +839,8 @@ export function addLearningToFile(
       "add_learning",
       `project=${project} created=true citation_commit=${citation.commit ?? "none"} citation_file=${citation.file ?? "none"}`
     );
-    return cortexOk(`Created LEARNINGS.md for "${project}" and added insight.`);
+    const createdMsg = `Created LEARNINGS.md for "${project}" and added insight.`;
+    return cortexOk(tagWarning ? `${createdMsg} Warning: ${tagWarning}` : createdMsg);
   }
 
   const content = fs.readFileSync(learningsPath, "utf8");
@@ -847,7 +890,8 @@ export function addLearningToFile(
     }
   }
 
-  return cortexOk(`Added learning to ${project}: ${bullet} (with citation metadata)`);
+  const addedMsg = `Added learning to ${project}: ${bullet} (with citation metadata)`;
+  return cortexOk(tagWarning ? `${addedMsg} Warning: ${tagWarning}` : addedMsg);
 }
 
 export function addLearningsToFile(

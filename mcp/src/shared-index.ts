@@ -13,6 +13,7 @@ import {
 } from "./shared.js";
 import { getIndexPolicy } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
+import { STOP_WORDS } from "./utils.js";
 
 const require = createRequire(import.meta.url);
 const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<any>;
@@ -303,6 +304,157 @@ export function queryRows(db: any, sql: string, params: (string | number)[]): an
     debugLog(`queryRows failed: ${err?.message || "unknown error"}`);
     return null;
   }
+}
+
+const HYBRID_SEARCH_FLAG = "CORTEX_FEATURE_HYBRID_SEARCH";
+const COSINE_FALLBACK_THRESHOLD = 3;
+const COSINE_SIMILARITY_MIN = 0.05;
+const COSINE_MAX_CORPUS = 10000;
+
+/**
+ * Tokenize text into non-stop-word tokens for TF-IDF computation.
+ */
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !STOP_WORDS.has(w));
+}
+
+/**
+ * Compute TF-IDF cosine similarity scores for a query against a corpus of documents.
+ * Returns an array of similarity scores in the same order as docs.
+ */
+function tfidfCosine(docs: string[], query: string): number[] {
+  const queryTokens = tokenize(query);
+  if (queryTokens.length === 0) return docs.map(() => 0);
+
+  // Collect all unique terms from query + all docs
+  const allTokens = new Set<string>(queryTokens);
+  const docTokenLists: string[][] = docs.map(d => {
+    const tokens = tokenize(d);
+    for (const t of tokens) allTokens.add(t);
+    return tokens;
+  });
+
+  const terms = [...allTokens];
+  const N = docs.length;
+
+  // Compute document frequency for each term
+  const df = new Map<string, number>();
+  for (const term of terms) {
+    let count = 0;
+    for (const docTokens of docTokenLists) {
+      if (docTokens.includes(term)) count++;
+    }
+    df.set(term, count);
+  }
+
+  function buildVector(tokens: string[]): number[] {
+    const tf = new Map<string, number>();
+    for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+    return terms.map(term => {
+      const termTf = (tf.get(term) ?? 0) / (tokens.length || 1);
+      const idf = Math.log((N + 1) / ((df.get(term) ?? 0) + 1)) + 1;
+      return termTf * idf;
+    });
+  }
+
+  function cosine(a: number[], b: number[]): number {
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    return denom === 0 ? 0 : dot / denom;
+  }
+
+  const queryVec = buildVector(queryTokens);
+  return docTokenLists.map(docTokens => cosine(queryVec, buildVector(docTokens)));
+}
+
+/**
+ * Cosine fallback search: when FTS5 returns fewer than COSINE_FALLBACK_THRESHOLD results,
+ * load all docs and rank by TF-IDF cosine similarity.
+ * Only activated when CORTEX_FEATURE_HYBRID_SEARCH=1 and corpus size <= COSINE_MAX_CORPUS.
+ * Returns DocRow[] ranked by similarity (threshold > COSINE_SIMILARITY_MIN), excluding already-found rowids.
+ */
+export function cosineFallback(
+  db: any,
+  query: string,
+  excludeRowids: Set<number>,
+  limit: number
+): DocRow[] {
+  // Feature flag guard — default off
+  const flagVal = process.env[HYBRID_SEARCH_FLAG];
+  if (!flagVal || ["0", "false", "off", "no"].includes(flagVal.trim().toLowerCase())) {
+    return [];
+  }
+
+  // Count total docs to guard against large corpora
+  let totalDocs = 0;
+  try {
+    const countResult = db.exec("SELECT COUNT(*) FROM docs");
+    if (countResult?.length && countResult[0]?.values?.length) {
+      totalDocs = Number(countResult[0].values[0][0]);
+    }
+  } catch {
+    return [];
+  }
+
+  if (totalDocs > COSINE_MAX_CORPUS) {
+    debugLog(`cosineFallback: corpus size ${totalDocs} exceeds ${COSINE_MAX_CORPUS}, skipping`);
+    return [];
+  }
+
+  // Load all docs
+  let allRows: any[][] | null = null;
+  try {
+    const results = db.exec("SELECT rowid, project, filename, type, content, path FROM docs");
+    if (!Array.isArray(results) || !results.length || !results[0]?.values?.length) return [];
+    allRows = results[0].values;
+  } catch {
+    return [];
+  }
+
+  // Separate rowids, DocRows, and content strings for scoring
+  const rowids: number[] = [];
+  const docContents: string[] = [];
+  const docMeta: { project: string; filename: string; type: string; content: string; path: string }[] = [];
+
+  for (const row of allRows ?? []) {
+    const rowid = Number(row[0]);
+    if (excludeRowids.has(rowid)) continue;
+    rowids.push(rowid);
+    const content = String(row[4]);
+    docContents.push(content);
+    docMeta.push({
+      project: String(row[1]),
+      filename: String(row[2]),
+      type: String(row[3]),
+      content,
+      path: String(row[5]),
+    });
+  }
+
+  if (docContents.length === 0) return [];
+
+  const scores = tfidfCosine(docContents, query);
+
+  // Collect scored results above threshold
+  const scored: { score: number; doc: DocRow }[] = [];
+  for (let i = 0; i < scores.length; i++) {
+    if (scores[i] > COSINE_SIMILARITY_MIN) {
+      scored.push({ score: scores[i], doc: docMeta[i] });
+    }
+  }
+
+  // Sort descending by score and return top-limit
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map(s => s.doc);
 }
 
 export function extractSnippet(content: string, query: string, lines: number = 5): string {

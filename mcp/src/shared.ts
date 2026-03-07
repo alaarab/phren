@@ -311,6 +311,7 @@ export {
   extractSnippet,
   detectProject,
   resolveImports,
+  cosineFallback,
 } from "./shared-index.js";
 
 export {
@@ -336,4 +337,5 @@ export {
   clearCitationCaches,
   countActiveLearnings,
   autoArchiveToKnowledge,
+  KNOWN_OBSERVATION_TAGS,
 } from "./shared-content.js";

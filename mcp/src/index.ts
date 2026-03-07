@@ -248,6 +248,7 @@ import {
   buildIndex,
   extractSnippet,
   queryRows,
+  cosineFallback,
   addLearningToFile,
   addLearningsToFile,
   autoMergeConflicts,
@@ -257,6 +258,7 @@ import {
   flushMemoryScores,
   runtimeDir,
   EXEC_TIMEOUT_MS,
+  KNOWN_OBSERVATION_TAGS,
 } from "./shared.js";
 import { runCustomHooks } from "./hooks.js";
 
@@ -405,6 +407,51 @@ async function main() {
   );
 
   server.registerTool(
+    "get_memory_detail",
+    {
+      title: "◆ cortex · memory detail",
+      description:
+        "Fetch the full content of a specific memory entry by its ID. Use this after receiving a compact " +
+        "memory index from the hook-prompt (when CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE is enabled). " +
+        "The id format is `mem:project/filename` as shown in the memory index.",
+      inputSchema: z.object({
+        id: z.string().describe(
+          "Memory ID in the format `mem:project/filename` (e.g. `mem:my-app/LEARNINGS.md`). " +
+          "Returned by the hook-prompt compact index when CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1."
+        ),
+      }),
+    },
+    async ({ id }) => {
+      // Parse mem:project/filename
+      const match = id.match(/^mem:([^/]+)\/(.+)$/);
+      if (!match) {
+        return jsonResponse({ ok: false, error: `Invalid memory id format "${id}". Expected mem:project/filename.` });
+      }
+      const [, project, filename] = match;
+      if (!isValidProjectName(project)) {
+        return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      }
+
+      const rows = queryRows(
+        db,
+        "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND filename = ? LIMIT 1",
+        [project, filename]
+      );
+
+      if (!rows || !rows.length) {
+        return jsonResponse({ ok: false, error: `Memory not found: ${id}` });
+      }
+
+      const [proj, fname, docType, content, filePath] = rows[0] as string[];
+      return jsonResponse({
+        ok: true,
+        message: `[${proj}/${fname}] (${docType})\n\n${content}`,
+        data: { id, project: proj, filename: fname, type: docType, content, path: filePath },
+      });
+    }
+  );
+
+  server.registerTool(
     "search_knowledge",
     {
       title: "◆ cortex · search",
@@ -416,12 +463,16 @@ async function main() {
         type: z.enum(["claude", "learnings", "knowledge", "skills", "summary", "backlog", "changelog", "canonical", "memory-queue", "skill", "other"])
           .optional()
           .describe("Filter by document type: claude, learnings, knowledge, summary, backlog, skill"),
+        tag: z.enum(["decision", "gotcha", "tradeoff", "architecture", "bug"])
+          .optional()
+          .describe("Filter learnings by semantic observation tag: decision, gotcha, tradeoff, architecture, bug"),
       }),
     },
-    async ({ query, limit, project, type }) => {
+    async ({ query, limit, project, type, tag }) => {
       try {
         const maxResults = limit ?? 5;
         const filterType = type === "skills" ? "skill" : type;
+        const filterTag = tag?.toLowerCase();
         const filterProject = project?.trim();
         if (filterProject && !isValidProjectName(filterProject)) {
           return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
@@ -445,6 +496,42 @@ async function main() {
 
         let rows = queryRows(db, sql, params);
         let usedFallback = false;
+
+        // Hybrid search: if FTS5 returns fewer than 3 results, try cosine fallback
+        // Only active when CORTEX_FEATURE_HYBRID_SEARCH=1 (default off)
+        if (rows && rows.length < 3) {
+          const ftsRowids = new Set<number>();
+          // Get rowids of existing FTS5 results to deduplicate
+          try {
+            let rowidSql = "SELECT rowid, project, filename, type, content, path FROM docs WHERE docs MATCH ?";
+            const rowidParams: (string | number)[] = [safeQuery];
+            if (filterProject) { rowidSql += " AND project = ?"; rowidParams.push(filterProject); }
+            if (filterType) { rowidSql += " AND type = ?"; rowidParams.push(filterType); }
+            rowidSql += " ORDER BY rank LIMIT ?";
+            rowidParams.push(maxResults);
+            const rowidResult = db.exec(rowidSql, rowidParams);
+            if (rowidResult?.length && rowidResult[0]?.values?.length) {
+              for (const r of rowidResult[0].values) ftsRowids.add(Number(r[0]));
+            }
+          } catch { /* ignore — rowids are optional for deduplication */ }
+
+          const cosineResults = cosineFallback(db, query, ftsRowids, maxResults - rows.length);
+          if (cosineResults.length > 0) {
+            const cosineRows = cosineResults.map(d => [d.project, d.filename, d.type, d.content, d.path]);
+            rows = [...rows, ...cosineRows];
+            usedFallback = true;
+          }
+        }
+
+        // Also try cosine fallback when FTS5 returns null (0 results)
+        if (!rows) {
+          const cosineResults = cosineFallback(db, query, new Set<number>(), maxResults);
+          if (cosineResults.length > 0) {
+            rows = cosineResults.map(d => [d.project, d.filename, d.type, d.content, d.path]);
+            usedFallback = true;
+          }
+        }
+
         if (!rows) {
           // Keyword overlap fallback: scan all docs and rank by term overlap
           let fallbackSql = "SELECT project, filename, type, content, path FROM docs";
@@ -491,6 +578,18 @@ async function main() {
 
           if (!rows) {
             return jsonResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
+          }
+        }
+
+        // Filter by observation tag if requested
+        if (filterTag && rows) {
+          const tagPattern = `[${filterTag}]`;
+          rows = rows.filter((row: any[]) => {
+            const content = (row[3] as string).toLowerCase();
+            return content.includes(tagPattern);
+          });
+          if (rows.length === 0) {
+            return jsonResponse({ ok: true, message: `No results found with tag [${filterTag}].`, data: { query, results: [] } });
           }
         }
 

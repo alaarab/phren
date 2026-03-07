@@ -44,6 +44,7 @@ import {
   handleHookSessionStart,
   handleHookStop,
   handleHookContext,
+  handleHookTool,
   scheduleBackgroundMaintenance,
   resolveSubprocessArgs,
 } from "./cli-hooks.js";
@@ -310,6 +311,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleHookStop();
     case "hook-context":
       return handleHookContext();
+    case "hook-tool":
+      return handleHookTool();
     case "add-learning":
       return handleAddLearning(args[0], args.slice(1).join(" "));
     case "extract-memories":
