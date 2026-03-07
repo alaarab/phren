@@ -598,6 +598,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
 
   saveHashMap(cortexPath, newHashes);
   touchSentinel(cortexPath);
+  invalidateDfCache();
 
   const buildMs = Date.now() - t0;
   debugLog(`Built FTS index: ${fileCount} files from ${getProjectDirs(cortexPath, profile).length} projects in ${buildMs}ms`);
@@ -633,10 +634,7 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
     timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
   });
   try {
-    const db = await Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
-    // Invalidate TF-IDF DF cache on full rebuild — incremental updates don't bump the generation
-    invalidateDfCache();
-    return db;
+    return await Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
   } finally {
     clearTimeout(timer!);
   }
@@ -674,18 +672,11 @@ export function queryDocBySourceKey(db: SqlJsDatabase, cortexPath: string, sourc
   const match = sourceKey.match(/^([^/]+)\/(.+)$/);
   if (!match) return null;
   const [, project, rest] = match;
-  // Try direct filename lookup first — O(1) for the common case of unique filenames per project
   const filename = rest.includes("/") ? path.basename(rest) : rest;
-  const directRows = queryDocRows(db,
-    "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND filename = ?",
-    [project, filename]
-  );
-  if (directRows?.length === 1) return directRows[0];
-  // Fall back to full project scan for exact source key match (handles duplicate filenames)
   const rows = queryDocRows(
     db,
-    "SELECT project, filename, type, content, path FROM docs WHERE project = ?",
-    [project]
+    "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND filename = ?",
+    [project, filename]
   );
   if (!rows) return null;
   return rows.find((row) => getDocSourceKey(row, cortexPath) === sourceKey) ?? null;
