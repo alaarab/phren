@@ -392,6 +392,26 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       }
     }
 
+    // Detect conflict markers in project markdown files
+    for (const projectDir of getProjectDirs(cortexPath, profile)) {
+      const projectName = path.basename(projectDir);
+      if (projectName === "global") continue;
+
+      for (const mdFile of ["FINDINGS.md", "backlog.md", "MEMORY_QUEUE.md", "CLAUDE.md", "REFERENCE.md"]) {
+        const filePath = path.join(projectDir, mdFile);
+        if (!fs.existsSync(filePath)) continue;
+        const content = fs.readFileSync(filePath, "utf8");
+        const hasConflict = /^<{7} |^={7}$|^>{7} /m.test(content);
+        if (hasConflict) {
+          checks.push({
+            name: `data:conflict-markers:${projectName}/${mdFile}`,
+            ok: false,
+            detail: `${projectName}/${mdFile} contains git conflict markers`,
+          });
+        }
+      }
+    }
+
     // Validate skill frontmatter in bundled skills
     const bundledSkills = path.join(cortexPath, "..", "skills");
     const skillResults = validateSkillsDir(fs.existsSync(bundledSkills) ? bundledSkills : path.join(cortexPath, "skills"));

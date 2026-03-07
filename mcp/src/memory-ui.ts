@@ -94,6 +94,81 @@ function buildGraph(cortexPath: string): { nodes: GraphNode[]; links: GraphLink[
   return { nodes, links };
 }
 
+function layoutGraph(graph: { nodes: GraphNode[]; links: GraphLink[] }, width: number, height: number): { nodes: Array<GraphNode & { x: number; y: number }>; links: Array<{ x1: number; y1: number; x2: number; y2: number }> } {
+  if (graph.nodes.length === 0) return { nodes: [], links: [] };
+
+  const nodeMap = new Map<string, GraphNode & { x: number; y: number }>();
+  const cx = width / 2;
+  const cy = height / 2;
+
+  // Place project nodes in a circle, then child nodes around their parent
+  const projectNodes = graph.nodes.filter((n) => n.group === "project");
+  const childNodes = graph.nodes.filter((n) => n.group !== "project");
+
+  projectNodes.forEach((n, i) => {
+    const angle = (2 * Math.PI * i) / Math.max(projectNodes.length, 1);
+    const radius = Math.min(width, height) * 0.3;
+    nodeMap.set(n.id, { ...n, x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) });
+  });
+
+  // Group children by parent project
+  const parentMap = new Map<string, string[]>();
+  for (const link of graph.links) {
+    if (!parentMap.has(link.source)) parentMap.set(link.source, []);
+    parentMap.get(link.source)!.push(link.target);
+  }
+
+  for (const [parentId, childIds] of parentMap) {
+    const parent = nodeMap.get(parentId);
+    if (!parent) continue;
+    childIds.forEach((childId, i) => {
+      const child = graph.nodes.find((n) => n.id === childId);
+      if (!child || nodeMap.has(childId)) return;
+      const angle = (2 * Math.PI * i) / childIds.length;
+      const r = 60 + childIds.length * 5;
+      nodeMap.set(childId, { ...child, x: parent.x + r * Math.cos(angle), y: parent.y + r * Math.sin(angle) });
+    });
+  }
+
+  // Any remaining nodes not yet placed
+  for (const n of graph.nodes) {
+    if (!nodeMap.has(n.id)) {
+      nodeMap.set(n.id, { ...n, x: cx + (Math.random() - 0.5) * width * 0.5, y: cy + (Math.random() - 0.5) * height * 0.5 });
+    }
+  }
+
+  const laidOutNodes = [...nodeMap.values()];
+  const laidOutLinks = graph.links.map((link) => {
+    const s = nodeMap.get(link.source);
+    const t = nodeMap.get(link.target);
+    return { x1: s?.x ?? 0, y1: s?.y ?? 0, x2: t?.x ?? 0, y2: t?.y ?? 0 };
+  });
+
+  return { nodes: laidOutNodes, links: laidOutLinks };
+}
+
+function renderGraphSvg(cortexPath: string, width: number, height: number): string {
+  const graph = buildGraph(cortexPath);
+  const layout = layoutGraph(graph, width, height);
+  const colorMap: Record<string, string> = { project: "#7C3AED", decision: "#2563EB", pitfall: "#DC2626", pattern: "#16A34A" };
+
+  const lines = layout.links.map((l) =>
+    `<line x1="${l.x1}" y1="${l.y1}" x2="${l.x2}" y2="${l.y2}" stroke="#555" stroke-opacity="0.4" stroke-width="1" />`
+  );
+
+  const circles = layout.nodes.map((n) => {
+    const r = Math.max(5, Math.sqrt(n.refCount) * 6);
+    const fill = colorMap[n.group] || "#888";
+    const fontSize = n.group === "project" ? 13 : 10;
+    const fontWeight = n.group === "project" ? "bold" : "normal";
+    return `<circle cx="${n.x}" cy="${n.y}" r="${r}" fill="${fill}" stroke="#1e1e2e" stroke-width="1.5" />` +
+      `<text x="${n.x + r + 4}" y="${n.y + 4}" font-size="${fontSize}" font-weight="${fontWeight}" fill="#cdd6f4">${h(n.label)}</text>`;
+  });
+
+  return `<svg id="graph-svg" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">` +
+    `<g>${lines.join("")}${circles.join("")}</g></svg>`;
+}
+
 function renderPage(cortexPath: string, csrfToken?: string, authToken?: string): string {
   const projects = getProjectDirs(cortexPath).map((p) => path.basename(p)).filter((p) => p !== "global");
   const usage = recentUsage(cortexPath);
@@ -144,13 +219,14 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   const acceptedItems = accepted.map((l) => `<li>${h(l)}</li>`).join("\n");
   const usageItems = usage.map((l) => `<li>${h(l)}</li>`).join("\n");
 
+  const graphSvg = renderGraphSvg(cortexPath, 900, 600);
+
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cortex Memory UI</title>
-  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <style>
     :root {
       --bg: #f4efe6;
@@ -225,7 +301,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
   <div id="tab-graph" class="tab-content">
     <div id="graph-panel">
-      <svg id="graph-svg"></svg>
+      ${graphSvg}
       <div class="graph-legend">
         <span class="legend-project">Project</span>
         <span class="legend-decision">Decision</span>
@@ -241,90 +317,6 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       document.querySelectorAll('.tab-bar button').forEach(function(el) { el.classList.remove('active'); });
       document.getElementById('tab-' + tab).classList.add('active');
       document.querySelector('.tab-bar button[onclick*="' + tab + '"]').classList.add('active');
-      if (tab === 'graph' && !window._graphLoaded) {
-        window._graphLoaded = true;
-        loadGraph();
-      }
-    }
-
-    function loadGraph() {
-      fetch('/api/graph').then(function(r) { return r.json(); }).then(function(data) {
-        var svg = d3.select('#graph-svg');
-        var container = document.getElementById('graph-panel');
-        var width = container.clientWidth || 900;
-        var height = 600;
-        svg.attr('viewBox', '0 0 ' + width + ' ' + height);
-
-        var colorMap = { project: '#7C3AED', decision: '#2563EB', pitfall: '#DC2626', pattern: '#16A34A' };
-
-        var g = svg.append('g');
-
-        var zoom = d3.zoom().scaleExtent([0.3, 4]).on('zoom', function(event) {
-          g.attr('transform', event.transform);
-        });
-        svg.call(zoom);
-
-        var simulation = d3.forceSimulation(data.nodes)
-          .force('link', d3.forceLink(data.links).id(function(d) { return d.id; }).distance(80))
-          .force('charge', d3.forceManyBody().strength(-200))
-          .force('center', d3.forceCenter(width / 2, height / 2))
-          .force('collision', d3.forceCollide().radius(30));
-
-        var link = g.append('g')
-          .selectAll('line')
-          .data(data.links)
-          .join('line')
-          .attr('stroke', '#555')
-          .attr('stroke-opacity', 0.4)
-          .attr('stroke-width', 1);
-
-        var node = g.append('g')
-          .selectAll('circle')
-          .data(data.nodes)
-          .join('circle')
-          .attr('r', function(d) { return Math.max(5, Math.sqrt(d.refCount) * 6); })
-          .attr('fill', function(d) { return colorMap[d.group] || '#888'; })
-          .attr('stroke', '#1e1e2e')
-          .attr('stroke-width', 1.5)
-          .call(d3.drag()
-            .on('start', function(event, d) {
-              if (!event.active) simulation.alphaTarget(0.3).restart();
-              d.fx = d.x; d.fy = d.y;
-            })
-            .on('drag', function(event, d) {
-              d.fx = event.x; d.fy = event.y;
-            })
-            .on('end', function(event, d) {
-              if (!event.active) simulation.alphaTarget(0);
-              d.fx = null; d.fy = null;
-            })
-          );
-
-        var label = g.append('g')
-          .selectAll('text')
-          .data(data.nodes)
-          .join('text')
-          .text(function(d) { return d.label; })
-          .attr('font-size', function(d) { return d.group === 'project' ? 13 : 10; })
-          .attr('font-weight', function(d) { return d.group === 'project' ? 'bold' : 'normal'; })
-          .attr('fill', '#cdd6f4')
-          .attr('dx', function(d) { return Math.max(5, Math.sqrt(d.refCount) * 6) + 4; })
-          .attr('dy', 4);
-
-        simulation.on('tick', function() {
-          link
-            .attr('x1', function(d) { return d.source.x; })
-            .attr('y1', function(d) { return d.source.y; })
-            .attr('x2', function(d) { return d.target.x; })
-            .attr('y2', function(d) { return d.target.y; });
-          node
-            .attr('cx', function(d) { return d.x; })
-            .attr('cy', function(d) { return d.y; });
-          label
-            .attr('x', function(d) { return d.x; })
-            .attr('y', function(d) { return d.y; });
-        });
-      });
     }
   </script>
 </body>

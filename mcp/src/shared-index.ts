@@ -15,12 +15,12 @@ import {
 import { getIndexPolicy } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
 import { cosineFallback, COSINE_CANDIDATE_CAP, invalidateDfCache } from "./shared-search-fallback.js";
-import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs } from "./shared-entity-graph.js";
+import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities } from "./shared-entity-graph.js";
 
 // Re-export for backward compatibility
 export { porterStem } from "./shared-stemmer.js";
 export { cosineFallback, COSINE_CANDIDATE_CAP } from "./shared-search-fallback.js";
-export { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs } from "./shared-entity-graph.js";
+export { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities } from "./shared-entity-graph.js";
 
 export type SqlValue = string | number | null | Uint8Array;
 export type DbRow = SqlValue[];
@@ -358,7 +358,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
       if (type === "findings") {
         try {
           const content = fs.readFileSync(resolvedPath, "utf-8");
-          extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
+          extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath), cortexPath);
         } catch { /* non-fatal */ }
       }
     }
@@ -465,7 +465,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
                 if (entry.type === "findings") {
                   try {
                     const content = fs.readFileSync(entry.fullPath, "utf-8");
-                    extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
+                    extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath), cortexPath);
                   } catch (err: unknown) { debugLog(`entity extraction failed: ${err instanceof Error ? err.message : String(err)}`); }
                 }
               }
@@ -522,6 +522,8 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   // Entity graph tables for lightweight reference graph
   db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, UNIQUE(name, type))`);
   db.run(`CREATE TABLE IF NOT EXISTS entity_links (source_id INTEGER REFERENCES entities(id), target_id INTEGER REFERENCES entities(id), rel_type TEXT NOT NULL, source_doc TEXT, PRIMARY KEY (source_id, target_id, rel_type))`);
+  // Q20: Cross-project entity index
+  ensureGlobalEntitiesTable(db);
 
   const allFiles = collectAllFiles(cortexPath, profile);
   const newHashes: Record<string, string> = {};
@@ -559,7 +561,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
       if (!entityGraphLoaded && entry.type === "findings") {
         try {
           const content = fs.readFileSync(entry.fullPath, "utf-8");
-          extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
+          extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath), cortexPath);
         } catch (err: unknown) { debugLog(`entity extraction failed: ${err instanceof Error ? err.message : String(err)}`); }
       }
     }

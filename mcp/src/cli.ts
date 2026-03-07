@@ -435,6 +435,13 @@ async function handleSearch(opts: SearchOptions) {
     }
 
     if (!rows) {
+      // Q30: Log zero-result search
+      if (opts.query) {
+        try {
+          const { logSearchMiss } = await import("./mcp-search.js");
+          logSearchMiss(cortexPath, opts.query, opts.project);
+        } catch { /* best-effort */ }
+      }
       const scope = [
         opts.query ? `query "${opts.query}"` : undefined,
         opts.project ? `project "${opts.project}"` : undefined,
@@ -516,6 +523,36 @@ async function handleDoctor(args: string[]) {
   for (const check of result.checks) {
     console.log(`- ${check.ok ? "ok" : "fail"} ${check.name}: ${check.detail}`);
   }
+
+  // Q30: Show top search miss patterns
+  try {
+    const missFile = runtimeFile(cortexPath, "search-misses.jsonl");
+    if (fs.existsSync(missFile)) {
+      const lines = fs.readFileSync(missFile, "utf8").split("\n").filter(Boolean);
+      if (lines.length > 0) {
+        const tokenCounts = new Map<string, number>();
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line) as { query: string };
+            const tokens = entry.query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+            for (const token of tokens) {
+              tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
+            }
+          } catch { /* skip malformed lines */ }
+        }
+        const topMisses = [...tokenCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10);
+        if (topMisses.length > 0) {
+          console.log(`\nSearch miss patterns (${lines.length} zero-result queries):`);
+          for (const [token, count] of topMisses) {
+            console.log(`  ${token}: ${count} miss(es)`);
+          }
+        }
+      }
+    }
+  } catch { /* best-effort */ }
+
   process.exit(result.ok ? 0 : 1);
 }
 

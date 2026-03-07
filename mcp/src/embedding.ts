@@ -1,83 +1,209 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { createRequire } from "module";
+import { fileURLToPath } from "url";
 import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
 
-const EMBED_CACHE_FILE = "embed-cache.jsonl";
-const MAX_CACHE_FILE_SIZE_BYTES = 50 * 1024 * 1024;
-const MAX_CACHE_ENTRIES_AFTER_TRUNCATE = 5000;
+// ---------------------------------------------------------------------------
+// SQLite cache (Q17) — replaces embed-cache.jsonl with O(1) lookup
+// ---------------------------------------------------------------------------
 
-interface CacheEntry {
-  hash: string;
-  model: string;
-  embedding: number[];
+interface SqlJsDatabase {
+  run(sql: string, params?: (string | number | null | Uint8Array)[]): void;
+  exec(sql: string, params?: (string | number | null | Uint8Array)[]): { columns: string[]; values: (string | number | null | Uint8Array)[][] }[];
+  export(): Uint8Array;
+  close(): void;
 }
 
-const cacheByFile = new Map<string, Map<string, number[]>>();
+interface SqlJsStatic {
+  Database: new (data?: ArrayLike<number>) => SqlJsDatabase;
+}
 
-function getCacheFilePath(cortexPath: string): string {
+const require = createRequire(import.meta.url);
+const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<SqlJsStatic>;
+
+const EMBED_CACHE_DB = "embed-cache.db";
+const EMBED_CACHE_JSONL = "embed-cache.jsonl"; // legacy file for migration
+
+// Module-level cache of open databases keyed by db file path
+const dbByFile = new Map<string, SqlJsDatabase>();
+
+function findWasmBinary(): Buffer | undefined {
+  try {
+    const resolved = require.resolve("sql.js-fts5/dist/sql-wasm.wasm") as string;
+    if (fs.existsSync(resolved)) return fs.readFileSync(resolved);
+  } catch {
+    // fall through to path probing
+  }
+
+  const __filename = fileURLToPath(import.meta.url);
+  let dir = path.dirname(__filename);
+  for (let i = 0; i < 5; i++) {
+    const candidateA = path.join(dir, "node_modules", "sql.js-fts5", "dist", "sql-wasm.wasm");
+    if (fs.existsSync(candidateA)) return fs.readFileSync(candidateA);
+    const candidateB = path.join(dir, "sql.js-fts5", "dist", "sql-wasm.wasm");
+    if (fs.existsSync(candidateB)) return fs.readFileSync(candidateB);
+    dir = path.dirname(dir);
+  }
+  return undefined;
+}
+
+function getCacheDbPath(cortexPath: string): string {
   const dir = runtimeDir(cortexPath);
   fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, EMBED_CACHE_FILE);
+  return path.join(dir, EMBED_CACHE_DB);
 }
 
 function sha256(text: string): string {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
-function loadCache(cortexPath: string): Map<string, number[]> {
-  const cacheFile = getCacheFilePath(cortexPath);
-  const cached = cacheByFile.get(cacheFile);
-  if (cached) return cached;
-
-  const cache = new Map<string, number[]>();
-  if (!fs.existsSync(cacheFile)) {
-    cacheByFile.set(cacheFile, cache);
-    return cache;
-  }
-  try {
-    const lines = fs.readFileSync(cacheFile, "utf-8").split("\n").filter(Boolean);
-    for (const line of lines) {
-      const entry = JSON.parse(line) as CacheEntry;
-      cache.set(entry.hash, entry.embedding);
-    }
-  } catch {
-    debugLog("embedding: failed to load cache");
-  }
-  cacheByFile.set(cacheFile, cache);
-  return cache;
+/** Encode a number[] embedding into a compact binary blob (Float32Array). */
+function encodeEmbedding(embedding: number[]): Buffer {
+  const f32 = new Float32Array(embedding);
+  return Buffer.from(f32.buffer);
 }
 
-function appendCache(cortexPath: string, hash: string, model: string, embedding: number[]): void {
-  const cacheFile = getCacheFilePath(cortexPath);
-  const cache = loadCache(cortexPath);
-  const entry: CacheEntry = { hash, model, embedding };
+/** Decode a binary blob back to number[]. */
+function decodeEmbedding(blob: Uint8Array): number[] {
+  const f32 = new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+  return Array.from(f32);
+}
 
-  try {
-    if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > MAX_CACHE_FILE_SIZE_BYTES) {
-      const recentLines = fs.readFileSync(cacheFile, "utf-8")
-        .split("\n")
-        .filter(Boolean)
-        .slice(-MAX_CACHE_ENTRIES_AFTER_TRUNCATE);
-      const truncatedCache = new Map<string, number[]>();
-      for (const line of recentLines) {
-        const parsed = JSON.parse(line) as CacheEntry;
-        truncatedCache.set(parsed.hash, parsed.embedding);
+let sqlPromise: Promise<SqlJsStatic> | null = null;
+function getSql(): Promise<SqlJsStatic> {
+  if (!sqlPromise) {
+    const wasmBinary = findWasmBinary();
+    sqlPromise = initSqlJs(wasmBinary ? { wasmBinary } : {});
+  }
+  return sqlPromise;
+}
+
+async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
+  const dbPath = getCacheDbPath(cortexPath);
+  const existing = dbByFile.get(dbPath);
+  if (existing) return existing;
+
+  const SQL = await getSql();
+
+  let db: SqlJsDatabase;
+  if (fs.existsSync(dbPath)) {
+    const data = fs.readFileSync(dbPath);
+    db = new SQL.Database(data);
+  } else {
+    db = new SQL.Database();
+  }
+
+  db.run(`CREATE TABLE IF NOT EXISTS embeddings (
+    model TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    PRIMARY KEY (model, hash)
+  )`);
+
+  // Migrate legacy JSONL cache if it exists
+  const legacyPath = path.join(runtimeDir(cortexPath), EMBED_CACHE_JSONL);
+  if (fs.existsSync(legacyPath)) {
+    try {
+      const lines = fs.readFileSync(legacyPath, "utf-8").split("\n").filter(Boolean);
+      if (lines.length > 0) {
+        db.run("BEGIN TRANSACTION");
+        for (const line of lines) {
+          const entry = JSON.parse(line) as { hash: string; model: string; embedding: number[] };
+          db.run(
+            "INSERT OR IGNORE INTO embeddings (model, hash, embedding) VALUES (?, ?, ?)",
+            [entry.model, entry.hash, encodeEmbedding(entry.embedding)]
+          );
+        }
+        db.run("COMMIT");
+        // Persist after migration
+        fs.writeFileSync(dbPath, Buffer.from(db.export()));
+        // Remove legacy file after successful migration
+        fs.unlinkSync(legacyPath);
+        debugLog(`embedding: migrated ${lines.length} entries from JSONL to SQLite`);
       }
-      cacheByFile.set(cacheFile, truncatedCache);
-      fs.writeFileSync(cacheFile, recentLines.length > 0 ? `${recentLines.join("\n")}\n` : "");
+    } catch (err) {
+      try { db.run("ROLLBACK"); } catch { /* ignore */ }
+      debugLog(`embedding: JSONL migration failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  } catch {
-    debugLog("embedding: failed to truncate cache");
   }
 
-  const activeCache = cacheByFile.get(cacheFile) ?? cache;
-  activeCache.set(hash, embedding);
-  fs.appendFileSync(cacheFile, JSON.stringify(entry) + "\n");
+  dbByFile.set(dbPath, db);
+  return db;
 }
+
+function persistDb(cortexPath: string, db: SqlJsDatabase): void {
+  const dbPath = getCacheDbPath(cortexPath);
+  try {
+    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+  } catch {
+    debugLog("embedding: failed to persist cache db");
+  }
+}
+
+function lookupCache(db: SqlJsDatabase, model: string, hash: string): number[] | null {
+  const results = db.exec("SELECT embedding FROM embeddings WHERE model = ? AND hash = ?", [model, hash]);
+  if (results.length > 0 && results[0].values.length > 0) {
+    const blob = results[0].values[0][0] as Uint8Array;
+    return decodeEmbedding(blob);
+  }
+  return null;
+}
+
+function insertCache(db: SqlJsDatabase, model: string, hash: string, embedding: number[]): void {
+  db.run(
+    "INSERT OR REPLACE INTO embeddings (model, hash, embedding) VALUES (?, ?, ?)",
+    [model, hash, encodeEmbedding(embedding)]
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Q5: Local ONNX embedding via @xenova/transformers
+// ---------------------------------------------------------------------------
+
+const LOCAL_MODEL = "Xenova/all-MiniLM-L6-v2";
+const MODEL_LOAD_TIMEOUT_MS = 30_000;
+
+let pipelinePromise: Promise<(text: string) => Promise<number[]>> | null = null;
+
+function loadPipeline(): Promise<(text: string) => Promise<number[]>> {
+  if (!pipelinePromise) {
+    pipelinePromise = (async () => {
+      // Dynamic import — @xenova/transformers is ESM-compatible
+      const { pipeline } = await import("@xenova/transformers");
+      const extractor = await pipeline("feature-extraction", LOCAL_MODEL, {
+        quantized: true,
+      });
+      return async (text: string): Promise<number[]> => {
+        const output = await extractor(text, { pooling: "mean", normalize: true });
+        return Array.from(output.data as Float32Array);
+      };
+    })();
+  }
+  return pipelinePromise;
+}
+
+/**
+ * Get embedding from local ONNX model (Xenova/all-MiniLM-L6-v2, 384-dim).
+ * First call downloads ~23MB model; subsequent calls use cached model.
+ */
+export async function getLocalEmbedding(text: string): Promise<number[]> {
+  const embedFn = await Promise.race([
+    loadPipeline(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Local ONNX model loading timed out (30s)")), MODEL_LOAD_TIMEOUT_MS)
+    ),
+  ]);
+  return embedFn(text);
+}
+
+// ---------------------------------------------------------------------------
+// API embedding (unchanged)
+// ---------------------------------------------------------------------------
 
 /**
  * Get embedding from OpenAI-compatible API.
@@ -152,12 +278,9 @@ export async function getApiEmbeddings(
   return sorted.map(d => d.embedding);
 }
 
-/**
- * Stub for local ONNX embedding — not yet supported.
- */
-export async function getLocalEmbedding(_text: string): Promise<number[]> {
-  throw new Error("local ONNX embedding not yet supported; use CORTEX_EMBEDDING_PROVIDER=api");
-}
+// ---------------------------------------------------------------------------
+// Cached embedding (uses SQLite cache)
+// ---------------------------------------------------------------------------
 
 /**
  * Get embedding with caching. Uses the configured provider.
@@ -169,12 +292,13 @@ export async function getCachedEmbedding(
   model: string
 ): Promise<number[]> {
   const hash = sha256(`${model}:${text}`);
-  const cache = loadCache(cortexPath);
-  const cached = cache.get(hash);
+  const db = await openCacheDb(cortexPath);
+  const cached = lookupCache(db, model, hash);
   if (cached) return cached;
 
   const embedding = await getApiEmbedding(text, apiKey, model);
-  appendCache(cortexPath, hash, model, embedding);
+  insertCache(db, model, hash, embedding);
+  persistDb(cortexPath, db);
   return embedding;
 }
 
@@ -189,10 +313,10 @@ export async function getCachedEmbeddings(
 ): Promise<number[][]> {
   if (texts.length === 0) return [];
 
-  const cache = loadCache(cortexPath);
+  const db = await openCacheDb(cortexPath);
   const results: (number[] | null)[] = texts.map(text => {
     const hash = sha256(`${model}:${text}`);
-    return cache.get(hash) ?? null;
+    return lookupCache(db, model, hash);
   });
 
   const uncachedIndices: number[] = [];
@@ -213,9 +337,10 @@ export async function getCachedEmbeddings(
         const idx = uncachedIndices[start + j];
         results[idx] = batchEmbeddings[j];
         const hash = sha256(`${model}:${batch[j]}`);
-        appendCache(cortexPath, hash, model, batchEmbeddings[j]);
+        insertCache(db, model, hash, batchEmbeddings[j]);
       }
     }
+    persistDb(cortexPath, db);
   }
 
   return results as number[][];
@@ -235,3 +360,6 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   const denom = Math.sqrt(normA) * Math.sqrt(normB);
   return denom === 0 ? 0 : dot / denom;
 }
+
+// Export helpers for testing
+export { encodeEmbedding, decodeEmbedding, openCacheDb, lookupCache, insertCache, persistDb };

@@ -3,7 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import { isValidProjectName } from "./utils.js";
-import { queryDocBySourceKey, queryRows, queryEntityLinks } from "./shared-index.js";
+import { queryDocBySourceKey, queryRows, queryEntityLinks, queryCrossProjectEntities } from "./shared-index.js";
 import { runtimeFile } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 
@@ -270,6 +270,54 @@ export function register(server: McpServer, ctx: McpContext): void {
           ok: true,
           message: `Linked "${entity}" to ${sourceDoc} with relation "${relType}".`,
         });
+      });
+    },
+  );
+
+  // ── cross_project_entities (Q20) ───────────────────────────────────────────
+  server.registerTool(
+    "cross_project_entities",
+    {
+      title: "◆ cortex · cross-project entities",
+      description:
+        "Find entities (libraries, tools, concepts) shared across multiple projects. " +
+        "Use this to discover how a technology or concept is used in other projects.",
+      inputSchema: z.object({
+        entity: z.string().describe("Entity name to search for (partial match)."),
+        exclude_project: z.string().optional().describe("Exclude a specific project from results."),
+        limit: z.number().int().min(1).max(50).optional().describe("Max results (default 20)."),
+      }),
+    },
+    async ({ entity, exclude_project, limit }) => {
+      const db = ctx.db();
+      const max = limit ?? 20;
+      const results = queryCrossProjectEntities(db, entity, exclude_project);
+      const capped = results.slice(0, max);
+
+      if (capped.length === 0) {
+        return mcpResponse({ ok: true, data: [], message: `No cross-project references found for "${entity}".` });
+      }
+
+      // Group by project for cleaner output
+      const byProject = new Map<string, Array<{ entity: string; docKey: string }>>();
+      for (const r of capped) {
+        const arr = byProject.get(r.project) ?? [];
+        arr.push({ entity: r.entity, docKey: r.docKey });
+        byProject.set(r.project, arr);
+      }
+
+      const lines: string[] = [];
+      for (const [proj, refs] of byProject) {
+        lines.push(`### ${proj}`);
+        for (const ref of refs) {
+          lines.push(`- ${ref.entity} (${ref.docKey})`);
+        }
+      }
+
+      return mcpResponse({
+        ok: true,
+        message: `Cross-project references for "${entity}" (${capped.length} results):\n\n${lines.join("\n")}`,
+        data: capped,
       });
     },
   );

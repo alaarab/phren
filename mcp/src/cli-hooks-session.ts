@@ -301,6 +301,48 @@ export async function handleHookSessionStart() {
   );
 }
 
+// ── Q21: Conversation memory capture ─────────────────────────────────────────
+
+const INSIGHT_KEYWORDS = [
+  "always", "never", "important", "gotcha", "trick", "workaround",
+  "careful", "caveat", "beware", "note that", "make sure",
+  "don't forget", "remember to", "must", "avoid", "prefer",
+];
+
+const INSIGHT_KEYWORD_RE = new RegExp(
+  `\\b(${INSIGHT_KEYWORDS.join("|")})\\b`,
+  "i"
+);
+
+/**
+ * Extract potential insights from conversation text using keyword heuristics.
+ * Returns lines that contain insight-signal words and look like actionable knowledge.
+ */
+export function extractConversationInsights(text: string): string[] {
+  const lines = text.split("\n").filter(l => l.trim().length > 20 && l.trim().length < 300);
+  const insights: string[] = [];
+  const seen = new Set<string>();
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Skip code-only lines, headers, etc.
+    if (trimmed.startsWith("```") || trimmed.startsWith("#") || trimmed.startsWith("//")) continue;
+    if (trimmed.startsWith("$") || trimmed.startsWith(">")) continue;
+
+    if (INSIGHT_KEYWORD_RE.test(trimmed)) {
+      // Normalize for dedup
+      const normalized = trimmed.toLowerCase().replace(/\s+/g, " ");
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        insights.push(trimmed);
+      }
+    }
+  }
+
+  // Cap to prevent flooding
+  return insights.slice(0, 5);
+}
+
 export async function handleHookStop() {
   const now = new Date().toISOString();
   if (!getHooksEnabledPreference(cortexPath)) {
@@ -363,6 +405,26 @@ export async function handleHookStop() {
       lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed" },
     });
     appendAuditLog(cortexPath, "hook_stop", "status=saved-pushed");
+
+    // Q21: Auto-capture conversation insights (gated behind CORTEX_FEATURE_AUTO_CAPTURE=1)
+    if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
+      try {
+        const captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
+        if (captureInput) {
+          const cwd = process.cwd();
+          const activeProject = detectProject(cortexPath, cwd, profile);
+          if (activeProject) {
+            const insights = extractConversationInsights(captureInput);
+            for (const insight of insights) {
+              addFindingToFile(cortexPath, activeProject, `[pattern] ${insight}`);
+              debugLog(`auto-capture: saved insight for ${activeProject}: ${insight.slice(0, 60)}`);
+            }
+          }
+        }
+      } catch (err: unknown) {
+        debugLog(`auto-capture failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
     // Auto governance scheduling: run governance weekly if overdue
     try {

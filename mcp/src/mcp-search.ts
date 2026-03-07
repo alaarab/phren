@@ -9,6 +9,7 @@ import { readFindings } from "./data-access.js";
 import {
   debugLog,
   runtimeDir,
+  runtimeFile,
 } from "./shared.js";
 import {
   queryRows,
@@ -25,6 +26,28 @@ import { getCachedEmbedding, getCachedEmbeddings, cosineSimilarity } from "./emb
 
 const API_EMBEDDING_CANDIDATE_CAP = 500;
 const API_EMBEDDING_TIMEOUT_MS = 10_000;
+
+/**
+ * Q30: Log zero-result queries to .runtime/search-misses.jsonl.
+ * Strips PII-like tokens (emails, UUIDs, numbers) and keeps only query terms.
+ */
+export function logSearchMiss(cortexPath: string, query: string, project?: string): void {
+  try {
+    const sanitized = query
+      .replace(/\S+@\S+\.\S+/g, "<email>")      // strip emails
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<uuid>")  // strip UUIDs
+      .replace(/\b\d{3,}\b/g, "<num>")             // strip long numbers
+      .trim();
+    if (!sanitized) return;
+    const entry = JSON.stringify({
+      query: sanitized,
+      ts: Date.now(),
+      project: project ?? null,
+    });
+    const missFile = runtimeFile(cortexPath, "search-misses.jsonl");
+    fs.appendFileSync(missFile, entry + "\n");
+  } catch { /* best-effort */ }
+}
 
 interface FeedbackScoreEntry {
   key: string;
@@ -238,6 +261,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
 
           if (!rows) {
+            logSearchMiss(cortexPath, query, filterProject);
             return mcpResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
           }
         }
@@ -250,6 +274,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             return content.includes(tagPattern);
           });
           if (rows.length === 0) {
+            logSearchMiss(cortexPath, query, filterProject);
             return mcpResponse({ ok: true, message: `No results found with tag [${filterTag}].`, data: { query, results: [] } });
           }
         }
@@ -274,7 +299,8 @@ export function register(server: McpServer, ctx: McpContext): void {
               return createdDates.some(m => new Date(`${m[1]}T00:00:00Z`).getTime() >= sinceMs);
             });
             if (rows.length === 0) {
-              return mcpResponse({ ok: true, message: `No results found since ${since}.`, data: { query, results: [] } });
+              logSearchMiss(cortexPath, query, filterProject);
+            return mcpResponse({ ok: true, message: `No results found since ${since}.`, data: { query, results: [] } });
             }
           }
         }
