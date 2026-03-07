@@ -134,7 +134,7 @@ function computeCortexHash(cortexPath: string, profile?: string): string {
   return hash.digest("hex").slice(0, 16);
 }
 
-export async function buildIndex(cortexPath: string, profile?: string): Promise<any> {
+async function buildIndexImpl(cortexPath: string, profile?: string): Promise<any> {
   const t0 = Date.now();
   let userSuffix: string;
   try {
@@ -256,6 +256,13 @@ export async function buildIndex(cortexPath: string, profile?: string): Promise<
   }
 
   return db;
+}
+
+export async function buildIndex(cortexPath: string, profile?: string): Promise<any> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000)
+  );
+  return Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
 }
 
 export interface DocRow {

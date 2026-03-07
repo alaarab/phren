@@ -133,6 +133,8 @@ export function queueFilePath(cortexPath: string, project: string): string {
 // Sanitize user input before passing it to an FTS5 MATCH expression.
 // Strips FTS5-specific syntax that could cause injection or parse errors.
 export function sanitizeFts5Query(raw: string): string {
+  if (!raw) return "";
+  if (raw.length > 500) raw = raw.slice(0, 500);
   let q = raw.replace(/\0/g, " ");
   q = q.replace(/\b(content|type|project|filename|path):/gi, "");
   q = q.replace(/\b(AND|OR|NOT|NEAR)\b/gi, " ");

@@ -9,6 +9,7 @@ import {
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
   getProjectDirs,
+  runtimeFile,
   cortexOk,
   cortexErr,
   CortexError,
@@ -21,6 +22,11 @@ import {
   hashContent,
   type MemoryPolicy,
 } from "./shared-governance.js";
+
+function safeParseDate(s: string): Date | null {
+  const d = new Date(s);
+  return isNaN(d.getTime()) || d.getFullYear() < 2020 ? null : d;
+}
 
 export interface ConsolidationNeeded {
   project: string;
@@ -84,7 +90,8 @@ export function checkConsolidationNeeded(cortexPath: string, profile?: string): 
 
     let daysSince: number | null = null;
     if (lastConsolidated) {
-      daysSince = Math.floor((today.getTime() - new Date(lastConsolidated).getTime()) / 86400000);
+      const consolidated = safeParseDate(lastConsolidated);
+      daysSince = consolidated ? Math.floor((today.getTime() - consolidated.getTime()) / 86400000) : null;
     }
 
     const needsByCount = entriesSince >= ENTRY_THRESHOLD;
@@ -934,6 +941,19 @@ export function autoArchiveToKnowledge(
   const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
   if (!fs.existsSync(learningsPath)) return cortexOk(0);
 
+  // Consolidation lock to prevent concurrent runs
+  const lockFile = runtimeFile(cortexPath, "consolidation.lock");
+  if (fs.existsSync(lockFile)) {
+    try {
+      const stat = fs.statSync(lockFile);
+      if (Date.now() - stat.mtimeMs < 600000) { // 10 min
+        return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
+      }
+    } catch { /* stale lock check is best-effort */ }
+  }
+  fs.writeFileSync(lockFile, String(Date.now()));
+
+  try {
   const content = fs.readFileSync(learningsPath, "utf8");
   const entries = parseActiveEntries(content);
   if (entries.length <= keepCount) return cortexOk(0);
@@ -966,6 +986,7 @@ export function autoArchiveToKnowledge(
     const newSection = [`\n## Archived ${today}\n`];
     for (const entry of topicEntries) {
       newSection.push(entry.bullet);
+      if (entry.citation) newSection.push(entry.citation);
     }
     newSection.push("");
 
@@ -1026,4 +1047,7 @@ export function autoArchiveToKnowledge(
   );
 
   return cortexOk(toArchive.length);
+  } finally {
+    try { fs.unlinkSync(lockFile); } catch { /* best-effort cleanup */ }
+  }
 }
