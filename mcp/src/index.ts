@@ -233,8 +233,10 @@ import { fileURLToPath } from "url";
 import { isValidProjectName, buildRobustFtsQuery, extractKeywords, STOP_WORDS } from "./utils.js";
 import {
   addBacklogItem as addBacklogItemStore,
+  addBacklogItems as addBacklogItemsBatch,
   backlogMarkdown,
   completeBacklogItem as completeBacklogItemStore,
+  completeBacklogItems as completeBacklogItemsBatch,
   readBacklog,
   readBacklogs,
   readLearnings,
@@ -247,6 +249,7 @@ import {
   extractSnippet,
   queryRows,
   addLearningToFile,
+  addLearningsToFile,
   autoMergeConflicts,
   debugLog,
   upsertCanonicalMemory,
@@ -723,13 +726,10 @@ async function main() {
     async ({ project, items }) => {
       if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const results: { item: string; ok: boolean; message: string }[] = [];
-        for (const item of items) {
-          const result = addBacklogItemStore(cortexPath, project, item);
-          results.push({ item, ok: result.ok, message: result.ok ? result.data : result.error ?? "unknown error" });
-        }
-        const succeeded = results.filter((r) => r.ok).length;
-        return jsonResponse({ ok: succeeded > 0, message: `Added ${succeeded} of ${items.length} items to ${project} backlog`, data: { project, results } });
+        const result = addBacklogItemsBatch(cortexPath, project, items);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const { added, errors } = result.data;
+        return jsonResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} items to ${project} backlog`, data: { project, added, errors } });
       });
     }
   );
@@ -767,13 +767,10 @@ async function main() {
     async ({ project, items }) => {
       if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const results: { item: string; ok: boolean; message: string }[] = [];
-        for (const item of items) {
-          const result = completeBacklogItemStore(cortexPath, project, item);
-          results.push({ item, ok: result.ok, message: result.ok ? result.data : result.error ?? "unknown error" });
-        }
-        const succeeded = results.filter((r) => r.ok).length;
-        return jsonResponse({ ok: succeeded > 0, message: `Completed ${succeeded}/${items.length} items`, data: { project, results } });
+        const result = completeBacklogItemsBatch(cortexPath, project, items);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const { completed, errors } = result.data;
+        return jsonResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
       });
     }
   );
@@ -848,17 +845,13 @@ async function main() {
     async ({ project, learnings }) => {
       if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const results: { learning: string; ok: boolean; message: string }[] = [];
-        for (const learning of learnings) {
-          runCustomHooks(cortexPath, "pre-learning", { CORTEX_PROJECT: project });
-          const result = addLearningToFile(cortexPath, project, learning, undefined);
-          const ok = result.ok && (result.data.startsWith("Added learning") || result.data.startsWith("Saved learning"));
-          if (ok) runCustomHooks(cortexPath, "post-learning", { CORTEX_PROJECT: project });
-          results.push({ learning, ok, message: result.ok ? result.data : result.error });
-        }
+        runCustomHooks(cortexPath, "pre-learning", { CORTEX_PROJECT: project });
+        const result = addLearningsToFile(cortexPath, project, learnings);
+        if (!result.ok) return jsonResponse({ ok: false, error: result.error });
+        const { added, skipped } = result.data;
+        if (added.length > 0) runCustomHooks(cortexPath, "post-learning", { CORTEX_PROJECT: project });
         await rebuildIndex();
-        const succeeded = results.filter((r) => r.ok).length;
-        return jsonResponse({ ok: succeeded > 0, message: `Added ${succeeded}/${learnings.length} learnings`, data: { project, results } });
+        return jsonResponse({ ok: added.length > 0, message: `Added ${added.length}/${learnings.length} learnings (${skipped.length} duplicates skipped)`, data: { project, added, skipped } });
       });
     }
   );

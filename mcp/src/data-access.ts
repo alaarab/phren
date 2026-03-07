@@ -348,6 +348,57 @@ export function addBacklogItem(cortexPath: string, project: string, item: string
   });
 }
 
+export function addBacklogItems(cortexPath: string, project: string, items: string[]): CortexResult<{ added: string[]; errors: string[] }> {
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const added: string[] = [];
+    const errors: string[] = [];
+    for (const item of items) {
+      const line = item.replace(/^-\s*/, "").trim();
+      if (!line) { errors.push(item); continue; }
+      parsed.data.items.Queue.push({
+        id: `Q${parsed.data.items.Queue.length + 1}`,
+        section: "Queue",
+        line,
+        checked: false,
+        priority: normalizePriority(line),
+      });
+      added.push(line);
+    }
+    writeBacklogDoc(parsed.data);
+    return cortexOk({ added, errors });
+  });
+}
+
+export function completeBacklogItems(cortexPath: string, project: string, matches: string[]): CortexResult<{ completed: string[]; errors: string[] }> {
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+
+  return withFileLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const completed: string[] = [];
+    const errors: string[] = [];
+    for (const match of matches) {
+      const found = findItemByMatch(parsed.data, match);
+      if (found.error || !found.match) { errors.push(match); continue; }
+      const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
+      item.section = "Done";
+      item.checked = true;
+      parsed.data.items.Done.unshift(item);
+      completed.push(item.line);
+    }
+    writeBacklogDoc(parsed.data);
+    return cortexOk({ completed, errors });
+  });
+}
+
 export function completeBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);

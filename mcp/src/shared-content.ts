@@ -850,6 +850,85 @@ export function addLearningToFile(
   return cortexOk(`Added learning to ${project}: ${bullet} (with citation metadata)`);
 }
 
+export function addLearningsToFile(
+  cortexPath: string,
+  project: string,
+  learnings: string[]
+): CortexResult<{ added: string[]; skipped: string[] }> {
+  const denial = checkMemoryPermission(cortexPath, "write");
+  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
+  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
+  const resolvedDir = safeProjectPath(cortexPath, project);
+  if (!resolvedDir) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
+  const learningsPath = path.join(resolvedDir, "LEARNINGS.md");
+
+  const today = new Date().toISOString().slice(0, 10);
+  const nowIso = new Date().toISOString();
+  const cwd = process.cwd();
+  const inferredRepo = getRepoRoot(cwd);
+  const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
+
+  const added: string[] = [];
+  const skipped: string[] = [];
+
+  if (!fs.existsSync(learningsPath)) {
+    if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+    // File doesn't exist — create with all learnings
+    const lines: string[] = [`# ${project} LEARNINGS\n\n## ${today}\n`];
+    for (const learning of learnings) {
+      const bullet = learning.startsWith("- ") ? learning : `- ${learning}`;
+      const citation: LearningCitation = { created_at: nowIso, repo: inferredRepo, commit: headCommit };
+      lines.push(`\n${bullet}\n  ${buildCitationComment(citation)}`);
+      added.push(learning);
+    }
+    fs.writeFileSync(learningsPath, lines.join("") + "\n");
+    appendAuditLog(cortexPath, "add_learning", `project=${project} count=${added.length} batch=true`);
+    return cortexOk({ added, skipped });
+  }
+
+  // Read once, apply all learnings, write once
+  let content = fs.readFileSync(learningsPath, "utf8");
+  const issues = validateLearningsFormat(content);
+  if (issues.length > 0) debugLog(`LEARNINGS.md format warnings for "${project}": ${issues.join("; ")}`);
+
+  for (const learning of learnings) {
+    const bullet = learning.startsWith("- ") ? learning : `- ${learning}`;
+    if (isDuplicateLearning(content, bullet)) { skipped.push(learning); continue; }
+    const citation: LearningCitation = { created_at: nowIso, repo: inferredRepo, commit: headCommit };
+    const citationComment = `  ${buildCitationComment(citation)}`;
+    const todayHeader = `## ${today}`;
+    if (content.includes(todayHeader)) {
+      content = content.replace(todayHeader, `${todayHeader}\n\n${bullet}\n${citationComment}`);
+    } else {
+      const firstHeading = content.match(/^(## \d{4}-\d{2}-\d{2})/m);
+      if (firstHeading) {
+        content = content.replace(firstHeading[0], `${todayHeader}\n\n${bullet}\n${citationComment}\n\n${firstHeading[0]}`);
+      } else {
+        content = content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n${citationComment}\n`;
+      }
+    }
+    added.push(learning);
+  }
+
+  if (added.length > 0) {
+    const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
+    fs.writeFileSync(tmpPath, content);
+    fs.renameSync(tmpPath, learningsPath);
+    appendAuditLog(cortexPath, "add_learning", `project=${project} count=${added.length} batch=true`);
+
+    const DEFAULT_LEARNINGS_CAP = 20;
+    const cap = Number.parseInt(process.env.CORTEX_LEARNINGS_CAP || "", 10) || DEFAULT_LEARNINGS_CAP;
+    if (countActiveLearnings(content) > cap) {
+      const archiveResult = autoArchiveToKnowledge(cortexPath, project, cap);
+      if (archiveResult.ok && archiveResult.data > 0) {
+        debugLog(`Size cap: archived ${archiveResult.data} oldest entries for "${project}" (cap=${cap})`);
+      }
+    }
+  }
+
+  return cortexOk({ added, skipped });
+}
+
 // ── Knowledge tier helpers ───────────────────────────────────────────────────
 
 const TOPIC_PATTERNS: Array<{ topic: string; keywords: RegExp }> = [

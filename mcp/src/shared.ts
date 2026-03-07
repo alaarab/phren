@@ -331,6 +331,7 @@ export {
   migrateLegacyFindings,
   upsertCanonicalMemory,
   addLearningToFile,
+  addLearningsToFile,
   isDuplicateLearning,
   clearCitationCaches,
   countActiveLearnings,
