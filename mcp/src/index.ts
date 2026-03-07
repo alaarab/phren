@@ -8,6 +8,7 @@ if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] 
 
 Usage:
   cortex                                 Open interactive shell
+  cortex quickstart                      Quick setup: init + link + project scaffold
   cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--from-existing <path>] [--dry-run] [-y]
                                          Set up cortex (templates: python-project, monorepo, library, frontend)
   cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
@@ -202,6 +203,7 @@ const CLI_COMMANDS = [
   "skill-list",
   "detect-skills",
   "backlog",
+  "quickstart",
   "background-maintenance",
   // Legacy aliases (still work, route to old handlers)
   "extract-memories",
@@ -236,7 +238,7 @@ import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
-import { buildIndex } from "./shared-index.js";
+import { buildIndex, updateFileInIndex as updateFileInIndexFn } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { register as registerSearch } from "./mcp-search.js";
 import { register as registerBacklog } from "./mcp-backlog.js";
@@ -295,6 +297,9 @@ async function main() {
     process.exit(1);
   }
   let writeQueue: Promise<void> = Promise.resolve();
+  let writeQueueDepth = 0;
+  const MAX_QUEUE_DEPTH = 50;
+  const WRITE_TIMEOUT_MS = 30_000;
   async function rebuildIndex() {
     runCustomHooks(cortexPath, "pre-index");
     indexReady = false;
@@ -304,16 +309,24 @@ async function main() {
     runCustomHooks(cortexPath, "post-index");
   }
   async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = writeQueue.then(() => fn());
+    if (writeQueueDepth >= MAX_QUEUE_DEPTH) {
+      throw new Error(`Write queue full (${MAX_QUEUE_DEPTH} items). Try again shortly.`);
+    }
+    writeQueueDepth++;
+    const run = writeQueue.then(() =>
+      Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Write timeout after 30s")), WRITE_TIMEOUT_MS))
+      ])
+    );
     writeQueue = run.then(
-      () => undefined,
+      () => { writeQueueDepth = Math.max(0, writeQueueDepth - 1); },
       (error) => {
+        writeQueueDepth = Math.max(0, writeQueueDepth - 1);
         const message = error instanceof Error
           ? error.stack || error.message
           : String(error);
-        debugLog(`Write queue failed: ${message}`);
-        // Do NOT rethrow here — reset queue to unblocked state so subsequent writes proceed.
-        // The caller receives the error via `run` directly.
+        debugLog(`Write queue error: ${message}`);
       },
     );
     return run;
@@ -360,6 +373,10 @@ async function main() {
     },
     rebuildIndex,
     withWriteQueue,
+    updateFileInIndex: (filePath: string) => {
+      if (!db) throw new Error("Index unavailable - check cortex setup");
+      updateFileInIndexFn(db, filePath, cortexPath);
+    },
   };
 
   registerSearch(server, ctx);

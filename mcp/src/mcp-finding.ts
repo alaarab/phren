@@ -25,7 +25,7 @@ import { incrementSessionFindings } from "./mcp-session.js";
 
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, withWriteQueue, rebuildIndex } = ctx;
+  const { cortexPath, withWriteQueue, rebuildIndex, updateFileInIndex } = ctx;
 
   server.registerTool(
     "add_finding",
@@ -83,7 +83,8 @@ export function register(server: McpServer, ctx: McpContext): void {
               }
             }
           }
-          await rebuildIndex();
+          const findingsPath = path.join(safeProjectPath(cortexPath, project) || "", "FINDINGS.md");
+          updateFileInIndex(findingsPath);
           const ok = result.ok && (result.data.startsWith("Added finding") || result.data.startsWith("Saved finding") || result.data.startsWith("Created FINDINGS.md"));
           if (ok) {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });

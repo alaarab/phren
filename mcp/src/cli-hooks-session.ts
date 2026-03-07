@@ -363,6 +363,25 @@ export async function handleHookStop() {
       lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed" },
     });
     appendAuditLog(cortexPath, "hook_stop", "status=saved-pushed");
+
+    // Auto governance scheduling: run governance weekly if overdue
+    try {
+      const lastGovPath = runtimeFile(cortexPath, "last-governance.txt");
+      const lastRun = fs.existsSync(lastGovPath) ? parseInt(fs.readFileSync(lastGovPath, "utf8"), 10) : 0;
+      const daysSince = (Date.now() - lastRun) / 86_400_000;
+      if (daysSince >= 7) {
+        const spawnArgs = resolveSubprocessArgs("background-maintenance");
+        if (spawnArgs) {
+          const child = spawn(process.execPath, spawnArgs, { detached: true, stdio: "ignore" });
+          child.unref();
+          fs.writeFileSync(lastGovPath, Date.now().toString());
+          debugLog("hook_stop: scheduled weekly governance run");
+        }
+      }
+    } catch (err: unknown) {
+      debugLog(`hook_stop: governance scheduling failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     return;
   }
 

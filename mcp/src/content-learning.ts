@@ -299,7 +299,7 @@ export function addFindingToFile(
       const needle = supersedesText.slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
       for (let i = 0; i < lines.length; i++) {
         if (!lines[i].startsWith("- ")) continue;
-        const lineText = lines[i].replace(/^-\s+/, "").slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
+        const lineText = lines[i].replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
         if (lineText === needle) {
           const newFirst60 = normalizedForSupersedes.replace(/^-\s+/, "").slice(0, 60);
           lines[i] = `${lines[i]} <!-- superseded_by: ${newFirst60} -->`;
@@ -376,8 +376,22 @@ export function addFindingToFile(
     }
   }
 
+  // Consolidation trigger: warn when active findings exceed the consolidation cap
+  const CONSOLIDATION_CAP = Number.parseInt(process.env.CORTEX_CONSOLIDATION_CAP || "", 10) || 150;
+  let consolidationNotice = "";
+  if (activeCount > CONSOLIDATION_CAP) {
+    debugLog(`Consolidation cap exceeded for "${project}": ${activeCount} active findings (cap=${CONSOLIDATION_CAP})`);
+    try {
+      const runtimeDir = path.join(cortexPath, ".runtime");
+      fs.mkdirSync(runtimeDir, { recursive: true });
+      fs.writeFileSync(path.join(runtimeDir, "consolidation-needed.txt"), `${project}\n`);
+    } catch { /* best effort */ }
+    consolidationNotice = ` Note: ${activeCount} active findings exceeds consolidation cap (${CONSOLIDATION_CAP}). Consider running consolidation.`;
+  }
+
   const addedMsg = `Added finding to ${project}: ${prepared.finding.bullet} (with citation metadata)`;
-  return cortexOk(prepared.finding.tagWarning ? `${addedMsg} Warning: ${prepared.finding.tagWarning}` : addedMsg);
+  const fullMsg = prepared.finding.tagWarning ? `${addedMsg} Warning: ${prepared.finding.tagWarning}` : addedMsg;
+  return cortexOk(consolidationNotice ? `${fullMsg}${consolidationNotice}` : fullMsg);
 }
 
 export function addFindingsToFile(

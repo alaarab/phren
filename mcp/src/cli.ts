@@ -368,6 +368,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleSkillList();
     case "backlog":
       return handleBacklogView();
+    case "quickstart":
+      return handleQuickstart();
     case "background-maintenance":
       return handleBackgroundMaintenance(args[0]);
     case "debug-injection":
@@ -743,6 +745,35 @@ function handleBacklogView() {
   }
 
   console.log(`\n${totalActive} active, ${totalQueue} queued across ${docs.length} project(s).`);
+}
+
+async function handleQuickstart() {
+  const { runInit } = await import("./init.js");
+  const { runLink } = await import("./link.js");
+
+  const dirBasename = path.basename(process.cwd());
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const projectName = await new Promise<string>((resolve) => {
+    rl.question(`Project name [${dirBasename}]: `, (answer) => {
+      rl.close();
+      resolve(answer.trim() || dirBasename);
+    });
+  });
+
+  console.log(`\nInitializing cortex for "${projectName}"...\n`);
+
+  await runInit({ yes: true });
+  await runLink(cortexPath, {});
+
+  const projectDir = path.join(cortexPath, projectName);
+  if (!fs.existsSync(projectDir)) {
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), `# ${projectName} Findings\n`);
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), `# ${projectName} Backlog\n\n## Active\n\n## Queue\n\n## Done\n`);
+  }
+
+  console.log(`\n\u2713 cortex ready. Project: ${projectName}. Try: cortex search 'your query'`);
 }
 
 async function handleDebugInjection(args: string[]) {

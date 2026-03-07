@@ -97,6 +97,15 @@ import { approximateTokens } from "./cli-hooks-retrieval.js";
 const cortexPath = ensureCortexPath();
 const profile = process.env.CORTEX_PROFILE || "";
 
+async function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on("data", (chunk) => chunks.push(chunk));
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+    process.stdin.on("error", reject);
+  });
+}
+
 // ── hook-prompt pipeline input parsing ───────────────────────────────────────
 
 export interface HookPromptInput {
@@ -123,7 +132,7 @@ export async function handleHookPrompt() {
   const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
 
   let raw = "";
-  try { raw = fs.readFileSync(0, "utf-8"); } catch { process.exit(0); }
+  try { raw = await readStdin(); } catch { process.exit(0); }
 
   const input = parseHookInput(raw);
   if (!input) process.exit(0);
@@ -295,7 +304,9 @@ export async function handleHookPrompt() {
 
     console.log(parts.join("\n"));
   } catch (err: unknown) {
-    process.stderr.write("cortex hook-prompt error: " + (err instanceof Error ? err.message : String(err)) + "\n");
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stdout.write(`\n<cortex-error>cortex hook failed: ${msg}. Check ~/.cortex/.runtime/debug.log for details.</cortex-error>\n`);
+    debugLog(`hook-prompt error: ${msg}`);
     process.exit(0);
   }
 }

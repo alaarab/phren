@@ -199,10 +199,13 @@ const DEFAULT_DECAY = {
 };
 
 function confidenceForAge(ageDays: number, decay: RetentionPolicy["decay"]): number {
-  if (ageDays <= 30) return decay.d30;
-  if (ageDays <= 60) return decay.d60;
-  if (ageDays <= 90) return decay.d90;
-  return decay.d120;
+  const { d30 = 1.0, d60 = 0.85, d90 = 0.65, d120 = 0.45 } = decay;
+  if (ageDays <= 0) return 1.0;
+  if (ageDays <= 30) return 1.0 - ((1.0 - d30) * (ageDays / 30));
+  if (ageDays <= 60) return d30 - ((d30 - d60) * ((ageDays - 30) / 30));
+  if (ageDays <= 90) return d60 - ((d60 - d90) * ((ageDays - 60) / 30));
+  if (ageDays <= 120) return d90 - ((d90 - d120) * ((ageDays - 90) / 30));
+  return d120; // don't decay further past d120; TTL handles final expiry
 }
 
 export function filterTrustedFindings(content: string, ttlDays: number): string {

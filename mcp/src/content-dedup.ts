@@ -163,7 +163,7 @@ export function isDuplicateFinding(existingContent: string, newLearning: string,
     const existingTokens = jaccardTokenize(stripMeta(bullet));
     if (newTokens.size < 3 || existingTokens.size < 3) continue; // too few tokens for reliable Jaccard
     const jaccard = jaccardSimilarity(newTokens, existingTokens);
-    if (jaccard > 0.65) {
+    if (jaccard > 0.55) {
       debugLog(`duplicate-detection: Jaccard ${Math.round(jaccard * 100)}% with existing: "${bullet.slice(0, 80)}"`);
       return true;
     }
@@ -227,6 +227,24 @@ export function scanForSecrets(text: string): string | null {
   if (/-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----/.test(text)) return 'SSH private key';
   // Anthropic API key
   if (/sk-ant-api\d{2}-[A-Za-z0-9_\-]{10,}/.test(text)) return 'Anthropic API key';
+  // OpenAI API key
+  if (/sk-proj-[A-Za-z0-9_\-]{30,}/.test(text)) return 'OpenAI API key';
+  // GitHub PAT classic
+  if (/ghp_[A-Za-z0-9]{36}/.test(text)) return 'GitHub personal access token';
+  // GitHub OAuth token
+  if (/gho_[A-Za-z0-9]{36}/.test(text)) return 'GitHub OAuth token';
+  // Slack bot token
+  if (/xoxb-[0-9]+-[A-Za-z0-9-]+/.test(text)) return 'Slack bot token';
+  // Slack user token
+  if (/xoxp-[0-9]+-[A-Za-z0-9-]+/.test(text)) return 'Slack user token';
+  // Stripe secret key
+  if (/sk_live_[A-Za-z0-9]{24,}/.test(text)) return 'Stripe secret key';
+  // Stripe publishable key
+  if (/pk_live_[A-Za-z0-9]{24,}/.test(text)) return 'Stripe publishable key';
+  // npm access token
+  if (/npm_[A-Za-z0-9]{36}/.test(text)) return 'npm access token';
+  // GCP service account
+  if (/"private_key_id"\s*:\s*"[^"]{20,}"/.test(text)) return 'GCP service account key';
   // Generic API key (only when variable name suggests it)
   if (/['"]?(api_?key|secret|token|password)['"]?\s*[=:]\s*['"]?[a-zA-Z0-9_\-\.]{20,}/i.test(text)) return 'API key or secret';
   return null;
@@ -292,7 +310,7 @@ export async function checkSemanticDedup(
     const tokB = jaccardTokenize(b);
     if (tokA.size < 3 || tokB.size < 3) continue;
     const jaccard = jaccardSimilarity(tokA, tokB);
-    if (jaccard >= 0.65) continue; // already caught by sync isDuplicateFinding
+    if (jaccard >= 0.55) continue; // already caught by sync isDuplicateFinding
     if (jaccard >= 0.3) {
       const isDup = await semanticDedup(a, b, cortexPath);
       if (isDup) return true;

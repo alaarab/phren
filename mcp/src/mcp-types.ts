@@ -6,6 +6,7 @@ export interface McpContext {
   profile: string;
   db: () => SqlJsDatabase;
   rebuildIndex: () => Promise<void>;
+  updateFileInIndex: (filePath: string) => void;
   withWriteQueue: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 

@@ -126,7 +126,28 @@ function findWasmBinary(): Buffer | undefined {
   return undefined;
 }
 
+function touchSentinel(cortexPath: string): void {
+  const dir = path.join(cortexPath, ".runtime");
+  const sentinelPath = path.join(dir, "cortex-sentinel");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(sentinelPath, Date.now().toString());
+  } catch { /* best-effort */ }
+}
+
 function computeCortexHash(cortexPath: string, profile?: string): string {
+  // Fast path: if sentinel file exists, use its mtime as the hash
+  const sentinelPath = path.join(cortexPath, ".runtime", "cortex-sentinel");
+  if (fs.existsSync(sentinelPath)) {
+    try {
+      const mtime = fs.statSync(sentinelPath).mtimeMs;
+      const hash = crypto.createHash("sha1");
+      hash.update(`sentinel:${mtime}`);
+      if (profile) hash.update(`profile:${profile}`);
+      return hash.digest("hex").slice(0, 16);
+    } catch { /* fall through to full computation */ }
+  }
+
   const projectDirs = getProjectDirs(cortexPath, profile);
   const policy = getIndexPolicy(cortexPath);
   const files: string[] = [];
@@ -181,7 +202,7 @@ function computeCortexHash(cortexPath: string, profile?: string): string {
 }
 
 const INDEX_HASHES_FILENAME = "index-hashes.json";
-const INDEX_SCHEMA_VERSION = 2; // bump when FTS schema changes to force full rebuild
+const INDEX_SCHEMA_VERSION = 3; // bump when FTS schema changes to force full rebuild
 
 function hashFileContent(filePath: string): string {
   const content = fs.readFileSync(filePath, "utf-8");
@@ -311,6 +332,48 @@ function deleteEntityLinksForDocPath(db: SqlJsDatabase, cortexPath: string, docP
   db.run("DELETE FROM entity_links WHERE source_doc = ?", [sourceDoc]);
 }
 
+/**
+ * Incrementally update a single file in the FTS index.
+ * Deletes the old record for the file, re-reads and re-inserts it.
+ * Touches the sentinel file to invalidate caches.
+ */
+export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPath: string): void {
+  const resolvedPath = path.resolve(filePath);
+
+  // Delete old record
+  try { deleteEntityLinksForDocPath(db, cortexPath, resolvedPath); } catch { /* ignore */ }
+  try { db.run("DELETE FROM docs WHERE path = ?", [resolvedPath]); } catch { /* ignore */ }
+
+  // Re-insert if file still exists
+  if (fs.existsSync(resolvedPath)) {
+    const filename = path.basename(resolvedPath);
+    // Determine project from path: the file should be under cortexPath/<project>/
+    const rel = path.relative(path.resolve(cortexPath), resolvedPath);
+    const project = rel.split(path.sep)[0];
+    const relFile = rel.split(path.sep).slice(1).join(path.sep);
+    const type = classifyFile(filename, relFile);
+    const entry: FileEntry = { fullPath: resolvedPath, project, filename, type, relFile };
+    if (insertFileIntoIndex(db, entry, cortexPath)) {
+      // Re-extract entities for finding files
+      if (type === "findings") {
+        try {
+          const content = fs.readFileSync(resolvedPath, "utf-8");
+          extractAndLinkEntities(db, content, getEntrySourceDocKey(entry, cortexPath));
+        } catch { /* non-fatal */ }
+      }
+    }
+
+    // Update hash map for this file
+    try {
+      const hashData = loadHashMap(cortexPath);
+      hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
+      saveHashMap(cortexPath, hashData.hashes);
+    } catch { /* best-effort */ }
+  }
+
+  touchSentinel(cortexPath);
+}
+
 async function buildIndexImpl(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
   const t0 = Date.now();
   let userSuffix: string;
@@ -415,6 +478,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
           }
 
           saveHashMap(cortexPath, currentHashes);
+          touchSentinel(cortexPath);
 
           // Save updated cache
           try {
@@ -450,7 +514,8 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   const db = new SQL.Database();
   db.run(`
     CREATE VIRTUAL TABLE docs USING fts5(
-      project, filename, type, content, path
+      project, filename, type, content, path,
+      tokenize = "porter unicode61"
     );
   `);
 
@@ -535,6 +600,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   }
 
   saveHashMap(cortexPath, newHashes);
+  touchSentinel(cortexPath);
 
   const buildMs = Date.now() - t0;
   debugLog(`Built FTS index: ${fileCount} files from ${getProjectDirs(cortexPath, profile).length} projects in ${buildMs}ms`);

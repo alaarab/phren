@@ -146,22 +146,25 @@ describe("checkSemanticDedup", () => {
     const projDir = path.join(cortex, "proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+    // a and b: Jaccard ~0.4 (4 shared tokens: always/restart/server/environment out of 10 union)
+    // jaccardTokenize(a) = {always,restart,server,after,changing,environment,configuration} = 7
+    // jaccardTokenize(b) = {always,restart,server,when,modifying,environment,variables} = 7
+    // intersection=4, union=10, Jaccard=0.4 → in [0.3,0.55) range → triggers semanticDedup
+    const a = "always restart server after changing environment configuration";
+    const b = "always restart server when modifying environment variables";
     fs.writeFileSync(
       path.join(projDir, "FINDINGS.md"),
-      "# proj Findings\n\n## 2026-01-01\n\n- restart server after configuration changes to apply new settings\n"
+      `# proj Findings\n\n## 2026-01-01\n\n- ${b}\n`
     );
 
     // Pre-populate the cache with a result
-    // a and b have Jaccard ~0.56 (5 shared tokens out of 9 union), in the 0.3-0.65 semantic-check range
     const crypto = await import("node:crypto");
-    const a = "restart server after configuration changes applied";
-    const b = "restart server after configuration changes to apply new settings";
     const key = crypto.createHash("sha256").update(a + "|||" + b).digest("hex");
     const cachePath = path.join(cortex, ".runtime", "dedup-cache.json");
     fs.writeFileSync(cachePath, JSON.stringify({ [key]: { result: true, ts: Date.now() } }));
 
     // This should return true from cache without calling Anthropic
-    const result = await checkSemanticDedup(cortex, "proj", "restart server after configuration changes applied");
+    const result = await checkSemanticDedup(cortex, "proj", a);
     expect(result).toBe(true);
 
     delete process.env.CORTEX_FEATURE_SEMANTIC_DEDUP;
