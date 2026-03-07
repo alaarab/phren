@@ -589,6 +589,7 @@ describe("hooks", () => {
     });
 
     it("runCustomHooks passes environment variables", () => {
+      if (process.platform === "win32") return; // echo $VAR is POSIX sh syntax; cmd.exe does not expand $VAR
       const envFile = path.join(cortexPath, "env-check.txt");
       fs.writeFileSync(
         path.join(cortexPath, ".governance", "install-preferences.json"),

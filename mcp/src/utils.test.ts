@@ -83,7 +83,7 @@ describe("safeProjectPath", () => {
   });
 
   it("allows valid subpath", () => {
-    expect(safeProjectPath(base, "myproject")).toBe(path.join(base, "myproject"));
+    expect(safeProjectPath(base, "myproject")).toBe(path.resolve(base, "myproject"));
   });
 });
 
