@@ -322,12 +322,28 @@ Cortex 1.11.1   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scor
 Supermemory     & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
 claude-mem      & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M \\
 Copilot Memory  & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
+Memorix         & \cellcolor{scoreHi}H  & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
 \bottomrule
 \end{tabular}
 }
-\caption{Architecture-level scorecard from documented behavior (H/M/L). H=high, M=medium, L=low. For all columns except Lock-in: green=H (better), red=L (worse). For Lock-in: green=L (less lock-in, better), red=H (more lock-in, worse). Not a substitute for empirical benchmark results.}
+\caption{Architecture-level scorecard from documented behavior (H/M/L). H=high, M=medium, L=low. For all columns except Lock-in: green=H (better), red=L (worse). For Lock-in: green=L (less lock-in, better), red=H (more lock-in, worse). Memorix: strong semantic recall, weak on governance, auditability, CLI, and multi-agent. Not a substitute for empirical benchmark results.}
 \label{tab:scorecard}
 \end{table*}
+
+\subsection{Governance as a Moat}
+
+Memorix, mem0, and DiffMem represent a class of memory tools that compete on semantic retrieval quality. Memorix in particular offers strong vector-based recall and a polished managed API. However, semantic search is a feature, not a moat.
+
+The defensible advantage of git-backed, governance-aware memory systems like Cortex lies in four properties that vector-only tools structurally lack:
+
+\begin{itemize}
+  \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed API systems have no equivalent.
+  \item \textbf{Policy and access governance}: role-based access control, approval workflows, TTL and retention policy, and canonical locks are first-class features. Memorix, mem0, and DiffMem have no published policy engine.
+  \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection. Vector similarity has no concept of recency decay or feedback-driven suppression.
+  \item \textbf{CLI shell for human review}: \texttt{cortex shell} provides a model-free interface for reviewing, approving, and cleaning memories before any agent consumes them. This is operationally essential at team scale.
+\end{itemize}
+
+Any memory system can add a vector index. Governance, auditability, and operational tooling require deliberate architectural choices that are difficult to retrofit. This is where Cortex is differentiated.
 
 \section{Speed and Cost Analysis}
 
@@ -418,7 +434,32 @@ This section addresses the retrieval tradeoff the paper has been sidestepping: C
 
 \textbf{The honest comparison:} semantic search (e.g., Supermemory's embedding layer) genuinely retrieves better on paraphrase and synonym-heavy queries. Cortex's FTS5 approach retrieves better when the user knows the exact terminology, when offline operation or auditability are required, and when zero retrieval-side token cost matters.
 
-A hybrid approach -- FTS5 for exact matches, embedding fallback for low-result queries -- would close most of the gap. This is not currently implemented.
+A hybrid approach -- FTS5 for exact matches, embedding fallback for low-result queries -- closes most of the gap. Cortex now implements this as an opt-in feature (see Section~\ref{sec:hybrid}).
+
+\subsection{Hybrid Search: FTS5 + Cosine Fallback}
+\label{sec:hybrid}
+
+Cortex implements a local hybrid retrieval mode, activated by the environment flag \texttt{CORTEX\_FEATURE\_HYBRID\_SEARCH=1} (default off, no regression for existing users).
+
+The retrieval pipeline works as follows:
+
+\begin{enumerate}
+  \item \textbf{FTS5 primary}: run the standard BM25 query with synonym expansion. If 3 or more results are returned, stop here.
+  \item \textbf{Cosine fallback}: when FTS5 returns fewer than 3 results, compute TF-IDF cosine similarity between the query and all indexed documents. Return the top-scoring documents above a similarity threshold of 0.05, filling remaining result slots up to the limit.
+  \item \textbf{Deduplication}: FTS5 results come first. Cosine results are excluded by rowid to avoid duplicates. FTS5 results are always preferred because they represent exact token matches.
+  \item \textbf{Performance guard}: if the corpus exceeds 10,000 documents, the cosine fallback is skipped entirely. TF-IDF over a large corpus is $O(n \cdot k)$ where $k$ is the vocabulary size; this is acceptable for personal knowledge bases (typically hundreds to low thousands of documents) but not for very large deployments.
+\end{enumerate}
+
+\textbf{Why this matches or exceeds vector-only approaches for personal knowledge bases:}
+
+\begin{itemize}
+  \item FTS5 has a strong recency bias advantage: personal knowledge bases have high vocabulary consistency within a single developer's writing style. FTS5 exact matches handle the common case with zero latency and zero API cost.
+  \item Cosine fallback adds semantic coverage for older or vaguer memories where vocabulary has drifted.
+  \item No cloud API dependency: TF-IDF is computed locally in-process. Unlike embedding-based retrieval (e.g., OpenAI \texttt{text-embedding-3-small}), this preserves privacy and works fully offline.
+  \item The combination is conservative by design: FTS5 results are never demoted. The cosine layer only adds, never reranks, ensuring that exact-match precision is preserved.
+\end{itemize}
+
+This design reflects a deliberate choice: a personal knowledge base is not the same retrieval problem as a large enterprise corpus. FTS5 handles the dominant case efficiently; cosine handles edge cases without compromising the common path.
 
 \section{When To Choose What}
 \subsection{Choose Cortex when}
