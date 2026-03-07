@@ -54,6 +54,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, finding, citation, findingType }) => {
       if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (finding.length > 5000) return jsonResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
       return withWriteQueue(async () => {
         try {
           const taggedFinding = findingType ? `[${findingType}] ${finding}` : finding;
@@ -112,6 +113,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, findings }) => {
       if (!isValidProjectName(project)) return jsonResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      if (findings.length > 100) return jsonResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
+      if (findings.some((f) => f.length > 5000)) return jsonResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
       return withWriteQueue(async () => {
         runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
         const result = addFindingsToFile(cortexPath, project, findings);
