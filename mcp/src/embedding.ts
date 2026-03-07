@@ -7,12 +7,16 @@ import {
 } from "./shared.js";
 
 const EMBED_CACHE_FILE = "embed-cache.jsonl";
+const MAX_CACHE_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+const MAX_CACHE_ENTRIES_AFTER_TRUNCATE = 5000;
 
 interface CacheEntry {
   hash: string;
   model: string;
   embedding: number[];
 }
+
+const cacheByFile = new Map<string, Map<string, number[]>>();
 
 function getCacheFilePath(cortexPath: string): string {
   const dir = runtimeDir(cortexPath);
@@ -26,8 +30,14 @@ function sha256(text: string): string {
 
 function loadCache(cortexPath: string): Map<string, number[]> {
   const cacheFile = getCacheFilePath(cortexPath);
+  const cached = cacheByFile.get(cacheFile);
+  if (cached) return cached;
+
   const cache = new Map<string, number[]>();
-  if (!fs.existsSync(cacheFile)) return cache;
+  if (!fs.existsSync(cacheFile)) {
+    cacheByFile.set(cacheFile, cache);
+    return cache;
+  }
   try {
     const lines = fs.readFileSync(cacheFile, "utf-8").split("\n").filter(Boolean);
     for (const line of lines) {
@@ -37,12 +47,35 @@ function loadCache(cortexPath: string): Map<string, number[]> {
   } catch {
     debugLog("embedding: failed to load cache");
   }
+  cacheByFile.set(cacheFile, cache);
   return cache;
 }
 
 function appendCache(cortexPath: string, hash: string, model: string, embedding: number[]): void {
   const cacheFile = getCacheFilePath(cortexPath);
+  const cache = loadCache(cortexPath);
   const entry: CacheEntry = { hash, model, embedding };
+
+  try {
+    if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > MAX_CACHE_FILE_SIZE_BYTES) {
+      const recentLines = fs.readFileSync(cacheFile, "utf-8")
+        .split("\n")
+        .filter(Boolean)
+        .slice(-MAX_CACHE_ENTRIES_AFTER_TRUNCATE);
+      const truncatedCache = new Map<string, number[]>();
+      for (const line of recentLines) {
+        const parsed = JSON.parse(line) as CacheEntry;
+        truncatedCache.set(parsed.hash, parsed.embedding);
+      }
+      cacheByFile.set(cacheFile, truncatedCache);
+      fs.writeFileSync(cacheFile, recentLines.length > 0 ? `${recentLines.join("\n")}\n` : "");
+    }
+  } catch {
+    debugLog("embedding: failed to truncate cache");
+  }
+
+  const activeCache = cacheByFile.get(cacheFile) ?? cache;
+  activeCache.set(hash, embedding);
   fs.appendFileSync(cacheFile, JSON.stringify(entry) + "\n");
 }
 
