@@ -19,13 +19,8 @@ import {
 import { STOP_WORDS, isFeatureEnabled, clampInt } from "./utils.js";
 import { appendAuditLog } from "./shared.js";
 import { getProjectGlobBoost } from "./cli-hooks-globs.js";
-
-// ── Git context types ────────────────────────────────────────────────────────
-
-export interface GitContext {
-  branch: string;
-  changedFiles: Set<string>;
-}
+import type { GitContext } from "./cli-hooks-session.js";
+export type { GitContext } from "./cli-hooks-session.js";
 
 // ── Intent and scoring helpers ───────────────────────────────────────────────
 
