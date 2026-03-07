@@ -8,12 +8,50 @@ import {
   addBacklogItem as addBacklogItemStore,
   addBacklogItems as addBacklogItemsBatch,
   backlogMarkdown,
+  type BacklogDoc,
+  type BacklogSection,
   completeBacklogItem as completeBacklogItemStore,
   completeBacklogItems as completeBacklogItemsBatch,
   readBacklog,
   readBacklogs,
   updateBacklogItem as updateBacklogItemStore,
 } from "./data-access.js";
+
+type BacklogStatus = "all" | "active" | "queue" | "done" | "active+queue";
+
+const BACKLOG_SECTION_ORDER: BacklogSection[] = ["Active", "Queue", "Done"];
+
+function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number } {
+  let includedSections: BacklogSection[];
+  if (status === "all") {
+    includedSections = BACKLOG_SECTION_ORDER;
+  } else if (status === "done") {
+    includedSections = ["Done"];
+  } else if (status === "active") {
+    includedSections = ["Active"];
+  } else if (status === "queue") {
+    includedSections = ["Queue"];
+  } else {
+    includedSections = ["Active", "Queue"];
+  }
+
+  const items: Record<BacklogSection, BacklogDoc["items"][BacklogSection]> = {
+    Active: includedSections.includes("Active") ? doc.items.Active : [],
+    Queue: includedSections.includes("Queue") ? doc.items.Queue : [],
+    Done: includedSections.includes("Done") ? doc.items.Done : [],
+  };
+
+  const totalItems = BACKLOG_SECTION_ORDER.reduce((sum, section) => sum + items[section].length, 0);
+
+  return {
+    doc: {
+      ...doc,
+      items,
+    },
+    includedSections,
+    totalItems,
+  };
+}
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, profile, withWriteQueue, updateFileInIndex } = ctx;
@@ -22,14 +60,15 @@ export function register(server: McpServer, ctx: McpContext): void {
     "get_backlog",
     {
       title: "◆ cortex · backlog",
-      description: "Get a project's backlog, all backlogs, or a single item. Omit all params for all projects. Pass project for that project's backlog. Pass id or item to fetch a single entry.",
+      description: "Get backlog items. Defaults to Active and Queue sections only. Pass status='all' to include Done items.",
       inputSchema: z.object({
         project: z.string().optional().describe("Project name. Omit to get all projects."),
         id: z.string().optional().describe("Backlog item ID like A1, Q3, D2. Requires project."),
         item: z.string().optional().describe("Exact backlog item text. Requires project."),
+        status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which backlog sections to include. Defaults to 'active+queue'."),
       }),
     },
-    async ({ project, id, item }) => {
+    async ({ project, id, item, status }) => {
       // Single item lookup
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
@@ -56,15 +95,33 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = readBacklog(cortexPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
-        if (!fs.existsSync(doc.path)) return mcpResponse({ ok: true, message: `No backlog found for "${project}".`, data: { project, items: { Active: [], Queue: [], Done: [] } } });
-        return mcpResponse({ ok: true, message: `## ${project}\n${backlogMarkdown(doc)}`, data: { project, items: doc.items, issues: doc.issues } });
+        const view = buildBacklogView(doc, status);
+        if (!fs.existsSync(doc.path)) {
+          return mcpResponse({
+            ok: true,
+            message: `No backlog found for "${project}".`,
+            data: { project, items: view.doc.items, includedSections: view.includedSections, totalItems: view.totalItems },
+          });
+        }
+        return mcpResponse({
+          ok: true,
+          message: `## ${project}\n${backlogMarkdown(view.doc)}`,
+          data: { project, items: view.doc.items, issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems },
+        });
       }
 
       // All projects
       const docs = readBacklogs(cortexPath, profile);
       if (!docs.length) return mcpResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
-      const parts = docs.map((doc) => `## ${doc.project}\n${backlogMarkdown(doc)}`);
-      const projectData = docs.map((doc) => ({ project: doc.project, items: doc.items, issues: doc.issues }));
+      const views = docs.map((doc) => ({ project: doc.project, view: buildBacklogView(doc, status), issues: doc.issues }));
+      const parts = views.map(({ project, view }) => `## ${project}\n${backlogMarkdown(view.doc)}`);
+      const projectData = views.map(({ project, view, issues }) => ({
+        project,
+        items: view.doc.items,
+        issues,
+        includedSections: view.includedSections,
+        totalItems: view.totalItems,
+      }));
       return mcpResponse({ ok: true, message: parts.join("\n\n"), data: { projects: projectData } });
     }
   );
