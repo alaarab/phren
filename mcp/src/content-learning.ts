@@ -291,7 +291,7 @@ export function addFindingToFile(
   if (!resolvedDir) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, "FINDINGS.md");
 
-  // Secret/PII scan — reject before writing
+  // Secret/PII scan — reject before anything else (before existence check, before lock)
   const nowIso = new Date().toISOString();
   const today = nowIso.slice(0, 10);
   const inferredRepo = citationInput?.repo || getRepoRoot(resolvedDir);
@@ -304,6 +304,14 @@ export function addFindingToFile(
       })
     : undefined;
 
+  // Reject secrets before anything else — even if project doesn't exist yet
+  const earlySecretType = scanForSecrets(learning);
+  if (earlySecretType) {
+    throw new Error(`Rejected: finding appears to contain a secret (${earlySecretType}). Strip credentials before saving.`);
+  }
+  // Check project dir existence before withFileLock (which would create the dir via mkdirSync)
+  if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" does not exist.`, CortexError.INVALID_PROJECT_NAME);
+
   const result: CortexResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
     const preparedForNewFile = prepareFinding(learning, project, "", citationInput, nowIso, inferredRepo, headCommit);
     if (!fs.existsSync(learningsPath)) {
@@ -313,7 +321,6 @@ export function addFindingToFile(
       if (preparedForNewFile.status === "duplicate") {
         return cortexOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
       }
-      if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
       const newContent = `# ${project} Findings\n\n## ${today}\n\n${preparedForNewFile.finding.bullet}\n${preparedForNewFile.finding.citationComment}\n`;
       fs.writeFileSync(learningsPath, newContent);
       return cortexOk({
@@ -327,9 +334,16 @@ export function addFindingToFile(
 
     const content = fs.readFileSync(learningsPath, "utf8");
     const legacyHistory = opts?.skipLegacyDedup ? "" : readLegacyHistoryContent(resolvedDir);
+    // When superseding, strip the old finding from history so dedup doesn't block the intentionally similar replacement
+    const historyForDedup = supersedesText
+      ? (legacyHistory ? `${content}\n${legacyHistory}` : content)
+          .split("\n")
+          .filter(line => !line.startsWith("- ") || !line.toLowerCase().includes(supersedesText.slice(0, 40).toLowerCase()))
+          .join("\n")
+      : (legacyHistory ? `${content}\n${legacyHistory}` : content);
     const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
 
-    const prepared = prepareFinding(learning, project, fullHistory, citationInput, nowIso, inferredRepo, headCommit);
+    const prepared = prepareFinding(learning, project, historyForDedup, citationInput, nowIso, inferredRepo, headCommit);
     if (prepared.status === "rejected") {
       throw new Error(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`);
     }
@@ -349,7 +363,7 @@ export function addFindingToFile(
       const needle = supersedesText.slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
       for (let i = 0; i < lines.length; i++) {
         if (!lines[i].startsWith("- ")) continue;
-        const lineText = lines[i].replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
+        const lineText = lines[i].replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").replace(/^\[[^\]]+\]\s+/, "").slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
         if (lineText === needle) {
           const newFirst60 = normalizedForSupersedes.replace(/^-\s+/, "").slice(0, 60);
           lines[i] = `${lines[i]} <!-- superseded_by: ${newFirst60} -->`;

@@ -618,7 +618,8 @@ export function addFinding(cortexPath: string, project: string, learning: string
   if (!resolved) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
   const findingsPath = path.join(resolved, "FINDINGS.md");
 
-  return withFileLock(findingsPath, () => addFindingToFile(cortexPath, project, learning));
+  // addFindingToFile handles its own file lock; no double-wrap
+  return addFindingToFile(cortexPath, project, learning);
 }
 
 export function removeFinding(cortexPath: string, project: string, match: string): CortexResult<string> {
@@ -755,7 +756,8 @@ export function approveQueueItem(cortexPath: string, project: string, match: str
     }
 
     const findingsFilePath = path.join(ensured.data, "FINDINGS.md");
-    const add = withFileLock(findingsFilePath, () => addFindingToFile(cortexPath, project, found.data.item.text));
+    // addFindingToFile handles its own file lock; no double-wrap
+    const add = addFindingToFile(cortexPath, project, found.data.item.text);
     if (!add.ok) return forwardErr(add);
 
     found.data.all.splice(found.data.index, 1);
