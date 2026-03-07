@@ -255,7 +255,8 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
       const lines = content.split("\n");
       fs.writeFileSync(logPath, lines.slice(-500).join("\n"));
     }
-  } catch (err: any) {
-    debugLog(`Audit log write failed: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    debugLog(`Audit log write failed: ${msg}`);
   }
 }
