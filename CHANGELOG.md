@@ -1,5 +1,36 @@
 # Changelog
 
+All notable changes to cortex are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/).
+
+## [Unreleased]
+
+### Added
+- `add_backlog_items` bulk MCP tool
+- Consolidation lock file to prevent concurrent runs
+- `@import` path traversal security check
+- CI workflow with publish dry-run
+
+### Fixed
+- Windows CI: PATH delimiter, .cmd wrappers, SQLite WAL temp file cleanup
+- Scroll header visibility when learning text wraps multiple terminal rows
+- d-key delete using text match instead of UI-computed ID
+
+## [1.12.x] - Recent
+
+### Added
+- Bulk MCP tools: `add_learnings`, `complete_backlog_items`, `remove_learnings`
+- Interactive TUI shell with Backlog, Learnings, Memory Queue, Health tabs
+- Tiered knowledge: `knowledge/` subdirectories indexed separately
+- Starter templates: `python-project`, `monorepo`, `library`, `frontend`
+- FTS5 full-text search with synonym expansion and keyword extraction
+- Multi-agent governance with role-based access control
+
+### Fixed
+- Windows CI: PATH delimiter, .cmd wrappers, SQLite WAL temp file cleanup
+- Scroll header visibility when learning text wraps multiple terminal rows
+- d-key delete using text match instead of UI-computed ID
+
 ## [1.11.1] - 2026-03-06
 
 ### Added

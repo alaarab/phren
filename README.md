@@ -70,6 +70,19 @@ cortex hooks-mode off    # disable hook execution temporarily
 cortex hooks-mode on     # re-enable hooks
 ```
 
+### Templates
+
+`cortex init --template <name>` scaffolds with a project-specific starter:
+
+| Template | Best for |
+|----------|----------|
+| `python-project` | Python packages and scripts |
+| `monorepo` | Multi-package repos |
+| `library` | Reusable libraries |
+| `frontend` | React/Vue/web apps |
+
+Use `--from-existing <path>` to import an existing project structure.
+
 ### Sync across machines
 
 ```bash
@@ -83,43 +96,28 @@ On a new machine: clone, run init, done.
 
 ---
 
-## What's new in v2
+## What's new
 
-**Memory quality.** Learnings now have confidence scores that decay over time. Stale, conflicting, or low-value entries get flagged for review instead of silently polluting your context. You set the retention policy, the TTL, the decay curve. Cortex enforces it.
-
-**Trust filtering.** Before any memory gets injected into a prompt, it passes through a trust gate. Entries below your confidence threshold are held back. Entries with broken citations are quarantined. The agent only sees what you've decided is reliable.
-
-**Interactive shell.** `cortex` in a terminal opens a TUI with six views: Projects, Backlog, Learnings, Memory Queue, Machines, Health. Navigate with single keys, triage your memory queue, manage backlogs, run health checks. Works on every machine, no browser needed.
-
-**Quality feedback loop.** When an injected memory helps, mark it helpful. When it causes a bad response, mark it as a regression. Those signals feed back into confidence scoring, so the system learns which memories actually matter.
+- **Bulk MCP tools** -- `add_learnings`, `add_backlog_items`, `complete_backlog_items`, `remove_learnings` for batch operations
+- **TUI shell** -- interactive terminal UI with Backlog, Learnings, Memory Queue, and Health tabs (`cortex shell`)
+- **Tiered knowledge** -- `knowledge/` subdirectories for deep reference docs, indexed separately from learnings
+- **FTS5 full-text search** with synonym expansion and keyword extraction
+- **Multi-agent governance** -- role-based access control for teams (admins, maintainers, contributors, viewers)
+- **Starter templates** -- `cortex init --template python-project|monorepo|library|frontend`
+- **Memory quality** -- confidence scoring, age decay, trust filtering, and a feedback loop
+- **Data portability** -- export/import projects as JSON, archive/unarchive projects
 
 ---
 
 ## What makes this different
 
-### It runs itself
+**It runs itself.** Hooks inject context before every prompt and auto-save after every response. No manual calls needed. Trust filtering gates what gets injected based on confidence, age decay, and citation validity.
 
-Other memory tools need the agent to remember to call them. Cortex hooks into the agent's lifecycle directly. Every prompt you type, the hook searches your knowledge base and injects matching context before the agent starts thinking. When the session ends, anything written down gets committed and pushed. You never do either of those things manually.
+**It's just files.** Markdown in a git repo you own. No database, no vector store, no account. `git log` shows how it grew.
 
-Before injection, every learning passes through trust filtering: confidence scoring, citation validation, and staleness checks. Only entries above your threshold make it into the prompt. Stale or conflicting memories get routed to a review queue instead.
+**Search that works.** Type "throttling" and it finds "rate limit" and "429". Synonym expansion means you don't need exact phrases.
 
-When learnings accumulate past the consolidation threshold (25 entries, or 60 days plus 10 entries), cortex flags it once per session and suggests consolidation. Old entries get archived, duplicates get merged, cross-project patterns get promoted to global knowledge.
-
-### It's just files
-
-No database service. No vector store. No account or API key. Your knowledge lives in markdown files in a git repo you own. `git log` shows how it grew. `git diff` shows what changed. Quality policies live in `.governance/` as JSON files you can edit by hand.
-
-### Search that doesn't need exact words
-
-Type "throttling" and it also finds "rate limit", "429", and "too many requests." Type "auth" and it finds "login" and "oauth". You don't need to remember the exact phrase you used six months ago.
-
-### Every machine, same brain
-
-Push your cortex to a private repo. Clone it on a new machine, run init, done. Profiles control which projects each machine sees. The work laptop gets work projects. Home gets everything.
-
-### Builds over time
-
-When the agent figures out a tricky pattern or hits a subtle bug, it writes that down. Next session, next week, next machine: that knowledge is there. Memories that prove useful gain confidence. Memories that cause problems lose it. The longer you use it, the sharper it gets.
+**Every machine, same brain.** Push to a private repo, clone on a new machine, run init. Profiles control which projects each machine sees.
 
 ---
 
@@ -142,39 +140,15 @@ When the agent figures out a tricky pattern or hits a subtle bug, it writes that
 
 ## How it runs itself
 
-### Prompt injection
+**Prompt injection.** A hook extracts keywords, searches your cortex, and injects matching context before the agent starts thinking. Trust filtering checks confidence scores, age decay, and citation validity before injection.
 
-Before the agent sees your message, a hook extracts keywords, searches your cortex, and injects matching results as context. Generic replies, short acks, unrelated questions: nothing gets added. When something matches, it pulls up to 3 results, constrained by a token budget (default ~550 tokens).
+**Auto-save.** After each response, changes get committed and pushed automatically.
 
-Every injected learning passes through trust filtering first. The filter checks:
-- **Confidence score** against your minimum threshold (default 0.6)
-- **Age decay** on a configurable curve (30/60/90/120 day breakpoints)
-- **Citation validity** for entries that reference specific files or commits
+**Context recovery.** When the context window resets, a hook re-injects your project summary, recent learnings, and active backlog.
 
-Entries that fail any check get routed to the memory queue for human review.
+**Consolidation.** When learnings accumulate past the threshold, cortex flags it once per session. The `/cortex-consolidate` skill archives old entries and promotes cross-project patterns to global knowledge.
 
-### Auto-save
-
-After each response, a hook checks for cortex changes. Anything new (a learning, a backlog update) gets committed and pushed. You don't save manually.
-
-### Context recovery
-
-When the context window fills and resets, a hook re-injects your project summary, recent learnings, and active backlog so the agent doesn't lose the thread.
-
-### Consolidation
-
-When learnings accumulate past the threshold, cortex flags it once per session. The `/cortex-consolidate` skill archives old entries, merges duplicates, and promotes patterns that appear in 3+ projects to global knowledge.
-
-### Memory queue
-
-When a learning fails trust filtering (low confidence, broken citation, staleness), it lands in the project's `MEMORY_QUEUE.md` instead of being discarded. Items sit there until you review them.
-
-You can triage the queue from the shell (press `m` to see it) or with palette commands:
-- `:mq approve <id>` -- move the item into LEARNINGS.md
-- `:mq reject <id>` -- discard it
-- `:mq edit <id> <new text>` -- rewrite it, then approve
-
-The queue is per-project. Items that need a maintainer role to approve (risky entries below the confidence threshold) are marked in the queue view.
+**Memory queue.** Learnings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
 
 ---
 
@@ -197,6 +171,7 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 |------|-------------|
 | `get_backlog` | Read tasks for one or all projects, or fetch a single item by ID or text. |
 | `add_backlog_item` | Add a task to the Queue section. |
+| `add_backlog_items` | Bulk add multiple tasks in one call. |
 | `complete_backlog_item` | Match by text, move to Done. |
 | `complete_backlog_items` | Bulk complete multiple items in one call. |
 | `update_backlog_item` | Change priority, context, or section. |
@@ -261,15 +236,7 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 
 **Navigation:** `:open <project>`, `:search <query>`, `:reset`
 
-### Shell git commands
-
-| Command | What it does |
-|---------|-------------|
-| `:undo` | Undo the last cortex action (reverts the most recent git commit in ~/.cortex). |
-| `:diff` | Show the git diff for the current project, so you can see what changed since the last commit. |
-| `:conflicts` | Show any git merge conflicts and the auto-merge log. Useful after pulling on a new machine. |
-
-The shell is the universal interface. It works the same on every machine, for every agent. If you can open a terminal, you can manage your cortex.
+The shell works the same on every machine, for every agent.
 
 ---
 
@@ -287,41 +254,7 @@ cortex memory-ui [--port=3499]       # lightweight review UI in the browser
 cortex update                        # update to latest version
 ```
 
-> **Note:** `cortex config` and `cortex maintain` are the canonical command groups. Top-level aliases (like `cortex memory-policy`) still work for backwards compatibility.
-
-Memory quality commands:
-
-```bash
-cortex govern-memories [project]     # queue stale/conflicting memories
-cortex prune-memories [project]      # delete expired entries
-cortex consolidate-memories [project] # deduplicate LEARNINGS.md
-cortex extract-memories [project]    # mine git + GitHub signals into candidates
-cortex migrate-findings <project>    # promote legacy findings docs
-```
-
-Wave 1 migration and safety:
-
-```bash
-cortex maintain migrate governance --dry-run   # preview config schema upgrades
-cortex maintain migrate governance             # apply config schema upgrades
-cortex maintain migrate data <project> --dry-run
-cortex maintain migrate all <project> --dry-run
-```
-
-For destructive maintenance (`maintain prune`, `maintain consolidate`, and non-dry-run migrations), run `--dry-run` first. Write paths that rewrite `LEARNINGS.md` create/update `LEARNINGS.md.bak` and report changed backup paths (for example, `Updated backups (1): <project>/LEARNINGS.md.bak`); `--dry-run` does not create backups.
-
-Locking behavior: daily background maintenance uses `.quality-YYYY-MM-DD.lock` to prevent duplicate runs on the same day (stale locks are recovered automatically), and markdown mutations use per-file `.lock` files with timeout + stale-lock recovery.
-
-Policy tuning:
-
-```bash
-cortex memory-policy get|set ...     # retention, decay, confidence
-cortex memory-workflow get|set ...   # approval gates
-cortex memory-access get|set ...     # role permissions
-cortex index-policy get|set ...      # indexer include/exclude globs
-cortex mcp-mode on|off|status       # toggle MCP integration
-cortex hooks-mode on|off|status     # toggle hook execution
-```
+Use `cortex config` for policy tuning and `cortex maintain` for governance operations. Top-level aliases still work for backwards compatibility. Run `--dry-run` before destructive maintenance commands.
 
 ### cortex doctor
 
@@ -349,55 +282,15 @@ cortex hooks-mode on|off|status     # toggle hook execution
 
 ### Access control (RBAC)
 
-Cortex reads role assignments from `.governance/access-control.json` (the config directory) and enforces least privilege by default.
+Four roles: `admin`, `maintainer`, `contributor`, `viewer`. Configured in `.governance/access-control.json`. Actor identity resolves from `CORTEX_ACTOR`, then `USER`/`USERNAME`, then OS username. Unknown actors are treated as `viewer`.
 
-Roles:
-- `admin`: full access (`read`, `write`, `queue`, `pin`, `delete`, `policy`)
-- `maintainer`: everything except `policy` updates
-- `contributor`: `read`, `write`, `queue`
-- `viewer`: `read` only
-
-Permission model:
-- Policy changes (`memory-access set`, `memory-policy set`, `memory-workflow set`) require `admin`.
-- Actor identity resolves from `CORTEX_ACTOR`, then `USER`/`USERNAME`, then OS username.
-- Unknown actors are treated as `viewer`.
-- Role resolution order is `admin` -> `maintainer` -> `contributor` -> `viewer` (if duplicated across lists).
-
-Config expectations:
-- File path: `.governance/access-control.json`
-- Shape: JSON object with optional `schemaVersion` and role arrays: `admins`, `maintainers`, `contributors`, `viewers`
-- Role array values should be non-empty actor IDs (for example usernames or service identities)
-- Keep each actor in only one role list to avoid ambiguity
-
-Example:
-
-```json
-{
-  "schemaVersion": 1,
-  "admins": ["alice"],
-  "maintainers": ["team-leads"],
-  "contributors": ["dev1", "dev2"],
-  "viewers": ["ci-bot"]
-}
-```
-
-### Feature flags
-
-Optional env vars for staged rollout and large-repo safety:
-
-```bash
-CORTEX_FEATURE_AUTO_EXTRACT=0       # toggle git/GitHub mining in hook-prompt
-CORTEX_FEATURE_DAILY_MAINTENANCE=0  # toggle detached daily quality maintenance
-CORTEX_GH_TIMEOUT_MS=10000          # GitHub mining timeout
-CORTEX_GH_RETRIES=2                 # GitHub mining retry count
-CORTEX_GH_PR_LIMIT=40               # max PRs to scan
-```
+See [docs/environment.md](docs/environment.md) for feature flags and env var reference.
 
 ---
 
 ## Works with every major agent
 
-Cortex hooks are plain shell commands. Init auto-detects which tools you have and registers them all. Use `cortex link --all-tools` to configure everything regardless of detection.
+Init auto-detects which tools you have and registers them all.
 
 | Agent | Context injection | Auto-save | MCP tools | Instruction files |
 |-------|:-----------------:|:---------:|:---------:|:-----------------:|
@@ -405,17 +298,8 @@ Cortex hooks are plain shell commands. Init auto-detects which tools you have an
 | GitHub Copilot CLI | yes | yes | yes | `copilot-instructions.md` |
 | Cursor | yes | yes | yes | via hooks |
 | OpenAI Codex | yes | yes | yes | `AGENTS.md` |
-| Any agentskills tool | yes | yes | no | via `cortex.SKILL.md` |
 
-**Claude Code** gets full hook support plus MCP. Init writes `~/.claude/settings.json`.
-
-**GitHub Copilot CLI** gets hooks written to `~/.github/hooks/cortex.json`. Per-project `CLAUDE.md` is symlinked as `.github/copilot-instructions.md`.
-
-**Cursor** gets hooks written to `~/.cursor/hooks.json`. No session-start hook available, but prompt injection and auto-save both work.
-
-**OpenAI Codex** gets hooks written to `codex.json` in your cortex directory. Per-project `CLAUDE.md` is symlinked as `AGENTS.md`.
-
-The shell works regardless of which agent you use. If your agent supports MCP, cortex uses it. If it only supports hooks, that works too. The memory layer is the same either way.
+If your agent supports MCP, cortex uses it. If it only supports hooks, that works too.
 
 ---
 
@@ -465,30 +349,12 @@ Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlin
 
 ---
 
-## Building your own
-
-Cortex is installed via npm. Your data lives in `~/.cortex`, separate from the package. The split is clean: framework (`cortex link`, `mcp/`, `global/skills/`) on one side, your data (project directories, `machines.yaml`, `profiles/`) on the other.
+## Adding projects
 
 ```bash
-npx @alaarab/cortex init
-```
-
-That creates `~/.cortex` with starter templates. From there, add projects:
-
-```bash
-# Let Claude scaffold it
-/cortex-init my-project
-
-# Or create manually
-mkdir ~/.cortex/my-project
-echo "# my-project" > ~/.cortex/my-project/CLAUDE.md
-```
-
-To contribute to cortex itself:
-
-```bash
-git clone https://github.com/alaarab/cortex.git
-cd cortex && npm install && npm run build && npm test
+/cortex-init my-project              # let Claude scaffold it
+# or manually:
+mkdir ~/.cortex/my-project && echo "# my-project" > ~/.cortex/my-project/CLAUDE.md
 ```
 
 ---

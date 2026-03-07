@@ -1,8 +1,8 @@
 # MCP API Reference
 
-Cortex exposes a full tool surface through the Model Context Protocol. These are available to any MCP-compatible client (Claude Code, etc.) when the cortex server is running.
+Cortex exposes 19 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
 
-All tools return text responses. Error conditions return descriptive error messages in the same format.
+All tools return structured JSON: `{ ok, message, data?, error? }`.
 
 ---
 
@@ -33,17 +33,14 @@ List all projects in the active cortex profile with a brief summary of each. Sho
 
 No parameters.
 
-### `list_machines`
+### `get_learnings`
 
-Show which machines are registered and which profile each uses.
+List recent learnings for a project without requiring a search query.
 
-No parameters.
-
-### `list_profiles`
-
-Show all profiles and which projects each includes.
-
-No parameters.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `limit` | number | no | Max rows to return (1-200, default 50). |
 
 ---
 
@@ -56,6 +53,8 @@ Get the backlog for a project, or all projects if no name is given.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Project name. Omit to get all projects. |
+| `id` | string | no | Backlog item ID like A1, Q3, D2. Requires project. |
+| `item` | string | no | Exact backlog item text. Requires project. |
 
 ### `add_backlog_item`
 
@@ -66,6 +65,15 @@ Append a task to a project's backlog. Adds to the Queue section.
 | `project` | string | yes | Project name (must match a directory in your cortex). |
 | `item` | string | yes | The task to add. |
 
+### `add_backlog_items`
+
+Append multiple tasks to a project's backlog in one call. Adds to the Queue section.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `items` | string[] | yes | List of tasks to add. |
+
 ### `complete_backlog_item`
 
 Move a backlog item to the Done section by matching text.
@@ -74,6 +82,15 @@ Move a backlog item to the Done section by matching text.
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `item` | string | yes | Exact or partial text of the item to complete. |
+
+### `complete_backlog_items`
+
+Move multiple backlog items to Done in one call.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `items` | string[] | yes | List of partial item texts to complete. |
 
 ### `update_backlog_item`
 
@@ -107,18 +124,36 @@ Record a single insight to a project's LEARNINGS.md. Call this the moment you di
 | `learning` | string | yes | The insight, as a single bullet point. Be specific enough to act on without extra context. |
 | `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit? }`. |
 
+### `add_learnings`
+
+Record multiple insights to a project's LEARNINGS.md in one call. FTS index rebuilds once at the end.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `learnings` | string[] | yes | List of insights to record. |
+
 ### `remove_learning`
 
-Remove a learning from LEARNINGS.md by matching text. Use when a previously captured insight is wrong or outdated.
+Remove a learning from LEARNINGS.md by matching text.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `learning` | string | yes | Partial text to match against existing learnings. |
 
+### `remove_learnings`
+
+Remove multiple learnings from a project's LEARNINGS.md in one call.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `learnings` | string[] | yes | List of partial texts to match and remove. |
+
 ### `push_changes`
 
-Commit and push any changes in the cortex repo. Call at the end of a session or after adding multiple learnings.
+Commit and push any changes in the cortex repo.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -126,7 +161,7 @@ Commit and push any changes in the cortex repo. Call at the end of a session or 
 
 ---
 
-## Memory Governance
+## Memory Quality
 
 ### `pin_memory`
 
@@ -137,30 +172,6 @@ Promote an important memory into CANONICAL_MEMORIES.md so retrieval prioritizes 
 | `project` | string | yes | Project name. |
 | `memory` | string | yes | Canonical memory text to pin. |
 
-### `govern_memories`
-
-Scan LEARNINGS.md entries and queue stale, citation-conflicting, or low-value items in MEMORY_QUEUE.md.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | no | Project name. Omit to scan all indexed projects. |
-
-### `prune_memories`
-
-Delete stale memory entries based on retention policy.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | no | Project name. Omit to prune all projects. |
-
-### `consolidate_memories`
-
-Deduplicate LEARNINGS.md bullets for one project or all projects.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | no | Project name. Omit to consolidate all indexed projects. |
-
 ### `memory_feedback`
 
 Record feedback on whether an injected memory was helpful or noisy.
@@ -170,66 +181,35 @@ Record feedback on whether an injected memory was helpful or noisy.
 | `key` | string | yes | Memory key to score. |
 | `feedback` | enum | yes | One of: `helpful`, `reprompt`, `regression`. |
 
-### `migrate_legacy_findings`
+---
 
-Promote legacy findings/retro docs into LEARNINGS.md and optionally CANONICAL_MEMORIES.md.
+## Data Management
+
+### `export_project`
+
+Export a project's data (learnings, backlog, summary, CLAUDE.md) as portable JSON.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name to export. |
+
+### `import_project`
+
+Import project data from a previously exported JSON payload. Creates the project directory if needed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `data` | string | yes | JSON string from a previous `export_project` call. |
+
+### `manage_project`
+
+Archive or unarchive a project. Archive renames the directory with `.archived` suffix, removing it from the active index without deleting data.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `pinCanonical` | boolean | no | When true, pin high-signal migrated findings as canonical memories. |
-| `dryRun` | boolean | no | Preview how many findings would be migrated without writing files. |
+| `action` | enum | yes | `archive` or `unarchive`. |
 
 ---
 
-## Policy Configuration
-
-### `memory_policy`
-
-Read or update memory governance policy (retention, TTL, confidence thresholds, decay).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `mode` | enum | yes | `get` returns current policy, `set` applies provided fields. |
-| `ttlDays` | number | no | Time-to-live in days. |
-| `retentionDays` | number | no | Retention period in days. |
-| `autoAcceptThreshold` | number | no | Confidence threshold for auto-accepting memories. |
-| `minInjectConfidence` | number | no | Minimum confidence for injecting memories into context. |
-| `decay_d30` | number | no | Decay multiplier at 30 days. |
-| `decay_d60` | number | no | Decay multiplier at 60 days. |
-| `decay_d90` | number | no | Decay multiplier at 90 days. |
-| `decay_d120` | number | no | Decay multiplier at 120 days. |
-
-### `memory_workflow`
-
-Read or update risky-memory approval workflow policy.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `mode` | enum | yes | `get` returns workflow policy, `set` applies provided fields. |
-| `requireMaintainerApproval` | boolean | no | Whether risky memories need maintainer approval. |
-| `lowConfidenceThreshold` | number | no | Confidence below which memories are flagged as risky. |
-| `riskySections` | array | no | Sections considered risky. Array of: `Review`, `Stale`, `Conflicts`. |
-
-### `memory_access`
-
-Read or update role-based memory access control.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `mode` | enum | yes | `get` returns current access control, `set` updates role lists. |
-| `admins` | string[] | no | List of admin identifiers. |
-| `maintainers` | string[] | no | List of maintainer identifiers. |
-| `contributors` | string[] | no | List of contributor identifiers. |
-| `viewers` | string[] | no | List of viewer identifiers. |
-
-### `index_policy`
-
-Read or update indexer include/exclude controls and hidden-doc coverage.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `mode` | enum | yes | `get` returns current index policy, `set` applies provided fields. |
-| `includeGlobs` | string[] | no | Glob patterns to include in indexing. |
-| `excludeGlobs` | string[] | no | Glob patterns to exclude from indexing. |
-| `includeHidden` | boolean | no | Whether to index hidden files/directories. |
+Governance, policy, and maintenance tools are CLI-only. See `cortex config` and `cortex maintain`.

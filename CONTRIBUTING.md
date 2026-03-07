@@ -34,19 +34,16 @@ The build compiles TypeScript from `mcp/src/` into `mcp/dist/` and marks the ent
 | `docs/` | GitHub Pages site and documentation |
 | `skills/` | Cortex slash command definitions |
 
-## Tests
-
-Tests use [Vitest](https://vitest.dev/) and live alongside the source files:
+## Running specific tests
 
 ```bash
-npm test                          # run all tests
-npx vitest run mcp/src/shared     # run a specific test file
-npx vitest --watch                # watch mode
+npm test                              # run all tests
+npm test -- --grep "pattern"          # filter by test name
+npm test -- mcp/src/data-access.test  # run one file
+npx vitest --watch                    # watch mode
 ```
 
-Test files: `*.test.ts` in `mcp/src/`. Currently around 105 tests covering search, data access, hooks, init, link, shell, and shared utilities.
-
-When adding a new feature, add tests in the same directory as the source file.
+Test files: `*.test.ts` in `mcp/src/`. When adding a new feature, add tests in the same directory as the source file.
 
 ## Code Style
 
@@ -74,42 +71,29 @@ Read `CLAUDE.md` for the full set of conventions. The highlights:
 - If your PR adds or changes MCP tools, update `docs/api-reference.md`.
 - Make sure CI passes before requesting review.
 
-## Commit Messages
+## Commit conventions
 
-Use present tense, imperative mood:
+Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
 
 ```
-add synonym expansion for search queries
-fix FTS5 sanitizer stripping valid URLs
-update memory governance to respect TTL policy
+feat: add synonym expansion for search queries
+fix: FTS5 sanitizer stripping valid URLs
+docs: update API reference with bulk tools
 ```
 
-No need for conventional commit prefixes (`feat:`, `fix:`, etc.) unless you prefer them.
+## Adding a new MCP tool
 
-## Adding a Global Skill
+1. Add the tool definition in `mcp/src/index.ts` following the existing `server.registerTool()` pattern
+2. Implement the handler (call data-access functions, return `{ ok, message, data }`)
+3. Add it to the tools list in `CLAUDE.md`
+4. Add tests in the relevant `*.test.ts` file
+5. Update `docs/api-reference.md` with the new tool's parameters
 
-1. Create a markdown file in `global/skills/your-skill.md`.
-2. Follow the existing skill format: name, description, steps.
-3. Test it locally by running `cortex link` and invoking `/your-skill` in a Claude Code session.
-4. Open a PR with the skill file.
+## Adding a global skill
 
-### Skill Format
-
-```markdown
-# /skill-name
-
-One sentence description.
-
-## Steps
-
-1. What to do first
-2. What to do next
-3. How to verify it worked
-```
-
-Keep skills focused. One skill, one job. If it does two things, make two skills.
-
-Skills are markdown instructions with no test runner. The test is: does Claude do the right thing when you invoke it?
+1. Create a markdown file in `global/skills/your-skill.md`
+2. Follow the existing skill format: name, description, steps
+3. Test locally by running `cortex link` and invoking `/your-skill` in a Claude Code session
 
 ## Reporting Bugs
 
