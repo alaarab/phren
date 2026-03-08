@@ -625,7 +625,6 @@ export function addFinding(cortexPath: string, project: string, learning: string
   if (!isValidProjectName(project)) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
   const resolved = safeProjectPath(cortexPath, project);
   if (!resolved) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
-  const findingsPath = path.join(resolved, "FINDINGS.md");
 
   // addFindingToFile handles its own file lock; no double-wrap
   return addFindingToFile(cortexPath, project, learning);
@@ -642,8 +641,28 @@ export function removeFinding(cortexPath: string, project: string, match: string
 
   return withFileLock(filePath, () => {
     const lines = fs.readFileSync(filePath, "utf8").split("\n");
-    const idx = lines.findIndex((line) => line.startsWith("- ") && line.toLowerCase().includes(match.toLowerCase()));
-    if (idx === -1) return cortexErr(`No finding matching "${match}" in project "${project}". Try a different search term or check :findings view.`, CortexError.NOT_FOUND);
+    const needle = match.trim().toLowerCase();
+    const bulletLines = lines.map((line, i) => ({ line, i })).filter(({ line }) => line.startsWith("- "));
+
+    // 1) Exact text match (strip bullet prefix + metadata for comparison)
+    const exactMatches = bulletLines.filter(({ line }) =>
+      line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().toLowerCase() === needle
+    );
+    // 2) Unique partial substring match
+    const partialMatches = bulletLines.filter(({ line }) => line.toLowerCase().includes(needle));
+
+    let idx: number;
+    if (exactMatches.length === 1) {
+      idx = exactMatches[0].i;
+    } else if (exactMatches.length > 1) {
+      return cortexErr(`"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, CortexError.AMBIGUOUS_MATCH);
+    } else if (partialMatches.length === 1) {
+      idx = partialMatches[0].i;
+    } else if (partialMatches.length > 1) {
+      return cortexErr(`"${match}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.`, CortexError.AMBIGUOUS_MATCH);
+    } else {
+      return cortexErr(`No finding matching "${match}" in project "${project}". Try a different search term or check :findings view.`, CortexError.NOT_FOUND);
+    }
 
     const citationComment = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/;
     const removeCount = citationComment.test(lines[idx + 1] || "") ? 2 : 1;
@@ -660,8 +679,10 @@ const queuePath = queueFilePath;
 
 function parseQueueLine(line: string): { date?: string; text: string; confidence?: number } {
   const parsed = line.match(/^- \[(\d{4}-\d{2}-\d{2})\]\s*(.+)$/);
-  const text = parsed ? parsed[2] : line.replace(/^-\s+/, "").trim();
-  const confidence = text.match(/\[confidence\s+([01](?:\.\d+)?)\]/i);
+  const rawText = parsed ? parsed[2] : line.replace(/^-\s+/, "").trim();
+  const confidence = rawText.match(/\[confidence\s+([01](?:\.\d+)?)\]/i);
+  // Strip the confidence marker from the canonical text so it doesn't pollute FINDINGS.md
+  const text = rawText.replace(/\s*\[confidence\s+[01](?:\.\d+)?\]/gi, "").trim();
   return {
     date: parsed?.[1],
     text,
@@ -730,12 +751,29 @@ function rewriteQueue(cortexPath: string, project: string, items: QueueItem[]): 
 function findQueueByMatch(cortexPath: string, project: string, match: string): CortexResult<{ item: QueueItem; all: QueueItem[]; index: number }> {
   const items = readReviewQueue(cortexPath, project);
   if (!items.ok) return forwardErr(items);
-  const needle = match.toLowerCase();
-  const index = items.data.findIndex(
-    (item) => item.id.toLowerCase() === needle || item.text.toLowerCase().includes(needle) || item.line === match
-  );
-  if (index === -1) return cortexErr(`No review queue item matching "${match}" in "${project}". Check the review queue view or use the item ID.`, CortexError.NOT_FOUND);
-  return cortexOk({ item: items.data[index], all: items.data, index });
+  const needle = match.trim().toLowerCase();
+
+  // 1) Exact ID match
+  const idIndex = items.data.findIndex((item) => item.id.toLowerCase() === needle);
+  if (idIndex !== -1) return cortexOk({ item: items.data[idIndex], all: items.data, index: idIndex });
+
+  // 2) Exact text match
+  const exactMatches = items.data.reduce<number[]>((acc, item, i) => {
+    if (item.text.toLowerCase() === needle || item.line === match) acc.push(i);
+    return acc;
+  }, []);
+  if (exactMatches.length === 1) return cortexOk({ item: items.data[exactMatches[0]], all: items.data, index: exactMatches[0] });
+  if (exactMatches.length > 1) return cortexErr(`"${match}" is ambiguous (${exactMatches.length} exact matches in review queue). Use the item ID (e.g. M1).`, CortexError.AMBIGUOUS_MATCH);
+
+  // 3) Unique partial substring match
+  const partialMatches = items.data.reduce<number[]>((acc, item, i) => {
+    if (item.text.toLowerCase().includes(needle)) acc.push(i);
+    return acc;
+  }, []);
+  if (partialMatches.length === 1) return cortexOk({ item: items.data[partialMatches[0]], all: items.data, index: partialMatches[0] });
+  if (partialMatches.length > 1) return cortexErr(`"${match}" is ambiguous (${partialMatches.length} partial matches in review queue). Use the item ID (e.g. M1).`, CortexError.AMBIGUOUS_MATCH);
+
+  return cortexErr(`No review queue item matching "${match}" in "${project}". Check the review queue view or use the item ID.`, CortexError.NOT_FOUND);
 }
 
 export function approveQueueItem(cortexPath: string, project: string, match: string): CortexResult<string> {
@@ -747,7 +785,12 @@ export function approveQueueItem(cortexPath: string, project: string, match: str
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
   const qPath = queuePath(cortexPath, project);
-  return withFileLock(qPath, () => {
+
+  // Step 1: Acquire queue lock only to read and validate the item.
+  // addFindingToFile acquires its own lock on FINDINGS.md; to avoid
+  // inconsistent lock ordering (queue lock -> findings lock vs findings lock -> queue lock),
+  // we release the queue lock before writing to FINDINGS.md, then re-acquire it to remove the item.
+  const lookupResult = withFileLock<{ item: QueueItem; all: QueueItem[]; index: number }>(qPath, () => {
     const found = findQueueByMatch(cortexPath, project, match);
     if (!found.ok) return forwardErr(found);
 
@@ -759,15 +802,24 @@ export function approveQueueItem(cortexPath: string, project: string, match: str
       if (pinDenied) return cortexErr(`This memory is flagged as risky and requires a maintainer or admin to approve. Check your role in .governance/access-control.json.`, CortexError.PERMISSION_DENIED);
     }
 
-    const findingsFilePath = path.join(ensured.data, "FINDINGS.md");
-    // addFindingToFile handles its own file lock; no double-wrap
-    const add = addFindingToFile(cortexPath, project, found.data.item.text);
-    if (!add.ok) return forwardErr(add);
+    return cortexOk(found.data);
+  });
+  if (!lookupResult.ok) return forwardErr(lookupResult);
 
-    found.data.all.splice(found.data.index, 1);
-    rewriteQueue(cortexPath, project, found.data.all);
-    appendAuditLog(cortexPath, "approve_memory", `project=${project} item=${JSON.stringify(found.data.item.text)}`);
-    return cortexOk(`Approved memory in ${project}: ${found.data.item.text}`);
+  // Step 2: Write to FINDINGS.md with its own lock (no queue lock held).
+  const add = addFindingToFile(cortexPath, project, lookupResult.data.item.text);
+  if (!add.ok) return forwardErr(add);
+
+  // Step 3: Re-acquire queue lock to remove the approved item.
+  return withFileLock(qPath, () => {
+    // Re-read queue in case it changed while findings lock was held.
+    const refreshed = readReviewQueue(cortexPath, project);
+    if (!refreshed.ok) return forwardErr(refreshed);
+    const refreshedIndex = refreshed.data.findIndex((i) => i.id === lookupResult.data.item.id);
+    if (refreshedIndex !== -1) refreshed.data.splice(refreshedIndex, 1);
+    rewriteQueue(cortexPath, project, refreshed.data);
+    appendAuditLog(cortexPath, "approve_memory", `project=${project} item=${JSON.stringify(lookupResult.data.item.text)}`);
+    return cortexOk(`Approved memory in ${project}: ${lookupResult.data.item.text}`);
   });
 }
 
