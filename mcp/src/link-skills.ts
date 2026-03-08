@@ -32,7 +32,9 @@ export interface SkillValidationResult {
 
 const REQUIRED_SKILL_FIELDS = ["name", "description"] as const;
 
-export function parseSkillFrontmatter(content: string): { frontmatter: Record<string, unknown> | null; body: string } {
+export function parseSkillFrontmatter(rawContent: string): { frontmatter: Record<string, unknown> | null; body: string } {
+  // Normalize UTF-8 BOM and Windows-style CRLF line endings before matching frontmatter
+  const content = rawContent.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) return { frontmatter: null, body: content };
   try {
@@ -154,7 +156,9 @@ export function linkSkillsDir(srcDir: string, destDir: string, managedRoot: stri
     } else if (stat.isDirectory()) {
       const skillFile = path.join(srcPath, "SKILL.md");
       if (fs.existsSync(skillFile)) {
-        symlinkFile(skillFile, path.join(destDir, `${entry}.md`), managedRoot);
+        // Symlink the entire skill directory so bundled scripts and assets are accessible.
+        // Relative paths in the skill body remain valid because the directory structure is preserved.
+        symlinkFile(srcPath, path.join(destDir, entry), managedRoot);
       }
     }
   }

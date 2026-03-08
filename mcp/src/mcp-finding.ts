@@ -250,7 +250,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           } catch { /* no remote */ }
 
           if (!hasRemote) {
-            const changedFiles = status.split("\n").length;
+            const changedFiles = status.split("\n").filter(Boolean).length;
             return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). No remote configured, skipping push.`, data: { files: changedFiles, pushed: false } });
           }
 
@@ -293,7 +293,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             }
           }
 
-          const changedFiles = status.split("\n").length;
+          const changedFiles = status.split("\n").filter(Boolean).length;
           runCustomHooks(cortexPath, "post-save", { CORTEX_FILES_CHANGED: String(changedFiles), CORTEX_PUSHED: String(pushed) });
           if (pushed) {
             return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). Pushed to remote.`, data: { files: changedFiles, pushed: true } });

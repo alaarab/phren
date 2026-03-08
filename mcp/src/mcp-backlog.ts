@@ -12,6 +12,10 @@ import {
   type BacklogSection,
   completeBacklogItem as completeBacklogItemStore,
   completeBacklogItems as completeBacklogItemsBatch,
+  pinBacklogItem,
+  unpinBacklogItem,
+  workNextBacklogItem,
+  tidyBacklogDone,
   readBacklog,
   readBacklogs,
   updateBacklogItem as updateBacklogItemStore,
@@ -296,6 +300,69 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "pin_backlog_item",
+    {
+      title: "◆ cortex · pin task",
+      description: "Pin a backlog item so it floats to the top of its section.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial item text or ID to pin."),
+      }),
+    },
+    async ({ project, item }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = pinBacklogItem(cortexPath, project, item);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        return mcpResponse({ ok: true, message: result.data, data: { project, item } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "work_next_backlog_item",
+    {
+      title: "◆ cortex · work next",
+      description: "Move the highest-priority Queue item to Active so it becomes the next task to work on.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+      }),
+    },
+    async ({ project }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = workNextBacklogItem(cortexPath, project);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        return mcpResponse({ ok: true, message: result.data, data: { project } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "tidy_backlog_done",
+    {
+      title: "◆ cortex · tidy done",
+      description: "Archive old Done items beyond the keep limit to keep the backlog tidy.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        keep: z.number().optional().describe("Number of recent Done items to keep. Default 30."),
+        dry_run: z.boolean().optional().describe("If true, preview changes without writing."),
+      }),
+    },
+    async ({ project, keep, dry_run }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = tidyBacklogDone(cortexPath, project, keep ?? 30, dry_run ?? false);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        if (!dry_run) updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        return mcpResponse({ ok: true, message: result.data, data: { project, keep: keep ?? 30, dryRun: dry_run ?? false } });
       });
     }
   );

@@ -50,8 +50,8 @@ export async function runCortexUpdate(): Promise<UpdateResult> {
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
       run("npm", ["install"], root);
       return { ok: true, message: `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.` };
-    } catch (err: any) {
-      const detail = String(err?.message || err || "update failed");
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
       return { ok: false, message: `Local repo update failed: ${detail}` };
     }
   }
@@ -59,8 +59,8 @@ export async function runCortexUpdate(): Promise<UpdateResult> {
   try {
     run("npm", ["install", "-g", "@alaarab/cortex@latest"]);
     return { ok: true, message: "Updated cortex via npm global install (@latest)." };
-  } catch (err: any) {
-    const detail = String(err?.message || err || "update failed");
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
     return { ok: false, message: `Global update failed: ${detail}. Try manually: npm install -g @alaarab/cortex@latest` };
   }
 }

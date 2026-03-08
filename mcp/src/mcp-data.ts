@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName } from "./utils.js";
 import { readFindings, readBacklog } from "./data-access.js";
+import { debugLog } from "./shared.js";
 
 
 
@@ -97,6 +98,14 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         const parsed = parsedResult.data;
+
+        // Warn about unknown fields silently discarded by .passthrough()
+        const knownTopLevel = new Set(["project", "overwrite", "summary", "claudeMd", "learnings", "backlog", "exportedAt", "version", "findingsRaw"]);
+        const unknownFields = Object.keys(decoded as Record<string, unknown>).filter(k => !knownTopLevel.has(k));
+        if (unknownFields.length > 0) {
+          debugLog(`import_project: unknown fields will be ignored: ${unknownFields.join(", ")}`);
+        }
+
         if (!isValidProjectName(parsed.project)) {
           return mcpResponse({ ok: false, error: `Invalid project name: "${parsed.project}"` });
         }

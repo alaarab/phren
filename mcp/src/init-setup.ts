@@ -4,6 +4,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import {
   debugLog,
@@ -285,8 +286,10 @@ export function applyTemplate(projectDir: string, templateName: string, projectN
   return true;
 }
 
-/** Bootstrap a cortex project from an existing project directory with CLAUDE.md */
-export function bootstrapFromExisting(cortexPath: string, projectPath: string): string {
+/** Bootstrap a cortex project from an existing project directory with CLAUDE.md.
+ * @param profile - if provided, only this profile YAML is updated (avoids leaking project to unrelated profiles).
+ */
+export function bootstrapFromExisting(cortexPath: string, projectPath: string, profile?: string): string {
   const resolvedPath = path.resolve(projectPath);
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(`Path does not exist: ${resolvedPath}`);
@@ -353,9 +356,14 @@ export function bootstrapFromExisting(cortexPath: string, projectPath: string): 
 
   const profilesDir = path.join(cortexPath, "profiles");
   if (fs.existsSync(profilesDir)) {
-    for (const pf of fs.readdirSync(profilesDir)) {
-      if (!pf.endsWith(".yaml")) continue;
-      const pfPath = path.join(profilesDir, pf);
+    // Only update the explicitly selected profile (or the first one found if none specified)
+    // to avoid leaking the project into unrelated profiles on other machines.
+    const allProfiles = fs.readdirSync(profilesDir).filter(f => f.endsWith(".yaml"));
+    const targetProfile = profile
+      ? allProfiles.find(f => f === `${profile}.yaml` || f === profile) ?? allProfiles[0]
+      : allProfiles[0];
+    if (targetProfile) {
+      const pfPath = path.join(profilesDir, targetProfile);
       const content = fs.readFileSync(pfPath, "utf8");
       if (!content.includes(projectName)) {
         fs.writeFileSync(pfPath, content.trimEnd() + `\n  - ${projectName}\n`);
@@ -371,17 +379,37 @@ export function updateMachinesYaml(cortexPath: string, machine?: string, profile
   if (!fs.existsSync(machinesFile)) return;
   const hostname = machine || os.hostname();
   const profileName = profile || "personal";
-  let content = fs.readFileSync(machinesFile, "utf8");
-  if (!content.includes(hostname)) {
-    const lines = content.split("\n");
-    let firstNonComment = 0;
-    while (firstNonComment < lines.length && (lines[firstNonComment].startsWith("#") || lines[firstNonComment].trim() === "")) {
-      firstNonComment++;
+  const content = fs.readFileSync(machinesFile, "utf8");
+
+  // Parse structurally to avoid substring false-positives and preserve comments
+  let parsed: Record<string, unknown> = {};
+  try {
+    const loaded = yaml.load(content);
+    if (loaded && typeof loaded === "object" && !Array.isArray(loaded)) {
+      parsed = loaded as Record<string, unknown>;
     }
-    const rest = lines.slice(firstNonComment).join("\n").trim();
-    content = rest ? `${hostname}: ${profileName}\n${rest}\n` : `${hostname}: ${profileName}\n`;
-    fs.writeFileSync(machinesFile, content);
+  } catch { /* fall through to raw write */ }
+
+  // If the hostname key already exists (exact match), do not overwrite
+  if (Object.prototype.hasOwnProperty.call(parsed, hostname)) return;
+
+  // Set the new key and re-serialize, preserving the comment header
+  parsed[hostname] = profileName;
+
+  // Preserve leading comment lines from the original file
+  const lines = content.split("\n");
+  const commentLines: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("#") || line.trim() === "") {
+      commentLines.push(line);
+    } else {
+      break;
+    }
   }
+
+  const header = commentLines.length ? commentLines.join("\n") + "\n" : "";
+  const body = yaml.dump(parsed, { lineWidth: -1 });
+  fs.writeFileSync(machinesFile, header + body);
 }
 
 export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: PostInitCheck[] } {

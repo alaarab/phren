@@ -455,8 +455,8 @@ export function autoMergeConflicts(cortexPath: string): boolean {
       timeout: EXEC_TIMEOUT_MS,
     }).trim();
     conflictedFiles = out ? out.split("\n") : [];
-  } catch (err: any) {
-    debugLog(`autoMergeConflicts: failed to list conflicted files: ${err.message}`);
+  } catch (err: unknown) {
+    debugLog(`autoMergeConflicts: failed to list conflicted files: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
 
@@ -489,8 +489,8 @@ export function autoMergeConflicts(cortexPath: string): boolean {
       fs.renameSync(tmpMergePath, fullPath);
       execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
-    } catch (err: any) {
-      debugLog(`Failed to auto-merge ${relFile}: ${err.message}`);
+    } catch (err: unknown) {
+      debugLog(`Failed to auto-merge ${relFile}: ${err instanceof Error ? err.message : String(err)}`);
       allResolved = false;
     }
   }

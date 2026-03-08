@@ -6,8 +6,7 @@ import {
 import {
   removeFinding as removeFindingStore,
 } from "./data-access.js";
-
-const MAX_FINDING_LENGTH = 5000;
+import { MAX_FINDING_LENGTH } from "./content-validate.js";
 const MAX_BULK_COUNT = 100;
 
 export interface FindingResult {

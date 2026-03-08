@@ -559,15 +559,16 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
       "background_maintenance",
       `status=ok projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}`
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
     updateRuntimeHealth(getCortexPath(), {
       lastGovernance: {
         at: startedAt,
         status: "error",
-        detail: err?.message || String(err),
+        detail: errMsg,
       },
     });
-    appendAuditLog(getCortexPath(), "background_maintenance_failed", `error=${err?.message || String(err)}`);
+    appendAuditLog(getCortexPath(), "background_maintenance_failed", `error=${errMsg}`);
   } finally {
     try { fs.unlinkSync(markers.lock); } catch { /* best effort */ }
   }
