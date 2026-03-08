@@ -293,6 +293,9 @@ export type FindingType = (typeof FINDING_TYPES)[number];
 export const FINDING_TAGS = FINDING_TYPES;
 export type FindingTag = FindingType;
 
+/** Canonical set of known observation tags — derived from FINDING_TYPES */
+export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TYPES);
+
 /** Document types in the FTS index */
 export const DOC_TYPES = ["claude", "findings", "reference", "skills", "summary", "backlog", "changelog", "canonical", "memory-queue", "skill", "other"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
@@ -355,6 +358,29 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
   } finally {
     if (hasLock) try { fs.unlinkSync(lockPath); } catch (err: unknown) {
       if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog unlock: ${errorMessage(err)}\n`);
+    }
+  }
+}
+
+// Lazy singleton for getCortexPath — shared across all CLI modules.
+let _lazyCortexPath: string | undefined;
+export function getCortexPath(): string {
+  if (!_lazyCortexPath) _lazyCortexPath = ensureCortexPath();
+  return _lazyCortexPath;
+}
+
+// ── Cache eviction helper ────────────────────────────────────────────────────
+
+const CACHE_MAX = 1000;
+const CACHE_EVICT = 100;
+
+export function capCache<K, V>(cache: Map<K, V>): void {
+  if (cache.size > CACHE_MAX) {
+    const it = cache.keys();
+    for (let i = 0; i < CACHE_EVICT; i++) {
+      const k = it.next();
+      if (k.done) break;
+      cache.delete(k.value);
     }
   }
 }

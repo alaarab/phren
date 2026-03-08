@@ -4,22 +4,7 @@ import {
   validateFindingCitation,
 } from "./content-citation.js";
 import * as fs from "fs";
-
-// ── Cache eviction helper ────────────────────────────────────────────────────
-
-const CACHE_MAX = 1000;
-const CACHE_EVICT = 100;
-
-export function capCache<K, V>(cache: Map<K, V>): void {
-  if (cache.size > CACHE_MAX) {
-    const it = cache.keys();
-    for (let i = 0; i < CACHE_EVICT; i++) {
-      const k = it.next();
-      if (k.done) break;
-      cache.delete(k.value);
-    }
-  }
-}
+import { capCache } from "./shared.js";
 
 // ── Citation validation ──────────────────────────────────────────────────────
 

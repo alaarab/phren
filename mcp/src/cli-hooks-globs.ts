@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { capCache } from "./cli-hooks-citations.js";
+import { capCache } from "./shared.js";
 
 // ── Glob matching and project frontmatter ────────────────────────────────────
 
