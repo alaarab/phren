@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing yet.
 
+## [1.15.1] - 2026-03-08
+
+### Added
+- **Per-project MCP servers**: declare extra MCP servers in `cortex.project.yaml` under `mcpServers`. `cortex link` merges them into agent config using namespaced keys (`cortex__<project>__<name>`)
+- **Skills shell view** (`s`): browse and remove per-project skills from the interactive shell
+- **Hooks shell view** (`k`): enable/disable hooks per tool from the interactive shell
+
+### Fixed
+- Review Queue discard keybinding corrected from `r` to `d`
+
 ## [1.15.0] - 2026-03-07
 
 ### Added
