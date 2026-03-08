@@ -226,9 +226,54 @@ function findingBulletText(block: string): string {
 }
 
 /**
+ * Extract non-entry preamble content from a FINDINGS.md string.
+ * Returns lines that appear before the first date section heading (## YYYY-MM-DD)
+ * and are not the title line, so things like <!-- consolidated: ... --> markers
+ * and <details>/cortex:archive blocks are preserved during merge.
+ */
+function extractFindingsPreamble(content: string): string[] {
+  const lines = content.split("\n");
+  const preamble: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("## ") && /^\d{4}-\d{2}-\d{2}$/.test(line.slice(3).trim())) break;
+    preamble.push(line);
+  }
+  // Drop the title line (index 0) since it's handled separately
+  return preamble.slice(1);
+}
+
+/**
+ * Extract postamble content from a FINDINGS.md string.
+ * Returns lines that appear after all date sections, such as <details> archive blocks.
+ */
+function extractFindingsPostamble(content: string): string[] {
+  const lines = content.split("\n");
+  // Find the last date-section heading
+  let lastDateIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith("## ") && /^\d{4}-\d{2}-\d{2}$/.test(lines[i].slice(3).trim())) {
+      lastDateIdx = i;
+      break;
+    }
+  }
+  if (lastDateIdx === -1) return [];
+  // Skip forward past the date section's content to find postamble
+  for (let i = lastDateIdx + 1; i < lines.length; i++) {
+    if (lines[i].startsWith("## ") && !/^\d{4}-\d{2}-\d{2}$/.test(lines[i].slice(3).trim())) {
+      return lines.slice(i);
+    }
+    if (lines[i].startsWith("<details") || lines[i].startsWith("<!-- consolidated:")) {
+      return lines.slice(i);
+    }
+  }
+  return [];
+}
+
+/**
  * Merge two FINDINGS.md versions: union entries per date, newest date first.
  * Deduplicates by bullet text only, keeping comment lines from whichever
  * version is kept (ours takes priority).
+ * Preserves preamble content (consolidated markers) and postamble (archive blocks).
  */
 export function mergeFindings(ours: string, theirs: string): string {
   const ourEntries = parseFindingsEntries(ours);
@@ -237,7 +282,17 @@ export function mergeFindings(ours: string, theirs: string): string {
   const allDates = [...new Set([...ourEntries.keys(), ...theirEntries.keys()])].sort().reverse();
 
   const titleLine = ours.split("\n")[0] || "# Findings";
-  const lines = [titleLine, ""];
+  // Preserve preamble from ours (consolidated markers, etc.)
+  const preamble = extractFindingsPreamble(ours);
+  // Preserve postamble from ours (archive <details> blocks, etc.)
+  const postamble = extractFindingsPostamble(ours);
+
+  const lines = [titleLine];
+  if (preamble.length > 0) {
+    lines.push(...preamble);
+  } else {
+    lines.push("");
+  }
 
   for (const date of allDates) {
     const ourItems = ourEntries.get(date) ?? [];
@@ -269,29 +324,78 @@ export function mergeFindings(ours: string, theirs: string): string {
     }
   }
 
+  if (postamble.length > 0) {
+    lines.push(...postamble);
+  }
+
   return lines.join("\n");
 }
 
-// Parse backlog.md into a map of section name -> bullet entries
-function parseBacklogSections(content: string): Map<string, string[]> {
-  const sections = new Map<string, string[]>();
+/** A parsed backlog record that may span multiple lines (bullet + Context: continuation). */
+interface BacklogRecord {
+  /** The stable bid:XXXXXXXX if present in the bullet line, used as merge key. */
+  stableId?: string;
+  /** The bullet line itself. */
+  bullet: string;
+  /** Continuation lines immediately following the bullet (e.g. "  Context: ..."). */
+  continuations: string[];
+}
+
+/** Pattern for stable bid comment embedded in backlog lines. */
+const MERGE_BID_PATTERN = /<!--\s*bid:([a-z0-9]{8})\s*-->/;
+
+/** Render a BacklogRecord back to its original lines. */
+function renderBacklogRecord(record: BacklogRecord): string[] {
+  return [record.bullet, ...record.continuations];
+}
+
+/** Merge key: stable ID if present, otherwise normalised bullet text. */
+function backlogRecordKey(record: BacklogRecord): string {
+  if (record.stableId) return `bid:${record.stableId}`;
+  return record.bullet.replace(MERGE_BID_PATTERN, "").trim().toLowerCase();
+}
+
+// Parse backlog.md into a map of section name -> multi-line BacklogRecord entries.
+function parseBacklogSections(content: string): Map<string, BacklogRecord[]> {
+  const sections = new Map<string, BacklogRecord[]>();
   let current = "";
+  let currentRecord: BacklogRecord | null = null;
+
+  const flush = () => {
+    if (currentRecord && current) {
+      sections.get(current)!.push(currentRecord);
+      currentRecord = null;
+    }
+  };
 
   for (const line of content.split("\n")) {
     if (line.startsWith("## ")) {
+      flush();
       current = line.slice(3).trim();
       if (!sections.has(current)) sections.set(current, []);
     } else if (line.startsWith("- ") && current) {
-      sections.get(current)!.push(line);
+      flush();
+      const bidMatch = line.match(MERGE_BID_PATTERN);
+      currentRecord = {
+        stableId: bidMatch ? bidMatch[1] : undefined,
+        bullet: line,
+        continuations: [],
+      };
+    } else if (currentRecord && line.trim().startsWith("Context:")) {
+      currentRecord.continuations.push(line);
+    } else {
+      flush();
     }
   }
+  flush();
 
   return sections;
 }
 
 /**
- * Merge two backlog.md versions: union items per section, deduplicated.
- * Section order follows Active > Queue > Done, with unknown sections appended.
+ * Merge two backlog.md versions: union items per section, deduplicated by stable ID when
+ * present or by normalised bullet text otherwise. Context/continuation lines are preserved.
+ * Ours wins on conflict. Section order follows Active > Queue > Done.
  */
 export function mergeBacklog(ours: string, theirs: string): string {
   const ourSections = parseBacklogSections(ours);
@@ -310,8 +414,28 @@ export function mergeBacklog(ours: string, theirs: string): string {
   for (const section of ordered) {
     const ourItems = ourSections.get(section) ?? [];
     const theirItems = theirSections.get(section) ?? [];
-    const allItems = [...new Set([...ourItems, ...theirItems])];
-    lines.push(`## ${section}`, "", ...allItems, "");
+
+    // Merge: ours wins; include theirs only when key not already seen
+    const seen = new Map<string, BacklogRecord>();
+    for (const record of ourItems) seen.set(backlogRecordKey(record), record);
+    for (const record of theirItems) {
+      const key = backlogRecordKey(record);
+      if (!seen.has(key)) {
+        seen.set(key, record);
+      } else if (record.stableId) {
+        // Merge fields from theirs into ours when using stable ID: preserve context lines
+        const oursRecord = seen.get(key)!;
+        if (oursRecord.continuations.length === 0 && record.continuations.length > 0) {
+          seen.set(key, { ...oursRecord, continuations: record.continuations });
+        }
+      }
+    }
+
+    lines.push(`## ${section}`, "");
+    for (const record of seen.values()) {
+      lines.push(...renderBacklogRecord(record));
+    }
+    lines.push("");
   }
 
   return lines.join("\n");

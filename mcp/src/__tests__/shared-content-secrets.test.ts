@@ -64,24 +64,26 @@ describe("scanForSecrets", () => {
 });
 
 describe("addFindingToFile rejects secrets", () => {
-  it("throws when finding contains an AWS key", () => {
+  it("returns VALIDATION_ERROR when finding contains an AWS key", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "myproj", { "summary.md": "# myproj\n" });
 
-    expect(() => {
-      addFindingToFile(cortex, "myproj", "Use AKIAIOSFODNN7EXAMPLE for the API");
-    }).toThrow("Rejected: finding appears to contain a secret (AWS access key)");
+    const result = addFindingToFile(cortex, "myproj", "Use AKIAIOSFODNN7EXAMPLE for the API");
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toContain("Rejected: finding appears to contain a secret (AWS access key)");
+    expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
   });
 
-  it("throws when finding contains a JWT", () => {
+  it("returns VALIDATION_ERROR when finding contains a JWT", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     makeProject(cortex, "myproj", { "summary.md": "# myproj\n" });
 
-    expect(() => {
-      addFindingToFile(cortex, "myproj", "Set token to eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U");
-    }).toThrow("Rejected: finding appears to contain a secret (JWT token)");
+    const result = addFindingToFile(cortex, "myproj", "Set token to eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U");
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toContain("Rejected: finding appears to contain a secret (JWT token)");
+    expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
   });
 
   it("allows clean findings through", () => {

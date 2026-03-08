@@ -290,8 +290,9 @@ export function scanForSecrets(text: string): string | null {
   if (/(?:aws[_-]?secret|AWS_SECRET)[_-]?(?:access[_-]?)?key[_-]?(?:id)?['":\s]+[A-Za-z0-9/+=]{40}/i.test(text)) return 'AWS secret access key';
   // JWT token
   if (/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(text)) return 'JWT token';
-  // Long base64-encoded secret-like blob
-  if (/[A-Za-z0-9+\/]{40,}={0,2}/.test(text)) return 'long base64 secret';
+  // Long base64-encoded secret-like blob (requires base64 chars including +/= and must not be
+  // a plain hex digest like a git commit SHA — 40-char lowercase hex is explicitly exempt).
+  if (!/^[0-9a-f]{40}$/.test(text) && /(?=[A-Za-z0-9+/]*[+/][A-Za-z0-9+/]*)[A-Za-z0-9+/]{40,}={0,2}/.test(text.replace(/[0-9a-f]{40}/g, ""))) return 'long base64 secret';
   // Connection string with credentials
   if (/(mongodb|postgres|mysql|redis):\/\/[^@\s]+:[^@\s]+@/i.test(text)) return 'connection string with credentials';
   // SSH private key

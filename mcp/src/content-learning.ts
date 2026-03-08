@@ -9,6 +9,9 @@ import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCo
 import { validateFindingsFormat, validateFinding } from "./content-validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./content-archive.js";
 
+/** Default cap for active findings before auto-archiving is triggered. */
+export const DEFAULT_FINDINGS_CAP = 20;
+
 // Read legacy history files (LEARNINGS.md, etc.) as supplementary dedup/conflict context.
 // Never written to — used only as a read-only baseline when FINDINGS.md is being created or updated.
 function readLegacyHistoryContent(resolvedDir: string): string {
@@ -319,7 +322,7 @@ export function addFindingToFile(
   // Reject secrets before anything else — even if project doesn't exist yet
   const earlySecretType = scanForSecrets(learning);
   if (earlySecretType) {
-    throw new Error(`Rejected: finding appears to contain a secret (${earlySecretType}). Strip credentials before saving.`);
+    return cortexErr(`Rejected: finding appears to contain a secret (${earlySecretType}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
   }
   // Check project dir existence before withFileLock (which would create the dir via mkdirSync)
   if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" does not exist.`, CortexError.INVALID_PROJECT_NAME);
@@ -328,7 +331,7 @@ export function addFindingToFile(
     const preparedForNewFile = prepareFinding(learning, project, "", citationInput, nowIso, inferredRepo, headCommit);
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
-        throw new Error(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`);
+        return cortexErr(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
       }
       if (preparedForNewFile.status === "duplicate") {
         return cortexOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
@@ -360,7 +363,7 @@ export function addFindingToFile(
 
     const prepared = prepareFinding(learning, project, historyForDedup, citationInput, nowIso, inferredRepo, headCommit);
     if (prepared.status === "rejected") {
-      throw new Error(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`);
+      return cortexErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
     }
     if (prepared.status === "duplicate") {
       debugLog(`add_finding: skipped duplicate for "${project}": ${learning.slice(0, 80)}`);
@@ -409,7 +412,6 @@ export function addFindingToFile(
     `project=${project}${result.data.created ? " created=true" : ""} citation_commit=${result.data.citation.commit ?? "none"} citation_file=${result.data.citation.file ?? "none"}`
   );
 
-  const DEFAULT_FINDINGS_CAP = 20;
   const cap = Number.parseInt(process.env.CORTEX_FINDINGS_CAP || "", 10) || DEFAULT_FINDINGS_CAP;
   const activeCount = countActiveFindings(result.data.content);
   if (activeCount > cap) {
@@ -462,9 +464,11 @@ export function addFindingsToFile(
   const skipped: string[] = [];
   const rejected: { text: string; reason: string }[] = [];
 
+  // Check project dir existence before withFileLock (which would create the dir via mkdirSync)
+  if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+
   const contentResult: CortexResult<AddFindingsWriteResult> = withFileLock(learningsPath, () => {
     if (!fs.existsSync(learningsPath)) {
-      if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
       let content = `# ${project} Findings\n\n## ${today}\n`;
       for (const learning of learnings) {
         const lengthError = validateFinding(learning);
@@ -531,7 +535,6 @@ export function addFindingsToFile(
   if (contentResult.data.wrote) {
     appendAuditLog(cortexPath, "add_finding", `project=${project} count=${added.length} batch=true`);
 
-    const DEFAULT_FINDINGS_CAP = 20;
     const cap = Number.parseInt(process.env.CORTEX_FINDINGS_CAP || "", 10) || DEFAULT_FINDINGS_CAP;
     if (countActiveFindings(contentResult.data.content) > cap) {
       const archiveResult = autoArchiveToReference(cortexPath, project, cap);
