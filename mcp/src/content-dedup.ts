@@ -117,18 +117,18 @@ async function callLlm(prompt: string): Promise<string> {
   }
 }
 
-// Stop words for Jaccard similarity tokenization
-const JACCARD_STOP_WORDS = new Set([
+// Stop words for lightweight semantic overlap checks
+const DEDUP_STOP_WORDS = new Set([
   "the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for",
   "of", "and", "or", "but", "not", "with", "from", "by", "as", "it", "its",
-  "this", "that", "be", "has", "have", "had",
+  "this", "that", "be", "has", "have", "had", "will", "would", "can", "could", "should",
 ]);
 
 function jaccardTokenize(text: string): Set<string> {
   return new Set(
     text.toLowerCase()
       .split(/[\s\W]+/)
-      .filter(w => w.length > 0 && !JACCARD_STOP_WORDS.has(w))
+      .filter(w => w.length > 0 && !DEDUP_STOP_WORDS.has(w))
   );
 }
 
@@ -196,7 +196,7 @@ export function isDuplicateFinding(existingContent: string, newLearning: string,
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, " ")
       .split(/\s+/)
-      .filter(w => w.length > 2);
+      .filter(w => w.length > 2 && !DEDUP_STOP_WORDS.has(w));
   };
 
   const newWords = normalize(newLearning);
@@ -288,6 +288,8 @@ export function scanForSecrets(text: string): string | null {
   if (/AKIA[0-9A-Z]{16}/.test(text)) return 'AWS access key';
   // JWT token
   if (/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(text)) return 'JWT token';
+  // Long base64-encoded secret-like blob
+  if (/[A-Za-z0-9+\/]{40,}={0,2}/.test(text)) return 'long base64 secret';
   // Connection string with credentials
   if (/(mongodb|postgres|mysql|redis):\/\/[^@\s]+:[^@\s]+@/i.test(text)) return 'connection string with credentials';
   // SSH private key
@@ -300,6 +302,8 @@ export function scanForSecrets(text: string): string | null {
   if (/ghp_[A-Za-z0-9]{36}/.test(text)) return 'GitHub personal access token';
   // GitHub OAuth token
   if (/gho_[A-Za-z0-9]{36}/.test(text)) return 'GitHub OAuth token';
+  // GitHub tokens (classic, OAuth, user, org, server)
+  if (/gh[pousr]_[A-Za-z0-9]{36}/.test(text)) return 'GitHub token';
   // Slack bot token
   if (/xoxb-[0-9]+-[A-Za-z0-9-]+/.test(text)) return 'Slack bot token';
   // Slack user token

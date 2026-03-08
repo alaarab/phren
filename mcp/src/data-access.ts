@@ -164,9 +164,9 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
   const sectionCounters: Record<BacklogSection, number> = { Active: 0, Queue: 0, Done: 0 };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const heading = line.trim().match(/^##\s+(.+)$/);
+    const heading = line.trim().match(/^##\s+(.+?)[\s]*$/);
     if (heading) {
-      const token = heading[1].trim().toLowerCase();
+      const token = heading[1].replace(/\s+/g, " ").trim().toLowerCase();
       if (["active", "in progress", "in-progress", "current", "wip"].includes(token)) {
         section = "Active";
       } else if (["queue", "queued", "backlog", "todo", "upcoming", "next"].includes(token)) {
@@ -254,7 +254,7 @@ function findItemByMatch(
   if (partial.length > 1) {
     return { error: `${CortexError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${partial.length} partial matches). Use item ID.` };
   }
-  return {};
+  return { error: `${CortexError.NOT_FOUND}: Item not found: ${match}` };
 }
 
 function writeBacklogDoc(doc: BacklogDoc): void {
@@ -642,17 +642,12 @@ export function readReviewQueue(cortexPath: string, project: string): CortexResu
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed === "## Review") {
-      section = "Review";
-      continue;
-    }
-    if (trimmed === "## Stale") {
-      section = "Stale";
-      continue;
-    }
-    if (trimmed === "## Conflicts") {
-      section = "Conflicts";
-      continue;
+    const queueHeading = trimmed.match(/^##\s+(.+?)[\s]*$/i);
+    if (queueHeading) {
+      const qToken = queueHeading[1].replace(/\s+/g, " ").trim().toLowerCase();
+      if (qToken === "review") { section = "Review"; continue; }
+      if (qToken === "stale") { section = "Stale"; continue; }
+      if (qToken === "conflicts") { section = "Conflicts"; continue; }
     }
     if (!line.startsWith("- ")) continue;
 
@@ -964,15 +959,18 @@ export function loadShellState(cortexPath: string): ShellState {
 export function saveShellState(cortexPath: string, state: ShellState): void {
   const file = shellStatePath(cortexPath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const out: ShellState = {
-    version: SHELL_STATE_VERSION,
-    view: state.view,
-    project: state.project,
-    filter: state.filter,
-    page: state.page,
-    perPage: state.perPage,
-  };
-  fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
+  withFileLock(file, () => {
+    const out: ShellState = {
+      version: SHELL_STATE_VERSION,
+      view: state.view,
+      project: state.project,
+      filter: state.filter,
+      page: state.page,
+      perPage: state.perPage,
+    };
+    fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
+    return cortexOk(undefined);
+  });
 }
 
 export function resetShellState(cortexPath: string): CortexResult<string> {

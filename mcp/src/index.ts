@@ -21,6 +21,7 @@ import { register as registerMemory } from "./mcp-memory.js";
 import { register as registerData } from "./mcp-data.js";
 import { register as registerGraph } from "./mcp-graph.js";
 import { register as registerSession } from "./mcp-session.js";
+import { register as registerOps } from "./mcp-ops.js";
 import type { McpContext } from "./mcp-types.js";
 
 if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
@@ -271,6 +272,9 @@ const PACKAGE_VERSION = (() => {
   }
 })();
 const profile = process.env.CORTEX_PROFILE || "";
+const TOOL_NAME_ALIASES: Record<string, string> = {
+  search_cortex: "search_knowledge",
+};
 
 const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
 
@@ -330,15 +334,17 @@ async function main() {
       }
     });
     writeQueueDepth++;
-    writeQueue = run.then(
-      () => undefined,
-      (error): void => {
+    writeQueue = run.then(() => undefined).catch((error): void => {
+      try {
         const message = error instanceof Error
           ? error.stack || error.message
           : String(error);
         debugLog(`Write queue error: ${message}`);
-      },
-    );
+      } catch (logError: unknown) {
+        const message = logError instanceof Error ? logError.message : String(logError);
+        console.error(`Failed to log write queue error: ${message}`);
+      }
+    });
     return run;
   }
 
@@ -355,6 +361,7 @@ async function main() {
   // The real type safety comes from each domain module's z.object() inputSchema.
   // TODO: tighten when SDK exposes simpler handler types.
   server.registerTool = function (name: string, config: any, handler: any) {
+    const registeredName = TOOL_NAME_ALIASES[name] ?? name;
     const wrapped = async (...args: any[]) => {
       if (!indexReady || !db) {
         return {
@@ -367,10 +374,13 @@ async function main() {
           }],
         };
       }
-      try { trackToolCall(cortexPath, name); } catch { /* best-effort */ }
+      try { trackToolCall(cortexPath, registeredName); } catch { /* best-effort */ }
       return handler(...args);
     };
-    return origRegisterTool(name, config, wrapped);
+    if (registeredName !== name) {
+      debugLog(`Remapped MCP tool "${name}" to canonical name "${registeredName}"`);
+    }
+    return origRegisterTool(registeredName, config, wrapped);
   } as typeof server.registerTool;
 
   // Register all tool handlers from domain modules
@@ -396,6 +406,7 @@ async function main() {
   registerData(server, ctx);
   registerGraph(server, ctx);
   registerSession(server, ctx);
+  registerOps(server, ctx);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

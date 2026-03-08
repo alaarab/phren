@@ -536,6 +536,8 @@ export async function handleHookContext() {
 // ── PostToolUse hook ─────────────────────────────────────────────────────────
 
 const INTERESTING_TOOLS = new Set(["Read", "Write", "Edit", "Bash", "Glob", "Grep"]);
+const COOLDOWN_MS = parseInt(process.env.CORTEX_AUTOCAPTURE_COOLDOWN_MS ?? "30000", 10);
+const SESSION_CAP = parseInt(process.env.CORTEX_AUTOCAPTURE_SESSION_CAP ?? "10", 10);
 
 interface ToolLogEntry {
   at: string;
@@ -551,134 +553,133 @@ export async function handleHookTool() {
     process.exit(0);
   }
 
-  const start = Date.now();
-
-  let raw = "";
   try {
-    raw = fs.readFileSync(0, "utf-8");
-  } catch {
-    process.exit(0);
-  }
+    const start = Date.now();
 
-  let data: Record<string, unknown>;
-  try {
-    data = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    process.exit(0);
-  }
-
-  const toolName: string = String(data.tool_name ?? data.tool ?? "");
-  if (!INTERESTING_TOOLS.has(toolName)) {
-    process.exit(0);
-  }
-
-  const sessionId: string | undefined = data.session_id as string | undefined;
-  const input: Record<string, unknown> = (data.tool_input ?? {}) as Record<string, unknown>;
-
-  const entry: ToolLogEntry = {
-    at: new Date().toISOString(),
-    session_id: sessionId,
-    tool: toolName,
-  };
-
-  if (toolName === "Read" || toolName === "Write" || toolName === "Edit") {
-    const filePath = input.file_path ?? input.path ?? undefined;
-    if (filePath) entry.file = String(filePath);
-  } else if (toolName === "Bash") {
-    const cmd = input.command ?? undefined;
-    if (cmd) entry.command = String(cmd).slice(0, 200);
-  } else if (toolName === "Glob") {
-    const pattern = input.pattern ?? undefined;
-    if (pattern) entry.file = String(pattern);
-  } else if (toolName === "Grep") {
-    const pattern = input.pattern ?? undefined;
-    const searchPath = input.path ?? undefined;
-    if (pattern) entry.command = `grep ${pattern}${searchPath ? ` in ${searchPath}` : ""}`.slice(0, 200);
-  }
-
-  const responseStr = typeof data.tool_response === "string"
-    ? data.tool_response
-    : JSON.stringify(data.tool_response ?? "");
-  if (/(error|exception|failed|no such file|ENOENT)/i.test(responseStr)) {
-    entry.error = responseStr.slice(0, 300);
-  }
-
-  try {
-    const logFile = runtimeFile(getCortexPath(), "tool-log.jsonl");
-    fs.mkdirSync(path.dirname(logFile), { recursive: true });
-    fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
-  } catch {
-    // best effort
-  }
-
-  const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
-  let activeProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
-
-  // Check cooldown
-  const cooldownMs = Number.parseInt(process.env.CORTEX_HOOK_TOOL_COOLDOWN_MS || "30000", 10) || 30000;
-  const cooldownFile = runtimeFile(getCortexPath(), "hook-tool-cooldown");
-  try {
-    if (fs.existsSync(cooldownFile)) {
-      const age = Date.now() - fs.statSync(cooldownFile).mtimeMs;
-      if (age < cooldownMs) {
-        debugLog(`hook-tool: cooldown active (${Math.round(age / 1000)}s < ${Math.round(cooldownMs / 1000)}s), skipping extraction`);
-        // Skip to the log-only path
-        activeProject = null; // prevent extraction below
-      }
-    }
-  } catch { /* best effort */ }
-
-  // Check session cap
-  const sessionCap = Number.parseInt(process.env.CORTEX_HOOK_TOOL_SESSION_CAP || "10", 10) || 10;
-  if (activeProject && sessionId) {
+    let raw = "";
     try {
-      const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
-      let count = 0;
-      if (fs.existsSync(capFile)) {
-        count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
+      raw = fs.readFileSync(0, "utf-8");
+    } catch {
+      process.exit(0);
+    }
+
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      process.exit(0);
+    }
+
+    const toolName: string = String(data.tool_name ?? data.tool ?? "");
+    if (!INTERESTING_TOOLS.has(toolName)) {
+      process.exit(0);
+    }
+
+    const sessionId: string | undefined = data.session_id as string | undefined;
+    const input: Record<string, unknown> = (data.tool_input ?? {}) as Record<string, unknown>;
+
+    const entry: ToolLogEntry = {
+      at: new Date().toISOString(),
+      session_id: sessionId,
+      tool: toolName,
+    };
+
+    if (toolName === "Read" || toolName === "Write" || toolName === "Edit") {
+      const filePath = input.file_path ?? input.path ?? undefined;
+      if (filePath) entry.file = String(filePath);
+    } else if (toolName === "Bash") {
+      const cmd = input.command ?? undefined;
+      if (cmd) entry.command = String(cmd).slice(0, 200);
+    } else if (toolName === "Glob") {
+      const pattern = input.pattern ?? undefined;
+      if (pattern) entry.file = String(pattern);
+    } else if (toolName === "Grep") {
+      const pattern = input.pattern ?? undefined;
+      const searchPath = input.path ?? undefined;
+      if (pattern) entry.command = `grep ${pattern}${searchPath ? ` in ${searchPath}` : ""}`.slice(0, 200);
+    }
+
+    const responseStr = typeof data.tool_response === "string"
+      ? data.tool_response
+      : JSON.stringify(data.tool_response ?? "");
+    if (/(error|exception|failed|no such file|ENOENT)/i.test(responseStr)) {
+      entry.error = responseStr.slice(0, 300);
+    }
+
+    try {
+      const logFile = runtimeFile(getCortexPath(), "tool-log.jsonl");
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
+    } catch {
+      // best effort
+    }
+
+    const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
+    let activeProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
+
+    const cooldownFile = runtimeFile(getCortexPath(), "hook-tool-cooldown");
+    try {
+      if (fs.existsSync(cooldownFile)) {
+        const age = Date.now() - fs.statSync(cooldownFile).mtimeMs;
+        if (age < COOLDOWN_MS) {
+          debugLog(`hook-tool: cooldown active (${Math.round(age / 1000)}s < ${Math.round(COOLDOWN_MS / 1000)}s), skipping extraction`);
+          activeProject = null;
+        }
       }
-      if (count >= sessionCap) {
-        debugLog(`hook-tool: session cap reached (${count}/${sessionCap}), skipping extraction`);
-        activeProject = null; // prevent extraction below
       }
     } catch { /* best effort */ }
-  }
 
-  if (activeProject) {
-    try {
-      const candidates = extractToolFindings(toolName, input, responseStr);
-      for (const { text, confidence } of candidates) {
-        if (confidence >= 0.85) {
-          addFindingToFile(getCortexPath(), activeProject, text);
-          debugLog(`hook-tool: auto-added learning (conf=${confidence}): ${text.slice(0, 60)}`);
-        } else {
-          appendReviewQueue(getCortexPath(), activeProject, "Review", [text]);
-          debugLog(`hook-tool: queued candidate (conf=${confidence}): ${text.slice(0, 60)}`);
+    if (activeProject && sessionId) {
+      try {
+        const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
+        let count = 0;
+        if (fs.existsSync(capFile)) {
+          count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
         }
-      }
-
-      // Update cooldown and session counter
-      if (candidates.length > 0) {
-        try { fs.writeFileSync(cooldownFile, Date.now().toString()); } catch { /* best effort */ }
-        if (sessionId) {
-          try {
-            const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
-            let count = 0;
-            try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch { /* new file */ }
-            count += candidates.filter(c => c.confidence >= 0.85).length; // only count directly added ones
-            fs.writeFileSync(capFile, count.toString());
-          } catch { /* best effort */ }
+        if (count >= SESSION_CAP) {
+          debugLog(`hook-tool: session cap reached (${count}/${SESSION_CAP}), skipping extraction`);
+          activeProject = null;
         }
-      }
-    } catch (err: unknown) {
-      debugLog(`hook-tool: learning extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+      } catch { /* best effort */ }
     }
+
+    if (activeProject) {
+      try {
+        const candidates = extractToolFindings(toolName, input, responseStr);
+        for (const { text, confidence } of candidates) {
+          if (confidence >= 0.85) {
+            addFindingToFile(getCortexPath(), activeProject, text);
+            debugLog(`hook-tool: auto-added learning (conf=${confidence}): ${text.slice(0, 60)}`);
+          } else {
+            appendReviewQueue(getCortexPath(), activeProject, "Review", [text]);
+            debugLog(`hook-tool: queued candidate (conf=${confidence}): ${text.slice(0, 60)}`);
+          }
+        }
+
+        if (candidates.length > 0) {
+          try { fs.writeFileSync(cooldownFile, Date.now().toString()); } catch { /* best effort */ }
+          if (sessionId) {
+            try {
+              const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
+              let count = 0;
+              try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch { /* new file */ }
+              count += candidates.filter(c => c.confidence >= 0.85).length;
+              fs.writeFileSync(capFile, count.toString());
+            } catch { /* best effort */ }
+          }
+        }
+      } catch (err: unknown) {
+        debugLog(`hook-tool: learning extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    const elapsed = Date.now() - start;
+    debugLog(`hook-tool: ${toolName} logged in ${elapsed}ms`);
+    process.exit(0);
+  } catch (err: unknown) {
+    debugLog(`hook-tool: unhandled error: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+    process.exit(0);
   }
-
-  const elapsed = Date.now() - start;
-  debugLog(`hook-tool: ${toolName} logged in ${elapsed}ms`);
-
-  process.exit(0);
 }
 
 // ── Tool finding extraction ──────────────────────────────────────────────────

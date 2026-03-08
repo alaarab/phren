@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, type CortexResult } from "./shared.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 
@@ -102,6 +103,27 @@ function parseActiveEntries(content: string): ParsedEntry[] {
 }
 
 /**
+ * Check whether a bullet already exists in a reference file (already archived).
+ */
+function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
+  if (!fs.existsSync(referenceDir)) return false;
+  const normalizedBullet = bullet.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().toLowerCase();
+  if (!normalizedBullet) return false;
+  try {
+    const files = fs.readdirSync(referenceDir).filter(f => f.endsWith(".md"));
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(referenceDir, file), "utf8");
+      for (const line of content.split("\n")) {
+        if (!line.startsWith("- ")) continue;
+        const normalizedLine = line.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().toLowerCase();
+        if (normalizedLine === normalizedBullet) return true;
+      }
+    }
+  } catch { /* best-effort */ }
+  return false;
+}
+
+/**
  * Archive the oldest entries from FINDINGS.md into reference/{topic}.md files.
  * Keeps `keepCount` most recent entries, archives the rest grouped by topic.
  * Returns the number of entries archived.
@@ -143,16 +165,26 @@ export function autoArchiveToReference(
   const toArchive = entries.slice(0, entries.length - keepCount);
   const toKeep = new Set(entries.slice(entries.length - keepCount).map(e => e.lineIndex));
 
+  // Guard: skip entries already present in reference tier (prevent double-archive)
+  const referenceDir = path.join(resolvedDir, "reference");
+  const actuallyArchived: ParsedEntry[] = [];
+  for (const entry of toArchive) {
+    if (isAlreadyArchived(referenceDir, entry.bullet)) {
+      debugLog(`auto_archive: skipping already-archived entry: "${entry.bullet.slice(0, 60)}"`);
+      continue;
+    }
+    actuallyArchived.push(entry);
+  }
+
   // Group archived entries by topic
   const byTopic = new Map<string, ParsedEntry[]>();
-  for (const entry of toArchive) {
+  for (const entry of actuallyArchived) {
     const topic = classifyTopic(entry.bullet);
     if (!byTopic.has(topic)) byTopic.set(topic, []);
     byTopic.get(topic)!.push(entry);
   }
 
   // Write to reference/{topic}.md
-  const referenceDir = path.join(resolvedDir, "reference");
   fs.mkdirSync(referenceDir, { recursive: true });
   const today = new Date().toISOString().slice(0, 10);
 
@@ -172,7 +204,10 @@ export function autoArchiveToReference(
     }
     newSection.push("");
 
-    fs.writeFileSync(filePath, existing.trimEnd() + "\n" + newSection.join("\n"));
+    const refContent = existing.trimEnd() + "\n" + newSection.join("\n");
+    const tmpRefPath = filePath + `.tmp-${crypto.randomUUID()}`;
+    fs.writeFileSync(tmpRefPath, refContent);
+    fs.renameSync(tmpRefPath, filePath);
   }
 
   // Remove archived entries from FINDINGS.md
@@ -222,10 +257,11 @@ export function autoArchiveToReference(
   fs.writeFileSync(tmpPath, cleaned.join("\n"));
   fs.renameSync(tmpPath, learningsPath);
 
+  const skippedCount = toArchive.length - actuallyArchived.length;
   appendAuditLog(
     cortexPath,
     "auto_archive_reference",
-    `project=${project} archived=${toArchive.length} topics=${[...byTopic.keys()].join(",")}`
+    `project=${project} archived=${actuallyArchived.length} skipped_duplicates=${skippedCount} topics=${[...byTopic.keys()].join(",")}`
   );
 
   return cortexOk(toArchive.length);

@@ -77,10 +77,19 @@ export function parseCitationComment(line: string): FindingCitation | null {
   const match = line.match(/<!--\s*cortex:cite\s+(\{.*\})\s*-->/);
   if (!match) return null;
   try {
-    const parsed = JSON.parse(match[1]) as FindingCitation;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (typeof parsed.created_at !== "string" || !parsed.created_at) return null;
-    return parsed;
+    const parsed = JSON.parse(match[1]);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    // Default created_at to empty string if missing, but still require it to be string-like
+    const created_at = typeof parsed.created_at === "string" ? parsed.created_at : "";
+    if (!created_at) return null;
+    return {
+      created_at,
+      repo: typeof parsed.repo === "string" ? parsed.repo : undefined,
+      file: typeof parsed.file === "string" ? parsed.file : undefined,
+      line: typeof parsed.line === "number" ? parsed.line : undefined,
+      commit: typeof parsed.commit === "string" ? parsed.commit : undefined,
+      supersedes: typeof parsed.supersedes === "string" ? parsed.supersedes : undefined,
+    };
   } catch (err: unknown) {
     debugLog(`parseCitationComment: malformed citation JSON: ${err instanceof Error ? err.message : String(err)}`);
     return null;

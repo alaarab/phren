@@ -433,3 +433,58 @@ describe("mcp-search: get_findings", () => {
     expect(res.error).toContain("Invalid project name");
   });
 });
+
+describe("mcp-search: get_memory_detail URL decode", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-memid-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "myapp", {
+      "FINDINGS.md": "# myapp Findings\n\n## 2026-03-01\n\n- Important finding about caching\n",
+      "summary.md": "# myapp\nA web application.",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      cortexPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.CORTEX_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("resolves URL-encoded memory ID with %2F slash", async () => {
+    // mem:myapp/FINDINGS.md with the slash encoded
+    const res = parseResult(await server.call("get_memory_detail", { id: "mem:myapp%2FFINDINGS.md" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.project).toBe("myapp");
+    expect(res.data.content).toContain("caching");
+  });
+
+  it("resolves plain (non-encoded) memory ID", async () => {
+    const res = parseResult(await server.call("get_memory_detail", { id: "mem:myapp/FINDINGS.md" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.project).toBe("myapp");
+  });
+
+  it("returns error for invalid format even after decode", async () => {
+    const res = parseResult(await server.call("get_memory_detail", { id: "invalid-id" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid memory id format");
+  });
+});

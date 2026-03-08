@@ -18,6 +18,7 @@ export {
   type FindingTrustIssue,
   type TrustFilterOptions,
   clearCitationCaches,
+  parseCitationComment,
   filterTrustedFindings,
   filterTrustedFindingsDetailed,
 } from "./content-citation.js";

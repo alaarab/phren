@@ -2,6 +2,11 @@ import { debugLog } from "./shared.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
 
+export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/** Escape SQL LIKE wildcard characters so user input is treated literally. */
+export function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
+
 const PROSE_ENTITY_PATTERN =
   /\b(React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Koa|Hapi|NestJS|Django|Flask|FastAPI|Rails|Spring|Laravel|Redis|Postgres|PostgreSQL|MySQL|MariaDB|SQLite|MongoDB|DynamoDB|Cassandra|Elasticsearch|Docker|Kubernetes|Terraform|Ansible|AWS|GCP|Azure|Vercel|Netlify|Cloudflare|Prisma|TypeORM|Sequelize|Drizzle|Mongoose|Jest|Vitest|Mocha|Cypress|Playwright|Puppeteer|Webpack|Vite|Rollup|esbuild|Turbopack|ESLint|Prettier|Babel|SWC|GraphQL|REST|gRPC|WebSocket|Kafka|RabbitMQ|NATS|Nginx|Caddy|Traefik|Node\.js|Deno|Bun|Python|Rust|Go|Java|Kotlin|Swift|TypeScript|JavaScript)\b/gi;
 
@@ -108,8 +113,9 @@ export function extractAndLinkEntities(db: SqlJsDatabase, content: string, sourc
       const userEntities = parseUserDefinedEntities(cortexPath, project);
       for (const ue of userEntities) {
         const lower = ue.toLowerCase();
-        // Check if user-defined entity appears in content
-        if (content.toLowerCase().includes(lower)) {
+        // Check if user-defined entity appears in content (use escaped regex for safe matching)
+        const safePattern = new RegExp(`\\b${escapeRegex(lower)}\\b`, "i");
+        if (safePattern.test(content)) {
           entityNames.push(lower);
         }
       }
@@ -191,8 +197,8 @@ export function queryCrossProjectEntities(
   const results: Array<{ entity: string; project: string; docKey: string }> = [];
   try {
     ensureGlobalEntitiesTable(db);
-    const pattern = `%${entityName.toLowerCase()}%`;
-    let sql = "SELECT entity, project, doc_key FROM global_entities WHERE entity LIKE ?";
+    const pattern = `%${escapeLike(entityName.toLowerCase())}%`;
+    let sql = "SELECT entity, project, doc_key FROM global_entities WHERE entity LIKE ? ESCAPE '\\'";
     const params: (string | number)[] = [pattern];
     if (excludeProject) {
       sql += " AND project != ?";

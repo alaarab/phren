@@ -16,7 +16,10 @@ import {
 import {
   filterTrustedFindingsDetailed,
 } from "./shared-content.js";
+import { parseCitationComment } from "./content-citation.js";
 import { STOP_WORDS, isFeatureEnabled, clampInt } from "./utils.js";
+import * as fs from "fs";
+import * as path from "path";
 import { appendAuditLog } from "./shared.js";
 import { getProjectGlobBoost } from "./cli-hooks-globs.js";
 import type { GitContext } from "./cli-hooks-session.js";
@@ -243,6 +246,8 @@ export function searchDocuments(
 
 // ── Trust filter ─────────────────────────────────────────────────────────────
 
+const TRUST_FILTERED_TYPES = new Set(["findings", "reference", "knowledge"]);
+
 export function applyTrustFilter(
   rows: DocRow[],
   cortexPathLocal: string,
@@ -252,7 +257,7 @@ export function applyTrustFilter(
 ): DocRow[] {
   return rows
     .map((doc) => {
-      if (doc.type !== "findings") return doc;
+      if (!TRUST_FILTERED_TYPES.has(doc.type)) return doc;
       const trust = filterTrustedFindingsDetailed(doc.content, { ttlDays, minConfidence, decay });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
@@ -262,13 +267,13 @@ export function applyTrustFilter(
         appendAuditLog(
           cortexPathLocal,
           "trust_filter",
-          `project=${doc.project} stale=${stale.length} invalid_citation=${conflicts.length}`
+          `project=${doc.project} type=${doc.type} stale=${stale.length} invalid_citation=${conflicts.length}`
         );
       }
       return { ...doc, content: trust.content };
     })
     .filter((doc) => {
-      return doc.type !== "findings" || Boolean(doc.content.trim());
+      return !TRUST_FILTERED_TYPES.has(doc.type) || Boolean(doc.content.trim());
     });
 }
 
@@ -344,11 +349,14 @@ export function rankResults(
   const FILE_MATCH_BOOST = 1.5;
   ranked.sort((a, b) => {
     // Highest priority: currently-changed files / branch-matching docs
-    if (gitCtx && gitCtx.changedFiles.size > 0) {
-      const aMatch = fileRelevanceBoost(a.path, gitCtx.changedFiles) > 0 || branchMatchBoost(a.content, gitCtx.branch) > 0;
-      const bMatch = fileRelevanceBoost(b.path, gitCtx.changedFiles) > 0 || branchMatchBoost(b.content, gitCtx.branch) > 0;
-      const scoreDiff = (bMatch ? FILE_MATCH_BOOST : 1) - (aMatch ? FILE_MATCH_BOOST : 1);
-      if (scoreDiff !== 0) return scoreDiff;
+    // Only apply git-context filtering when explicitly opted in
+    if (process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === 'true') {
+      if (gitCtx && gitCtx.changedFiles.size > 0) {
+        const aMatch = fileRelevanceBoost(a.path, gitCtx.changedFiles) > 0 || branchMatchBoost(a.content, gitCtx.branch) > 0;
+        const bMatch = fileRelevanceBoost(b.path, gitCtx.changedFiles) > 0 || branchMatchBoost(b.content, gitCtx.branch) > 0;
+        const scoreDiff = (bMatch ? FILE_MATCH_BOOST : 1) - (aMatch ? FILE_MATCH_BOOST : 1);
+        if (scoreDiff !== 0) return scoreDiff;
+      }
     }
 
     const isFindingsA = a.type === "findings";
@@ -384,7 +392,10 @@ export function rankResults(
       entityB -
       lowValuePenalty(b.content, b.type)
     ) * crossProjectAgeMultiplier(b, detectedProject);
-    const scoreDelta = scoreB - scoreA;
+    // Round scores to avoid floating-point comparison instability
+    const roundedA = Math.round(scoreA * 10000) / 10000;
+    const roundedB = Math.round(scoreB * 10000) / 10000;
+    const scoreDelta = roundedB - roundedA;
     if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
 
     const intentDelta = intentBoost(intent, b.type) - intentBoost(intent, a.type);
@@ -407,7 +418,8 @@ export function rankResults(
 
     if (entityB !== entityA) return entityB - entityA;
 
-    return 0;
+    // Stable secondary sort: deterministic ordering for identical scores
+    return (a.path || `${a.project}/${a.filename}`).localeCompare(b.path || `${b.project}/${b.filename}`);
   });
 
   ranked = ranked.slice(0, 8);
@@ -427,6 +439,32 @@ export interface SelectedSnippet {
   key: string;
 }
 
+/** Mark snippet lines with stale citations (cited file no longer exists). */
+export function markStaleCitations(snippet: string): string {
+  const lines = snippet.split("\n");
+  const result: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Check if the next line is a citation comment
+    const nextLine = lines[i + 1];
+    if (nextLine) {
+      const citation = parseCitationComment(nextLine);
+      if (citation && citation.file) {
+        const resolvedFile = citation.repo
+          ? path.resolve(citation.repo, citation.file)
+          : (path.isAbsolute(citation.file) ? citation.file : null);
+        if (resolvedFile && !fs.existsSync(resolvedFile)) {
+          result.push(line + " [stale citation]");
+          i++; // skip the citation comment line
+          continue;
+        }
+      }
+    }
+    result.push(line);
+  }
+  return result.join("\n");
+}
+
 export function selectSnippets(
   rows: DocRow[],
   keywords: string,
@@ -439,6 +477,10 @@ export function selectSnippets(
   for (const doc of rows) {
     let snippet = compactSnippet(extractSnippet(doc.content, keywords, 8), lineBudget, charBudget);
     if (!snippet.trim()) continue;
+    // Mark findings with stale citations before injection
+    if (TRUST_FILTERED_TYPES.has(doc.type)) {
+      snippet = markStaleCitations(snippet);
+    }
     let est = approximateTokens(snippet) + 14;
     if (selected.length > 0 && usedTokens + est > tokenBudget) continue;
     if (selected.length === 0 && usedTokens + est > tokenBudget) {

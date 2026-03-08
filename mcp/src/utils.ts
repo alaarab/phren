@@ -236,6 +236,8 @@ export function extractKeywords(text: string): string {
   // Build bigrams from adjacent non-stop-words
   const bigrams: string[] = [];
   for (let i = 0; i < words.length - 1; i++) {
+    // Filter out bigrams where both tokens are stop words (words is already filtered,
+    // so this is defensive — the real stop-word bigram filter is in buildRobustFtsQuery)
     bigrams.push(`${words[i]} ${words[i + 1]}`);
   }
 
@@ -257,6 +259,9 @@ export function extractKeywords(text: string): string {
 export function isValidProjectName(name: string): boolean {
   if (!name || name.length === 0) return false;
   if (name.length > 100) return false;
+  if (name === "." || name === "..") return false;
+  if (/^\./.test(name)) return false;  // hidden dirs
+  if (/^-/.test(name)) return false;   // breaks CLI flags
   if (name.includes("..") || name.includes("/") || name.includes("\\") || name.includes("\0")) return false;
   return true;
 }
@@ -283,10 +288,8 @@ export function queueFilePath(cortexPath: string, project: string): string {
 export function sanitizeFts5Query(raw: string): string {
   if (!raw) return "";
   if (raw.length > 500) raw = raw.slice(0, 500);
-  let q = raw.replace(/\0/g, " ");
-  q = q.replace(/\b(content|type|project|filename|path):/gi, "");
-  q = q.replace(/\b(AND|OR|NOT|NEAR)\b/gi, " ");
-  q = q.replace(/[\^"()[\]{}!@#$%&*+=~`';?,\\|]/g, " ");
+  // Whitelist approach: only allow alphanumeric, spaces, hyphens, underscores, apostrophes
+  let q = raw.replace(/[^a-zA-Z0-9 '\-_]/g, " ");
   q = q.replace(/\s+/g, " ");
   return q.trim();
 }
@@ -345,9 +348,10 @@ export function buildRobustFtsQuery(raw: string, project?: string | null): strin
   const baseWords = safe.split(/\s+/).filter((t) => t.length > 1);
   if (baseWords.length === 0) return "";
 
-  // Build bigrams from adjacent words
+  // Build bigrams from adjacent words, filtering out pairs where both tokens are stop words
   const bigrams: string[] = [];
   for (let i = 0; i < baseWords.length - 1; i++) {
+    if (STOP_WORDS.has(baseWords[i].toLowerCase()) && STOP_WORDS.has(baseWords[i + 1].toLowerCase())) continue;
     bigrams.push(`${baseWords[i]} ${baseWords[i + 1]}`);
   }
 

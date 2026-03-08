@@ -3,6 +3,9 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "./shared.js";
 
+/** Maximum allowed length for a single finding entry (token budget protection). */
+export const MAX_FINDING_LENGTH = 2000;
+
 function safeParseDate(s: string): Date | null {
   const d = new Date(s);
   return isNaN(d.getTime()) || d.getFullYear() < 2020 ? null : d;
@@ -15,7 +18,20 @@ export interface ConsolidationNeeded {
   lastConsolidated: string | null;
 }
 
-// Check which projects have enough new learnings to warrant consolidation
+/**
+ * Validate a single finding text before it is persisted.
+ * Returns null if valid, or an error message string if invalid.
+ */
+export function validateFinding(text: string): string | null {
+  if (!text || !text.trim()) return "Finding text cannot be empty.";
+  if (text.length > MAX_FINDING_LENGTH) return `Finding exceeds maximum length of ${MAX_FINDING_LENGTH} characters (got ${text.length}). Shorten the text or split into multiple findings.`;
+  return null;
+}
+
+/**
+ * Check which projects have enough new findings to warrant consolidation.
+ * Returns projects that exceed the entry or time thresholds.
+ */
 export function checkConsolidationNeeded(cortexPath: string, profile?: string): ConsolidationNeeded[] {
   const ENTRY_THRESHOLD = 25;
   const TIME_THRESHOLD_DAYS = 60;
@@ -66,7 +82,10 @@ export function checkConsolidationNeeded(cortexPath: string, profile?: string): 
   return results;
 }
 
-// Validate FINDINGS.md format. Returns array of issue strings (empty = valid).
+/**
+ * Validate FINDINGS.md format and structure.
+ * Returns an array of issue description strings (empty array means valid).
+ */
 export function validateFindingsFormat(content: string): string[] {
   const issues: string[] = [];
   const lines = content.split("\n");
@@ -88,8 +107,10 @@ export function validateFindingsFormat(content: string): string[] {
   return issues;
 }
 
-// Strip the ## Done section from backlog content to reduce index bloat.
-// Keeps title, Active, and Queue sections which are the actionable parts.
+/**
+ * Strip the ## Done section from backlog content to reduce index bloat.
+ * Keeps the title, Active, and Queue sections which are the actionable parts.
+ */
 export function stripBacklogDoneSection(content: string): string {
   const donePattern = /^## Done\b.*$/im;
   const match = content.match(donePattern);
@@ -97,7 +118,10 @@ export function stripBacklogDoneSection(content: string): string {
   return content.slice(0, match.index).trimEnd() + "\n";
 }
 
-// Validate backlog.md format. Returns array of issue strings (empty = valid).
+/**
+ * Validate backlog.md format and structure.
+ * Returns an array of issue description strings (empty array means valid).
+ */
 export function validateBacklogFormat(content: string): string[] {
   const issues: string[] = [];
   const lines = content.split("\n");
@@ -117,7 +141,10 @@ export function validateBacklogFormat(content: string): string[] {
   return issues;
 }
 
-// Extract ours/theirs from a file containing git conflict markers
+/**
+ * Extract ours/theirs versions from a file containing git conflict markers.
+ * Returns null if no conflict markers are found.
+ */
 export function extractConflictVersions(content: string): { ours: string; theirs: string } | null {
   if (!content.includes("<<<<<<<")) return null;
 
@@ -196,9 +223,11 @@ function findingBulletText(block: string): string {
   return block.split("\n")[0];
 }
 
-// Merge two FINDINGS.md versions: union entries per date, newest date first.
-// Deduplicates by bullet text only, keeping the comment lines from whichever
-// version is kept (ours takes priority).
+/**
+ * Merge two FINDINGS.md versions: union entries per date, newest date first.
+ * Deduplicates by bullet text only, keeping comment lines from whichever
+ * version is kept (ours takes priority).
+ */
 export function mergeFindings(ours: string, theirs: string): string {
   const ourEntries = parseLearningsEntries(ours);
   const theirEntries = parseLearningsEntries(theirs);
@@ -258,7 +287,10 @@ function parseBacklogSections(content: string): Map<string, string[]> {
   return sections;
 }
 
-// Merge two backlog.md versions: union items per section, deduplicated
+/**
+ * Merge two backlog.md versions: union items per section, deduplicated.
+ * Section order follows Active > Queue > Done, with unknown sections appended.
+ */
 export function mergeBacklog(ours: string, theirs: string): string {
   const ourSections = parseBacklogSections(ours);
   const theirSections = parseBacklogSections(theirs);
@@ -283,8 +315,10 @@ export function mergeBacklog(ours: string, theirs: string): string {
   return lines.join("\n");
 }
 
-// Attempt to auto-resolve git conflicts in FINDINGS.md and backlog.md files.
-// Returns true if all conflicts were resolved, false if any remain.
+/**
+ * Attempt to auto-resolve git conflicts in FINDINGS.md and backlog.md files.
+ * Returns true if all conflicts were resolved, false if any remain.
+ */
 export function autoMergeConflicts(cortexPath: string): boolean {
   let conflictedFiles: string[];
   try {
@@ -324,7 +358,9 @@ export function autoMergeConflicts(cortexPath: string): boolean {
         ? mergeFindings(versions.ours, versions.theirs)
         : mergeBacklog(versions.ours, versions.theirs);
 
-      fs.writeFileSync(fullPath, merged);
+      const tmpMergePath = fullPath + ".tmp";
+      fs.writeFileSync(tmpMergePath, merged);
+      fs.renameSync(tmpMergePath, fullPath);
       execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: any) {
