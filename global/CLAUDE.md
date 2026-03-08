@@ -55,9 +55,10 @@ The cortex MCP server is running. Use these tools proactively. Don't ask the use
 - **At session start:** call `list_projects()` to see what's active, then `get_project_summary(name)` for the relevant project
 - **When the user mentions a project, codebase, or task:** call `search_knowledge(query)` before asking questions
 - **When the user asks about commands, architecture, conventions, or past decisions:** call `search_knowledge(query)` first
-- **When the user mentions a task or todo:** call `get_backlog(project)` to see what's already tracked
+- **When the user mentions a task or todo:** call `get_backlog(project)` to see what's already tracked. For large backlogs, pass `summary:true` to get counts and titles only. Use `limit` and `offset` for pagination (e.g. `offset:20, limit:20` for page 2). Look up a single item by its ID with `id:"A1"`.
 - **When the user says they want to do something later:** call `add_backlog_item(project, item)` instead of listing it in chat
 - **When a task is finished:** offer to add any follow-ups to the backlog rather than leaving them in the conversation
+- **To triage the backlog:** call `work_next_backlog_item(project)` to promote the top Queue item to Active, `pin_backlog_item(project, item)` to pin an important task, or `tidy_backlog_done(project)` to archive old completed items
 - **When you discover something about a codebase entity:** call `search_entities(name)` or `get_related_docs(entity)` to see what's already known
 - **To explore the knowledge graph:** call `read_graph(project?)` to see entities and their relationships
 - **To link a finding to an entity:** call `link_findings(project, finding_text, entity, relation?)` to persist a manual link

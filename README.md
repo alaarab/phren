@@ -154,7 +154,7 @@ On a new machine: clone, run init, done.
 
 ## The MCP server
 
-The server indexes your cortex into a local SQLite FTS5 database. Tools are grouped by what they do:
+The server indexes your cortex into a local SQLite FTS5 database. 46 tools grouped by what they do:
 
 ### Search and browse
 
@@ -165,6 +165,8 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 | `get_project_summary` | Summary card and file list for a project. |
 | `list_projects` | Everything in your active profile. |
 | `get_findings` | Read recent findings for a project without a search query. |
+| `get_consolidation_status` | Check if findings need consolidation. |
+| `health_check` | Run doctor checks and return results. |
 
 ### Backlog management
 

@@ -5,7 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- `pin_backlog_item` MCP tool: pin a task to the top of its section
+- `work_next_backlog_item` MCP tool: promote highest-priority Queue item to Active
+- `tidy_backlog_done` MCP tool: archive old Done items beyond a configurable keep limit
+- `get_backlog` now supports `summary:true` for counts-only responses, `limit`/`offset` for pagination, and single-item lookup by ID
+- Skills MCP tools: `list_skills`, `read_skill`, `write_skill`, `remove_skill`
+- Hooks MCP tools: `list_hooks`, `toggle_hooks`, `add_custom_hook`, `remove_custom_hook`
+- Operations MCP tools: `health_check`, `get_consolidation_status`, `list_hook_errors`, `approve_queue_item`, `reject_queue_item`, `edit_queue_item`
+- MCP tool count: 29 to 46
+
+### Fixed
+- Race condition in session start/index rebuild when multiple agents start simultaneously
+- Content and archive file writes now use atomic tmp-then-rename pattern to prevent partial reads
+- Backlog item IDs (bid hashes) now exposed in API responses for stable cross-session references
+- `get_backlog` pagination offset applied before limit cap, preventing off-by-one on later pages
+
+### Docs
+- README: documented all 46 MCP tools across 10 categories (was missing skills, hooks, and operations sections)
+- README: `get_backlog` entry updated with summary, pagination, and ID lookup features
+- global/CLAUDE.md: added backlog triage guidance (work_next, pin, tidy)
+- Architecture diagram updated with skills, hooks, and operations tool categories
 
 ## [1.15.5] - 2026-03-08
 
@@ -509,7 +529,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, backlog, pipeline, release, creative
 - `@alaarab/cortex` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.13.6...HEAD
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.15.5...HEAD
+[1.15.5]: https://github.com/alaarab/cortex/compare/v1.13.6...v1.15.5
 [1.13.6]: https://github.com/alaarab/cortex/compare/v1.11.1...v1.13.6
 [1.11.1]: https://github.com/alaarab/cortex/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/alaarab/cortex/compare/v1.10.2...v1.11.0
