@@ -58,13 +58,18 @@ List recent findings for a project without requiring a search query.
 
 ### `get_backlog`
 
-Get the backlog for a project, or all projects if no name is given.
+Get the backlog for a project, or all projects if no name is given. Supports progressive disclosure: use `summary:true` for lightweight planning views (~200 tokens), pagination for browsing, or `id` with a stable `bid:` hash for single-item fetches during execution. See [Context Optimization](context-optimization.md) for the full pattern.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Project name. Omit to get all projects. |
-| `id` | string | no | Backlog item ID like A1, Q3, D2. Requires project. |
+| `id` | string | no | Backlog item ID. Accepts positional IDs (A1, Q3, D2) or stable `bid:XXXXXXXX` hashes. Requires project. Stable hashes are preferred for cross-session references because positional IDs shift when items complete. |
 | `item` | string | no | Exact backlog item text. Requires project. |
+| `summary` | boolean | no | If true, return counts and titles only (no full content). Reduces token usage to ~200 tokens. Use for planning and status checks. |
+| `limit` | number | no | Max items per Active/Queue section to return (1-200, default 20). Use with `offset` for pagination. |
+| `done_limit` | number | no | Max Done items to return, most recent first (1-200, default 5). Done sections are capped tightly by default to avoid large responses. |
+| `offset` | number | no | Skip the first N items in each section before applying limit. Use with `limit` for pagination (e.g. offset:20, limit:20 for page 2). |
+| `status` | enum | no | Filter by section: `all`, `active`, `queue`, `done`, `active+queue` (default). |
 
 ### `add_backlog_item`
 
