@@ -57,7 +57,7 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-async function callLlm(prompt: string): Promise<string> {
+export async function callLlm(prompt: string, signal?: AbortSignal): Promise<string> {
   const endpoint = process.env.CORTEX_LLM_ENDPOINT;
   const customKey = process.env.CORTEX_LLM_KEY;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -69,6 +69,7 @@ async function callLlm(prompt: string): Promise<string> {
     const key = customKey || openaiKey || anthropicKey || "";
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
     let response: Response;
     try {
       response = await fetch(`${endpoint.replace(/\/$/, "")}/chat/completions`, {
@@ -95,6 +96,7 @@ async function callLlm(prompt: string): Promise<string> {
     // Anthropic REST API fallback (no SDK required)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
     let response: Response;
     try {
       response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -122,6 +124,7 @@ async function callLlm(prompt: string): Promise<string> {
     // OpenAI REST API fallback
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
     let response: Response;
     try {
       response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -396,7 +399,8 @@ export function resolveCoref(text: string, context: { project?: string; file?: s
 export async function checkSemanticDedup(
   cortexPath: string,
   project: string,
-  newLearning: string
+  newLearning: string,
+  signal?: AbortSignal
 ): Promise<boolean> {
   if (process.env.CORTEX_FEATURE_SEMANTIC_DEDUP !== "1") return false;
 
@@ -419,14 +423,14 @@ export async function checkSemanticDedup(
     const jaccard = jaccardSimilarity(tokA, tokB);
     if (jaccard >= 0.55) continue; // already caught by sync isDuplicateFinding
     if (jaccard >= 0.3) {
-      const isDup = await semanticDedup(a, b, cortexPath);
+      const isDup = await semanticDedup(a, b, cortexPath, signal);
       if (isDup) return true;
     }
   }
   return false;
 }
 
-async function semanticDedup(a: string, b: string, cortexPath: string): Promise<boolean> {
+async function semanticDedup(a: string, b: string, cortexPath: string, signal?: AbortSignal): Promise<boolean> {
   const key = crypto.createHash("sha256").update(a + "|||" + b).digest("hex");
   const cachePath = runtimeFile(cortexPath, "dedup-cache.json");
 
@@ -441,7 +445,7 @@ async function semanticDedup(a: string, b: string, cortexPath: string): Promise<
   } catch { /* ignore */ }
 
   try {
-    const answer = await callLlm(`Are these two findings semantically equivalent? Reply YES or NO only.\nA: ${a}\nB: ${b}`);
+    const answer = await callLlm(`Are these two findings semantically equivalent? Reply YES or NO only.\nA: ${a}\nB: ${b}`, signal);
     const result = answer.startsWith("YES");
 
     // Cache result
@@ -470,7 +474,8 @@ const CONFLICT_CHECK_TOTAL_TIMEOUT_MS = 30_000;
 export async function checkSemanticConflicts(
   cortexPath: string,
   project: string,
-  newFinding: string
+  newFinding: string,
+  signal?: AbortSignal
 ): Promise<{ annotations: string[]; checked: boolean }> {
   if (process.env.CORTEX_FEATURE_SEMANTIC_CONFLICT !== "1") return { annotations: [], checked: false };
 
@@ -536,7 +541,7 @@ export async function checkSemanticConflicts(
       const shared = lineEntities.filter((e) => newEntities.includes(e));
       if (shared.length === 0) continue;
 
-      const result = await llmConflictCheck(line, newFinding, shared[0], cortexPath);
+      const result = await llmConflictCheck(line, newFinding, shared[0], cortexPath, signal);
       if (result === "CONFLICT") {
         const snippet = line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
         const sourceLabel = sourceProject ? ` (from project: ${sourceProject})` : "";
@@ -552,7 +557,8 @@ async function llmConflictCheck(
   existing: string,
   newFinding: string,
   entity: string,
-  cortexPath: string
+  cortexPath: string,
+  signal?: AbortSignal
 ): Promise<"CONFLICT" | "OK"> {
   const key = crypto.createHash("sha256").update(existing + "|||" + newFinding).digest("hex");
   const cachePath = runtimeFile(cortexPath, "conflict-cache.json");
@@ -568,7 +574,7 @@ async function llmConflictCheck(
   } catch { /* ignore */ }
 
   try {
-    const answer = await callLlm(`Finding A: ${existing}. Finding B: ${newFinding}. Do these contradict each other about how to use ${entity}? Reply CONFLICT or OK only.`);
+    const answer = await callLlm(`Finding A: ${existing}. Finding B: ${newFinding}. Do these contradict each other about how to use ${entity}? Reply CONFLICT or OK only.`, signal);
     const result = answer.startsWith("CONFLICT")
       ? ("CONFLICT" as const)
       : ("OK" as const);

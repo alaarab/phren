@@ -92,8 +92,31 @@ function findMostRecentSession(cortexPath: string): { file: string; state: Sessi
   return { file: bestFile, state };
 }
 
+/** Path for the last-summary fast-path file. */
+function lastSummaryPath(cortexPath: string): string {
+  return path.join(sessionsDir(cortexPath), "last-summary.json");
+}
+
+/** Write the last summary for fast retrieval by next session_start. */
+function writeLastSummary(cortexPath: string, summary: string, sessionId: string): void {
+  try {
+    const data = { summary, sessionId, endedAt: new Date().toISOString() };
+    fs.writeFileSync(lastSummaryPath(cortexPath), JSON.stringify(data, null, 2));
+  } catch { /* best-effort */ }
+}
+
 /** Find the most recent session with a summary (including ended sessions). */
-function findMostRecentSummary(cortexPath: string): string | null {
+export function findMostRecentSummary(cortexPath: string): string | null {
+  // Fast path: read from dedicated last-summary file
+  try {
+    const fastPath = lastSummaryPath(cortexPath);
+    if (fs.existsSync(fastPath)) {
+      const data = JSON.parse(fs.readFileSync(fastPath, "utf-8")) as { summary?: string };
+      if (data.summary) return data.summary;
+    }
+  } catch { /* fall through to O(n) scan */ }
+
+  // Slow path: scan all session files
   const dir = sessionsDir(cortexPath);
   let entries: fs.Dirent[];
   try {
@@ -308,6 +331,12 @@ export function register(server: McpServer, ctx: McpContext): void {
     });
 
     if (!endedState) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
+
+    // Write fast-path summary file for next session_start
+    const effectiveSummary = endedState.summary;
+    if (effectiveSummary) {
+      writeLastSummary(cortexPath, effectiveSummary, state.sessionId);
+    }
 
     const durationMs = new Date(endedState.endedAt!).getTime() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);

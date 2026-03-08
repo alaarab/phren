@@ -171,12 +171,12 @@ export function register(server: McpServer, ctx: McpContext): void {
         const filteredFindings: string[] = [];
 
         for (const f of findings) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), PER_ITEM_TIMEOUT_MS);
           try {
-            const isDup = await Promise.race([
-              checkSemanticDedup(cortexPath, project, f),
-              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), PER_ITEM_TIMEOUT_MS)),
-            ]);
+            const isDup = await checkSemanticDedup(cortexPath, project, f, controller.signal);
             if (isDup) {
+              clearTimeout(timeoutId);
               semanticSkipped.push(f);
               continue;
             }
@@ -185,18 +185,14 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
 
           try {
-            const conflicts = await Promise.race([
-              checkSemanticConflicts(cortexPath, project, f),
-              new Promise<{ annotations: string[]; checked: boolean }>((resolve) =>
-                setTimeout(() => resolve({ annotations: [], checked: false }), PER_ITEM_TIMEOUT_MS)
-              ),
-            ]);
+            const conflicts = await checkSemanticConflicts(cortexPath, project, f, controller.signal);
             if (conflicts.checked && conflicts.annotations.length > 0) {
               semanticConflicts.push(`${f} (${conflicts.annotations.join(", ")})`);
             }
           } catch {
             // Semantic conflict failure is non-fatal
           }
+          clearTimeout(timeoutId);
 
           filteredFindings.push(f);
         }
