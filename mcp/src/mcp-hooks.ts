@@ -5,17 +5,12 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
-import { readCustomHooks, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry, type CustomHookEvent } from "./hooks.js";
+import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry, type CustomHookEvent } from "./hooks.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookTool = typeof HOOK_TOOLS[number];
 
-const VALID_CUSTOM_EVENTS = [
-  "pre-save", "post-save", "post-search",
-  "pre-finding", "post-finding",
-  "pre-index", "post-index",
-  "post-session-end", "post-consolidate",
-] as const;
+const VALID_CUSTOM_EVENTS = HOOK_EVENT_VALUES;
 
 /**
  * Validate a custom hook command at registration time.
@@ -88,8 +83,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (customHooks.length > 0) {
         lines.push("", `${customHooks.length} custom hook(s):`);
         for (const h of customHooks) {
-          const target = "webhook" in h ? `[webhook] ${h.webhook}` : h.command;
-          lines.push(`  ${h.event}: ${target}${h.timeout ? ` (${h.timeout}ms)` : ""}`);
+          const hookKind = "webhook" in h ? "[webhook] " : "";
+          lines.push(`  ${h.event}: ${hookKind}${getHookTarget(h)}${h.timeout ? ` (${h.timeout}ms)` : ""}`);
         }
       }
 
@@ -159,19 +154,18 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
           return mcpResponse({ ok: false, error: "webhook must be an http:// or https:// URL." });
         }
-        newHook = { event: event as CustomHookEvent, webhook: trimmed, ...(secret ? { secret } : {}), ...(timeout !== undefined ? { timeout } : {}) } satisfies WebhookHookEntry;
+        newHook = { event, webhook: trimmed, ...(secret ? { secret } : {}), ...(timeout !== undefined ? { timeout } : {}) } satisfies WebhookHookEntry;
       } else {
         const cmdErr = validateHookCommand(command!);
         if (cmdErr) return mcpResponse({ ok: false, error: cmdErr });
-        newHook = { event: event as CustomHookEvent, command: command!, ...(timeout !== undefined ? { timeout } : {}) } satisfies CommandHookEntry;
+        newHook = { event, command: command!, ...(timeout !== undefined ? { timeout } : {}) } satisfies CommandHookEntry;
       }
 
       return ctx.withWriteQueue(async () => {
         const prefs = readInstallPreferences(cortexPath);
         const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
         writeInstallPreferences(cortexPath, { ...prefs, customHooks: [...existing, newHook] });
-        const target = "webhook" in newHook ? `[webhook] ${newHook.webhook}` : newHook.command;
-        return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${target}`, data: { hook: newHook, total: existing.length + 1 } });
+        return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${"webhook" in newHook ? "[webhook] " : ""}${getHookTarget(newHook)}`, data: { hook: newHook, total: existing.length + 1 } });
       });
     }
   );
@@ -192,8 +186,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return ctx.withWriteQueue(async () => {
         const prefs = readInstallPreferences(cortexPath);
         const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
-        const hookTarget = (h: CustomHookEntry) => "webhook" in h ? h.webhook : h.command;
-        const remaining = existing.filter(h => h.event !== event || (command && !hookTarget(h).includes(command)));
+        const remaining = existing.filter(h => h.event !== event || (command && !getHookTarget(h).includes(command)));
         const removed = existing.length - remaining.length;
 
         if (removed === 0) {

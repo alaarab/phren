@@ -455,16 +455,14 @@ export function register(server: McpServer, ctx: McpContext): void {
             const synthKey = createHash("sha256").update(query + (filterProject ?? "")).digest("hex").slice(0, 16);
             const synthCachePath = runtimeFile(cortexPath, "synth-cache.json");
             let synthCache: Record<string, { result: string; ts: number }> = {};
-            if (fs.existsSync(synthCachePath)) {
-              try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch { /* ignore */ }
-            }
+            try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch { /* file absent or corrupt */ }
             const cached = synthCache[synthKey];
             const SYNTH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
             if (cached && Date.now() - cached.ts < SYNTH_CACHE_TTL_MS) {
               synthesis = cached.result;
             } else {
               const snippets = results.slice(0, 5).map((r, i) => `[${i + 1}] ${r.snippet}`).join("\n");
-              const synthPrompt = `You are a knowledge assistant. Given these search results for the query "${query}", write a concise 2-3 sentence synthesis paragraph summarizing the key insights. Do not add headers. Return only the paragraph.\n\n${snippets}`;
+              const synthPrompt = `Summarize these search results for "${query}" in 2-3 sentences. No headers, no lists. Plain paragraph only.\n\n${snippets}`;
               synthesis = await callLlm(synthPrompt, undefined, 300);
               if (synthesis) {
                 synthCache[synthKey] = { result: synthesis, ts: Date.now() };
@@ -484,11 +482,11 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         const fallbackNote = usedFallback ? " (keyword fallback)" : "";
         const entityNote = relatedEntities.length > 0 ? `\n\nRelated entities: ${relatedEntities.join(", ")}` : "";
-        const synthesisNote = synthesis ? `\n\n## Synthesis\n${synthesis}` : "";
+        const synthesisBlock = synthesis ? `\n\n${synthesis}\n\n---\n\n` : "\n\n";
         runCustomHooks(cortexPath, "post-search", { CORTEX_QUERY: query, CORTEX_RESULT_COUNT: String(results.length) });
         return mcpResponse({
           ok: true,
-          message: `Found ${results.length} result(s) for "${query}"${fallbackNote}:\n\n${formatted.join("\n\n---\n\n")}${entityNote}${synthesisNote}`,
+          message: `Found ${results.length} result(s) for "${query}"${fallbackNote}:${synthesisBlock}${formatted.join("\n\n---\n\n")}${entityNote}`,
           data: { query, count: results.length, results, fallback: usedFallback, relatedEntities: relatedEntities.length > 0 ? relatedEntities : undefined, ...(synthesis ? { synthesis } : {}) },
         });
       } catch (err: unknown) {
