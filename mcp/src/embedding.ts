@@ -7,6 +7,7 @@ import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
+import { withFileLock } from "./shared-governance.js";
 
 // ---------------------------------------------------------------------------
 // SQLite cache (Q17) — replaces embed-cache.jsonl with O(1) lookup
@@ -72,10 +73,13 @@ function decodeEmbedding(blob: Uint8Array): number[] {
 }
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
+// Q14: Synchronously-accessible resolved SQL static, set once sqlPromise settles.
+let sqlResolved: SqlJsStatic | null = null;
 function getSql(): Promise<SqlJsStatic> {
   if (!sqlPromise) {
     const wasmBinary = findWasmBinary();
     sqlPromise = initSqlJs(wasmBinary ? { wasmBinary } : {});
+    sqlPromise.then(s => { sqlResolved = s; }).catch(() => {});
   }
   return sqlPromise;
 }
@@ -132,10 +136,62 @@ async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
   }
 }
 
+/**
+ * Q14: Persist the in-memory DB to disk under a file lock.
+ * Reads the current on-disk snapshot inside the lock, merges any entries that
+ * are in `db` but missing from disk, then writes atomically via temp-file rename.
+ * This prevents the "last writer wins" race where two concurrent processes each
+ * open the same on-disk snapshot, insert different entries, and overwrite each
+ * other's work.
+ */
 function persistDb(cortexPath: string, db: SqlJsDatabase): void {
   const dbPath = getCacheDbPath(cortexPath);
   try {
-    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    withFileLock(dbPath, () => {
+      // Read the freshest on-disk snapshot (may have entries from another process)
+      let onDisk: SqlJsDatabase | null = null;
+      // We cannot call the async openCacheDb here; use a raw sync open instead.
+      // If that fails we fall back to writing `db` as-is (best-effort).
+      try {
+        if (fs.existsSync(dbPath)) {
+          // sql.js-fts5 is already initialised by the time we persist; reuse the
+          // cached promise result synchronously if available (it is a resolved
+          // Promise at this point because getCachedEmbedding awaited it first).
+          // We extract the resolved value by creating a fulfilled-only thenable.
+          if (sqlResolved) {
+            onDisk = new sqlResolved.Database(fs.readFileSync(dbPath));
+            onDisk.run(`CREATE TABLE IF NOT EXISTS embeddings (
+              model TEXT NOT NULL, hash TEXT NOT NULL, embedding BLOB NOT NULL,
+              PRIMARY KEY (model, hash)
+            )`);
+            // Merge entries from `db` into onDisk
+            const rows = db.exec("SELECT model, hash, embedding FROM embeddings")[0]?.values ?? [];
+            if (rows.length > 0) {
+              onDisk.run("BEGIN TRANSACTION");
+              for (const [model, hash, embedding] of rows) {
+                onDisk.run(
+                  "INSERT OR IGNORE INTO embeddings (model, hash, embedding) VALUES (?, ?, ?)",
+                  [model as string, hash as string, embedding as Uint8Array]
+                );
+              }
+              onDisk.run("COMMIT");
+            }
+          }
+        }
+      } catch {
+        try { onDisk?.close(); } catch { /* ignore */ }
+        onDisk = null;
+      }
+
+      const target = onDisk ?? db;
+      const tmp = dbPath + `.tmp-${crypto.randomUUID()}`;
+      try {
+        fs.writeFileSync(tmp, Buffer.from(target.export()));
+        fs.renameSync(tmp, dbPath);
+      } finally {
+        if (onDisk) try { onDisk.close(); } catch { /* ignore */ }
+      }
+    });
   } catch {
     debugLog("embedding: failed to persist cache db");
   }
@@ -305,6 +361,8 @@ export async function getCachedEmbedding(
 
     const embedding = await embeddingOps.getApiEmbedding(text, apiKey, model);
     embeddingOps.insertCache(db, model, hash, embedding);
+    // Q14: persistDb now holds a file lock and merges with the on-disk snapshot
+    // before writing, so concurrent callers don't overwrite each other's entries.
     embeddingOps.persistDb(cortexPath, db);
     return embedding;
   } catch (err) {

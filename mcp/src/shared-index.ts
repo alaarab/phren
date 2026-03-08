@@ -348,6 +348,11 @@ function deleteEntityLinksForDocPath(db: SqlJsDatabase, cortexPath: string, docP
   const filename = docRows?.[0]?.filename ?? fallbackFilename;
   const sourceDoc = buildSourceDocKey(project, docPath, cortexPath, filename);
   db.run("DELETE FROM entity_links WHERE source_doc = ?", [sourceDoc]);
+  // Q19: also purge global_entities rows for this doc so cross_project_entities
+  // never returns deleted/stale documents.
+  try {
+    db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDoc]);
+  } catch { /* global_entities table may not exist in older cached DBs */ }
 }
 
 /**
@@ -491,6 +496,8 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
               if (changedPaths.has(entry.fullPath)) {
                 const sourceDocKey = getEntrySourceDocKey(entry, cortexPath);
                 db.run("DELETE FROM entity_links WHERE source_doc = ?", [sourceDocKey]);
+                // Q19: keep global_entities in sync with entity_links on updates
+                try { db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDocKey]); } catch { /* older cached DBs may not have this table */ }
                 db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
               }
 
@@ -580,6 +587,39 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         for (const [sourceId, targetId, relType, sourceDoc] of graph.links) {
           db.run("INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)", [sourceId, targetId, relType, sourceDoc]);
         }
+        // Q19: also restore global_entities from cached graph so cross_project_entities
+        // is not empty after a cached-graph rebuild path.
+        if (Array.isArray(graph.globalEntities)) {
+          for (const [entity, project, docKey] of graph.globalEntities) {
+            try {
+              db.run(
+                "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
+                [entity, project, docKey]
+              );
+            } catch { /* ignore */ }
+          }
+        } else {
+          // Older cache without globalEntities: re-derive from entity_links + entities
+          try {
+            const rows = db.exec(
+              `SELECT e.name, el.source_doc FROM entity_links el
+               JOIN entities e ON el.target_id = e.id
+               WHERE el.source_doc IS NOT NULL`
+            )[0]?.values ?? [];
+            for (const [name, sourceDoc] of rows) {
+              const projectMatch = typeof sourceDoc === "string" ? sourceDoc.match(/^([^/]+)\//) : null;
+              const proj = projectMatch ? projectMatch[1] : null;
+              if (proj && name) {
+                try {
+                  db.run(
+                    "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
+                    [name as string, proj, sourceDoc as string]
+                  );
+                } catch { /* ignore */ }
+              }
+            }
+          } catch { /* non-fatal */ }
+        }
         entityGraphLoaded = true;
       }
     } catch { /* fall through to extract */ }
@@ -606,7 +646,10 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
     try {
       const entityRows = db.exec("SELECT id, name, type FROM entities")[0]?.values ?? [];
       const linkRows = db.exec("SELECT source_id, target_id, rel_type, source_doc FROM entity_links")[0]?.values ?? [];
-      fs.writeFileSync(graphPath, JSON.stringify({ entities: entityRows, links: linkRows, ts: Date.now() }));
+      // Q19: also persist global_entities so the cached-graph rebuild path can
+      // restore it without re-running extraction on every file.
+      const globalEntityRows = db.exec("SELECT entity, project, doc_key FROM global_entities")[0]?.values ?? [];
+      fs.writeFileSync(graphPath, JSON.stringify({ entities: entityRows, links: linkRows, globalEntities: globalEntityRows, ts: Date.now() }));
     } catch { /* non-fatal */ }
   }
 

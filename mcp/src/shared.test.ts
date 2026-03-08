@@ -306,7 +306,7 @@ describe("buildIndex and queryRows", () => {
     expect(queryRows(fakeDb, "SELECT 1", [])).toBeNull();
   });
 
-  it("buildIndex tolerates malformed profile YAML by falling back to default project discovery", async () => {
+  it("buildIndex returns empty index when profile YAML is malformed (fail-closed, Q18)", async () => {
     const cortex = makeCortex();
     fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
     fs.writeFileSync(path.join(cortex, "profiles", "broken.yaml"), "name: broken\nprojects: [\n");
@@ -314,10 +314,12 @@ describe("buildIndex and queryRows", () => {
       "summary.md": "# testproj\n\nProfile parse fallback should still index this.\n",
     });
 
+    // Q18: when a profile is set but the file is malformed, getProjectDirs returns []
+    // and buildIndex produces an empty (but valid) FTS database — it does NOT widen
+    // to all projects, which would violate profile-based access control.
     const db = await buildIndex(cortex, "broken");
     const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["fallback"]);
-    expect(rows).not.toBeNull();
-    expect(rows![0][0]).toBe("testproj");
+    expect(rows).toBeNull(); // empty DB — no documents indexed
     db.close();
   });
 });
