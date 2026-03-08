@@ -3,6 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, type CortexResult } from "./shared.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
+import { withFileLock } from "./shared-governance.js";
 
 // ── Reference tier helpers ───────────────────────────────────────────────────
 
@@ -99,8 +100,12 @@ function parseActiveEntries(content: string): ParsedEntry[] {
     }
   }
 
-  // Sort oldest first (earliest date, then by line order within that date)
-  entries.sort((a, b) => a.date.localeCompare(b.date) || a.lineIndex - b.lineIndex);
+  // Sort oldest first: earliest date first; within the same date, higher
+  // lineIndex = earlier in the file (newest findings are prepended at top).
+  // Q25: use descending lineIndex within the same day so that when we slice
+  // `toArchive = entries.slice(0, N)` we archive the truly oldest entries
+  // (lowest in the file = largest lineIndex for that date).
+  entries.sort((a, b) => a.date.localeCompare(b.date) || b.lineIndex - a.lineIndex);
   return entries;
 }
 
@@ -159,13 +164,15 @@ export function autoArchiveToReference(
     } else { throw e; }
   }
 
+  // Q11: Hold the per-file lock on FINDINGS.md for the entire read-modify-write
+  // cycle so finding writers and the archive pass see a consistent file.
   try {
+  return withFileLock(learningsPath, () => {
   const content = fs.readFileSync(learningsPath, "utf8");
   const entries = parseActiveEntries(content);
   if (entries.length <= keepCount) return cortexOk(0);
 
   const toArchive = entries.slice(0, entries.length - keepCount);
-  const toKeep = new Set(entries.slice(entries.length - keepCount).map(e => e.lineIndex));
 
   // Guard: skip entries already present in reference tier (prevent double-archive)
   const referenceDir = path.join(resolvedDir, "reference");
@@ -186,30 +193,33 @@ export function autoArchiveToReference(
     byTopic.get(topic)!.push(entry);
   }
 
-  // Write to reference/{topic}.md
+  // Write to reference/{topic}.md (atomic rename per file)
   fs.mkdirSync(referenceDir, { recursive: true });
   const today = new Date().toISOString().slice(0, 10);
 
   for (const [topic, topicEntries] of byTopic) {
     const filePath = path.join(referenceDir, `${topic}.md`);
-    let existing = "";
-    if (fs.existsSync(filePath)) {
-      existing = fs.readFileSync(filePath, "utf8");
-    } else {
-      existing = `# ${project} - ${topic}\n`;
-    }
+    // Q11: hold per-file lock on each reference file while writing
+    withFileLock(filePath, () => {
+      let existing = "";
+      if (fs.existsSync(filePath)) {
+        existing = fs.readFileSync(filePath, "utf8");
+      } else {
+        existing = `# ${project} - ${topic}\n`;
+      }
 
-    const newSection = [`\n## Archived ${today}\n`];
-    for (const entry of topicEntries) {
-      newSection.push(entry.bullet);
-      if (entry.citation) newSection.push(entry.citation);
-    }
-    newSection.push("");
+      const newSection = [`\n## Archived ${today}\n`];
+      for (const entry of topicEntries) {
+        newSection.push(entry.bullet);
+        if (entry.citation) newSection.push(entry.citation);
+      }
+      newSection.push("");
 
-    const refContent = existing.trimEnd() + "\n" + newSection.join("\n");
-    const tmpRefPath = filePath + `.tmp-${crypto.randomUUID()}`;
-    fs.writeFileSync(tmpRefPath, refContent);
-    fs.renameSync(tmpRefPath, filePath);
+      const refContent = existing.trimEnd() + "\n" + newSection.join("\n");
+      const tmpRefPath = filePath + `.tmp-${crypto.randomUUID()}`;
+      fs.writeFileSync(tmpRefPath, refContent);
+      fs.renameSync(tmpRefPath, filePath);
+    });
   }
 
   // Remove archived entries from FINDINGS.md
@@ -267,6 +277,7 @@ export function autoArchiveToReference(
   );
 
   return cortexOk(toArchive.length);
+  });
   } finally {
     try { fs.unlinkSync(lockFile); } catch { /* best-effort cleanup */ }
   }

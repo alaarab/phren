@@ -2,8 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "./shared.js";
 
-export function withFileLock<T>(filePath: string, fn: () => T): T {
-  const lockPath = filePath + ".lock";
+// Acquire the file lock, returning true on success or throwing on timeout.
+function acquireFileLock(lockPath: string): void {
   const maxWait = Number.parseInt(process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS || "5000", 10) || 5000;
   const pollInterval = Number.parseInt(process.env.CORTEX_FILE_LOCK_POLL_MS || "100", 10) || 100;
   const staleThreshold = Number.parseInt(process.env.CORTEX_FILE_LOCK_STALE_MS || "30000", 10) || 30000;
@@ -36,20 +36,40 @@ export function withFileLock<T>(filePath: string, fn: () => T): T {
   }
 
   if (!hasLock) {
-    const msg = `withFileLock: could not acquire lock for "${path.basename(filePath)}" within ${maxWait}ms`;
+    const msg = `withFileLock: could not acquire lock for "${path.basename(lockPath)}" within ${maxWait}ms`;
     debugLog(msg);
     throw new Error(msg);
   }
+}
 
+function releaseFileLock(lockPath: string): void {
+  try { fs.unlinkSync(lockPath); } catch { /* lock may not exist */ }
+}
+
+// Q10: withFileLock now accepts both sync and async callbacks.
+// When the callback returns a Promise, the lock file is held until the
+// Promise settles — preventing concurrent processes from seeing partial state.
+export function withFileLock<T>(filePath: string, fn: () => T): T extends Promise<infer U> ? Promise<U> : T {
+  const lockPath = filePath + ".lock";
+  acquireFileLock(lockPath);
+  let result: T;
   try {
-    return fn();
-  } finally {
-    try {
-      fs.unlinkSync(lockPath);
-    } catch {
-      // lock may not exist
-    }
+    result = fn();
+  } catch (err) {
+    releaseFileLock(lockPath);
+    throw err;
   }
+
+  // If the callback returned a Promise, hold the lock until it settles.
+  if (result instanceof Promise) {
+    return result.then(
+      (value) => { releaseFileLock(lockPath); return value; },
+      (err)   => { releaseFileLock(lockPath); throw err; },
+    ) as T extends Promise<infer U> ? Promise<U> : T;
+  }
+
+  releaseFileLock(lockPath);
+  return result as T extends Promise<infer U> ? Promise<U> : T;
 }
 
 export const withFileLockRaw = withFileLock;

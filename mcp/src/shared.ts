@@ -186,37 +186,45 @@ export function findCortexPathWithArg(arg?: string): string {
 // Figure out which project directories to index
 export function getProjectDirs(cortexPath: string, profile?: string): string[] {
   if (profile) {
+    // Q18: when a profile is explicitly set, fail closed — never widen to all projects.
+    // If the profile file is missing or malformed we return [] rather than leaking
+    // unrelated projects into the caller's view.
     if (!isValidProjectName(profile)) {
       console.error(`${CortexError.VALIDATION_ERROR}: Invalid CORTEX_PROFILE value: ${profile}`);
       return [];
     }
     const profilePath = path.join(cortexPath, "profiles", `${profile}.yaml`);
-    if (fs.existsSync(profilePath)) {
-      try {
-        const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
-        const projects = isRecord(data) ? data.projects : undefined;
-        if (Array.isArray(projects)) {
-          const listed = projects
-            .map((p: unknown) => {
-              const name = String(p);
-              if (!isValidProjectName(name)) {
-                console.error(`${CortexError.VALIDATION_ERROR}: Skipping invalid project name in profile: ${name}`);
-                return null;
-              }
-              return safeProjectPath(cortexPath, name);
-            })
-            .filter((p): p is string => p !== null && fs.existsSync(p));
-
-          // Shared spaces are always visible when present.
-          const sharedDirs = ["shared", "org"]
-            .map((name) => safeProjectPath(cortexPath, name))
-            .filter((p): p is string => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
-
-          return [...new Set([...listed, ...sharedDirs])];
-        }
-      } catch {
-        console.error(`${CortexError.MALFORMED_YAML}: Ignoring malformed profile YAML: ${profilePath}`);
+    if (!fs.existsSync(profilePath)) {
+      console.error(`${CortexError.FILE_NOT_FOUND}: Profile file not found: ${profilePath}`);
+      return [];
+    }
+    try {
+      const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
+      const projects = isRecord(data) ? data.projects : undefined;
+      if (!Array.isArray(projects)) {
+        console.error(`${CortexError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);
+        return [];
       }
+      const listed = projects
+        .map((p: unknown) => {
+          const name = String(p);
+          if (!isValidProjectName(name)) {
+            console.error(`${CortexError.VALIDATION_ERROR}: Skipping invalid project name in profile: ${name}`);
+            return null;
+          }
+          return safeProjectPath(cortexPath, name);
+        })
+        .filter((p): p is string => p !== null && fs.existsSync(p));
+
+      // Shared spaces are always visible when present.
+      const sharedDirs = ["shared", "org"]
+        .map((name) => safeProjectPath(cortexPath, name))
+        .filter((p): p is string => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
+
+      return [...new Set([...listed, ...sharedDirs])];
+    } catch {
+      console.error(`${CortexError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
+      return [];
     }
   }
 
@@ -272,7 +280,32 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
   }
   const logPath = newPath;
   const line = `[${new Date().toISOString()}] ${event} ${details}\n`;
+  const lockPath = logPath + ".lock";
+  const maxWait = 5000;
+  const pollMs = 50;
+  const staleMs = 30_000;
+  const waiter = new Int32Array(new SharedArrayBuffer(4));
+  // Q82: use an inline lock (same protocol as withFileLock) to guard the
+  // append + conditional rotation so concurrent processes don't read the same
+  // old content and race to write a truncated version each.
+  let waited = 0;
+  let hasLock = false;
   try {
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    while (waited < maxWait) {
+      try {
+        fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
+        hasLock = true;
+        break;
+      } catch {
+        try {
+          const stat = fs.statSync(lockPath);
+          if (Date.now() - stat.mtimeMs > staleMs) { fs.unlinkSync(lockPath); continue; }
+        } catch { /* ignore */ }
+        Atomics.wait(waiter, 0, 0, pollMs);
+        waited += pollMs;
+      }
+    }
     fs.appendFileSync(logPath, line);
     const stat = fs.statSync(logPath);
     if (stat.size > 1_000_000) {
@@ -283,5 +316,7 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     debugLog(`Audit log write failed: ${msg}`);
+  } finally {
+    if (hasLock) try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
   }
 }
