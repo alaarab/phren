@@ -15,21 +15,25 @@ const _synonymsJson: Record<string, string[]> = (() => {
 
 // ── Shared Git helper ────────────────────────────────────────────────────────
 
+export function runGitOrThrow(cwd: string, args: string[], timeoutMs: number): string {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: timeoutMs,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const stderr = (result.stderr ?? "").trim();
+    const suffix = stderr ? `: ${stderr}` : result.signal ? ` (signal: ${result.signal})` : "";
+    throw new Error(`git ${args.join(" ")} exited with status ${result.status ?? "unknown"}${suffix}`);
+  }
+  return result.stdout ?? "";
+}
+
 export function runGit(cwd: string, args: string[], timeoutMs: number, debugLogFn?: (msg: string) => void): string | null {
   try {
-    const result = spawnSync("git", args, {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: timeoutMs,
-    });
-    if (result.error) throw result.error;
-    if (result.status !== 0) {
-      const stderr = (result.stderr ?? "").trim();
-      const suffix = stderr ? `: ${stderr}` : result.signal ? ` (signal: ${result.signal})` : "";
-      throw new Error(`git ${args[0]} exited with status ${result.status ?? "unknown"}${suffix}`);
-    }
-    return (result.stdout ?? "").trim();
+    return runGitOrThrow(cwd, args, timeoutMs).trim();
   } catch (err: unknown) {
     const msg = errorMessage(err);
     if (debugLogFn) debugLogFn(`runGit: git ${args[0]} failed in ${cwd}: ${msg}`);

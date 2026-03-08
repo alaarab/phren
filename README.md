@@ -147,7 +147,7 @@ Three things happen every session without you doing anything:
 
 Two more things run in the background:
 
-**Consolidation.** When findings pile up past the threshold, cortex flags it once per session. `/cortex-consolidate` archives old entries and promotes patterns that show up in three or more projects.
+**Consolidation.** When findings pile up past the threshold, cortex flags it once per session. `/cortex-consolidate` archives old entries and promotes patterns that show up across two or more projects.
 
 **Review queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
 
@@ -387,7 +387,7 @@ When you run multiple agents, they all read and write the same project store. An
 
 - **Parallel agents** share findings on push/pull cycles
 - **Sequential sessions** build on each other. Session 47 knows everything sessions 1 through 46 learned.
-- **Cross-project patterns** surface when the same insight shows up in three or more projects
+- **Cross-project patterns** surface when the same insight shows up in two or more projects
 - **Backlog items** persist across agents and sessions. One agent adds a task, another finishes it.
 
 Because it's all markdown in git, you have a full record of what your agents learned, when, and which session produced each insight.
