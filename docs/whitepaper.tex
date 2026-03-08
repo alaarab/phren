@@ -14,11 +14,12 @@
 \usepackage{hyperref}
 \usepackage{titlesec}
 \usepackage{graphicx}
-\usepackage[section]{placeins}
+\usepackage{placeins}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 \usepackage{tikz}
 \usetikzlibrary{shapes.geometric,arrows.meta,positioning,fit,backgrounds,calc}
+\usepackage{dblfloatfix}
 
 \hypersetup{
   colorlinks=true,
@@ -329,7 +330,7 @@ No comparable public p95 coding-latency benchmark exists across all systems/mode
 
 Column definitions: \textbf{Ease} = zero-to-working setup friction (H=easy). \textbf{Token ctrl} = ability to bound injected tokens (H=tight control). \textbf{Governance} = policy engine, roles, approval workflows. \textbf{Audit} = queryable history of memory changes. \textbf{Trust} = confidence scoring and decay. \textbf{Multi-agent} = concurrent session safety. \textbf{Shell/CLI} = model-free management tool. \textbf{Daily ops} = ongoing maintenance burden after setup (H=low burden). \textbf{Lock-in} = data portability risk (H=high lock-in, color-coded red; L=low lock-in, color-coded green).
 
-\begin{table*}[!b]
+\begin{table*}[!t]
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
