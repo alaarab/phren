@@ -329,6 +329,7 @@ async function main() {
     if (writeQueueDepth >= MAX_QUEUE_DEPTH) {
       throw new Error(`Write queue full (${MAX_QUEUE_DEPTH} items). Try again shortly.`);
     }
+    writeQueueDepth++;
     const run = writeQueue.then(async () => {
       try {
         return await Promise.race([
@@ -346,7 +347,6 @@ async function main() {
         writeQueueDepth = Math.max(0, writeQueueDepth - 1);
       }
     });
-    writeQueueDepth++;
     writeQueue = run.then(() => undefined).catch((error): void => {
       try {
         const message = error instanceof Error
