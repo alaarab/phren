@@ -100,6 +100,18 @@ export function appendIndexEvent(cortexPath: string, event: Record<string, unkno
   }
 }
 
+/**
+ * Resolve the findings file for a project directory, falling back to LEARNINGS.md
+ * if FINDINGS.md doesn't exist. Returns undefined if neither exists.
+ */
+export function resolveFindingsPath(projectDir: string): string | undefined {
+  const findingsPath = path.join(projectDir, "FINDINGS.md");
+  if (fs.existsSync(findingsPath)) return findingsPath;
+  const legacyPath = path.join(projectDir, "LEARNINGS.md");
+  if (fs.existsSync(legacyPath)) return legacyPath;
+  return undefined;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -152,7 +164,7 @@ export function ensureCortexPath(): string {
   fs.mkdirSync(defaultPath, { recursive: true });
   fs.writeFileSync(
     path.join(defaultPath, "README.md"),
-    `# My Cortex\n\nThis is your personal knowledge base. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md FINDINGS.md backlog.md\n\`\`\`\n\nOr run \`/cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
+    `# My Cortex\n\nThis is your personal project store. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md FINDINGS.md backlog.md\n\`\`\`\n\nOr run \`/cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
   );
   console.error(`Created ~/.cortex`);
   return defaultPath;
@@ -234,13 +246,13 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
   return results;
 }
 
-/** Canonical finding type tags */
-export const FINDING_TYPES = ["decision", "pitfall", "pattern"] as const;
+/** All valid finding type tags — used for writes, search filters, and hook extraction */
+export const FINDING_TYPES = ["decision", "pitfall", "pattern", "tradeoff", "architecture", "bug"] as const;
 export type FindingType = (typeof FINDING_TYPES)[number];
 
-/** All searchable finding tags (canonical + legacy aliases) */
-export const FINDING_TAGS = ["decision", "pitfall", "pattern", "tradeoff", "architecture", "bug"] as const;
-export type FindingTag = (typeof FINDING_TAGS)[number];
+/** Searchable finding tags (same set as FINDING_TYPES, kept as alias for backward compatibility) */
+export const FINDING_TAGS = FINDING_TYPES;
+export type FindingTag = FindingType;
 
 /** Document types in the FTS index */
 export const DOC_TYPES = ["claude", "findings", "reference", "skills", "summary", "backlog", "changelog", "canonical", "memory-queue", "skill", "other"] as const;

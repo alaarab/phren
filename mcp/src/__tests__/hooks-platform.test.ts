@@ -189,6 +189,7 @@ describe("hooks platform compatibility", () => {
     });
 
     it("runCustomHooks respects custom timeout", () => {
+      if (process.platform === "win32") return; // sleep is POSIX
       const govDir = path.join(cortexPath, ".governance");
       fs.mkdirSync(govDir, { recursive: true });
       fs.writeFileSync(
@@ -202,8 +203,11 @@ describe("hooks platform compatibility", () => {
       );
       const result = runCustomHooks(cortexPath, "pre-save");
       expect(result.ran).toBe(1);
+      // errors[0] is a HookError object with {code, message} properties
       expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]).toContain("pre-save");
+      expect(result.errors[0]).toHaveProperty("code");
+      expect(result.errors[0]).toHaveProperty("message");
+      expect(result.errors[0].message).toContain("pre-save");
     });
 
     it("runCustomHooks runs multiple matching hooks in sequence", () => {
@@ -274,7 +278,8 @@ describe("hooks platform compatibility", () => {
       if (fs.existsSync(wrapper)) {
         const content = fs.readFileSync(wrapper, "utf8");
         expect(content).toContain("run_with_timeout");
-        expect(content).toContain("14s");
+        expect(content).toContain("CORTEX_HOOK_TIMEOUT_S");
+        expect(content).toContain("14}");
       }
     });
 

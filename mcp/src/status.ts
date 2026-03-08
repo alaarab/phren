@@ -188,18 +188,18 @@ export async function runStatus() {
 
   // Stats
   const projectDirs = getProjectDirs(cortexPath, profile);
-  let totalLearnings = 0;
+  let totalFindings = 0;
   let totalBacklog = 0;
   let totalQueue = 0;
 
   for (const dir of projectDirs) {
     const projName = path.basename(dir);
-    totalLearnings += countBullets(path.join(cortexPath, projName, "FINDINGS.md")) || countBullets(path.join(cortexPath, projName, "LEARNINGS.md"));
+    totalFindings += countBullets(path.join(cortexPath, projName, "FINDINGS.md")) || countBullets(path.join(cortexPath, projName, "LEARNINGS.md"));
     totalBacklog += countBullets(path.join(cortexPath, projName, "backlog.md"));
     totalQueue += countQueueItems(cortexPath, projName);
   }
 
-  console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalLearnings} findings, ${totalBacklog} backlog, ${totalQueue} queued`);
+  console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalBacklog} backlog, ${totalQueue} queued`);
 
   // Recent changes (git log)
   const isGitRepo = runGit(cortexPath, ["rev-parse", "--is-inside-work-tree"]);

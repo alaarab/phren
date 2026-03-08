@@ -4,6 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { debugLog, runtimeDir, runtimeFile, getProjectDirs } from "./shared.js";
+import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -129,15 +130,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         version = pkg.version || "unknown";
       } catch { /* best-effort */ }
 
-      // FTS index
+      // FTS index (lives in /tmp/cortex-fts-*/, not .runtime/)
       let indexStatus: { exists: boolean; sizeBytes?: number } = { exists: false };
       try {
-        const rtDir = runtimeDir(cortexPath);
-        const indexPath = path.join(rtDir, "index.db");
-        if (fs.existsSync(indexPath)) {
-          const stat = fs.statSync(indexPath);
-          indexStatus = { exists: true, sizeBytes: stat.size };
-        }
+        indexStatus = findFtsCacheForPath(cortexPath, profile);
       } catch { /* best-effort */ }
 
       // Hook registration
@@ -204,7 +200,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ cortex · hook errors",
       description:
-        "List recent error entries from the cortex debug log. " +
+        "List recent error entries from cortex hook-errors.log and debug.log. " +
         "Useful for diagnosing hook or index failures.",
       inputSchema: z.object({
         limit: z.number().int().min(1).max(200).optional()
@@ -213,15 +209,6 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ limit }) => {
       const maxEntries = limit ?? 20;
-      const logPath = runtimeFile(cortexPath, "debug.log");
-
-      if (!fs.existsSync(logPath)) {
-        return mcpResponse({
-          ok: true,
-          message: "No debug log found. Debug logging may not be enabled (set CORTEX_DEBUG=1).",
-          data: { errors: [], total: 0 },
-        });
-      }
 
       const ERROR_PATTERNS = [
         /\berror\b/i,
@@ -235,34 +222,37 @@ export function register(server: McpServer, ctx: McpContext): void {
         /\bENOSPC\b/,
       ];
 
-      try {
-        const content = fs.readFileSync(logPath, "utf8");
-        const allLines = content.split("\n").filter(l => l.trim());
-        const errorLines = allLines.filter(line =>
-          ERROR_PATTERNS.some(p => p.test(line))
-        );
+      function readErrorLines(filePath: string, filterPatterns: boolean): string[] {
+        try {
+          if (!fs.existsSync(filePath)) return [];
+          const content = fs.readFileSync(filePath, "utf8");
+          const lines = content.split("\n").filter(l => l.trim());
+          if (!filterPatterns) return lines; // hook-errors.log: every line is an error
+          return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
+        } catch { return []; }
+      }
 
-        const recent = errorLines.slice(-maxEntries);
+      // hook-errors.log contains only hook failure lines (no filtering needed)
+      const hookErrors = readErrorLines(runtimeFile(cortexPath, "hook-errors.log"), false);
+      // debug.log may contain non-error lines, so filter
+      const debugErrors = readErrorLines(runtimeFile(cortexPath, "debug.log"), true);
 
-        if (recent.length === 0) {
-          return mcpResponse({
-            ok: true,
-            message: "No error entries found in debug log.",
-            data: { errors: [], total: 0, logLines: allLines.length },
-          });
-        }
+      const allErrors = [...hookErrors, ...debugErrors];
 
+      if (allErrors.length === 0) {
         return mcpResponse({
           ok: true,
-          message: `Found ${errorLines.length} error(s), showing last ${recent.length}:\n\n${recent.join("\n")}`,
-          data: { errors: recent, total: errorLines.length, logLines: allLines.length },
-        });
-      } catch (err: unknown) {
-        return mcpResponse({
-          ok: false,
-          error: `Failed to read debug log: ${err instanceof Error ? err.message : String(err)}`,
+          message: "No error entries found. Hook errors go to hook-errors.log; general errors require CORTEX_DEBUG=1.",
+          data: { errors: [], total: 0 },
         });
       }
+
+      const recent = allErrors.slice(-maxEntries);
+      return mcpResponse({
+        ok: true,
+        message: `Found ${allErrors.length} error(s), showing last ${recent.length}:\n\n${recent.join("\n")}`,
+        data: { errors: recent, total: allErrors.length, sources: { hookErrors: hookErrors.length, debugErrors: debugErrors.length } },
+      });
     }
   );
 }

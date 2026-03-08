@@ -158,11 +158,8 @@ describe("boundary and edge case inputs", () => {
   it("handles adding a finding with very long text", () => {
     const longText = "A".repeat(5000) + " unique long finding";
     const msg = addFinding(tmpDir, PROJECT, longText);
-    expect(msg.ok).toBe(true);
-
-    const findings = readFindings(tmpDir, PROJECT);
-    if (!findings.ok) return;
-    expect(findings.data.some((f) => f.text.includes("unique long finding"))).toBe(true);
+    // validateFinding rejects texts longer than 2000 chars
+    expect(msg.ok).toBe(false);
   });
 
   it("handles adding a backlog item with unicode characters", () => {

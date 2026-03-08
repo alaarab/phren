@@ -86,7 +86,7 @@ cortex add-finding <project> "..."   # append a finding via CLI
 ## Available MCP tools (29)
 
 **Search and browse:**
-- `search_cortex(query, type?, limit?, project?)`: full-text search across all project data. `type` filter: `claude`, `findings`, `reference`, `summary`, `backlog`, `skill`.
+- `search_knowledge(query, type?, limit?, project?)`: full-text search across all project data. `type` filter: `claude`, `findings`, `reference`, `summary`, `backlog`, `skill`.
 - `get_project_summary(name)`: fetch the summary for a specific project
 - `list_projects()`: list all projects in your project store
 - `get_findings(project, limit?)`: read recent findings for a project without a search query

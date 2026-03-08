@@ -48,9 +48,13 @@ function intentBoost(intent: string, docType: string): number {
 function fileRelevanceBoost(filePath: string, changedFiles: Set<string>): number {
   if (changedFiles.size === 0) return 0;
   const normalized = filePath.replace(/\\/g, "/");
+  const docBasename = path.basename(normalized);
   for (const cf of changedFiles) {
     const n = cf.replace(/\\/g, "/");
-    if (normalized.endsWith(n) || normalized.includes(`/${n}`)) return 3;
+    // Exact basename match to avoid 'index.ts' matching 'shared-index.ts'
+    if (path.basename(n) === docBasename) return 3;
+    // Also match if the full changed-file path is a suffix of the doc path
+    if (normalized.endsWith(`/${n}`)) return 3;
   }
   return 0;
 }
@@ -137,12 +141,12 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
   const docs = project
     ? queryDocRows(
       db,
-      "SELECT project, filename, type, content, path FROM docs WHERE project = ? LIMIT ?",
+      "SELECT project, filename, type, content, path FROM docs WHERE project = ? ORDER BY rowid DESC LIMIT ?",
       [project, sampleLimit]
     ) || []
     : queryDocRows(
       db,
-      "SELECT project, filename, type, content, path FROM docs LIMIT ?",
+      "SELECT project, filename, type, content, path FROM docs ORDER BY rowid DESC LIMIT ?",
       [sampleLimit]
     ) || [];
 
@@ -161,7 +165,7 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
 }
 
 function approximateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  return Math.ceil(text.length / 3.5 + (text.match(/\s+/g) || []).length * 0.1);
 }
 
 function compactSnippet(snippet: string, maxLines: number, maxChars: number): string {
@@ -439,7 +443,7 @@ export interface SelectedSnippet {
   key: string;
 }
 
-/** Mark snippet lines with stale citations (cited file no longer exists). */
+/** Mark snippet lines with stale citations (cited file missing or line content changed). */
 export function markStaleCitations(snippet: string): string {
   const lines = snippet.split("\n");
   const result: string[] = [];
@@ -453,10 +457,29 @@ export function markStaleCitations(snippet: string): string {
         const resolvedFile = citation.repo
           ? path.resolve(citation.repo, citation.file)
           : (path.isAbsolute(citation.file) ? citation.file : null);
-        if (resolvedFile && !fs.existsSync(resolvedFile)) {
-          result.push(line + " [stale citation]");
-          i++; // skip the citation comment line
-          continue;
+        if (resolvedFile) {
+          let stale = false;
+          if (!fs.existsSync(resolvedFile)) {
+            stale = true;
+          } else if (citation.line !== undefined && citation.line >= 1) {
+            // Verify the cited line still has content (not beyond EOF)
+            try {
+              const fileLines = fs.readFileSync(resolvedFile, "utf8").split("\n");
+              if (citation.line > fileLines.length) {
+                stale = true;
+              } else if (fileLines[citation.line - 1].trim() === "") {
+                // Line exists but is now empty — content has drifted
+                stale = true;
+              }
+            } catch {
+              stale = true;
+            }
+          }
+          if (stale) {
+            result.push(line + " [stale citation]");
+            i++; // skip the citation comment line
+            continue;
+          }
         }
       }
     }
@@ -482,7 +505,7 @@ export function selectSnippets(
       snippet = markStaleCitations(snippet);
     }
     let est = approximateTokens(snippet) + 14;
-    if (selected.length > 0 && usedTokens + est > tokenBudget) continue;
+    if (selected.length > 0 && usedTokens + est > tokenBudget) break;
     if (selected.length === 0 && usedTokens + est > tokenBudget) {
       snippet = compactSnippet(snippet, 3, Math.floor(charBudget * 0.55));
       est = approximateTokens(snippet) + 14;
@@ -491,6 +514,12 @@ export function selectSnippets(
     selected.push({ doc, snippet, key });
     usedTokens += est;
     if (selected.length >= 3) break;
+  }
+  // Final pass: trim from the end if token budget is exceeded (guards against
+  // rounding / compaction producing more tokens than estimated during selection)
+  while (selected.length > 1 && usedTokens > tokenBudget) {
+    const removed = selected.pop()!;
+    usedTokens -= approximateTokens(removed.snippet) + 14;
   }
   return { selected, usedTokens };
 }

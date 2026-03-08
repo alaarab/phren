@@ -17,6 +17,7 @@ import {
   queryEntityLinks,
   extractSnippet,
   queryDocBySourceKey,
+  normalizeMemoryId,
   type SqlJsDatabase,
   type DbRow,
 } from "./shared-index.js";
@@ -68,8 +69,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ id: rawId }) => {
-      // Decode URL-encoded IDs (e.g. mem:project%2Ffilename -> mem:project/filename)
-      const id = decodeURIComponent(rawId);
+      // Normalize ID: decode URL encoding, fix backslashes, strip legacy :linenum suffix
+      const id = normalizeMemoryId(rawId);
       const match = id.match(/^mem:([^/]+)\/(.+)$/);
       if (!match) {
         return mcpResponse({ ok: false, error: `Invalid memory id format "${rawId}". Expected mem:project/path/to/file.md.` });
@@ -116,13 +117,18 @@ export function register(server: McpServer, ctx: McpContext): void {
           updated_at: updatedAt,
           tags: tags.length > 0 ? tags : undefined,
           score: qualityMultiplier,
+          // Relevance metadata: rank and relevance_score are populated when
+          // the detail is fetched as part of a search result set. When fetched
+          // directly by ID they are not available.
+          rank: undefined,
+          relevance_score: undefined,
         },
       });
     }
   );
 
   server.registerTool(
-    "search_cortex",
+    "search_knowledge",
     {
       title: "◆ cortex · search",
       description: "Search the user's cortex. Call this at the start of any session to get project context, and any time the user asks about their codebase, stack, architecture, past decisions, commands, conventions, or findings. Prefer this over asking the user to re-explain things they've already documented.",
@@ -135,7 +141,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           .describe("Filter by document type: claude, findings, reference, summary, backlog, skill"),
         tag: z.enum(FINDING_TAGS)
           .optional()
-          .describe("Filter findings by type tag (decision, pitfall, pattern are canonical; tradeoff, architecture, bug are legacy aliases)."),
+          .describe("Filter findings by type tag: decision, pitfall, pattern, tradeoff, architecture, bug."),
         since: z.string().optional().describe('Filter findings by creation date. Formats: "7d" (last 7 days), "30d" (last 30 days), "YYYY-MM" (since start of month), "YYYY-MM-DD" (since date).'),
       }),
     },
@@ -164,8 +170,12 @@ export function register(server: McpServer, ctx: McpContext): void {
           sql += " AND type = ?";
           params.push(filterType);
         }
+        // When post-query filters are active, fetch more candidates so filtering
+        // doesn't leave fewer results than requested (capped at 200).
+        const hasPostFilter = Boolean(filterTag || since);
+        const fetchLimit = hasPostFilter ? Math.min(maxResults * 5, 200) : maxResults;
         sql += " ORDER BY rank LIMIT ?";
-        params.push(maxResults);
+        params.push(fetchLimit);
 
         let rows = queryRows(db, sql, params);
         let usedFallback = false;
@@ -218,7 +228,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 if (filterProject) { filterParts.push("project = ?"); filterParams.push(filterProject); }
                 if (filterType) { filterParts.push("type = ?"); filterParams.push(filterType); }
                 const filterWhere = filterParts.length > 0 ? " WHERE " + filterParts.join(" AND ") : "";
-                const allDocs = queryRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
+                const allDocs = queryRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY rowid DESC LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
                 if (allDocs) {
                   const existingPaths = new Set(rows!.map((r: DbRow) => r[4]));
                   const candidates = allDocs.filter(doc => !existingPaths.has(doc[4]));
@@ -302,6 +312,11 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
 
+        // Trim back to requested limit after post-query filters
+        if (hasPostFilter && rows && rows.length > maxResults) {
+          rows = rows.slice(0, maxResults);
+        }
+
         // Filter out superseded entries from results
         if (rows) {
           rows = rows.map((row: DbRow) => {
@@ -363,7 +378,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           data: { query, count: results.length, results, fallback: usedFallback, relatedEntities: relatedEntities.length > 0 ? relatedEntities : undefined },
         });
       } catch (err: unknown) {
-        return mcpResponse({ ok: false, error: `Search error: ${err instanceof Error ? err.message : String(err)}` });
+        return mcpResponse({ ok: false, error: `Search error: ${err instanceof Error ? err.message : String(err)}`, errorCode: "INTERNAL_ERROR" });
       }
     }
   );

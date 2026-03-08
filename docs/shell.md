@@ -8,7 +8,7 @@ npx @alaarab/cortex shell
 
 ## Views
 
-The shell has six views. Switch between them with single-key shortcuts or palette commands.
+The shell has eight views. Switch between them with single-key shortcuts or palette commands.
 
 ### Projects (`p`)
 
@@ -24,9 +24,17 @@ Shows the selected project's backlog.md parsed into three sections: Active, Queu
 
 Lists entries from the selected project's FINDINGS.md with dates and optional citations. Entries are shown with their auto-generated IDs for use with `:find remove`.
 
-### Memory Queue (`m`)
+### Review Queue (`m`)
 
-Shows pending memory items from MEMORY_QUEUE.md. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date. Triage items with `:mq approve`, `:mq reject`, or `:mq edit`.
+Shows pending review items from `MEMORY_QUEUE.md`. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date. Triage items with `:mq approve`, `:mq reject`, or `:mq edit`.
+
+### Skills (`s`)
+
+Shows installed global and project-local skills and lets you inspect what is available in the current context.
+
+### Hooks (`k`)
+
+Shows lifecycle hook status and custom hook configuration for the active setup.
 
 ### Machines/Profiles (via `:machines`)
 
@@ -43,7 +51,9 @@ Runs doctor checks and shows results alongside runtime health data: last hook ru
 | `p` | Switch to Projects view |
 | `b` | Switch to Backlog view |
 | `l` | Switch to Findings view |
-| `m` | Switch to Memory Queue view |
+| `m` | Switch to Review Queue view |
+| `s` | Switch to Skills view |
+| `k` | Switch to Hooks view |
 | `h` | Switch to Health view |
 | `q` | Quit the shell |
 | `/text` | Set a filter (filters items in the current view by text match) |
@@ -79,7 +89,7 @@ All palette commands start with `:`. You can also type them without the colon pr
 | `:find add <text>` | Append a finding to the selected project |
 | `:find remove <id\|match>` | Remove a finding by ID or text match |
 
-### Memory Queue Triage
+### Review Queue Triage
 
 | Command | Description |
 |---------|-------------|

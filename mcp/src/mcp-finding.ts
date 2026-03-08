@@ -3,6 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import {
   removeFinding as removeFindingCore,
@@ -36,7 +37,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         "Record a single insight to a project's FINDINGS.md. Call this the moment you discover " +
         "a non-obvious pattern, hit a subtle bug, find a workaround, or learn something that would " +
         "save time in a future session. Do not wait until the end of the session." +
-        " Optionally classify with findingType: decision, pitfall, or pattern.",
+        " Optionally classify with findingType: decision, pitfall, pattern, tradeoff, architecture, or bug.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your cortex)."),
         finding: z.string().describe("The insight, written as a single bullet point. Be specific enough that someone could act on it without extra context."),
@@ -49,7 +50,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }).optional().describe("Optional source citation for traceability."),
         findingType: z.enum(FINDING_TYPES)
           .optional()
-          .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or gotcha to avoid), 'pattern' (reusable approach that works well)."),
+          .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'tradeoff' (deliberate compromise), 'architecture' (structural design note), 'bug' (confirmed defect or failure)."),
       }),
     },
     async ({ project, finding, citation, findingType }) => {
@@ -79,7 +80,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                   const lineEnd = content.indexOf("\n", idx);
                   const insertAt = lineEnd >= 0 ? lineEnd : content.length;
                   content = content.slice(0, insertAt) + " " + conflicts.annotations.join(" ") + " <!-- conflicts_checked: true -->" + content.slice(insertAt);
-                  const tmpFp = fp + ".tmp";
+                  const tmpFp = fp + `.tmp-${crypto.randomUUID()}`;
                   fs.writeFileSync(tmpFp, content);
                   fs.renameSync(tmpFp, fp);
                 }
@@ -96,7 +97,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok, message: result.ok ? result.data : result.error, data: ok ? { project, finding: taggedFinding } : undefined });
         } catch (err: unknown) {
           if (err instanceof Error && err.message.includes("Rejected:")) {
-            return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+            return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err), errorCode: "VALIDATION_ERROR" });
           }
           throw err;
         }
@@ -290,7 +291,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             });
           }
         } catch (err: unknown) {
-          return mcpResponse({ ok: false, error: `Save failed: ${err instanceof Error ? err.message : String(err)}` });
+          return mcpResponse({ ok: false, error: `Save failed: ${err instanceof Error ? err.message : String(err)}`, errorCode: "INTERNAL_ERROR" });
         }
       });
     }

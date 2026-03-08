@@ -211,10 +211,10 @@ Cursor, Codex, and more.
 - **UserPromptSubmit**: searches cortex, injects matching context with trust filtering and token budgeting
 - **Stop**: commits and pushes any cortex changes to remote
 
-## MCP tools (28)
+## MCP tools (29)
 
 **Search and browse:**
-- \`search_knowledge\`: FTS5 search with synonym expansion across all project knowledge
+- \`search_knowledge\`: FTS5 search with synonym expansion across the project store
 - \`get_memory_detail\`: fetch full content of a memory by id (progressive disclosure)
 - \`get_project_summary\`: project summary card and available docs
 - \`list_projects\`: all projects in the active profile

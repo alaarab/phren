@@ -419,7 +419,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
         if (queueResult.ok) {
           const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
           if (conflictItems.length) {
-            lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in Memory Queue`)}  (:mq approve|reject)`);
+            lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in Review Queue`)}  (:mq approve|reject)`);
           }
         }
       }
@@ -481,9 +481,9 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
 export function suggestCommand(input: string): string | undefined {
   const known = [
-    "help", "projects", "backlog", "learnings", "memory", "machines", "health",
+    "help", "projects", "backlog", "findings", "review queue", "machines", "health",
     "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
-    "work next", "tidy", "learn add", "learn remove", "mq approve", "mq reject",
+    "work next", "tidy", "find add", "find remove", "mq approve", "mq reject",
     "mq edit", "machine map", "profile add-project", "profile remove-project",
     "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
     "undo", "diff", "conflicts", "reset",
@@ -499,7 +499,7 @@ export function suggestCommand(input: string): string | undefined {
 
 export function completeInput(line: string, cortexPath: string, profile: string, state: ShellState): string[] {
   const commands = [
-    ":projects", ":backlog", ":learnings", ":findings", ":memory", ":machines", ":health",
+    ":projects", ":backlog", ":findings", ":review queue", ":machines", ":health",
     ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
     ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
     ":mq approve", ":mq reject", ":mq edit", ":machine map",

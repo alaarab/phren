@@ -24,6 +24,7 @@ export interface McpToolResult {
   ok: boolean;
   data?: unknown;
   error?: string;
+  errorCode?: string;
   message?: string;
 }
 

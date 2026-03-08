@@ -70,7 +70,7 @@ describe("mcp-search: project filter", () => {
   });
 
   it("search with project filter returns only results from that project", async () => {
-    const res = parseResult(await server.call("search_cortex", { query: "Redis", project: "project-a" }));
+    const res = parseResult(await server.call("search_knowledge", { query: "Redis", project: "project-a" }));
     expect(res.ok).toBe(true);
     expect(res.data.results.length).toBeGreaterThan(0);
     for (const r of res.data.results) {
@@ -79,7 +79,7 @@ describe("mcp-search: project filter", () => {
   });
 
   it("search without project filter can return results from multiple projects", async () => {
-    const res = parseResult(await server.call("search_cortex", { query: "Redis" }));
+    const res = parseResult(await server.call("search_knowledge", { query: "Redis" }));
     expect(res.ok).toBe(true);
     expect(res.data.results.length).toBeGreaterThan(0);
     const projects = new Set(res.data.results.map((r: any) => r.project));
@@ -88,7 +88,7 @@ describe("mcp-search: project filter", () => {
   });
 
   it("search with nonexistent project returns no results", async () => {
-    const res = parseResult(await server.call("search_cortex", { query: "Redis", project: "nonexistent" }));
+    const res = parseResult(await server.call("search_knowledge", { query: "Redis", project: "nonexistent" }));
     expect(res.ok).toBe(true);
     expect(res.data.results).toHaveLength(0);
   });
@@ -134,7 +134,7 @@ describe("mcp-search: type filter", () => {
   });
 
   it("type=reference returns only reference docs", async () => {
-    const res = parseResult(await server.call("search_cortex", { query: "authentication", type: "reference" }));
+    const res = parseResult(await server.call("search_knowledge", { query: "authentication", type: "reference" }));
     expect(res.ok).toBe(true);
     if (res.data.results.length > 0) {
       for (const r of res.data.results) {
@@ -144,7 +144,7 @@ describe("mcp-search: type filter", () => {
   });
 
   it("type=findings returns only findings docs", async () => {
-    const res = parseResult(await server.call("search_cortex", { query: "authentication", type: "findings" }));
+    const res = parseResult(await server.call("search_knowledge", { query: "authentication", type: "findings" }));
     expect(res.ok).toBe(true);
     if (res.data.results.length > 0) {
       for (const r of res.data.results) {
@@ -154,7 +154,7 @@ describe("mcp-search: type filter", () => {
   });
 
   it("type=summary returns only summary docs", async () => {
-    const res = parseResult(await server.call("search_cortex", { query: "authentication", type: "summary" }));
+    const res = parseResult(await server.call("search_knowledge", { query: "authentication", type: "summary" }));
     expect(res.ok).toBe(true);
     if (res.data.results.length > 0) {
       for (const r of res.data.results) {
@@ -201,7 +201,7 @@ describe("mcp-search: no cross-project leakage", () => {
   });
 
   it("searching project-a for project-b's unique term returns no results", async () => {
-    const res = parseResult(await server.call("search_cortex", {
+    const res = parseResult(await server.call("search_knowledge", {
       query: "Zylophone",
       project: "project-a",
     }));
@@ -211,7 +211,7 @@ describe("mcp-search: no cross-project leakage", () => {
   });
 
   it("searching project-b for project-a's unique term returns no results", async () => {
-    const res = parseResult(await server.call("search_cortex", {
+    const res = parseResult(await server.call("search_knowledge", {
       query: "Xylophone",
       project: "project-b",
     }));
@@ -221,7 +221,7 @@ describe("mcp-search: no cross-project leakage", () => {
 
   it("cosine fallback results also respect project filter", async () => {
     // Use a query that won't match FTS5 well but might match via cosine/keyword fallback
-    const res = parseResult(await server.call("search_cortex", {
+    const res = parseResult(await server.call("search_knowledge", {
       query: "tuning parameters configuration",
       project: "project-a",
     }));
@@ -272,7 +272,7 @@ describe("mcp-search: feedback re-ranking", () => {
     // The quality multiplier is read from .runtime/quality/<key>.json files
     // entryScoreKey produces keys like "myapp::FINDINGS.md::snippet"
     // We can verify the search still works and returns results
-    const res = parseResult(await server.call("search_cortex", { query: "database connection pooling" }));
+    const res = parseResult(await server.call("search_knowledge", { query: "database connection pooling" }));
     expect(res.ok).toBe(true);
     expect(res.data.results.length).toBeGreaterThan(0);
   });

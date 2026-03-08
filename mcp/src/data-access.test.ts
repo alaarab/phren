@@ -269,7 +269,7 @@ describe("completeBacklogItem", () => {
   it("returns an error when no item matches", () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
     const msg = completeBacklogItem(tmpDir, PROJECT, "nonexistent item xyz");
-    expect(resultMsg(msg)).toContain("No backlog item matching");
+    expect(resultMsg(msg)).toContain("Item not found");
   });
 });
 

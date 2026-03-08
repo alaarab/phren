@@ -98,7 +98,7 @@ describe("complete_backlog_item MCP tool", () => {
     fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
     const msg = completeBacklogItem(tmpDir, PROJECT, "nonexistent item xyz123");
     expect(msg.ok).toBe(false);
-    expect(resultMsg(msg)).toContain("No backlog item matching");
+    expect(resultMsg(msg)).toContain("Item not found");
   });
 
   it("completes by item ID", () => {

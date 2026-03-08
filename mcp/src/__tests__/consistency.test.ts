@@ -14,11 +14,14 @@ describe("taxonomy consistency", () => {
     expect(DOC_TYPES).toContain("canonical");
   });
 
-  it("FINDING_TYPES has exactly the 3 canonical tags", () => {
-    expect(FINDING_TYPES).toHaveLength(3);
+  it("FINDING_TYPES has all 6 unified tags", () => {
+    expect(FINDING_TYPES).toHaveLength(6);
     expect(FINDING_TYPES).toContain("decision");
     expect(FINDING_TYPES).toContain("pitfall");
     expect(FINDING_TYPES).toContain("pattern");
+    expect(FINDING_TYPES).toContain("tradeoff");
+    expect(FINDING_TYPES).toContain("architecture");
+    expect(FINDING_TYPES).toContain("bug");
   });
 });
 

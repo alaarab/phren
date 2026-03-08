@@ -98,7 +98,7 @@ export function renderBottomBar(state: ShellState, navMode: "navigate" | "input"
       add: "add task",
       "learn-add": "add finding",
       "skill-add": "new skill name",
-      "mq-edit": "edit Memory Queue item",
+      "mq-edit": "edit Review Queue item",
     };
     const label = labels[inputCtx] || inputCtx;
     return `${sep}\n  ${style.boldCyan(label + " ›")} ${inputBuf}${style.cyan("█")}`;
@@ -386,7 +386,7 @@ export function renderFindingsView(ctx: ViewContext, cursor: number, height: num
   return vp.lines;
 }
 
-// ── Memory Queue view ──────────────────────────────────────────────────────
+// ── Review Queue view ──────────────────────────────────────────────────────
 
 function queueSectionBadge(section: string): string {
   switch (section.toLowerCase()) {

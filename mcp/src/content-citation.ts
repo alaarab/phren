@@ -74,10 +74,17 @@ export function buildCitationComment(citation: FindingCitation): string {
 }
 
 export function parseCitationComment(line: string): FindingCitation | null {
-  const match = line.match(/<!--\s*cortex:cite\s+(\{.*\})\s*-->/);
-  if (!match) return null;
+  // Find opening marker and closing --> to handle multiline/escaped JSON.
+  // Uses marker-based extraction instead of regex to support multiline JSON.
+  const markerMatch = line.match(/<!--\s*cortex:cite\s+/);
+  if (!markerMatch) return null;
+  const jsonStart = markerMatch.index! + markerMatch[0].length;
+  const endMarker = line.indexOf("-->", jsonStart);
+  if (endMarker === -1) return null;
+  const jsonStr = line.slice(jsonStart, endMarker).trim();
+  if (!jsonStr.startsWith("{")) return null;
   try {
-    const parsed = JSON.parse(match[1]);
+    const parsed = JSON.parse(jsonStr);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     // Default created_at to empty string if missing, but still require it to be string-like
     const created_at = typeof parsed.created_at === "string" ? parsed.created_at : "";
@@ -207,6 +214,8 @@ const DEFAULT_DECAY = {
   d120: 0.45,
 };
 
+const DEFAULT_UNDATED_CONFIDENCE = 0.7;
+
 function confidenceForAge(ageDays: number, decay: RetentionPolicy["decay"]): number {
   const { d30 = 1.0, d60 = 0.85, d90 = 0.65, d120 = 0.45 } = decay;
   if (ageDays <= 0) return 1.0;
@@ -252,11 +261,11 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    if (line.includes("<details>")) {
+    if (line.includes("<!-- cortex:archive:start -->") || line.includes("<details>")) {
       inDetails = true;
       continue;
     }
-    if (line.includes("</details>")) {
+    if (line.includes("<!-- cortex:archive:end -->") || line.includes("</details>")) {
       inDetails = false;
       continue;
     }
@@ -277,27 +286,47 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
 
     if (!line.startsWith("- ")) continue;
 
-    const stale = currentDate ? isDateStale(currentDate, ttlDays) : false;
+    // Determine the effective date for this bullet: heading date, inline created tag, or citation
+    const next = lines[i + 1] ?? "";
+    const citation = parseCitationComment(next);
+
+    let effectiveDate = currentDate;
+    if (!effectiveDate) {
+      const inlineCreated = line.match(/<!-- created: (\d{4}-\d{2}-\d{2}) -->/);
+      if (inlineCreated) {
+        effectiveDate = inlineCreated[1];
+      } else if (citation?.created_at) {
+        const citationDate = citation.created_at.slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(citationDate)) {
+          effectiveDate = citationDate;
+        }
+      }
+    }
+
+    const stale = effectiveDate ? isDateStale(effectiveDate, ttlDays) : false;
     if (stale) {
-      issues.push({ date: currentDate || "unknown", bullet: line, reason: "stale" });
+      issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
+      if (citation) i++;
       continue;
     }
 
-    let confidence = 1;
-    if (currentDate) {
-      const age = ageDaysForDate(currentDate);
-      if (age !== null) confidence *= confidenceForAge(age, decay);
+    let confidence: number;
+    if (effectiveDate) {
+      const age = ageDaysForDate(effectiveDate);
+      confidence = age !== null ? confidenceForAge(age, decay) : DEFAULT_UNDATED_CONFIDENCE;
+    } else {
+      confidence = DEFAULT_UNDATED_CONFIDENCE;
     }
 
-    const next = lines[i + 1] ?? "";
-    const citation = parseCitationComment(next);
     if (citation && !validateFindingCitation(citation)) {
-      issues.push({ date: currentDate || "unknown", bullet: line, reason: "invalid_citation" });
+      issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "invalid_citation" });
+      i++;
       continue;
     }
     if (!citation) confidence *= 0.8;
     if (confidence < minConfidence) {
-      issues.push({ date: currentDate || "unknown", bullet: line, reason: "stale" });
+      issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
+      if (citation) i++;
       continue;
     }
 

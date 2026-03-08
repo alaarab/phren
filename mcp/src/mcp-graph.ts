@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
+import * as crypto from "crypto";
 import { isValidProjectName } from "./utils.js";
 import { queryDocBySourceKey, queryRows, queryEntityLinks, queryCrossProjectEntities } from "./shared-index.js";
 import { runtimeFile } from "./shared.js";
@@ -124,13 +125,13 @@ export function register(server: McpServer, ctx: McpContext): void {
         "and their connected documents.",
       inputSchema: z.object({
         project: z.string().optional().describe("Filter to a specific project."),
-        limit: z.number().int().min(1).max(100).optional().describe("Max entities to return (default 100)."),
+        limit: z.number().int().min(1).max(2000).optional().describe("Max entities to return (default 500, max 2000)."),
         offset: z.number().int().min(0).optional().describe("Number of entities to skip for pagination (default 0)."),
       }),
     },
     async ({ project, limit, offset }) => {
       const db = ctx.db();
-      const max = limit ?? 100;
+      const max = limit ?? 500;
       const skip = offset ?? 0;
 
       // First get total count
@@ -241,15 +242,19 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
         const targetId = Number(entityResult[0].values[0][0]);
 
-        // 2. Find source doc — look for FINDINGS.md containing the finding text
-        const sourceDoc = `${project}/FINDINGS.md`;
-        const docCheck = queryRows(db, "SELECT content FROM docs WHERE project = ? AND filename = 'FINDINGS.md' LIMIT 1", [project]);
+        // 2. Find source doc — look for FINDINGS.md (or legacy LEARNINGS.md) containing the finding text
+        let docCheck = queryRows(db, "SELECT content FROM docs WHERE project = ? AND filename = 'FINDINGS.md' LIMIT 1", [project]);
+        let sourceDoc = `${project}/FINDINGS.md`;
+        if (!docCheck || docCheck.length === 0) {
+          docCheck = queryRows(db, "SELECT content FROM docs WHERE project = ? AND filename = 'LEARNINGS.md' LIMIT 1", [project]);
+          sourceDoc = `${project}/LEARNINGS.md`;
+        }
         if (!docCheck || docCheck.length === 0) {
           return mcpResponse({ ok: false, error: `No FINDINGS.md found for project "${project}".` });
         }
         const content = String(docCheck[0][0]);
         if (!content.toLowerCase().includes(finding_text.toLowerCase())) {
-          return mcpResponse({ ok: false, error: `Finding text not found in ${project}/FINDINGS.md.` });
+          return mcpResponse({ ok: false, error: `Finding text not found in ${sourceDoc}.` });
         }
 
         // 3. Find or create document entity
@@ -286,7 +291,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             );
             if (!alreadyStored) {
               existing.push(newEntry);
-              const tmpPath = manualLinksPath + ".tmp";
+              const tmpPath = manualLinksPath + `.tmp-${crypto.randomUUID()}`;
               fs.writeFileSync(tmpPath, JSON.stringify(existing, null, 2));
               fs.renameSync(tmpPath, manualLinksPath);
             }

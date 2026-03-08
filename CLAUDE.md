@@ -42,12 +42,12 @@ npm publish        # publish to npm (needs OTP)
 
 v1.15.5
 
-## MCP Tools (29)
+## MCP Tools (40)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
 **Search and browse:**
-- `search_knowledge(query, type?, limit?, project?)` : FTS5 search with synonym expansion (renamed from search_cortex)
+- `search_knowledge(query, type?, limit?, project?)` : FTS5 search with synonym expansion
 - `get_memory_detail(id)` : fetch full content of a memory by id (e.g. `mem:project/filename`); Layer 3 of progressive disclosure
 - `get_project_summary(name)` : project summary + file list
 - `list_projects()` : all projects in active profile
@@ -88,6 +88,18 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `session_start(project?)` : mark session start, returns prior summary + recent findings + active backlog
 - `session_end(summary?)` : mark session end, save summary for next session
 - `session_context()` : get current session state: project, duration, findings added so far
+
+**Skills management:**
+- `list_skills(project?)` : list all installed skills with metadata
+- `read_skill(name, project?)` : read full skill file content and parsed frontmatter
+- `write_skill(name, content, scope)` : create or update a skill (scope: 'global' or project name)
+- `remove_skill(name, project?)` : delete a skill file
+
+**Hooks management:**
+- `list_hooks()` : show hook status for all tools (claude/copilot/cursor/codex) + custom hooks + config paths
+- `toggle_hooks(enabled, tool?)` : enable/disable hooks globally or per tool
+- `add_custom_hook(event, command, timeout?)` : add a custom integration hook
+- `remove_custom_hook(event, command?)` : remove custom hooks by event/command match
 
 Governance, policy, and maintenance tools are CLI-only (see `cortex config` and `cortex maintain`).
 
@@ -198,6 +210,12 @@ Legacy files at the root are auto-migrated on first access.
 - `reference/` subdirectories in projects are classified as reference type in FTS index (legacy `knowledge/` also accepted)
 - Backlog done sections stripped from FTS index to reduce noise
 - Init supports `--template` (python-project, monorepo, library, frontend) and `--from-existing <path>`
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_FEATURE_GIT_CONTEXT_FILTER` | disabled | Set to `'true'` to enable git-context file relevance filtering in search ranking. When enabled, docs matching currently-changed files or branch name get a boost. |
 
 ## Finding Quality Rules
 

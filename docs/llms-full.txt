@@ -9,7 +9,7 @@ Quick start:
 MCP Tools (29):
 
   Search and browse:
-    search_cortex(query, type?, limit?, project?) - FTS5 search with synonym expansion
+    search_knowledge(query, type?, limit?, project?) - FTS5 search with synonym expansion
     get_memory_detail(id) - fetch full content of a memory by id (e.g. mem:project/filename)
     get_project_summary(name) - project summary card and file list
     list_projects() - all projects in active profile
@@ -121,10 +121,10 @@ Finding Tags:
 
   Findings can be tagged with [decision], [pitfall], or [pattern]:
     [decision] architectural choice with rationale
-    [pitfall]  bug or gotcha to avoid
+    [pitfall]  bug or failure mode to avoid
     [pattern]  reusable approach that works well
   Use findingType param in add_finding, or prefix manually: "- [pitfall] ..."
-  Tags are filterable in search_cortex via the tag parameter.
+  Tags are filterable in search_knowledge via the tag parameter.
 
 Agent Support:
 

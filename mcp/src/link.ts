@@ -330,7 +330,7 @@ function symlinkFile(src: string, dest: string, managedRoot: string): boolean {
 function addTokenAnnotation(filePath: string) {
   const content = fs.readFileSync(filePath, "utf8");
   if (content.startsWith("<!-- tokens:")) return;
-  const tokens = Math.round(content.length / 4);
+  const tokens = Math.round(content.length / 3.5 + (content.match(/\s+/g) || []).length * 0.1);
   if (tokens <= 500) return;
   const rounded = Math.round((tokens + 50) / 100) * 100;
   fs.writeFileSync(filePath, `<!-- tokens: ~${rounded} -->\n${content}`);

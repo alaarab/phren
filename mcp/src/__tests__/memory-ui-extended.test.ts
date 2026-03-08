@@ -452,12 +452,11 @@ describe.sequential("review-ui missing project/line validation", () => {
   it("GET / page contains expected UI elements", async () => {
     const res = await httpGet(port, "/");
     expect(res.status).toBe(200);
-    expect(res.body).toContain("Cortex Memory Review");
+    expect(res.body).toContain("Cortex Dashboard");
     expect(res.body).toContain("Review");
     expect(res.body).toContain("Graph");
     expect(res.body).toContain("Approve");
     expect(res.body).toContain("Reject");
-    expect(res.body).toContain("Edit");
   });
 
   it("GET / page shows no items when queue is empty", async () => {
@@ -465,6 +464,6 @@ describe.sequential("review-ui missing project/line validation", () => {
     fs.unlinkSync(path.join(tmpRoot, "demo", "MEMORY_QUEUE.md"));
     const res = await httpGet(port, "/");
     expect(res.status).toBe(200);
-    expect(res.body).toContain("No queued items");
+    expect(res.body).toContain("No items in the review queue");
   });
 });

@@ -288,8 +288,8 @@ export function queueFilePath(cortexPath: string, project: string): string {
 export function sanitizeFts5Query(raw: string): string {
   if (!raw) return "";
   if (raw.length > 500) raw = raw.slice(0, 500);
-  // Whitelist approach: only allow alphanumeric, spaces, hyphens, underscores, apostrophes
-  let q = raw.replace(/[^a-zA-Z0-9 '\-_]/g, " ");
+  // Whitelist approach: only allow alphanumeric, spaces, hyphens, apostrophes, double quotes, asterisks
+  let q = raw.replace(/[^a-zA-Z0-9 \-'"*]/g, " ");
   q = q.replace(/\s+/g, " ");
   return q.trim();
 }
@@ -348,11 +348,13 @@ export function buildRobustFtsQuery(raw: string, project?: string | null): strin
   const baseWords = safe.split(/\s+/).filter((t) => t.length > 1);
   if (baseWords.length === 0) return "";
 
-  // Build bigrams from adjacent words, filtering out pairs where both tokens are stop words
+  // Filter stop words from tokens before generating bigrams
+  const filteredWords = baseWords.filter((t) => !STOP_WORDS.has(t.toLowerCase()));
+
+  // Build bigrams from adjacent non-stop-words
   const bigrams: string[] = [];
-  for (let i = 0; i < baseWords.length - 1; i++) {
-    if (STOP_WORDS.has(baseWords[i].toLowerCase()) && STOP_WORDS.has(baseWords[i + 1].toLowerCase())) continue;
-    bigrams.push(`${baseWords[i]} ${baseWords[i + 1]}`);
+  for (let i = 0; i < filteredWords.length - 1; i++) {
+    bigrams.push(`${filteredWords[i]} ${filteredWords[i + 1]}`);
   }
 
   // Determine which words are consumed by bigrams that match synonym keys
@@ -377,9 +379,9 @@ export function buildRobustFtsQuery(raw: string, project?: string | null): strin
       coreTerms.push(`"${bg.replace(/"/g, "").trim()}"`);
     }
   }
-  for (let i = 0; i < baseWords.length; i++) {
+  for (let i = 0; i < filteredWords.length; i++) {
     if (!consumedIndices.has(i)) {
-      const w = baseWords[i].replace(/"/g, "").trim();
+      const w = filteredWords[i].replace(/"/g, "").trim();
       const wLow = w.toLowerCase();
       if (w.length > 1 && !seenTerms.has(wLow)) {
         seenTerms.add(wLow);

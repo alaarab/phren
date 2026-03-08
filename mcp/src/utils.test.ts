@@ -31,8 +31,8 @@ describe("sanitizeFts5Query", () => {
     expect(sanitizeFts5Query("it's don't")).toBe("it's don't");
   });
 
-  it("keeps hyphens and underscores", () => {
-    expect(sanitizeFts5Query("rate-limit my_var")).toBe("rate-limit my_var");
+  it("keeps hyphens but strips underscores", () => {
+    expect(sanitizeFts5Query("rate-limit my_var")).toBe("rate-limit my var");
   });
 
   it("passes through boolean operator words as plain tokens (no FTS5 semantics)", () => {
@@ -42,8 +42,8 @@ describe("sanitizeFts5Query", () => {
     expect(sanitizeFts5Query("foo OR bar NOT baz")).toBe("foo OR bar NOT baz");
   });
 
-  it("strips special characters (quotes, parens, brackets)", () => {
-    expect(sanitizeFts5Query('hello "world')).not.toContain('"');
+  it("preserves double quotes but strips parens, brackets, braces", () => {
+    expect(sanitizeFts5Query('hello "world')).toContain('"');
     expect(sanitizeFts5Query("foo(bar)")).not.toContain("(");
     expect(sanitizeFts5Query("foo[bar]")).not.toContain("[");
     expect(sanitizeFts5Query("foo{bar}")).not.toContain("{");

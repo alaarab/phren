@@ -4,7 +4,9 @@
 - `Projects`
 - `Backlog`
 - `Findings`
-- `Memory Queue`
+- `Review Queue`
+- `Skills`
+- `Hooks`
 - `Machines/Profiles`
 - `Health`
 
@@ -16,7 +18,7 @@
 
 ## State Transitions
 - `Projects -> *`: `:open <project>` establishes selected project then transition by shortcut/palette.
-- `* -> Backlog/Findings/Memory Queue`: retains selected project and filter.
+- `* -> Backlog/Findings/Review Queue`: retains selected project and filter.
 - `* -> Health`: refreshable health dashboard with remediation commands.
 - `reset`: clears persisted shell state and rehydrates defaults.
 
@@ -25,7 +27,9 @@
   - `p` projects
   - `b` backlog
   - `l` findings
-  - `m` memory queue
+  - `m` review queue
+  - `s` skills
+  - `k` hooks
   - `h` health
   - `q` quit
 - Search/filter:
@@ -39,7 +43,7 @@
   - no projects
   - no backlog items in section
   - no findings
-  - no memory queue entries
+  - no review queue entries
 - Error:
   - invalid project/profile names
   - missing files (`backlog.md`, `FINDINGS.md`, `machines.yaml`)
@@ -52,6 +56,6 @@
 - `Projects`: list projects, doc badges, summary snippet; `:open` pins project context.
 - `Backlog`: `Active | Queue | Done` read board with IDs, paging/filtering, and writes.
 - `Findings`: browse by date + citation line visibility; write/remove commands.
-- `Memory Queue`: triage with risk/confidence indicators and audit-backed actions.
+- `Review Queue`: triage with risk/confidence indicators and audit-backed actions.
 - `Machines/Profiles`: inspect mappings and safe edit workflows with backup files.
 - `Health`: doctor checks + runtime lifecycle stats + remediation commands.

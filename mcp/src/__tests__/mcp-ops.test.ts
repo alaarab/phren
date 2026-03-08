@@ -217,7 +217,7 @@ describe("mcp-ops: list_hook_errors", () => {
     const res = parseResult(await server.call("list_hook_errors", {}));
     expect(res.ok).toBe(true);
     expect(res.data.errors).toHaveLength(0);
-    expect(res.message).toContain("No debug log found");
+    expect(res.message).toContain("No error entries found");
     expect(res.message).toContain("CORTEX_DEBUG=1");
   });
 

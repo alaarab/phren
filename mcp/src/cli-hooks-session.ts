@@ -308,7 +308,7 @@ export async function handleHookSessionStart() {
 // ── Q21: Conversation memory capture ─────────────────────────────────────────
 
 const INSIGHT_KEYWORDS = [
-  "always", "never", "important", "gotcha", "trick", "workaround",
+  "always", "never", "important", "pitfall", "gotcha", "trick", "workaround",
   "careful", "caveat", "beware", "note that", "make sure",
   "don't forget", "remember to", "must", "avoid", "prefer",
 ];
@@ -626,7 +626,6 @@ export async function handleHookTool() {
           activeProject = null;
         }
       }
-      }
     } catch { /* best effort */ }
 
     if (activeProject && sessionId) {
@@ -649,7 +648,7 @@ export async function handleHookTool() {
         for (const { text, confidence } of candidates) {
           if (confidence >= 0.85) {
             addFindingToFile(getCortexPath(), activeProject, text);
-            debugLog(`hook-tool: auto-added learning (conf=${confidence}): ${text.slice(0, 60)}`);
+            debugLog(`hook-tool: auto-added finding (conf=${confidence}): ${text.slice(0, 60)}`);
           } else {
             appendReviewQueue(getCortexPath(), activeProject, "Review", [text]);
             debugLog(`hook-tool: queued candidate (conf=${confidence}): ${text.slice(0, 60)}`);
@@ -669,7 +668,7 @@ export async function handleHookTool() {
           }
         }
       } catch (err: unknown) {
-        debugLog(`hook-tool: learning extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+        debugLog(`hook-tool: finding extraction failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 

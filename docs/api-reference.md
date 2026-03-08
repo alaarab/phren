@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Cortex exposes 29 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
+Cortex exposes 40 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -18,7 +18,7 @@ Fetch the full content of a specific memory entry by its ID. This is Layer 3 of 
 
 ---
 
-### `search_cortex`
+### `search_knowledge`
 
 Search the user's personal project store using FTS5 full-text search with synonym expansion.
 

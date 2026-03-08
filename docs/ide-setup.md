@@ -100,7 +100,7 @@ Cursor supports MCP servers via `mcp.json`. Hooks are not supported.
 
 **Common pitfalls:**
 - Cursor looks for `mcpServers` (camelCase), not `servers`.
-- Without hooks, you must manually call `search_cortex` to get context. The MCP tools work but there is no automatic injection.
+- Without hooks, you must manually call `search_knowledge` to get context. The MCP tools work but there is no automatic injection.
 - Restart Cursor after changing `mcp.json`.
 
 ## VS Code Copilot

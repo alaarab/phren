@@ -84,7 +84,7 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     db.close();
     db = await buildIndex(tmp.path);
 
-    const searchRes = parseResult(await server.call("search_cortex", {
+    const searchRes = parseResult(await server.call("search_knowledge", {
       query: "Xylophone tuning frequency",
     }));
     expect(searchRes.ok).toBe(true);
@@ -110,7 +110,7 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     db.close();
     db = await buildIndex(tmp.path);
 
-    const searchRes = parseResult(await server.call("search_cortex", {
+    const searchRes = parseResult(await server.call("search_knowledge", {
       query: "Zygomorphic algorithm",
       project: "integ-proj",
     }));
@@ -200,7 +200,7 @@ describe("MCP integration: backlog immediately searchable after add", () => {
     tmp.cleanup();
   });
 
-  it("add_backlog_item is visible to search_cortex after index refresh", async () => {
+  it("add_backlog_item is visible to search_knowledge after index refresh", async () => {
     const addRes = parseResult(await server.call("add_backlog_item", {
       project: "search-proj",
       item: "Implement zymurgy fermentation tracking algorithm for brew optimization",
@@ -211,7 +211,7 @@ describe("MCP integration: backlog immediately searchable after add", () => {
     db.close();
     db = await buildIndex(tmp.path);
 
-    const searchRes = parseResult(await server.call("search_cortex", {
+    const searchRes = parseResult(await server.call("search_knowledge", {
       query: "zymurgy fermentation",
       project: "search-proj",
     }));

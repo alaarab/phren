@@ -322,7 +322,9 @@ function collectAllFiles(cortexPath: string, profile?: string): FileEntry[] {
 function insertFileIntoIndex(db: SqlJsDatabase, entry: FileEntry, cortexPath: string): boolean {
   try {
     const raw = fs.readFileSync(entry.fullPath, "utf-8");
-    let content = raw.replace(/<details>[\s\S]*?<\/details>/gi, "");
+    let content = raw
+      .replace(/<!-- cortex:archive:start -->[\s\S]*?<!-- cortex:archive:end -->/g, "")
+      .replace(/<details>[\s\S]*?<\/details>/gi, "");
     content = resolveImports(content, cortexPath);
     if (entry.type === "backlog") {
       content = stripBacklogDoneSection(content);
@@ -700,7 +702,17 @@ async function loadIndexSnapshotOrEmpty(cortexPath: string, profile?: string): P
   return createEmptyIndexDb(SQL);
 }
 
+// Serialize concurrent in-process buildIndex calls to prevent SQLite corruption
+let buildLock: Promise<SqlJsDatabase> = Promise.resolve(null as unknown as SqlJsDatabase);
+
 export async function buildIndex(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
+  const result = buildLock.then(() => _buildIndexGuarded(cortexPath, profile));
+  // Update the lock chain; swallow rejections so the chain doesn't stall
+  buildLock = result.catch(() => null as unknown as SqlJsDatabase);
+  return result;
+}
+
+async function _buildIndexGuarded(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
   const lockTarget = runtimeFile(cortexPath, "index-rebuild");
   if (isRebuildLockHeld(cortexPath)) {
     return loadIndexSnapshotOrEmpty(cortexPath, profile);
@@ -738,6 +750,19 @@ export interface DocRow {
 
 export function getDocSourceKey(doc: Pick<DocRow, "project" | "filename" | "path">, cortexPath: string): string {
   return buildSourceDocKey(doc.project, doc.path, cortexPath, doc.filename);
+}
+
+/**
+ * Normalize a memory ID to canonical format: `mem:project/path/to/file.md`.
+ * Handles URL-encoded slashes, missing `mem:` prefix, backslashes, and
+ * legacy formats with colons after the filename (e.g. `mem:project/file:linenum`).
+ */
+export function normalizeMemoryId(rawId: string): string {
+  let id = decodeURIComponent(rawId).replace(/\\/g, "/");
+  if (!id.startsWith("mem:")) id = `mem:${id}`;
+  // Strip trailing :linenum if present (legacy format)
+  id = id.replace(/:(\d+)$/, "");
+  return id;
 }
 
 export function rowToDoc(row: DbRow): DocRow {
@@ -854,6 +879,53 @@ export function extractSnippet(content: string, query: string, lines: number = 5
   const start = Math.max(0, bestIdx - 1);
   const end = Math.min(contentLines.length, bestIdx + lines - 1);
   return contentLines.slice(start, end).join("\n");
+}
+
+/** Find existing FTS cache files in the temp directory. Returns { dir, files[], totalBytes }. */
+export function findFtsCacheInfo(): { dir: string; files: string[]; totalBytes: number } {
+  let userSuffix: string;
+  try {
+    userSuffix = String(os.userInfo().uid);
+  } catch {
+    userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
+  }
+  const dir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
+  const files: string[] = [];
+  let totalBytes = 0;
+  try {
+    for (const entry of fs.readdirSync(dir)) {
+      if (entry.endsWith(".db")) {
+        const fullPath = path.join(dir, entry);
+        try {
+          const stat = fs.statSync(fullPath);
+          files.push(fullPath);
+          totalBytes += stat.size;
+        } catch { /* skip */ }
+      }
+    }
+  } catch { /* dir may not exist yet */ }
+  return { dir, files, totalBytes };
+}
+
+/** Find the FTS cache file for a specific cortexPath+profile. Returns exists + size. */
+export function findFtsCacheForPath(cortexPath: string, profile?: string): { exists: boolean; sizeBytes?: number } {
+  let userSuffix: string;
+  try {
+    userSuffix = String(os.userInfo().uid);
+  } catch {
+    userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
+  }
+  const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
+  try {
+    const globResult = globAllFiles(cortexPath, profile);
+    const hash = computeCortexHash(cortexPath, profile, globResult.filePaths);
+    const cacheFile = path.join(cacheDir, `${hash}.db`);
+    if (fs.existsSync(cacheFile)) {
+      const stat = fs.statSync(cacheFile);
+      return { exists: true, sizeBytes: stat.size };
+    }
+  } catch { /* best-effort */ }
+  return { exists: false };
 }
 
 export function detectProject(cortexPath: string, cwd: string, profile?: string): string | null {

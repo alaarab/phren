@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
-import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, type CortexErrorCode } from "./shared.js";
+import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, type CortexErrorCode } from "./shared.js";
 
 export interface HookError {
   code: CortexErrorCode;
@@ -155,12 +155,14 @@ run_with_timeout() {
   fi
 }
 
-run_with_timeout 14s ${sessionStartCmd} >/dev/null 2>&1
+HOOK_TIMEOUT="\${CORTEX_HOOK_TIMEOUT_S:-${Math.ceil(HOOK_TIMEOUT_MS / 1000)}}s"
+
+run_with_timeout "$HOOK_TIMEOUT" ${sessionStartCmd} >/dev/null 2>&1
 
 "$REAL_BIN" "$@"
 status=$?
 
-run_with_timeout 14s ${stopCmd} >/dev/null 2>&1
+run_with_timeout "$HOOK_TIMEOUT" ${stopCmd} >/dev/null 2>&1
 
 exit $status
 `;
@@ -262,7 +264,7 @@ function isToolHookEnabled(cortexPath: string, tool: string): boolean {
 export type CustomHookEvent =
   | "pre-save"      // Before push_changes commits
   | "post-save"     // After push_changes pushes
-  | "post-search"   // After search_cortex returns results
+  | "post-search"   // After search_knowledge returns results
   | "pre-finding"   // Before a finding is written to FINDINGS.md
   | "post-finding"  // After a finding is written
   | "pre-index"     // Before FTS index rebuild
@@ -281,6 +283,7 @@ const VALID_HOOK_EVENTS = new Set<string>([
 ]);
 
 const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
+const HOOK_TIMEOUT_MS = parseInt(process.env.CORTEX_HOOK_TIMEOUT_MS || '14000', 10);
 
 export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
   try {
@@ -327,6 +330,10 @@ export function runCustomHooks(
       const message = `${event}: ${hook.command}: ${err instanceof Error ? err.message : String(err)}`;
       debugLog(`runCustomHooks: ${message}`);
       errors.push({ code: CortexError.VALIDATION_ERROR, message });
+      try {
+        const logPath = runtimeFile(cortexPath, "hook-errors.log");
+        fs.appendFileSync(logPath, `[${new Date().toISOString()}] [${event}] ${err instanceof Error ? err.message : String(err)}\n`);
+      } catch { /* best-effort logging */ }
     }
   }
 

@@ -141,7 +141,7 @@ Claude Code <--stdio--> cortex-mcp
           +---------------+---------------+
           |               |               |
      Search/Browse   Backlog CRUD       Finding Capture
-     - search_cortex    - get_backlog   - add_finding(s)
+     - search_knowledge - get_backlog   - add_finding(s)
      - get_project_summary      - add_item     - remove_finding(s)
      - list_projects    - complete(s)  - push_changes
      - get_findings     - update
@@ -181,7 +181,7 @@ All state lives in `~/.cortex/` as plain files, committed to git.
     CLAUDE.md              # cross-project instructions
     FINDINGS.md            # cross-project insights
   .governance/
-    memory-policy.json     # retention, ttl, decay, confidence
+    retention-policy.json  # retention, ttl, decay, confidence
     workflow-policy.json   # approval gates for risky entries
     access-control.json    # role-based permissions
     index-policy.json      # include/exclude globs

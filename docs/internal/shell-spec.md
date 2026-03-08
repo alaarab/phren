@@ -18,7 +18,7 @@ Ship an interactive `cortex` shell that makes backlog/findings/memory operations
   - `cortex` (no args, TTY): interactive shell.
   - `cortex shell`: explicit interactive mode.
 - Views:
-  - `Projects`, `Backlog`, `Findings`, `Memory Queue`, `Machines/Profiles`, `Health`.
+  - `Projects`, `Backlog`, `Findings`, `Review Queue`, `Skills`, `Hooks`, `Machines/Profiles`, `Health`.
 - Command model:
   - `:command` palette for actions.
   - `q` to quit.

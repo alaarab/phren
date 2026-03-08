@@ -19,7 +19,7 @@ Supports Claude Code, Copilot CLI, Cursor, and Codex.
 
 <br>
 
-Project knowledge, field findings, task queues. Stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
+Project references, field findings, task queues. Stored as markdown in a git repo you own. No vendor lock-in, no cloud dependency. One command to set up. Zero commands to use after that.
 
 > **Quick start:** `npx @alaarab/cortex init` takes 30 seconds, no account needed.
 
@@ -133,7 +133,7 @@ On a new machine: clone, run init, done.
 | `FINDINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
 | `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
 | `backlog.md` | Task queue that persists across sessions |
-| `MEMORY_QUEUE.md` | Items waiting for your review (see [Memory queue](#memory-queue) below) |
+| `MEMORY_QUEUE.md` | Items waiting for your review (see [Review queue](#review-queue) below) |
 | `.claude/skills/` | Project-specific slash commands |
 
 ---
@@ -247,7 +247,7 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 
 **Findings:** `:find add`, `:find remove`
 
-**Memory queue:** `:mq approve`, `:mq reject`, `:mq edit`
+**Review queue:** `:mq approve`, `:mq reject`, `:mq edit`
 
 **Memory quality:** `:govern`, `:consolidate`
 
@@ -430,7 +430,7 @@ Run `cortex status` and check the MCP and MCP cfg lines. If MCP is off, run `cor
 
 **"I saved a finding but can't find it"**
 
-Findings are scoped to a project. Run `cortex search "your term" --project <name>` to search within a specific project. If the finding was flagged by trust filtering, check the memory queue: `cortex` then press `m`, or search without a project filter.
+Findings are scoped to a project. Run `cortex search "your term" --project <name>` to search within a specific project. If the finding was flagged by trust filtering, check the review queue: `cortex` then press `m`, or search without a project filter.
 
 **Doctor says FAIL on symlinks**
 

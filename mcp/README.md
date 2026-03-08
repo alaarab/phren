@@ -2,7 +2,7 @@
 
 MCP server that indexes your personal cortex and exposes it to AI agents via full-text search.
 
-On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index. 29 tools let agents search, browse, manage backlogs, capture findings, and track entities across your projects.
+On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index. 40 tools let agents search, browse, manage backlogs, capture findings, and track entities across your projects.
 
 ## Install
 
@@ -29,7 +29,7 @@ If no profile is set, all top-level directories in the cortex are indexed.
 
 See [docs/api-reference.md](../docs/api-reference.md) for the full API reference.
 
-### search_cortex
+### search_knowledge
 
 Full-text search across all indexed markdown files with synonym expansion.
 

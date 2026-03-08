@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { appendAuditLog, debugLog, getProjectDirs, isRecord, withDefaults, cortexErr, CortexError, cortexOk, type CortexResult } from "./shared.js";
+import { appendAuditLog, debugLog, getProjectDirs, isRecord, withDefaults, cortexErr, CortexError, cortexOk, type CortexResult, resolveFindingsPath } from "./shared.js";
 import { withFileLock } from "./governance-locks.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 
@@ -736,7 +736,7 @@ export function appendReviewQueue(
   if (fs.existsSync(queuePath)) {
     content = fs.readFileSync(queuePath, "utf8");
   } else {
-    content = `# ${project} Memory Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n`;
+    content = `# ${project} Review Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n`;
   }
 
   const lines = content.split("\n");
@@ -779,8 +779,8 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
   const dryRunDetails: string[] = [];
 
   for (const dir of dirs) {
-    const file = path.join(dir, "FINDINGS.md");
-    if (!fs.existsSync(file)) continue;
+    const file = resolveFindingsPath(dir);
+    if (!file) continue;
     const lines = fs.readFileSync(file, "utf8").split("\n");
     let currentDate: string | null = null;
     const next: string[] = [];
@@ -872,8 +872,8 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
   const denial = checkPermission(cortexPath, "delete");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
   if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const file = path.join(cortexPath, project, "FINDINGS.md");
-  if (!fs.existsSync(file)) return cortexErr(`No FINDINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
+  const file = resolveFindingsPath(path.join(cortexPath, project));
+  if (!file) return cortexErr(`No FINDINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
 
   const lines = fs.readFileSync(file, "utf8").split("\n");
   const byDate = new Map<string, Map<string, { bullet: string; citation?: string }>>();
@@ -928,7 +928,9 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
   }
 
   fs.copyFileSync(file, file + ".bak");
-  fs.writeFileSync(file, out.join("\n").trimEnd() + "\n");
+  const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
+  fs.writeFileSync(tmpFile, out.join("\n").trimEnd() + "\n");
+  fs.renameSync(tmpFile, file);
   appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
   return cortexOk(`Consolidated findings for ${project}.`);
 }

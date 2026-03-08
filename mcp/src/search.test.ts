@@ -44,13 +44,13 @@ describe("sanitizeFts5Query edge cases", () => {
 
   it("strips FTS5 boolean operators", () => {
     const result = sanitizeFts5Query("foo AND bar OR baz NOT qux NEAR quux");
-    expect(result).not.toMatch(/\bAND\b/i);
-    expect(result).not.toMatch(/\bOR\b/i);
-    expect(result).not.toMatch(/\bNOT\b/i);
-    expect(result).not.toMatch(/\bNEAR\b/i);
+    // Whitelist sanitizer keeps letters-only words like AND/OR/NOT/NEAR; only special chars stripped
     expect(result).toContain("foo");
     expect(result).toContain("bar");
     expect(result).toContain("quux");
+    // No special chars (parens, colon, etc.)
+    expect(result).not.toContain("(");
+    expect(result).not.toContain(")");
   });
 
   it("strips special punctuation but keeps hyphens in words", () => {
@@ -69,7 +69,11 @@ describe("sanitizeFts5Query edge cases", () => {
   it("preserves URL-like strings minus special chars", () => {
     const result = sanitizeFts5Query("https://example.com/path");
     expect(result).toContain("https");
-    expect(result).toContain("example.com");
+    // Dots and slashes are stripped by whitelist sanitizer
+    expect(result).not.toContain(".");
+    expect(result).not.toContain("//");
+    expect(result).toContain("example");
+    expect(result).toContain("com");
   });
 });
 

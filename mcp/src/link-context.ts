@@ -55,7 +55,7 @@ export function writeContextFile(managedContent: string) {
 
 export function formatMcpStatus(status: string): string {
   if (status === "installed" || status === "already_configured") {
-    return "MCP: active (search_cortex, get_project_summary, list_projects)";
+    return "MCP: active (search_knowledge, get_project_summary, list_projects)";
   }
   if (status === "disabled" || status === "already_disabled") {
     return "MCP: disabled (hooks-only fallback active)";

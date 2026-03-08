@@ -22,8 +22,10 @@ type BacklogStatus = "all" | "active" | "queue" | "done" | "active+queue";
 const BACKLOG_SECTION_ORDER: BacklogSection[] = ["Active", "Queue", "Done"];
 
 const DEFAULT_BACKLOG_LIMIT = 20;
+/** Done items are historical — cap tightly by default to avoid large responses. */
+const DEFAULT_DONE_LIMIT = 5;
 
-function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: number): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number; truncated: boolean } {
+function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: number, doneLimit?: number): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number; truncated: boolean } {
   let includedSections: BacklogSection[];
   if (status === "all") {
     includedSections = BACKLOG_SECTION_ORDER;
@@ -38,6 +40,7 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
   }
 
   const effectiveLimit = limit ?? DEFAULT_BACKLOG_LIMIT;
+  const effectiveDoneLimit = doneLimit ?? (limit ?? DEFAULT_DONE_LIMIT);
   let truncated = false;
 
   const items: Record<BacklogSection, BacklogDoc["items"][BacklogSection]> = {
@@ -48,8 +51,9 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
 
   for (const section of includedSections) {
     const sectionItems = doc.items[section];
-    if (sectionItems.length > effectiveLimit) {
-      items[section] = sectionItems.slice(0, effectiveLimit);
+    const cap = section === "Done" ? effectiveDoneLimit : effectiveLimit;
+    if (sectionItems.length > cap) {
+      items[section] = sectionItems.slice(-cap); // most recent Done items
       truncated = true;
     } else {
       items[section] = sectionItems;
@@ -99,11 +103,12 @@ export function register(server: McpServer, ctx: McpContext): void {
         id: z.string().optional().describe("Backlog item ID like A1, Q3, D2. Requires project."),
         item: z.string().optional().describe("Exact backlog item text. Requires project."),
         status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which backlog sections to include. Defaults to 'active+queue'."),
-        limit: z.number().optional().describe("Max items per section to return. Default 20."),
+        limit: z.number().optional().describe("Max items per Active/Queue section to return. Default 20."),
+        done_limit: z.number().optional().describe("Max Done items to return (most recent). Default 5. Done sections are capped tightly to avoid large responses."),
         summary: z.boolean().optional().describe("If true, return counts and titles only (no full content). Reduces token usage."),
       }),
     },
-    async ({ project, id, item, status, limit, summary }) => {
+    async ({ project, id, item, status, limit, done_limit, summary }) => {
       // Single item lookup
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
@@ -130,7 +135,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = readBacklog(cortexPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
-        const view = buildBacklogView(doc, status, limit);
+        const view = buildBacklogView(doc, status, limit, done_limit);
         if (!fs.existsSync(doc.path)) {
           return mcpResponse({
             ok: true,
@@ -145,7 +150,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             data: { project, includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
           });
         }
-        const truncationNote = view.truncated ? `\n\n_Showing first ${limit ?? DEFAULT_BACKLOG_LIMIT} items per section. Pass a higher limit to see more._` : "";
+        const truncationNote = view.truncated ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_BACKLOG_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
         return mcpResponse({
           ok: true,
           message: `## ${project}\n${backlogMarkdown(view.doc)}${truncationNote}`,
@@ -156,7 +161,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       // All projects
       const docs = readBacklogs(cortexPath, profile);
       if (!docs.length) return mcpResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
-      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildBacklogView(doc, status, limit), issues: doc.issues }));
+      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildBacklogView(doc, status, limit, done_limit), issues: doc.issues }));
       const anyTruncated = views.some(({ view }) => view.truncated);
       let parts: string[];
       if (summary) {
@@ -164,7 +169,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       } else {
         parts = views.map(({ project, view }) => `## ${project}\n${backlogMarkdown(view.doc)}`);
       }
-      const truncationNote = anyTruncated && !summary ? `\n\n_Showing first ${limit ?? DEFAULT_BACKLOG_LIMIT} items per section. Pass a higher limit to see more._` : "";
+      const truncationNote = anyTruncated && !summary ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_BACKLOG_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
       const projectData = views.map(({ project, view, issues }) => ({
         project,
         items: view.doc.items,
@@ -192,7 +197,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = addBacklogItemStore(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        updateFileInIndex(path.join(cortexPath, project, "BACKLOG.md"));
+        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -214,7 +219,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = addBacklogItemsBatch(cortexPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, errors } = result.data;
-        if (added.length > 0) updateFileInIndex(path.join(cortexPath, project, "BACKLOG.md"));
+        if (added.length > 0) updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
         return mcpResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} items to ${project} backlog`, data: { project, added, errors } });
       });
     }
@@ -235,7 +240,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = completeBacklogItemStore(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        updateFileInIndex(path.join(cortexPath, project, "BACKLOG.md"));
+        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -257,7 +262,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = completeBacklogItemsBatch(cortexPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { completed, errors } = result.data;
-        if (completed.length > 0) updateFileInIndex(path.join(cortexPath, project, "BACKLOG.md"));
+        if (completed.length > 0) updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
         return mcpResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
       });
     }
@@ -283,7 +288,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = updateBacklogItemStore(cortexPath, project, item, updates);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        updateFileInIndex(path.join(cortexPath, project, "BACKLOG.md"));
+        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
       });
     }

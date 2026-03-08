@@ -46,15 +46,17 @@ function classifyTopic(bullet: string): string {
 
 /**
  * Count active (non-archived) finding entries in FINDINGS.md content.
- * Entries inside <details> blocks are considered archived.
+ * Entries inside archive blocks are considered archived.
+ * Supports both new structured markers (<!-- cortex:archive:start/end -->)
+ * and legacy <details>...</details> format for backwards compatibility.
  */
 export function countActiveFindings(content: string): number {
-  let inDetails = false;
+  let inArchive = false;
   let count = 0;
   for (const line of content.split("\n")) {
-    if (line.includes("<details>")) { inDetails = true; continue; }
-    if (line.includes("</details>")) { inDetails = false; continue; }
-    if (!inDetails && line.startsWith("- ")) count++;
+    if (line.includes("<!-- cortex:archive:start -->") || line.includes("<details>")) { inArchive = true; continue; }
+    if (line.includes("<!-- cortex:archive:end -->") || line.includes("</details>")) { inArchive = false; continue; }
+    if (!inArchive && line.startsWith("- ")) count++;
   }
   return count;
 }
@@ -73,13 +75,13 @@ function parseActiveEntries(content: string): ParsedEntry[] {
   const lines = content.split("\n");
   const entries: ParsedEntry[] = [];
   let currentDate = "";
-  let inDetails = false;
+  let inArchive = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (line.includes("<details>")) { inDetails = true; continue; }
-    if (line.includes("</details>")) { inDetails = false; continue; }
-    if (inDetails) continue;
+    if (line.includes("<!-- cortex:archive:start -->") || line.includes("<details>")) { inArchive = true; continue; }
+    if (line.includes("<!-- cortex:archive:end -->") || line.includes("</details>")) { inArchive = false; continue; }
+    if (inArchive) continue;
 
     const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
     if (heading) { currentDate = heading[1]; continue; }

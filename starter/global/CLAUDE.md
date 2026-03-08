@@ -53,8 +53,8 @@ Run `/cortex-sync` to pull everything down or push changes back.
 The cortex MCP server is running. Use these tools proactively. Don't ask the user to re-explain things they've already documented.
 
 - **At session start:** call `list_projects()` to see what's active, then `get_project_summary(name)` for the relevant project
-- **When the user mentions a project, codebase, or task:** call `search_cortex(query)` before asking questions
-- **When the user asks about commands, architecture, conventions, or past decisions:** call `search_cortex(query)` first
+- **When the user mentions a project, codebase, or task:** call `search_knowledge(query)` before asking questions
+- **When the user asks about commands, architecture, conventions, or past decisions:** call `search_knowledge(query)` first
 - **When the user mentions a task or todo:** call `get_backlog(project)` to see what's already tracked
 - **When you discover a non-obvious pattern, bug, or workaround:** call `add_finding(project, insight)` immediately
 - **When the user says they want to do something later:** call `add_backlog_item(project, item)` instead of listing it in chat

@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "./shared.js";
 
@@ -108,11 +109,12 @@ export function validateFindingsFormat(content: string): string[] {
 }
 
 /**
- * Strip the ## Done section from backlog content to reduce index bloat.
+ * Strip the ## Done section (and equivalents) from backlog content to reduce index bloat.
  * Keeps the title, Active, and Queue sections which are the actionable parts.
+ * Handles: Done, Completed, Archived, Finished, Complete.
  */
 export function stripBacklogDoneSection(content: string): string {
-  const donePattern = /^## Done\b.*$/im;
+  const donePattern = /^## (Done|Completed|Archived|Finished|Complete)\b.*$/im;
   const match = content.match(donePattern);
   if (!match || match.index === undefined) return content;
   return content.slice(0, match.index).trimEnd() + "\n";
@@ -174,7 +176,7 @@ export function extractConflictVersions(content: string): { ours: string; theirs
 // Each finding is a bullet line plus any immediately following HTML comment lines
 // (e.g. <!-- cortex:cite {...} -->). These are stored as multi-line strings and
 // deduplicated by the bullet text only, preserving provenance comments.
-function parseLearningsEntries(content: string): Map<string, string[]> {
+function parseFindingsEntries(content: string): Map<string, string[]> {
   const entries = new Map<string, string[]>();
   let currentDate = "";
   let currentBlock: string[] = [];
@@ -229,8 +231,8 @@ function findingBulletText(block: string): string {
  * version is kept (ours takes priority).
  */
 export function mergeFindings(ours: string, theirs: string): string {
-  const ourEntries = parseLearningsEntries(ours);
-  const theirEntries = parseLearningsEntries(theirs);
+  const ourEntries = parseFindingsEntries(ours);
+  const theirEntries = parseFindingsEntries(theirs);
 
   const allDates = [...new Set([...ourEntries.keys(), ...theirEntries.keys()])].sort().reverse();
 
@@ -358,7 +360,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
         ? mergeFindings(versions.ours, versions.theirs)
         : mergeBacklog(versions.ours, versions.theirs);
 
-      const tmpMergePath = fullPath + ".tmp";
+      const tmpMergePath = fullPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpMergePath, merged);
       fs.renameSync(tmpMergePath, fullPath);
       execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });

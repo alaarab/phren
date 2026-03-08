@@ -12,6 +12,7 @@ import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
+import { log as structuredLog } from "./logger.js";
 import { buildIndex, updateFileInIndex as updateFileInIndexFn } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { register as registerSearch } from "./mcp-search.js";
@@ -22,6 +23,8 @@ import { register as registerData } from "./mcp-data.js";
 import { register as registerGraph } from "./mcp-graph.js";
 import { register as registerSession } from "./mcp-session.js";
 import { register as registerOps } from "./mcp-ops.js";
+import { register as registerSkills } from "./mcp-skills.js";
+import { register as registerHooks } from "./mcp-hooks.js";
 import type { McpContext } from "./mcp-types.js";
 
 if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
@@ -273,6 +276,7 @@ const PACKAGE_VERSION = (() => {
 })();
 const profile = process.env.CORTEX_PROFILE || "";
 const TOOL_NAME_ALIASES: Record<string, string> = {
+  // Backwards compat: old clients calling search_cortex still resolve
   search_cortex: "search_knowledge",
 };
 
@@ -304,6 +308,8 @@ async function main() {
     db = await buildIndex(cortexPath, profile);
     indexReady = true;
   } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    structuredLog("error", "startup", `Failed to build cortex index: ${msg}`);
     console.error("Failed to build cortex index at startup:", error);
     process.exit(1);
   }
@@ -329,6 +335,13 @@ async function main() {
           fn(),
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Write timeout after 30s")), WRITE_TIMEOUT_MS))
         ]);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("Write timeout") || message.includes("Write queue full")) {
+          debugLog(`Write queue timeout: ${message}`);
+          return { ok: false, error: `Write queue timeout: ${message}`, errorCode: "TIMEOUT" } as T;
+        }
+        throw err;
       } finally {
         writeQueueDepth = Math.max(0, writeQueueDepth - 1);
       }
@@ -342,7 +355,7 @@ async function main() {
         debugLog(`Write queue error: ${message}`);
       } catch (logError: unknown) {
         const message = logError instanceof Error ? logError.message : String(logError);
-        console.error(`Failed to log write queue error: ${message}`);
+        structuredLog("error", "write-queue", `Failed to log write queue error: ${message}`);
       }
     });
     return run;
@@ -407,6 +420,8 @@ async function main() {
   registerGraph(server, ctx);
   registerSession(server, ctx);
   registerOps(server, ctx);
+  registerSkills(server, ctx);
+  registerHooks(server, ctx);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

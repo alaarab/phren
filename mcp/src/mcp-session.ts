@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { runtimeFile } from "./shared.js";
+import { runtimeFile, resolveFindingsPath } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName } from "./utils.js";
 
@@ -17,10 +17,24 @@ interface SessionState {
   findingsAdded: number;
 }
 
+const STALE_SESSION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/** The session ID created by this process's most recent session_start call. */
+let _currentProcessSessionId: string | undefined;
 
-function sessionStateFile(cortexPath: string): string {
-  return runtimeFile(cortexPath, "session-state.json");
+/** Get the current process's session ID (set by session_start). */
+export function getCurrentSessionId(): string | undefined {
+  return _currentProcessSessionId;
+}
+
+function sessionsDir(cortexPath: string): string {
+  const dir = path.join(cortexPath, ".runtime", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function sessionFileForId(cortexPath: string, sessionId: string): string {
+  return path.join(sessionsDir(cortexPath), `session-${sessionId}.json`);
 }
 
 function readSessionStateFile(file: string): SessionState | null {
@@ -35,29 +49,103 @@ function writeSessionStateFile(file: string, state: SessionState): void {
   fs.renameSync(tempFile, file);
 }
 
-function withSessionStateLock<T>(cortexPath: string, fn: (file: string) => T): T {
-  const file = sessionStateFile(cortexPath);
-  return withFileLock(file, () => fn(file));
-}
-
-function updateSessionState(cortexPath: string, updater: (state: SessionState | null) => SessionState | null): SessionState | null {
-  return withSessionStateLock(cortexPath, (file) => {
-    const next = updater(readSessionStateFile(file));
-    if (next) writeSessionStateFile(file, next);
-    return next;
-  });
-}
-
-function readSessionStateLocked(cortexPath: string): SessionState | null {
-  return withSessionStateLock(cortexPath, (file) => readSessionStateFile(file));
-}
-
-/** Increment the findingsAdded counter for the current session. Call from add_finding handlers. */
-export function incrementSessionFindings(cortexPath: string, count = 1): void {
+/** Find the most recent session file by mtime. */
+function findMostRecentSession(cortexPath: string): { file: string; state: SessionState } | null {
+  const dir = sessionsDir(cortexPath);
+  let entries: fs.Dirent[];
   try {
-    updateSessionState(cortexPath, (state) => {
-      if (!state) return null;
-      return { ...state, findingsAdded: state.findingsAdded + count };
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch { return null; }
+
+  let bestFile: string | null = null;
+  let bestMtime = 0;
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
+    const fullPath = path.join(dir, entry.name);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (stat.mtimeMs > bestMtime) {
+        bestMtime = stat.mtimeMs;
+        bestFile = fullPath;
+      }
+    } catch { /* skip unreadable files */ }
+  }
+
+  if (!bestFile) return null;
+  const state = readSessionStateFile(bestFile);
+  if (!state) return null;
+  return { file: bestFile, state };
+}
+
+/** Resolve session file: use provided sessionId, then _currentProcessSessionId, then fall back to most recent. */
+function resolveSessionFile(cortexPath: string, sessionId?: string): { file: string; state: SessionState } | null {
+  const effectiveId = sessionId ?? _currentProcessSessionId;
+  if (effectiveId) {
+    const file = sessionFileForId(cortexPath, effectiveId);
+    const state = readSessionStateFile(file);
+    if (!state) return null;
+    return { file, state };
+  }
+  return findMostRecentSession(cortexPath);
+}
+
+/** Remove session files older than 24 hours. */
+function cleanupStaleSessions(cortexPath: string): number {
+  const dir = sessionsDir(cortexPath);
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch { return 0; }
+
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
+    const fullPath = path.join(dir, entry.name);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (now - stat.mtimeMs > STALE_SESSION_MS) {
+        fs.unlinkSync(fullPath);
+        cleaned++;
+      }
+    } catch { /* skip */ }
+  }
+  return cleaned;
+}
+
+/** Migrate legacy global session-state.json to per-session file if it exists. */
+function migrateLegacySession(cortexPath: string): SessionState | null {
+  const legacyFile = path.join(cortexPath, ".runtime", "session-state.json");
+  if (!fs.existsSync(legacyFile)) return null;
+  try {
+    const state = JSON.parse(fs.readFileSync(legacyFile, "utf-8")) as SessionState;
+    if (state.sessionId) {
+      const newFile = sessionFileForId(cortexPath, state.sessionId);
+      writeSessionStateFile(newFile, state);
+    }
+    fs.unlinkSync(legacyFile);
+    return state;
+  } catch {
+    try { fs.unlinkSync(legacyFile); } catch { /* ignore */ }
+    return null;
+  }
+}
+
+/** Increment the findingsAdded counter for a session. Uses current process session, falls back to most-recent. */
+export function incrementSessionFindings(cortexPath: string, count = 1, sessionId?: string): void {
+  try {
+    const effectiveId = sessionId ?? _currentProcessSessionId;
+    const resolved = effectiveId
+      ? resolveSessionFile(cortexPath, effectiveId)
+      : findMostRecentSession(cortexPath);
+    if (!resolved) return;
+    const { file } = resolved;
+    withFileLock(file, () => {
+      const current = readSessionStateFile(file);
+      if (!current) return;
+      writeSessionStateFile(file, { ...current, findingsAdded: current.findingsAdded + count });
     });
   } catch { /* non-fatal */ }
 }
@@ -72,19 +160,27 @@ export function register(server: McpServer, ctx: McpContext): void {
       project: z.string().optional().describe("Project to load context for."),
     }),
   }, async ({ project }) => {
-    const started = withSessionStateLock(cortexPath, (file) => {
-      const prior = readSessionStateFile(file);
-      const next: SessionState = {
-        sessionId: crypto.randomUUID(),
-        project: project ?? prior?.project,
-        startedAt: new Date().toISOString(),
-        findingsAdded: 0,
-      };
-      writeSessionStateFile(file, next);
-      return { prior, next };
-    });
-    const prior = started.prior;
-    const startedSession = started.next;
+    // Migrate legacy global session file if present
+    migrateLegacySession(cortexPath);
+
+    // Clean up stale sessions (>24h)
+    cleanupStaleSessions(cortexPath);
+
+    // Find most recent prior session for context
+    const priorResult = findMostRecentSession(cortexPath);
+    const prior = priorResult?.state ?? null;
+
+    // Create new session with unique ID in its own file
+    const sessionId = crypto.randomUUID();
+    const next: SessionState = {
+      sessionId,
+      project: project ?? prior?.project,
+      startedAt: new Date().toISOString(),
+      findingsAdded: 0,
+    };
+    const newFile = sessionFileForId(cortexPath, sessionId);
+    writeSessionStateFile(newFile, next);
+    _currentProcessSessionId = sessionId;
 
     const parts: string[] = [];
 
@@ -94,8 +190,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
     const activeProject = project ?? prior?.project;
     if (activeProject && isValidProjectName(activeProject)) {
-      const findingsPath = path.join(cortexPath, activeProject, "FINDINGS.md");
-      if (fs.existsSync(findingsPath)) {
+      const findingsPath = resolveFindingsPath(path.join(cortexPath, activeProject));
+      if (findingsPath) {
         const content = fs.readFileSync(findingsPath, "utf-8");
         const bullets = content.split("\n").filter(l => l.startsWith("- ")).slice(-5);
         if (bullets.length > 0) {
@@ -116,10 +212,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
 
     const message = parts.length > 0
-      ? `Session started (${startedSession.sessionId.slice(0, 8)}).\n\n${parts.join("\n\n")}`
-      : `Session started (${startedSession.sessionId.slice(0, 8)}). No prior context found.`;
+      ? `Session started (${sessionId.slice(0, 8)}).\n\n${parts.join("\n\n")}`
+      : `Session started (${sessionId.slice(0, 8)}). No prior context found.`;
 
-    return mcpResponse({ ok: true, message, data: { sessionId: startedSession.sessionId, project: activeProject } });
+    return mcpResponse({ ok: true, message, data: { sessionId, project: activeProject } });
   });
 
   server.registerTool("session_end", {
@@ -127,21 +223,26 @@ export function register(server: McpServer, ctx: McpContext): void {
     description: "Mark the end of a session and save a summary for the next session to pick up. Call this before ending a conversation to preserve context.",
     inputSchema: z.object({
       summary: z.string().optional().describe("What was accomplished this session. Shown at the start of the next session."),
+      sessionId: z.string().optional().describe("Session ID to end. If not provided, ends the most recent session."),
     }),
-  }, async ({ summary }) => {
-    const ended = withSessionStateLock(cortexPath, (file) => {
-      const state = readSessionStateFile(file);
-      if (!state) return null;
+  }, async ({ summary, sessionId }) => {
+    const resolved = resolveSessionFile(cortexPath, sessionId);
+    if (!resolved) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
+
+    const { file, state } = resolved;
+    const endedState = withFileLock(file, () => {
+      const current = readSessionStateFile(file);
+      if (!current) return null;
       const next: SessionState = {
-        ...state,
+        ...current,
         endedAt: new Date().toISOString(),
-        summary: summary ?? state.summary,
+        summary: summary ?? current.summary,
       };
       writeSessionStateFile(file, next);
-      return { state, next };
+      return next;
     });
-    if (!ended) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
-    const { state, next: endedState } = ended;
+
+    if (!endedState) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
 
     const durationMs = new Date(endedState.endedAt!).getTime() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);
@@ -156,11 +257,14 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool("session_context", {
     title: "◆ cortex · session context",
     description: "Get the current session context -- active project, session duration, findings added, and prior session summary.",
-    inputSchema: z.object({}),
-  }, async () => {
-    const state = readSessionStateLocked(cortexPath);
-    if (!state) return mcpResponse({ ok: true, message: "No active session. Call session_start to begin.", data: null });
+    inputSchema: z.object({
+      sessionId: z.string().optional().describe("Session ID to query. If not provided, returns the most recent session."),
+    }),
+  }, async ({ sessionId }) => {
+    const resolved = resolveSessionFile(cortexPath, sessionId);
+    if (!resolved) return mcpResponse({ ok: true, message: "No active session. Call session_start to begin.", data: null });
 
+    const { state } = resolved;
     const durationMs = Date.now() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);
 

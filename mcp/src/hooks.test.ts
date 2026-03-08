@@ -638,6 +638,20 @@ describe("hooks", () => {
   });
 
   describe("runCustomHooks error structure", () => {
+    let tmpRoot: string;
+    let tmpCleanup: () => void;
+    let cortexPath: string;
+
+    beforeEach(() => {
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hooks-error-structure-test-"));
+      cortexPath = path.join(tmpRoot, "cortex");
+      fs.mkdirSync(path.join(cortexPath, ".governance"), { recursive: true });
+    });
+
+    afterEach(() => {
+      tmpCleanup();
+    });
+
     it("returns HookError[] with code and message properties, not plain strings", () => {
       fs.writeFileSync(
         path.join(cortexPath, ".governance", "install-preferences.json"),
@@ -740,9 +754,9 @@ describe("FTS5 whitelist (sanitizeFts5Query)", () => {
     // because they are now plain tokens without FTS5 operator semantics
   });
 
-  it("preserves allowed characters: alphanumeric, spaces, hyphens, underscores, apostrophes", () => {
+  it("preserves allowed characters: alphanumeric, spaces, hyphens, apostrophes", () => {
     const result = sanitizeFts5Query("it's a test-case with under_score");
-    expect(result).toBe("it's a test-case with under_score");
+    expect(result).toBe("it's a test-case with under score");
   });
 
   it("returns empty string for empty input", () => {
@@ -846,9 +860,10 @@ describe("Token budget overflow after reorder (selectSnippets)", () => {
     }
   });
 
-  it("approximateTokens returns roughly chars/4", () => {
-    expect(approximateTokens("hello world")).toBe(Math.ceil(11 / 4));
-    expect(approximateTokens("a".repeat(100))).toBe(25);
+  it("approximateTokens returns roughly chars/3.5 + whitespace weight", () => {
+    // Updated formula: Math.ceil(length / 3.5 + whitespace * 0.1)
+    expect(approximateTokens("hello world")).toBe(Math.ceil(11 / 3.5 + 1 * 0.1));
+    expect(approximateTokens("a".repeat(100))).toBe(Math.ceil(100 / 3.5));
   });
 });
 

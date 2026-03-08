@@ -344,13 +344,12 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   }
 
   if (checkData) {
-    const governanceChecks: Array<{ file: string; schema: "access-control" | "retention-policy" | "workflow-policy" | "index-policy" | "runtime-health" | "memory-scores" | "canonical-locks" }> = [
+    const governanceChecks: Array<{ file: string; schema: "access-control" | "retention-policy" | "workflow-policy" | "index-policy" | "runtime-health" | "canonical-locks" }> = [
       { file: "access-control.json", schema: "access-control" },
       { file: "retention-policy.json", schema: "retention-policy" },
       { file: "workflow-policy.json", schema: "workflow-policy" },
       { file: "index-policy.json", schema: "index-policy" },
       { file: "runtime-health.json", schema: "runtime-health" },
-      { file: "memory-scores.json", schema: "memory-scores" },
       { file: "canonical-locks.json", schema: "canonical-locks" },
     ];
 

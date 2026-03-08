@@ -183,6 +183,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             return mcpResponse({
               ok: false,
               error: error instanceof Error ? `Failed to finalize import: ${error.message}` : "Failed to finalize import.",
+              errorCode: "INTERNAL_ERROR",
             });
           }
         } catch (error) {
@@ -190,6 +191,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({
             ok: false,
             error: error instanceof Error ? `Failed to stage import: ${error.message}` : "Failed to stage import.",
+            errorCode: "INTERNAL_ERROR",
           });
         }
 

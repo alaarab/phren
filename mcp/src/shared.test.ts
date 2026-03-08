@@ -181,7 +181,7 @@ describe("ensureCortexPath", () => {
 });
 
 describe("governance validation and migrations", () => {
-  it("validates runtime-health and memory-scores schemas", () => {
+  it("validates runtime-health schema", () => {
     const cortex = makeCortex();
     const govDir = path.join(cortex, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
@@ -190,27 +190,30 @@ describe("governance validation and migrations", () => {
     fs.writeFileSync(runtimeHealth, JSON.stringify({ lastAutoSave: { at: 123, status: "clean" } }, null, 2));
     expect(validateGovernanceJson(runtimeHealth, "runtime-health")).toBe(false);
 
-    const scores = path.join(govDir, "memory-scores.json");
-    fs.writeFileSync(scores, JSON.stringify({ "k": { impressions: 1, helpful: 0, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: new Date().toISOString() } }, null, 2));
-    expect(validateGovernanceJson(scores, "memory-scores")).toBe(true);
+    // canonical-locks with valid entries should pass
+    const locks = path.join(govDir, "canonical-locks.json");
+    fs.writeFileSync(locks, JSON.stringify({ "proj/CANONICAL_MEMORIES.md": { hash: "h", snapshot: "s", updatedAt: new Date().toISOString() } }, null, 2));
+    expect(validateGovernanceJson(locks, "canonical-locks")).toBe(true);
   });
 
   it("supports dry-run governance migration reporting", () => {
     const cortex = makeCortex();
     const govDir = path.join(cortex, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
+    // Use canonical-locks.json (a valid GovernanceSchema type) in flat legacy format
     fs.writeFileSync(
-      path.join(govDir, "memory-scores.json"),
-      JSON.stringify({ "legacy/key": { impressions: 1, helpful: 0, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: new Date().toISOString() } }, null, 2)
+      path.join(govDir, "canonical-locks.json"),
+      JSON.stringify({ "proj/CANONICAL_MEMORIES.md": { hash: "h", snapshot: "s", updatedAt: new Date().toISOString() } }, null, 2)
     );
 
     const report = migrateGovernance(cortex, { dryRun: true });
-    const scoreResult = report.results.find((r) => r.file === "memory-scores.json");
+    const locksResult = report.results.find((r) => r.file === "canonical-locks.json");
     expect(report.dryRun).toBe(true);
-    expect(scoreResult?.changed).toBe(true);
-    expect(scoreResult?.action).toBe("migrated");
+    expect(locksResult?.changed).toBe(true);
+    expect(locksResult?.action).toBe("migrated");
 
-    const raw = JSON.parse(fs.readFileSync(path.join(govDir, "memory-scores.json"), "utf8"));
+    // dry-run should not write the file, so it stays in legacy format
+    const raw = JSON.parse(fs.readFileSync(path.join(govDir, "canonical-locks.json"), "utf8"));
     expect(raw.entries).toBeUndefined();
   });
 
@@ -218,10 +221,6 @@ describe("governance validation and migrations", () => {
     const cortex = makeCortex();
     const govDir = path.join(cortex, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "memory-scores.json"),
-      JSON.stringify({ "legacy/key": { impressions: 1, helpful: 0, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: new Date().toISOString() } }, null, 2)
-    );
     fs.writeFileSync(
       path.join(govDir, "canonical-locks.json"),
       JSON.stringify({ "proj/CANONICAL_MEMORIES.md": { hash: "h", snapshot: "s", updatedAt: new Date().toISOString() } }, null, 2)
@@ -232,15 +231,11 @@ describe("governance validation and migrations", () => {
     );
 
     const report = migrateGovernance(cortex);
-    expect(report.migratedFiles).toContain("memory-scores.json");
     expect(report.migratedFiles).toContain("canonical-locks.json");
     expect(report.results.find((r) => r.file === "index-policy.json")?.action).toBe("invalid-fallback");
 
-    const scoresRaw = JSON.parse(fs.readFileSync(path.join(govDir, "memory-scores.json"), "utf8"));
     const locksRaw = JSON.parse(fs.readFileSync(path.join(govDir, "canonical-locks.json"), "utf8"));
-    expect(scoresRaw.schemaVersion).toBe(1);
     expect(locksRaw.schemaVersion).toBe(1);
-    expect(scoresRaw.entries["legacy/key"]).toBeDefined();
     expect(locksRaw.entries["proj/CANONICAL_MEMORIES.md"]).toBeDefined();
   });
 });

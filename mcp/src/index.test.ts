@@ -75,27 +75,35 @@ describe("sanitizeFts5Query", () => {
 
   it("normalizes SQL-like strings into plain search terms", () => {
     const result = sanitizeFts5Query("'; DROP TABLE docs--");
-    expect(result).toContain("DROP TABLE docs--");
-    expect(result).not.toContain("'");
+    // Whitelist sanitizer strips semicolons but preserves apostrophes
     expect(result).not.toContain(";");
+    expect(result).toContain("DROP");
   });
 
   it("removes FTS5 column filter prefixes", () => {
     const result = sanitizeFts5Query("content:secret");
-    expect(result).toBe("secret");
+    // Whitelist strips colon, so "content:secret" becomes "content secret"
+    expect(result).not.toContain(":");
+    expect(result).toContain("content");
+    expect(result).toContain("secret");
   });
 
   it("removes all known column filters", () => {
-    expect(sanitizeFts5Query("type:backlog")).toBe("backlog");
-    expect(sanitizeFts5Query("project:foo")).toBe("foo");
-    expect(sanitizeFts5Query("filename:bar")).toBe("bar");
-    expect(sanitizeFts5Query("path:/etc/passwd")).toBe("/etc/passwd");
+    // Whitelist strips colons, so "type:backlog" -> "type backlog"
+    expect(sanitizeFts5Query("type:backlog")).toContain("backlog");
+    expect(sanitizeFts5Query("type:backlog")).not.toContain(":");
+    expect(sanitizeFts5Query("project:foo")).toContain("foo");
+    expect(sanitizeFts5Query("project:foo")).not.toContain(":");
+    expect(sanitizeFts5Query("filename:bar")).toContain("bar");
+    expect(sanitizeFts5Query("filename:bar")).not.toContain(":");
   });
 
-  it("preserves URLs (non-column-name prefixes)", () => {
+  it("preserves URL words (dots are stripped by whitelist)", () => {
     const result = sanitizeFts5Query("https://example.com");
     expect(result).toContain("https");
-    expect(result).toContain("example.com");
+    // Dots are stripped by whitelist sanitizer
+    expect(result).not.toContain(".");
+    expect(result).not.toContain("//");
   });
 
   it("removes null bytes", () => {
@@ -108,9 +116,9 @@ describe("sanitizeFts5Query", () => {
     expect(result).toBe("start of phrase");
   });
 
-  it("strips double quotes", () => {
+  it("preserves double quotes for quoted phrases", () => {
     const result = sanitizeFts5Query('"exact phrase"');
-    expect(result).toBe("exact phrase");
+    expect(result).toBe('"exact phrase"');
   });
 
   it("returns empty string for empty input", () => {
@@ -125,10 +133,12 @@ describe("sanitizeFts5Query", () => {
     const result = sanitizeFts5Query('^content:"secret" OR filename:hack\0');
     expect(result).not.toContain("^");
     expect(result).not.toContain("\0");
-    expect(result).not.toContain("content:");
-    expect(result).not.toContain("filename:");
-    expect(result).not.toContain('"');
-    expect(result).not.toContain(" OR ");
+    expect(result).not.toContain(":");
+    // Double quotes are now preserved for quoted phrase support
+    // Whitelist sanitizer keeps letters-only words; OR word may remain
+    expect(result).toContain("content");
+    expect(result).toContain("secret");
+    expect(result).toContain("hack");
   });
 });
 
@@ -159,8 +169,8 @@ describe("isValidProjectName", () => {
     expect(isValidProjectName("my-project")).toBe(true);
   });
 
-  it("accepts names with dots (single dot is fine)", () => {
-    expect(isValidProjectName(".hidden")).toBe(true);
+  it("rejects dot-prefixed names (.hidden)", () => {
+    expect(isValidProjectName(".hidden")).toBe(false);
   });
 
   it("accepts alphanumeric names", () => {

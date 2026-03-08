@@ -35,10 +35,10 @@ cortex search "api auth" --type reference    # reference tier only
 cortex search "rate limit" --project my-app  # one project's findings + reference
 ```
 
-In MCP, use the `type` parameter on `search_cortex`:
+In MCP, use the `type` parameter on `search_knowledge`:
 
 ```
-search_cortex(query: "api auth", type: "reference")
+search_knowledge(query: "api auth", type: "reference")
 ```
 
 ## Decision guide

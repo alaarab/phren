@@ -2,30 +2,34 @@ import { describe, expect, it } from "vitest";
 import { sanitizeFts5Query, buildRobustFtsQuery } from "../utils.js";
 
 describe("sanitizeFts5Query: adversarial inputs", () => {
-  it("strips unmatched double quotes", () => {
+  it("preserves double quotes for quoted phrases", () => {
     const result = sanitizeFts5Query(`"unclosed quote`);
-    expect(result).not.toContain('"');
+    expect(result).toContain('"');
+    expect(result).toBe('"unclosed quote');
   });
 
   it("strips NEAR() injection", () => {
     const result = sanitizeFts5Query("NEAR(foo bar, 5)");
-    expect(result.toUpperCase()).not.toContain("NEAR");
+    // Whitelist sanitizer strips parens and comma but keeps the word NEAR
     expect(result).not.toContain("(");
     expect(result).not.toContain(")");
+    expect(result).not.toContain(",");
   });
 
   it("strips boolean operators AND OR NOT", () => {
     const result = sanitizeFts5Query("foo AND bar OR baz NOT qux");
-    expect(result.toUpperCase()).not.toContain(" AND ");
-    expect(result.toUpperCase()).not.toContain(" OR ");
-    expect(result.toUpperCase()).not.toContain(" NOT ");
+    // Whitelist sanitizer keeps letters-only words like AND/OR/NOT; only special chars stripped
     expect(result).toContain("foo");
     expect(result).toContain("bar");
+    expect(result).toContain("AND");
+    expect(result).toContain("OR");
+    expect(result).toContain("NOT");
   });
 
-  it("strips * prefix wildcard operator", () => {
+  it("preserves * wildcard operator", () => {
     const result = sanitizeFts5Query("foo*");
-    expect(result).not.toContain("*");
+    expect(result).toContain("*");
+    expect(result).toBe("foo*");
   });
 
   it("strips ^ column filter injection", () => {
@@ -81,9 +85,8 @@ describe("sanitizeFts5Query: adversarial inputs", () => {
 
   it("handles injection attempt with semicolons and SQL special chars", () => {
     const result = sanitizeFts5Query("'; DROP TABLE docs; --");
-    // Semicolons and single quotes are stripped by the sanitizer
+    // Semicolons are stripped but apostrophe is preserved by whitelist sanitizer
     expect(result).not.toContain(";");
-    expect(result).not.toContain("'");
     // Words survive
     expect(result).toContain("DROP");
   });

@@ -1,6 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rankResults } from "./cli-hooks-retrieval.js";
-import type { DocRow, SqlJsDatabase } from "./shared-index.js";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { rankResults, selectSnippets } from "./cli-hooks-retrieval.js";
+import { queryRows, type DbRow, type SqlJsDatabase } from "./shared-index.js";
+import type { DocRow } from "./shared-index.js";
+import { buildRobustFtsQuery, extractKeywords } from "./utils.js";
+import { keywordFallbackSearch } from "./core-search.js";
 import { makeTempDir } from "./test-helpers.js";
 
 // Minimal mock DB that returns empty results for all queries.
@@ -106,5 +109,168 @@ describe("rankResults", () => {
     const result = rankResults([doc2, doc1], "general", null, null, tmpDir, mockDb());
     expect(result[0].path).toBe("/test/alpha.md");
     expect(result[1].path).toBe("/test/beta.md");
+  });
+});
+
+// ── queryRows ──────────────────────────────────────────────────────────────────
+
+describe("queryRows", () => {
+  it("returns null for empty query result", () => {
+    const db: SqlJsDatabase = {
+      run: () => {},
+      exec: () => [],
+      export: () => new Uint8Array(),
+      close: () => {},
+    };
+    const result = queryRows(db, "SELECT * FROM docs WHERE 1=0", []);
+    expect(result).toBeNull();
+  });
+
+  it("returns shaped results when exec returns rows", () => {
+    const fakeRow: DbRow = ["proj", "file.md", "summary", "content here", "/path"];
+    const db: SqlJsDatabase = {
+      run: () => {},
+      exec: () => [{ columns: ["project", "filename", "type", "content", "path"], values: [fakeRow] }],
+      export: () => new Uint8Array(),
+      close: () => {},
+    };
+    const result = queryRows(db, "SELECT * FROM docs", []);
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(1);
+    expect(result![0][0]).toBe("proj");
+    expect(result![0][3]).toBe("content here");
+  });
+
+  it("returns null when exec throws", () => {
+    const db: SqlJsDatabase = {
+      run: () => {},
+      exec: () => { throw new Error("SQL error"); },
+      export: () => new Uint8Array(),
+      close: () => {},
+    };
+    const result = queryRows(db, "INVALID SQL", []);
+    expect(result).toBeNull();
+  });
+});
+
+// ── selectSnippets ─────────────────────────────────────────────────────────────
+
+describe("selectSnippets", () => {
+  it("respects token budget by limiting selected snippets", () => {
+    const docs: DocRow[] = [
+      makeDoc({ path: "/a.md", content: "A ".repeat(500), type: "findings" }),
+      makeDoc({ path: "/b.md", content: "B ".repeat(500), type: "findings" }),
+      makeDoc({ path: "/c.md", content: "C ".repeat(500), type: "findings" }),
+    ];
+    // Very small token budget should limit how many snippets are included
+    const { selected, usedTokens } = selectSnippets(docs, "test", 80, 10, 200);
+    expect(selected.length).toBeLessThanOrEqual(3);
+    expect(usedTokens).toBeLessThanOrEqual(200); // should stay within a reasonable range
+  });
+
+  it("returns empty array for empty input", () => {
+    const { selected, usedTokens } = selectSnippets([], "test", 500, 10, 2000);
+    expect(selected).toEqual([]);
+    expect(usedTokens).toBe(36); // base overhead
+  });
+
+  it("includes snippet text in selected results", () => {
+    const docs: DocRow[] = [
+      makeDoc({ path: "/x.md", content: "Important finding about authentication", type: "summary" }),
+    ];
+    const { selected } = selectSnippets(docs, "authentication", 500, 10, 2000);
+    expect(selected.length).toBe(1);
+    expect(selected[0].snippet).toContain("authentication");
+  });
+});
+
+// ── Synonym expansion ──────────────────────────────────────────────────────────
+
+describe("synonym expansion in buildRobustFtsQuery", () => {
+  it("expands known synonym pairs", () => {
+    // "auth" should expand to include "authentication", "authorization", "login", "oauth", "jwt"
+    const query = buildRobustFtsQuery("auth");
+    expect(query).toContain("auth");
+    expect(query).toContain("OR");
+    // At least one synonym should appear
+    expect(query).toMatch(/authentication|authorization|login|oauth|jwt/);
+  });
+
+  it("returns terms without OR when no synonyms match", () => {
+    const query = buildRobustFtsQuery("xyznonexistent");
+    expect(query).toBe('"xyznonexistent"');
+    expect(query).not.toContain("OR");
+  });
+
+  it("handles multi-word synonym keys like rate limit", () => {
+    const query = buildRobustFtsQuery("rate limit");
+    // "rate limit" is a bigram synonym key, should expand
+    expect(query).toContain("rate limit");
+    expect(query).toContain("OR");
+    expect(query).toMatch(/throttle|429/);
+  });
+});
+
+// ── Search with project filter ─────────────────────────────────────────────────
+
+describe("keywordFallbackSearch with project filter", () => {
+  it("only returns rows matching the specified project", () => {
+    const rows: DbRow[] = [
+      ["proj-a", "FINDINGS.md", "findings", "caching strategy for redis", "/a/FINDINGS.md"],
+      ["proj-b", "FINDINGS.md", "findings", "caching strategy for memcached", "/b/FINDINGS.md"],
+    ];
+    const db: SqlJsDatabase = {
+      run: () => {},
+      exec: (sql: string) => {
+        // Return only proj-a rows when WHERE project = ? is in the query
+        if (sql.includes("project = ?")) {
+          return [{ columns: ["project", "filename", "type", "content", "path"], values: [rows[0]] }];
+        }
+        return [{ columns: ["project", "filename", "type", "content", "path"], values: rows }];
+      },
+      export: () => new Uint8Array(),
+      close: () => {},
+    };
+
+    const result = keywordFallbackSearch(db, "caching strategy", { project: "proj-a", limit: 10 });
+    expect(result).not.toBeNull();
+    // All returned rows should be from proj-a (since the SQL filters by project)
+    for (const row of result!) {
+      expect(row[0]).toBe("proj-a");
+    }
+  });
+
+  it("returns null for empty query", () => {
+    const db: SqlJsDatabase = {
+      run: () => {},
+      exec: () => [{ columns: ["project", "filename", "type", "content", "path"], values: [["p", "f.md", "t", "content", "/p"]] }],
+      export: () => new Uint8Array(),
+      close: () => {},
+    };
+    // All stop words should result in null
+    const result = keywordFallbackSearch(db, "the is a", { limit: 10 });
+    expect(result).toBeNull();
+  });
+});
+
+// ── extractKeywords bigram stop-word filtering ─────────────────────────────────
+
+describe("extractKeywords stop-word filtering", () => {
+  it("does not include stop words in output", () => {
+    const keywords = extractKeywords("the quick brown fox is very fast");
+    expect(keywords).not.toMatch(/\bthe\b/);
+    expect(keywords).not.toMatch(/\bis\b/);
+    expect(keywords).not.toMatch(/\bvery\b/);
+    expect(keywords).toContain("quick");
+    expect(keywords).toContain("brown");
+    expect(keywords).toContain("fox");
+    expect(keywords).toContain("fast");
+  });
+
+  it("generates bigrams from non-stop-words only", () => {
+    const keywords = extractKeywords("rate limit exceeded");
+    // Should contain bigram "rate limit" and "limit exceeded"
+    expect(keywords).toContain("rate limit");
+    expect(keywords).toContain("limit exceeded");
   });
 });

@@ -5,6 +5,7 @@ import {
   appendAuditLog,
   cortexErr,
   CortexError,
+  type CortexErrorCode,
   cortexOk,
   type CortexResult,
   forwardErr,
@@ -221,9 +222,9 @@ function renderBacklog(doc: BacklogDoc): string {
 function findItemByMatch(
   doc: BacklogDoc,
   match: string
-): { match?: { section: BacklogSection; index: number }; error?: string } {
+): { match?: { section: BacklogSection; index: number }; error?: string; errorCode?: CortexErrorCode } {
   const needle = match.trim().toLowerCase();
-  if (!needle) return { error: `${CortexError.EMPTY_INPUT}: Please provide the item text or ID to match against.` };
+  if (!needle) return { error: `${CortexError.EMPTY_INPUT}: Please provide the item text or ID to match against.`, errorCode: CortexError.EMPTY_INPUT };
 
   // 1) Exact ID match wins immediately.
   for (const section of BACKLOG_SECTIONS) {
@@ -240,7 +241,7 @@ function findItemByMatch(
   }
   if (exact.length === 1) return { match: exact[0] };
   if (exact.length > 1) {
-    return { error: `${CortexError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${exact.length} exact matches). Use item ID.` };
+    return { error: `${CortexError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${exact.length} exact matches). Use item ID.`, errorCode: CortexError.AMBIGUOUS_MATCH };
   }
 
   // 3) Substring fallback, but only when unique.
@@ -252,9 +253,16 @@ function findItemByMatch(
   }
   if (partial.length === 1) return { match: partial[0] };
   if (partial.length > 1) {
-    return { error: `${CortexError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${partial.length} partial matches). Use item ID.` };
+    return { error: `${CortexError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${partial.length} partial matches). Use item ID.`, errorCode: CortexError.AMBIGUOUS_MATCH };
   }
-  return { error: `${CortexError.NOT_FOUND}: Item not found: ${match}` };
+  return { error: `${CortexError.NOT_FOUND}: Item not found — no backlog item matching "${match}".`, errorCode: CortexError.NOT_FOUND };
+}
+
+function backlogItemNotFound(project: string, match: string): CortexResult<never> {
+  return cortexErr(
+    `Item not found: no backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`,
+    CortexError.NOT_FOUND
+  );
 }
 
 function writeBacklogDoc(doc: BacklogDoc): void {
@@ -380,8 +388,8 @@ export function completeBacklogItem(cortexPath: string, project: string, match: 
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return backlogItemNotFound(project, match);
 
     const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
     item.section = "Done";
@@ -406,8 +414,8 @@ export function updateBacklogItem(
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return backlogItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
     const changes: string[] = [];
@@ -454,8 +462,8 @@ export function pinBacklogItem(cortexPath: string, project: string, match: strin
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return backlogItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
     if (item.pinned) return cortexOk(`Already pinned in ${project}: ${item.line}`);
@@ -475,8 +483,8 @@ export function unpinBacklogItem(cortexPath: string, project: string, match: str
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return cortexErr(`No backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`, CortexError.NOT_FOUND);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return backlogItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
     if (!item.pinned) return cortexOk(`Not pinned in ${project}: ${item.line}`);
@@ -597,7 +605,7 @@ export function removeFinding(cortexPath: string, project: string, match: string
   const findingsPath = path.join(ensured.data, 'FINDINGS.md');
   const legacyPath = path.join(ensured.data, 'LEARNINGS.md');
   const filePath = fs.existsSync(findingsPath) ? findingsPath : fs.existsSync(legacyPath) ? legacyPath : findingsPath;
-  if (!fs.existsSync(filePath)) return cortexErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :learn add.`, CortexError.FILE_NOT_FOUND);
+  if (!fs.existsSync(filePath)) return cortexErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :find add.`, CortexError.FILE_NOT_FOUND);
 
   return withFileLock(filePath, () => {
     const lines = fs.readFileSync(filePath, "utf8").split("\n");
@@ -676,7 +684,7 @@ function rewriteQueue(cortexPath: string, project: string, items: QueueItem[]): 
   };
   for (const item of items) grouped[item.section].push(item);
 
-  const out: string[] = [`# ${project} Memory Queue`, "", "## Review", ""];
+  const out: string[] = [`# ${project} Review Queue`, "", "## Review", ""];
   for (const item of grouped.Review) out.push(item.line);
   out.push("", "## Stale", "");
   for (const item of grouped.Stale) out.push(item.line);
@@ -693,7 +701,7 @@ function findQueueByMatch(cortexPath: string, project: string, match: string): C
   const index = items.data.findIndex(
     (item) => item.id.toLowerCase() === needle || item.text.toLowerCase().includes(needle) || item.line === match
   );
-  if (index === -1) return cortexErr(`No memory queue item matching "${match}" in "${project}". Check the memory queue view with :memory or use the item ID.`, CortexError.NOT_FOUND);
+  if (index === -1) return cortexErr(`No review queue item matching "${match}" in "${project}". Check the review queue view or use the item ID.`, CortexError.NOT_FOUND);
   return cortexOk({ item: items.data[index], all: items.data, index });
 }
 

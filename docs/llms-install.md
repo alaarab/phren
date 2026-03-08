@@ -49,13 +49,13 @@ cortex migrate-findings <project> --dry-run
 
 Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, cortex creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (29)
+## MCP Tools (40)
 
 ### Search and Browse
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `search_cortex` | `query`, `type?`, `limit?`, `project?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. |
+| `search_knowledge` | `query`, `type?`, `limit?`, `project?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. |
 | `get_project_summary` | `name` | Returns a project's summary card, CLAUDE.md path, and list of indexed files. |
 | `list_projects` | (none) | Lists all projects in the active profile with doc badges and brief descriptions. |
 | `get_findings` | `project`, `limit?` | Read recent findings without a search query. |
@@ -153,7 +153,7 @@ Findings lose confidence as they age. The default decay multipliers:
 | 90-120 days | 0.45 | Low confidence |
 | 120+ days | 0.0 | Expired (prunable) |
 
-These values are configurable via `cortex config policy` or the `memory-policy.json` governance file.
+These values are configurable via `cortex config policy` or the `retention-policy.json` governance file.
 
 ### Citation Validation
 

@@ -587,7 +587,7 @@ async function handleMemoryUi(args: string[]) {
 async function handleShell(args: string[]) {
   if (args.includes("--help") || args.includes("-h")) {
     console.log("Usage: cortex shell");
-    console.log("Interactive shell with views for Projects, Backlog, Learnings, Memory Queue, Machines/Profiles, and Health.");
+    console.log("Interactive shell with views for Projects, Backlog, Findings, Review Queue, Skills, Hooks, Machines/Profiles, and Health.");
     return;
   }
   await startShell(getCortexPath(), profile);
@@ -608,7 +608,9 @@ type HookToolName = typeof HOOK_TOOLS[number];
 
 function printSkillsUsage() {
   console.log("Usage:");
-  console.log("  cortex skills list");
+  console.log("  cortex skills list [--project <name>]");
+  console.log("  cortex skills show <name> [--project <name>]");
+  console.log("  cortex skills edit <name> [--project <name>]");
   console.log("  cortex skills add <project> <path>");
   console.log("  cortex skills remove <project> <name>");
 }
@@ -616,6 +618,8 @@ function printSkillsUsage() {
 function printHooksUsage() {
   console.log("Usage:");
   console.log("  cortex hooks list");
+  console.log("  cortex hooks show <tool>");
+  console.log("  cortex hooks edit <tool>");
   console.log("  cortex hooks enable <tool>");
   console.log("  cortex hooks disable <tool>");
   console.log("  tools: claude|copilot|cursor|codex");
@@ -627,6 +631,63 @@ function normalizeHookTool(raw: string | undefined): HookToolName | null {
   return HOOK_TOOLS.includes(tool as HookToolName) ? tool as HookToolName : null;
 }
 
+function findSkillPath(name: string, project?: string): string | null {
+  const needle = name.replace(/\.md$/i, "").toLowerCase();
+  const seenPaths = new Set<string>();
+
+  function search(root: string, sourceLabel: string): string | null {
+    if (!fs.existsSync(root)) return null;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      const isDir = entry.isDirectory();
+      const filePath = isDir
+        ? path.join(root, entry.name, "SKILL.md")
+        : entry.name.endsWith(".md") ? path.join(root, entry.name) : null;
+      if (!filePath || seenPaths.has(filePath) || !fs.existsSync(filePath)) continue;
+      seenPaths.add(filePath);
+      const entryName = isDir ? entry.name : entry.name.replace(/\.md$/, "");
+      if (entryName.toLowerCase() === needle && (!project || sourceLabel.toLowerCase() === project.toLowerCase())) {
+        return filePath;
+      }
+    }
+    return null;
+  }
+
+  const cortexPath = getCortexPath();
+  const found = search(path.join(cortexPath, "global", "skills"), "global");
+  if (found) return found;
+
+  for (const dir of getProjectDirs(cortexPath, profile)) {
+    const projectName = path.basename(dir);
+    if (projectName === "global") continue;
+    const r1 = search(path.join(dir, "skills"), projectName);
+    if (r1) return r1;
+    const r2 = search(path.join(dir, ".claude", "skills"), projectName);
+    if (r2) return r2;
+  }
+  return null;
+}
+
+function hookConfigPath(tool: string): string | null {
+  const cortexPath = getCortexPath();
+  const paths: Record<string, string> = {
+    claude: path.join(cortexPath, "cortex.SKILL.md"),
+    copilot: path.join(os.homedir(), ".github", "hooks", "cortex.json"),
+    cursor: path.join(os.homedir(), ".cursor", "hooks.json"),
+    codex: path.join(cortexPath, "codex.json"),
+  };
+  return paths[tool] ?? null;
+}
+
+function openInEditor(filePath: string): void {
+  const editor = process.env.EDITOR || process.env.VISUAL || "nano";
+  try {
+    execFileSync(editor, [filePath], { stdio: "inherit" });
+  } catch {
+    console.error(`Editor "${editor}" failed. Set $EDITOR to your preferred editor.`);
+    process.exit(1);
+  }
+}
+
 function handleSkillsNamespace(args: string[]) {
   const subcommand = args[0];
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
@@ -636,6 +697,24 @@ function handleSkillsNamespace(args: string[]) {
 
   if (subcommand === "list") {
     handleSkillList();
+    return;
+  }
+
+  if (subcommand === "show" || subcommand === "edit") {
+    const name = args[1];
+    if (!name) { printSkillsUsage(); process.exit(1); }
+    const projectIdx = args.indexOf("--project");
+    const project = projectIdx !== -1 ? args[projectIdx + 1] : undefined;
+    const skillPath = findSkillPath(name, project);
+    if (!skillPath) {
+      console.error(`Skill not found: "${name}"${project ? ` in project "${project}"` : ""}`);
+      process.exit(1);
+    }
+    if (subcommand === "show") {
+      console.log(fs.readFileSync(skillPath, "utf8"));
+    } else {
+      openInEditor(skillPath);
+    }
     return;
   }
 
@@ -727,6 +806,22 @@ function handleHooksNamespace(args: string[]) {
     console.log(`--------  ---------  --------`);
     for (const row of rows) {
       console.log(`${row.tool.padEnd(8)}  ${row.hookType.padEnd(9)}  ${row.status}`);
+    }
+    return;
+  }
+
+  if (subcommand === "show" || subcommand === "edit") {
+    const tool = normalizeHookTool(args[1]);
+    if (!tool) { printHooksUsage(); process.exit(1); }
+    const configPath = hookConfigPath(tool);
+    if (!configPath || !fs.existsSync(configPath)) {
+      console.error(`Hook config not found for "${tool}": ${configPath ?? "(unknown path)"}`);
+      process.exit(1);
+    }
+    if (subcommand === "show") {
+      console.log(fs.readFileSync(configPath, "utf8"));
+    } else {
+      openInEditor(configPath);
     }
     return;
   }

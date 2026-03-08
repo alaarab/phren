@@ -754,7 +754,7 @@ export async function runUninstall() {
   }
 
   log(`\nCortex hooks and MCP config removed.`);
-  log(`\nYour knowledge base at ~/.cortex was NOT deleted.`);
+  log(`\nYour Cortex data at ~/.cortex was NOT deleted.`);
   log(`To fully remove it, run: rm -rf ~/.cortex\n`);
   log(`Restart your agent(s) to apply changes.\n`);
 }
