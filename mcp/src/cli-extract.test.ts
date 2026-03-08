@@ -10,6 +10,11 @@ vi.mock("child_process", () => ({
   execFileSync: vi.fn(),
 }));
 
+vi.mock("./utils.js", async (importOriginal) => {
+  const orig: any = await importOriginal();
+  return { ...orig, runGit: vi.fn() };
+});
+
 vi.mock("./shared.js", async (importOriginal) => {
   const orig: any = await importOriginal();
   return {
@@ -33,8 +38,10 @@ vi.mock("./hooks.js", () => ({
 }));
 
 import { execFileSync } from "child_process";
+import { runGit as runGitUtil } from "./utils.js";
 
 const mockExecFileSync = vi.mocked(execFileSync);
+const mockRunGit = vi.mocked(runGitUtil);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -43,7 +50,7 @@ beforeEach(() => {
 describe("parseGitLogRecords", () => {
   it("parses records separated by \\x1e with \\x1f field separators", () => {
     const raw = "abc123\x1fFix the bug\x1fdetails here\x1edef456\x1fAdd feature\x1f\x1e";
-    mockExecFileSync.mockReturnValue(raw);
+    mockRunGit.mockReturnValue(raw);
 
     const records = parseGitLogRecords("/repo", 30);
     expect(records).toHaveLength(2);
@@ -52,20 +59,18 @@ describe("parseGitLogRecords", () => {
   });
 
   it("returns empty array when git log returns nothing", () => {
-    mockExecFileSync.mockReturnValue("");
+    mockRunGit.mockReturnValue("");
     expect(parseGitLogRecords("/repo", 7)).toEqual([]);
   });
 
-  it("returns empty array when git log throws", () => {
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error("not a git repo");
-    });
+  it("returns empty array when git log returns null (error)", () => {
+    mockRunGit.mockReturnValue(null);
     expect(parseGitLogRecords("/repo", 7)).toEqual([]);
   });
 
   it("skips records with missing hash or subject", () => {
     const raw = "\x1f\x1fbody only\x1eabc\x1fReal commit\x1fbod\x1e";
-    mockExecFileSync.mockReturnValue(raw);
+    mockRunGit.mockReturnValue(raw);
     const records = parseGitLogRecords("/repo", 30);
     expect(records).toHaveLength(1);
     expect(records[0].subject).toBe("Real commit");
