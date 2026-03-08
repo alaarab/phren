@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
-import { addFindingToFile } from "./shared-content.js";
+import { addFindingsToFile } from "./shared-content.js";
 import { checkOllamaAvailable, checkModelAvailable, generateText, getOllamaUrl, getExtractModel } from "./shared-ollama.js";
 import { debugLog } from "./shared.js";
 import * as path from "path";
@@ -117,25 +117,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       return withWriteQueue(async () => {
-        const added: string[] = [];
-        const skipped: string[] = [];
-
-        for (const finding of findings) {
-          try {
-            const result = addFindingToFile(cortexPath, project, finding);
-            if (result.ok) {
-              if (result.data.startsWith("Skipped duplicate")) {
-                skipped.push(finding);
-              } else {
-                added.push(finding);
-              }
-            } else {
-              skipped.push(finding);
-            }
-          } catch {
-            skipped.push(finding);
-          }
+        // Use addFindingsToFile so extracted findings go through the full pipeline:
+        // secret scan, dedup check, validation, and index update.
+        const result = addFindingsToFile(cortexPath, project, findings);
+        if (!result.ok) {
+          return mcpResponse({ ok: false, error: result.error });
         }
+        const { added, skipped, rejected } = result.data;
+        const allSkipped = [...skipped, ...rejected.map(r => r.text)];
 
         // Update index for the findings file
         const resolvedDir = safeProjectPath(cortexPath, project);
@@ -145,8 +134,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         return mcpResponse({
           ok: added.length > 0,
-          message: `Extracted ${findings.length} finding(s): ${added.length} added, ${skipped.length} skipped (duplicates or errors).`,
-          data: { project, extracted: findings, added, skipped, dryRun: false },
+          message: `Extracted ${findings.length} finding(s): ${added.length} added, ${allSkipped.length} skipped (duplicates or errors).`,
+          data: { project, extracted: findings, added, skipped: allSkipped, dryRun: false },
         });
       });
     }

@@ -609,9 +609,21 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
   const items: FindingItem[] = [];
   let date = "unknown";
   let index = 1;
+  let inArchiveBlock = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    // Skip archived content wrapped in <!-- cortex:archive:start/end --> or <details> blocks
+    if (/<!--\s*cortex:archive:start\s*-->/.test(line) || /^<details>/i.test(line.trim())) {
+      inArchiveBlock = true;
+      continue;
+    }
+    if (inArchiveBlock) {
+      if (/<!--\s*cortex:archive:end\s*-->/.test(line) || /^<\/details>/i.test(line.trim())) {
+        inArchiveBlock = false;
+      }
+      continue;
+    }
     if (line.startsWith("## ")) {
       date = line.slice(3).trim();
       continue;
@@ -869,7 +881,11 @@ export function editQueueItem(cortexPath: string, project: string, match: string
 
     const date = found.data.item.date === "unknown" ? new Date().toISOString().slice(0, 10) : found.data.item.date;
     found.data.item.text = trimmed;
-    found.data.item.line = `- [${date}] ${found.data.item.text}`;
+    // Preserve the [confidence X.XX] marker so the approval gate can still evaluate risk.
+    const confidencePart = found.data.item.confidence !== undefined
+      ? ` [confidence ${found.data.item.confidence.toFixed(2)}]`
+      : "";
+    found.data.item.line = `- [${date}] ${found.data.item.text}${confidencePart}`;
     found.data.all[found.data.index] = found.data.item;
     rewriteQueue(cortexPath, project, found.data.all);
     appendAuditLog(cortexPath, "edit_memory", `project=${project} item=${JSON.stringify(found.data.item.text)}`);

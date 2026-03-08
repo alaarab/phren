@@ -238,6 +238,9 @@ function saveEntryScores(cortexPath: string, scores: Record<string, EntryScore>)
 }
 
 export function flushEntryScores(cortexPath: string): void {
+  // Invalidate journal cache since claimScoreJournal will clear the file
+  journalCache = null;
+  journalCachePath = null;
   const journalEntries = claimScoreJournal(cortexPath);
   if (journalEntries.length > 0) {
     const scores = loadEntryScores(cortexPath);
@@ -305,6 +308,31 @@ export function recordFeedback(
 
 export const recordMemoryFeedback = recordFeedback;
 
+// Module-level cache for the journal aggregation used by getQualityMultiplier.
+// Invalidated whenever flushEntryScores runs (at which point the journal is cleared).
+let journalCache: Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }> | null = null;
+let journalCachePath: string | null = null;
+
+function getJournalCache(cortexPath: string): Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }> {
+  const file = scoresJournalFile(cortexPath);
+  if (journalCache && journalCachePath === file) return journalCache;
+  // Build the cache by reading the journal once and aggregating by key
+  const entries = readScoreJournal(cortexPath);
+  const cache = new Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }>();
+  for (const entry of entries) {
+    const cur = cache.get(entry.key) ?? { helpful: 0, repromptPenalty: 0, regressionPenalty: 0, impressions: 0, lastUsedAt: "" };
+    if (entry.delta.helpful) cur.helpful += entry.delta.helpful;
+    if (entry.delta.repromptPenalty) cur.repromptPenalty += entry.delta.repromptPenalty;
+    if (entry.delta.regressionPenalty) cur.regressionPenalty += entry.delta.regressionPenalty;
+    if (entry.delta.impressions) cur.impressions += entry.delta.impressions;
+    if (entry.at && entry.at > cur.lastUsedAt) cur.lastUsedAt = entry.at;
+    cache.set(entry.key, cur);
+  }
+  journalCache = cache;
+  journalCachePath = file;
+  return cache;
+}
+
 export function getQualityMultiplier(cortexPath: string, key: string): number {
   const scores = loadEntryScores(cortexPath);
   const entry = scores[key];
@@ -314,16 +342,18 @@ export function getQualityMultiplier(cortexPath: string, key: string): number {
   let impressions = entry ? entry.impressions : 0;
   let lastUsedAt = entry ? entry.lastUsedAt : "";
 
-  const journalEntries = readScoreJournal(cortexPath).filter((journalEntry) => journalEntry.key === key);
-  for (const journalEntry of journalEntries) {
-    if (journalEntry.delta.helpful) helpful += journalEntry.delta.helpful;
-    if (journalEntry.delta.repromptPenalty) repromptPenalty += journalEntry.delta.repromptPenalty;
-    if (journalEntry.delta.regressionPenalty) regressionPenalty += journalEntry.delta.regressionPenalty;
-    if (journalEntry.delta.impressions) impressions += journalEntry.delta.impressions;
-    if (journalEntry.at && (!lastUsedAt || journalEntry.at > lastUsedAt)) lastUsedAt = journalEntry.at;
+  // Use the cached journal aggregation to avoid O(n×m) reads during ranking
+  const journalAgg = getJournalCache(cortexPath).get(key);
+  const hasJournalData = journalAgg !== undefined;
+  if (journalAgg) {
+    helpful += journalAgg.helpful;
+    repromptPenalty += journalAgg.repromptPenalty;
+    regressionPenalty += journalAgg.regressionPenalty;
+    impressions += journalAgg.impressions;
+    if (journalAgg.lastUsedAt && journalAgg.lastUsedAt > lastUsedAt) lastUsedAt = journalAgg.lastUsedAt;
   }
 
-  if (!entry && journalEntries.length === 0) return 1;
+  if (!entry && !hasJournalData) return 1;
 
   let recencyBoost = 0;
   if (lastUsedAt) {

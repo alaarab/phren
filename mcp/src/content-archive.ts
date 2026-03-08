@@ -146,9 +146,10 @@ export function autoArchiveToReference(
   const learningsPath = path.join(resolvedDir, "FINDINGS.md");
   if (!fs.existsSync(learningsPath)) return cortexOk(0);
 
-  // Consolidation lock to prevent concurrent runs (atomic create via wx flag)
+  // Consolidation lock to prevent concurrent runs for the same project (atomic create via wx flag).
+  // Use a project-specific lock so consolidating multiple projects in parallel is allowed.
   const STALE_LOCK_MS = 600_000; // 10 min
-  const lockFile = runtimeFile(cortexPath, "consolidation.lock");
+  const lockFile = runtimeFile(cortexPath, `consolidation-${project}.lock`);
   try {
     fs.writeFileSync(lockFile, String(Date.now()), { flag: "wx" });
   } catch (e: any) {

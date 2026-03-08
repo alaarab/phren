@@ -110,20 +110,31 @@ export function resolveImports(
   return content.replace(IMPORT_RE, (_match, importPath: string) => {
     const trimmed = importPath.trim();
     const resolved = path.join(cortexPath, "global", trimmed);
-    const normalized = path.resolve(resolved);
+    // Use lexical resolution first for the prefix check
+    const lexical = path.resolve(resolved);
+
+    if (!lexical.startsWith(path.resolve(cortexPath, "global") + path.sep)) {
+      return `<!-- @import blocked: path traversal -->`;
+    }
+
+    // Dereference symlinks before the prefix check to prevent symlink traversal attacks
+    // (e.g. global/evil -> /etc/passwd would pass the lexical check but fail here).
+    let normalized: string;
+    try {
+      normalized = fs.realpathSync.native(resolved);
+    } catch {
+      return `<!-- @import not found: ${trimmed} -->`;
+    }
+
+    if (!normalized.startsWith(path.resolve(cortexPath, "global") + path.sep)) {
+      return `<!-- @import blocked: symlink traversal -->`;
+    }
 
     if (currentSeen.has(normalized)) {
       return `<!-- @import cycle: ${trimmed} -->`;
     }
 
-    if (!normalized.startsWith(path.resolve(cortexPath, "global") + path.sep)) {
-      return `<!-- @import blocked: path traversal -->`;
-    }
-
     try {
-      if (!fs.existsSync(normalized)) {
-        return `<!-- @import not found: ${trimmed} -->`;
-      }
       const childSeen = new Set(currentSeen);
       childSeen.add(normalized);
       const imported = fs.readFileSync(normalized, "utf-8");
@@ -260,13 +271,21 @@ function saveHashMap(cortexPath: string, hashes: Record<string, string>): void {
     fs.mkdirSync(runtimeDir, { recursive: true });
     const hashFile = path.join(runtimeDir, INDEX_HASHES_FILENAME);
     withFileLock(hashFile, () => {
-      // Read-merge-write: load existing hashes, merge new values (new wins), then write
+      // Read-merge-write: load existing hashes, merge new values (new wins), then write.
+      // Prune entries for files that no longer exist to prevent ghost paths from causing
+      // repeated full rebuilds when deleted files are found in the hash map.
       let existing: Record<string, string> = {};
       try {
         const data = JSON.parse(fs.readFileSync(hashFile, "utf-8"));
         if (data.hashes && typeof data.hashes === "object") existing = data.hashes;
       } catch { /* file missing or corrupt — treat as empty */ }
       const merged = { ...existing, ...hashes };
+      // Remove entries for paths that no longer exist on disk
+      for (const filePath of Object.keys(merged)) {
+        if (!fs.existsSync(filePath)) {
+          delete merged[filePath];
+        }
+      }
       fs.writeFileSync(
         hashFile,
         JSON.stringify({ version: INDEX_SCHEMA_VERSION, hashes: merged }, null, 2)

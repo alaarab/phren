@@ -315,12 +315,16 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
         waited += pollMs;
       }
     }
-    fs.appendFileSync(logPath, line);
-    const stat = fs.statSync(logPath);
-    if (stat.size > 1_000_000) {
-      const content = fs.readFileSync(logPath, "utf8");
-      const lines = content.split("\n");
-      fs.writeFileSync(logPath, lines.slice(-500).join("\n"));
+    if (hasLock) {
+      fs.appendFileSync(logPath, line);
+      const stat = fs.statSync(logPath);
+      if (stat.size > 1_000_000) {
+        const content = fs.readFileSync(logPath, "utf8");
+        const lines = content.split("\n");
+        fs.writeFileSync(logPath, lines.slice(-500).join("\n"));
+      }
+    } else {
+      debugLog(`Audit log skipped (lock timeout): ${event} ${details}`);
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

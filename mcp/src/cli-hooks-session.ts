@@ -39,9 +39,24 @@ import {
 import type { SelectedSnippet } from "./cli-hooks-retrieval.js";
 import { filterBacklogByPriority } from "./cli-hooks-retrieval.js";
 
-/** Validate that a transcript path points to a safe, expected location. */
+/** Validate that a transcript path points to a safe, expected location.
+ * Uses realpathSync to dereference symlinks, preventing traversal attacks
+ * where a symlink inside a safe dir points outside it.
+ */
 function isSafeTranscriptPath(p: string): boolean {
-  const normalized = path.resolve(p);
+  // Resolve symlinks so a link like ~/.claude/evil -> /etc/passwd is caught
+  let normalized: string;
+  try {
+    normalized = fs.realpathSync.native(p);
+  } catch {
+    // If the file doesn't exist yet, fall back to lexical resolution
+    try {
+      normalized = fs.realpathSync.native(path.dirname(p));
+      normalized = path.join(normalized, path.basename(p));
+    } catch {
+      normalized = path.resolve(p);
+    }
+  }
   const safePrefixes = [
     path.resolve(os.tmpdir()),
     path.resolve(os.homedir(), ".claude"),
@@ -416,6 +431,60 @@ export async function handleHookStop() {
     return;
   }
 
+  // Read stdin early — it's a stream and can only be consumed once.
+  // Needed for auto-capture transcript_path parsing.
+  let stdinPayload: { transcript_path?: string } | null = null;
+  try {
+    const stdinData = fs.readFileSync(0, "utf-8");
+    stdinPayload = JSON.parse(stdinData) as { transcript_path?: string };
+  } catch { /* stdin not available or not JSON */ }
+
+  // Auto-capture BEFORE git operations so captured insights get committed and pushed.
+  // Gated behind CORTEX_FEATURE_AUTO_CAPTURE=1.
+  if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
+    try {
+      let captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
+      if (!captureInput && stdinPayload?.transcript_path) {
+        const transcriptPath = stdinPayload.transcript_path;
+        if (!isSafeTranscriptPath(transcriptPath)) {
+          debugLog(`auto-capture: skipping unsafe transcript_path: ${transcriptPath}`);
+        } else if (fs.existsSync(transcriptPath)) {
+          // Cap at last 500 lines (~50 KB) to bound memory usage for long sessions
+          const raw = fs.readFileSync(transcriptPath, "utf-8");
+          const allLines = raw.split("\n").filter(Boolean);
+          const lines = allLines.length > 500 ? allLines.slice(-500) : allLines;
+          const assistantTexts: string[] = [];
+          for (const line of lines) {
+            try {
+              const msg = JSON.parse(line) as { role?: string; content?: string | Array<{ type?: string; text?: string }> };
+              if (msg.role !== "assistant") continue;
+              if (typeof msg.content === "string") assistantTexts.push(msg.content);
+              else if (Array.isArray(msg.content)) {
+                for (const block of msg.content) {
+                  if (block.type === "text" && block.text) assistantTexts.push(block.text);
+                }
+              }
+            } catch { /* skip malformed lines */ }
+          }
+          captureInput = assistantTexts.join("\n");
+        }
+      }
+      if (captureInput) {
+        const cwd = process.cwd();
+        const activeProject = detectProject(getCortexPath(), cwd, profile);
+        if (activeProject) {
+          const insights = extractConversationInsights(captureInput);
+          for (const insight of insights) {
+            addFindingToFile(getCortexPath(), activeProject, `[pattern] ${insight}`);
+            debugLog(`auto-capture: saved insight for ${activeProject}: ${insight.slice(0, 60)}`);
+          }
+        }
+      }
+    } catch (err: unknown) {
+      debugLog(`auto-capture failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const status = await runBestEffortGit(["status", "--porcelain"], getCortexPath());
   if (!status.ok) {
     updateRuntimeHealth(getCortexPath(), {
@@ -435,7 +504,12 @@ export async function handleHookStop() {
     return;
   }
 
-  const add = await runBestEffortGit(["add", "-A"], getCortexPath());
+  // Exclude sensitive files from staging: .env files and private keys should
+  // never be committed to the cortex git repository.
+  const add = await runBestEffortGit(
+    ["add", "-A", "--", ":(exclude).env", ":(exclude)**/.env", ":(exclude)*.pem", ":(exclude)*.key"],
+    getCortexPath()
+  );
   const commit = add.ok ? await runBestEffortGit(["commit", "-m", "auto-save cortex"], getCortexPath()) : { ok: false, error: add.error };
   if (!add.ok || !commit.ok) {
     updateRuntimeHealth(getCortexPath(), {
@@ -468,86 +542,30 @@ export async function handleHookStop() {
     if (Date.now() - stat.mtimeMs < DEBOUNCE_MS) shouldPush = false;
   } catch { /* marker doesn't exist, push normally */ }
 
-  const push = shouldPush ? await runBestEffortGit(["push"], getCortexPath()) : { ok: true, output: "debounced" };
-  if (shouldPush && push.ok) {
-    fs.writeFileSync(lastPushMarker, String(Date.now()));
+  if (!shouldPush) {
+    // Debounced: commit is saved locally, push will happen on the next non-debounced stop.
+    updateRuntimeHealth(getCortexPath(), {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "saved-local", detail: "commit saved; push debounced" },
+    });
+    appendAuditLog(getCortexPath(), "hook_stop", "status=saved-local detail=debounced");
+
+    // Auto governance scheduling (non-blocking)
+    scheduleWeeklyGovernance();
+    return;
   }
+
+  const push = await runBestEffortGit(["push"], getCortexPath());
   if (push.ok) {
+    fs.writeFileSync(lastPushMarker, String(Date.now()));
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed" },
     });
     appendAuditLog(getCortexPath(), "hook_stop", "status=saved-pushed");
 
-    // Auto-capture conversation insights (gated behind CORTEX_FEATURE_AUTO_CAPTURE=1)
-    // Enabled by init walkthrough; reads transcript_path from Claude Code's Stop hook payload.
-    if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
-      try {
-        // Claude Code passes JSON to stdin including transcript_path (JSONL file with messages)
-        let captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
-        if (!captureInput) {
-          try {
-            const stdinData = fs.readFileSync(0, "utf-8");
-            const hookPayload = JSON.parse(stdinData) as { transcript_path?: string };
-            if (hookPayload.transcript_path && !isSafeTranscriptPath(hookPayload.transcript_path)) {
-              debugLog(`auto-capture: skipping unsafe transcript_path: ${hookPayload.transcript_path}`);
-            }
-            if (hookPayload.transcript_path && isSafeTranscriptPath(hookPayload.transcript_path) && fs.existsSync(hookPayload.transcript_path)) {
-              // Cap at last 500 lines (~50 KB) to bound memory usage for long sessions
-              const raw = fs.readFileSync(hookPayload.transcript_path, "utf-8");
-              const allLines = raw.split("\n").filter(Boolean);
-              const lines = allLines.length > 500 ? allLines.slice(-500) : allLines;
-              const assistantTexts: string[] = [];
-              for (const line of lines) {
-                try {
-                  const msg = JSON.parse(line) as { role?: string; content?: string | Array<{ type?: string; text?: string }> };
-                  if (msg.role !== "assistant") continue;
-                  if (typeof msg.content === "string") assistantTexts.push(msg.content);
-                  else if (Array.isArray(msg.content)) {
-                    for (const block of msg.content) {
-                      if (block.type === "text" && block.text) assistantTexts.push(block.text);
-                    }
-                  }
-                } catch { /* skip malformed lines */ }
-              }
-              captureInput = assistantTexts.join("\n");
-            }
-          } catch { /* stdin may not be readable or not JSON; skip */ }
-        }
-        if (captureInput) {
-          const cwd = process.cwd();
-          const activeProject = detectProject(getCortexPath(), cwd, profile);
-          if (activeProject) {
-            const insights = extractConversationInsights(captureInput);
-            for (const insight of insights) {
-              addFindingToFile(getCortexPath(), activeProject, `[pattern] ${insight}`);
-              debugLog(`auto-capture: saved insight for ${activeProject}: ${insight.slice(0, 60)}`);
-            }
-          }
-        }
-      } catch (err: unknown) {
-        debugLog(`auto-capture failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    // Auto governance scheduling: run governance weekly if overdue
-    try {
-      const lastGovPath = runtimeFile(getCortexPath(), "last-governance.txt");
-      const lastRun = fs.existsSync(lastGovPath) ? parseInt(fs.readFileSync(lastGovPath, "utf8"), 10) : 0;
-      const daysSince = (Date.now() - lastRun) / 86_400_000;
-      if (daysSince >= 7) {
-        const spawnArgs = resolveSubprocessArgs("background-maintenance");
-        if (spawnArgs) {
-          const child = spawn(process.execPath, spawnArgs, { detached: true, stdio: "ignore" });
-          child.unref();
-          fs.writeFileSync(lastGovPath, Date.now().toString());
-          debugLog("hook_stop: scheduled weekly governance run");
-        }
-      }
-    } catch (err: unknown) {
-      debugLog(`hook_stop: governance scheduling failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
+    // Auto governance scheduling (non-blocking)
+    scheduleWeeklyGovernance();
     return;
   }
 
@@ -556,6 +574,25 @@ export async function handleHookStop() {
     lastAutoSave: { at: now, status: "saved-local", detail: push.error || "push failed" },
   });
   appendAuditLog(getCortexPath(), "hook_stop", `status=saved-local detail=${JSON.stringify(push.error || "push failed")}`);
+}
+
+function scheduleWeeklyGovernance(): void {
+  try {
+    const lastGovPath = runtimeFile(getCortexPath(), "last-governance.txt");
+    const lastRun = fs.existsSync(lastGovPath) ? parseInt(fs.readFileSync(lastGovPath, "utf8"), 10) : 0;
+    const daysSince = (Date.now() - lastRun) / 86_400_000;
+    if (daysSince >= 7) {
+      const spawnArgs = resolveSubprocessArgs("background-maintenance");
+      if (spawnArgs) {
+        const child = spawn(process.execPath, spawnArgs, { detached: true, stdio: "ignore" });
+        child.unref();
+        fs.writeFileSync(lastGovPath, Date.now().toString());
+        debugLog("hook_stop: scheduled weekly governance run");
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`hook_stop: governance scheduling failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export async function handleHookContext() {

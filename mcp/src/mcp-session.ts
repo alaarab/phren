@@ -150,6 +150,9 @@ function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId
     const file = sessionFileForId(cortexPath, effectiveId);
     const state = readSessionStateFile(file);
     if (!state) return null;
+    // When an explicit sessionId is provided, only return active (not yet ended) sessions.
+    // This prevents session_end from being called twice on the same session.
+    if (sessionId && state.endedAt) return null;
     return { file, state };
   }
   return findMostRecentSession(cortexPath);

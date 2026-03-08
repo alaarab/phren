@@ -250,7 +250,8 @@ export async function vectorFallback(
   cortexPath: string,
   query: string,
   excludePaths: Set<string>,
-  limit: number
+  limit: number,
+  project?: string | null
 ): Promise<DocRow[]> {
   // Run when either Ollama or a cloud embedding endpoint is available
   if (!getOllamaUrl() && !getCloudEmbeddingUrl()) return [];
@@ -266,7 +267,19 @@ export async function vectorFallback(
   if (!queryVec || queryVec.length === 0) return [];
 
   const model = getEmbeddingModel();
-  const entries = cache.getAllEntries().filter(e => e.model === model && !excludePaths.has(e.path));
+  // Apply project scoping: when a project is detected, restrict vector results to that
+  // project and the global project to prevent cross-project memory injection.
+  const entries = cache.getAllEntries().filter(e => {
+    if (e.model !== model) return false;
+    if (excludePaths.has(e.path)) return false;
+    if (project) {
+      // Allow global docs and docs from the active project
+      const rel = e.path.startsWith(cortexPath) ? e.path.slice(cortexPath.length + 1) : e.path;
+      const entryProject = rel.split("/")[0] ?? "";
+      if (entryProject !== project && entryProject !== "global") return false;
+    }
+    return true;
+  });
   if (entries.length === 0) return [];
 
   const scored = entries

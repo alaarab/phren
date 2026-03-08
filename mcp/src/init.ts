@@ -287,8 +287,14 @@ export async function runInit(opts: InitOptions = {}) {
   const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
   const dryRun = Boolean(opts.dryRun);
   const existing = fs.existsSync(cortexPath);
-  const existingEntries = existing ? fs.readdirSync(cortexPath) : [];
-  const hasExistingInstall = existing && existingEntries.length > 0;
+  // Treat as existing install only when cortex-specific files are present.
+  // An empty or non-cortex directory (e.g. from a partial clone) should not
+  // trigger the update path.
+  const hasExistingInstall = existing && (
+    fs.existsSync(path.join(cortexPath, "machines.yaml")) ||
+    fs.existsSync(path.join(cortexPath, ".governance")) ||
+    fs.existsSync(path.join(cortexPath, "global"))
+  );
 
   // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
   if (!hasExistingInstall && !dryRun && !opts.yes && process.stdin.isTTY && process.stdout.isTTY) {
@@ -686,7 +692,11 @@ export async function runInit(opts: InitOptions = {}) {
     let changed = false;
     for (const { flag } of envFlags) {
       const key = flag.split("=")[0];
-      if (!envContent.includes(key)) {
+      // Use exact line-prefix matching to avoid false positives from substring checks.
+      // e.g. CORTEX_FEATURE_AUTO_CAPTURE=0 should not block writing CORTEX_FEATURE_AUTO_CAPTURE=1.
+      const lines = envContent.split("\n");
+      const hasKey = lines.some(l => l.trimStart().startsWith(key + "="));
+      if (!hasKey) {
         envContent += `${flag}\n`;
         changed = true;
       }

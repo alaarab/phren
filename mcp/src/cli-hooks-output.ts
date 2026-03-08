@@ -8,7 +8,7 @@ import {
 import { isFeatureEnabled } from "./utils.js";
 import { annotateStale } from "./cli-hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "./cli-hooks-retrieval.js";
-import { approximateTokens } from "./cli-hooks-retrieval.js";
+import { approximateTokens, fileRelevanceBoost, branchMatchBoost } from "./cli-hooks-retrieval.js";
 
 // ── Progressive disclosure helpers ────────────────────────────────────────────
 
@@ -128,27 +128,3 @@ export function buildHookOutput(
   return parts;
 }
 
-// Internal helpers used for trace output — duplicated here to avoid circular deps
-function fileRelevanceBoost(filePath: string, changedFiles: Set<string>): number {
-  if (changedFiles.size === 0) return 0;
-  const normalized = filePath.replace(/\\/g, "/");
-  for (const cf of changedFiles) {
-    const n = cf.replace(/\\/g, "/");
-    if (normalized.endsWith(n) || normalized.includes(`/${n}`)) return 3;
-  }
-  return 0;
-}
-
-function branchMatchBoost(content: string, branch: string | undefined): number {
-  if (!branch) return 0;
-  const text = content.toLowerCase();
-  const tokens = branch
-    .split(/[\/._-]/g)
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 2 && !["main", "master", "feature", "fix", "bugfix", "hotfix"].includes(s));
-  let score = 0;
-  for (const t of tokens) {
-    if (text.includes(t)) score += 1;
-  }
-  return Math.min(3, score);
-}

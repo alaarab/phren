@@ -45,7 +45,7 @@ function intentBoost(intent: string, docType: string): number {
   return 0;
 }
 
-function fileRelevanceBoost(filePath: string, changedFiles: Set<string>): number {
+export function fileRelevanceBoost(filePath: string, changedFiles: Set<string>): number {
   if (changedFiles.size === 0) return 0;
   const normalized = filePath.replace(/\\/g, "/");
   const docBasename = path.basename(normalized);
@@ -66,7 +66,7 @@ export function branchTokens(branch: string): string[] {
     .filter((s) => s.length > 2 && !["main", "master", "feature", "fix", "bugfix", "hotfix"].includes(s));
 }
 
-function branchMatchBoost(content: string, branch: string | undefined): number {
+export function branchMatchBoost(content: string, branch: string | undefined): number {
   if (!branch) return 0;
   const text = content.toLowerCase();
   const tokens = branchTokens(branch);
@@ -293,7 +293,7 @@ export async function searchDocumentsAsync(
     const existingPaths = new Set<string>(
       (syncResult ?? []).map((d) => d.path || `${d.project}/${d.filename}`)
     );
-    const vectorDocs = await vectorFallback(cortexPath, `${prompt}\n${keywords}`, existingPaths, 8);
+    const vectorDocs = await vectorFallback(cortexPath, `${prompt}\n${keywords}`, existingPaths, 8, detectedProject);
     if (vectorDocs.length === 0) return syncResult;
 
     // RRF-merge all three tiers
@@ -424,7 +424,9 @@ export function rankResults(
   const entityBoost = query ? getEntityBoostDocs(db, query, cortexPathLocal) : new Set<string>();
   const entityBoostPaths = new Set<string>();
   for (const doc of ranked) {
-    const docKey = `${doc.project}/${doc.filename}`;
+    // Use getDocSourceKey to build the full project/relFile key, matching what
+    // entity_links stores (e.g. project/reference/arch.md, not project/arch.md).
+    const docKey = getDocSourceKey(doc, cortexPathLocal);
     if (entityBoost.has(docKey)) entityBoostPaths.add(doc.path);
   }
 

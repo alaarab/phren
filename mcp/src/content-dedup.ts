@@ -58,6 +58,9 @@ function isAbortError(error: unknown): boolean {
 }
 
 export async function callLlm(prompt: string, signal?: AbortSignal): Promise<string> {
+  // Check abort before starting any work to avoid unnecessary API calls
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
   const endpoint = process.env.CORTEX_LLM_ENDPOINT;
   const customKey = process.env.CORTEX_LLM_KEY;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
