@@ -87,8 +87,8 @@ export function register(server: McpServer, ctx: McpContext): void {
               }
             }
           }
-          const findingsPath = path.join(safeProjectPath(cortexPath, project) || "", "FINDINGS.md");
-          updateFileInIndex(findingsPath);
+          const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
           const ok = result.ok && (result.data.startsWith("Added finding") || result.data.startsWith("Saved finding") || result.data.startsWith("Created FINDINGS.md"));
           if (ok) {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
@@ -127,8 +127,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
           incrementSessionFindings(cortexPath, added.length);
-          const findingsPath = path.join(safeProjectPath(cortexPath, project) || "", "FINDINGS.md");
-          updateFileInIndex(findingsPath);
+          const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
         }
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
         return mcpResponse({ ok: added.length > 0, message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`, data: { project, added, skipped, rejected } });
@@ -149,11 +149,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, finding }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = removeFindingCore(cortexPath, project, finding);
         if (result.ok) {
-          const findingsPath = path.join(safeProjectPath(cortexPath, project) || "", "FINDINGS.md");
-          updateFileInIndex(findingsPath);
+          const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
         }
         if (!result.ok) return mcpResponse({ ok: false, error: result.message });
         return mcpResponse({ ok: true, message: result.message, data: result.data });
@@ -172,11 +173,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, findings }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = removeFindingsCore(cortexPath, project, findings);
         if (result.ok) {
-          const findingsPath = path.join(safeProjectPath(cortexPath, project) || "", "FINDINGS.md");
-          updateFileInIndex(findingsPath);
+          const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
         }
         if (!result.ok) return mcpResponse({ ok: false, error: result.message });
         return mcpResponse({ ok: result.ok, message: result.message, data: result.data });

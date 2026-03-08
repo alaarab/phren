@@ -40,7 +40,7 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
   }
 
   const effectiveLimit = limit ?? DEFAULT_BACKLOG_LIMIT;
-  const effectiveDoneLimit = doneLimit ?? (limit ?? DEFAULT_DONE_LIMIT);
+  const effectiveDoneLimit = doneLimit ?? DEFAULT_DONE_LIMIT;
   let truncated = false;
 
   const items: Record<BacklogSection, BacklogDoc["items"][BacklogSection]> = {
@@ -53,7 +53,7 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
     const sectionItems = doc.items[section];
     const cap = section === "Done" ? effectiveDoneLimit : effectiveLimit;
     if (sectionItems.length > cap) {
-      items[section] = sectionItems.slice(-cap); // most recent Done items
+      items[section] = sectionItems.slice(0, cap); // most recent Done items (Done prepends, so index 0 is newest)
       truncated = true;
     } else {
       items[section] = sectionItems;

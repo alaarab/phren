@@ -264,7 +264,7 @@ describe("CLI integration: maintain migrate", () => {
   });
 });
 
-describe("CLI integration: destructive backup reporting", () => {
+describe("CLI integration: prune and consolidate atomic writes", () => {
   let cortexDir: string;
   let cleanup: () => void;
 
@@ -291,7 +291,7 @@ describe("CLI integration: destructive backup reporting", () => {
     expect(fs.existsSync(backupPath)).toBe(false);
   });
 
-  it("prune reports updated backup paths on write", () => {
+  it("prune writes atomically (no .bak file created)", () => {
     const backupPath = path.join(cortexDir, "test-proj", "FINDINGS.md.bak");
     const { stdout, exitCode } = runCli(
       ["maintain", "prune", "test-proj"],
@@ -299,11 +299,11 @@ describe("CLI integration: destructive backup reporting", () => {
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Pruned");
-    expect(stdout).toContain("Updated backups (1): test-proj/FINDINGS.md.bak");
-    expect(fs.existsSync(backupPath)).toBe(true);
+    // atomic write (tmp + rename) — no .bak file is created
+    expect(fs.existsSync(backupPath)).toBe(false);
   });
 
-  it("consolidate reports updated backup paths on write", () => {
+  it("consolidate creates .bak and reports updated backup paths", () => {
     const backupPath = path.join(cortexDir, "test-proj", "FINDINGS.md.bak");
     const { stdout, exitCode } = runCli(
       ["maintain", "consolidate", "test-proj"],

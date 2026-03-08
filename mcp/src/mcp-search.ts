@@ -228,7 +228,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 if (filterProject) { filterParts.push("project = ?"); filterParams.push(filterProject); }
                 if (filterType) { filterParts.push("type = ?"); filterParams.push(filterType); }
                 const filterWhere = filterParts.length > 0 ? " WHERE " + filterParts.join(" AND ") : "";
-                const allDocs = queryRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY rowid DESC LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
+                const allDocs = queryRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY RANDOM() LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
                 if (allDocs) {
                   const existingPaths = new Set(rows!.map((r: DbRow) => r[4]));
                   const candidates = allDocs.filter(doc => !existingPaths.has(doc[4]));
@@ -340,7 +340,6 @@ export function register(server: McpServer, ctx: McpContext): void {
           } catch { /* file may not exist on disk */ }
 
           const scoreKey = entryScoreKey(rowProject, filename, content);
-          const snippet = extractSnippet(content, query);
           boost *= getQualityMultiplier(cortexPath, scoreKey);
 
           return { row, rank: (rows!.length - idx) * boost };

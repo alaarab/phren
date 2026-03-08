@@ -209,8 +209,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       return withWriteQueue(async () => {
-        updateFileInIndex(result.path);
         fs.unlinkSync(result.path);
+        updateFileInIndex(result.path); // called after delete so indexer removes the entry
         return mcpResponse({ ok: true, message: `Removed skill "${name}" (${result.path}).`, data: { path: result.path } });
       });
     }

@@ -9,6 +9,7 @@ import {
   flushEntryScores,
 } from "./shared-governance.js";
 import { upsertCanonical } from "./shared-content.js";
+import { isValidProjectName } from "./utils.js";
 
 
 
@@ -27,6 +28,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, memory }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
         const result = upsertCanonical(cortexPath, project, memory);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });

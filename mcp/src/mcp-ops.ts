@@ -6,6 +6,7 @@ import * as path from "path";
 import { debugLog, runtimeDir, runtimeFile, getProjectDirs } from "./shared.js";
 import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
+import { approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, profile } = ctx;
@@ -253,6 +254,70 @@ export function register(server: McpServer, ctx: McpContext): void {
         message: `Found ${allErrors.length} error(s), showing last ${recent.length}:\n\n${recent.join("\n")}`,
         data: { errors: recent, total: allErrors.length, sources: { hookErrors: hookErrors.length, debugErrors: debugErrors.length } },
       });
+    }
+  );
+
+  // ── approve_queue_item ────────────────────────────────────────────────────
+
+  server.registerTool(
+    "approve_queue_item",
+    {
+      title: "◆ cortex · approve queue item",
+      description:
+        "Approve a queued memory item: moves it from the review queue into FINDINGS.md. " +
+        "Requires queue + write permission. High-risk items additionally require maintainer role.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial text of the queue item to approve."),
+      }),
+    },
+    async ({ project, item }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+      const result = approveQueueItem(cortexPath, project, item);
+      return mcpResponse(result);
+    }
+  );
+
+  // ── reject_queue_item ─────────────────────────────────────────────────────
+
+  server.registerTool(
+    "reject_queue_item",
+    {
+      title: "◆ cortex · reject queue item",
+      description:
+        "Reject a queued memory item: removes it from the review queue without promoting to FINDINGS.md. " +
+        "Requires queue permission.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial text of the queue item to reject."),
+      }),
+    },
+    async ({ project, item }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+      const result = rejectQueueItem(cortexPath, project, item);
+      return mcpResponse(result);
+    }
+  );
+
+  // ── edit_queue_item ───────────────────────────────────────────────────────
+
+  server.registerTool(
+    "edit_queue_item",
+    {
+      title: "◆ cortex · edit queue item",
+      description:
+        "Edit the text of a queued memory item before approving or rejecting it. " +
+        "Requires queue permission.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial text of the queue item to edit."),
+        new_text: z.string().describe("Replacement text for the queue item."),
+      }),
+    },
+    async ({ project, item, new_text }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+      const result = editQueueItem(cortexPath, project, item, new_text);
+      return mcpResponse(result);
     }
   );
 }

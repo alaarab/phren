@@ -16,6 +16,23 @@ const VALID_CUSTOM_EVENTS = [
   "pre-index", "post-index",
 ] as const;
 
+/**
+ * Validate a custom hook command at registration time.
+ * Rejects obviously dangerous patterns to reduce confused-deputy risk
+ * if install-preferences.json is ever compromised.
+ * Returns an error string, or null if valid.
+ */
+function validateHookCommand(command: string): string | null {
+  const trimmed = command.trim();
+  if (!trimmed) return "Command cannot be empty.";
+  if (trimmed.length > 1000) return "Command too long (max 1000 characters).";
+  // Reject eval — allows arbitrary code execution bypass
+  if (/\beval\b/.test(trimmed)) return "eval is not permitted in hook commands.";
+  // Command must start with a word character, path, or quoted string
+  if (!/^[\w./~"'(]/.test(trimmed)) return "Command must begin with an executable name or path.";
+  return null;
+}
+
 function normalizeHookTool(input: string | undefined): HookTool | null {
   if (!input) return null;
   const lower = input.toLowerCase() as HookTool;
@@ -122,15 +139,14 @@ export function register(server: McpServer, ctx: McpContext): void {
         "Add a custom integration hook. Valid events: " +
         VALID_CUSTOM_EVENTS.join(", ") + ".",
       inputSchema: z.object({
-        event: z.string().describe("Hook event name."),
+        event: z.enum(VALID_CUSTOM_EVENTS).describe("Hook event name."),
         command: z.string().describe("Shell command to execute."),
         timeout: z.number().optional().describe("Timeout in ms (default 5000)."),
       }),
     },
     async ({ event, command, timeout }) => {
-      if (!VALID_CUSTOM_EVENTS.includes(event as any)) {
-        return mcpResponse({ ok: false, error: `Invalid event "${event}". Valid: ${VALID_CUSTOM_EVENTS.join(", ")}` });
-      }
+      const cmdErr = validateHookCommand(command);
+      if (cmdErr) return mcpResponse({ ok: false, error: cmdErr });
 
       return ctx.withWriteQueue(async () => {
         const prefs = readInstallPreferences(cortexPath);
@@ -151,7 +167,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ cortex · remove custom hook",
       description: "Remove custom hook(s) by event and optional command text (partial match).",
       inputSchema: z.object({
-        event: z.string().describe("Hook event name to match."),
+        event: z.enum(VALID_CUSTOM_EVENTS).describe("Hook event name to match."),
         command: z.string().optional().describe("Partial command text. Omit to remove all hooks for the event."),
       }),
     },

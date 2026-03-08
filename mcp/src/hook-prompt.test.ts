@@ -227,8 +227,8 @@ describe("applyTrustFilter", () => {
       { project: "proj", filename: "CLAUDE.md", type: "claude", content: "instructions", path: "/path2" },
     ];
     const result = applyTrustFilter(rows, cortexDir, 365, 0.5, { enabled: false });
-    expect(result).toHaveLength(2);
-    expect(result[0].content).toBe("project summary text");
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0].content).toBe("project summary text");
   });
 
   it("filters findings rows through trust pipeline", () => {
@@ -246,9 +246,9 @@ describe("applyTrustFilter", () => {
       { project: "testproj", filename: "FINDINGS.md", type: "findings", content: findingsContent, path: "/FINDINGS.md" },
     ];
     const result = applyTrustFilter(rows, cortexDir, 365, 0.0, { enabled: false });
-    expect(result).toHaveLength(1);
+    expect(result.rows).toHaveLength(1);
     // Content should still contain the fresh finding
-    expect(result[0].content).toContain("Fresh finding");
+    expect(result.rows[0].content).toContain("Fresh finding");
   });
 
   it("removes findings rows that become empty after trust filtering", () => {
@@ -269,10 +269,10 @@ describe("applyTrustFilter", () => {
     // Very short TTL should filter out old entries
     const result = applyTrustFilter(rows, cortexDir, 1, 0.99, { enabled: true, halfLifeDays: 30 });
     // The row should be filtered out because all content is stale
-    expect(result.length).toBeLessThanOrEqual(1);
-    if (result.length === 1) {
+    expect(result.rows.length).toBeLessThanOrEqual(1);
+    if (result.rows.length === 1) {
       // If it survives, at least check that old content was removed
-      expect(result[0].content).not.toContain("Ancient finding");
+      expect(result.rows[0].content).not.toContain("Ancient finding");
     }
   });
 });

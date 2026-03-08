@@ -78,9 +78,9 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     const filtered = applyTrustFilter(rows, tmp.path, 90, 0.35, {});
     // The stale bullet is removed but the heading "# Findings" remains,
     // so the doc passes through with reduced content (not fully excluded)
-    expect(filtered.length).toBe(1);
-    expect(filtered[0].content).not.toContain("Very old reference entry");
-    expect(filtered[0].content).toContain("Findings");
+    expect(filtered.rows.length).toBe(1);
+    expect(filtered.rows[0].content).not.toContain("Very old reference entry");
+    expect(filtered.rows[0].content).toContain("Findings");
   });
 
   it("filters stale entries from knowledge type docs", () => {
@@ -95,8 +95,8 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     const rows: DocRow[] = [makeDocRow("knowledge", staleContent)];
     const filtered = applyTrustFilter(rows, tmp.path, 90, 0.35, {});
     // The stale bullet is removed but the heading "# Findings" remains
-    expect(filtered.length).toBe(1);
-    expect(filtered[0].content).not.toContain("Ancient knowledge entry");
+    expect(filtered.rows.length).toBe(1);
+    expect(filtered.rows[0].content).not.toContain("Ancient knowledge entry");
   });
 
   it("does not filter non-trust types like claude or backlog", () => {
@@ -111,8 +111,8 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     const rows: DocRow[] = [makeDocRow("claude", content)];
     const filtered = applyTrustFilter(rows, tmp.path, 90, 0.35, {});
     // claude type should pass through unfiltered
-    expect(filtered.length).toBe(1);
-    expect(filtered[0].content).toBe(content);
+    expect(filtered.rows.length).toBe(1);
+    expect(filtered.rows[0].content).toBe(content);
   });
 });
 

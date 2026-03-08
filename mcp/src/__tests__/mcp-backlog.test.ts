@@ -117,3 +117,25 @@ describe("complete_backlog_item MCP tool", () => {
     expect(msg.ok).toBe(false);
   });
 });
+
+describe("readBacklog done_limit", () => {
+  it("done_limit returns most recent items, not oldest", () => {
+    // Seed Active section with 10 items
+    const activeItems = "# backlog\n\n## Active\n\n" +
+      Array.from({ length: 10 }, (_, i) => `- [ ] Done item ${i + 1}`).join("\n") + "\n\n## Queue\n\n## Done\n";
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), activeItems);
+
+    // Complete each item in order 1..10; completeBacklogItem uses unshift so last completed is at index 0
+    for (let i = 1; i <= 10; i++) {
+      completeBacklogItem(tmpDir, PROJECT, `Done item ${i}`);
+    }
+
+    const result = readBacklog(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    const doneItems = result.data.items.Done;
+    expect(doneItems).toHaveLength(10);
+    // completeBacklogItem uses unshift (prepend), so most recently completed is first
+    expect(doneItems[0].line).toContain("Done item 10");
+    expect(doneItems[9].line).toContain("Done item 1");
+  });
+});

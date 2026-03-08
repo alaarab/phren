@@ -137,12 +137,21 @@ function prepareFinding(
 
 function insertFindingIntoContent(content: string, today: string, bullet: string, citationComment: string): string {
   const todayHeader = `## ${today}`;
-  if (content.includes(todayHeader)) {
-    return content.replace(todayHeader, `${todayHeader}\n\n${bullet}\n${citationComment}`);
+  // Use positional insertion (not String.replace) to avoid: (1) special $& replacement patterns
+  // if bullet contains $ chars, and (2) inserting inside an archived <details> block when a
+  // duplicate date header exists from a prior consolidation run.
+  const idx = content.indexOf(todayHeader);
+  if (idx !== -1) {
+    const insertAt = idx + todayHeader.length;
+    return content.slice(0, insertAt) + `\n\n${bullet}\n${citationComment}` + content.slice(insertAt);
   }
-  const firstHeading = content.match(/^(## \d{4}-\d{2}-\d{2})/m);
-  if (firstHeading) {
-    return content.replace(firstHeading[0], `${todayHeader}\n\n${bullet}\n${citationComment}\n\n${firstHeading[0]}`);
+  const firstHeadingMatch = content.match(/^## \d{4}-\d{2}-\d{2}/m);
+  if (firstHeadingMatch?.index != null) {
+    return (
+      content.slice(0, firstHeadingMatch.index) +
+      `${todayHeader}\n\n${bullet}\n${citationComment}\n\n` +
+      content.slice(firstHeadingMatch.index)
+    );
   }
   return content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n${citationComment}\n`;
 }
