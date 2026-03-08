@@ -1672,6 +1672,24 @@ describe("getRuntimeHealth and updateRuntimeHealth", () => {
     const h = getRuntimeHealth(cortex);
     expect(h.lastAutoSave?.status).toBe("saved-pushed");
   });
+
+  it("handles sync metadata updates", () => {
+    const cortex = makeCortex();
+    const now = new Date().toISOString();
+    updateRuntimeHealth(cortex, {
+      lastSync: {
+        lastPullAt: now,
+        lastPullStatus: "ok",
+        lastPushAt: now,
+        lastPushStatus: "saved-local",
+        unsyncedCommits: 2,
+      },
+    });
+    const h = getRuntimeHealth(cortex);
+    expect(h.lastSync?.lastPullStatus).toBe("ok");
+    expect(h.lastSync?.lastPushStatus).toBe("saved-local");
+    expect(h.lastSync?.unsyncedCommits).toBe(2);
+  });
 });
 
 // --- migrateLegacyFindings ---

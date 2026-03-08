@@ -13,6 +13,7 @@ import { detectProject, findFtsCacheForPath } from "./shared-index.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
+import { readRuntimeHealth } from "./data-access.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -210,6 +211,15 @@ export async function runStatus() {
   }
 
   console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalBacklog} backlog, ${totalQueue} queued`);
+
+  const runtime = readRuntimeHealth(cortexPath);
+  console.log(`\n  ${BOLD}Sync:${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+  console.log(`             last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
+  console.log(`             last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
+  console.log(`             unsynced commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+  if (runtime.lastSync?.lastPushDetail) {
+    console.log(`             push detail: ${runtime.lastSync.lastPushDetail}`);
+  }
 
   // Recent changes (git log)
   const isGitRepo = runGit(cortexPath, ["rev-parse", "--is-inside-work-tree"]);

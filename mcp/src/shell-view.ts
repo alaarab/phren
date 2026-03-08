@@ -680,6 +680,9 @@ export function renderHealthView(
   allLines.push(`    ${style.dim("last hook:   ")} ${style.dim(runtime.lastPromptAt || "n/a")}`);
   allLines.push(`    ${style.dim("last auto-save:  ")} ${style.dim(runtime.lastAutoSave?.at || "n/a")}  ${style.dim(runtime.lastAutoSave?.status || "")}`);
   allLines.push(`    ${style.dim("last governance: ")} ${style.dim(runtime.lastGovernance?.at || "n/a")}  ${style.dim(runtime.lastGovernance?.status || "")}`);
+  allLines.push(`    ${style.dim("last pull:      ")} ${style.dim(runtime.lastSync?.lastPullAt || "n/a")}  ${style.dim(runtime.lastSync?.lastPullStatus || "")}`);
+  allLines.push(`    ${style.dim("last push:      ")} ${style.dim(runtime.lastSync?.lastPushAt || "n/a")}  ${style.dim(runtime.lastSync?.lastPushStatus || "")}`);
+  allLines.push(`    ${style.dim("unsynced:       ")} ${style.bold(String(runtime.lastSync?.unsyncedCommits ?? 0))} ${style.dim("commit(s)")}`);
 
   allLines.push("", `  ${style.dim(":run fix  :relink  :rerun hooks  :update")}`);
 

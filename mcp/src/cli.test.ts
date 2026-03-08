@@ -147,6 +147,45 @@ describe("CLI integration: doctor", () => {
   });
 });
 
+describe("CLI integration: status", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cortexDir, ".governance", "runtime-health.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        lastAutoSave: { at: "2026-03-08T00:00:00.000Z", status: "saved-local" },
+        lastSync: {
+          lastPullAt: "2026-03-08T00:01:00.000Z",
+          lastPullStatus: "ok",
+          lastPushAt: "2026-03-08T00:02:00.000Z",
+          lastPushStatus: "saved-local",
+          unsyncedCommits: 2,
+        },
+      }, null, 2)
+    );
+  });
+
+  afterEach(() => cleanup());
+
+  it("prints sync state from runtime health", () => {
+    const { stdout, exitCode } = runCli(
+      ["status"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    const plain = stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    expect(exitCode).toBe(0);
+    expect(plain).toContain("cortex status");
+    expect(plain).toContain("Sync:");
+    expect(plain).toContain("last pull ok");
+    expect(plain).toContain("unsynced commits: 2");
+  });
+});
+
 describe("CLI integration: projects add", () => {
   let cortexDir: string;
   let cleanup: () => void;

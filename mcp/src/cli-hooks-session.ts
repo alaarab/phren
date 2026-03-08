@@ -335,6 +335,15 @@ async function runBestEffortGit(args: string[], cwd: string): Promise<{ ok: bool
   return { ok: false, error: "git command failed" };
 }
 
+async function countUnsyncedCommits(cwd: string): Promise<number> {
+  const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
+  if (!upstream.ok || !upstream.output) return 0;
+  const ahead = await runBestEffortGit(["rev-list", "--count", `${upstream.output.trim()}..HEAD`], cwd);
+  if (!ahead.ok || !ahead.output) return 0;
+  const parsed = Number.parseInt(ahead.output.trim(), 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 // ── Hook handlers ────────────────────────────────────────────────────────────
 
 export async function handleHookSessionStart() {
@@ -354,12 +363,22 @@ export async function handleHookSessionStart() {
   const pull = await runBestEffortGit(["pull", "--rebase", "--quiet"], getCortexPath());
   const doctor = await runDoctor(getCortexPath(), false);
   const maintenanceScheduled = scheduleBackgroundMaintenance(getCortexPath());
+  const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
 
   try { const { trackSession } = await import("./telemetry.js"); trackSession(getCortexPath()); } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookSessionStart trackSession: ${errorMessage(err)}\n`);
   }
 
-  updateRuntimeHealth(getCortexPath(), { lastSessionStartAt: startedAt });
+  updateRuntimeHealth(getCortexPath(), {
+    lastSessionStartAt: startedAt,
+    lastSync: {
+      lastPullAt: startedAt,
+      lastPullStatus: pull.ok ? "ok" : "error",
+      lastPullDetail: pull.ok ? (pull.output || "pull ok") : (pull.error || "pull failed"),
+      lastSuccessfulPullAt: pull.ok ? startedAt : undefined,
+      unsyncedCommits,
+    },
+  });
   appendAuditLog(
     getCortexPath(),
     "hook_session_start",
@@ -507,6 +526,11 @@ export async function handleHookStop() {
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "error", detail: status.error || "git status failed" },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "error",
+        lastPushDetail: status.error || "git status failed",
+      },
     });
     appendAuditLog(getCortexPath(), "hook_stop", `status=error detail=${JSON.stringify(status.error || "git status failed")}`);
     return;
@@ -516,6 +540,12 @@ export async function handleHookStop() {
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "clean", detail: "no changes" },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "saved-pushed",
+        lastPushDetail: "no changes",
+        unsyncedCommits: 0,
+      },
     });
     appendAuditLog(getCortexPath(), "hook_stop", "status=clean");
     return;
@@ -536,6 +566,11 @@ export async function handleHookStop() {
         status: "error",
         detail: add.error || commit.error || "git add/commit failed",
       },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "error",
+        lastPushDetail: add.error || commit.error || "git add/commit failed",
+      },
     });
     appendAuditLog(getCortexPath(), "hook_stop", `status=error detail=${JSON.stringify(add.error || commit.error || "git add/commit failed")}`);
     return;
@@ -543,9 +578,16 @@ export async function handleHookStop() {
 
   const remotes = await runBestEffortGit(["remote"], getCortexPath());
   if (!remotes.ok || !remotes.output) {
+    const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "saved-local", detail: "commit created; no remote configured" },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "saved-local",
+        lastPushDetail: "commit created; no remote configured",
+        unsyncedCommits,
+      },
     });
     appendAuditLog(getCortexPath(), "hook_stop", "status=saved-local");
     return;
@@ -562,10 +604,17 @@ export async function handleHookStop() {
   }
 
   if (!shouldPush) {
+    const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
     // Debounced: commit is saved locally, push will happen on the next non-debounced stop.
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "saved-local", detail: "commit saved; push debounced" },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "saved-local",
+        lastPushDetail: "commit saved; push debounced",
+        unsyncedCommits,
+      },
     });
     appendAuditLog(getCortexPath(), "hook_stop", "status=saved-local detail=debounced");
 
@@ -580,6 +629,12 @@ export async function handleHookStop() {
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed" },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "saved-pushed",
+        lastPushDetail: "commit pushed",
+        unsyncedCommits: 0,
+      },
     });
     appendAuditLog(getCortexPath(), "hook_stop", "status=saved-pushed");
 
@@ -588,9 +643,16 @@ export async function handleHookStop() {
     return;
   }
 
+  const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
   updateRuntimeHealth(getCortexPath(), {
     lastStopAt: now,
     lastAutoSave: { at: now, status: "saved-local", detail: push.error || "push failed" },
+    lastSync: {
+      lastPushAt: now,
+      lastPushStatus: "saved-local",
+      lastPushDetail: push.error || "push failed",
+      unsyncedCommits,
+    },
   });
   appendAuditLog(getCortexPath(), "hook_stop", `status=saved-local detail=${JSON.stringify(push.error || "push failed")}`);
 }

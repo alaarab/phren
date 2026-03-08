@@ -81,6 +81,36 @@ function recentAccepted(cortexPath: string): string[] {
   return lines.slice(-40).reverse();
 }
 
+function readSyncSnapshot(cortexPath: string) {
+  try {
+    const runtimeHealth = path.join(cortexPath, ".governance", "runtime-health.json");
+    if (!fs.existsSync(runtimeHealth)) return {};
+    const parsed = JSON.parse(fs.readFileSync(runtimeHealth, "utf8")) as {
+      lastAutoSave?: { status?: string; detail?: string };
+      lastSync?: {
+        lastPullAt?: string;
+        lastPullStatus?: string;
+        lastPushAt?: string;
+        lastPushStatus?: string;
+        unsyncedCommits?: number;
+        lastPushDetail?: string;
+      };
+    };
+    return {
+      autoSaveStatus: parsed.lastAutoSave?.status || "",
+      autoSaveDetail: parsed.lastAutoSave?.detail || "",
+      lastPullAt: parsed.lastSync?.lastPullAt || "",
+      lastPullStatus: parsed.lastSync?.lastPullStatus || "",
+      lastPushAt: parsed.lastSync?.lastPushAt || "",
+      lastPushStatus: parsed.lastSync?.lastPushStatus || "",
+      unsyncedCommits: parsed.lastSync?.unsyncedCommits || 0,
+      lastPushDetail: parsed.lastSync?.lastPushDetail || "",
+    };
+  } catch {
+    return {};
+  }
+}
+
 function h(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -361,6 +391,14 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   const projects = getProjectDirs(cortexPath).map((p) => path.basename(p)).filter((p) => p !== "global");
   const usage = recentUsage(cortexPath);
   const accepted = recentAccepted(cortexPath);
+  const sync = readSyncSnapshot(cortexPath) as {
+    autoSaveStatus?: string;
+    lastPullAt?: string;
+    lastPullStatus?: string;
+    lastPushAt?: string;
+    lastPushStatus?: string;
+    unsyncedCommits?: number;
+  };
   const rows: string[] = [];
 
   const csrfField = csrfToken ? `<input type="hidden" name="_csrf" value="${h(csrfToken)}" />` : "";
@@ -1075,6 +1113,17 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
   <!-- ── Review Tab ────────────────────────────────────────── -->
   <div id="tab-review" class="tab-content">
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>Sync State</h2></div>
+      <div class="card-body">
+        <div id="sync-state-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;font-size:13px">
+          <div><strong>Auto-save</strong><div class="text-muted">${h(sync.autoSaveStatus || "n/a")}</div></div>
+          <div><strong>Last pull</strong><div class="text-muted">${h(sync.lastPullStatus || "n/a")} ${h(sync.lastPullAt || "")}</div></div>
+          <div><strong>Last push</strong><div class="text-muted">${h(sync.lastPushStatus || "n/a")} ${h(sync.lastPushAt || "")}</div></div>
+          <div><strong>Unsynced commits</strong><div class="text-muted">${h(String(sync.unsyncedCommits || 0))}</div></div>
+        </div>
+      </div>
+    </div>
     <details class="review-help" style="margin-bottom:16px">
       <summary>Help: How the Review Queue works</summary>
       <dl>
@@ -1246,6 +1295,15 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
   function refreshLiveState() {
     loadProjects();
+    fetch('/api/runtime-health').then(function(r) { return r.json(); }).then(function(data) {
+      var summary = document.getElementById('sync-state-summary');
+      if (!summary) return;
+      summary.innerHTML =
+        '<div><strong>Auto-save</strong><div class="text-muted">' + esc(data.autoSaveStatus || 'n/a') + '</div></div>' +
+        '<div><strong>Last pull</strong><div class="text-muted">' + esc((data.lastPullStatus || 'n/a') + ' ' + (data.lastPullAt || '')) + '</div></div>' +
+        '<div><strong>Last push</strong><div class="text-muted">' + esc((data.lastPushStatus || 'n/a') + ' ' + (data.lastPushAt || '')) + '</div></div>' +
+        '<div><strong>Unsynced commits</strong><div class="text-muted">' + esc(String(data.unsyncedCommits || 0)) + '</div></div>';
+    });
     if (_selectedProject) {
       var activeTab = document.querySelector('.project-detail-tab.active');
       var activeFile = activeTab ? activeTab.textContent : 'Findings';
@@ -1997,6 +2055,12 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     if (req.method === "GET" && url === "/api/change-token") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ token: computeCortexLiveStateToken(cortexPath) }));
+      return;
+    }
+
+    if (req.method === "GET" && url === "/api/runtime-health") {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(readSyncSnapshot(cortexPath)));
       return;
     }
 

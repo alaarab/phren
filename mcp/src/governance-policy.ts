@@ -68,6 +68,16 @@ export interface RuntimeHealth {
     status: "ok" | "error";
     detail: string;
   };
+  lastSync?: {
+    lastPullAt?: string;
+    lastPullStatus?: "ok" | "error";
+    lastPullDetail?: string;
+    lastSuccessfulPullAt?: string;
+    lastPushAt?: string;
+    lastPushStatus?: "saved-local" | "saved-pushed" | "error";
+    lastPushDetail?: string;
+    unsyncedCommits?: number;
+  };
 }
 
 interface CanonicalLock {
@@ -224,7 +234,16 @@ const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unkn
     && (!("lastGovernance" in data) || (isRecord(data.lastGovernance)
       && typeof data.lastGovernance.at === "string"
       && ["ok", "error"].includes(String(data.lastGovernance.status))
-      && typeof data.lastGovernance.detail === "string")),
+      && typeof data.lastGovernance.detail === "string"))
+    && (!("lastSync" in data) || (isRecord(data.lastSync)
+      && (!("lastPullAt" in data.lastSync) || typeof data.lastSync.lastPullAt === "string")
+      && (!("lastPullStatus" in data.lastSync) || ["ok", "error"].includes(String(data.lastSync.lastPullStatus)))
+      && (!("lastPullDetail" in data.lastSync) || typeof data.lastSync.lastPullDetail === "string")
+      && (!("lastSuccessfulPullAt" in data.lastSync) || typeof data.lastSync.lastSuccessfulPullAt === "string")
+      && (!("lastPushAt" in data.lastSync) || typeof data.lastSync.lastPushAt === "string")
+      && (!("lastPushStatus" in data.lastSync) || ["saved-local", "saved-pushed", "error"].includes(String(data.lastSync.lastPushStatus)))
+      && (!("lastPushDetail" in data.lastSync) || typeof data.lastSync.lastPushDetail === "string")
+      && (!("unsyncedCommits" in data.lastSync) || isFiniteNumber(data.lastSync.unsyncedCommits)))),
   "canonical-locks": (data) => {
     if (isVersionedEntries(data) && !hasValidSchemaVersion(data)) return false;
     if (isVersionedEntries(data) && !isRecord(data.entries)) return false;
@@ -327,6 +346,17 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
       status: data.lastGovernance.status as "ok" | "error",
       detail: data.lastGovernance.detail,
     };
+  }
+  if (isRecord(data.lastSync)) {
+    normalized.lastSync = {};
+    if (typeof data.lastSync.lastPullAt === "string") normalized.lastSync.lastPullAt = data.lastSync.lastPullAt;
+    if (["ok", "error"].includes(String(data.lastSync.lastPullStatus))) normalized.lastSync.lastPullStatus = data.lastSync.lastPullStatus as "ok" | "error";
+    if (typeof data.lastSync.lastPullDetail === "string") normalized.lastSync.lastPullDetail = data.lastSync.lastPullDetail;
+    if (typeof data.lastSync.lastSuccessfulPullAt === "string") normalized.lastSync.lastSuccessfulPullAt = data.lastSync.lastSuccessfulPullAt;
+    if (typeof data.lastSync.lastPushAt === "string") normalized.lastSync.lastPushAt = data.lastSync.lastPushAt;
+    if (["saved-local", "saved-pushed", "error"].includes(String(data.lastSync.lastPushStatus))) normalized.lastSync.lastPushStatus = data.lastSync.lastPushStatus as "saved-local" | "saved-pushed" | "error";
+    if (typeof data.lastSync.lastPushDetail === "string") normalized.lastSync.lastPushDetail = data.lastSync.lastPushDetail;
+    if (isFiniteNumber(data.lastSync.unsyncedCommits)) normalized.lastSync.unsyncedCommits = data.lastSync.unsyncedCommits;
   }
   return normalized;
 }
@@ -699,6 +729,7 @@ export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHe
       ...patch,
       lastAutoSave: patch.lastAutoSave ?? current.lastAutoSave,
       lastGovernance: patch.lastGovernance ?? current.lastGovernance,
+      lastSync: patch.lastSync ? { ...(current.lastSync ?? {}), ...patch.lastSync } : current.lastSync,
     };
     writeJsonFileUnlocked(file, next);
     return next;

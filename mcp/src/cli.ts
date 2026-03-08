@@ -31,7 +31,7 @@ import { runDoctor } from "./link.js";
 import { startReviewUi } from "./memory-ui.js";
 import { startShell } from "./shell.js";
 import { runCortexUpdate } from "./update.js";
-import { readBacklogs } from "./data-access.js";
+import { readBacklogs, readRuntimeHealth } from "./data-access.js";
 
 // Re-export from split modules so existing test imports keep working
 export {
@@ -358,6 +358,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handlePinCanonical(args[0], args.slice(1).join(" "));
     case "doctor":
       return handleDoctor(args);
+    case "status":
+      return handleStatus();
     case "quality-feedback":
       return handleQualityFeedback(args);
     case "prune-memories":
@@ -616,6 +618,16 @@ async function handleDoctor(args: string[]) {
   }
 
   process.exit(result.ok ? 0 : 1);
+}
+
+function handleStatus() {
+  const runtime = readRuntimeHealth(getCortexPath());
+  console.log("cortex status");
+  console.log(`last auto-save: ${runtime.lastAutoSave?.status || "n/a"}${runtime.lastAutoSave?.at ? ` @ ${runtime.lastAutoSave.at}` : ""}`);
+  console.log(`last pull: ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
+  console.log(`last push: ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
+  console.log(`unsynced commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+  if (runtime.lastSync?.lastPushDetail) console.log(`push detail: ${runtime.lastSync.lastPushDetail}`);
 }
 
 async function handleQualityFeedback(args: string[]) {
