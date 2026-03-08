@@ -132,6 +132,7 @@ export interface InitOptions {
   machine?: string;
   profile?: string;
   mcp?: McpMode;
+  hooks?: McpMode;
   applyStarterUpdate?: boolean;
   dryRun?: boolean;
   yes?: boolean;
@@ -139,15 +140,18 @@ export interface InitOptions {
   template?: string;
   /** Set by walkthrough to pass project name to init logic */
   _walkthroughProject?: string;
+  /** Set by walkthrough for personalized GitHub next-steps output */
+  _walkthroughGithub?: { username?: string; repo: string };
 }
 
 // Interactive walkthrough for first-time init
-async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp: McpMode; projectName?: string }> {
+async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp: McpMode; hooks: McpMode; ollamaEnabled: boolean; githubUsername?: string; githubRepo?: string }> {
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string): Promise<string> => new Promise(r => rl.question(q, r));
 
   log("\nWelcome to cortex. Let's set up persistent memory for your AI agents.\n");
+  log("We'll ask a few questions. Every option can be changed later.\n");
 
   const defaultMachine = os.hostname();
   const machineAnswer = (await ask(`Machine name [${defaultMachine}]: `)).trim();
@@ -156,24 +160,80 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   const profileAnswer = (await ask(`Profile name [personal]: `)).trim();
   const profile = profileAnswer || "personal";
 
-  log("\nMCP mode lets your AI agent call cortex tools directly (search, backlog, findings).");
-  log("This is the recommended setup and works with Claude Code, Cursor, Copilot CLI, and Codex.");
-  log("Hooks-only mode injects context into prompts instead (works with any agent, but read-only).");
+  log("\n─── MCP ────────────────────────────────────────────────────────────────");
+  log("MCP mode registers cortex as a tool server so your AI agent can call it");
+  log("directly: search memory, manage backlog, save findings, etc.");
+  log("  Recommended for: Claude Code, Cursor, Copilot CLI, Codex");
+  log("  Alternative: hooks-only mode (read-only context injection, any agent)");
+  log("  Change later: npx @alaarab/cortex mcp-mode on|off");
   const mcpAnswer = (await ask(`Enable MCP? [Y/n]: `)).trim().toLowerCase();
   const mcp: McpMode = (mcpAnswer === "n" || mcpAnswer === "no") ? "off" : "on";
 
-  const projectAnswer = (await ask(`\nFirst project name (or press Enter to use "my-first-project"): `)).trim();
-  if (projectAnswer && !isValidProjectName(projectAnswer)) {
-    log(`Invalid project name "${projectAnswer}". Avoid path separators, "..", and null bytes.`);
-    rl.close();
-    process.exit(1);
+  log("\n─── Hooks ──────────────────────────────────────────────────────────────");
+  log("Hooks run shell commands at session start, prompt submit, and session end.");
+  log("  - SessionStart: git pull (keeps memory in sync across machines)");
+  log("  - UserPromptSubmit: searches cortex and injects relevant context");
+  log("  - Stop: commits and pushes any new findings after each response");
+  log("  What they touch: ~/.claude/settings.json (hooks section only)");
+  log("  Change later: npx @alaarab/cortex hooks-mode on|off");
+  const hooksAnswer = (await ask(`Enable hooks? [Y/n]: `)).trim().toLowerCase();
+  const hooks: McpMode = (hooksAnswer === "n" || hooksAnswer === "no") ? "off" : "on";
+
+  log("\n─── Semantic search (optional) ─────────────────────────────────────────");
+  log("Cortex can use a local embedding model for semantic (fuzzy) search via Ollama.");
+  log("  - Model: nomic-embed-text (274 MB, one-time download)");
+  log("  - Ollama runs locally, no cloud, no cost");
+  log("  - Falls back to FTS5 keyword search if disabled or unavailable");
+  log("  Change later: set CORTEX_OLLAMA_URL=off to disable");
+  let ollamaEnabled = false;
+  try {
+    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared-ollama.js");
+    if (getOllamaUrl()) {
+      const ollamaUp = await checkOllamaAvailable();
+      if (ollamaUp) {
+        const modelReady = await checkModelAvailable();
+        if (modelReady) {
+          log("  Ollama detected with nomic-embed-text ready.");
+          const ans = (await ask(`Enable semantic search? [Y/n]: `)).trim().toLowerCase();
+          ollamaEnabled = !(ans === "n" || ans === "no");
+        } else {
+          log("  Ollama detected, but nomic-embed-text is not pulled yet.");
+          const ans = (await ask(`Enable semantic search? (will pull nomic-embed-text) [Y/n]: `)).trim().toLowerCase();
+          ollamaEnabled = !(ans === "n" || ans === "no");
+          if (ollamaEnabled) {
+            log("  Run after init: ollama pull nomic-embed-text");
+          }
+        }
+      } else {
+        log("  Ollama not detected. Install it to enable semantic search:");
+        log("    https://ollama.com  →  then: ollama pull nomic-embed-text");
+        const ans = (await ask(`Enable semantic search (Ollama not installed yet)? [y/N]: `)).trim().toLowerCase();
+        ollamaEnabled = ans === "y" || ans === "yes";
+        if (ollamaEnabled) {
+          log("  Semantic search enabled — will activate once Ollama is running.");
+          log("  To disable: set CORTEX_OLLAMA_URL=off in your shell profile");
+        }
+      }
+    }
+  } catch { /* best-effort: Ollama check failed, skip */ }
+
+  log("\n─── GitHub sync ────────────────────────────────────────────────────────");
+  log("Cortex stores memory as plain Markdown files in a git repo (~/.cortex).");
+  log("Push it to a private GitHub repo to sync memory across machines.");
+  log("  Hooks will auto-commit + push after every session and pull on start.");
+  log("  Skip this if you just want to try cortex locally first.");
+  const githubAnswer = (await ask(`GitHub username (or Enter to skip): `)).trim();
+  const githubUsername = githubAnswer || undefined;
+  let githubRepo: string | undefined;
+  if (githubUsername) {
+    const repoAnswer = (await ask(`Repo name [my-cortex]: `)).trim();
+    githubRepo = repoAnswer || "my-cortex";
   }
-  const projectName = projectAnswer || undefined;
 
   rl.close();
 
   log("");
-  return { machine, profile, mcp, projectName };
+  return { machine, profile, mcp, hooks, ollamaEnabled, githubUsername, githubRepo };
 }
 
 export async function runInit(opts: InitOptions = {}) {
@@ -189,13 +249,18 @@ export async function runInit(opts: InitOptions = {}) {
     opts.machine = opts.machine || answers.machine;
     opts.profile = opts.profile || answers.profile;
     opts.mcp = opts.mcp || answers.mcp;
-    if (answers.projectName) {
-      opts._walkthroughProject = answers.projectName;
+    opts.hooks = opts.hooks || answers.hooks;
+    if (answers.githubRepo) {
+      opts._walkthroughGithub = { username: answers.githubUsername, repo: answers.githubRepo };
+    }
+    if (!answers.ollamaEnabled) {
+      // User explicitly declined Ollama — note it but don't set env (they can set it themselves)
+      process.env._CORTEX_WALKTHROUGH_OLLAMA_SKIP = "1";
     }
   }
 
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
-  const hooksEnabled = getHooksEnabledPreference(cortexPath);
+  const hooksEnabled = opts.hooks ? opts.hooks === "on" : getHooksEnabledPreference(cortexPath);
   const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
   const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
 
@@ -528,41 +593,63 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  ${cortexPath}/profiles/           Machine-to-project mappings`);
   log(`  ${cortexPath}/.governance/        Memory quality settings and config`);
 
-  // Ollama detection
-  try {
-    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared-ollama.js");
-    if (getOllamaUrl()) {
-      const ollamaUp = await checkOllamaAvailable();
-      if (ollamaUp) {
-        const modelReady = await checkModelAvailable();
-        if (modelReady) {
-          log("\n✓ Ollama detected with nomic-embed-text — semantic search is available.");
-          log("  Embeddings will build in the background after first use.");
+  // Ollama status summary (skip if already covered in walkthrough)
+  const walkthroughCoveredOllama = Boolean(process.env._CORTEX_WALKTHROUGH_OLLAMA_SKIP) || (!hasExistingInstall && !opts.yes);
+  if (!walkthroughCoveredOllama) {
+    try {
+      const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared-ollama.js");
+      if (getOllamaUrl()) {
+        const ollamaUp = await checkOllamaAvailable();
+        if (ollamaUp) {
+          const modelReady = await checkModelAvailable();
+          if (modelReady) {
+            log("\n  Semantic search: Ollama + nomic-embed-text ready.");
+          } else {
+            log("\n  Semantic search: Ollama running, but nomic-embed-text not pulled.");
+            log("  Run: ollama pull nomic-embed-text");
+          }
         } else {
-          log("\n  Ollama detected, but nomic-embed-text is not pulled.");
-          log("  For semantic search, run: ollama pull nomic-embed-text");
+          log("\n  Tip: Install Ollama for semantic search (optional).");
+          log("  https://ollama.com → then: ollama pull nomic-embed-text");
+          log("  (Set CORTEX_OLLAMA_URL=off to hide this message)");
         }
-      } else {
-        log("\n  Tip: Install Ollama for better semantic search (optional).");
-        log("  https://ollama.com → then: ollama pull nomic-embed-text");
-        log("  (Set CORTEX_OLLAMA_URL=off to hide this message)");
       }
-    }
-  } catch { /* best-effort */ }
+    } catch { /* best-effort */ }
+  }
 
   log(`\ncortex initialized`);
   log(`\nNext steps:`);
-  log(`  1. Create your first project:`);
-  log(`     mkdir ${cortexPath}/my-project && touch ${cortexPath}/my-project/FINDINGS.md`);
-  log(`  2. Start a new Claude session -- hooks are now active`);
-  log(`  3. Run \`cortex doctor\` to verify everything is wired correctly`);
-  log(`  4. Create a private GitHub repo and push your cortex:`);
-  log(`     cd ${cortexPath}`);
-  log(`     git init && git add . && git commit -m "Initial cortex setup"`);
-  log(`     git remote add origin git@github.com:YOUR_USERNAME/cortex.git`);
-  log(`     git push -u origin main`);
+  let step = 1;
+  log(`  ${step++}. Start a new Claude session — hooks are now active`);
+  log(`  ${step++}. Run \`cortex doctor\` to verify everything is wired correctly`);
+
+  const gh = opts._walkthroughGithub;
+  if (gh) {
+    const remote = gh.username
+      ? `git@github.com:${gh.username}/${gh.repo}.git`
+      : `git@github.com:YOUR_USERNAME/${gh.repo}.git`;
+    log(`  ${step++}. Push your cortex to GitHub (private repo recommended):`);
+    log(`     cd ${cortexPath}`);
+    log(`     git init && git add . && git commit -m "Initial cortex setup"`);
+    if (gh.username) {
+      log(`     gh repo create ${gh.username}/${gh.repo} --private --source=. --push`);
+      log(`     # or manually: git remote add origin ${remote} && git push -u origin main`);
+    } else {
+      log(`     git remote add origin ${remote}`);
+      log(`     git push -u origin main`);
+    }
+  } else {
+    log(`  ${step++}. Push to GitHub for cross-machine sync (private repo recommended):`);
+    log(`     cd ${cortexPath}`);
+    log(`     git init && git add . && git commit -m "Initial cortex setup"`);
+    log(`     git remote add origin git@github.com:YOUR_USERNAME/my-cortex.git`);
+    log(`     git push -u origin main`);
+  }
+
+  log(`  ${step++}. Add more projects: cortex init --from-existing ~/your-project`);
+
   if (!mcpEnabled) {
-    log(`  5. Turn MCP on later: npx @alaarab/cortex mcp-mode on`);
+    log(`  ${step++}. Turn MCP on: npx @alaarab/cortex mcp-mode on`);
   }
   log(`\n  Read ${cortexPath}/README.md for a guided tour of each file.`);
 
