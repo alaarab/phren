@@ -319,7 +319,7 @@ Cortex is \textit{local memory + MCP interface + lifecycle hooks}. A local syste
   \item Governance defaults: \texttt{ttlDays=120}, \texttt{retentionDays=365} \cite{cortex-shared}.
   \item Trust filter defaults: decay curve 1.0/0.9/0.75/0.5 at 30/60/90/120 days, \texttt{minInjectConfidence=0.35}, citation-absent multiplier 0.8 \cite{cortex-shared}.
   \item Access control: 4 roles (admin, maintainer, contributor, viewer), 6 action types \cite{cortex-shared}.
-  \item MCP tool surface: 40 tools across search, backlog, finding capture, entity graph, session management, skills, hooks, portability, and quality feedback categories \cite{cortex-index}.
+  \item MCP tool surface: 46 tools across search, backlog, finding capture, entity graph, session management, skills, hooks, portability, and quality feedback categories \cite{cortex-index}.
   \item Interactive shell: 8 views, palette commands, persistent state \cite{cortex-shell}.
   \item Claude Opus 4.6 includes a 1M-token context window (beta) \cite{anthropic-opus46}.
 \end{itemize}
@@ -329,7 +329,7 @@ No comparable public p95 coding-latency benchmark exists across all systems/mode
 
 Column definitions: \textbf{Ease} = zero-to-working setup friction (H=easy). \textbf{Token ctrl} = ability to bound injected tokens (H=tight control). \textbf{Governance} = policy engine, roles, approval workflows. \textbf{Audit} = queryable history of memory changes. \textbf{Trust} = confidence scoring and decay. \textbf{Multi-agent} = concurrent session safety. \textbf{Shell/CLI} = model-free management tool. \textbf{Daily ops} = ongoing maintenance burden after setup (H=low burden). \textbf{Lock-in} = data portability risk (H=high lock-in, color-coded red; L=low lock-in, color-coded green).
 
-\begin{table*}[!t]
+\begin{table*}[!b]
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
