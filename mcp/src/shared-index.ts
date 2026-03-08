@@ -728,6 +728,16 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
               [dId, eId, link.relType, link.sourceDoc]
             );
           }
+          // Also populate global_entities so manual links are discoverable via cross_project_entities
+          const projectMatch = link.sourceDoc.match(/^([^/]+)\//);
+          if (projectMatch) {
+            try {
+              db.run(
+                "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
+                [link.entity, projectMatch[1], link.sourceDoc]
+              );
+            } catch { /* global_entities table may not exist */ }
+          }
         } catch { /* skip bad entries */ }
       }
     } catch { /* non-fatal */ }
