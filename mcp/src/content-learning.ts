@@ -10,7 +10,7 @@ import { validateFindingsFormat, validateFinding } from "./content-validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./content-archive.js";
 
 /** Default cap for active findings before auto-archiving is triggered. */
-export const DEFAULT_FINDINGS_CAP = 20;
+const DEFAULT_FINDINGS_CAP = 20;
 
 // Read legacy history files (LEARNINGS.md, etc.) as supplementary dedup/conflict context.
 // Never written to — used only as a read-only baseline when FINDINGS.md is being created or updated.

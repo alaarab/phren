@@ -40,7 +40,7 @@ function normalizeHookTool(input: string | undefined): HookTool | null {
   return HOOK_TOOLS.includes(lower) ? lower : null;
 }
 
-function hookConfigPaths(_cortexPath: string): Record<HookTool, string> {
+function hookConfigPaths(): Record<HookTool, string> {
   return {
     claude: path.join(os.homedir(), ".claude", "settings.json"),
     copilot: path.join(os.homedir(), ".github", "hooks", "cortex.json"),
@@ -67,7 +67,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const prefs = readInstallPreferences(cortexPath);
       const globalEnabled = prefs.hooksEnabled !== false;
       const toolPrefs = prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {};
-      const paths = hookConfigPaths(cortexPath);
+      const paths = hookConfigPaths();
       const customHooks = readCustomHooks(cortexPath);
 
       const tools = HOOK_TOOLS.map(tool => ({

@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as yaml from "js-yaml";
-import { isRecord } from "./shared.js";
+
 
 const CONTEXT_FILE = path.join(os.homedir(), ".cortex-context.md");
 

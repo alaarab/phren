@@ -171,16 +171,3 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
-export function packEmbedding(vec: number[]): Buffer {
-  const buf = Buffer.allocUnsafe(vec.length * 4);
-  for (let i = 0; i < vec.length; i++) buf.writeFloatLE(vec[i], i * 4);
-  return buf;
-}
-
-export function unpackEmbedding(buf: Buffer | Uint8Array): number[] {
-  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
-  const len = Math.floor(b.length / 4);
-  const vec: number[] = new Array(len);
-  for (let i = 0; i < len; i++) vec[i] = b.readFloatLE(i * 4);
-  return vec;
-}

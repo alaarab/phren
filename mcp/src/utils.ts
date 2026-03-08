@@ -22,26 +22,6 @@ export function runGit(cwd: string, args: string[], timeoutMs: number, debugLogF
   }
 }
 
-// ── Strict Git helper (throws on failure) ───────────────────────────────────
-
-export function runGitStrict(args: string[], opts: { cwd: string; timeout?: number }): string {
-  return execFileSync("git", args, {
-    cwd: opts.cwd,
-    encoding: "utf8",
-    timeout: opts.timeout ?? 30000,
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-}
-
-// ── Safe JSON parse ─────────────────────────────────────────────────────────
-
-export function safeJsonParse<T>(str: string, fallback: T): T {
-  try {
-    return JSON.parse(str) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 // ── Error message extractor ─────────────────────────────────────────────────
 
@@ -134,8 +114,7 @@ export function safeProjectPath(base: string, ...segments: string[]): string | n
 
 // Memory queue section types and file path helper, shared by data-access.ts and shared.ts.
 export type QueueSection = "Review" | "Stale" | "Conflicts";
-export const QUEUE_SECTIONS: QueueSection[] = ["Review", "Stale", "Conflicts"];
-export const QUEUE_FILENAME = "MEMORY_QUEUE.md";
+const QUEUE_FILENAME = "MEMORY_QUEUE.md";
 
 export function queueFilePath(cortexPath: string, project: string): string {
   return path.join(cortexPath, project, QUEUE_FILENAME);

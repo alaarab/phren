@@ -11,7 +11,6 @@ import {
   migrateGovernanceFiles,
   updateRuntimeHealth,
   GOVERNANCE_SCHEMA_VERSION,
-  recordRetrieval,
   pruneDeadMemories,
   enforceCanonicalLocks,
 } from "./shared-governance.js";

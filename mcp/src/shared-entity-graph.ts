@@ -1,4 +1,3 @@
-import { debugLog } from "./shared.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
 

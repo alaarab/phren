@@ -1,6 +1,5 @@
 import {
   type RetentionPolicy,
-  getRetentionPolicy,
   getQualityMultiplier,
   entryScoreKey,
 } from "./shared-governance.js";
@@ -16,7 +15,7 @@ import {
   filterTrustedFindingsDetailed,
 } from "./shared-content.js";
 import { parseCitationComment } from "./content-citation.js";
-import { STOP_WORDS, isFeatureEnabled, clampInt } from "./utils.js";
+import { STOP_WORDS } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import { getProjectGlobBoost } from "./cli-hooks-globs.js";
@@ -59,7 +58,7 @@ export function fileRelevanceBoost(filePath: string, changedFiles: Set<string>):
   return 0;
 }
 
-export function branchTokens(branch: string): string[] {
+function branchTokens(branch: string): string[] {
   return branch
     .split(/[\/._-]/g)
     .map((s) => s.trim().toLowerCase())
@@ -218,8 +217,7 @@ export function searchDocuments(
   prompt: string,
   keywords: string,
   detectedProject: string | null,
-  searchAllProjects = false,
-  cortexPath?: string
+  searchAllProjects = false
 ): DocRow[] | null {
   // Tier 1: FTS5 — run project-scoped and global in one pass, dedup
   const ftsDocs: DocRow[] = [];
@@ -281,7 +279,7 @@ export async function searchDocumentsAsync(
   cortexPath?: string
 ): Promise<DocRow[] | null> {
   // Sync result (Tier 1 + Tier 2)
-  const syncResult = searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects, cortexPath);
+  const syncResult = searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects);
 
   // Tier 3: Real vector search — only if embeddings are available and cortexPath provided
   const hasVectorBackend = Boolean(getCloudEmbeddingUrl() || getOllamaUrl());

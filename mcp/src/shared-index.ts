@@ -14,7 +14,7 @@ import {
 } from "./shared.js";
 import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
-import { cosineFallback, COSINE_CANDIDATE_CAP, invalidateDfCache } from "./shared-search-fallback.js";
+import { cosineFallback, invalidateDfCache } from "./shared-search-fallback.js";
 import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities } from "./shared-entity-graph.js";
 
 // Re-export for backward compatibility
@@ -1083,31 +1083,6 @@ export function extractSnippet(content: string, query: string, lines: number = 5
   return contentLines.slice(start, end).join("\n");
 }
 
-/** Find existing FTS cache files in the temp directory. Returns { dir, files[], totalBytes }. */
-export function findFtsCacheInfo(): { dir: string; files: string[]; totalBytes: number } {
-  let userSuffix: string;
-  try {
-    userSuffix = String(os.userInfo().uid);
-  } catch {
-    userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
-  }
-  const dir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
-  const files: string[] = [];
-  let totalBytes = 0;
-  try {
-    for (const entry of fs.readdirSync(dir)) {
-      if (entry.endsWith(".db")) {
-        const fullPath = path.join(dir, entry);
-        try {
-          const stat = fs.statSync(fullPath);
-          files.push(fullPath);
-          totalBytes += stat.size;
-        } catch { /* skip */ }
-      }
-    }
-  } catch { /* dir may not exist yet */ }
-  return { dir, files, totalBytes };
-}
 
 /** Find the FTS cache file for a specific cortexPath+profile. Returns exists + size. */
 export function findFtsCacheForPath(cortexPath: string, profile?: string): { exists: boolean; sizeBytes?: number } {

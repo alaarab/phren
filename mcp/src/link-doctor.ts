@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import {
   debugLog,
@@ -21,7 +20,6 @@ import {
   findProfileFile,
   getProfileProjects,
   findProjectDir,
-  safeUsername,
 } from "./link.js";
 import { claudeProjectKey } from "./link-context.js";
 import type { DoctorResult } from "./link.js";

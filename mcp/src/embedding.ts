@@ -213,45 +213,6 @@ function insertCache(db: SqlJsDatabase, model: string, hash: string, embedding: 
   );
 }
 
-// ---------------------------------------------------------------------------
-// Q5: Local ONNX embedding via @xenova/transformers
-// ---------------------------------------------------------------------------
-
-const LOCAL_MODEL = "Xenova/all-MiniLM-L6-v2";
-const MODEL_LOAD_TIMEOUT_MS = 30_000;
-
-let pipelinePromise: Promise<(text: string) => Promise<number[]>> | null = null;
-
-function loadPipeline(): Promise<(text: string) => Promise<number[]>> {
-  if (!pipelinePromise) {
-    pipelinePromise = (async () => {
-      // Dynamic import — @xenova/transformers is ESM-compatible
-      const { pipeline } = await import("@xenova/transformers");
-      const extractor = await pipeline("feature-extraction", LOCAL_MODEL, {
-        quantized: true,
-      });
-      return async (text: string): Promise<number[]> => {
-        const output = await extractor(text, { pooling: "mean", normalize: true });
-        return Array.from(output.data as Float32Array);
-      };
-    })();
-  }
-  return pipelinePromise;
-}
-
-/**
- * Get embedding from local ONNX model (Xenova/all-MiniLM-L6-v2, 384-dim).
- * First call downloads ~23MB model; subsequent calls use cached model.
- */
-export async function getLocalEmbedding(text: string): Promise<number[]> {
-  const embedFn = await Promise.race([
-    loadPipeline(),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Local ONNX model loading timed out (30s)")), MODEL_LOAD_TIMEOUT_MS)
-    ),
-  ]);
-  return embedFn(text);
-}
 
 // ---------------------------------------------------------------------------
 // API embedding (unchanged)

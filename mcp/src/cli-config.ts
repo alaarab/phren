@@ -193,7 +193,7 @@ export async function handleAccessControl(args: string[]) {
 
 // ── Machines and profiles ────────────────────────────────────────────────────
 
-export function handleConfigMachines() {
+function handleConfigMachines() {
   const result = listMachinesStore(getCortexPath());
   if (!result.ok) {
     console.log(result.error);
@@ -203,7 +203,7 @@ export function handleConfigMachines() {
   console.log(`Registered Machines\n${lines.join("\n")}`);
 }
 
-export function handleConfigProfiles() {
+function handleConfigProfiles() {
   const result = listProfilesStore(getCortexPath());
   if (!result.ok) {
     console.log(result.error);

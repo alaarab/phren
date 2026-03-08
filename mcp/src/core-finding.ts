@@ -1,13 +1,11 @@
 import { isValidProjectName } from "./utils.js";
 import {
   addFindingToFile,
-  addFindingsToFile,
 } from "./shared-content.js";
 import {
   removeFinding as removeFindingStore,
 } from "./data-access.js";
 import { MAX_FINDING_LENGTH } from "./content-validate.js";
-const MAX_BULK_COUNT = 100;
 
 export interface FindingResult {
   ok: boolean;
@@ -41,36 +39,6 @@ export function addFinding(
   return { ok: true, message: result.data, data: { project, finding: taggedFinding } };
 }
 
-/**
- * Validate and add multiple findings in bulk.
- */
-export function addFindings(
-  cortexPath: string,
-  project: string,
-  findings: string[]
-): FindingResult {
-  if (!isValidProjectName(project)) {
-    return { ok: false, message: `Invalid project name: "${project}"` };
-  }
-  if (findings.length > MAX_BULK_COUNT) {
-    return { ok: false, message: `Bulk add limited to ${MAX_BULK_COUNT} findings per call.` };
-  }
-  if (findings.some(f => f.length > MAX_FINDING_LENGTH)) {
-    return { ok: false, message: `One or more findings exceed ${MAX_FINDING_LENGTH} character limit.` };
-  }
-
-  const result = addFindingsToFile(cortexPath, project, findings);
-  if (!result.ok) {
-    return { ok: false, message: result.error };
-  }
-  const { added, skipped, rejected } = result.data;
-  const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
-  return {
-    ok: added.length > 0,
-    message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`,
-    data: { project, added, skipped, rejected },
-  };
-}
 
 /**
  * Remove a finding by partial text match.

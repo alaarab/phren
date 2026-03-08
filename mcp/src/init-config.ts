@@ -6,12 +6,12 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { execFileSync } from "child_process";
-import { buildLifecycleCommands, configureAllHooks } from "./hooks.js";
+import { buildLifecycleCommands } from "./hooks.js";
 import {
-  debugLog,
   EXEC_TIMEOUT_QUICK_MS,
 } from "./shared.js";
-import { isFeatureEnabled, errorMessage } from "./utils.js";
+import { isFeatureEnabled } from "./utils.js";
+
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init-preferences.js";
 import { resolveEntryScript, VERSION } from "./init-shared.js";
 

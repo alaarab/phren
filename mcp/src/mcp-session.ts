@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { runtimeFile, resolveFindingsPath, debugLog, tryUnlink } from "./shared.js";
+import { resolveFindingsPath, debugLog, tryUnlink } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
