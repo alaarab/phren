@@ -1476,7 +1476,7 @@ describe("pruneDeadMemories", () => {
     expect(content).toContain("Very old entry");
   });
 
-  it("prunes entries and creates backup on real run", () => {
+  it("prunes entries and uses atomic write (no .bak file)", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
     const govDir = path.join(cortex, ".governance");
@@ -1494,7 +1494,8 @@ describe("pruneDeadMemories", () => {
     const content = fs.readFileSync(path.join(cortex, "pruneproj", "FINDINGS.md"), "utf8");
     expect(content).not.toContain("Very old entry");
     expect(content).toContain("Future entry");
-    expect(fs.existsSync(path.join(cortex, "pruneproj", "FINDINGS.md.bak"))).toBe(true);
+    // atomic write (tmp + rename) — no .bak file is created
+    expect(fs.existsSync(path.join(cortex, "pruneproj", "FINDINGS.md.bak"))).toBe(false);
   });
 
   it("denies prune when actor lacks delete permission", () => {

@@ -105,8 +105,12 @@ function cleanupStaleSessions(cortexPath: string): number {
     if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
     const fullPath = path.join(dir, entry.name);
     try {
-      const stat = fs.statSync(fullPath);
-      if (now - stat.mtimeMs > STALE_SESSION_MS) {
+      // prefer startedAt from the JSON content over mtime (reliable on noatime mounts)
+      const state = readSessionStateFile(fullPath);
+      const ageMs = state?.startedAt
+        ? Date.now() - new Date(state.startedAt).getTime()
+        : Date.now() - fs.statSync(fullPath).mtimeMs;
+      if (ageMs > STALE_SESSION_MS) {
         fs.unlinkSync(fullPath);
         cleaned++;
       }
@@ -192,11 +196,13 @@ export function register(server: McpServer, ctx: McpContext): void {
     if (activeProject && isValidProjectName(activeProject)) {
       const findingsPath = resolveFindingsPath(path.join(cortexPath, activeProject));
       if (findingsPath) {
-        const content = fs.readFileSync(findingsPath, "utf-8");
-        const bullets = content.split("\n").filter(l => l.startsWith("- ")).slice(-5);
-        if (bullets.length > 0) {
-          parts.push(`## Recent findings (${activeProject})\n${bullets.join("\n")}`);
-        }
+        try {
+          const content = fs.readFileSync(findingsPath, "utf-8");
+          const bullets = content.split("\n").filter(l => l.startsWith("- ")).slice(-5);
+          if (bullets.length > 0) {
+            parts.push(`## Recent findings (${activeProject})\n${bullets.join("\n")}`);
+          }
+        } catch { /* file disappeared between check and read */ }
       }
       const backlogPath = path.join(cortexPath, activeProject, "backlog.md");
       if (fs.existsSync(backlogPath)) {

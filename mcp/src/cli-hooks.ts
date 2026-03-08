@@ -14,6 +14,7 @@ import {
 import {
   getRetentionPolicy,
   flushEntryScores,
+  appendReviewQueue,
 } from "./shared-governance.js";
 import {
   buildIndex,
@@ -56,6 +57,8 @@ export {
   selectSnippets,
   type SelectedSnippet,
   type GitContext,
+  type TrustFilterResult,
+  type TrustFilterQueueItem,
 } from "./cli-hooks-retrieval.js";
 
 // Output
@@ -177,11 +180,12 @@ export async function handleHookPrompt() {
     const memoryTtlDays = Number.parseInt(
       process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10
     );
-    rows = applyTrustFilter(
+    const trustResult = applyTrustFilter(
       rows, getCortexPath(),
       Number.isNaN(memoryTtlDays) ? policy.ttlDays : memoryTtlDays,
       policy.minInjectConfidence, policy.decay
     );
+    rows = trustResult.rows;
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 
@@ -254,6 +258,14 @@ export async function handleHookPrompt() {
 
     flushEntryScores(getCortexPath());
     scheduleBackgroundMaintenance(getCortexPath());
+
+    // Write trust-filter queue items and audit log AFTER output is built — retrieval is side-effect-free.
+    for (const { project, section, items } of trustResult.queueItems) {
+      appendReviewQueue(getCortexPath(), project, section, items);
+    }
+    for (const entry of trustResult.auditEntries) {
+      appendAuditLog(getCortexPath(), "trust_filter", entry);
+    }
 
     const noticeFile = sessionId ? sessionMarker(getCortexPath(), `noticed-${sessionId}`) : null;
     const alreadyNoticed = noticeFile ? fs.existsSync(noticeFile) : false;

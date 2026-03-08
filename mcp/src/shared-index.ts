@@ -230,10 +230,12 @@ function saveHashMap(cortexPath: string, hashes: Record<string, string>): void {
   const runtimeDir = path.join(cortexPath, ".runtime");
   try {
     fs.mkdirSync(runtimeDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(runtimeDir, INDEX_HASHES_FILENAME),
-      JSON.stringify({ version: INDEX_SCHEMA_VERSION, hashes }, null, 2)
-    );
+    withFileLock(path.join(runtimeDir, INDEX_HASHES_FILENAME), () => {
+      fs.writeFileSync(
+        path.join(runtimeDir, INDEX_HASHES_FILENAME),
+        JSON.stringify({ version: INDEX_SCHEMA_VERSION, hashes }, null, 2)
+      );
+    });
   } catch {
     debugLog("Failed to save index hash map");
   }
@@ -420,6 +422,15 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
       try {
         db = new SQL.Database(cached);
 
+        // If OS cleaned /tmp and the file was recreated as empty, the DB will have
+        // 0 docs even though savedHashes has full content. Treat as cache miss so
+        // the stale hash map doesn't drive an incremental update against an empty DB.
+        const docCountResult = db.exec("SELECT COUNT(*) FROM docs");
+        const docCount = docCountResult?.[0]?.values?.[0]?.[0] as number ?? 0;
+        if (docCount === 0 && globResult.entries.length > 0) {
+          throw new Error("cached DB is empty, forcing full rebuild");
+        }
+
         // Compute current file hashes and determine what changed
         const allFiles = globResult.entries;
         const currentHashes: Record<string, string> = {};
@@ -462,9 +473,15 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         } else {
           // Incremental update: apply each file change atomically to avoid losing docs on crash.
           const changedPaths = new Set(changedFiles.map(entry => entry.fullPath));
-          for (const missingPath of missingFromIndex) {
-            try { deleteEntityLinksForDocPath(db, cortexPath, missingPath); } catch { /* ignore */ }
-            try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch { /* ignore */ }
+          db.run("BEGIN");
+          try {
+            for (const missingPath of missingFromIndex) {
+              try { deleteEntityLinksForDocPath(db, cortexPath, missingPath); } catch { /* ignore */ }
+              try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch { /* ignore */ }
+            }
+            db.run("COMMIT");
+          } catch {
+            try { db.run("ROLLBACK"); } catch { /* ignore */ }
           }
 
           let updatedCount = 0;

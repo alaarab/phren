@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { randomBytes } from "crypto";
 import {
   appendAuditLog,
   cortexErr,
@@ -38,7 +39,10 @@ function withFileLock<T>(filePath: string, fn: () => CortexResult<T>): CortexRes
 export type BacklogSection = "Active" | "Queue" | "Done";
 
 export interface BacklogItem {
+  /** Positional ID for display (e.g. "A1", "Q3"). Recomputed on every read — use stableId for persistent references. */
   id: string;
+  /** Content-addressed stable ID embedded in the file as `<!-- bid:HASH -->`. Survives reordering and completions. */
+  stableId?: string;
   section: BacklogSection;
   line: string;
   checked: boolean;
@@ -138,6 +142,21 @@ function ensureProject(cortexPath: string, project: string): CortexResult<string
   return cortexOk(dir);
 }
 
+/** Pattern that matches the stable-ID comment embedded in backlog item lines. */
+const BID_PATTERN = /\s*<!--\s*bid:([a-z0-9]{8})\s*-->/;
+
+/** Generate a new 8-character random stable ID. */
+function newBid(): string {
+  return randomBytes(4).toString("hex");
+}
+
+/** Strip the stable-ID comment from a raw line, returning the clean text and any extracted bid. */
+function stripBid(text: string): { clean: string; bid?: string } {
+  const m = text.match(BID_PATTERN);
+  if (!m) return { clean: text };
+  return { clean: text.replace(BID_PATTERN, "").trimEnd(), bid: m[1] };
+}
+
 function backlogFilePath(cortexPath: string, project: string): string | null {
   const resolved = safeProjectPath(cortexPath, project);
   if (!resolved) return null;
@@ -149,7 +168,9 @@ function normalizeBacklogItemLine(item: BacklogItem): string {
   if (item.priority) text = `${text} [${item.priority}]`;
   if (item.pinned) text = `${text} [pinned]`;
   const prefix = item.checked || item.section === "Done" ? "- [x] " : "- [ ] ";
-  return `${prefix}${text}`;
+  // Embed a stable ID so LLMs can reference this item persistently across mutations.
+  const bid = item.stableId ?? newBid();
+  return `${prefix}${text} <!-- bid:${bid} -->`;
 }
 
 function parseBacklogContent(project: string, backlogPath: string, content: string): BacklogDoc {
@@ -180,15 +201,18 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
     if (!line.startsWith("- ")) continue;
 
     const parsed = stripBulletPrefix(line);
-    const pinned = detectPinned(parsed.body);
-    const priority = normalizePriority(parsed.body);
+    // Extract and strip the stable-ID comment before further parsing.
+    const { clean: cleanBody, bid } = stripBid(parsed.body);
+    const pinned = detectPinned(cleanBody);
+    const priority = normalizePriority(cleanBody);
     const context = parseContext(lines, i);
     const sectionPrefix = section === "Active" ? "A" : section === "Queue" ? "Q" : "D";
     sectionCounters[section]++;
     items[section].push({
       id: `${sectionPrefix}${sectionCounters[section]}`,
+      stableId: bid,
       section,
-      line: parsed.body,
+      line: cleanBody,
       checked: parsed.checked || section === "Done",
       priority,
       context: context.context,
@@ -226,7 +250,16 @@ function findItemByMatch(
   const needle = match.trim().toLowerCase();
   if (!needle) return { error: `${CortexError.EMPTY_INPUT}: Please provide the item text or ID to match against.`, errorCode: CortexError.EMPTY_INPUT };
 
-  // 1) Exact ID match wins immediately.
+  // 1a) Stable ID match (bid:XXXX or just the 8-char hex).
+  const bidNeedle = needle.replace(/^bid:/, "");
+  if (/^[a-f0-9]{8}$/.test(bidNeedle)) {
+    for (const section of BACKLOG_SECTIONS) {
+      const idx = doc.items[section].findIndex((item) => item.stableId === bidNeedle);
+      if (idx !== -1) return { match: { section, index: idx } };
+    }
+  }
+
+  // 1b) Positional ID match (A1, Q2, D3).
   for (const section of BACKLOG_SECTIONS) {
     const idx = doc.items[section].findIndex((item) => item.id.toLowerCase() === needle);
     if (idx !== -1) return { match: { section, index: idx } };

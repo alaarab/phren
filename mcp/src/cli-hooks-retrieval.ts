@@ -1,7 +1,6 @@
 import {
   type RetentionPolicy,
   getRetentionPolicy,
-  appendReviewQueue,
   getQualityMultiplier,
   entryScoreKey,
 } from "./shared-governance.js";
@@ -20,7 +19,6 @@ import { parseCitationComment } from "./content-citation.js";
 import { STOP_WORDS, isFeatureEnabled, clampInt } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
-import { appendAuditLog } from "./shared.js";
 import { getProjectGlobBoost } from "./cli-hooks-globs.js";
 import type { GitContext } from "./cli-hooks-session.js";
 export type { GitContext } from "./cli-hooks-session.js";
@@ -32,7 +30,7 @@ export function detectTaskIntent(prompt: string): "debug" | "review" | "build" |
   if (/(bug|error|fix|broken|regression|fail|stack trace)/.test(p)) return "debug";
   if (/(review|audit|pr|pull request|nit|refactor)/.test(p)) return "review";
   if (/(build|deploy|release|ci|workflow|pipeline|test)/.test(p)) return "build";
-  if (/(doc|readme|explain|guide|instruction)/.test(p)) return "docs";
+  if (/\b(doc|docs|readme|explain|guide|instructions?)\b/.test(p)) return "docs";
   return "general";
 }
 
@@ -138,15 +136,16 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
   const queryTokens = tokenizeForOverlap(prompt);
   if (!queryTokens.length) return [];
   const sampleLimit = 100;
+  // ORDER BY RANDOM() avoids insertion-order bias — older docs get equal sampling probability.
   const docs = project
     ? queryDocRows(
       db,
-      "SELECT project, filename, type, content, path FROM docs WHERE project = ? ORDER BY rowid DESC LIMIT ?",
+      "SELECT project, filename, type, content, path FROM docs WHERE project = ? ORDER BY RANDOM() LIMIT ?",
       [project, sampleLimit]
     ) || []
     : queryDocRows(
       db,
-      "SELECT project, filename, type, content, path FROM docs ORDER BY rowid DESC LIMIT ?",
+      "SELECT project, filename, type, content, path FROM docs ORDER BY RANDOM() LIMIT ?",
       [sampleLimit]
     ) || [];
 
@@ -252,33 +251,40 @@ export function searchDocuments(
 
 const TRUST_FILTERED_TYPES = new Set(["findings", "reference", "knowledge"]);
 
+export type TrustFilterQueueItem = { project: string; section: "Stale" | "Conflicts"; items: string[] };
+
+export type TrustFilterResult = { rows: DocRow[]; queueItems: TrustFilterQueueItem[]; auditEntries: string[] };
+
+/** Apply trust filter to rows. Returns filtered rows plus any queue/audit items to be written
+ * by the caller — retrieval itself should remain side-effect-free. */
 export function applyTrustFilter(
   rows: DocRow[],
   cortexPathLocal: string,
   ttlDays: number,
   minConfidence: number,
   decay: Partial<RetentionPolicy["decay"]>
-): DocRow[] {
-  return rows
+): TrustFilterResult {
+  const queueItems: TrustFilterQueueItem[] = [];
+  const auditEntries: string[] = [];
+
+  const filtered = rows
     .map((doc) => {
       if (!TRUST_FILTERED_TYPES.has(doc.type)) return doc;
       const trust = filterTrustedFindingsDetailed(doc.content, { ttlDays, minConfidence, decay });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
         const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);
-        if (stale.length) appendReviewQueue(cortexPathLocal, doc.project, "Stale", stale);
-        if (conflicts.length) appendReviewQueue(cortexPathLocal, doc.project, "Conflicts", conflicts);
-        appendAuditLog(
-          cortexPathLocal,
-          "trust_filter",
-          `project=${doc.project} type=${doc.type} stale=${stale.length} invalid_citation=${conflicts.length}`
-        );
+        if (stale.length) queueItems.push({ project: doc.project, section: "Stale", items: stale });
+        if (conflicts.length) queueItems.push({ project: doc.project, section: "Conflicts", items: conflicts });
+        auditEntries.push(`project=${doc.project} type=${doc.type} stale=${stale.length} invalid_citation=${conflicts.length}`);
       }
       return { ...doc, content: trust.content };
     })
     .filter((doc) => {
       return !TRUST_FILTERED_TYPES.has(doc.type) || Boolean(doc.content.trim());
     });
+
+  return { rows: filtered, queueItems, auditEntries };
 }
 
 // ── Ranking ──────────────────────────────────────────────────────────────────

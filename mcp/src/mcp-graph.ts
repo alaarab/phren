@@ -220,9 +220,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         finding_text: z.string().describe("Partial text of the finding to link (used to locate the source doc)."),
         entity: z.string().describe("Entity name to link to (e.g. 'Redis', 'Docker')."),
         relation: z.string().optional().describe("Relationship type (default: 'mentions')."),
+        entity_type: z.string().optional().describe("Entity type (e.g. 'library', 'service', 'concept', 'architecture'). Defaults to 'entity'."),
       }),
     },
-    async ({ project, finding_text, entity, relation }) => {
+    async ({ project, finding_text, entity, relation, entity_type }) => {
       if (!isValidProjectName(project)) {
         return mcpResponse({ ok: false, error: `Invalid project: "${project}"` });
       }
@@ -231,12 +232,13 @@ export function register(server: McpServer, ctx: McpContext): void {
         const db = ctx.db();
         const relType = relation ?? "mentions";
         const entityName = entity.toLowerCase();
+        const resolvedEntityType = entity_type ?? "entity";
 
         // 1. Find or create entity
         try {
-          db.run("INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)", [entityName, "library"]);
+          db.run("INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)", [entityName, resolvedEntityType]);
         } catch { /* ignore */ }
-        const entityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [entityName, "library"]);
+        const entityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [entityName, resolvedEntityType]);
         if (!entityResult?.length || !entityResult[0]?.values?.length) {
           return mcpResponse({ ok: false, error: "Failed to create entity." });
         }
@@ -285,7 +287,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             if (fs.existsSync(manualLinksPath)) {
               try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch { /* corrupt file — start fresh */ }
             }
-            const newEntry = { entity: entityName, entityType: "library", sourceDoc, relType };
+            const newEntry = { entity: entityName, entityType: resolvedEntityType, sourceDoc, relType };
             const alreadyStored = existing.some(
               (e) => e.entity === newEntry.entity && e.sourceDoc === newEntry.sourceDoc && e.relType === newEntry.relType
             );

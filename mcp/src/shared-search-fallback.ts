@@ -56,8 +56,11 @@ function tokenize(text: string): string[] {
 /**
  * Compute TF-IDF cosine similarity scores for a query against a corpus of documents.
  * Returns an array of similarity scores in the same order as docs.
+ * @param corpusN - Total number of documents in the full corpus (for IDF denominator).
+ *   Defaults to docs.length, which is correct when docs IS the full corpus.
+ *   Pass the real total when docs is a pre-filtered subset so IDF scores are not inflated.
  */
-function tfidfCosine(docs: string[], query: string): number[] {
+function tfidfCosine(docs: string[], query: string, corpusN?: number): number[] {
   const queryTokens = tokenize(query);
   if (queryTokens.length === 0) return docs.map(() => 0);
 
@@ -73,7 +76,8 @@ function tfidfCosine(docs: string[], query: string): number[] {
   const docTokenSets: Set<string>[] = docTokenLists.map(tokens => new Set(tokens));
 
   const terms = [...allTokens];
-  const N = docs.length;
+  // Use the full corpus N for IDF so scores are comparable even when docs is a subset.
+  const N = corpusN ?? docs.length;
 
   // Compute document frequency for each term, using generation-keyed cache.
   // Cache survives individual file adds/removes; only full rebuilds bump the generation.
@@ -210,7 +214,8 @@ export function cosineFallback(
 
   if (docContents.length === 0) return [];
 
-  const scores = tfidfCosine(docContents, query);
+  // Pass totalDocs so IDF denominators reflect the full corpus, not just the candidate subset.
+  const scores = tfidfCosine(docContents, query, totalDocs);
 
   // Collect scored results above threshold
   const scored: { score: number; doc: DocRow }[] = [];

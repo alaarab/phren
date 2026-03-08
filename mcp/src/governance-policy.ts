@@ -552,6 +552,8 @@ export function migrateGovernanceFiles(cortexPath: string): string[] {
 
 function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRole {
   const acl = readJsonFile<AccessControl>(govFile(cortexPath, "access-control"), DEFAULT_ACCESS);
+  const allRoles = [...(acl.admins || []), ...(acl.maintainers || []), ...(acl.contributors || []), ...(acl.viewers || [])];
+  if (allRoles.length === 0) return "admin"; // no access control configured — open access
   if ((acl.admins || []).includes(actor)) return "admin";
   if ((acl.maintainers || []).includes(actor)) return "maintainer";
   if ((acl.contributors || []).includes(actor)) return "contributor";
@@ -732,35 +734,37 @@ export function appendReviewQueue(
   const normalized = entries.map(normalizeBulletForQueue).filter(Boolean);
   if (normalized.length === 0) return cortexOk(0);
 
-  let content = "";
-  if (fs.existsSync(queuePath)) {
-    content = fs.readFileSync(queuePath, "utf8");
-  } else {
-    content = `# ${project} Review Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n`;
-  }
+  return withFileLock(queuePath, () => {
+    let content = "";
+    if (fs.existsSync(queuePath)) {
+      content = fs.readFileSync(queuePath, "utf8");
+    } else {
+      content = `# ${project} Review Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n`;
+    }
 
-  const lines = content.split("\n");
-  const secHeader = `## ${section}`;
-  let secIdx = lines.findIndex((line) => line.trim() === secHeader);
-  if (secIdx === -1) {
-    lines.push("", secHeader, "");
-    secIdx = lines.length - 2;
-  }
+    const lines = content.split("\n");
+    const secHeader = `## ${section}`;
+    let secIdx = lines.findIndex((line) => line.trim() === secHeader);
+    if (secIdx === -1) {
+      lines.push("", secHeader, "");
+      secIdx = lines.length - 2;
+    }
 
-  let insertAt = secIdx + 1;
-  while (insertAt < lines.length && !lines[insertAt].startsWith("## ")) insertAt++;
+    let insertAt = secIdx + 1;
+    while (insertAt < lines.length && !lines[insertAt].startsWith("## ")) insertAt++;
 
-  const existing = new Set(lines.map((line) => line.trim()));
-  const toInsert: string[] = [];
-  for (const entry of normalized) {
-    const line = `- [${today}] ${entry}`;
-    if (!existing.has(line)) toInsert.push(line);
-  }
-  if (!toInsert.length) return cortexOk(0);
+    const existing = new Set(lines.map((line) => line.trim()));
+    const toInsert: string[] = [];
+    for (const entry of normalized) {
+      const line = `- [${today}] ${entry}`;
+      if (!existing.has(line)) toInsert.push(line);
+    }
+    if (!toInsert.length) return cortexOk(0);
 
-  lines.splice(insertAt, 0, ...toInsert, "");
-  fs.writeFileSync(queuePath, lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
-  return cortexOk(toInsert.length);
+    lines.splice(insertAt, 0, ...toInsert, "");
+    fs.writeFileSync(queuePath, lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+    return cortexOk(toInsert.length);
+  });
 }
 
 export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?: boolean): CortexResult<string> {
@@ -823,8 +827,9 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
       next.push(line);
     }
     if (!dryRun) {
-      fs.copyFileSync(file, file + ".bak");
-      fs.writeFileSync(file, next.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+      const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
+      fs.writeFileSync(tmpFile, next.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+      fs.renameSync(tmpFile, file);
     }
   }
 
@@ -858,7 +863,7 @@ export function enforceCanonicalLocks(cortexPath: string, project?: string): str
     }
     const currentHash = hashContent(content);
     if (currentHash === lock.hash) continue;
-    fs.writeFileSync(file, lock.snapshot);
+    withFileLock(file, () => fs.writeFileSync(file, lock.snapshot));
     appendReviewQueue(cortexPath, projectName, "Conflicts", ["Canonical memory drift detected and auto-restored"]);
     appendAuditLog(cortexPath, "canonical_restore", `project=${projectName}`);
     restored++;

@@ -68,9 +68,13 @@ export function sessionsDir(cortexPath: string): string {
   return path.join(cortexPath, ".sessions");
 }
 
+const _runtimeDirsMade = new Set<string>();
 export function runtimeFile(cortexPath: string, name: string): string {
-  const dir = runtimeDir(cortexPath);
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = path.join(cortexPath, ".runtime");
+  if (!_runtimeDirsMade.has(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    _runtimeDirsMade.add(dir);
+  }
   return path.join(dir, name);
 }
 
