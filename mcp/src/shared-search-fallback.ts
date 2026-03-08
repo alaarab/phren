@@ -2,6 +2,7 @@ import { debugLog } from "./shared.js";
 import { STOP_WORDS } from "./utils.js";
 import { porterStem } from "./shared-stemmer.js";
 import type { SqlJsDatabase, DbRow, DocRow } from "./shared-index.js";
+import { classifyFile, resolveImports } from "./shared-index.js";
 import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 import { getEmbeddingCache } from "./shared-embedding-cache.js";
 import * as fs from "fs";
@@ -291,25 +292,34 @@ export async function vectorFallback(
   return scored.map(e => {
     const parts = e.path.split("/");
     const filename = parts[parts.length - 1] ?? "";
-    // Derive project from path relative to cortexPath
+    // Derive project and relative path from absolute path
     const rel = e.path.startsWith(cortexPath) ? e.path.slice(cortexPath.length + 1) : e.path;
-    const project = rel.split("/")[0] ?? "";
-    const type = filename.toLowerCase() === "findings.md" ? "findings"
-      : filename.toLowerCase() === "claude.md" ? "claude"
-      : filename.toLowerCase().includes("backlog") ? "backlog"
-      : "other";
+    const relParts = rel.split("/");
+    const entryProject = relParts[0] ?? "";
+    const relFile = relParts.slice(1).join("/");
+    // Use the same path-aware classifyFile logic as the indexer so reference/skills/etc.
+    // get their correct type instead of always falling back to "other".
+    const type = classifyFile(filename, relFile);
 
-    // Hydrate content from disk so downstream consumers (snippet extraction, ranking,
-    // entryScoreKey) have real text to work with instead of an empty string.
+    // Hydrate and normalize content from disk — apply the same pipeline as the indexer
+    // (archive/details stripping, @import resolution) so vector hits are consistent
+    // with the indexed corpus and don't re-expose archived content.
     let content = "";
     try {
       if (e.path && fs.existsSync(e.path)) {
-        content = fs.readFileSync(e.path, "utf-8").slice(0, 10000);
+        const raw = fs.readFileSync(e.path, "utf-8");
+        content = raw
+          .replace(/<!-- cortex:archive:start -->[\s\S]*?<!-- cortex:archive:end -->/g, "")
+          .replace(/<details>[\s\S]*?<\/details>/gi, "")
+          .slice(0, 10000);
+        try {
+          content = resolveImports(content, cortexPath);
+        } catch { /* non-fatal — use raw normalized content */ }
       }
     } catch {
       // best-effort: leave content empty if file is unreadable
     }
 
-    return { project, filename, type, content, path: e.path };
+    return { project: entryProject, filename, type, content, path: e.path };
   });
 }

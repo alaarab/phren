@@ -98,21 +98,26 @@ function lastSummaryPath(cortexPath: string): string {
 }
 
 /** Write the last summary for fast retrieval by next session_start. */
-function writeLastSummary(cortexPath: string, summary: string, sessionId: string): void {
+function writeLastSummary(cortexPath: string, summary: string, sessionId: string, project?: string): void {
   try {
-    const data = { summary, sessionId, endedAt: new Date().toISOString() };
+    const data = { summary, sessionId, project, endedAt: new Date().toISOString() };
     fs.writeFileSync(lastSummaryPath(cortexPath), JSON.stringify(data, null, 2));
   } catch { /* best-effort */ }
 }
 
 /** Find the most recent session with a summary (including ended sessions). */
 export function findMostRecentSummary(cortexPath: string): string | null {
+  return findMostRecentSummaryWithProject(cortexPath).summary;
+}
+
+/** Find the most recent session with a summary and project context. */
+function findMostRecentSummaryWithProject(cortexPath: string): { summary: string | null; project?: string } {
   // Fast path: read from dedicated last-summary file
   try {
     const fastPath = lastSummaryPath(cortexPath);
     if (fs.existsSync(fastPath)) {
-      const data = JSON.parse(fs.readFileSync(fastPath, "utf-8")) as { summary?: string };
-      if (data.summary) return data.summary;
+      const data = JSON.parse(fs.readFileSync(fastPath, "utf-8")) as { summary?: string; project?: string };
+      if (data.summary) return { summary: data.summary, project: data.project };
     }
   } catch { /* fall through to O(n) scan */ }
 
@@ -121,9 +126,10 @@ export function findMostRecentSummary(cortexPath: string): string | null {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch { return null; }
+  } catch { return { summary: null }; }
 
   let bestSummary: string | null = null;
+  let bestProject: string | undefined;
   let bestMtime = 0;
 
   for (const entry of entries) {
@@ -136,11 +142,12 @@ export function findMostRecentSummary(cortexPath: string): string | null {
       if (stat.mtimeMs > bestMtime) {
         bestMtime = stat.mtimeMs;
         bestSummary = state.summary;
+        bestProject = state.project;
       }
     } catch { /* skip unreadable files */ }
   }
 
-  return bestSummary;
+  return { summary: bestSummary, project: bestProject };
 }
 
 /** Resolve session file: use provided sessionId, then connectionId lookup, then _currentProcessSessionId, then fall back to most recent active session. */
@@ -252,14 +259,18 @@ export function register(server: McpServer, ctx: McpContext): void {
     // Find most recent prior session for context
     const priorResult = findMostRecentSession(cortexPath);
     const prior = priorResult?.state ?? null;
-    // Also check ended sessions for summaries (findMostRecentSession skips ended sessions)
-    const priorSummary = prior?.summary ?? findMostRecentSummary(cortexPath);
+    // Also check ended sessions for summaries and project context.
+    // findMostRecentSession skips ended sessions, so we need a separate lookup
+    // to restore project context after a normal session_end.
+    const priorEnded = prior ? null : findMostRecentSummaryWithProject(cortexPath);
+    const priorSummary = prior?.summary ?? priorEnded?.summary ?? null;
+    const priorProject = prior?.project ?? priorEnded?.project;
 
     // Create new session with unique ID in its own file
     const sessionId = crypto.randomUUID();
     const next: SessionState = {
       sessionId,
-      project: project ?? prior?.project,
+      project: project ?? priorProject,
       startedAt: new Date().toISOString(),
       findingsAdded: 0,
     };
@@ -276,7 +287,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       parts.push(`## Last session\n${priorSummary}`);
     }
 
-    const activeProject = project ?? prior?.project;
+    const activeProject = project ?? priorProject;
     if (activeProject && isValidProjectName(activeProject)) {
       const findingsPath = resolveFindingsPath(path.join(cortexPath, activeProject));
       if (findingsPath) {
@@ -335,10 +346,11 @@ export function register(server: McpServer, ctx: McpContext): void {
 
     if (!endedState) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
 
-    // Write fast-path summary file for next session_start
+    // Write fast-path summary file for next session_start — also persist project so
+    // session_start can restore project context even after a normal session_end.
     const effectiveSummary = endedState.summary;
     if (effectiveSummary) {
-      writeLastSummary(cortexPath, effectiveSummary, state.sessionId);
+      writeLastSummary(cortexPath, effectiveSummary, state.sessionId, endedState.project);
     }
 
     const durationMs = new Date(endedState.endedAt!).getTime() - new Date(state.startedAt).getTime();

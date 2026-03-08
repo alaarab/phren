@@ -62,10 +62,12 @@ export function register(server: McpServer, ctx: McpContext): void {
           regression: -1.0,
         };
         const weight = feedbackWeights[feedback] ?? 0;
-        const scoresFile = path.join(runtimeDir(cortexPath), "scores.jsonl");
-        fs.mkdirSync(path.dirname(scoresFile), { recursive: true });
+        // Write feedback audit to a dedicated file — NOT to scores.jsonl, which uses a
+        // different schema ({key, delta, at}) and would crash readScoreJournal if polluted.
+        const auditFile = path.join(runtimeDir(cortexPath), "feedback-audit.jsonl");
+        fs.mkdirSync(path.dirname(auditFile), { recursive: true });
         const entry = { key, feedback, weight, timestamp: new Date().toISOString() };
-        fs.appendFileSync(scoresFile, JSON.stringify(entry) + "\n");
+        fs.appendFileSync(auditFile, JSON.stringify(entry) + "\n");
 
         return mcpResponse({ ok: true, message: `Recorded feedback ${feedback} for ${key} (weight: ${weight})`, data: { key, feedback, weight } });
       });

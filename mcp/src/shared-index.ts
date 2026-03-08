@@ -79,7 +79,7 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "memory_queue.md": "memory-queue",
 };
 
-function classifyFile(filename: string, relPath: string): string {
+export function classifyFile(filename: string, relPath: string): string {
   // Directory takes priority over filename-based classification
   if (relPath.includes("reference/") || relPath.includes("reference\\")) return "reference";
   if (relPath.includes("knowledge/") || relPath.includes("knowledge\\")) return "reference";

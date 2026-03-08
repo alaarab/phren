@@ -210,7 +210,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
         const conflictMsg = semanticConflicts.length > 0 ? `, ${semanticConflicts.length} with conflicts` : "";
-        return mcpResponse({ ok: added.length > 0, message: `Added ${added.length}/${findings.length} findings (${allSkipped.length} duplicates skipped${rejectedMsg}${conflictMsg})`, data: { project, added, skipped: allSkipped, rejected, ...(semanticConflicts.length > 0 ? { conflicts: semanticConflicts } : {}) } });
+        // ok:true whenever the operation completed without error — use counts to distinguish outcomes.
+        // Returning ok:false when all items are duplicates confuses callers into thinking a write failed.
+        return mcpResponse({ ok: true, message: `Added ${added.length}/${findings.length} findings (${allSkipped.length} duplicates skipped${rejectedMsg}${conflictMsg})`, data: { project, added, skipped: allSkipped, rejected, ...(semanticConflicts.length > 0 ? { conflicts: semanticConflicts } : {}) } });
       });
     }
   );

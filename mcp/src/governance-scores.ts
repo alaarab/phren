@@ -151,7 +151,9 @@ function readScoreJournal(cortexPath: string): ScoreJournalEntry[] {
           return null;
         }
       })
-      .filter((entry: ScoreJournalEntry | null): entry is ScoreJournalEntry => entry !== null);
+      .filter((entry: ScoreJournalEntry | null): entry is ScoreJournalEntry =>
+        entry !== null && typeof entry.key === "string" && typeof entry.delta === "object" && entry.delta !== null
+      );
   } catch (err: unknown) {
     debugLog(`readScoreJournal failed: ${errorMessage(err)}`);
     return [];
@@ -179,7 +181,9 @@ function claimScoreJournal(cortexPath: string): ScoreJournalEntry[] {
           return null;
         }
       })
-      .filter((entry: ScoreJournalEntry | null): entry is ScoreJournalEntry => entry !== null);
+      .filter((entry: ScoreJournalEntry | null): entry is ScoreJournalEntry =>
+        entry !== null && typeof entry.key === "string" && typeof entry.delta === "object" && entry.delta !== null
+      );
   } catch (err: unknown) {
     debugLog(`claimScoreJournal failed: ${errorMessage(err)}`);
     return [];

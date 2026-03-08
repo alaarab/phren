@@ -343,6 +343,10 @@ export function readBacklogs(cortexPath: string, profile?: string): BacklogDoc[]
 export function addBacklogItem(cortexPath: string, project: string, item: string): CortexResult<string> {
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
+  // Validate project exists before acquiring the lock — withFileLock creates the parent
+  // directory via mkdirSync, which would silently create an unintended project directory.
+  const preCheck = ensureProject(cortexPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withFileLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
@@ -364,6 +368,8 @@ export function addBacklogItem(cortexPath: string, project: string, item: string
 export function addBacklogItems(cortexPath: string, project: string, items: string[]): CortexResult<{ added: string[]; errors: string[] }> {
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(cortexPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withFileLock(bPath, () => {
     const parsed = readBacklog(cortexPath, project);
