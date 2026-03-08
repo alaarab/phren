@@ -124,12 +124,41 @@ export function register(server: McpServer, ctx: McpContext): void {
         "and their connected documents.",
       inputSchema: z.object({
         project: z.string().optional().describe("Filter to a specific project."),
-        limit: z.number().int().min(1).max(100).optional().describe("Max entities to return (default 20)."),
+        limit: z.number().int().min(1).max(100).optional().describe("Max entities to return (default 100)."),
+        offset: z.number().int().min(0).optional().describe("Number of entities to skip for pagination (default 0)."),
       }),
     },
-    async ({ project, limit }) => {
+    async ({ project, limit, offset }) => {
       const db = ctx.db();
-      const max = limit ?? 20;
+      const max = limit ?? 100;
+      const skip = offset ?? 0;
+
+      // First get total count
+      let countSql: string;
+      let countParams: (string | number)[];
+      if (project) {
+        countSql = `
+          SELECT COUNT(*) FROM (
+            SELECT e.id FROM entities e
+            JOIN entity_links el ON el.target_id = e.id
+            WHERE e.type != 'document' AND el.source_doc LIKE ?
+            GROUP BY e.id
+          )
+        `;
+        countParams = [`${project}/%`];
+      } else {
+        countSql = `
+          SELECT COUNT(*) FROM (
+            SELECT e.id FROM entities e
+            JOIN entity_links el ON el.target_id = e.id
+            WHERE e.type != 'document'
+            GROUP BY e.id
+          )
+        `;
+        countParams = [];
+      }
+      const countRows = queryRows(db, countSql, countParams);
+      const total = countRows && countRows.length > 0 ? Number(countRows[0][0]) : 0;
 
       let sql: string;
       let params: (string | number)[];
@@ -143,9 +172,9 @@ export function register(server: McpServer, ctx: McpContext): void {
           WHERE e.type != 'document' AND el.source_doc LIKE ?
           GROUP BY e.id, e.name, e.type
           ORDER BY ref_count DESC
-          LIMIT ?
+          LIMIT ? OFFSET ?
         `;
-        params = [`${project}/%`, max];
+        params = [`${project}/%`, max, skip];
       } else {
         sql = `
           SELECT e.name, e.type, COUNT(el.source_id) as ref_count,
@@ -155,14 +184,14 @@ export function register(server: McpServer, ctx: McpContext): void {
           WHERE e.type != 'document'
           GROUP BY e.id, e.name, e.type
           ORDER BY ref_count DESC
-          LIMIT ?
+          LIMIT ? OFFSET ?
         `;
-        params = [max];
+        params = [max, skip];
       }
 
       const rows = queryRows(db, sql, params);
       if (!rows || rows.length === 0) {
-        return mcpResponse({ ok: true, data: [], message: "No entities in the graph." });
+        return mcpResponse({ ok: true, data: { entities: [], total, hasMore: false }, message: "No entities in the graph." });
       }
 
       const entities = rows.map(r => ({
@@ -172,7 +201,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         docs: String(r[3] || "").split(",").filter(Boolean),
       }));
 
-      return mcpResponse({ ok: true, data: entities });
+      const hasMore = skip + entities.length < total;
+      return mcpResponse({ ok: true, data: { entities, total, hasMore, offset: skip, limit: max } });
     },
   );
 

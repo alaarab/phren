@@ -259,6 +259,9 @@ export function extractKeywords(text: string): string {
 export function isValidProjectName(name: string): boolean {
   if (!name || name.length === 0) return false;
   if (name.length > 100) return false;
+  if (name === "." || name === "..") return false;
+  if (/^\./.test(name)) return false;  // hidden dirs
+  if (/^-/.test(name)) return false;   // breaks CLI flags
   if (name.includes("..") || name.includes("/") || name.includes("\\") || name.includes("\0")) return false;
   return true;
 }

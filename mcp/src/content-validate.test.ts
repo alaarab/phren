@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { mergeFindings, extractConflictVersions } from "./content-validate.js";
+import { mergeFindings, extractConflictVersions, validateFinding } from "./content-validate.js";
+import { isValidProjectName } from "./utils.js";
 
 describe("mergeFindings", () => {
   it("preserves provenance comments after bullet lines", () => {
@@ -157,5 +158,61 @@ describe("mergeFindings", () => {
 
     expect(merged).toContain("- Simple finding without comments");
     expect(merged).toContain("- Another simple finding");
+  });
+});
+
+describe("validateFinding", () => {
+  it("rejects empty string", () => {
+    expect(validateFinding("")).not.toBeNull();
+    expect(validateFinding("")).toContain("empty");
+  });
+
+  it("rejects whitespace-only string", () => {
+    expect(validateFinding("   ")).not.toBeNull();
+    expect(validateFinding("   ")).toContain("empty");
+  });
+
+  it("rejects strings over 2000 chars", () => {
+    const long = "x".repeat(2001);
+    const error = validateFinding(long);
+    expect(error).not.toBeNull();
+    expect(error).toContain("2000");
+    expect(error).toContain("2001");
+  });
+
+  it("accepts a valid 100-char finding", () => {
+    const valid = "a".repeat(100);
+    expect(validateFinding(valid)).toBeNull();
+  });
+
+  it("accepts a finding at exactly 2000 chars", () => {
+    const boundary = "b".repeat(2000);
+    expect(validateFinding(boundary)).toBeNull();
+  });
+});
+
+describe("isValidProjectName edge cases", () => {
+  it("rejects '.'", () => {
+    expect(isValidProjectName(".")).toBe(false);
+  });
+
+  it("rejects '..'", () => {
+    expect(isValidProjectName("..")).toBe(false);
+  });
+
+  it("rejects names starting with dot (.hidden)", () => {
+    expect(isValidProjectName(".hidden")).toBe(false);
+  });
+
+  it("rejects names starting with hyphen (-flag)", () => {
+    expect(isValidProjectName("-flag")).toBe(false);
+  });
+
+  it("accepts 'my-project'", () => {
+    expect(isValidProjectName("my-project")).toBe(true);
+  });
+
+  it("accepts 'cortex_01'", () => {
+    expect(isValidProjectName("cortex_01")).toBe(true);
   });
 });

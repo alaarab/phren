@@ -11,6 +11,16 @@ import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
 
+function readPackageVersion(): string {
+  try {
+    const pkgPath = path.resolve(__dirname, "..", "..", "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    return typeof pkg.version === "string" ? pkg.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
@@ -49,7 +59,8 @@ export async function runStatus() {
   const profile = process.env.CORTEX_PROFILE || "";
   const activeProject = detectProject(cortexPath, cwd, profile);
 
-  console.log(`\n${BOLD}cortex status${RESET}\n`);
+  const version = readPackageVersion();
+  console.log(`\n${BOLD}cortex status${RESET} ${DIM}v${version}${RESET}\n`);
 
   // Active project
   if (activeProject) {
@@ -92,6 +103,26 @@ export async function runStatus() {
   }
   console.log(`  ${BOLD}MCP cfg:${RESET}  ${check(mcpConfigured)} ${DIM}(in settings.json)${RESET}`);
   console.log(`  ${BOLD}Hooks cfg:${RESET} ${check(hooksInstalled)} ${DIM}(in settings.json)${RESET}`);
+
+  // FTS index health
+  let ftsIndexOk = false;
+  let ftsIndexSize = 0;
+  try {
+    const userSuffix = os.userInfo().username || "default";
+    const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
+    if (fs.existsSync(cacheDir)) {
+      const dbFiles = fs.readdirSync(cacheDir).filter(f => f.endsWith(".db"));
+      if (dbFiles.length > 0) {
+        const stat = fs.statSync(path.join(cacheDir, dbFiles[0]));
+        ftsIndexOk = stat.size > 0;
+        ftsIndexSize = stat.size;
+      }
+    }
+  } catch { /* best-effort */ }
+  const ftsLabel = ftsIndexOk
+    ? `${GREEN}ok${RESET} ${DIM}(${(ftsIndexSize / 1024).toFixed(0)} KB)${RESET}`
+    : `${YELLOW}not built${RESET} ${DIM}(run a search to build)${RESET}`;
+  console.log(`  ${BOLD}FTS index:${RESET} ${ftsLabel}`);
 
   // Agent integration status
   function hasCortexEntry(filePath: string): boolean {

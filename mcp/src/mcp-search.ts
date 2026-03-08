@@ -21,7 +21,7 @@ import {
   type DbRow,
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
-import { entryScoreKey, getQualityMultiplier } from "./shared-governance.js";
+import { entryScoreKey, getQualityMultiplier, } from "./shared-governance.js";
 import { getCachedEmbedding, getCachedEmbeddings, cosineSimilarity } from "./embedding.js";
 
 const API_EMBEDDING_CANDIDATE_CAP = 500;
@@ -83,10 +83,38 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Memory not found: ${id}` });
       }
 
+      // Extract metadata from filesystem and content
+      let updatedAt: string | null = null;
+      let createdAt: string | null = null;
+      try {
+        const stat = fs.statSync(doc.path);
+        updatedAt = stat.mtime.toISOString();
+        createdAt = stat.birthtime.toISOString();
+      } catch { /* file may not exist on disk */ }
+
+      // Extract tags from content (e.g. [decision], [pitfall], [pattern])
+      const tagMatches = doc.content.match(/\[(decision|pitfall|pattern|tradeoff|architecture|bug)\]/gi);
+      const tags = tagMatches ? [...new Set(tagMatches.map(t => t.slice(1, -1).toLowerCase()))] : [];
+
+      // Get quality score if available
+      const scoreKey = entryScoreKey(doc.project, doc.filename, doc.content);
+      const qualityMultiplier = getQualityMultiplier(cortexPath, scoreKey);
+
       return mcpResponse({
         ok: true,
         message: `[${id.slice(4)}] (${doc.type})\n\n${doc.content}`,
-        data: { id, project: doc.project, filename: doc.filename, type: doc.type, content: doc.content, path: doc.path },
+        data: {
+          id,
+          project: doc.project,
+          filename: doc.filename,
+          type: doc.type,
+          content: doc.content,
+          path: doc.path,
+          created_at: createdAt,
+          updated_at: updatedAt,
+          tags: tags.length > 0 ? tags : undefined,
+          score: qualityMultiplier,
+        },
       });
     }
   );

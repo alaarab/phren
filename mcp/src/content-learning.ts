@@ -6,7 +6,7 @@ import { checkPermission, loadCanonicalLocks, saveCanonicalLocks, hashContent, w
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import { type FindingCitation, buildCitationComment, getHeadCommit, getRepoRoot, inferCitationLocation } from "./content-citation.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts } from "./content-dedup.js";
-import { validateFindingsFormat } from "./content-validate.js";
+import { validateFindingsFormat, validateFinding } from "./content-validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./content-archive.js";
 
 // Read legacy history files (LEARNINGS.md, etc.) as supplementary dedup/conflict context.
@@ -289,6 +289,8 @@ export function addFindingToFile(
 ): CortexResult<string> {
   const denial = checkPermission(cortexPath, "write");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
+  const findingError = validateFinding(learning);
+  if (findingError) return cortexErr(findingError, CortexError.EMPTY_INPUT);
   if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(cortexPath, project);
   if (!resolvedDir) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
@@ -458,6 +460,11 @@ export function addFindingsToFile(
       if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
       let content = `# ${project} Findings\n\n## ${today}\n`;
       for (const learning of learnings) {
+        const lengthError = validateFinding(learning);
+        if (lengthError) {
+          rejected.push({ text: learning, reason: lengthError });
+          continue;
+        }
         const prepared = prepareFinding(learning, project, content, undefined, nowIso, inferredRepo, headCommit);
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
@@ -483,6 +490,11 @@ export function addFindingsToFile(
     if (issues.length > 0) debugLog(`FINDINGS.md format warnings for "${project}": ${issues.join("; ")}`);
 
     for (const learning of learnings) {
+      const lengthError = validateFinding(learning);
+      if (lengthError) {
+        rejected.push({ text: learning, reason: lengthError });
+        continue;
+      }
       const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
       const prepared = prepareFinding(learning, project, fullHistory, undefined, nowIso, inferredRepo, headCommit);
       if (prepared.status === "rejected") {
