@@ -90,7 +90,6 @@ Environment:
   CORTEX_MEMORY_TTL_DAYS         Override memory TTL for trust filtering
   CORTEX_HOOK_TIMEOUT_MS         Hook subprocess timeout in ms (default: 14000)
   CORTEX_FINDINGS_CAP            Max findings per date section before consolidation (default: 20)
-  CORTEX_CONSOLIDATION_CAP       Max total findings before forced consolidation (default: 150)
   CORTEX_GH_PR_LIMIT/RUN_LIMIT/ISSUE_LIMIT  GitHub extraction limits (defaults: 40/25/25)
 
 Examples:

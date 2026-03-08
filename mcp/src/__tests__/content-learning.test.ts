@@ -189,3 +189,21 @@ describe("supersession: failed add does not mutate original finding", () => {
     }
   });
 });
+
+describe("consolidation semantics", () => {
+  it("does not write implicit consolidation markers during addFinding", () => {
+    const manyFindings = Array.from({ length: 160 }, (_, i) => `- Existing finding ${i + 1}`).join("\n");
+    writeFile(
+      findingsPath(),
+      `# ${PROJECT} Findings\n\n## 2026-03-01\n\n${manyFindings}\n`
+    );
+
+    const r = addFindingToFile(tmp.path, PROJECT, "Newest finding after a large backlog");
+    expect(r.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, ".runtime", "consolidation-needed.txt"))).toBe(false);
+    if (r.ok && typeof r.data === "string") {
+      expect(r.data.toLowerCase()).not.toContain("consolidation cap");
+      expect(r.data.toLowerCase()).not.toContain("consider running consolidation");
+    }
+  });
+});

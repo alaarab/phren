@@ -450,28 +450,13 @@ export function addFindingToFile(
     }
   }
 
-  const CONSOLIDATION_CAP = Number.parseInt(process.env.CORTEX_CONSOLIDATION_CAP || "", 10) || 150;
-  let consolidationNotice = "";
-  if (activeCount > CONSOLIDATION_CAP) {
-    debugLog(`Consolidation cap exceeded for "${project}": ${activeCount} active findings (cap=${CONSOLIDATION_CAP})`);
-    try {
-      const runtimeDir = path.join(cortexPath, ".runtime");
-      fs.mkdirSync(runtimeDir, { recursive: true });
-      fs.writeFileSync(path.join(runtimeDir, "consolidation-needed.txt"), `${project}\n`);
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] addFinding consolidationMarker: ${errorMessage(err)}\n`);
-    }
-    consolidationNotice = ` Note: ${activeCount} active findings exceeds consolidation cap (${CONSOLIDATION_CAP}). Consider running consolidation.`;
-  }
-
   if (result.data.created) {
     const createdMsg = `Created FINDINGS.md for "${project}" and added insight.`;
     return cortexOk(result.data.tagWarning ? `${createdMsg} Warning: ${result.data.tagWarning}` : createdMsg);
   }
 
   const addedMsg = `Added finding to ${project}: ${result.data.bullet} (with citation metadata)`;
-  const fullMsg = result.data.tagWarning ? `${addedMsg} Warning: ${result.data.tagWarning}` : addedMsg;
-  return cortexOk(consolidationNotice ? `${fullMsg}${consolidationNotice}` : fullMsg);
+  return cortexOk(result.data.tagWarning ? `${addedMsg} Warning: ${result.data.tagWarning}` : addedMsg);
 }
 
 export function addFindingsToFile(
