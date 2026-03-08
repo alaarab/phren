@@ -3,14 +3,22 @@ import * as path from "path";
 import * as os from "os";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
-import { EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
+import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, type CortexErrorCode } from "./shared.js";
+
+export interface HookError {
+  code: CortexErrorCode;
+  message: string;
+}
 
 export function commandExists(cmd: string): boolean {
   try {
     const whichCmd = process.platform === "win32" ? "where.exe" : "which";
     execFileSync(whichCmd, [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
     return true;
-  } catch { return false; }
+  } catch (err: unknown) {
+    debugLog(`commandExists: ${cmd} not found: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
 }
 
 export function detectInstalledTools(): Set<string> {
@@ -42,7 +50,8 @@ function resolveToolBinary(tool: string): string | null {
       const resolved = path.resolve(candidate);
       if (resolved !== wrapperPath) return candidate;
     }
-  } catch {
+  } catch (err: unknown) {
+    debugLog(`resolveToolBinary: failed for ${tool}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
   return null;
@@ -161,7 +170,8 @@ exit $status
     fs.writeFileSync(wrapperPath, content);
     fs.chmodSync(wrapperPath, 0o755);
     return true;
-  } catch {
+  } catch (err: unknown) {
+    debugLog(`installSessionWrapper: failed for ${tool}: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
 }
@@ -233,7 +243,8 @@ function readHookPreferences(cortexPath: string): { enabled: boolean; toolPrefs:
       ? prefs.hookTools
       : {};
     return { enabled, toolPrefs };
-  } catch {
+  } catch (err: unknown) {
+    debugLog(`readHookPreferences: ${err instanceof Error ? err.message : String(err)}`);
     return { enabled: true, toolPrefs: {} };
   }
 }
@@ -284,7 +295,8 @@ export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
         typeof h.command === "string" &&
         h.command.trim().length > 0
     );
-  } catch {
+  } catch (err: unknown) {
+    debugLog(`readCustomHooks: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -293,10 +305,10 @@ export function runCustomHooks(
   cortexPath: string,
   event: CustomHookEvent,
   env: Record<string, string> = {}
-): { ran: number; errors: string[] } {
+): { ran: number; errors: HookError[] } {
   const hooks = readCustomHooks(cortexPath);
   const matching = hooks.filter((h) => h.event === event);
-  const errors: string[] = [];
+  const errors: HookError[] = [];
 
   const isWindows = process.platform === "win32";
   const shellCmd = isWindows ? "cmd" : "sh";
@@ -312,7 +324,9 @@ export function runCustomHooks(
         stdio: ["ignore", "ignore", "pipe"],
       });
     } catch (err: unknown) {
-      errors.push(`${event}: ${hook.command}: ${err instanceof Error ? err.message : String(err)}`);
+      const message = `${event}: ${hook.command}: ${err instanceof Error ? err.message : String(err)}`;
+      debugLog(`runCustomHooks: ${message}`);
+      errors.push({ code: CortexError.VALIDATION_ERROR, message });
     }
   }
 
@@ -354,7 +368,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       if (!validateCopilotConfig(config)) throw new Error("invalid copilot hook config shape");
       fs.writeFileSync(copilotFile, JSON.stringify(config, null, 2));
       configured.push("Copilot CLI");
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      debugLog(`configureAllHooks: copilot failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     if (isToolHookEnabled(cortexPath, "copilot")) installSessionWrapper("copilot", cortexPath);
   }
 
@@ -364,7 +380,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
     try {
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
       let existing: Record<string, unknown> = {};
-      try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch { /* new file */ }
+      try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch { /* new file is expected */ }
       const config: CursorHookConfig = {
         ...existing,
         version: 1,
@@ -376,7 +392,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       if (!validateCursorConfig(config)) throw new Error("invalid cursor hook config shape");
       fs.writeFileSync(cursorFile, JSON.stringify(config, null, 2));
       configured.push("Cursor");
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      debugLog(`configureAllHooks: cursor failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     if (isToolHookEnabled(cortexPath, "cursor")) installSessionWrapper("cursor", cortexPath);
   }
 
@@ -385,7 +403,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
     const codexFile = path.join(cortexPath, "codex.json");
     try {
       let existing: Record<string, unknown> = {};
-      try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch { /* new file */ }
+      try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch { /* new file is expected */ }
       const config: CodexHookConfig = {
         ...existing,
         hooks: {
@@ -397,7 +415,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       if (!validateCodexConfig(config)) throw new Error("invalid codex hook config shape");
       fs.writeFileSync(codexFile, JSON.stringify(config, null, 2));
       configured.push("Codex");
-    } catch { /* best effort */ }
+    } catch (err: unknown) {
+      debugLog(`configureAllHooks: codex failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     if (isToolHookEnabled(cortexPath, "codex")) installSessionWrapper("codex", cortexPath);
   }
 
