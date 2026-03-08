@@ -158,8 +158,18 @@ export function autoArchiveToReference(
         if (Date.now() - stat.mtimeMs < STALE_LOCK_MS) {
           return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
         }
-        // Stale lock, overwrite it
-        fs.writeFileSync(lockFile, String(Date.now()));
+        // Stale lock: delete then re-create atomically with wx.
+        // If unlink fails with ENOENT, another thread already cleaned it up.
+        try { fs.unlinkSync(lockFile); } catch (unlinkErr: any) {
+          if (unlinkErr?.code !== "ENOENT") throw unlinkErr;
+        }
+        // Re-attempt atomic create. If EEXIST, another thread won the race.
+        try {
+          fs.writeFileSync(lockFile, String(Date.now()), { flag: "wx" });
+        } catch (wxErr: any) {
+          if (wxErr?.code === "EEXIST") return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
+          throw wxErr;
+        }
       } catch { return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT); }
     } else { throw e; }
   }
@@ -199,27 +209,32 @@ export function autoArchiveToReference(
 
   for (const [topic, topicEntries] of byTopic) {
     const filePath = path.join(referenceDir, `${topic}.md`);
-    // Q11: hold per-file lock on each reference file while writing
-    withFileLock(filePath, () => {
-      let existing = "";
-      if (fs.existsSync(filePath)) {
-        existing = fs.readFileSync(filePath, "utf8");
-      } else {
-        existing = `# ${project} - ${topic}\n`;
-      }
+    // Q11: hold per-file lock on each reference file while writing.
+    // Catch per-topic so one failed reference write doesn't abort the whole archive.
+    try {
+      withFileLock(filePath, () => {
+        let existing = "";
+        if (fs.existsSync(filePath)) {
+          existing = fs.readFileSync(filePath, "utf8");
+        } else {
+          existing = `# ${project} - ${topic}\n`;
+        }
 
-      const newSection = [`\n## Archived ${today}\n`];
-      for (const entry of topicEntries) {
-        newSection.push(entry.bullet);
-        if (entry.citation) newSection.push(entry.citation);
-      }
-      newSection.push("");
+        const newSection = [`\n## Archived ${today}\n`];
+        for (const entry of topicEntries) {
+          newSection.push(entry.bullet);
+          if (entry.citation) newSection.push(entry.citation);
+        }
+        newSection.push("");
 
-      const refContent = existing.trimEnd() + "\n" + newSection.join("\n");
-      const tmpRefPath = filePath + `.tmp-${crypto.randomUUID()}`;
-      fs.writeFileSync(tmpRefPath, refContent);
-      fs.renameSync(tmpRefPath, filePath);
-    });
+        const refContent = existing.trimEnd() + "\n" + newSection.join("\n");
+        const tmpRefPath = filePath + `.tmp-${crypto.randomUUID()}`;
+        fs.writeFileSync(tmpRefPath, refContent);
+        fs.renameSync(tmpRefPath, filePath);
+      });
+    } catch (err) {
+      debugLog(`auto_archive: failed to write reference file for topic "${topic}": ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // Remove archived entries from FINDINGS.md

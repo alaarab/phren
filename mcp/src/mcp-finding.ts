@@ -21,6 +21,7 @@ import {
   checkSemanticConflicts,
   autoMergeConflicts,
 } from "./shared-content.js";
+import { withFileLock } from "./shared-governance.js";
 import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings } from "./mcp-session.js";
 
@@ -79,24 +80,28 @@ export function register(server: McpServer, ctx: McpContext): void {
           // Semantic conflict post-check (async, feature-flagged) — only for newly added findings
           const conflicts = await checkSemanticConflicts(cortexPath, project, taggedFinding);
           if (conflicts.checked && conflicts.annotations.length > 0) {
-            // Append conflict annotations to the exact inserted bullet in the file
+            // Append conflict annotations to the exact inserted bullet in the file.
+            // Wrap in withFileLock so the read-modify-write is atomic with respect to
+            // concurrent add_finding calls that also modify FINDINGS.md.
             const resolvedDir = safeProjectPath(cortexPath, project);
             if (resolvedDir) {
               const fp = path.join(resolvedDir, "FINDINGS.md");
               if (fs.existsSync(fp)) {
-                let content = fs.readFileSync(fp, "utf8");
-                // Build the full bullet prefix as it was written (with "- " prefix)
-                const bulletPrefix = taggedFinding.startsWith("- ") ? taggedFinding.slice(0, 60) : `- ${taggedFinding.slice(0, 60)}`;
-                // Find the last occurrence of this exact bullet (the one just inserted)
-                const idx = content.lastIndexOf(bulletPrefix);
-                if (idx >= 0) {
-                  const lineEnd = content.indexOf("\n", idx);
-                  const insertAt = lineEnd >= 0 ? lineEnd : content.length;
-                  content = content.slice(0, insertAt) + " " + conflicts.annotations.join(" ") + " <!-- conflicts_checked: true -->" + content.slice(insertAt);
-                  const tmpFp = fp + `.tmp-${crypto.randomUUID()}`;
-                  fs.writeFileSync(tmpFp, content);
-                  fs.renameSync(tmpFp, fp);
-                }
+                withFileLock(fp, () => {
+                  let content = fs.readFileSync(fp, "utf8");
+                  // Build the full bullet prefix as it was written (with "- " prefix)
+                  const bulletPrefix = taggedFinding.startsWith("- ") ? taggedFinding.slice(0, 60) : `- ${taggedFinding.slice(0, 60)}`;
+                  // Find the last occurrence of this exact bullet (the one just inserted)
+                  const idx = content.lastIndexOf(bulletPrefix);
+                  if (idx >= 0) {
+                    const lineEnd = content.indexOf("\n", idx);
+                    const insertAt = lineEnd >= 0 ? lineEnd : content.length;
+                    content = content.slice(0, insertAt) + " " + conflicts.annotations.join(" ") + " <!-- conflicts_checked: true -->" + content.slice(insertAt);
+                    const tmpFp = fp + `.tmp-${crypto.randomUUID()}`;
+                    fs.writeFileSync(tmpFp, content);
+                    fs.renameSync(tmpFp, fp);
+                  }
+                });
               }
             }
           }

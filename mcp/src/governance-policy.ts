@@ -717,6 +717,14 @@ export function saveCanonicalLocks(cortexPath: string, locks: Record<string, Can
   } satisfies VersionedEntriesFile<CanonicalLock>);
 }
 
+/** Save canonical locks without acquiring a file lock (caller must hold the lock). */
+export function saveCanonicalLocksUnlocked(cortexPath: string, locks: Record<string, CanonicalLock>) {
+  writeJsonFileUnlocked(govFile(cortexPath, "canonical-locks"), {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    entries: locks,
+  } satisfies VersionedEntriesFile<CanonicalLock>);
+}
+
 export function hashContent(content: string): string {
   return crypto.createHash("sha256").update(content).digest("hex");
 }
