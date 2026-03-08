@@ -600,7 +600,10 @@ async function handleUpdate(args: string[]) {
     return;
   }
   const result = await runCortexUpdate();
-  console.log(result);
+  console.log(result.message);
+  if (!result.ok) {
+    process.exitCode = 1;
+  }
 }
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
@@ -1057,6 +1060,11 @@ async function handleQuickstart() {
       resolve(answer.trim() || dirBasename);
     });
   });
+
+  if (!isValidProjectName(projectName)) {
+    console.error(`Error: invalid project name "${projectName}". Use lowercase letters, numbers, hyphens, or underscores.`);
+    return;
+  }
 
   console.log(`\nInitializing cortex for "${projectName}"...\n`);
 
