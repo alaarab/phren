@@ -4,6 +4,53 @@ const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 const DEFAULT_EXTRACT_MODEL = "llama3.2";
 
+/**
+ * Cloud embedding API support (Item 6).
+ * Set CORTEX_EMBEDDING_API_URL to an OpenAI-compatible /embeddings endpoint.
+ * Set CORTEX_EMBEDDING_API_KEY for the Authorization: Bearer header.
+ * When set, cloud embedding takes priority over Ollama.
+ *
+ * Example (OpenAI):
+ *   CORTEX_EMBEDDING_API_URL=https://api.openai.com/v1
+ *   CORTEX_EMBEDDING_API_KEY=sk-...
+ *   CORTEX_EMBEDDING_MODEL=text-embedding-3-small
+ */
+export function getCloudEmbeddingUrl(): string | null {
+  const val = process.env["CORTEX_EMBEDDING_API_URL"];
+  if (!val || ["off", "0", "false", "no"].includes(val.trim().toLowerCase())) return null;
+  return val.trim().replace(/\/$/, ""); // strip trailing slash
+}
+
+export function getCloudEmbeddingKey(): string | null {
+  return process.env["CORTEX_EMBEDDING_API_KEY"] ?? null;
+}
+
+/** Embed text via OpenAI-compatible /embeddings endpoint. */
+async function embedTextCloud(text: string, baseUrl: string, model: string, apiKey: string | null): Promise<number[] | null> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch(`${baseUrl}/embeddings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model, input: text.slice(0, 8000) }),
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    if (!res.ok) {
+      debugLog(`embedTextCloud: API returned ${res.status}`);
+      return null;
+    }
+    const data = await res.json() as { data?: Array<{ embedding?: number[] }> };
+    return data.data?.[0]?.embedding ?? null;
+  } catch (e) {
+    debugLog(`embedTextCloud error: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
 export function getOllamaUrl(): string | null {
   const val = process.env["CORTEX_OLLAMA_URL"];
   if (val !== undefined && ["off", "0", "false", "no"].includes(val.trim().toLowerCase())) return null;
@@ -19,6 +66,8 @@ export function getExtractModel(): string {
 }
 
 export async function checkOllamaAvailable(url?: string): Promise<boolean> {
+  // When cloud embedding is configured, report as "available" (skip Ollama probe)
+  if (!url && getCloudEmbeddingUrl()) return true;
   const baseUrl = url ?? getOllamaUrl();
   if (!baseUrl) return false;
   try {
@@ -33,6 +82,8 @@ export async function checkOllamaAvailable(url?: string): Promise<boolean> {
 }
 
 export async function checkModelAvailable(model?: string, url?: string): Promise<boolean> {
+  // When cloud embedding is configured, assume model is available (no /api/tags equivalent)
+  if (!url && getCloudEmbeddingUrl()) return true;
   const baseUrl = url ?? getOllamaUrl();
   if (!baseUrl) return false;
   const modelName = model ?? getEmbeddingModel();
@@ -50,9 +101,16 @@ export async function checkModelAvailable(model?: string, url?: string): Promise
 }
 
 export async function embedText(text: string, model?: string, url?: string): Promise<number[] | null> {
+  const modelName = model ?? getEmbeddingModel();
+
+  // Cloud embedding takes priority when CORTEX_EMBEDDING_API_URL is set
+  const cloudUrl = url ? null : getCloudEmbeddingUrl();
+  if (cloudUrl) {
+    return embedTextCloud(text, cloudUrl, modelName, getCloudEmbeddingKey());
+  }
+
   const baseUrl = url ?? getOllamaUrl();
   if (!baseUrl) return null;
-  const modelName = model ?? getEmbeddingModel();
   try {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 10000);

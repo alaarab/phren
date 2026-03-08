@@ -358,8 +358,30 @@ export function extractConversationInsights(text: string): string[] {
   return insights.slice(0, 5);
 }
 
+/**
+ * Load ~/.cortex/.env into process.env. Only sets keys that are not already set.
+ * Called at the start of handleHookStop so feature flags written by init are active.
+ */
+function loadCortexDotEnv(cortexPathLocal: string): void {
+  try {
+    const content = fs.readFileSync(path.join(cortexPathLocal, ".env"), "utf8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx < 1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      // Strip matching surrounding quotes (both ends must use the same quote character)
+      const raw = trimmed.slice(eqIdx + 1).trim();
+      const val = /^(["'])(.*)\1$/.test(raw) ? raw.slice(1, -1) : raw;
+      if (key && !(key in process.env)) process.env[key] = val;
+    }
+  } catch { /* file not found or unreadable — skip */ }
+}
+
 export async function handleHookStop() {
   const now = new Date().toISOString();
+  loadCortexDotEnv(getCortexPath());
   if (!getHooksEnabledPreference(getCortexPath())) {
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
@@ -421,10 +443,38 @@ export async function handleHookStop() {
     });
     appendAuditLog(getCortexPath(), "hook_stop", "status=saved-pushed");
 
-    // Q21: Auto-capture conversation insights (gated behind CORTEX_FEATURE_AUTO_CAPTURE=1)
+    // Auto-capture conversation insights (gated behind CORTEX_FEATURE_AUTO_CAPTURE=1)
+    // Enabled by init walkthrough; reads transcript_path from Claude Code's Stop hook payload.
     if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
       try {
-        const captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
+        // Claude Code passes JSON to stdin including transcript_path (JSONL file with messages)
+        let captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
+        if (!captureInput) {
+          try {
+            const stdinData = fs.readFileSync(0, "utf-8");
+            const hookPayload = JSON.parse(stdinData) as { transcript_path?: string };
+            if (hookPayload.transcript_path && fs.existsSync(hookPayload.transcript_path)) {
+              // Cap at last 500 lines (~50 KB) to bound memory usage for long sessions
+              const raw = fs.readFileSync(hookPayload.transcript_path, "utf-8");
+              const allLines = raw.split("\n").filter(Boolean);
+              const lines = allLines.length > 500 ? allLines.slice(-500) : allLines;
+              const assistantTexts: string[] = [];
+              for (const line of lines) {
+                try {
+                  const msg = JSON.parse(line) as { role?: string; content?: string | Array<{ type?: string; text?: string }> };
+                  if (msg.role !== "assistant") continue;
+                  if (typeof msg.content === "string") assistantTexts.push(msg.content);
+                  else if (Array.isArray(msg.content)) {
+                    for (const block of msg.content) {
+                      if (block.type === "text" && block.text) assistantTexts.push(block.text);
+                    }
+                  }
+                } catch { /* skip malformed lines */ }
+              }
+              captureInput = assistantTexts.join("\n");
+            }
+          } catch { /* stdin may not be readable or not JSON; skip */ }
+        }
         if (captureInput) {
           const cwd = process.cwd();
           const activeProject = detectProject(getCortexPath(), cwd, profile);

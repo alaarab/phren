@@ -115,7 +115,10 @@ export function register(server: McpServer, ctx: McpContext): void {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
             incrementSessionFindings(cortexPath, 1, getCurrentSessionId());
           }
-          return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "added" } });
+          // Surface any conflict annotation that was written into the bullet
+          const conflictsWithMatch = result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"\s*-->/);
+          const conflictsWith = conflictsWithMatch?.[1];
+          return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "added", ...(conflictsWith ? { conflictsWith } : {}) } });
         } catch (err: unknown) {
           if (err instanceof Error && err.message.includes("Rejected:")) {
             return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err), errorCode: "VALIDATION_ERROR" });

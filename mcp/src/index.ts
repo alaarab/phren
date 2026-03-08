@@ -36,6 +36,9 @@ Usage:
   cortex quickstart                      Quick setup: init + link + project scaffold
   cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--from-existing <path>] [--dry-run] [-y]
                                          Set up cortex (templates: python-project, monorepo, library, frontend)
+  cortex projects list                   List all projects in cortex
+  cortex projects add <name>             Create a new project
+  cortex projects remove <name>          Remove a project (asks for confirmation)
   cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
   cortex skills list                     List installed skills
   cortex skills add <project> <path>    Link or copy a skill file into one project
@@ -84,9 +87,12 @@ Setup:
   cortex uninstall                       Remove cortex config and hooks
 
 Environment:
-  CORTEX_PATH     Override cortex directory (default: ~/.cortex)
-  CORTEX_PROFILE  Active profile name
-  CORTEX_DEBUG    Enable debug logging (set to 1)
+  CORTEX_PATH                Override cortex directory (default: ~/.cortex)
+  CORTEX_PROFILE             Active profile name
+  CORTEX_DEBUG               Enable debug logging (set to 1)
+  CORTEX_EMBEDDING_API_URL   OpenAI-compatible embedding endpoint (cloud alternative to Ollama)
+  CORTEX_EMBEDDING_API_KEY   API key for CORTEX_EMBEDDING_API_URL
+  CORTEX_FEATURE_AUTO_CAPTURE=1  Extract insights from conversations at session end (written by init)
 
 Examples:
   cortex search "rate limiting"          Search across all projects
@@ -238,6 +244,7 @@ const CLI_COMMANDS = [
   "backlog",
   "quickstart",
   "background-maintenance",
+  "projects",
   // Legacy aliases (still work, route to old handlers)
   "extract-memories",
   "govern-memories",

@@ -121,6 +121,9 @@ cortex verify                          Post-init verification checks
 cortex uninstall                       Remove cortex config and hooks
 cortex update                          Update to latest version
 
+cortex projects list                   List all projects
+cortex projects add <name>             Create a new project
+cortex projects remove <name>          Remove a project (confirmation required)
 cortex link [--machine <n>] [--profile <n>]  Sync profile, symlinks, hooks
 cortex mcp-mode [on|off|status]        Toggle MCP integration
 cortex hooks-mode [on|off|status]      Toggle hook execution
@@ -216,6 +219,9 @@ Legacy files at the root are auto-migrated on first access.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CORTEX_FEATURE_GIT_CONTEXT_FILTER` | disabled | Set to `'true'` to enable git-context file relevance filtering in search ranking. When enabled, docs matching currently-changed files or branch name get a boost. |
+| `CORTEX_FEATURE_AUTO_CAPTURE` | disabled | Set to `'1'` to extract insights from conversation transcripts at session end (written by init walkthrough to `~/.cortex/.env`). |
+| `CORTEX_EMBEDDING_API_URL` | — | OpenAI-compatible `/embeddings` endpoint (e.g. `https://api.openai.com/v1`). Takes priority over Ollama when set. |
+| `CORTEX_EMBEDDING_API_KEY` | — | Bearer token for `CORTEX_EMBEDDING_API_URL`. |
 
 ## Finding Quality Rules
 

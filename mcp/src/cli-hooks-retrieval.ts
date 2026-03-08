@@ -132,6 +132,27 @@ function mergeUniqueDocs(primary: DocRow[] | null, secondary: DocRow[]): DocRow[
   return primary;
 }
 
+/**
+ * Item 4: Reciprocal Rank Fusion — merges ranked result lists from multiple search tiers.
+ * Documents appearing in multiple tiers get a higher combined score.
+ * Formula: score(d) = Σ 1/(k + rank_i) for each tier i containing d, where k=60 (standard).
+ */
+function rrfMerge(tiers: DocRow[][], k = 60): DocRow[] {
+  const scores = new Map<string, number>();
+  const docs = new Map<string, DocRow>();
+  for (const tier of tiers) {
+    for (let rank = 0; rank < tier.length; rank++) {
+      const doc = tier[rank];
+      const key = doc.path || `${doc.project}/${doc.filename}`;
+      if (!docs.has(key)) docs.set(key, doc);
+      scores.set(key, (scores.get(key) ?? 0) + 1 / (k + rank + 1));
+    }
+  }
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([key]) => docs.get(key)!);
+}
+
 function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: string | null): DocRow[] {
   const queryTokens = tokenizeForOverlap(prompt);
   if (!queryTokens.length) return [];
@@ -209,42 +230,49 @@ export function searchDocuments(
   detectedProject: string | null,
   searchAllProjects = false
 ): DocRow[] | null {
-  let rows: DocRow[] | null = null;
+  // Tier 1: FTS5 — run project-scoped and global in one pass, dedup
+  const ftsDocs: DocRow[] = [];
+  const ftsSeenKeys = new Set<string>();
+
+  const addFtsRows = (rows: DocRow[] | null) => {
+    if (!rows) return;
+    for (const doc of rows) {
+      const key = doc.path || `${doc.project}/${doc.filename}`;
+      if (!ftsSeenKeys.has(key)) { ftsSeenKeys.add(key); ftsDocs.push(doc); }
+    }
+  };
 
   if (detectedProject) {
-    rows = queryDocRows(
+    addFtsRows(queryDocRows(
       db,
       "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 7",
       [safeQuery, detectedProject]
-    );
+    ));
   }
 
-  if (!rows || rows.length < 3) {
-    let globalRows: DocRow[] | null;
-    if (searchAllProjects || !detectedProject) {
-      globalRows = queryDocRows(
-        db,
-        "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10",
-        [safeQuery]
-      );
-    } else {
-      const scopeProjects = [detectedProject, ...SHARED_PROJECTS];
-      const placeholders = scopeProjects.map(() => "?").join(", ");
-      globalRows = queryDocRows(
-        db,
-        `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project IN (${placeholders}) ORDER BY rank LIMIT 10`,
-        [safeQuery, ...scopeProjects]
-      );
-    }
-    rows = mergeUniqueDocs(rows, globalRows || []);
+  if (searchAllProjects || !detectedProject) {
+    addFtsRows(queryDocRows(
+      db,
+      "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10",
+      [safeQuery]
+    ));
+  } else {
+    const scopeProjects = [detectedProject, ...SHARED_PROJECTS];
+    const placeholders = scopeProjects.map(() => "?").join(", ");
+    addFtsRows(queryDocRows(
+      db,
+      `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project IN (${placeholders}) ORDER BY rank LIMIT 10`,
+      [safeQuery, ...scopeProjects]
+    ));
   }
 
-  if (!rows || rows.length < 2) {
-    const semanticRows = semanticFallbackDocs(db, `${prompt}\n${keywords}`, detectedProject);
-    rows = mergeUniqueDocs(rows, semanticRows);
-  }
+  // Tier 2: Token-overlap semantic — always run, scored independently
+  const semanticDocs = semanticFallbackDocs(db, `${prompt}\n${keywords}`, detectedProject);
 
-  return rows;
+  // Merge with Reciprocal Rank Fusion so documents found by both tiers rank highest
+  const merged = rrfMerge([ftsDocs, semanticDocs]);
+  if (merged.length === 0) return null;
+  return merged.slice(0, 12);
 }
 
 // ── Trust filter ─────────────────────────────────────────────────────────────
@@ -295,26 +323,30 @@ function mostRecentDate(content: string): string {
   return matches.map((m) => m.slice(3)).sort().reverse()[0];
 }
 
-function crossProjectAgeMultiplier(doc: DocRow, detectedProject: string | null): number {
-  if (doc.type !== "findings" || !detectedProject || doc.project === detectedProject) return 1;
+/** Shared helper: compute age in days from a YYYY-MM-DD date string. Returns Infinity for invalid/missing dates. */
+function ageInDaysFromDate(dateStr: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || dateStr === "0000-00-00") return Infinity;
+  const todayUtc = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
+  const entryUtc = Date.parse(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(entryUtc)) return Infinity;
+  return Math.max(0, Math.floor((todayUtc - entryUtc) / 86_400_000));
+}
 
+/** Item 3: Recency boost for findings. Recent findings rank higher. Accepts pre-computed date string. */
+function recencyBoost(docType: string, latestDate: string): number {
+  if (docType !== "findings") return 0;
+  const age = ageInDaysFromDate(latestDate);
+  if (age <= 7) return 0.3;
+  if (age <= 30) return 0.15;
+  return 0;
+}
+
+function crossProjectAgeMultiplier(doc: DocRow, detectedProject: string | null, latestDate: string): number {
+  if (doc.type !== "findings" || !detectedProject || doc.project === detectedProject) return 1;
   const decayDaysRaw = Number.parseInt(process.env.CORTEX_CROSS_PROJECT_DECAY_DAYS ?? "30", 10);
   const decayDays = Number.isFinite(decayDaysRaw) && decayDaysRaw > 0 ? decayDaysRaw : 30;
-  const latest = mostRecentDate(doc.content);
-  const todayUtc = Date.UTC(
-    new Date().getUTCFullYear(),
-    new Date().getUTCMonth(),
-    new Date().getUTCDate()
-  );
-
-  let ageInDays = 90;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(latest) && latest !== "0000-00-00") {
-    const entryUtc = Date.parse(`${latest}T00:00:00Z`);
-    if (!Number.isNaN(entryUtc)) {
-      ageInDays = Math.max(0, Math.floor((todayUtc - entryUtc) / 86_400_000));
-    }
-  }
-
+  const age = ageInDaysFromDate(latestDate);
+  const ageInDays = Number.isFinite(age) ? age : 90;
   return Math.max(0.1, 1 - (ageInDays / decayDays));
 }
 
@@ -354,6 +386,17 @@ export function rankResults(
     if (entityBoost.has(docKey)) entityBoostPaths.add(doc.path);
   }
 
+  // Pre-compute mostRecentDate once per findings doc to avoid O(n log n) regex rescans in sort.
+  const recentDateCache = new Map<string, string>();
+  for (const doc of ranked) {
+    if (doc.type === "findings") {
+      const key = doc.path || `${doc.project}/${doc.filename}`;
+      recentDateCache.set(key, mostRecentDate(doc.content));
+    }
+  }
+  const getRecentDate = (doc: DocRow): string =>
+    recentDateCache.get(doc.path || `${doc.project}/${doc.filename}`) ?? "0000-00-00";
+
   // Single composite sort — file-match boost is highest priority so relevant files
   // are not excluded by the slice. All criteria in one pass for deterministic ordering.
   const FILE_MATCH_BOOST = 1.5;
@@ -373,7 +416,7 @@ export function rankResults(
     const isFindingsB = b.type === "findings";
     if (isFindingsA !== isFindingsB) return isFindingsA ? -1 : 1;
     if (isFindingsA && isFindingsB) {
-      const byDate = mostRecentDate(b.content).localeCompare(mostRecentDate(a.content));
+      const byDate = getRecentDate(b).localeCompare(getRecentDate(a));
       if (byDate !== 0) return byDate;
     }
 
@@ -384,24 +427,28 @@ export function rankResults(
     const keyB = entryScoreKey(b.project, b.filename, b.content);
     const entityA = entityBoostPaths.has(a.path) ? 1.3 : 1;
     const entityB = entityBoostPaths.has(b.path) ? 1.3 : 1;
+    const dateA = getRecentDate(a);
+    const dateB = getRecentDate(b);
     const scoreA = (
       intentBoost(intent, a.type) +
       fileRelevanceBoost(a.path, changedFiles) +
       branchMatchBoost(a.content, gitCtx?.branch) +
       globBoostA +
       getQualityMultiplier(cortexPathLocal, keyA) +
-      entityA -
+      entityA +
+      recencyBoost(a.type, dateA) -
       lowValuePenalty(a.content, a.type)
-    ) * crossProjectAgeMultiplier(a, detectedProject);
+    ) * crossProjectAgeMultiplier(a, detectedProject, dateA);
     const scoreB = (
       intentBoost(intent, b.type) +
       fileRelevanceBoost(b.path, changedFiles) +
       branchMatchBoost(b.content, gitCtx?.branch) +
       globBoostB +
       getQualityMultiplier(cortexPathLocal, keyB) +
-      entityB -
+      entityB +
+      recencyBoost(b.type, dateB) -
       lowValuePenalty(b.content, b.type)
-    ) * crossProjectAgeMultiplier(b, detectedProject);
+    ) * crossProjectAgeMultiplier(b, detectedProject, dateB);
     // Round scores to avoid floating-point comparison instability
     const roundedA = Math.round(scoreA * 10000) / 10000;
     const roundedB = Math.round(scoreB * 10000) / 10000;

@@ -377,6 +377,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleHooksNamespace(args);
     case "backlog":
       return handleBacklogView();
+    case "projects":
+      return handleProjectsNamespace(args);
     case "quickstart":
       return handleQuickstart();
     case "background-maintenance":
@@ -1234,4 +1236,163 @@ async function handleInspectIndex(args: string[]) {
     console.log(`- ${proj}/${filename} (${docType})`);
     console.log(`  ${filePath}`);
   }
+}
+
+// ── cortex projects subcommand ────────────────────────────────────────────────
+
+async function handleProjectsNamespace(args: string[]) {
+  const subcommand = args[0];
+
+  if (!subcommand || subcommand === "list" || subcommand === "--help" || subcommand === "-h") {
+    if (subcommand === "--help" || subcommand === "-h") {
+      console.log("Usage:");
+      console.log("  cortex projects list               List all projects");
+      console.log("  cortex projects add <name>         Create a new project");
+      console.log("  cortex projects remove <name>      Remove a project (asks for confirmation)");
+      return;
+    }
+    return handleProjectsList();
+  }
+
+  if (subcommand === "add") {
+    const name = args[1];
+    if (!name) {
+      console.error("Usage: cortex projects add <name>");
+      process.exit(1);
+    }
+    return handleProjectsAdd(name);
+  }
+
+  if (subcommand === "remove") {
+    const name = args[1];
+    if (!name) {
+      console.error("Usage: cortex projects remove <name>");
+      process.exit(1);
+    }
+    return handleProjectsRemove(name);
+  }
+
+  console.error(`Unknown subcommand: ${subcommand}`);
+  console.error("Usage: cortex projects [list|add|remove]");
+  process.exit(1);
+}
+
+function handleProjectsList() {
+  const cortexPath = getCortexPath();
+  const projectDirs = getProjectDirs(cortexPath, profile);
+  const projects = projectDirs
+    .map((dir) => path.basename(dir))
+    .filter((name) => name !== "global")
+    .sort();
+
+  if (projects.length === 0) {
+    console.log("No projects found. Run: cortex projects add <name>");
+    return;
+  }
+
+  console.log(`\nProjects in ${cortexPath}:\n`);
+  for (const name of projects) {
+    const projectDir = path.join(cortexPath, name);
+    let dirFiles: Set<string>;
+    try { dirFiles = new Set(fs.readdirSync(projectDir)); } catch { dirFiles = new Set(); }
+    const tags: string[] = [];
+    if (dirFiles.has("FINDINGS.md")) tags.push("findings");
+    if (dirFiles.has("backlog.md")) tags.push("backlog");
+    const tagStr = tags.length ? `  [${tags.join(", ")}]` : "";
+    console.log(`  ${name}${tagStr}`);
+  }
+  console.log(`\n${projects.length} project(s) total.`);
+  console.log(`Add a project: cortex projects add <name>`);
+  console.log(`Add from existing repo: cortex init --from-existing ~/your-project`);
+}
+
+function handleProjectsAdd(name: string) {
+  if (!isValidProjectName(name)) {
+    console.error(`Invalid project name: "${name}". Use lowercase letters, numbers, and hyphens.`);
+    process.exit(1);
+  }
+
+  const cortexPath = getCortexPath();
+  const projectDir = path.join(cortexPath, name);
+
+  if (fs.existsSync(projectDir)) {
+    console.error(`Project "${name}" already exists at ${projectDir}`);
+    process.exit(1);
+  }
+
+  fs.mkdirSync(projectDir, { recursive: true });
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  fs.writeFileSync(
+    path.join(projectDir, "summary.md"),
+    `# ${name}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
+  );
+  fs.writeFileSync(
+    path.join(projectDir, "CLAUDE.md"),
+    `# ${name}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
+  );
+  fs.writeFileSync(
+    path.join(projectDir, "FINDINGS.md"),
+    `# ${name} Findings\n\n<!-- created: ${today} -->\n`
+  );
+  fs.writeFileSync(
+    path.join(projectDir, "backlog.md"),
+    `# ${name} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
+  );
+
+  console.log(`\nCreated project "${name}" at ${projectDir}`);
+  console.log(`\nFiles created:`);
+  console.log(`  summary.md     — one-liner description, stack, run command`);
+  console.log(`  CLAUDE.md      — project instructions for Claude`);
+  console.log(`  FINDINGS.md    — auto-captured insights`);
+  console.log(`  backlog.md     — task queue`);
+  console.log(`\nNext: edit ${projectDir}/summary.md to describe your project.`);
+}
+
+async function handleProjectsRemove(name: string) {
+  if (!isValidProjectName(name)) {
+    console.error(`Invalid project name: "${name}".`);
+    process.exit(1);
+  }
+  if (name === "global") {
+    console.error(`Cannot remove the "global" project.`);
+    process.exit(1);
+  }
+
+  const cortexPath = getCortexPath();
+  const projectDir = path.join(cortexPath, name);
+
+  if (!fs.existsSync(projectDir)) {
+    console.error(`Project "${name}" not found at ${projectDir}`);
+    process.exit(1);
+  }
+
+  // Count files to warn the user
+  let fileCount = 0;
+  const countFiles = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) countFiles(path.join(dir, entry.name));
+      else fileCount++;
+    }
+  };
+  try { countFiles(projectDir); } catch { /* best-effort */ }
+
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(
+      `Remove project "${name}" (${fileCount} file${fileCount === 1 ? "" : "s"})? This cannot be undone. Type the project name to confirm: `,
+      (a) => { rl.close(); resolve(a.trim()); }
+    );
+  });
+
+  if (answer !== name) {
+    console.log("Aborted.");
+    return;
+  }
+
+  fs.rmSync(projectDir, { recursive: true, force: true });
+  console.log(`Removed project "${name}".`);
+  console.log(`If this project was in a profile, remove it from profiles/${profile || "personal"}.yaml manually.`);
 }
