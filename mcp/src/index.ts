@@ -90,14 +90,31 @@ Environment:
   CORTEX_PATH                Override cortex directory (default: ~/.cortex)
   CORTEX_PROFILE             Active profile name
   CORTEX_DEBUG               Enable debug logging (set to 1)
-  CORTEX_EMBEDDING_API_URL   OpenAI-compatible embedding endpoint (cloud alternative to Ollama)
+  CORTEX_OLLAMA_URL          Ollama base URL (default: http://localhost:11434; set to 'off' to disable)
+  CORTEX_EMBEDDING_API_URL   OpenAI-compatible /embeddings endpoint (cloud alternative to Ollama)
   CORTEX_EMBEDDING_API_KEY   API key for CORTEX_EMBEDDING_API_URL
-  CORTEX_FEATURE_AUTO_CAPTURE=1  Extract insights from conversations at session end (written by init)
-  CORTEX_FEATURE_SEMANTIC_DEDUP=1  LLM-based dedup on add_finding: skip semantically equivalent findings
-  CORTEX_FEATURE_SEMANTIC_CONFLICT=1  LLM-based conflict detection on add_finding: annotates contradictions
-  CORTEX_LLM_MODEL           Override LLM model for semantic dedup/conflict (default: gpt-4o-mini)
-  CORTEX_LLM_ENDPOINT        OpenAI-compatible /chat/completions base URL for semantic dedup/conflict
-  CORTEX_LLM_KEY             API key for CORTEX_LLM_ENDPOINT (falls back to OPENAI_API_KEY/ANTHROPIC_API_KEY)
+  CORTEX_EMBEDDING_MODEL     Embedding model (default: nomic-embed-text)
+  CORTEX_EXTRACT_MODEL       Ollama model for memory extraction (default: llama3.2)
+  CORTEX_EMBEDDING_PROVIDER  Set to 'api' to use OpenAI API for search_knowledge embeddings
+  CORTEX_FEATURE_AUTO_CAPTURE=1      Extract insights from conversations at session end
+  CORTEX_FEATURE_SEMANTIC_DEDUP=1    LLM-based dedup on add_finding
+  CORTEX_FEATURE_SEMANTIC_CONFLICT=1 LLM-based conflict detection on add_finding
+  CORTEX_FEATURE_HYBRID_SEARCH=0     Disable TF-IDF cosine fallback in search_knowledge
+  CORTEX_FEATURE_AUTO_EXTRACT=0      Disable automatic memory extraction on each prompt
+  CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1  Compact memory index injection
+  CORTEX_LLM_MODEL           LLM model for semantic dedup/conflict (default: gpt-4o-mini)
+  CORTEX_LLM_ENDPOINT        OpenAI-compatible /chat/completions base URL for dedup/conflict
+  CORTEX_LLM_KEY             API key for CORTEX_LLM_ENDPOINT
+  CORTEX_CONTEXT_TOKEN_BUDGET    Max tokens injected per hook-prompt (default: 550)
+  CORTEX_CONTEXT_SNIPPET_LINES   Max lines per injected snippet (default: 6)
+  CORTEX_CONTEXT_SNIPPET_CHARS   Max chars per injected snippet (default: 520)
+  CORTEX_MAX_INJECT_TOKENS       Hard cap on total injected tokens (default: 2000)
+  CORTEX_BACKLOG_PRIORITY        Priorities to include in injection: high,medium,low (default: high,medium)
+  CORTEX_MEMORY_TTL_DAYS         Override memory TTL for trust filtering
+  CORTEX_HOOK_TIMEOUT_MS         Hook subprocess timeout in ms (default: 14000)
+  CORTEX_FINDINGS_CAP            Max findings per date section before consolidation (default: 20)
+  CORTEX_CONSOLIDATION_CAP       Max total findings before forced consolidation (default: 150)
+  CORTEX_GH_PR_LIMIT/RUN_LIMIT/ISSUE_LIMIT  GitHub extraction limits (defaults: 40/25/25)
 
 Examples:
   cortex search "rate limiting"          Search across all projects

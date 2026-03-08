@@ -11,7 +11,7 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 29 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 47 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findCortexPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
 | `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, memory queue, audit log |
@@ -34,7 +34,7 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 ```bash
 cd ~/cortex
 npm run build      # compile TypeScript
-npm test           # run vitest tests (1185 tests)
+npm test           # run vitest tests (1330+ tests)
 npm publish        # publish to npm (needs OTP)
 ```
 
@@ -227,6 +227,71 @@ Legacy files at the root are auto-migrated on first access.
 | `CORTEX_LLM_MODEL` | `gpt-4o-mini` / `claude-haiku-4-5-20251001` | Override the LLM model used for semantic dedup and conflict detection. |
 | `CORTEX_LLM_ENDPOINT` | — | OpenAI-compatible `/chat/completions` base URL for semantic dedup/conflict (e.g. `https://api.openai.com/v1`). When set, takes priority over the Anthropic fallback. |
 | `CORTEX_LLM_KEY` | — | API key for `CORTEX_LLM_ENDPOINT`. Also falls back to `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
+
+**Semantic / embedding:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL for local embeddings and extraction. Set to `off` to disable Ollama entirely. |
+| `CORTEX_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model used with Ollama or `CORTEX_EMBEDDING_API_URL`. |
+| `CORTEX_EXTRACT_MODEL` | `llama3.2` | Ollama model used for memory extraction (`cortex maintain extract`). |
+| `CORTEX_EMBEDDING_PROVIDER` | — | Set to `api` to enable OpenAI API embedding fallback in `search_knowledge` (requires `OPENAI_API_KEY`). |
+| `CORTEX_FEATURE_HYBRID_SEARCH` | enabled | Set to `0` to disable TF-IDF cosine fallback in `search_knowledge`. |
+
+**Feature flags:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_FEATURE_AUTO_EXTRACT` | enabled | Set to `0` to disable automatic memory extraction from project context on each prompt. |
+| `CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE` | disabled | Set to `1` to inject a compact memory index instead of full snippets; use `get_memory_detail` to expand. |
+
+**Hook context injection:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_CONTEXT_TOKEN_BUDGET` | `550` | Max tokens injected per hook-prompt call. Range: 180–10000. |
+| `CORTEX_CONTEXT_SNIPPET_LINES` | `6` | Max lines per snippet in injected context. Range: 2–100. |
+| `CORTEX_CONTEXT_SNIPPET_CHARS` | `520` | Max characters per snippet in injected context. Range: 120–10000. |
+| `CORTEX_MAX_INJECT_TOKENS` | `2000` | Hard cap on total injected tokens across all content. Range: 200–20000. |
+| `CORTEX_BACKLOG_PRIORITY` | `high,medium` | Comma-separated priorities to include in hook context backlog injection (`high`, `medium`, `low`). |
+| `CORTEX_LOW_VALUE_PATTERNS` | built-in list | Comma-separated substrings; findings matching these patterns are penalised in ranking. |
+| `CORTEX_CROSS_PROJECT_DECAY_DAYS` | `30` | Days over which cross-project findings decay in relevance score. |
+| `CORTEX_MEMORY_TTL_DAYS` | policy value | Override memory TTL (days) for hook-prompt trust filtering. |
+
+**Auto-capture:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_AUTOCAPTURE_COOLDOWN_MS` | `30000` | Minimum ms between auto-capture runs per session to avoid thrashing. |
+| `CORTEX_AUTOCAPTURE_SESSION_CAP` | `10` | Maximum findings auto-captured per session. |
+| `CORTEX_CONVERSATION_CONTEXT` | — | Inject additional conversation context for auto-capture heuristics (set by hooks). |
+
+**GitHub extraction (`cortex maintain extract`):**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_GH_PR_LIMIT` | `40` | Max PRs fetched per extraction run. Range: 5–200. |
+| `CORTEX_GH_RUN_LIMIT` | `25` | Max CI runs fetched per extraction run. Range: 5–200. |
+| `CORTEX_GH_ISSUE_LIMIT` | `25` | Max issues fetched per extraction run. Range: 5–200. |
+| `CORTEX_GH_TIMEOUT_MS` | `10000` | Timeout per GitHub API call (ms). Range: 1000–60000. |
+| `CORTEX_GH_RETRIES` | `2` | Retries per failed GitHub API call. Range: 0–5. |
+| `CORTEX_MEMORY_EXTRACT_WINDOW_DAYS` | `30` | Look-back window (days) when extracting memories from git/GitHub. |
+| `CORTEX_MEMORY_AUTO_ACCEPT` | policy value | Score threshold (0–1) above which extracted memories are auto-accepted without review. |
+
+**Content limits:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_FINDINGS_CAP` | `20` | Max findings kept per date section before triggering consolidation. |
+| `CORTEX_CONSOLIDATION_CAP` | `150` | Max total findings before forced consolidation. |
+
+**Performance and locking:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_HOOK_TIMEOUT_MS` | `14000` | Timeout (ms) for hook subprocess execution. Also controls `CORTEX_HOOK_TIMEOUT_S` in shell. |
+| `CORTEX_SLOW_FS_WARN_MS` | `3000` | Log a warning when filesystem operations (index build, etc.) exceed this threshold (ms). |
+| `CORTEX_FILE_LOCK_MAX_WAIT_MS` | `5000` | Max time (ms) to wait for a file lock before aborting. |
+| `CORTEX_FILE_LOCK_POLL_MS` | `100` | Polling interval (ms) when waiting for a file lock. |
+| `CORTEX_FILE_LOCK_STALE_MS` | `30000` | Age (ms) after which a file lock is considered stale and forcibly released. |
+
+**Access control:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORTEX_ACTOR` | `$USER` | Override the actor name used in governance audit log entries. |
 
 ## Finding Quality Rules
 

@@ -397,6 +397,9 @@ export async function runCliCommand(command: string, args: string[]) {
 
 // ── Simple command handlers (kept in cli.ts) ─────────────────────────────────
 
+// CLI search is intentionally simpler than the hook/MCP path: direct FTS5 SQL + keyword
+// fallback only. It omits RRF, token-overlap tier, entity boost, and trust filtering
+// because it is a developer browsing tool, not a context-injection pipeline.
 async function handleSearch(opts: SearchOptions) {
   if (opts.showHistory) {
     printSearchHistory();

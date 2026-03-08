@@ -122,18 +122,6 @@ function overlapScore(queryTokens: string[], content: string): number {
   return matched / denominator;
 }
 
-function mergeUniqueDocs(primary: DocRow[] | null, secondary: DocRow[]): DocRow[] | null {
-  if (!primary || !primary.length) return secondary.length ? secondary : null;
-  const seen = new Set(primary.map((r) => r.path || `${r.project}/${r.filename}`));
-  for (const doc of secondary) {
-    const key = doc.path || `${doc.project}/${doc.filename}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    primary.push(doc);
-  }
-  return primary;
-}
-
 /**
  * Item 4: Reciprocal Rank Fusion — merges ranked result lists from multiple search tiers.
  * Documents appearing in multiple tiers get a higher combined score.

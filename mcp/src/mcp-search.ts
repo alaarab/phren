@@ -24,6 +24,7 @@ import {
 import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier, } from "./shared-governance.js";
 import { getCachedEmbedding, getCachedEmbeddings, cosineSimilarity } from "./embedding.js";
+import { embedText as sharedEmbedText, getCloudEmbeddingUrl, getEmbeddingModel } from "./shared-ollama.js";
 
 const API_EMBEDDING_CANDIDATE_CAP = 500;
 const API_EMBEDDING_TIMEOUT_MS = 10_000;
@@ -212,6 +213,49 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (cosineResults.length > 0) {
             rows = cosineResults.map(d => [d.project, d.filename, d.type, d.content, d.path]);
             usedFallback = true;
+          }
+        }
+
+        // Cloud embedding fallback via CORTEX_EMBEDDING_API_URL (shared-ollama path).
+        // Activates when CORTEX_EMBEDDING_API_URL is set and results are sparse.
+        // This unifies the hook path (shared-ollama embedText) with the MCP search path.
+        if (rows && rows.length < maxResults && getCloudEmbeddingUrl()) {
+          try {
+            const cloudWork = async () => {
+              const queryEmbed = await sharedEmbedText(query);
+              if (!queryEmbed) return;
+              const filterParts: string[] = [];
+              const filterParams: (string | number)[] = [];
+              if (filterProject) { filterParts.push("project = ?"); filterParams.push(filterProject); }
+              if (filterType) { filterParts.push("type = ?"); filterParams.push(filterType); }
+              const filterWhere = filterParts.length > 0 ? " WHERE " + filterParts.join(" AND ") : "";
+              const allDocs = queryRows(db, "SELECT project, filename, type, content, path FROM docs" + filterWhere + " ORDER BY RANDOM() LIMIT ?", [...filterParams, API_EMBEDDING_CANDIDATE_CAP]);
+              if (allDocs) {
+                const existingPaths = new Set(rows!.map((r: DbRow) => String(r[4] ?? "")));
+                const candidates = allDocs.filter(doc => !existingPaths.has(String(doc[4])));
+                if (candidates.length > 0) {
+                  const scored: Array<{ row: DbRow; score: number }> = [];
+                  for (const doc of candidates) {
+                    const docEmbed = await sharedEmbedText(String(doc[3]).slice(0, 2000));
+                    if (!docEmbed) continue;
+                    const sim = cosineSimilarity(queryEmbed, docEmbed);
+                    if (sim > 0.3) scored.push({ row: doc, score: sim });
+                  }
+                  scored.sort((a, b) => b.score - a.score);
+                  const toAdd = scored.slice(0, maxResults - rows!.length);
+                  if (toAdd.length > 0) {
+                    rows = [...rows!, ...toAdd.map(s => s.row)];
+                    usedFallback = true;
+                  }
+                }
+              }
+            };
+            await Promise.race([
+              cloudWork(),
+              new Promise<never>((_, reject) => setTimeout(() => reject(new Error("cloud embedding timeout")), API_EMBEDDING_TIMEOUT_MS)),
+            ]);
+          } catch (err: unknown) {
+            debugLog(`cloud embedding fallback failed: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
 

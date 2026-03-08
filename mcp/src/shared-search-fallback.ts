@@ -2,8 +2,9 @@ import { debugLog } from "./shared.js";
 import { STOP_WORDS } from "./utils.js";
 import { porterStem } from "./shared-stemmer.js";
 import type { SqlJsDatabase, DbRow, DocRow } from "./shared-index.js";
-import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl } from "./shared-ollama.js";
+import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 import { getEmbeddingCache } from "./shared-embedding-cache.js";
+import * as fs from "fs";
 
 const HYBRID_SEARCH_FLAG = "CORTEX_FEATURE_HYBRID_SEARCH";
 const COSINE_SIMILARITY_MIN = 0.15;
@@ -251,7 +252,8 @@ export async function vectorFallback(
   excludePaths: Set<string>,
   limit: number
 ): Promise<DocRow[]> {
-  if (!getOllamaUrl()) return [];
+  // Run when either Ollama or a cloud embedding endpoint is available
+  if (!getOllamaUrl() && !getCloudEmbeddingUrl()) return [];
   const cache = getEmbeddingCache(cortexPath);
   if (cache.size() === 0) return [];
 
@@ -278,6 +280,18 @@ export async function vectorFallback(
       : filename.toLowerCase() === "claude.md" ? "claude"
       : filename.toLowerCase().includes("backlog") ? "backlog"
       : "other";
-    return { project, filename, type, content: "", path: e.path };
+
+    // Hydrate content from disk so downstream consumers (snippet extraction, ranking,
+    // entryScoreKey) have real text to work with instead of an empty string.
+    let content = "";
+    try {
+      if (e.path && fs.existsSync(e.path)) {
+        content = fs.readFileSync(e.path, "utf-8").slice(0, 10000);
+      }
+    } catch {
+      // best-effort: leave content empty if file is unreadable
+    }
+
+    return { project, filename, type, content, path: e.path };
   });
 }

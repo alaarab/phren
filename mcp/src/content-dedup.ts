@@ -425,11 +425,14 @@ async function semanticDedup(a: string, b: string, cortexPath: string): Promise<
   }
 }
 
+const CONFLICT_CHECK_TOTAL_TIMEOUT_MS = 30_000;
+
 /**
  * LLM-based conflict check. Only called when CORTEX_FEATURE_SEMANTIC_CONFLICT=1.
  * Call after detectConflicts() in addFindingToFile flow.
  * Returns conflict annotations to append to the bullet.
  * Also scans global findings and up to 2 other recent projects for cross-project contradictions.
+ * Has a 30-second total timeout; returns partial results if the deadline is hit.
  */
 export async function checkSemanticConflicts(
   cortexPath: string,
@@ -486,9 +489,16 @@ export async function checkSemanticConflicts(
   } catch { /* non-fatal: cross-project scan is best-effort */ }
 
   const annotations: string[] = [];
+  const deadline = Date.now() + CONFLICT_CHECK_TOTAL_TIMEOUT_MS;
 
-  for (const { bullets, sourceProject } of sources) {
+  outer: for (const { bullets, sourceProject } of sources) {
     for (const line of bullets) {
+      // Respect the aggregate deadline — return partial results rather than hanging
+      if (Date.now() >= deadline) {
+        debugLog("checkSemanticConflicts: total timeout reached, returning partial results");
+        break outer;
+      }
+
       const lineEntities = extractProseEntities(line);
       const shared = lineEntities.filter((e) => newEntities.includes(e));
       if (shared.length === 0) continue;
