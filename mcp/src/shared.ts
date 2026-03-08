@@ -20,6 +20,9 @@ export const CortexError = {
   AMBIGUOUS_MATCH: "AMBIGUOUS_MATCH",
   LOCK_TIMEOUT: "LOCK_TIMEOUT",
   EMPTY_INPUT: "EMPTY_INPUT",
+  VALIDATION_ERROR: "VALIDATION_ERROR",
+  INDEX_ERROR: "INDEX_ERROR",
+  NETWORK_ERROR: "NETWORK_ERROR",
 } as const;
 
 export type CortexErrorCode = typeof CortexError[keyof typeof CortexError];
@@ -120,10 +123,10 @@ export function withDefaults<T extends object>(data: Partial<T>, defaults: T): T
 // Validate that a path is a safe, existing directory
 function requireDirectory(resolved: string, label: string): string {
   if (!fs.existsSync(resolved)) {
-    throw new Error(`${label} not found: ${resolved}`);
+    throw new Error(`${CortexError.NOT_FOUND}: ${label} not found: ${resolved}`);
   }
   if (!fs.statSync(resolved).isDirectory()) {
-    throw new Error(`${label} is not a directory: ${resolved}`);
+    throw new Error(`${CortexError.VALIDATION_ERROR}: ${label} is not a directory: ${resolved}`);
   }
   return resolved;
 }
@@ -168,7 +171,7 @@ export function findCortexPathWithArg(arg?: string): string {
 export function getProjectDirs(cortexPath: string, profile?: string): string[] {
   if (profile) {
     if (!isValidProjectName(profile)) {
-      console.error(`Invalid CORTEX_PROFILE value: ${profile}`);
+      console.error(`${CortexError.VALIDATION_ERROR}: Invalid CORTEX_PROFILE value: ${profile}`);
       return [];
     }
     const profilePath = path.join(cortexPath, "profiles", `${profile}.yaml`);
@@ -181,7 +184,7 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
             .map((p: unknown) => {
               const name = String(p);
               if (!isValidProjectName(name)) {
-                console.error(`Skipping invalid project name in profile: ${name}`);
+                console.error(`${CortexError.VALIDATION_ERROR}: Skipping invalid project name in profile: ${name}`);
                 return null;
               }
               return safeProjectPath(cortexPath, name);
@@ -196,7 +199,7 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
           return [...new Set([...listed, ...sharedDirs])];
         }
       } catch {
-        console.error(`Ignoring malformed profile YAML: ${profilePath}`);
+        console.error(`${CortexError.MALFORMED_YAML}: Ignoring malformed profile YAML: ${profilePath}`);
       }
     }
   }

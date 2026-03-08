@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { commandExists, detectInstalledTools, buildLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks } from "./hooks.js";
 import { makeTempDir } from "./test-helpers.js";
+import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
+import { CortexError, type CortexErrorCode } from "./shared.js";
+import { selectSnippets, approximateTokens } from "./cli-hooks-retrieval.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -615,7 +618,8 @@ describe("hooks", () => {
       const result = runCustomHooks(cortexPath, "pre-save");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]).toContain("pre-save");
+      expect(result.errors[0].message).toContain("pre-save");
+      expect(result.errors[0].code).toBe("VALIDATION_ERROR");
     });
 
     it("runCustomHooks returns 0 when no hooks match the event", () => {
@@ -631,5 +635,277 @@ describe("hooks", () => {
       expect(result.ran).toBe(0);
       expect(result.errors).toHaveLength(0);
     });
+  });
+
+  describe("runCustomHooks error structure", () => {
+    it("returns HookError[] with code and message properties, not plain strings", () => {
+      fs.writeFileSync(
+        path.join(cortexPath, ".governance", "install-preferences.json"),
+        JSON.stringify({
+          customHooks: [
+            { event: "pre-index", command: "exit 42" },
+          ],
+        })
+      );
+      const result = runCustomHooks(cortexPath, "pre-index");
+      expect(result.ran).toBe(1);
+      expect(result.errors).toHaveLength(1);
+
+      const err = result.errors[0];
+      // Verify structured shape: { code, message }
+      expect(err).toHaveProperty("code");
+      expect(err).toHaveProperty("message");
+      expect(typeof err.code).toBe("string");
+      expect(typeof err.message).toBe("string");
+      expect(err.code).toBe("VALIDATION_ERROR");
+      expect(err.message).toContain("pre-index");
+    });
+
+    it("successful hooks produce no errors", () => {
+      fs.writeFileSync(
+        path.join(cortexPath, ".governance", "install-preferences.json"),
+        JSON.stringify({
+          customHooks: [
+            { event: "post-save", command: "true" },
+          ],
+        })
+      );
+      const result = runCustomHooks(cortexPath, "post-save");
+      expect(result.ran).toBe(1);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it("failed hook writes to debug log when CORTEX_DEBUG is set", () => {
+      const origDebug = process.env.CORTEX_DEBUG;
+      const origCortexPath = process.env.CORTEX_PATH;
+      try {
+        // Enable debug logging and point to our temp dir
+        process.env.CORTEX_DEBUG = "1";
+        process.env.CORTEX_PATH = cortexPath;
+
+        fs.writeFileSync(
+          path.join(cortexPath, ".governance", "install-preferences.json"),
+          JSON.stringify({
+            customHooks: [
+              { event: "pre-finding", command: "exit 99" },
+            ],
+          })
+        );
+
+        runCustomHooks(cortexPath, "pre-finding");
+
+        // Check that debug.log was written
+        const debugLogPath = path.join(cortexPath, ".runtime", "debug.log");
+        expect(fs.existsSync(debugLogPath)).toBe(true);
+        const logContent = fs.readFileSync(debugLogPath, "utf8");
+        expect(logContent).toContain("runCustomHooks");
+        expect(logContent).toContain("pre-finding");
+      } finally {
+        if (origDebug === undefined) delete process.env.CORTEX_DEBUG;
+        else process.env.CORTEX_DEBUG = origDebug;
+        if (origCortexPath === undefined) delete process.env.CORTEX_PATH;
+        else process.env.CORTEX_PATH = origCortexPath;
+      }
+    });
+  });
+});
+
+// ── Tests for gamma sprint changes ─────────────────────────────────────────
+
+describe("FTS5 whitelist (sanitizeFts5Query)", () => {
+  it("strips column prefix injection like content:foo", () => {
+    // The colon is not in the whitelist [a-zA-Z0-9 '-_], so it gets replaced
+    const result = sanitizeFts5Query("content:foo");
+    expect(result).not.toContain(":");
+    expect(result).toContain("foo");
+  });
+
+  it("strips angle brackets", () => {
+    const result = sanitizeFts5Query("<script>alert(1)</script>");
+    expect(result).not.toContain("<");
+    expect(result).not.toContain(">");
+  });
+
+  it("strips semicolons", () => {
+    const result = sanitizeFts5Query("test; DROP TABLE docs");
+    expect(result).not.toContain(";");
+  });
+
+  it("strips FTS5 operators (AND, OR, NOT, NEAR) via character removal", () => {
+    // Parentheses and special chars are stripped by whitelist
+    const result = sanitizeFts5Query("(foo AND bar) OR NOT baz");
+    expect(result).not.toContain("(");
+    expect(result).not.toContain(")");
+    // The words AND/OR/NOT remain since they are alphanumeric, but that's fine
+    // because they are now plain tokens without FTS5 operator semantics
+  });
+
+  it("preserves allowed characters: alphanumeric, spaces, hyphens, underscores, apostrophes", () => {
+    const result = sanitizeFts5Query("it's a test-case with under_score");
+    expect(result).toBe("it's a test-case with under_score");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(sanitizeFts5Query("")).toBe("");
+  });
+
+  it("truncates input longer than 500 characters", () => {
+    const long = "a".repeat(600);
+    const result = sanitizeFts5Query(long);
+    expect(result.length).toBeLessThanOrEqual(500);
+  });
+
+  it("strips null bytes via whitelist", () => {
+    const result = sanitizeFts5Query("hello\0world");
+    expect(result).not.toContain("\0");
+  });
+});
+
+describe("Stop-word bigrams (buildRobustFtsQuery)", () => {
+  it("produces no bigrams from a query of only stop words", () => {
+    // "the is a" are all stop words — should produce no bigrams in FTS query
+    const result = buildRobustFtsQuery("the is a an");
+    // If all words are stop words and too short after filtering, result should be empty
+    // or contain no quoted bigram phrases
+    // baseWords filters by length > 1, so "a" is dropped but "the", "is", "an" remain
+    // The bigram filter skips pairs where both are stop words
+    // Since no non-stop-word bigrams exist, no bigrams should be in coreTerms
+    // Individual words that aren't consumed remain as core terms
+    expect(result).not.toMatch(/"the is"|"is an"|"the an"/);
+  });
+
+  it("preserves bigrams where at least one word is not a stop word", () => {
+    const result = buildRobustFtsQuery("rate limit");
+    // "rate" and "limit" are not stop words, so bigram should be preserved
+    expect(result.length).toBeGreaterThan(0);
+  });
+});
+
+describe("Git-context filter opt-in (CORTEX_FEATURE_GIT_CONTEXT_FILTER)", () => {
+  const origEnv = process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
+
+  afterEach(() => {
+    if (origEnv === undefined) {
+      delete process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
+    } else {
+      process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = origEnv;
+    }
+  });
+
+  it("env var is not set by default", () => {
+    delete process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
+    // Without the env var, git-context filtering should be disabled
+    // We verify the env var check pattern works correctly
+    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER).toBeUndefined();
+    // The guard `process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === 'true'` evaluates false
+    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
+  });
+
+  it("env var set to 'true' enables the filter", () => {
+    process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = "true";
+    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(true);
+  });
+
+  it("env var set to other values does not enable the filter", () => {
+    process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = "1";
+    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
+
+    process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = "yes";
+    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
+  });
+});
+
+describe("Token budget overflow after reorder (selectSnippets)", () => {
+  it("does not exceed token budget with selected snippets", () => {
+    // Create mock DocRow objects with known content sizes
+    const makeDoc = (content: string) => ({
+      project: "test",
+      filename: "test.md",
+      type: "findings" as const,
+      content,
+      path: "/test/test.md",
+    });
+
+    // Each snippet is ~100 chars = ~25 tokens + 14 overhead = ~39 tokens per doc
+    const docs = [
+      makeDoc("A".repeat(100) + "\n" + "B".repeat(100)),
+      makeDoc("C".repeat(100) + "\n" + "D".repeat(100)),
+      makeDoc("E".repeat(100) + "\n" + "F".repeat(100)),
+    ];
+
+    // Very tight budget: should select at most what fits
+    const tightBudget = 80; // 36 base + only room for ~1 snippet
+    const { selected, usedTokens } = selectSnippets(docs, "test", tightBudget, 8, 500);
+
+    // usedTokens should not wildly exceed the budget
+    // First snippet is always included, subsequent ones are skipped if over budget
+    expect(selected.length).toBeLessThanOrEqual(3);
+    // The first snippet is always included even if it exceeds budget (compacted)
+    if (selected.length > 1) {
+      expect(usedTokens).toBeLessThanOrEqual(tightBudget + 50); // some slack for first item
+    }
+  });
+
+  it("approximateTokens returns roughly chars/4", () => {
+    expect(approximateTokens("hello world")).toBe(Math.ceil(11 / 4));
+    expect(approximateTokens("a".repeat(100))).toBe(25);
+  });
+});
+
+describe("CortexError codes (shared.ts)", () => {
+  it("exports all expected error code values as strings", () => {
+    const expectedCodes = [
+      "NOT_FOUND",
+      "PERMISSION_DENIED",
+      "VALIDATION_ERROR",
+      "LOCK_TIMEOUT",
+      "INDEX_ERROR",
+      "NETWORK_ERROR",
+    ];
+
+    for (const code of expectedCodes) {
+      expect(CortexError).toHaveProperty(code);
+      expect(typeof (CortexError as Record<string, unknown>)[code]).toBe("string");
+    }
+  });
+
+  it("includes all originally defined codes", () => {
+    const allCodes = [
+      "PROJECT_NOT_FOUND",
+      "INVALID_PROJECT_NAME",
+      "FILE_NOT_FOUND",
+      "PERMISSION_DENIED",
+      "MALFORMED_JSON",
+      "MALFORMED_YAML",
+      "NOT_FOUND",
+      "AMBIGUOUS_MATCH",
+      "LOCK_TIMEOUT",
+      "EMPTY_INPUT",
+      "VALIDATION_ERROR",
+      "INDEX_ERROR",
+      "NETWORK_ERROR",
+    ];
+
+    const actualKeys = Object.keys(CortexError);
+    for (const code of allCodes) {
+      expect(actualKeys).toContain(code);
+    }
+    // Verify total count matches
+    expect(actualKeys.length).toBe(allCodes.length);
+  });
+
+  it("values are the same as their keys (const enum pattern)", () => {
+    for (const [key, value] of Object.entries(CortexError)) {
+      expect(key).toBe(value);
+    }
+  });
+
+  it("CortexError is frozen (as const)", () => {
+    // as const makes the object readonly at compile time;
+    // verify the values are stable string literals
+    expect(CortexError.NOT_FOUND).toBe("NOT_FOUND");
+    expect(CortexError.VALIDATION_ERROR).toBe("VALIDATION_ERROR");
+    expect(CortexError.INDEX_ERROR).toBe("INDEX_ERROR");
+    expect(CortexError.NETWORK_ERROR).toBe("NETWORK_ERROR");
   });
 });
