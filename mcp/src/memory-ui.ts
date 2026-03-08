@@ -366,17 +366,25 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   const authField = authToken ? `<input type="hidden" name="_auth" value="${h(authToken)}" />` : "";
   const hiddenFields = csrfField + authField;
 
+  const reviewMachines = new Set<string>();
+  const reviewModels = new Set<string>();
+  const reviewProjects = new Set<string>();
+
   for (const project of projects) {
     const queueResult = readReviewQueue(cortexPath, project);
     const items = queueResult.ok ? queueResult.data : [];
     if (!items.length) continue;
+    reviewProjects.add(project);
     for (const item of items) {
+      if (item.machine) reviewMachines.add(item.machine);
+      if (item.model) reviewModels.add(item.model);
       rows.push(`
-        <div class="review-card">
+        <div class="review-card" data-project="${h(project)}" data-machine="${h(item.machine || "")}" data-model="${h(item.model || "")}">
           <div class="review-card-header">
             <span class="badge badge-project">${h(project)}</span>
             <span class="badge">${h(item.section)}</span>${item.machine ? `
-            <span class="badge" style="background:#e0e7ff;color:#3730a3;font-size:11px" title="Captured on machine: ${h(item.machine)}">${h(item.machine)}</span>` : ""}
+            <span class="badge" style="background:#e0e7ff;color:#3730a3;font-size:11px" title="Captured on machine: ${h(item.machine)}">${h(item.machine)}</span>` : ""}${item.model && item.model !== "unknown" ? `
+            <span class="badge" style="background:#fef3c7;color:#92400e;font-size:11px" title="Model: ${h(item.model)}">${h(item.model)}</span>` : ""}
             <span class="text-muted" style="font-size:12px;margin-left:auto">${h(item.date)}</span>
           </div>
           <div class="review-card-text">${h(item.text)}</div>
@@ -411,6 +419,11 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       `);
     }
   }
+
+  const filterProjectOptions = [...reviewProjects].sort().map(p => `<option value="${h(p)}">${h(p)}</option>`).join("");
+  const filterMachineOptions = [...reviewMachines].sort().map(m => `<option value="${h(m)}">${h(m)}</option>`).join("");
+  const filterModelOptions = [...reviewModels].sort().map(m => `<option value="${h(m)}">${h(m)}</option>`).join("");
+  const hasFilters = reviewProjects.size > 0;
 
   const acceptedItems = accepted.map((l) => `<li>${h(l)}</li>`).join("\n");
   const usageItems = usage.map((l) => `<li>${h(l)}</li>`).join("\n");
@@ -644,6 +657,25 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     }
 
     /* ── Review Tab ──────────────────────────────────────────── */
+    .review-filters {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .review-filters select {
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-family: var(--font);
+      background: var(--surface);
+      outline: none;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+    .review-filters select:focus { border-color: var(--accent); }
     .review-cards { display: flex; flex-direction: column; gap: 12px; }
     .review-card {
       background: var(--surface);
@@ -1062,6 +1094,22 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Items here are memories flagged for review. Approve to keep, Reject to discard.</p>
 
+    ${hasFilters ? `<div class="review-filters">
+      <select id="review-filter-project" onchange="filterReviewCards()">
+        <option value="">All projects</option>
+        ${filterProjectOptions}
+      </select>
+      <select id="review-filter-machine" onchange="filterReviewCards()">
+        <option value="">All machines</option>
+        ${filterMachineOptions}
+      </select>
+      <select id="review-filter-model" onchange="filterReviewCards()">
+        <option value="">All models</option>
+        ${filterModelOptions}
+      </select>
+      <span id="review-filter-count" class="text-muted" style="font-size:12px;margin-left:8px"></span>
+    </div>` : ""}
+
     <div class="review-cards">
       ${rows.join("\n") || '<div style="text-align:center;padding:40px;color:var(--muted)">No items in the review queue.</div>'}
     </div>
@@ -1220,6 +1268,29 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     if (!editSection) return;
     var isVisible = editSection.style.display !== 'none';
     editSection.style.display = isVisible ? 'none' : 'block';
+  };
+
+  window.filterReviewCards = function() {
+    var fp = document.getElementById('review-filter-project');
+    var fm = document.getElementById('review-filter-machine');
+    var fmod = document.getElementById('review-filter-model');
+    if (!fp) return;
+    var project = fp.value;
+    var machine = fm ? fm.value : '';
+    var model = fmod ? fmod.value : '';
+    var cards = document.querySelectorAll('.review-card');
+    var shown = 0;
+    var total = cards.length;
+    cards.forEach(function(card) {
+      var cp = card.getAttribute('data-project') || '';
+      var cm = card.getAttribute('data-machine') || '';
+      var cmod = card.getAttribute('data-model') || '';
+      var show = (!project || cp === project) && (!machine || cm === machine) && (!model || cmod === model);
+      card.style.display = show ? '' : 'none';
+      if (show) shown++;
+    });
+    var countEl = document.getElementById('review-filter-count');
+    if (countEl) countEl.textContent = shown < total ? (shown + ' of ' + total) : '';
   };
 
   window.selectProject = function(name, el) {

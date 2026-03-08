@@ -121,7 +121,8 @@ function prepareFinding(
     file: citationInput?.file,
   });
   const hostname = os.hostname();
-  let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} <!-- created: ${today} --> <!-- machine: ${hostname} -->`;
+  const model = process.env.CLAUDE_MODEL || "unknown";
+  let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} <!-- created: ${today} --> <!-- source: machine:${hostname} model:${model} -->`;
 
   if (isDuplicateFinding(fullHistory, bullet)) {
     return { status: "duplicate" };

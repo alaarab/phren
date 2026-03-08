@@ -7,8 +7,9 @@ import {
   getProjectDirs,
   EXEC_TIMEOUT_QUICK_MS,
   debugLog,
+  isRecord,
 } from "./shared.js";
-import { detectProject } from "./shared-index.js";
+import { detectProject, findFtsCacheForPath } from "./shared-index.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
@@ -53,6 +54,14 @@ function runGit(cwd: string, args: string[]): string | null {
   return runGitShared(cwd, args, EXEC_TIMEOUT_QUICK_MS, debugLog);
 }
 
+function hasCommandHook(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some((entry) => {
+    if (!isRecord(entry) || !Array.isArray(entry.hooks)) return false;
+    return entry.hooks.some((hook) => isRecord(hook) && typeof hook.command === "string" && hook.command.includes("cortex"));
+  });
+}
+
 export async function runStatus() {
   const cortexPath = findCortexPath();
   if (!cortexPath) {
@@ -92,18 +101,14 @@ export async function runStatus() {
   let mcpConfigured = false;
   if (fs.existsSync(settingsPath)) {
     try {
-      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-      mcpConfigured = Boolean(settings.mcpServers?.cortex || settings.servers?.cortex);
+      const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as unknown;
+      const settings = isRecord(parsed) ? parsed : {};
+      const mcpServers = isRecord(settings.mcpServers) ? settings.mcpServers : undefined;
+      const servers = isRecord(settings.servers) ? settings.servers : undefined;
+      const hooks = isRecord(settings.hooks) ? settings.hooks : undefined;
+      mcpConfigured = Boolean(mcpServers?.cortex || servers?.cortex);
       const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
-      hooksInstalled = hookEvents.every((event) => {
-        const hooks = settings.hooks?.[event];
-        if (!Array.isArray(hooks)) return false;
-        return hooks.some((h: any) =>
-          h.hooks?.some((hook: any) =>
-            typeof hook.command === "string" && hook.command.includes("cortex")
-          )
-        );
-      });
+      hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
     } catch (err: unknown) {
       if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
     }
@@ -115,16 +120,9 @@ export async function runStatus() {
   let ftsIndexOk = false;
   let ftsIndexSize = 0;
   try {
-    const userSuffix = os.userInfo().username || "default";
-    const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
-    if (fs.existsSync(cacheDir)) {
-      const dbFiles = fs.readdirSync(cacheDir).filter(f => f.endsWith(".db"));
-      if (dbFiles.length > 0) {
-        const stat = fs.statSync(path.join(cacheDir, dbFiles[0]));
-        ftsIndexOk = stat.size > 0;
-        ftsIndexSize = stat.size;
-      }
-    }
+    const cache = findFtsCacheForPath(cortexPath, profile);
+    ftsIndexOk = cache.exists;
+    ftsIndexSize = cache.sizeBytes ?? 0;
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusFtsIndex: ${err instanceof Error ? err.message : String(err)}\n`);
   }

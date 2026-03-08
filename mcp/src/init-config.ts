@@ -9,6 +9,7 @@ import { execFileSync } from "child_process";
 import { buildLifecycleCommands } from "./hooks.js";
 import {
   EXEC_TIMEOUT_QUICK_MS,
+  isRecord,
 } from "./shared.js";
 import { isFeatureEnabled, errorMessage } from "./utils.js";
 
@@ -24,15 +25,30 @@ interface HookEntry {
   hooks?: Array<{ type?: string; command?: string; timeout?: number }>;
 }
 
+type HookEventName = "UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse";
+type HookMap = Partial<Record<HookEventName, HookEntry[]>> & Record<string, unknown>;
+type JsonObject = Record<string, unknown> & {
+  hooks?: HookMap;
+  mcpServers?: Record<string, unknown>;
+  servers?: Record<string, unknown>;
+};
+
 function log(msg: string) {
   process.stdout.write(msg + "\n");
 }
 
-export function patchJsonFile(filePath: string, patch: (data: Record<string, any>) => void) {
-  let data: Record<string, any> = {};
+function getObjectProp(value: JsonObject, key: string): JsonObject | undefined {
+  const candidate = value[key];
+  return isRecord(candidate) ? candidate : undefined;
+}
+
+export function patchJsonFile(filePath: string, patch: (data: JsonObject) => void) {
+  let data: JsonObject = {};
   if (fs.existsSync(filePath)) {
     try {
-      data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+      if (!isRecord(parsed)) throw new Error("top-level JSON value must be an object");
+      data = parsed;
     } catch (err) {
       throw new Error(`Malformed JSON in ${filePath}: ${errorMessage(err)}`);
     }
@@ -89,25 +105,32 @@ function buildMcpServerConfig(cortexPath: string) {
 }
 
 export function upsertMcpServer(
-  data: Record<string, any>,
+  data: JsonObject,
   mcpEnabled: boolean,
   preferredRoot: McpRootKey,
   cortexPath: string
 ): McpConfigStatus {
-  const hadMcp = Boolean(data.mcpServers?.cortex || data.servers?.cortex);
+  const mcpServers = getObjectProp(data, "mcpServers");
+  const servers = getObjectProp(data, "servers");
+  const hadMcp = Boolean(mcpServers?.cortex || servers?.cortex);
   if (mcpEnabled) {
     const staleKey: McpRootKey = preferredRoot === "mcpServers" ? "servers" : "mcpServers";
-    if (data[staleKey]?.cortex) {
-      delete data[staleKey].cortex;
-      if (Object.keys(data[staleKey]).length === 0) delete data[staleKey];
+    const staleRoot = getObjectProp(data, staleKey);
+    if (staleRoot?.cortex) {
+      delete staleRoot.cortex;
+      if (Object.keys(staleRoot).length === 0) delete data[staleKey];
     }
-    if (!data[preferredRoot] || typeof data[preferredRoot] !== "object") data[preferredRoot] = {};
-    data[preferredRoot].cortex = buildMcpServerConfig(cortexPath);
+    let preferredRootValue = getObjectProp(data, preferredRoot);
+    if (!preferredRootValue) {
+      preferredRootValue = {};
+      data[preferredRoot] = preferredRootValue;
+    }
+    preferredRootValue.cortex = buildMcpServerConfig(cortexPath);
     return hadMcp ? "already_configured" : "installed";
   }
 
-  if (data.mcpServers?.cortex) delete data.mcpServers.cortex;
-  if (data.servers?.cortex) delete data.servers.cortex;
+  if (mcpServers?.cortex) delete mcpServers.cortex;
+  if (servers?.cortex) delete servers.cortex;
   return hadMcp ? "disabled" : "already_disabled";
 }
 
@@ -232,10 +255,11 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
     if (status === "already_disabled") status = settingsStatus;
 
     if (!data.hooks) data.hooks = {};
+    const hooksMap = data.hooks as Record<string, unknown>;
 
     const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", hookBody: { type: string; command: string; timeout?: number }) => {
-      if (!Array.isArray(data.hooks[eventName])) data.hooks[eventName] = [];
-      const eventHooks = data.hooks[eventName] as HookEntry[];
+      if (!Array.isArray(hooksMap[eventName])) hooksMap[eventName] = [];
+      const eventHooks = hooksMap[eventName] as HookEntry[];
       const marker = eventName === "UserPromptSubmit" ? "hook-prompt"
         : eventName === "Stop" ? "hook-stop"
         : eventName === "PostToolUse" ? "hook-tool"

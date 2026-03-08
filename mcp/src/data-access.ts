@@ -80,6 +80,7 @@ export interface QueueItem {
   confidence?: number;
   risky: boolean;
   machine?: string;
+  model?: string;
 }
 
 export interface ProfileInfo {
@@ -718,18 +719,32 @@ export function removeFinding(cortexPath: string, project: string, match: string
 // Use shared queueFilePath from utils.ts; alias for local brevity.
 const queuePath = queueFilePath;
 
-function parseQueueLine(line: string): { date?: string; text: string; confidence?: number; machine?: string } {
+function parseQueueLine(line: string): { date?: string; text: string; confidence?: number; machine?: string; model?: string } {
   const parsed = line.match(/^- \[(\d{4}-\d{2}-\d{2})\]\s*(.+)$/);
   const rawText = parsed ? parsed[2] : line.replace(/^-\s+/, "").trim();
   const confidence = rawText.match(/\[confidence\s+([01](?:\.\d+)?)\]/i);
-  const machineMatch = line.match(/<!--\s*machine:\s*([^>]+?)\s*-->/);
+  // Parse combined source annotation: <!-- source: machine:hostname model:model-name -->
+  const sourceMatch = line.match(/<!--\s*source:\s*(.*?)\s*-->/);
+  let machine: string | undefined;
+  let model: string | undefined;
+  if (sourceMatch) {
+    const machineField = sourceMatch[1].match(/machine:(\S+)/);
+    const modelField = sourceMatch[1].match(/model:(\S+)/);
+    machine = machineField?.[1];
+    model = modelField?.[1];
+  } else {
+    // Backward compat: legacy <!-- machine: hostname --> format
+    const legacyMachine = line.match(/<!--\s*machine:\s*([^>]+?)\s*-->/);
+    machine = legacyMachine?.[1]?.trim();
+  }
   // Strip the confidence marker from the canonical text so it doesn't pollute FINDINGS.md
   const text = rawText.replace(/\s*\[confidence\s+[01](?:\.\d+)?\]/gi, "").trim();
   return {
     date: parsed?.[1],
     text,
     confidence: confidence ? Number.parseFloat(confidence[1]) : undefined,
-    machine: machineMatch?.[1]?.trim(),
+    machine,
+    model,
   };
 }
 
@@ -767,6 +782,7 @@ export function readReviewQueue(cortexPath: string, project: string): CortexResu
       confidence: parsed.confidence,
       risky,
       machine: parsed.machine,
+      model: parsed.model,
     });
     index++;
   }

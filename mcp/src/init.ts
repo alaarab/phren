@@ -884,12 +884,12 @@ export async function runUninstall() {
           const hooks = data.hooks?.[hookEvent] as HookEntry[] | undefined;
           if (!Array.isArray(hooks)) continue;
           const before = hooks.length;
-          data.hooks[hookEvent] = hooks.filter(
+          (data.hooks as Record<string, unknown>)[hookEvent] = hooks.filter(
             (h: HookEntry) => !h.hooks?.some(
               (hook) => typeof hook.command === "string" && isCortexCommand(hook.command)
             )
           );
-          const removed = before - (data.hooks[hookEvent] as HookEntry[]).length;
+          const removed = before - ((data.hooks as Record<string, unknown>)[hookEvent] as HookEntry[]).length;
           if (removed > 0) log(`  Removed ${removed} cortex hook(s) from ${hookEvent}`);
         }
       });

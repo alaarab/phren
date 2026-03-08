@@ -260,6 +260,24 @@ describe.sequential("mcp mode configuration", () => {
     expect(() => configureClaude(cortexPath, { mcpEnabled: true })).toThrow("Malformed JSON");
   });
 
+  it("rejects null JSON roots in provider config files", () => {
+    const claudeDir = path.join(homeDir, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = path.join(claudeDir, "settings.json");
+    fs.writeFileSync(settingsPath, "null");
+
+    expect(() => configureClaude(cortexPath, { mcpEnabled: true })).toThrow("top-level JSON value must be an object");
+  });
+
+  it("rejects array JSON roots in provider config files", () => {
+    const claudeDir = path.join(homeDir, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = path.join(claudeDir, "settings.json");
+    fs.writeFileSync(settingsPath, "[]");
+
+    expect(() => configureClaude(cortexPath, { mcpEnabled: true })).toThrow("top-level JSON value must be an object");
+  });
+
   it("preserves non-cortex hooks when configuring (isCortexCommand filtering)", () => {
     const claudeDir = path.join(homeDir, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });

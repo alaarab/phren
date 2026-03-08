@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as crypto from "crypto";
-import * as path from "path";
 import { runtimeFile, debugLog } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
@@ -13,31 +12,53 @@ interface EmbeddingEntry {
 
 type EmbeddingMap = Record<string, EmbeddingEntry>;
 
+function isEmbeddingEntry(value: unknown): value is EmbeddingEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<EmbeddingEntry>;
+  return typeof candidate.model === "string"
+    && Array.isArray(candidate.vec)
+    && candidate.vec.every((n) => typeof n === "number" && Number.isFinite(n))
+    && typeof candidate.at === "string";
+}
+
+function readEmbeddingMapFromDisk(filePath: string): EmbeddingMap {
+  const raw = fs.readFileSync(filePath, "utf-8");
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Embedding cache must be a JSON object");
+  }
+  const data: EmbeddingMap = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (isEmbeddingEntry(v)) data[k] = v;
+  }
+  return data;
+}
+
 export class EmbeddingCache {
   private cortexPath: string;
   private cache: Map<string, EmbeddingEntry> = new Map();
   private dirty = false;
+  private dirtyUpserts = new Set<string>();
+  private dirtyDeletes = new Set<string>();
 
   constructor(cortexPath: string) {
     this.cortexPath = cortexPath;
   }
 
   async load(): Promise<void> {
+    if (this.dirty) return;
     const filePath = runtimeFile(this.cortexPath, "embeddings.json");
     try {
-      const raw = fs.readFileSync(filePath, "utf-8");
-      const data = JSON.parse(raw) as EmbeddingMap;
-      for (const [k, v] of Object.entries(data)) {
-        if (v && typeof v.model === "string" && Array.isArray(v.vec) && typeof v.at === "string") {
-          this.cache.set(k, v);
-        }
-      }
+      const data = readEmbeddingMapFromDisk(filePath);
+      this.cache = new Map(Object.entries(data));
       debugLog(`EmbeddingCache loaded: ${this.cache.size} entries`);
     } catch (err: unknown) {
       const code = err instanceof Error && "code" in err ? String((err as NodeJS.ErrnoException).code ?? "") : "";
-      if (code !== "ENOENT") {
-        debugLog(`EmbeddingCache load failed for ${filePath}: ${errorMessage(err)}`);
+      if (code === "ENOENT") {
+        this.cache.clear();
+        return;
       }
+      debugLog(`EmbeddingCache load failed for ${filePath}: ${errorMessage(err)}`);
     }
   }
 
@@ -50,29 +71,43 @@ export class EmbeddingCache {
   set(docPath: string, model: string, vec: number[]): void {
     this.cache.set(docPath, { model, vec, at: new Date().toISOString().slice(0, 10) });
     this.dirty = true;
+    this.dirtyUpserts.add(docPath);
+    this.dirtyDeletes.delete(docPath);
   }
 
   delete(docPath: string): void {
-    if (this.cache.has(docPath)) {
-      this.cache.delete(docPath);
-      this.dirty = true;
-    }
+    this.cache.delete(docPath);
+    this.dirty = true;
+    this.dirtyDeletes.add(docPath);
+    this.dirtyUpserts.delete(docPath);
   }
 
   async flush(): Promise<void> {
     if (!this.dirty) return;
     const filePath = runtimeFile(this.cortexPath, "embeddings.json");
-    const data: EmbeddingMap = {};
-    for (const [k, v] of this.cache.entries()) data[k] = v;
     try {
       withFileLock(filePath, () => {
+        let data: EmbeddingMap = {};
+        try {
+          if (fs.existsSync(filePath)) data = readEmbeddingMapFromDisk(filePath);
+        } catch (err: unknown) {
+          debugLog(`EmbeddingCache flush merge read failed for ${filePath}: ${errorMessage(err)}`);
+        }
+        for (const key of this.dirtyDeletes) delete data[key];
+        for (const key of this.dirtyUpserts) {
+          const entry = this.cache.get(key);
+          if (entry) data[key] = entry;
+        }
         const tmp = filePath + `.tmp-${crypto.randomUUID()}`;
         fs.writeFileSync(tmp, JSON.stringify(data));
         fs.renameSync(tmp, filePath);
+        this.cache = new Map(Object.entries(data));
       });
       this.dirty = false;
-    } catch (e) {
-      debugLog(`EmbeddingCache flush error: ${e instanceof Error ? e.message : String(e)}`);
+      this.dirtyUpserts.clear();
+      this.dirtyDeletes.clear();
+    } catch (err: unknown) {
+      debugLog(`EmbeddingCache flush error: ${errorMessage(err)}`);
     }
   }
 
