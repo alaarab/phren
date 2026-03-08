@@ -1,6 +1,6 @@
 {
   "name": "@alaarab/cortex",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "description": "Long-term memory for AI agents. Stored as markdown in a git repo you own.",
   "type": "module",
   "bin": {
@@ -12,21 +12,21 @@
     "skills"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@xenova/transformers": "^2.17.2",
-    "glob": "^12.0.0",
-    "js-yaml": "^4.1.0",
+    "glob": "^13.0.6",
+    "js-yaml": "^4.1.1",
     "sql.js-fts5": "^1.4.0",
-    "zod": "^4.0.0"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/js-yaml": "^4.0.0",
-    "@types/node": "^22.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.3.5",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
-    "eslint": "^10.0.2",
-    "tsx": "^4.0.0",
-    "typescript": "^5.7.0",
+    "eslint": "^10.0.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "scripts": {

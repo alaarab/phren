@@ -53,13 +53,13 @@
 \title{\vspace{-1.2em}Long-Term Memory for Coding Agents\\
 \large Architecture, Governance, Multi-Agent Coordination, and Comparative Evaluation}
 \author{Cortex Project}
-\date{March 6, 2026 \quad\textbar\quad v1.11.1}
+\date{March 7, 2026 \quad\textbar\quad v1.15.0}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Persistent memory is now a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. Cortex v1.11.1 includes a policy engine (retention, decay, access control), an interactive shell for direct memory management, index-level filtering, and first-class support for multi-agent coordination. The report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, provides a cost model with worked examples, and proposes a reproducible benchmark protocol. The central argument is operational: in real engineering teams, memory quality must be optimized jointly with auditability, governance, portability, and token predictability.
+Persistent memory is a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. Cortex v1.15.0 ships a policy engine (retention, decay, access control), an interactive shell for direct memory management, index-level filtering, first-class multi-agent coordination, user-extensible synonym configuration, cross-project age-decay ranking, per-project skill injection controls, and a skills/hooks management CLI. The report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, provides a cost model with worked examples, and proposes a reproducible benchmark protocol. The core argument is operational: in real engineering teams, memory quality has to be optimized alongside auditability, governance, portability, and token predictability.
 \end{abstract}
 
 \section{Executive Summary}
@@ -171,7 +171,7 @@ Three hook stages automate retrieval and persistence \cite{cortex-cli,cortex-hoo
   \item \texttt{UserPromptSubmit}: extracts keywords, expands synonyms, searches the index, injects relevant snippets within the token budget ($\approx$550 tokens, 6 lines, 520 chars per snippet). Also checks consolidation thresholds and fires a one-per-session notice when the project has accumulated $\geq$25 new learnings.
   \item \texttt{Stop}: auto-commits and pushes all cortex changes after every response, including subagent responses.
 \end{enumerate}
-This reduces dependence on manual tool invocation and lowers workflow variance across sessions.
+This cuts manual tool invocations and keeps session behavior consistent.
 
 \subsection{Governance}
 \label{sec:governance}
@@ -318,7 +318,7 @@ Column definitions: \textbf{Ease} = zero-to-working setup friction (H=easy). \te
 \toprule
 \textbf{System} & \textbf{Ease} & \textbf{Token ctrl} & \textbf{Governance} & \textbf{Audit} & \textbf{Trust} & \textbf{Multi-agent} & \textbf{Shell/CLI} & \textbf{Daily ops} & \textbf{Lock-in} \\
 \midrule
-Cortex 1.11.1   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreLklo}L \\
+Cortex 1.14.0   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreLklo}L \\
 Supermemory     & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
 claude-mem      & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M \\
 Copilot Memory  & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
@@ -387,9 +387,9 @@ Without memory injection (no Cortex overhead):
 &\approx \$41.25/\mathrm{mo}
 \end{align*}
 
-\textbf{Memory overhead: \$4.13/mo} at 500 prompts. At 5,000 prompts/month, the overhead is \$41.25 -- still modest relative to the value of reduced repetition and context re-entry. If Cortex prevents even two engineer-hours of re-explanation per month (at a loaded rate of \$100/hr), the economics strongly favor injection.
+\textbf{Memory overhead: \$4.13/mo} at 500 prompts. At 5,000 prompts/month, the overhead is \$41.25 --- still modest relative to the value of reduced repetition and context re-entry. Two engineer-hours of re-explanation prevented per month (at a loaded rate of \$100/hr) makes the economics straightforward.
 
-The labor and governance terms are harder to model but often larger. A team that spends 30 minutes/week on memory triage pays roughly \$200/mo in loaded time -- which argues for governance automation over manual review.
+The labor and governance terms are harder to model but often larger. A team spending 30 minutes/week on memory triage pays roughly \$200/mo in loaded time --- which argues for governance automation over manual review.
 
 \subsection{Practical measurement panel}
 \begin{table}[h]
@@ -434,18 +434,18 @@ This section addresses the retrieval tradeoff the paper has been sidestepping: C
 
 \textbf{The honest comparison:} semantic search (e.g., Supermemory's embedding layer) genuinely retrieves better on paraphrase and synonym-heavy queries. Cortex's FTS5 approach retrieves better when the user knows the exact terminology, when offline operation or auditability are required, and when zero retrieval-side token cost matters.
 
-A hybrid approach -- FTS5 for exact matches, embedding fallback for low-result queries -- closes most of the gap. Cortex now implements this as an opt-in feature (see Section~\ref{sec:hybrid}).
+A hybrid approach -- FTS5 for exact matches, embedding fallback for low-result queries -- closes most of the gap. Cortex implements this by default (see Section~\ref{sec:hybrid}).
 
 \subsection{Hybrid Search: FTS5 + Cosine Fallback}
 \label{sec:hybrid}
 
-Cortex implements a local hybrid retrieval mode, activated by the environment flag \texttt{CORTEX\_FEATURE\_HYBRID\_SEARCH=1} (default off, no regression for existing users).
+Cortex implements a local hybrid retrieval mode, enabled by default as of v1.15.0; disable with \texttt{CORTEX\_FEATURE\_HYBRID\_SEARCH=0}.
 
 The retrieval pipeline works as follows:
 
 \begin{enumerate}
   \item \textbf{FTS5 primary}: run the standard BM25 query with synonym expansion. If 3 or more results are returned, stop here.
-  \item \textbf{Cosine fallback}: when FTS5 returns fewer than 3 results, compute TF-IDF cosine similarity between the query and all indexed documents. Return the top-scoring documents above a similarity threshold of 0.05, filling remaining result slots up to the limit.
+  \item \textbf{Cosine fallback}: when FTS5 returns fewer than 3 results, compute TF-IDF cosine similarity between the query and all indexed documents. Return the top-scoring documents above a similarity threshold of 0.25, filling remaining result slots up to the limit.
   \item \textbf{Deduplication}: FTS5 results come first. Cosine results are excluded by rowid to avoid duplicates. FTS5 results are always preferred because they represent exact token matches.
   \item \textbf{Performance guard}: if the corpus exceeds 10,000 documents, the cosine fallback is skipped entirely. TF-IDF over a large corpus is $O(n \cdot k)$ where $k$ is the vocabulary size; this is acceptable for personal knowledge bases (typically hundreds to low thousands of documents) but not for very large deployments.
 \end{enumerate}
@@ -537,14 +537,6 @@ Managed alternatives remain strong choices where integration speed and platform 
 
 \FloatBarrier
 \bigskip
-\appendix
-\section*{Artifact Map}
-\small
-\begin{itemize}
-  \item Main LaTeX source: \texttt{docs/whitepaper.tex}
-  \item Compiled PDF: \texttt{docs/whitepaper.pdf}
-\end{itemize}
-
 \small
 \sloppy
 \begin{thebibliography}{99}
