@@ -13,8 +13,6 @@ import {
 } from "./shared.js";
 import {
   getRetentionPolicy,
-  flushEntryScores,
-  appendReviewQueue,
 } from "./shared-governance.js";
 import {
   buildIndex,
@@ -97,7 +95,6 @@ import { buildHookOutput } from "./cli-hooks-output.js";
 import {
   getGitContext,
   trackSessionMetrics,
-  scheduleBackgroundMaintenance,
 } from "./cli-hooks-session.js";
 import { approximateTokens } from "./cli-hooks-retrieval.js";
 
@@ -266,15 +263,10 @@ export async function handleHookPrompt() {
       trackSessionMetrics(getCortexPath(), sessionId, budgetSelected, changedCount);
     }
 
-    flushEntryScores(getCortexPath());
-    scheduleBackgroundMaintenance(getCortexPath());
-
-    // Write trust-filter queue items and audit log AFTER output is built — retrieval is side-effect-free.
-    for (const { project, section, items } of trustResult.queueItems) {
-      appendReviewQueue(getCortexPath(), project, section, items);
-    }
-    for (const entry of trustResult.auditEntries) {
-      appendAuditLog(getCortexPath(), "trust_filter", entry);
+    // Reads stay side-effect free: trust filter output informs ranking/snippets now,
+    // while queue/audit mutation is deferred to explicit governance maintenance.
+    if (trustResult.queueItems.length > 0 || trustResult.auditEntries.length > 0) {
+      debugLog(`hook-prompt deferred trust governance items=${trustResult.queueItems.length} audit=${trustResult.auditEntries.length}`);
     }
 
     const noticeFile = sessionId ? sessionMarker(getCortexPath(), `noticed-${sessionId}`) : null;
