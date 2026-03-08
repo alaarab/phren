@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
-import { checkPermission, loadCanonicalLocks, saveCanonicalLocks, hashContent, withFileLock } from "./shared-governance.js";
+import { checkPermission, loadCanonicalLocks, saveCanonicalLocksUnlocked, hashContent, withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import { type FindingCitation, buildCitationComment, getHeadCommit, getRepoRoot, inferCitationLocation } from "./content-citation.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts } from "./content-dedup.js";
@@ -276,14 +276,21 @@ export function upsertCanonical(cortexPath: string, project: string, memory: str
       }
     }
 
-    const locks = loadCanonicalLocks(cortexPath);
-    const lockKey = `${project}/CANONICAL_MEMORIES.md`;
-    locks[lockKey] = {
-      hash: hashContent(canonicalContent),
-      snapshot: canonicalContent,
-      updatedAt: new Date().toISOString(),
-    };
-    saveCanonicalLocks(cortexPath, locks);
+    // Wrap canonical-locks.json read-modify-write in its own file lock to prevent
+    // concurrent upserts for different projects from overwriting each other's entries.
+    // We call loadCanonicalLocks (unlocked read) + saveCanonicalLocksUnlocked inside
+    // withFileLock to avoid deadlocking with saveCanonicalLocks' internal lock.
+    const canonicalLocksPath = path.join(cortexPath, ".governance", "canonical-locks.json");
+    withFileLock(canonicalLocksPath, () => {
+      const locks = loadCanonicalLocks(cortexPath);
+      const lockKey = `${project}/CANONICAL_MEMORIES.md`;
+      locks[lockKey] = {
+        hash: hashContent(canonicalContent),
+        snapshot: canonicalContent,
+        updatedAt: new Date().toISOString(),
+      };
+      saveCanonicalLocksUnlocked(cortexPath, locks);
+    });
   });
 
   appendAuditLog(cortexPath, "pin_memory", `project=${project} memory=${JSON.stringify(memory)}`);

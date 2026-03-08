@@ -11,6 +11,8 @@ export const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosi
 // Module-level cache for TF-IDF document frequencies.
 // Keyed by a fingerprint of the candidate doc IDs so that different candidate subsets and
 // incremental index mutations produce distinct cache entries rather than reusing stale counts.
+// Intentionally not locked: single-threaded JS event loop, cache is eventually consistent,
+// worst case is a redundant recompute. No data loss is possible since this is a pure computation cache.
 const dfCache = new Map<string, Map<string, number>>();
 
 /** Invalidate the DF cache. Call after a full index rebuild. */
@@ -22,6 +24,8 @@ export function invalidateDfCache(): void {
 // Module-level cache for tokenized document content.
 // Keyed by a short content hash so the same document content is only tokenized once per server lifetime.
 // Cleared on full rebuild (same lifecycle as dfCache). Max 2000 entries to bound memory.
+// Intentionally not locked: single-threaded JS event loop, cache is eventually consistent,
+// worst case is a redundant recompute. No data loss is possible since this is a pure computation cache.
 const MAX_TOKEN_CACHE = 2000;
 const tokenCache = new Map<string, string[]>();
 
