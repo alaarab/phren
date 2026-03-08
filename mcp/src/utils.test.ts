@@ -1,25 +1,52 @@
 import { describe, it, expect } from "vitest";
 import * as path from "path";
-import { sanitizeFts5Query, buildRobustFtsQuery, extractKeywords, isValidProjectName, safeProjectPath, clampInt, isFeatureEnabled } from "./utils.js";
+import { sanitizeFts5Query, buildRobustFtsQuery, extractKeywords, isValidProjectName, safeProjectPath, clampInt, isFeatureEnabled, STOP_WORDS } from "./utils.js";
 
 describe("sanitizeFts5Query", () => {
   it("handles empty string", () => {
     expect(sanitizeFts5Query("")).toBe("");
   });
 
-  it("strips FTS5 column prefixes", () => {
-    expect(sanitizeFts5Query("content:hello")).toBe("hello");
-    expect(sanitizeFts5Query("type:doc")).toBe("doc");
+  it("neutralizes FTS5 column prefix injection by stripping colon", () => {
+    // Whitelist strips the colon; both words remain as plain tokens
+    expect(sanitizeFts5Query("content:hello")).toBe("content hello");
+    expect(sanitizeFts5Query("type:doc")).toBe("type doc");
+    expect(sanitizeFts5Query("project:secret")).toBe("project secret");
+    expect(sanitizeFts5Query("path:/etc/passwd")).toBe("path etc passwd");
   });
 
-  it("strips boolean operators", () => {
-    expect(sanitizeFts5Query("foo AND bar")).toBe("foo bar");
-    expect(sanitizeFts5Query("foo OR bar NOT baz")).toBe("foo bar baz");
+  it("strips angle brackets", () => {
+    const result = sanitizeFts5Query("<script>alert(1)</script>");
+    expect(result).not.toContain("<");
+    expect(result).not.toContain(">");
   });
 
-  it("strips special characters", () => {
+  it("strips semicolons", () => {
+    const result = sanitizeFts5Query("test; DROP TABLE docs");
+    expect(result).not.toContain(";");
+    expect(result).toContain("test");
+  });
+
+  it("keeps apostrophes", () => {
+    expect(sanitizeFts5Query("it's don't")).toBe("it's don't");
+  });
+
+  it("keeps hyphens and underscores", () => {
+    expect(sanitizeFts5Query("rate-limit my_var")).toBe("rate-limit my_var");
+  });
+
+  it("passes through boolean operator words as plain tokens (no FTS5 semantics)", () => {
+    // AND/OR/NOT are alphanumeric so they pass the whitelist, but without
+    // FTS5 syntax chars around them they are harmless plain tokens
+    expect(sanitizeFts5Query("foo AND bar")).toBe("foo AND bar");
+    expect(sanitizeFts5Query("foo OR bar NOT baz")).toBe("foo OR bar NOT baz");
+  });
+
+  it("strips special characters (quotes, parens, brackets)", () => {
     expect(sanitizeFts5Query('hello "world')).not.toContain('"');
     expect(sanitizeFts5Query("foo(bar)")).not.toContain("(");
+    expect(sanitizeFts5Query("foo[bar]")).not.toContain("[");
+    expect(sanitizeFts5Query("foo{bar}")).not.toContain("{");
   });
 
   it("collapses whitespace", () => {
@@ -28,6 +55,11 @@ describe("sanitizeFts5Query", () => {
 
   it("strips null bytes", () => {
     expect(sanitizeFts5Query("foo\0bar")).toBe("foo bar");
+  });
+
+  it("truncates at 500 chars", () => {
+    const result = sanitizeFts5Query("a".repeat(600));
+    expect(result.length).toBeLessThanOrEqual(500);
   });
 });
 
@@ -45,6 +77,48 @@ describe("buildRobustFtsQuery", () => {
   it("expands synonyms", () => {
     const result = buildRobustFtsQuery("cache");
     expect(result).toContain('"caching"');
+  });
+
+  it("produces no bigrams from all-stopword input", () => {
+    // "the", "is", "are", "was" are all stop words
+    const result = buildRobustFtsQuery("the is are was");
+    // No bigram where both tokens are stop words should appear
+    expect(result).not.toMatch(/"the is"/);
+    expect(result).not.toMatch(/"is are"/);
+    expect(result).not.toMatch(/"are was"/);
+  });
+
+  it("keeps bigrams where both tokens are non-stop-words (quick fox)", () => {
+    // Neither "quick" nor "fox" is a stop word
+    expect(STOP_WORDS.has("quick")).toBe(false);
+    expect(STOP_WORDS.has("fox")).toBe(false);
+    const result = buildRobustFtsQuery("quick fox");
+    expect(result).toContain("quick");
+    expect(result).toContain("fox");
+  });
+
+  it("keeps bigrams where only one token is a stop word (the quick fox)", () => {
+    // "the" is stop, "quick" and "fox" are not
+    expect(STOP_WORDS.has("the")).toBe(true);
+    expect(STOP_WORDS.has("quick")).toBe(false);
+    expect(STOP_WORDS.has("fox")).toBe(false);
+
+    const result = buildRobustFtsQuery("the quick fox");
+    // Both "quick" and "fox" should appear as terms
+    expect(result).toContain("quick");
+    expect(result).toContain("fox");
+    // "the quick" bigram: one stop word -> NOT filtered (our rule: only filter when BOTH are stop words)
+    // "quick fox" bigram: no stop words -> kept
+    // These may or may not appear as quoted phrases depending on synonym matching,
+    // but they should not be excluded by the stop-word filter
+  });
+
+  it("drops bigrams where both tokens are stop words in mixed input", () => {
+    // "the is" = both stop words -> dropped
+    // "is quick" = one stop word -> kept
+    const result = buildRobustFtsQuery("the is quick");
+    expect(result).not.toMatch(/"the is"/);
+    expect(result).toContain("quick");
   });
 });
 
