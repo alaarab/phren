@@ -91,10 +91,20 @@ export function register(server: McpServer, ctx: McpContext): void {
                 withFileLock(fp, () => {
                   try {
                     let content = fs.readFileSync(fp, "utf8");
-                    // Build the full bullet prefix as it was written (with "- " prefix)
-                    const bulletPrefix = taggedFinding.startsWith("- ") ? taggedFinding.slice(0, 60) : `- ${taggedFinding.slice(0, 60)}`;
-                    // Find the last occurrence of this exact bullet (the one just inserted)
-                    const idx = content.lastIndexOf(bulletPrefix);
+                    // Use the full bullet text with today's created date to uniquely identify
+                    // the just-inserted finding. Using only a 60-char prefix risks matching
+                    // an older bullet that starts with the same text.
+                    const today = new Date().toISOString().slice(0, 10);
+                    const fullBullet = taggedFinding.startsWith("- ") ? taggedFinding : `- ${taggedFinding}`;
+                    const createdTag = `<!-- created: ${today} -->`;
+                    // Search for the bullet with its created date to precisely target the new entry
+                    const searchStr = `${fullBullet} ${createdTag}`;
+                    let idx = content.lastIndexOf(searchStr);
+                    // Fallback: search for just the created tag near the bullet prefix
+                    if (idx < 0) {
+                      const bulletPrefix = fullBullet.slice(0, 60);
+                      idx = content.lastIndexOf(bulletPrefix);
+                    }
                     if (idx >= 0) {
                       const lineEnd = content.indexOf("\n", idx);
                       const insertAt = lineEnd >= 0 ? lineEnd : content.length;
@@ -152,9 +162,50 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (findings.some((f) => f.length > 5000)) return mcpResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
       return withWriteQueue(async () => {
         runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
-        const result = addFindingsToFile(cortexPath, project, findings);
+
+        // Run semantic quality gates (dedup + conflict) per finding before writing.
+        // Use a per-item timeout so one slow LLM call doesn't stall the whole batch.
+        const PER_ITEM_TIMEOUT_MS = 5_000;
+        const semanticSkipped: string[] = [];
+        const semanticConflicts: string[] = [];
+        const filteredFindings: string[] = [];
+
+        for (const f of findings) {
+          try {
+            const isDup = await Promise.race([
+              checkSemanticDedup(cortexPath, project, f),
+              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), PER_ITEM_TIMEOUT_MS)),
+            ]);
+            if (isDup) {
+              semanticSkipped.push(f);
+              continue;
+            }
+          } catch {
+            // Semantic dedup failure is non-fatal — proceed with the finding
+          }
+
+          try {
+            const conflicts = await Promise.race([
+              checkSemanticConflicts(cortexPath, project, f),
+              new Promise<{ annotations: string[]; checked: boolean }>((resolve) =>
+                setTimeout(() => resolve({ annotations: [], checked: false }), PER_ITEM_TIMEOUT_MS)
+              ),
+            ]);
+            if (conflicts.checked && conflicts.annotations.length > 0) {
+              semanticConflicts.push(`${f} (${conflicts.annotations.join(", ")})`);
+            }
+          } catch {
+            // Semantic conflict failure is non-fatal
+          }
+
+          filteredFindings.push(f);
+        }
+
+        const result = addFindingsToFile(cortexPath, project, filteredFindings);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, skipped, rejected } = result.data;
+        // Include semantic skips in the total skipped count
+        const allSkipped = [...skipped, ...semanticSkipped];
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
           incrementSessionFindings(cortexPath, added.length, getCurrentSessionId());
@@ -162,7 +213,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
         }
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
-        return mcpResponse({ ok: added.length > 0, message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`, data: { project, added, skipped, rejected } });
+        const conflictMsg = semanticConflicts.length > 0 ? `, ${semanticConflicts.length} with conflicts` : "";
+        return mcpResponse({ ok: added.length > 0, message: `Added ${added.length}/${findings.length} findings (${allSkipped.length} duplicates skipped${rejectedMsg}${conflictMsg})`, data: { project, added, skipped: allSkipped, rejected, ...(semanticConflicts.length > 0 ? { conflicts: semanticConflicts } : {}) } });
       });
     }
   );

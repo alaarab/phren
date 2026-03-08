@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import { isValidProjectName } from "./utils.js";
-import { queryDocBySourceKey, queryRows, queryEntityLinks, queryCrossProjectEntities } from "./shared-index.js";
+import { queryDocBySourceKey, queryRows, queryEntityLinks, queryCrossProjectEntities, ensureGlobalEntitiesTable } from "./shared-index.js";
 import { runtimeFile } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 
@@ -278,6 +278,15 @@ export function register(server: McpServer, ctx: McpContext): void {
         } catch {
           return mcpResponse({ ok: false, error: "Failed to insert entity link." });
         }
+
+        // 4a. Also populate global_entities so manual links appear in cross_project_entities
+        try {
+          ensureGlobalEntitiesTable(db);
+          db.run(
+            "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
+            [entityName, project, sourceDoc],
+          );
+        } catch { /* non-fatal: cross-project discovery is best-effort */ }
 
         // 4b. Persist manual link so it survives index rebuilds (mandatory — failure aborts the operation)
         const manualLinksPath = runtimeFile(ctx.cortexPath, "manual-links.json");

@@ -59,10 +59,14 @@ function isAbortError(error: unknown): boolean {
 
 async function callLlm(prompt: string): Promise<string> {
   const endpoint = process.env.CORTEX_LLM_ENDPOINT;
-  const key = process.env.CORTEX_LLM_KEY || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || "";
+  const customKey = process.env.CORTEX_LLM_KEY;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
   const model = process.env.CORTEX_LLM_MODEL;
 
   if (endpoint) {
+    // Custom endpoint: use CORTEX_LLM_KEY, fall back to any available key
+    const key = customKey || openaiKey || anthropicKey || "";
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
     let response: Response;
@@ -87,7 +91,7 @@ async function callLlm(prompt: string): Promise<string> {
     if (!response.ok) throw new Error(`LLM API error: ${response.status}`);
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     return data.choices?.[0]?.message?.content?.trim() ?? "";
-  } else {
+  } else if (anthropicKey) {
     // Anthropic REST API fallback (no SDK required)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
@@ -97,7 +101,7 @@ async function callLlm(prompt: string): Promise<string> {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-api-key": key,
+          "x-api-key": anthropicKey,
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
@@ -114,6 +118,35 @@ async function callLlm(prompt: string): Promise<string> {
     const data = await response.json() as { content?: Array<{ type: string; text?: string }> };
     const block = data.content?.[0];
     return (block?.type === "text" ? block.text ?? "" : "").trim();
+  } else if (openaiKey) {
+    // OpenAI REST API fallback
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    let response: Response;
+    try {
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: model || "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 10,
+          temperature: 0,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`);
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return data.choices?.[0]?.message?.content?.trim() ?? "";
+  } else {
+    // No LLM configured — return empty to signal "not duplicate" / "no conflict"
+    return "";
   }
 }
 

@@ -255,6 +255,11 @@ export async function vectorFallback(
   // Run when either Ollama or a cloud embedding endpoint is available
   if (!getOllamaUrl() && !getCloudEmbeddingUrl()) return [];
   const cache = getEmbeddingCache(cortexPath);
+  // Ensure the cache is loaded from disk — in hook subprocesses the singleton
+  // starts empty because load() is only called in the MCP server / CLI entry.
+  if (cache.size() === 0) {
+    try { await cache.load(); } catch { /* best-effort */ }
+  }
   if (cache.size() === 0) return [];
 
   const queryVec = await embedText(query);
