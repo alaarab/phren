@@ -18,6 +18,10 @@ const ENTITY_PATTERNS = [
   /@[\w-]+\/[\w-]+/g,
   // Known library/tool names mentioned in prose (case-insensitive word boundaries)
   PROSE_ENTITY_PATTERN,
+  // Backtick-quoted identifiers: `word` or `word-with-dashes`
+  /`([\w][\w\-\.\/]{1,48}[\w])`/g,
+  // Double-quoted short identifiers (tool/package names, not full sentences)
+  /"([\w][\w\-]{1,30}[\w])"/g,
 ];
 
 function extractEntityNames(content: string): string[] {
@@ -32,6 +36,19 @@ function extractEntityNames(content: string): string[] {
       }
     }
   }
+
+  // Extract explicit entity annotations: <!-- entity: Foo,Bar -->
+  const annotationRe = /<!--\s*entity:\s*([^-]+)-->/gi;
+  let m: RegExpExecArray | null;
+  while ((m = annotationRe.exec(content)) !== null) {
+    for (const part of m[1].split(",")) {
+      const name = part.trim();
+      if (name && name.length > 1 && name.length < 100) {
+        found.add(name.toLowerCase());
+      }
+    }
+  }
+
   return [...found];
 }
 

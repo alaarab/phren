@@ -93,6 +93,11 @@ Environment:
   CORTEX_EMBEDDING_API_URL   OpenAI-compatible embedding endpoint (cloud alternative to Ollama)
   CORTEX_EMBEDDING_API_KEY   API key for CORTEX_EMBEDDING_API_URL
   CORTEX_FEATURE_AUTO_CAPTURE=1  Extract insights from conversations at session end (written by init)
+  CORTEX_FEATURE_SEMANTIC_DEDUP=1  LLM-based dedup on add_finding: skip semantically equivalent findings
+  CORTEX_FEATURE_SEMANTIC_CONFLICT=1  LLM-based conflict detection on add_finding: annotates contradictions
+  CORTEX_LLM_MODEL           Override LLM model for semantic dedup/conflict (default: gpt-4o-mini)
+  CORTEX_LLM_ENDPOINT        OpenAI-compatible /chat/completions base URL for semantic dedup/conflict
+  CORTEX_LLM_KEY             API key for CORTEX_LLM_ENDPOINT (falls back to OPENAI_API_KEY/ANTHROPIC_API_KEY)
 
 Examples:
   cortex search "rate limiting"          Search across all projects

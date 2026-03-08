@@ -22,6 +22,8 @@ import * as path from "path";
 import { getProjectGlobBoost } from "./cli-hooks-globs.js";
 import type { GitContext } from "./cli-hooks-session.js";
 export type { GitContext } from "./cli-hooks-session.js";
+import { vectorFallback } from "./shared-search-fallback.js";
+import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 
 // ── Intent and scoring helpers ───────────────────────────────────────────────
 
@@ -228,7 +230,8 @@ export function searchDocuments(
   prompt: string,
   keywords: string,
   detectedProject: string | null,
-  searchAllProjects = false
+  searchAllProjects = false,
+  cortexPath?: string
 ): DocRow[] | null {
   // Tier 1: FTS5 — run project-scoped and global in one pass, dedup
   const ftsDocs: DocRow[] = [];
@@ -273,6 +276,47 @@ export function searchDocuments(
   const merged = rrfMerge([ftsDocs, semanticDocs]);
   if (merged.length === 0) return null;
   return merged.slice(0, 12);
+}
+
+/**
+ * Async variant of searchDocuments that also runs real vector search (Tier 3)
+ * when cloud embeddings (CORTEX_EMBEDDING_API_URL) or Ollama are available.
+ * Falls back to the sync result if vector search is unavailable or fails.
+ */
+export async function searchDocumentsAsync(
+  db: SqlJsDatabase,
+  safeQuery: string,
+  prompt: string,
+  keywords: string,
+  detectedProject: string | null,
+  searchAllProjects = false,
+  cortexPath?: string
+): Promise<DocRow[] | null> {
+  // Sync result (Tier 1 + Tier 2)
+  const syncResult = searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects, cortexPath);
+
+  // Tier 3: Real vector search — only if embeddings are available and cortexPath provided
+  const hasVectorBackend = Boolean(getCloudEmbeddingUrl() || getOllamaUrl());
+  if (!cortexPath || !hasVectorBackend) {
+    return syncResult;
+  }
+
+  try {
+    const existingPaths = new Set<string>(
+      (syncResult ?? []).map((d) => d.path || `${d.project}/${d.filename}`)
+    );
+    const vectorDocs = await vectorFallback(cortexPath, `${prompt}\n${keywords}`, existingPaths, 8);
+    if (vectorDocs.length === 0) return syncResult;
+
+    // RRF-merge all three tiers
+    const tiers: DocRow[][] = [syncResult ?? [], vectorDocs];
+    const merged = rrfMerge(tiers);
+    if (merged.length === 0) return syncResult;
+    return merged.slice(0, 12);
+  } catch {
+    // Vector search failure is non-fatal — return sync result
+    return syncResult;
+  }
 }
 
 // ── Trust filter ─────────────────────────────────────────────────────────────
