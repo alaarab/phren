@@ -385,6 +385,27 @@ Four skills for the things that can't be automatic:
 
 Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlinks them to `~/.claude/skills/` so they're available everywhere.
 
+### Per-project agent config
+
+Drop a `cortex.project.yaml` in `~/.cortex/<project>/` to control what gets injected for that project:
+
+```yaml
+# Opt out of global skill injection for this project
+skills: false
+
+# Register extra MCP servers when this project is linked
+mcpServers:
+  my-tool:
+    command: node
+    args: [/path/to/server.js]
+  my-api:
+    command: /usr/local/bin/api-server
+    env:
+      API_KEY: "from-your-env"
+```
+
+`cortex link` merges project MCP servers into your agent config under namespaced keys (`cortex__<project>__<name>`) and cleans them up automatically when the config changes.
+
 ---
 
 ## Adding projects

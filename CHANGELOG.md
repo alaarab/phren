@@ -17,6 +17,7 @@ Nothing yet.
 - **Hooks CLI**: `cortex hooks list/enable/disable` — toggle hook execution per tool (claude/copilot/cursor/codex) from the terminal
 - **Skills shell view** (`s`): browse and remove per-project skills from the interactive shell
 - **Hooks shell view** (`k`): enable/disable hooks per tool from the interactive shell
+- **Per-project MCP servers**: declare extra MCP servers in `cortex.project.yaml` under `mcpServers`. `cortex link` merges them into agent config using namespaced keys (`cortex__<project>__<name>`)
 - All npm dependencies updated to latest
 
 ### Fixed
