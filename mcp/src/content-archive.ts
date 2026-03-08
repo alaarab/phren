@@ -204,6 +204,7 @@ export function autoArchiveToReference(
   fs.mkdirSync(referenceDir, { recursive: true });
   const today = new Date().toISOString().slice(0, 10);
 
+  const successfulTopics = new Set<string>();
   for (const [topic, topicEntries] of byTopic) {
     const filePath = path.join(referenceDir, `${topic}.md`);
     // Q11: hold per-file lock on each reference file while writing.
@@ -229,15 +230,22 @@ export function autoArchiveToReference(
         fs.writeFileSync(tmpRefPath, refContent);
         fs.renameSync(tmpRefPath, filePath);
       });
+      successfulTopics.add(topic);
     } catch (err) {
       debugLog(`auto_archive: failed to write reference file for topic "${topic}": ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
+  // Only remove entries whose topics were successfully written to reference files,
+  // plus entries already present in reference (safe to remove since they're already archived).
+  const alreadyArchivedEntries = toArchive.filter(entry => !actuallyArchived.includes(entry));
+  const successfullyArchived = actuallyArchived.filter(entry => successfulTopics.has(classifyTopic(entry.bullet)));
+  const safeToRemove = [...successfullyArchived, ...alreadyArchivedEntries];
+
   // Remove archived entries from FINDINGS.md
   const lines = content.split("\n");
   const archiveLineSet = new Set<number>();
-  for (const entry of toArchive) {
+  for (const entry of safeToRemove) {
     archiveLineSet.add(entry.lineIndex);
     if (entry.citation) archiveLineSet.add(entry.lineIndex + 1);
   }
@@ -281,14 +289,15 @@ export function autoArchiveToReference(
   fs.writeFileSync(tmpPath, cleaned.join("\n"));
   fs.renameSync(tmpPath, learningsPath);
 
-  const skippedCount = toArchive.length - actuallyArchived.length;
+  const skippedCount = alreadyArchivedEntries.length;
+  const failedTopics = [...byTopic.keys()].filter(t => !successfulTopics.has(t));
   appendAuditLog(
     cortexPath,
     "auto_archive_reference",
-    `project=${project} archived=${actuallyArchived.length} skipped_duplicates=${skippedCount} topics=${[...byTopic.keys()].join(",")}`
+    `project=${project} archived=${successfullyArchived.length} skipped_duplicates=${skippedCount}${failedTopics.length ? ` failed_topics=${failedTopics.join(",")}` : ""} topics=${[...successfulTopics].join(",")}`
   );
 
-  return cortexOk(toArchive.length);
+  return cortexOk(safeToRemove.length);
   });
   } finally {
     try { fs.unlinkSync(lockFile); } catch { /* best-effort cleanup */ }

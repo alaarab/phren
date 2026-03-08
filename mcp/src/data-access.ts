@@ -498,10 +498,14 @@ export function pinBacklogItem(cortexPath: string, project: string, match: strin
     if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
     if (!found.match) return backlogItemNotFound(project, match);
 
-    const item = parsed.data.items[found.match.section][found.match.index];
+    const section = found.match.section;
+    const item = parsed.data.items[section][found.match.index];
     if (item.pinned) return cortexOk(`Already pinned in ${project}: ${item.line}`);
     item.pinned = true;
     item.line = stripPinnedTag(item.line);
+    // Move pinned item to the top of its section
+    parsed.data.items[section].splice(found.match.index, 1);
+    parsed.data.items[section].unshift(item);
     writeBacklogDoc(parsed.data);
     return cortexOk(`Pinned in ${project}: ${item.line}`);
   });
@@ -536,6 +540,14 @@ export function workNextBacklogItem(cortexPath: string, project: string): Cortex
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
     if (!parsed.data.items.Queue.length) return cortexErr(`No queued items in "${project}". Add items with :add or the add_backlog_item tool.`, CortexError.NOT_FOUND);
+
+    // Sort by priority so we take the highest-priority item, not just the first
+    const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    parsed.data.items.Queue.sort((a, b) => {
+      const pa = priorityOrder[a.priority ?? ""] ?? 3;
+      const pb = priorityOrder[b.priority ?? ""] ?? 3;
+      return pa - pb;
+    });
 
     const item = parsed.data.items.Queue.shift()!;
     item.section = "Active";
@@ -815,7 +827,7 @@ export function approveQueueItem(cortexPath: string, project: string, match: str
     // Re-read queue in case it changed while findings lock was held.
     const refreshed = readReviewQueue(cortexPath, project);
     if (!refreshed.ok) return forwardErr(refreshed);
-    const refreshedIndex = refreshed.data.findIndex((i) => i.id === lookupResult.data.item.id);
+    const refreshedIndex = refreshed.data.findIndex((i) => i.text === lookupResult.data.item.text && i.section === lookupResult.data.item.section);
     if (refreshedIndex !== -1) refreshed.data.splice(refreshedIndex, 1);
     rewriteQueue(cortexPath, project, refreshed.data);
     appendAuditLog(cortexPath, "approve_memory", `project=${project} item=${JSON.stringify(lookupResult.data.item.text)}`);

@@ -92,6 +92,34 @@ function findMostRecentSession(cortexPath: string): { file: string; state: Sessi
   return { file: bestFile, state };
 }
 
+/** Find the most recent session with a summary (including ended sessions). */
+function findMostRecentSummary(cortexPath: string): string | null {
+  const dir = sessionsDir(cortexPath);
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch { return null; }
+
+  let bestSummary: string | null = null;
+  let bestMtime = 0;
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
+    const fullPath = path.join(dir, entry.name);
+    try {
+      const state = readSessionStateFile(fullPath);
+      if (!state || !state.summary) continue;
+      const stat = fs.statSync(fullPath);
+      if (stat.mtimeMs > bestMtime) {
+        bestMtime = stat.mtimeMs;
+        bestSummary = state.summary;
+      }
+    } catch { /* skip unreadable files */ }
+  }
+
+  return bestSummary;
+}
+
 /** Resolve session file: use provided sessionId, then connectionId lookup, then _currentProcessSessionId, then fall back to most recent active session. */
 function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId?: string): { file: string; state: SessionState } | null {
   const effectiveId = sessionId ?? (connectionId ? _sessionMap.get(connectionId) : undefined) ?? _currentProcessSessionId;
@@ -198,6 +226,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     // Find most recent prior session for context
     const priorResult = findMostRecentSession(cortexPath);
     const prior = priorResult?.state ?? null;
+    // Also check ended sessions for summaries (findMostRecentSession skips ended sessions)
+    const priorSummary = prior?.summary ?? findMostRecentSummary(cortexPath);
 
     // Create new session with unique ID in its own file
     const sessionId = crypto.randomUUID();
@@ -216,8 +246,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
     const parts: string[] = [];
 
-    if (prior?.summary) {
-      parts.push(`## Last session\n${prior.summary}`);
+    if (priorSummary) {
+      parts.push(`## Last session\n${priorSummary}`);
     }
 
     const activeProject = project ?? prior?.project;

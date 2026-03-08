@@ -447,6 +447,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
   }
 
   touchSentinel(cortexPath);
+  invalidateDfCache();
 }
 
 async function buildIndexImpl(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
@@ -575,6 +576,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
 
           saveHashMap(cortexPath, currentHashes);
           touchSentinel(cortexPath);
+          invalidateDfCache();
 
           // Save updated cache
           try {

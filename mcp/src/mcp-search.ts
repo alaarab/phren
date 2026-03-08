@@ -157,7 +157,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (filterProject && !isValidProjectName(filterProject)) {
           return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         }
-        const safeQuery = buildRobustFtsQuery(query);
+        const safeQuery = buildRobustFtsQuery(query, filterProject);
 
         if (!safeQuery) return mcpResponse({ ok: false, error: "Search query is empty after sanitization." });
 

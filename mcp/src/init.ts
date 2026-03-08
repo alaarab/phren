@@ -948,6 +948,60 @@ export async function runUninstall() {
     } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${errorMessage(err)}`); }
   }
 
+  // Remove Copilot hooks file (written by configureAllHooks)
+  const copilotHooksFile = path.join(home, ".github", "hooks", "cortex.json");
+  try {
+    if (fs.existsSync(copilotHooksFile)) {
+      fs.unlinkSync(copilotHooksFile);
+      log(`  Removed Copilot hooks file (${copilotHooksFile})`);
+    }
+  } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${copilotHooksFile}: ${errorMessage(err)}`); }
+
+  // Remove cortex entries from Cursor hooks file (may contain non-cortex entries)
+  const cursorHooksFile = path.join(home, ".cursor", "hooks.json");
+  try {
+    if (fs.existsSync(cursorHooksFile)) {
+      const raw = JSON.parse(fs.readFileSync(cursorHooksFile, "utf8"));
+      let changed = false;
+      for (const key of ["sessionStart", "beforeSubmitPrompt", "stop"]) {
+        if (raw[key]?.command && typeof raw[key].command === "string" && isCortexCommand(raw[key].command)) {
+          delete raw[key];
+          changed = true;
+        }
+      }
+      if (changed) {
+        fs.writeFileSync(cursorHooksFile, JSON.stringify(raw, null, 2));
+        log(`  Removed cortex entries from Cursor hooks (${cursorHooksFile})`);
+      }
+    }
+  } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${cursorHooksFile}: ${errorMessage(err)}`); }
+
+  // Remove Codex hooks file in cortex path
+  const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const codexHooksFile = path.join(cortexPath, "codex.json");
+  try {
+    if (fs.existsSync(codexHooksFile)) {
+      fs.unlinkSync(codexHooksFile);
+      log(`  Removed Codex hooks file (${codexHooksFile})`);
+    }
+  } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${codexHooksFile}: ${errorMessage(err)}`); }
+
+  // Remove session wrapper scripts (written by installSessionWrapper)
+  const localBinDir = path.join(home, ".local", "bin");
+  for (const tool of ["copilot", "cursor", "codex"]) {
+    const wrapperPath = path.join(localBinDir, tool);
+    try {
+      if (fs.existsSync(wrapperPath)) {
+        // Only remove if it's a cortex wrapper (check for CORTEX_PATH marker)
+        const content = fs.readFileSync(wrapperPath, "utf8");
+        if (content.includes("CORTEX_PATH") && content.includes("cortex")) {
+          fs.unlinkSync(wrapperPath);
+          log(`  Removed ${tool} session wrapper (${wrapperPath})`);
+        }
+      }
+    } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${wrapperPath}: ${errorMessage(err)}`); }
+  }
+
   log(`\nCortex hooks and MCP config removed.`);
   log(`\nYour Cortex data at ~/.cortex was NOT deleted.`);
   log(`To fully remove it, run: rm -rf ~/.cortex\n`);

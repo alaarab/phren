@@ -133,6 +133,7 @@ set -u
 REAL_BIN="${escapedBinary}"
 CORTEX_PATH="\${CORTEX_PATH:-${escapedCortex}}"
 ENTRY_SCRIPT="${escapedEntry}"
+export CORTEX_HOOK_TOOL="${tool}"
 
 if [ ! -x "$REAL_BIN" ]; then
   echo "cortex wrapper error: real ${tool} binary not executable: $REAL_BIN" >&2
@@ -251,7 +252,7 @@ function readHookPreferences(cortexPath: string): { enabled: boolean; toolPrefs:
   }
 }
 
-function isToolHookEnabled(cortexPath: string, tool: string): boolean {
+export function isToolHookEnabled(cortexPath: string, tool: string): boolean {
   const { enabled, toolPrefs } = readHookPreferences(cortexPath);
   if (!enabled) return false;
   const key = tool as keyof HookToolPreferences;
