@@ -40,7 +40,7 @@ npm publish        # publish to npm (needs OTP)
 
 ## Current Version
 
-v1.14.0
+v1.15.0
 
 ## MCP Tools (29)
 
@@ -101,13 +101,25 @@ cortex search --from-history <n>       Re-run search #n from history
 cortex add-finding <project> "..."     Save an insight
 cortex pin <project> "..."             Pin canonical memory
 cortex backlog                         Cross-project backlog view
-cortex skill-list                      List installed skills
+cortex skill-list                      List installed skills (alias for skills list)
 cortex doctor [--fix]                  Health check and self-heal
 cortex review-ui [--port=3499]         Memory review web UI
 cortex status                          Health, project, stats
 cortex verify                          Post-init verification checks
 cortex uninstall                       Remove cortex config and hooks
 cortex update                          Update to latest version
+
+cortex link [--machine <n>] [--profile <n>]  Sync profile, symlinks, hooks
+cortex mcp-mode [on|off|status]        Toggle MCP integration
+cortex hooks-mode [on|off|status]      Toggle hook execution
+
+cortex skills list                     List all installed skills
+cortex skills add <project> <path>     Add a skill to a project
+cortex skills remove <project> <name>  Remove a skill from a project
+
+cortex hooks list                      Show hook enable/disable status per tool
+cortex hooks enable <tool>             Enable hooks for tool (claude/copilot/cursor/codex)
+cortex hooks disable <tool>            Disable hooks for tool
 
 cortex config policy [get|set ...]     Retention, TTL, confidence, decay
 cortex config workflow [get|set ...]   Approval gates, risky thresholds

@@ -7,6 +7,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing yet.
 
+## [1.15.0] - 2026-03-07
+
+### Added
+- **Synonym search**: user-extensible YAML synonym maps at `~/.cortex/global/synonyms.yaml` and per-project. Type "throttling", find "rate limit" and "429"
+- **Cross-project age decay**: findings from non-active projects scored lower in retrieval to surface current-project context first
+- **Per-project skill injection controls**: `cortex.project.yaml` lets projects opt out of global skill injection (`skills: false`)
+- **Skills CLI**: `cortex skills list/add/remove` — manage project-scoped skills from the terminal
+- **Hooks CLI**: `cortex hooks list/enable/disable` — toggle hook execution per tool (claude/copilot/cursor/codex) from the terminal
+- **Skills shell view** (`s`): browse and remove per-project skills from the interactive shell
+- **Hooks shell view** (`k`): enable/disable hooks per tool from the interactive shell
+- All npm dependencies updated to latest
+
+### Fixed
+- Review Queue discard keybinding corrected from `r` to `d`
+- `@types/node` v25 stdin chunk type (`Buffer | string`) handled in hook-prompt reader
+- Semantic fallback threshold tightened (0.15 → 0.25) to reduce noise in cross-project injection
+
+### Renamed
+- `search_cortex` MCP tool → `search_knowledge`
+- All `LEARNINGS.md` files migrated to `FINDINGS.md`
+
 ## [1.14.0] - 2026-03-07
 
 ### Added

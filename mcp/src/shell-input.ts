@@ -34,6 +34,7 @@ import {
 } from "./data-access.js";
 import { style } from "./shell-render.js";
 import { SUB_VIEWS, TAB_ICONS, type ShellDeps, type ShellView } from "./shell-types.js";
+import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./shell-view.js";
 import {
   resultMsg,
   editDistance,
@@ -589,6 +590,13 @@ export function getListItems(
       if (!result.ok) return [];
       return state.filter ? queueByFilter(result.data, state.filter) : result.data;
     }
+    case "Skills": {
+      if (!state.project) return [];
+      return getProjectSkills(cortexPath, state.project).map((s) => ({ name: s.name, text: s.path }));
+    }
+    case "Hooks": {
+      return getHookEntries(cortexPath).map((e) => ({ name: e.tool, text: e.enabled ? "enabled" : "disabled" }));
+    }
     case "Health":
       return Array.from({ length: Math.max(1, healthLineCount) }, (_, i) => ({ id: String(i) }));
     default:
@@ -626,7 +634,13 @@ export async function activateSelected(host: NavigationHost): Promise<void> {
       if (item.text) { host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}`); }
       break;
     case "Review Queue":
-      if (item.text) { host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}  ${style.dim("[ a approve · r reject ]")}`); }
+      if (item.text) { host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}  ${style.dim("[ a approve · d reject ]")}`); }
+      break;
+    case "Skills":
+      if (item.name) { host.setMessage(`  ${style.bold(item.name)}  ${style.dim(item.text ?? "")}`); }
+      break;
+    case "Hooks":
+      if (item.name) { host.setMessage(`  ${item.text === "enabled" ? style.boldGreen("enabled") : style.dim("disabled")}  ${style.bold(item.name)}`); }
       break;
   }
 }
@@ -675,7 +689,7 @@ export async function doViewAction(host: NavigationHost, key: string): Promise<v
           host.setMessage(`  ${resultMsg(r)}`);
           host.setCursor(Math.max(0, cursor - 1));
         });
-      } else if (key === "r" && item?.id) {
+      } else if (key === "d" && item?.id) {
         if (!project) { host.setMessage("Select a project first."); return; }
         host.confirmThen(`Reject ${style.dim(item.id)} "${item.text}"?`, () => {
           const r = rejectQueueItem(host.cortexPath, project!, item.id!);
@@ -684,6 +698,31 @@ export async function doViewAction(host: NavigationHost, key: string): Promise<v
         });
       } else if (key === "e" && item?.id) {
         host.startInput("mq-edit", item.text || "");
+      }
+      break;
+    case "Skills":
+      if ((key === "d" || key === "\x7f") && item?.name) {
+        if (!project) { host.setMessage("Select a project first."); return; }
+        const skillPath = item.text!;
+        host.confirmThen(`Remove skill "${item.name}"?`, () => {
+          try {
+            fs.unlinkSync(skillPath);
+            host.setMessage(`  Removed ${item.name}`);
+            host.setCursor(Math.max(0, cursor - 1));
+          } catch (err: unknown) {
+            host.setMessage(`  Failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        });
+      } else if (key === "a") {
+        host.setMessage(`  Use "cortex skills add ${project ?? "<project>"} <path>" to add a skill`);
+      }
+      break;
+    case "Hooks":
+      if ((key === "a" || key === "d") && item?.name) {
+        const enable = key === "a";
+        const prefs = { hookTools: { ...((getHookEntries(host.cortexPath).reduce((acc, e) => ({ ...acc, [e.tool]: e.enabled }), {}))) as Record<string, boolean>, [item.name]: enable } };
+        writeInstallPreferences(host.cortexPath, prefs);
+        host.setMessage(`  ${enable ? style.boldGreen("Enabled") : style.dim("Disabled")} hooks for ${item.name}`);
       }
       break;
   }
@@ -730,8 +769,10 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
   if (key === "b") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Backlog"); host.setMessage(`  ${TAB_ICONS.Backlog} Backlog`); return true; }
   if (key === "l") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
   if (key === "m") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
+  if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
+  if (key === "k") { host.setView("Hooks"); host.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
   if (key === "h") { host.prevHealthView = host.state.view === "Health" ? host.prevHealthView : host.state.view; host.healthCache = undefined; host.setView("Health"); host.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`); return true; }
-  if (["a", "d", "r", "e", "\x7f"].includes(key)) { await doViewAction(host, key); return true; }
+  if (["a", "d", "e", "\x7f"].includes(key)) { await doViewAction(host, key); return true; }
   return true;
 }
 

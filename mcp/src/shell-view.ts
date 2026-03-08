@@ -39,6 +39,7 @@ import {
   listMachines,
   listProfiles,
 } from "./data-access.js";
+import { readInstallPreferences, writeInstallPreferences } from "./init-preferences.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
@@ -106,7 +107,9 @@ export function renderBottomBar(state: ShellState, navMode: "navigate" | "input"
     Projects: [`${k("↵")} ${d("open project")}`],
     Backlog: [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
     Findings: [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
-    "Review Queue": [`${k("a")} ${d("keep")}`, `${k("r")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
+    "Review Queue": [`${k("a")} ${d("keep")}`, `${k("d")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
+    Skills: [`${k("d")} ${d("remove")}`],
+    Hooks: [`${k("a")} ${d("enable")}`, `${k("d")} ${d("disable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
   };
 
@@ -461,6 +464,131 @@ export function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: 
   return vp.lines;
 }
 
+// ── Skills view ────────────────────────────────────────────────────────────
+
+export interface SkillEntry {
+  name: string;
+  path: string;
+}
+
+export function getProjectSkills(cortexPath: string, project: string): SkillEntry[] {
+  const dirs = [
+    path.join(cortexPath, project, "skills"),
+    path.join(cortexPath, project, ".claude", "skills"),
+  ];
+  const seen = new Set<string>();
+  const skills: SkillEntry[] = [];
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        const name = entry.name.replace(/\.md$/, "");
+        if (!seen.has(name)) { seen.add(name); skills.push({ name, path: path.join(dir, entry.name) }); }
+      } else if (entry.isDirectory()) {
+        const skillFile = path.join(dir, entry.name, "SKILL.md");
+        if (fs.existsSync(skillFile) && !seen.has(entry.name)) {
+          seen.add(entry.name); skills.push({ name: entry.name, path: skillFile });
+        }
+      }
+    }
+  }
+  return skills;
+}
+
+export function renderSkillsView(ctx: ViewContext, cursor: number, height: number): string[] {
+  const cols = process.stdout.columns || 80;
+  const project = ctx.state.project;
+  if (!project) return [style.dim("  No project selected.")];
+
+  const skills = getProjectSkills(ctx.cortexPath, project);
+  const filtered = ctx.state.filter
+    ? skills.filter((s) => s.name.toLowerCase().includes(ctx.state.filter!.toLowerCase()))
+    : skills;
+
+  if (!filtered.length) {
+    return [style.dim(`  No skills for ${project}. Use "cortex skills add ${project} <path>" to add one.`)];
+  }
+
+  const allLines: string[] = [];
+  let cursorFirstLine = 0;
+  let cursorLastLine = 0;
+
+  for (let i = 0; i < filtered.length; i++) {
+    const s = filtered[i];
+    const isSelected = i === cursor;
+    if (isSelected) cursorFirstLine = allLines.length;
+
+    const isSymlink = (() => { try { return fs.lstatSync(s.path).isSymbolicLink(); } catch { return false; } })();
+    const linkTag = isSymlink ? style.dim(" →") : "";
+    let row = `  ${style.dim((i + 1).toString().padEnd(3))} ${style.bold(s.name)}${linkTag}`;
+    if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
+    else row = truncateLine(row, cols);
+    allLines.push(row);
+
+    if (isSelected) cursorLastLine = allLines.length - 1;
+  }
+
+  const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
+  const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
+  ctx.setScroll(vp.scrollStart);
+
+  if (allLines.length > usableHeight) {
+    const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
+    vp.lines.push(style.dim(`  ─── ${cursor + 1}/${filtered.length}  ${pct}%`));
+  }
+
+  return vp.lines;
+}
+
+// ── Hooks view ─────────────────────────────────────────────────────────────
+
+const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
+
+export interface HookEntry {
+  tool: string;
+  enabled: boolean;
+}
+
+export function getHookEntries(cortexPath: string): HookEntry[] {
+  const prefs = readInstallPreferences(cortexPath);
+  const hooksEnabled = prefs.hooksEnabled !== false;
+  const toolPrefs = (prefs.hookTools && typeof prefs.hookTools === "object") ? prefs.hookTools : {};
+  return HOOK_TOOLS.map((tool) => ({
+    tool,
+    enabled: hooksEnabled && toolPrefs[tool] !== false,
+  }));
+}
+
+export function renderHooksView(ctx: ViewContext, cursor: number, height: number): string[] {
+  const cols = process.stdout.columns || 80;
+  const entries = getHookEntries(ctx.cortexPath);
+  const allLines: string[] = [];
+  let cursorFirstLine = 0;
+  let cursorLastLine = 0;
+
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const isSelected = i === cursor;
+    if (isSelected) cursorFirstLine = allLines.length;
+
+    const statusBadge = e.enabled ? style.boldGreen("enabled ") : style.dim("disabled");
+    let row = `  ${style.dim((i + 1).toString().padEnd(3))} ${statusBadge}  ${style.bold(e.tool)}`;
+    if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
+    else row = truncateLine(row, cols);
+    allLines.push(row);
+
+    if (isSelected) cursorLastLine = allLines.length - 1;
+  }
+
+  const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
+  const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
+  ctx.setScroll(vp.scrollStart);
+
+  return vp.lines;
+}
+
+export { writeInstallPreferences } from "./init-preferences.js";
+
 // ── Machines/Profiles view ─────────────────────────────────────────────────
 
 export function renderMachinesView(cortexPath: string): string[] {
@@ -590,6 +718,12 @@ export async function renderShell(
         break;
       case "Review Queue":
         contentLines = renderMemoryQueueView(ctx, cursor, height);
+        break;
+      case "Skills":
+        contentLines = renderSkillsView(ctx, cursor, height);
+        break;
+      case "Hooks":
+        contentLines = renderHooksView(ctx, cursor, height);
         break;
       case "Machines/Profiles":
         contentLines = renderMachinesView(ctx.cortexPath);

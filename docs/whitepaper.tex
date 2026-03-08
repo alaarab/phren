@@ -259,9 +259,9 @@ Beyond the three lifecycle hooks, Cortex supports user-defined hooks for seven e
 Projects can be exported as self-contained JSON bundles via \texttt{export\_project} and re-imported with \texttt{import\_project}. The \texttt{manage\_project} tool supports archiving inactive projects without deleting data. Migration tooling (\texttt{cortex maintain migrate <project>}) scans git history and GitHub PR reviews, CI failures, and issue comments, routing extracted candidates to \texttt{FINDINGS.md} or \texttt{MEMORY\_QUEUE.md} based on confidence.
 
 \section{Interactive Shell}
-The terminal-native shell (\texttt{cortex shell}) provides direct access to memory operations without requiring an LLM in the loop \cite{cortex-cli}. Six views are navigable by single keystroke: Projects, Backlog, Learnings, Memory Queue, Machines/Profiles, and Health diagnostics.
+The terminal-native shell (\texttt{cortex shell}) provides direct access to memory operations without requiring an LLM in the loop \cite{cortex-cli}. Eight views are navigable by single keystroke: Projects, Backlog, Findings, Review Queue, Skills, Hooks, Machines/Profiles, and Health diagnostics.
 
-A palette system (\texttt{:command}) supports structured operations: \texttt{:add}, \texttt{:complete}, \texttt{:move}, \texttt{:govern}, \texttt{:consolidate}, \texttt{:learn add}, \texttt{:mq approve}, and more. Filtering (\texttt{/keyword}) and pagination (\texttt{:page next}) handle large datasets. State persists across invocations (current view, project, page, filter) so engineers return to where they left off.
+A palette system (\texttt{:command}) supports structured operations: \texttt{:add}, \texttt{:complete}, \texttt{:move}, \texttt{:govern}, \texttt{:consolidate}, \texttt{:find add}, \texttt{:mq approve}, and more. Filtering (\texttt{/keyword}) and pagination (\texttt{:page next}) handle large datasets. State persists across invocations (current view, project, page, filter) so engineers return to where they left off.
 
 The design goal is operational: memory governance should not require starting a coding session. An engineer should be able to run \texttt{cortex shell}, review what accumulated overnight, and clean it up before any agent touches it.
 

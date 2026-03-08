@@ -3,12 +3,14 @@ import type { runDoctor } from "./link.js";
 
 // Projects is level 0 (the home screen); these sub-views are level 1 (drill-down into a project)
 // Health is NOT a sub-view — it's a global overlay accessible from anywhere via [h]
-export const SUB_VIEWS = ["Backlog", "Findings", "Review Queue"] as const;
+export const SUB_VIEWS = ["Backlog", "Findings", "Review Queue", "Skills", "Hooks"] as const;
 export const TAB_ICONS: Record<string, string> = {
   Projects:      "◉",
   Backlog:       "▤",
   Findings:      "✦",
   "Review Queue": "◈",
+  Skills:        "◆",
+  Hooks:         "⚡",
   Health:        "♡",
 };
 

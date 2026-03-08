@@ -98,7 +98,7 @@ On a new machine: clone, run init, done.
 
 ## What's new
 
-- **Terminal shell**: open `cortex` and get tabs for Backlog, Findings, Memory Queue, and Health. No agent needed
+- **Terminal shell**: open `cortex` and get tabs for Backlog, Findings, Review Queue, Skills, Hooks, and Health. No agent needed
 - **Synonym search**: type "throttling" and find "rate limit" and "429". You don't need to remember what you called it
 - **Bulk operations**: `add_findings`, `add_backlog_items`, `complete_backlog_items`, `remove_findings` for batch work
 - **Memory quality**: confidence scoring, age decay, and a feedback loop. Stale or low-signal entries stop appearing
@@ -148,7 +148,7 @@ On a new machine: clone, run init, done.
 
 **Consolidation.** When findings accumulate past the threshold, cortex flags it once per session. The `/cortex-consolidate` skill archives old entries and promotes cross-project patterns to global findings.
 
-**Memory queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
+**Review queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
 
 ---
 
@@ -160,7 +160,8 @@ The server indexes your cortex into a local SQLite FTS5 database. Tools are grou
 
 | Tool | What it does |
 |------|-------------|
-| `search_cortex` | FTS5 search with synonym expansion. Filters by project, type, limit. |
+| `search_knowledge` | FTS5 search with synonym expansion. Filters by project, type, limit. |
+| `get_memory_detail` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
 | `get_project_summary` | Summary card and file list for a project. |
 | `list_projects` | Everything in your active profile. |
 | `get_findings` | Read recent findings for a project without a search query. |
@@ -225,14 +226,16 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 
 ## Interactive shell
 
-`cortex` in a terminal opens the shell. Five views, single-key navigation:
+`cortex` in a terminal opens the shell. Seven views, single-key navigation:
 
 | Key | View |
 |-----|------|
 | `p` | Projects |
 | `b` | Backlog |
 | `l` | Findings |
-| `m` | Memory Queue |
+| `m` | Review Queue |
+| `s` | Skills |
+| `k` | Hooks |
 | `h` | Health |
 | `/` | Filter current view |
 | `:` | Command palette |
@@ -263,16 +266,33 @@ The shell works the same on every machine, for every agent.
 For scripting, hooks, and quick lookups from the terminal:
 
 ```bash
-cortex                               # interactive shell (TTY default)
-cortex search "rate limiting"        # FTS5 search with synonym expansion
-cortex add-finding <project> "..."   # append a finding from the terminal
-cortex pin <project> "..."           # promote canonical memory
-cortex doctor [--fix]                # health checks + optional self-heal
-cortex review-ui [--port=3499]       # lightweight review UI in the browser
-cortex update                        # update to latest version
+cortex                                   # interactive shell (TTY default)
+cortex search "rate limiting"            # FTS5 search with synonym expansion
+cortex add-finding <project> "..."       # append a finding from the terminal
+cortex pin <project> "..."               # promote canonical memory
+cortex backlog [project]                 # cross-project backlog view
+cortex status                            # health, active project, stats
+cortex doctor [--fix]                    # health checks + optional self-heal
+cortex verify                            # check init completed correctly
+cortex review-ui [--port=3499]           # lightweight review UI in the browser
+cortex update                            # update to latest version
+cortex uninstall                         # remove cortex config and hooks
+
+cortex link [--machine <n>] [--profile <n>]  # sync profile, symlinks, hooks
+cortex mcp-mode [on|off|status]          # toggle MCP integration
+cortex hooks-mode [on|off|status]        # toggle hook execution
+
+cortex skills list                       # list all installed skills
+cortex skills add <project> <path>       # add a skill to a project
+cortex skills remove <project> <name>    # remove a skill from a project
+cortex skill-list                        # alias for skills list
+
+cortex hooks list                        # show hook status per tool
+cortex hooks enable <tool>              # enable hooks for tool (claude/copilot/cursor/codex)
+cortex hooks disable <tool>             # disable hooks for tool
 ```
 
-Use `cortex config` for policy tuning and `cortex maintain` for governance operations. Top-level aliases still work for backwards compatibility. Run `--dry-run` before destructive maintenance commands.
+Use `cortex config` for policy tuning and `cortex maintain` for governance operations. Run `--dry-run` before destructive maintenance commands.
 
 ### cortex doctor
 

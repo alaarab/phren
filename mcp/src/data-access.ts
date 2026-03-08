@@ -85,7 +85,7 @@ export interface ProjectCard {
 
 export interface ShellState {
   version: number;
-  view: "Projects" | "Backlog" | "Findings" | "Review Queue" | "Machines/Profiles" | "Health";
+  view: "Projects" | "Backlog" | "Findings" | "Review Queue" | "Skills" | "Hooks" | "Machines/Profiles" | "Health";
   project?: string;
   filter?: string;
   page?: number;
