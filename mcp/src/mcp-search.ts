@@ -27,10 +27,11 @@ import {
   type SqlJsDatabase,
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
-import { entryScoreKey, getQualityMultiplier, } from "./shared-governance.js";
+import { entryScoreKey, getQualityMultiplier } from "./shared-governance.js";
 import { callLlm } from "./content-dedup.js";
 import { getCachedEmbedding, getCachedEmbeddings, cosineSimilarity } from "./embedding.js";
 import { embedText as sharedEmbedText, getCloudEmbeddingUrl, getEmbeddingModel } from "./shared-ollama.js";
+import { rankResults } from "./cli-hooks-retrieval.js";
 
 const API_EMBEDDING_CANDIDATE_CAP = 500;
 const API_EMBEDDING_TIMEOUT_MS = 10_000;
@@ -416,28 +417,18 @@ export function register(server: McpServer, ctx: McpContext): void {
           });
         }
 
-        const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-        const scored = rows.map((row, idx) => {
-          const filePath = row.path;
-          const rowProject = row.project;
-          const filename = row.filename;
-          const content = row.content;
-          let boost = 1.0;
-          try {
-            const mtime = fs.statSync(filePath).mtimeMs;
-            if (mtime > thirtyDaysAgo) boost = 1.2;
-          } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] search_knowledge rerank statFile: ${errorMessage(err)}\n`);
-          }
+        rows = rankResults(
+          rows,
+          "general",
+          null,
+          filterProject ?? null,
+          cortexPath,
+          db,
+          undefined,
+          query
+        ).slice(0, maxResults);
 
-          const scoreKey = entryScoreKey(rowProject, filename, content);
-          boost *= getQualityMultiplier(cortexPath, scoreKey);
-
-          return { row, rank: (rows!.length - idx) * boost };
-        });
-        scored.sort((a, b) => b.rank - a.rank);
-
-        const results = scored.map(({ row }) => {
+        const results = rows.map((row) => {
           const snippet = extractSnippet(row.content, query);
           return { project: row.project, filename: row.filename, type: row.type, snippet, path: row.path };
         });

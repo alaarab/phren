@@ -78,6 +78,29 @@ describe("mcp-search: project filter", () => {
     }
   });
 
+  it("project-filtered search uses the shared reranker and injects canonical context", async () => {
+    writeFile(
+      path.join(tmp.path, "project-a", "CANONICAL_MEMORIES.md"),
+      "# project-a Canonical Memories\n\n- Prefer canonical memory before ad hoc findings when working in project-a.\n"
+    );
+    db.close();
+    db = await buildIndex(tmp.path);
+    const ctx: McpContext = {
+      cortexPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    server = makeMockServer();
+    register(server as any, ctx);
+
+    const res = parseResult(await server.call("search_knowledge", { query: "Redis", project: "project-a" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.results.length).toBeGreaterThan(0);
+    expect(res.data.results.some((result: any) => result.type === "canonical")).toBe(true);
+  });
+
   it("search without project filter can return results from multiple projects", async () => {
     const res = parseResult(await server.call("search_knowledge", { query: "Redis" }));
     expect(res.ok).toBe(true);
