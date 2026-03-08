@@ -21,6 +21,7 @@ import { register as registerMemory } from "./mcp-memory.js";
 import { register as registerData } from "./mcp-data.js";
 import { register as registerGraph } from "./mcp-graph.js";
 import { register as registerSession } from "./mcp-session.js";
+import { register as registerOps } from "./mcp-ops.js";
 import type { McpContext } from "./mcp-types.js";
 
 if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
@@ -396,6 +397,7 @@ async function main() {
   registerData(server, ctx);
   registerGraph(server, ctx);
   registerSession(server, ctx);
+  registerOps(server, ctx);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

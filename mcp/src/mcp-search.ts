@@ -67,10 +67,12 @@ export function register(server: McpServer, ctx: McpContext): void {
         ),
       }),
     },
-    async ({ id }) => {
+    async ({ id: rawId }) => {
+      // Decode URL-encoded IDs (e.g. mem:project%2Ffilename -> mem:project/filename)
+      const id = decodeURIComponent(rawId);
       const match = id.match(/^mem:([^/]+)\/(.+)$/);
       if (!match) {
-        return mcpResponse({ ok: false, error: `Invalid memory id format "${id}". Expected mem:project/path/to/file.md.` });
+        return mcpResponse({ ok: false, error: `Invalid memory id format "${rawId}". Expected mem:project/path/to/file.md.` });
       }
       const [, project] = match;
       if (!isValidProjectName(project)) {
