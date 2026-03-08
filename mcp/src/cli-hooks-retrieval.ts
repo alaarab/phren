@@ -344,11 +344,14 @@ export function rankResults(
   const FILE_MATCH_BOOST = 1.5;
   ranked.sort((a, b) => {
     // Highest priority: currently-changed files / branch-matching docs
-    if (gitCtx && gitCtx.changedFiles.size > 0) {
-      const aMatch = fileRelevanceBoost(a.path, gitCtx.changedFiles) > 0 || branchMatchBoost(a.content, gitCtx.branch) > 0;
-      const bMatch = fileRelevanceBoost(b.path, gitCtx.changedFiles) > 0 || branchMatchBoost(b.content, gitCtx.branch) > 0;
-      const scoreDiff = (bMatch ? FILE_MATCH_BOOST : 1) - (aMatch ? FILE_MATCH_BOOST : 1);
-      if (scoreDiff !== 0) return scoreDiff;
+    // Only apply git-context filtering when explicitly opted in
+    if (process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === 'true') {
+      if (gitCtx && gitCtx.changedFiles.size > 0) {
+        const aMatch = fileRelevanceBoost(a.path, gitCtx.changedFiles) > 0 || branchMatchBoost(a.content, gitCtx.branch) > 0;
+        const bMatch = fileRelevanceBoost(b.path, gitCtx.changedFiles) > 0 || branchMatchBoost(b.content, gitCtx.branch) > 0;
+        const scoreDiff = (bMatch ? FILE_MATCH_BOOST : 1) - (aMatch ? FILE_MATCH_BOOST : 1);
+        if (scoreDiff !== 0) return scoreDiff;
+      }
     }
 
     const isFindingsA = a.type === "findings";
@@ -384,7 +387,10 @@ export function rankResults(
       entityB -
       lowValuePenalty(b.content, b.type)
     ) * crossProjectAgeMultiplier(b, detectedProject);
-    const scoreDelta = scoreB - scoreA;
+    // Round scores to avoid floating-point comparison instability
+    const roundedA = Math.round(scoreA * 10000) / 10000;
+    const roundedB = Math.round(scoreB * 10000) / 10000;
+    const scoreDelta = roundedB - roundedA;
     if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
 
     const intentDelta = intentBoost(intent, b.type) - intentBoost(intent, a.type);
@@ -407,7 +413,8 @@ export function rankResults(
 
     if (entityB !== entityA) return entityB - entityA;
 
-    return 0;
+    // Stable secondary sort: deterministic ordering for identical scores
+    return (a.path || `${a.project}/${a.filename}`).localeCompare(b.path || `${b.project}/${b.filename}`);
   });
 
   ranked = ranked.slice(0, 8);
