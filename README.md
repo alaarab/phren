@@ -90,6 +90,26 @@ On a new machine: clone, run init, done.
 
 ---
 
+## Repository structure
+
+This repo has two roles: it's the source code for the `@alaarab/cortex` npm package, and it ships the starter files that `cortex init` copies to `~/.cortex`. The top-level directories break down like this:
+
+| Directory | What it is | When you'd touch it |
+|-----------|-----------|---------------------|
+| `mcp/` | MCP server and CLI source code (TypeScript). The core of cortex. | Adding tools, fixing bugs, changing CLI behavior. |
+| `global/` | Default user-level config shipped with the package. Contains the template `CLAUDE.md`, shared context files, and built-in skill definitions. Copied to `~/.cortex/global/` on init. | Editing the default instructions or adding built-in skills that ship with every install. |
+| `hooks/` | Shell scripts that plug into agent lifecycle events (Stop, SessionStart, UserPromptSubmit). Registered by init into agent settings. | Adding or modifying agent hooks. |
+| `skills/` | Cortex slash commands (`/cortex-init`, `/cortex-sync`, etc.). Each subdirectory has a `SKILL.md` with the full prompt. | Writing or editing built-in cortex skills. |
+| `starter/` | Complete `~/.cortex` skeleton copied on first init: example projects, profiles, machines.yaml, and typed project templates. | Changing what new users get out of the box. |
+| `templates/` | Default project scaffolding used by the `/cortex-init` skill (no `--template` flag). Contains the bare project skeleton and example summary files. | Editing the default project scaffold or adding example files. |
+| `profiles/` | Example profile YAML files (personal, work) showing how to map project sets to machines. Copied to `~/.cortex/profiles/` on init. | Adding new example profiles that ship with the package. |
+| `scripts/` | Dev scripts for maintainers: doc validation, retrieval evaluation. Not shipped to users. | Running CI checks or contributing to the test suite. |
+| `docs/` | Documentation site, whitepaper, architecture docs, and internal design specs. Served via GitHub Pages. | Reading or updating docs. |
+
+**starter/ vs templates/**: `starter/` is the full `~/.cortex` directory tree (projects, profiles, machines.yaml). `templates/` holds the bare project skeleton used by the `/cortex-init` skill. `starter/templates/` holds typed project templates (frontend, library, etc.) used by `cortex init --template`. Three layers: starter seeds the whole store, templates seeds the default project, starter/templates seeds typed projects.
+
+---
+
 ## Works with every major agent
 
 Init detects your tools and registers them. A finding saved by Claude Code shows up in Codex next session, and the other way around.
