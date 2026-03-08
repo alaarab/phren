@@ -528,6 +528,28 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  ${cortexPath}/profiles/           Machine-to-project mappings`);
   log(`  ${cortexPath}/.governance/        Memory quality settings and config`);
 
+  // Ollama detection
+  try {
+    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared-ollama.js");
+    if (getOllamaUrl()) {
+      const ollamaUp = await checkOllamaAvailable();
+      if (ollamaUp) {
+        const modelReady = await checkModelAvailable();
+        if (modelReady) {
+          log("\n✓ Ollama detected with nomic-embed-text — semantic search is available.");
+          log("  Embeddings will build in the background after first use.");
+        } else {
+          log("\n  Ollama detected, but nomic-embed-text is not pulled.");
+          log("  For semantic search, run: ollama pull nomic-embed-text");
+        }
+      } else {
+        log("\n  Tip: Install Ollama for better semantic search (optional).");
+        log("  https://ollama.com → then: ollama pull nomic-embed-text");
+        log("  (Set CORTEX_OLLAMA_URL=off to hide this message)");
+      }
+    }
+  } catch { /* best-effort */ }
+
   log(`\ncortex initialized`);
   log(`\nNext steps:`);
   log(`  1. Create your first project:`);

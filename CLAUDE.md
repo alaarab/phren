@@ -42,7 +42,7 @@ npm publish        # publish to npm (needs OTP)
 
 v1.15.5
 
-## MCP Tools (40)
+## MCP Tools (47)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 

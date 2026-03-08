@@ -273,6 +273,19 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
 
+        // Vector semantic fallback (uses pre-computed Ollama embeddings)
+        if (rows && rows.length < maxResults) {
+          try {
+            const { vectorFallback } = await import("./shared-search-fallback.js");
+            const alreadyFoundPaths = new Set(rows.map((r: DbRow) => String(r[4] ?? "")));
+            const vecRows = await vectorFallback(cortexPath, query, alreadyFoundPaths, maxResults - rows.length);
+            for (const vr of vecRows) {
+              rows.push([vr.project, vr.filename, vr.type, vr.content, vr.path] as unknown as DbRow);
+            }
+            if (vecRows.length > 0) usedFallback = true;
+          } catch { /* best-effort */ }
+        }
+
         // Filter by observation tag if requested
         if (filterTag && rows) {
           const tagPattern = `[${filterTag}]`;

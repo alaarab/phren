@@ -25,6 +25,7 @@ import { register as registerSession } from "./mcp-session.js";
 import { register as registerOps } from "./mcp-ops.js";
 import { register as registerSkills } from "./mcp-skills.js";
 import { register as registerHooks } from "./mcp-hooks.js";
+import { register as registerExtract } from "./mcp-extract.js";
 import type { McpContext } from "./mcp-types.js";
 
 if (process.argv[2] === "--help" || process.argv[2] === "-h" || process.argv[2] === "help") {
@@ -307,6 +308,12 @@ async function main() {
   try {
     db = await buildIndex(cortexPath, profile);
     indexReady = true;
+
+    // Load embedding cache and kick off background embedding (fire-and-forget)
+    const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
+    const embCache = getEmbeddingCache(cortexPath);
+    embCache.load().catch(() => {});
+    void backgroundEmbedMissingDocs(cortexPath, db, embCache);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     structuredLog("error", "startup", `Failed to build cortex index: ${msg}`);
@@ -422,10 +429,43 @@ async function main() {
   registerOps(server, ctx);
   registerSkills(server, ctx);
   registerHooks(server, ctx);
+  registerExtract(server, ctx);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`cortex-mcp running (${cortexPath})`);
+}
+
+async function backgroundEmbedMissingDocs(
+  cortexPath: string,
+  db: Awaited<ReturnType<typeof buildIndex>>,
+  cache: import("./shared-embedding-cache.js").EmbeddingCache
+): Promise<void> {
+  try {
+    const { checkOllamaAvailable, embedText, getEmbeddingModel, getOllamaUrl } = await import("./shared-ollama.js");
+    if (!getOllamaUrl()) return;
+    if (!await checkOllamaAvailable()) return;
+    const results = db.exec("SELECT path, content FROM docs");
+    if (!results?.length || !results[0]?.values?.length) return;
+    const model = getEmbeddingModel();
+    let count = 0;
+    for (const row of results[0].values) {
+      const docPath = String(row[0]);
+      const content = String(row[1]);
+      if (cache.get(docPath, model)) continue;
+      const vec = await embedText(content.slice(0, 8000));
+      if (vec) {
+        cache.set(docPath, model, vec);
+        count++;
+        if (count % 10 === 0) await cache.flush();
+      }
+      await new Promise(r => setTimeout(r, 50));
+    }
+    if (count > 0) await cache.flush();
+    debugLog(`backgroundEmbedMissingDocs: embedded ${count} new docs`);
+  } catch (e) {
+    debugLog(`backgroundEmbedMissingDocs error: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 main().catch((err) => {

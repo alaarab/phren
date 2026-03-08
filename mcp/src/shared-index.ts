@@ -39,6 +39,34 @@ interface SqlJsStatic {
 const require = createRequire(import.meta.url);
 const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<SqlJsStatic>;
 
+// ── Async embedding queue ───────────────────────────────────────────────────
+const _embQueue = new Map<string, { cortexPath: string; content: string }>();
+let _embTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleEmbedding(cortexPath: string, docPath: string, content: string): void {
+  _embQueue.set(docPath, { cortexPath, content });
+  if (_embTimer) clearTimeout(_embTimer);
+  _embTimer = setTimeout(() => { _embTimer = null; void _drainEmbQueue(); }, 500);
+}
+
+async function _drainEmbQueue(): Promise<void> {
+  if (_embQueue.size === 0) return;
+  const { embedText, getEmbeddingModel } = await import("./shared-ollama.js");
+  const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
+  const entries = [..._embQueue.entries()];
+  _embQueue.clear();
+  for (const [docPath, { cortexPath, content }] of entries) {
+    try {
+      const vec = await embedText(content);
+      if (vec) {
+        const cache = getEmbeddingCache(cortexPath);
+        cache.set(docPath, getEmbeddingModel(), vec);
+        await cache.flush();
+      }
+    } catch { /* best-effort */ }
+  }
+}
+
 const FILE_TYPE_MAP: Record<string, string> = {
   "claude.md": "claude",
   "summary.md": "summary",
@@ -400,6 +428,22 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
       hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
       saveHashMap(cortexPath, hashData.hashes);
     } catch { /* best-effort */ }
+
+    // Schedule async embedding (best-effort, does not block caller)
+    try {
+      const rawContent = fs.readFileSync(resolvedPath, "utf-8").slice(0, 8000);
+      scheduleEmbedding(cortexPath, resolvedPath, rawContent);
+    } catch { /* best-effort */ }
+  } else {
+    // Remove stale embedding if file was deleted
+    void (async () => {
+      try {
+        const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
+        const c = getEmbeddingCache(cortexPath);
+        c.delete(resolvedPath);
+        await c.flush();
+      } catch { /* best-effort */ }
+    })();
   }
 
   touchSentinel(cortexPath);
@@ -443,6 +487,9 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         if (docCount === 0 && globResult.entries.length > 0) {
           throw new Error("cached DB is empty, forcing full rebuild");
         }
+
+        // Schema migration: add first_seen_at column if missing
+        try { db.run("ALTER TABLE entities ADD COLUMN first_seen_at TEXT"); } catch { /* already exists */ }
 
         // Compute current file hashes and determine what changed
         const allFiles = globResult.entries;
@@ -569,7 +616,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   `);
 
   // Entity graph tables for lightweight reference graph
-  db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, UNIQUE(name, type))`);
+  db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, first_seen_at TEXT, UNIQUE(name, type))`);
   db.run(`CREATE TABLE IF NOT EXISTS entity_links (source_id INTEGER REFERENCES entities(id), target_id INTEGER REFERENCES entities(id), rel_type TEXT NOT NULL, source_doc TEXT, PRIMARY KEY (source_id, target_id, rel_type))`);
   // Q20: Cross-project entity index
   ensureGlobalEntitiesTable(db);
@@ -590,7 +637,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
       });
       if (!anyNewer && graph.entities && graph.links) {
         for (const [id, name, type] of graph.entities) {
-          db.run("INSERT OR IGNORE INTO entities (id, name, type) VALUES (?, ?, ?)", [id, name, type]);
+          db.run("INSERT OR IGNORE INTO entities (id, name, type, first_seen_at) VALUES (?, ?, ?, ?)", [id, name, type, new Date().toISOString().slice(0, 10)]);
         }
         for (const [sourceId, targetId, relType, sourceDoc] of graph.links) {
           db.run("INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)", [sourceId, targetId, relType, sourceDoc]);
@@ -669,8 +716,8 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
         JSON.parse(fs.readFileSync(manualLinksPath, 'utf8'));
       for (const link of manualLinks) {
         try {
-          db.run("INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)", [link.entity, link.entityType]);
-          db.run("INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)", [link.sourceDoc, "document"]);
+          db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [link.entity, link.entityType, new Date().toISOString().slice(0, 10)]);
+          db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [link.sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
           const eRes = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [link.entity, link.entityType]);
           const dRes = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [link.sourceDoc, "document"]);
           const eId = eRes?.[0]?.values?.[0]?.[0];
@@ -726,7 +773,7 @@ function createEmptyIndexDb(SQL: SqlJsStatic): SqlJsDatabase {
       tokenize = "porter unicode61"
     );
   `);
-  db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, UNIQUE(name, type))`);
+  db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, first_seen_at TEXT, UNIQUE(name, type))`);
   db.run(`CREATE TABLE IF NOT EXISTS entity_links (source_id INTEGER REFERENCES entities(id), target_id INTEGER REFERENCES entities(id), rel_type TEXT NOT NULL, source_doc TEXT, PRIMARY KEY (source_id, target_id, rel_type))`);
   ensureGlobalEntitiesTable(db);
   return db;

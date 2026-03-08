@@ -2,6 +2,8 @@ import { debugLog } from "./shared.js";
 import { STOP_WORDS } from "./utils.js";
 import { porterStem } from "./shared-stemmer.js";
 import type { SqlJsDatabase, DbRow, DocRow } from "./shared-index.js";
+import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl } from "./shared-ollama.js";
+import { getEmbeddingCache } from "./shared-embedding-cache.js";
 
 const HYBRID_SEARCH_FLAG = "CORTEX_FEATURE_HYBRID_SEARCH";
 const COSINE_SIMILARITY_MIN = 0.15;
@@ -236,4 +238,46 @@ export function cosineFallback(
   // Sort descending by score and return top-limit
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit).map(s => s.doc);
+}
+
+/**
+ * Vector-based semantic search fallback using pre-computed Ollama embeddings.
+ * Only runs when Ollama is configured (CORTEX_OLLAMA_URL is set or defaults).
+ * Returns DocRow[] sorted by cosine similarity, above 0.5 threshold.
+ */
+export async function vectorFallback(
+  cortexPath: string,
+  query: string,
+  excludePaths: Set<string>,
+  limit: number
+): Promise<DocRow[]> {
+  if (!getOllamaUrl()) return [];
+  const cache = getEmbeddingCache(cortexPath);
+  if (cache.size() === 0) return [];
+
+  const queryVec = await embedText(query);
+  if (!queryVec || queryVec.length === 0) return [];
+
+  const model = getEmbeddingModel();
+  const entries = cache.getAllEntries().filter(e => e.model === model && !excludePaths.has(e.path));
+  if (entries.length === 0) return [];
+
+  const scored = entries
+    .map(e => ({ path: e.path, score: cosineSimilarity(queryVec, e.vec) }))
+    .filter(e => e.score > 0.50)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return scored.map(e => {
+    const parts = e.path.split("/");
+    const filename = parts[parts.length - 1] ?? "";
+    // Derive project from path relative to cortexPath
+    const rel = e.path.startsWith(cortexPath) ? e.path.slice(cortexPath.length + 1) : e.path;
+    const project = rel.split("/")[0] ?? "";
+    const type = filename.toLowerCase() === "findings.md" ? "findings"
+      : filename.toLowerCase() === "claude.md" ? "claude"
+      : filename.toLowerCase().includes("backlog") ? "backlog"
+      : "other";
+    return { project, filename, type, content: "", path: e.path };
+  });
 }

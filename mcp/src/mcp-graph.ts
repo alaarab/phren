@@ -236,7 +236,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         // 1. Find or create entity
         try {
-          db.run("INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)", [entityName, resolvedEntityType]);
+          db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [entityName, resolvedEntityType, new Date().toISOString().slice(0, 10)]);
         } catch { /* ignore */ }
         const entityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [entityName, resolvedEntityType]);
         if (!entityResult?.length || !entityResult[0]?.values?.length) {
@@ -261,7 +261,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         // 3. Find or create document entity
         try {
-          db.run("INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)", [sourceDoc, "document"]);
+          db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
         } catch { /* ignore */ }
         const docEntityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
         if (!docEntityResult?.length || !docEntityResult[0]?.values?.length) {

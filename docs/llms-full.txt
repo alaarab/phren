@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.cortex, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Restart your agent after init. Context injection starts immediately.
 
-MCP Tools (29):
+MCP Tools (47):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?) - FTS5 search with synonym expansion

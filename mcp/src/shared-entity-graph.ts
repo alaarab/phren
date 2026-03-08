@@ -37,7 +37,7 @@ function extractEntityNames(content: string): string[] {
 
 function getOrCreateEntity(db: SqlJsDatabase, name: string, type: string): number {
   try {
-    db.run("INSERT OR IGNORE INTO entities (name, type) VALUES (?, ?)", [name, type]);
+    db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [name, type, new Date().toISOString().slice(0, 10)]);
   } catch { /* ignore duplicate */ }
   const result = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [name, type]);
   if (result?.length && result[0]?.values?.length) {

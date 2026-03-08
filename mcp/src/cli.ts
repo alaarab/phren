@@ -562,6 +562,32 @@ async function handleDoctor(args: string[]) {
     }
   } catch { /* best-effort */ }
 
+  // Semantic search / Ollama status
+  try {
+    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("./shared-ollama.js");
+    const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
+    const ollamaUrl = getOllamaUrl();
+    if (!ollamaUrl) {
+      console.log("- ok  semantic-search: disabled (set CORTEX_OLLAMA_URL=http://localhost:11434 to enable)");
+    } else {
+      const available = await checkOllamaAvailable();
+      if (!available) {
+        console.log(`- warn semantic-search: Ollama not running at ${ollamaUrl} (start Ollama or set CORTEX_OLLAMA_URL=off to disable)`);
+      } else {
+        const model = getEmbeddingModel();
+        const modelReady = await checkModelAvailable();
+        if (!modelReady) {
+          console.log(`- warn semantic-search: model ${model} not pulled (run: ollama pull ${model})`);
+        } else {
+          const cortexPath = getCortexPath();
+          const cache = getEmbeddingCache(cortexPath);
+          await cache.load().catch(() => {});
+          console.log(`- ok  semantic-search: ${model} ready, ${cache.size()} docs embedded`);
+        }
+      }
+    }
+  } catch { /* best-effort */ }
+
   process.exit(result.ok ? 0 : 1);
 }
 
