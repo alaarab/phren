@@ -289,12 +289,19 @@ export interface WebhookHookEntry {
 
 export type CustomHookEntry = CommandHookEntry | WebhookHookEntry;
 
-const VALID_HOOK_EVENTS = new Set<string>([
+export const HOOK_EVENT_VALUES = [
   "pre-save", "post-save", "post-search",
   "pre-finding", "post-finding",
   "pre-index", "post-index",
   "post-session-end", "post-consolidate",
-]);
+] as const;
+
+const VALID_HOOK_EVENTS = new Set<string>(HOOK_EVENT_VALUES);
+
+/** Return the target (URL or shell command) for display or matching. */
+export function getHookTarget(h: CustomHookEntry): string {
+  return "webhook" in h ? h.webhook : h.command;
+}
 
 const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
 const HOOK_TIMEOUT_MS = parseInt(process.env.CORTEX_HOOK_TIMEOUT_MS || '14000', 10);
@@ -335,7 +342,7 @@ export function runCustomHooks(
   for (const hook of matching) {
     if ("webhook" in hook) {
       // Webhook hook: fire-and-forget HTTP POST (async, does not block runCustomHooks)
-      const payload = JSON.stringify({ event, cortexPath, env, timestamp: new Date().toISOString() });
+      const payload = JSON.stringify({ event, env, timestamp: new Date().toISOString() });
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (hook.secret) {
         headers["X-Cortex-Signature"] = `sha256=${createHmac("sha256", hook.secret).update(payload).digest("hex")}`;
