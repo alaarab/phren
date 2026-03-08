@@ -7,7 +7,7 @@
 
 # cortex
 
-**Your AI agents are building something. Make it count.**
+**Your agents keep forgetting. They don't have to.**
 
 [![npm](https://img.shields.io/npm/v/@alaarab/cortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
 [![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fcortex-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/)
@@ -15,13 +15,13 @@
 
 <br>
 
-You run Claude Code, Codex, Cursor — maybe on three machines at once. Every session starts from zero. Every bug you traced, pattern you found, decision you made: gone when the context clears.
+You're running Claude Code, Codex, Cursor, maybe on a few machines at the same time. Every session starts over. Everything your agents figure out disappears when the context clears.
 
-Cortex captures it all. Stored as markdown in a **private git repo you own**. Work machine keeps work projects. Home machine keeps personal ones. Every agent on every machine reads from the same store — and every session builds on the last.
+Cortex stores it. A private git repo you own, shared across all your tools and machines. Work projects stay on your work machine. Personal projects stay personal. Every agent reads from the same knowledge base, and every session builds on the last.
 
-The more you work, the smarter your agents get. That's the whole idea.
+You stop re-explaining things. Your agents stop rediscovering things. The work you've already done starts working for you.
 
-> `npx @alaarab/cortex init` — 30 seconds. No account. Your data never leaves unless you push it.
+> `npx @alaarab/cortex init` — one command, 30 seconds, no account needed.
 
 <br>
 </div>
@@ -98,21 +98,19 @@ On a new machine: clone, run init, done.
 
 ## What makes this different
 
-**Solve it once.** Without persistent memory, every session re-figures out things you've already solved. Same bug traced twice. Same workaround rediscovered. Same decision re-litigated. Cortex saves it the first time, so every future agent draws from that instead of starting over. Your time compounds in your favor.
+**You stop figuring out the same things twice.** Every bug you traced, every workaround you found, every decision you made — it gets saved. Next session your agent already knows it. You draw from your knowledge instead of rebuilding it.
 
-**It compounds.** Every bug, pattern, and decision your agents encounter gets saved. Session 47 knows everything sessions 1 through 46 learned. It doesn't just remember — it accumulates. The more you work, the more context your agents carry.
+**All your agents share one brain.** Running Claude Code and Codex at the same time, on different machines. They all read from the same store. What one figures out, the others get. No coordination needed, it just flows through git.
 
-**Your data, your repo.** No vendor. No cloud service. No account required. A private git repo you control. What your work machine knows stays on the work profile. What your home machine knows stays on the personal one. Nobody else touches it.
+**Work and personal stay separate.** Your work machine sees work projects. Your home machine sees personal ones. Same system, same commands, different profiles. Nothing bleeds across.
 
-**All your agents, one brain.** Claude Code hits a pitfall at 2 AM. Codex on another machine gets that context tomorrow morning. The finding travels through git — no coordination code, no message passing. Just a shared repo every tool reads from.
+**It doesn't clog your context.** Loading your whole `CLAUDE.md` into every session is slow and expensive. Cortex pulls in only what's relevant to what you're working on right now. Less token spend per run means you can run more agents at the same time.
 
-**Lean context, lower cost, more agents.** Stuffing everything into `CLAUDE.md` bloats every session. Cortex injects only what's relevant to the current prompt — 550 tokens by default, not 50,000. Less token spend per run means you can run more agents in parallel for the same cost. More parallel agents means more throughput. It compounds.
+**Your data lives in your own GitHub.** No account, no vendor, no cloud service. Markdown in a private repo you control. You can read it, edit it, grep it, delete it. Nothing leaves unless you push it.
 
-**It runs itself.** Before each prompt, relevant context gets pulled in. After each response, changes commit and push. Trust filtering drops stale and low-confidence entries automatically. You don't manage it.
+**It runs on its own.** Before each prompt, relevant context gets injected. After each response, changes save and push. You don't think about it.
 
-**You can see what they know.** Everything is markdown in git. `git log` shows what your agents learned and when. `git diff` shows what changed between sessions. No dashboards — just files you can grep, edit, and read.
-
-**Search that finds what you need.** FTS5 full-text search, token-overlap matching, and optional vector embeddings. "throttling" finds "rate limit" and "429". Recent findings rank higher than old ones.
+**You can see what your agents know.** Everything is in git. `git log` shows what your agents learned and when. `git diff` shows what changed. No dashboards, just files.
 
 ---
 
