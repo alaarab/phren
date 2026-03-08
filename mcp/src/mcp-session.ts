@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { runtimeFile, resolveFindingsPath } from "./shared.js";
+import { runtimeFile, resolveFindingsPath, debugLog } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName } from "./utils.js";
 
@@ -125,7 +125,7 @@ function cleanupStaleSessions(cortexPath: string): number {
         ? Date.now() - new Date(state.startedAt).getTime()
         : Date.now() - fs.statSync(fullPath).mtimeMs;
       if (ageMs > STALE_SESSION_MS) {
-        fs.unlinkSync(fullPath);
+        try { fs.unlinkSync(fullPath); } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
         cleaned++;
       }
     } catch { /* skip */ }
@@ -138,12 +138,21 @@ function migrateLegacySession(cortexPath: string): SessionState | null {
   const legacyFile = path.join(cortexPath, ".runtime", "session-state.json");
   if (!fs.existsSync(legacyFile)) return null;
   try {
-    const state = JSON.parse(fs.readFileSync(legacyFile, "utf-8")) as SessionState;
+    const raw = fs.readFileSync(legacyFile, "utf-8");
+    const state = JSON.parse(raw) as SessionState;
     if (state.sessionId) {
       const newFile = sessionFileForId(cortexPath, state.sessionId);
-      writeSessionStateFile(newFile, state);
+      // Use wx flag so only the first concurrent caller creates the target file
+      try {
+        const tempFile = `${newFile}.${process.pid}.${Date.now()}.tmp`;
+        fs.writeFileSync(tempFile, JSON.stringify(state, null, 2));
+        fs.renameSync(tempFile, newFile);
+      } catch (e: any) {
+        // If file already exists from another concurrent migration, that's fine
+        if (e?.code !== "EEXIST") throw e;
+      }
     }
-    fs.unlinkSync(legacyFile);
+    try { fs.unlinkSync(legacyFile); } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
     return state;
   } catch {
     try { fs.unlinkSync(legacyFile); } catch { /* ignore */ }
@@ -151,13 +160,14 @@ function migrateLegacySession(cortexPath: string): SessionState | null {
   }
 }
 
-/** Increment the findingsAdded counter for a session. Uses current process session, falls back to most-recent. */
+/** Increment the findingsAdded counter for a session. Requires an explicit sessionId; no-ops without one. */
 export function incrementSessionFindings(cortexPath: string, count = 1, sessionId?: string): void {
   try {
-    const effectiveId = sessionId ?? _currentProcessSessionId;
-    const resolved = effectiveId
-      ? resolveSessionFile(cortexPath, effectiveId)
-      : findMostRecentSession(cortexPath);
+    if (!sessionId) {
+      debugLog("incrementSessionFindings called without explicit sessionId — skipping");
+      return;
+    }
+    const resolved = resolveSessionFile(cortexPath, sessionId);
     if (!resolved) return;
     const { file } = resolved;
     withFileLock(file, () => {
