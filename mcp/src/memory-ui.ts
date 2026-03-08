@@ -104,7 +104,21 @@ function isAllowedFilePath(filePath: string, cortexPath: string): boolean {
     path.resolve(path.join(os.homedir(), ".github", "hooks")),
     path.resolve(path.join(os.homedir(), ".cursor")),
   ];
-  return allowedRoots.some(root => resolved === root || resolved.startsWith(root + path.sep));
+  if (!allowedRoots.some(root => resolved === root || resolved.startsWith(root + path.sep))) {
+    return false;
+  }
+  // Resolve symlinks to prevent escaping the allowed boundary (Q8)
+  let realResolved: string;
+  try {
+    realResolved = fs.realpathSync(resolved);
+  } catch {
+    // File doesn't exist yet (e.g. new skill); use the lexically resolved path
+    realResolved = resolved;
+  }
+  const allowedRealRoots = allowedRoots.map(r => {
+    try { return fs.realpathSync(r); } catch { return r; }
+  });
+  return allowedRealRoots.some(root => realResolved === root || realResolved.startsWith(root + path.sep));
 }
 
 function collectSkillsForUI(cortexPath: string): Array<{ name: string; source: string; path: string }> {
@@ -1477,6 +1491,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   var _graphRunning = false;
   var _graphAlpha = 1;
   var _graphFilter = 'all';
+  var _graphListenersAttached = false;
 
   var COLORS = { project: '#7c3aed', decision: '#3b82f6', pitfall: '#ef4444', pattern: '#10b981', tradeoff: '#f59e0b', architecture: '#8b5cf6', bug: '#dc2626' };
   var RADII = { project: 18, decision: 8, pitfall: 8, pattern: 8, tradeoff: 8, architecture: 8, bug: 8 };
@@ -1668,6 +1683,10 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       return null;
     }
 
+    // Register canvas listeners only once to avoid duplicates on re-init (Q55)
+    if (!_graphListenersAttached) {
+      _graphListenersAttached = true;
+
     canvas.addEventListener('mousedown', function(e) {
       var rect = canvas.getBoundingClientRect();
       var mx = e.clientX - rect.left, my = e.clientY - rect.top;
@@ -1741,6 +1760,8 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       _graphZoom *= factor;
       if (!_graphRunning) renderGraph();
     }, { passive: false });
+
+    } // end if (!_graphListenersAttached)
 
     requestAnimationFrame(tick);
   }
@@ -1822,6 +1843,18 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       return;
     }
 
+    // ── Auth guard for all /api/* routes (Q7) ───────────────────
+    if (url.startsWith("/api/")) {
+      if (authToken) {
+        const submitted = getSubmittedAuthToken(req, url);
+        if (!authTokensMatch(submitted, authToken)) {
+          res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
+          res.end("Unauthorized");
+          return;
+        }
+      }
+    }
+
     // ── Project APIs ────────────────────────────────────────────
     if (req.method === "GET" && url === "/api/projects") {
       const projects = collectProjectsForUI(cortexPath);
@@ -1893,8 +1926,22 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
 
     // ── Write APIs ──────────────────────────────────────────────
     if (req.method === "POST" && url === "/api/skill-save") {
+      const contentLength = parseInt(req.headers["content-length"] || "0", 10);
+      if (contentLength > 1_048_576) {
+        res.writeHead(413, { "content-type": "text/plain" });
+        res.end("Request body too large");
+        return;
+      }
       let body = "";
-      req.on("data", (chunk) => { body += String(chunk); });
+      let received = 0;
+      req.on("data", (chunk) => {
+        received += chunk.length;
+        if (received > 1_048_576) {
+          req.destroy();
+          return;
+        }
+        body += String(chunk);
+      });
       req.on("end", () => {
         const parsed = querystring.parse(body);
         const filePath = String(parsed.path || "");
@@ -1918,8 +1965,22 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     if (req.method === "POST" && url === "/api/hook-toggle") {
+      const contentLength = parseInt(req.headers["content-length"] || "0", 10);
+      if (contentLength > 1_048_576) {
+        res.writeHead(413, { "content-type": "text/plain" });
+        res.end("Request body too large");
+        return;
+      }
       let body = "";
-      req.on("data", (chunk) => { body += String(chunk); });
+      let received = 0;
+      req.on("data", (chunk) => {
+        received += chunk.length;
+        if (received > 1_048_576) {
+          req.destroy();
+          return;
+        }
+        body += String(chunk);
+      });
       req.on("end", () => {
         const parsed = querystring.parse(body);
         const tool = String(parsed.tool || "").toLowerCase();
@@ -1943,14 +2004,6 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
 
     // ── Graph API ───────────────────────────────────────────────
     if (req.method === "GET" && url.startsWith("/api/graph")) {
-      if (authToken) {
-        const submitted = getSubmittedAuthToken(req, url);
-        if (!authTokensMatch(submitted, authToken)) {
-          res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
-          res.end("Unauthorized");
-          return;
-        }
-      }
       const graph = buildGraph(cortexPath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(graph));
@@ -2059,8 +2112,12 @@ export async function startReviewUi(cortexPath: string, port: number): Promise<v
   const csrfTokens = new Map<string, number>();
   const server = createReviewUiServer(cortexPath, { authToken, csrfTokens });
 
-  await new Promise<void>((resolve) => {
-    server.listen(port, "127.0.0.1", () => resolve());
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
   });
 
   process.stdout.write(`cortex review-ui running at http://127.0.0.1:${port}\n`);
