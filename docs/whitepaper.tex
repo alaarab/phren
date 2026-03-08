@@ -54,13 +54,13 @@
 \title{\vspace{-1.2em}Long-Term Memory for Coding Agents\\
 \large Architecture, Governance, Multi-Agent Coordination, and Comparative Evaluation}
 \author{Cortex Project}
-\date{March 8, 2026 \quad\textbar\quad v1.15.5}
+\date{March 8, 2026 \quad\textbar\quad v1.17.0}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Persistent memory is a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. Cortex v1.15.5 ships a policy engine (retention, decay, access control), an interactive shell for direct memory management, index-level filtering, user-extensible synonym configuration, cross-project age-decay ranking, per-project skill injection controls, and a skills/hooks management CLI. The report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, provides a cost model with worked examples, and proposes a reproducible benchmark protocol. The core argument is operational: in real engineering teams, memory quality has to be optimized alongside auditability, governance, portability, and token predictability.
+Persistent memory is a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. Cortex v1.17.0 ships a policy engine (retention, decay, access control), an interactive shell for direct memory management, index-level filtering, user-extensible synonym configuration, cross-project age-decay ranking, per-project skill injection controls, and a skills/hooks management CLI. The report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, provides a cost model with worked examples, and proposes a reproducible benchmark protocol. The core argument is operational: in real engineering teams, memory quality has to be optimized alongside auditability, governance, portability, and token predictability.
 \end{abstract}
 
 \section{Executive Summary}
@@ -121,7 +121,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 % === STORAGE ===
 \node[store, right=1.1cm of fts] (md) {Markdown Files\\[-2pt]{\scriptsize \textasciitilde/.cortex/<project>/}};
 \node[store, above=0.55cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
-\node[store, below=0.55cm of md]  (mcp) {MCP Tools (40)\\[-2pt]{\scriptsize add\_finding, backlog, skills, hooks, etc.}};
+\node[store, below=0.55cm of md]  (mcp) {MCP Tools (47)\\[-2pt]{\scriptsize add\_finding, backlog, skills, hooks, etc.}};
 
 % === GOVERNANCE ===
 \node[gov, right=1.1cm of md] (pol) {Policy Engine\\[-2pt]{\scriptsize .governance/*.json}};
@@ -339,7 +339,7 @@ Column definitions: \textbf{Ease} = zero-to-working setup friction (H=easy). \te
 \toprule
 \textbf{System} & \textbf{Ease} & \textbf{Token ctrl} & \textbf{Governance} & \textbf{Audit} & \textbf{Trust} & \textbf{Multi-agent} & \textbf{Shell/CLI} & \textbf{Daily ops} & \textbf{Lock-in} \\
 \midrule
-Cortex 1.15.5   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreLklo}L \\
+Cortex 1.17.0   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreLklo}L \\
 Supermemory     & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
 claude-mem      & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M \\
 Copilot Memory  & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\

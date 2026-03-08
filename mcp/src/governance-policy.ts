@@ -903,7 +903,7 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
   if (!file) return cortexErr(`No FINDINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
 
   // Q23: wrap entire read-modify-write in per-file lock to prevent races with concurrent finding writers
-  return withFileLock(file, (): CortexResult<string> => {
+  const result = withFileLock(file, (): CortexResult<string> => {
     const raw = fs.readFileSync(file, "utf8");
     const lines = raw.split("\n");
 
