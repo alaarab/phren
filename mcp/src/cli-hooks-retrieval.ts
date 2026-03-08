@@ -398,9 +398,19 @@ export function rankResults(
     const localByType = new Set(
       ranked.filter((r) => r.project === detectedProject).map((r) => r.type)
     );
+    // Keep all local docs, and allow up to 2 shared/org docs per type even if
+    // that type exists locally — avoids suppressing cross-project knowledge.
+    const sharedCountByType = new Map<string, number>();
+    const MAX_SHARED_PER_TYPE = 2;
     ranked = ranked.filter((r) => {
       if (r.project === detectedProject) return true;
-      return !localByType.has(r.type);
+      if (!localByType.has(r.type)) return true;
+      const count = sharedCountByType.get(r.type) ?? 0;
+      if (count < MAX_SHARED_PER_TYPE) {
+        sharedCountByType.set(r.type, count + 1);
+        return true;
+      }
+      return false;
     });
 
     const canonicalRows = queryDocRows(

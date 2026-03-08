@@ -25,6 +25,7 @@ import {
 } from "./shared-content.js";
 import { buildRobustFtsQuery, extractKeywords, isFeatureEnabled, clampInt } from "./utils.js";
 import { getHooksEnabledPreference } from "./init.js";
+import { isToolHookEnabled } from "./hooks.js";
 import { handleExtractMemories } from "./cli-extract.js";
 import { appendAuditLog } from "./shared.js";
 import { updateRuntimeHealth } from "./shared-governance.js";
@@ -150,6 +151,14 @@ export async function handleHookPrompt() {
 
   if (!getHooksEnabledPreference(getCortexPath())) {
     appendAuditLog(getCortexPath(), "hook_prompt", "status=disabled");
+    process.exit(0);
+  }
+
+  // Check per-tool hook preference (CORTEX_HOOK_TOOL is set by session wrappers;
+  // Claude hooks always run as "claude" from settings.json)
+  const hookTool = process.env.CORTEX_HOOK_TOOL || "claude";
+  if (!isToolHookEnabled(getCortexPath(), hookTool)) {
+    appendAuditLog(getCortexPath(), "hook_prompt", `status=tool_disabled tool=${hookTool}`);
     process.exit(0);
   }
 

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { fileURLToPath } from "url";
 import {
   findCortexPath,
   getProjectDirs,
@@ -10,6 +11,8 @@ import { detectProject } from "./shared-index.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function readPackageVersion(): string {
   try {

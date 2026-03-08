@@ -28,6 +28,7 @@ import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
 import { getHooksEnabledPreference } from "./init.js";
+import { isToolHookEnabled } from "./hooks.js";
 import { handleExtractMemories } from "./cli-extract.js";
 import {
   buildIndex,
@@ -302,6 +303,12 @@ export async function handleHookSessionStart() {
     return;
   }
 
+  const hookTool = process.env.CORTEX_HOOK_TOOL || "claude";
+  if (!isToolHookEnabled(getCortexPath(), hookTool)) {
+    appendAuditLog(getCortexPath(), "hook_session_start", `status=tool_disabled tool=${hookTool}`);
+    return;
+  }
+
   const pull = await runBestEffortGit(["pull", "--rebase", "--quiet"], getCortexPath());
   const doctor = await runDoctor(getCortexPath(), false);
   const maintenanceScheduled = scheduleBackgroundMaintenance(getCortexPath());
@@ -388,6 +395,12 @@ export async function handleHookStop() {
       lastAutoSave: { at: now, status: "clean", detail: "hooks disabled by preference" },
     });
     appendAuditLog(getCortexPath(), "hook_stop", "status=disabled");
+    return;
+  }
+
+  const hookTool = process.env.CORTEX_HOOK_TOOL || "claude";
+  if (!isToolHookEnabled(getCortexPath(), hookTool)) {
+    appendAuditLog(getCortexPath(), "hook_stop", `status=tool_disabled tool=${hookTool}`);
     return;
   }
 
