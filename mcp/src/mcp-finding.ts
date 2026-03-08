@@ -24,6 +24,7 @@ import {
 import { withFileLock } from "./shared-governance.js";
 import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings, getCurrentSessionId } from "./mcp-session.js";
+import { extractEntityNames } from "./shared-entity-graph.js";
 
 
 
@@ -118,7 +119,13 @@ export function register(server: McpServer, ctx: McpContext): void {
           // Surface any conflict annotation that was written into the bullet
           const conflictsWithMatch = result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"\s*-->/);
           const conflictsWith = conflictsWithMatch?.[1];
-          return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "added", ...(conflictsWith ? { conflictsWith } : {}) } });
+
+          // Extract entity hints synchronously from the finding text (regex only, no DB).
+          // Full DB entity linking happens on the next index rebuild via updateFileInIndex →
+          // extractAndLinkEntities. We surface hints here so callers can see what was detected.
+          const detectedEntities = extractEntityNames(taggedFinding);
+
+          return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "added", ...(conflictsWith ? { conflictsWith } : {}), ...(detectedEntities.length > 0 ? { detectedEntities } : {}) } });
         } catch (err: unknown) {
           if (err instanceof Error && err.message.includes("Rejected:")) {
             return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err), errorCode: "VALIDATION_ERROR" });

@@ -232,13 +232,14 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   const autoCaptureAnswer = (await ask(`Enable auto-capture? [Y/n]: `)).trim().toLowerCase();
   const autoCaptureEnabled = !(autoCaptureAnswer === "n" || autoCaptureAnswer === "no");
 
-  // Check if an LLM is configured (required for semantic dedup/conflict)
+  // Only offer semantic dedup/conflict when an LLM endpoint is explicitly configured.
+  // These features call /chat/completions, not an embedding endpoint, so we gate on
+  // CORTEX_LLM_ENDPOINT (primary) or the presence of a known API key as a fallback.
+  // CORTEX_EMBEDDING_API_URL is also accepted since cloud embedding users usually have
+  // an LLM key available at the same provider.
   const hasLlmApi = Boolean(
     process.env.CORTEX_LLM_ENDPOINT ||
-    process.env.CORTEX_EMBEDDING_API_URL ||
-    process.env.OPENAI_API_KEY ||
-    process.env.ANTHROPIC_API_KEY ||
-    ollamaEnabled
+    process.env.CORTEX_EMBEDDING_API_URL
   );
 
   let semanticDedupEnabled = false;

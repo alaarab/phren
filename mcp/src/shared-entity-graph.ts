@@ -24,7 +24,14 @@ const ENTITY_PATTERNS = [
   /"([\w][\w\-]{1,30}[\w])"/g,
 ];
 
-function extractEntityNames(content: string): string[] {
+/**
+ * Lightweight synchronous entity extraction from text — regex only, no DB writes.
+ * Used by add_finding to surface detected entities in the MCP response without
+ * requiring a DB reference in the write path. Full DB linking happens on the next
+ * index rebuild, which is triggered automatically after every add_finding call via
+ * updateFileInIndex → extractAndLinkEntities.
+ */
+export function extractEntityNames(content: string): string[] {
   const found = new Set<string>();
   for (const pattern of ENTITY_PATTERNS) {
     const regex = new RegExp(pattern.source, pattern.flags);
