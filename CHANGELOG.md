@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing yet.
 
+## [1.15.4] - 2026-03-08
+
+### Changed
+- Hooks shell view redesigned: now shows lifecycle events (UserPromptSubmit, Stop, SessionStart) with descriptions instead of agent tool names. `a`/`d` toggle hooks globally. Much clearer about what hooks actually do.
+
 ## [1.15.3] - 2026-03-08
 
 ### Fixed

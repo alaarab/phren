@@ -595,7 +595,7 @@ export function getListItems(
       return getProjectSkills(cortexPath, state.project).map((s) => ({ name: s.name, text: s.path }));
     }
     case "Hooks": {
-      return getHookEntries(cortexPath).map((e) => ({ name: e.tool, text: e.enabled ? "enabled" : "disabled" }));
+      return getHookEntries(cortexPath).map((e) => ({ name: e.event, text: e.enabled ? "active" : "inactive" }));
     }
     case "Health":
       return Array.from({ length: Math.max(1, healthLineCount) }, (_, i) => ({ id: String(i) }));
@@ -640,7 +640,7 @@ export async function activateSelected(host: NavigationHost): Promise<void> {
       if (item.name) { host.setMessage(`  ${style.bold(item.name)}  ${style.dim(item.text ?? "")}`); }
       break;
     case "Hooks":
-      if (item.name) { host.setMessage(`  ${item.text === "enabled" ? style.boldGreen("enabled") : style.dim("disabled")}  ${style.bold(item.name)}`); }
+      if (item.name) { host.setMessage(`  ${item.text === "active" ? style.boldGreen("active") : style.dim("inactive")}  ${style.bold(item.name)}`); }
       break;
   }
 }
@@ -719,11 +719,10 @@ export async function doViewAction(host: NavigationHost, key: string): Promise<v
       }
       break;
     case "Hooks":
-      if ((key === "a" || key === "d") && item?.name) {
+      if (key === "a" || key === "d") {
         const enable = key === "a";
-        const prefs = { hookTools: { ...((getHookEntries(host.cortexPath).reduce((acc, e) => ({ ...acc, [e.tool]: e.enabled }), {}))) as Record<string, boolean>, [item.name]: enable } };
-        writeInstallPreferences(host.cortexPath, prefs);
-        host.setMessage(`  ${enable ? style.boldGreen("Enabled") : style.dim("Disabled")} hooks for ${item.name}`);
+        writeInstallPreferences(host.cortexPath, { hooksEnabled: enable });
+        host.setMessage(`  Hooks ${enable ? style.boldGreen("enabled") : style.dim("disabled")} — takes effect next session`);
       }
       break;
   }

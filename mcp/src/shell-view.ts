@@ -543,26 +543,28 @@ export function renderSkillsView(ctx: ViewContext, cursor: number, height: numbe
 
 // ── Hooks view ─────────────────────────────────────────────────────────────
 
-const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
-
 export interface HookEntry {
-  tool: string;
+  event: string;
+  description: string;
   enabled: boolean;
 }
+
+const LIFECYCLE_HOOKS: Array<{ event: string; description: string }> = [
+  { event: "UserPromptSubmit", description: "inject context before each prompt" },
+  { event: "Stop",             description: "auto-save findings after each response" },
+  { event: "SessionStart",     description: "git pull at session start" },
+];
 
 export function getHookEntries(cortexPath: string): HookEntry[] {
   const prefs = readInstallPreferences(cortexPath);
   const hooksEnabled = prefs.hooksEnabled !== false;
-  const toolPrefs = (prefs.hookTools && typeof prefs.hookTools === "object") ? prefs.hookTools : {};
-  return HOOK_TOOLS.map((tool) => ({
-    tool,
-    enabled: hooksEnabled && toolPrefs[tool] !== false,
-  }));
+  return LIFECYCLE_HOOKS.map((h) => ({ ...h, enabled: hooksEnabled }));
 }
 
 export function renderHooksView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = process.stdout.columns || 80;
   const entries = getHookEntries(ctx.cortexPath);
+  const allEnabled = entries.every((e) => e.enabled);
   const allLines: string[] = [];
   let cursorFirstLine = 0;
   let cursorLastLine = 0;
@@ -572,14 +574,25 @@ export function renderHooksView(ctx: ViewContext, cursor: number, height: number
     const isSelected = i === cursor;
     if (isSelected) cursorFirstLine = allLines.length;
 
-    const statusBadge = e.enabled ? style.boldGreen("enabled ") : style.dim("disabled");
-    let row = `  ${style.dim((i + 1).toString().padEnd(3))} ${statusBadge}  ${style.bold(e.tool)}`;
-    if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
-    else row = truncateLine(row, cols);
-    allLines.push(row);
+    const statusBadge = e.enabled ? style.boldGreen("active  ") : style.dim("inactive");
+    let nameRow = `  ${style.dim((i + 1).toString().padEnd(3))} ${statusBadge}  ${style.bold(e.event)}`;
+    let descRow = `                    ${style.dim(e.description)}`;
+
+    if (isSelected) {
+      nameRow = `\x1b[7m${padToWidth(nameRow, cols)}${RESET}`;
+      descRow = `\x1b[7m${padToWidth(descRow, cols)}${RESET}`;
+    } else {
+      nameRow = truncateLine(nameRow, cols);
+      descRow = truncateLine(descRow, cols);
+    }
+    allLines.push(nameRow);
+    allLines.push(descRow);
 
     if (isSelected) cursorLastLine = allLines.length - 1;
   }
+
+  allLines.push("");
+  allLines.push(style.dim(`  hooks: ${allEnabled ? style.boldGreen("ON") : style.boldRed("OFF")}  ·  ${style.dim("a = enable all  ·  d = disable all")}`));
 
   const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
   const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
