@@ -3,7 +3,12 @@
 
 export {
   type ConsolidationNeeded,
+  type ConsolidationStatus,
   checkConsolidationNeeded,
+  getProjectConsolidationStatus,
+  CONSOLIDATION_ENTRY_THRESHOLD,
+  CONSOLIDATION_TIME_THRESHOLD_DAYS,
+  CONSOLIDATION_MIN_FOR_TIME_CHECK,
   validateFindingsFormat,
   stripBacklogDoneSection,
   validateBacklogFormat,

@@ -10,6 +10,7 @@ import { approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.
 
 import type { CortexResult } from "./shared.js";
 import type { McpToolResult } from "./mcp-types.js";
+import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
 
 /** Translate a CortexResult<string> into a standard McpToolResult shape. */
 function cortexResultToMcp(result: CortexResult<string>): McpToolResult {
@@ -36,9 +37,6 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project }) => {
-      const ENTRY_THRESHOLD = 25;
-      const TIME_THRESHOLD_DAYS = 60;
-
       const projectDirs = project
         ? (() => {
             if (!isValidProjectName(project)) return [];
@@ -61,49 +59,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }> = [];
 
       for (const dir of projectDirs) {
-        const findingsPath = path.join(dir, "FINDINGS.md");
-        if (!fs.existsSync(findingsPath)) continue;
-
-        const content = fs.readFileSync(findingsPath, "utf8");
-        const lines = content.split("\n");
-
-        const markerMatch = content.match(/<!--\s*consolidated:\s*(\d{4}-\d{2}-\d{2})/);
-        const lastConsolidated = markerMatch ? markerMatch[1] : null;
-
-        let startLine = 0;
-        if (markerMatch) {
-          startLine = lines.findIndex(l => /<!--\s*consolidated:/.test(l)) + 1;
-        }
-
-        let inDetails = false;
-        let entriesSince = 0;
-        for (let i = startLine; i < lines.length; i++) {
-          if (lines[i].includes("<details>")) { inDetails = true; continue; }
-          if (lines[i].includes("</details>")) { inDetails = false; continue; }
-          if (!inDetails && lines[i].startsWith("- ")) entriesSince++;
-        }
-
-        let daysSince: number | null = null;
-        if (lastConsolidated) {
-          const ts = Date.parse(`${lastConsolidated}T00:00:00Z`);
-          if (!isNaN(ts)) {
-            daysSince = Math.floor((Date.now() - ts) / 86400000);
-          }
-        }
-
-        const recommended =
-          entriesSince >= ENTRY_THRESHOLD ||
-          (daysSince !== null && daysSince >= TIME_THRESHOLD_DAYS && entriesSince >= 10) ||
-          (lastConsolidated === null && entriesSince >= ENTRY_THRESHOLD);
-
-        results.push({
-          project: path.basename(dir),
-          entriesSince,
-          threshold: ENTRY_THRESHOLD,
-          daysSince,
-          lastConsolidated,
-          recommended,
-        });
+        const status = getProjectConsolidationStatus(dir);
+        if (!status) continue;
+        results.push({ ...status, threshold: CONSOLIDATION_ENTRY_THRESHOLD });
       }
 
       if (results.length === 0) {
