@@ -318,7 +318,7 @@ describe("mcp-data: import rollback on rebuildIndex failure", () => {
     tmp.cleanup();
   });
 
-  it("import succeeds even when rebuildIndex throws (project dir is already moved)", async () => {
+  it("import returns a structured error when rebuildIndex throws, and rolls back for overwrite", async () => {
     const failingCtx = makeCtx(tmp.path, {
       rebuildIndex: async () => { throw new Error("index crash"); },
     });
@@ -326,12 +326,14 @@ describe("mcp-data: import rollback on rebuildIndex failure", () => {
     register(server as any, failingCtx);
 
     const payload = { project: "crash-test", summary: "# crash-test\nSome data." };
-    // rebuildIndex is called after files are already in place, so the error propagates
-    await expect(
-      server.call("import_project", { data: JSON.stringify(payload) })
-    ).rejects.toThrow("index crash");
+    // rebuildIndex failure is now caught and returned as a structured error response
+    const res = await server.call("import_project", { data: JSON.stringify(payload) });
+    const result = parseResult(res);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Index rebuild failed after import");
+    expect(result.errorCode).toBe("INTERNAL_ERROR");
 
-    // The project directory was already moved into place before rebuildIndex
+    // For a non-overwrite import there is no backup to restore, so the project dir remains
     expect(fs.existsSync(path.join(tmp.path, "crash-test"))).toBe(true);
   });
 });

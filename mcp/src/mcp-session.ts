@@ -19,8 +19,19 @@ interface SessionState {
 
 const STALE_SESSION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-/** The session ID created by this process's most recent session_start call. */
+/**
+ * The session ID created by this process's most recent session_start call.
+ *
+ * NOTE: This is a module-global singleton and will be overwritten when a new
+ * session_start is called.  When multiple clients share the same process, callers
+ * should always pass an explicit sessionId to session_end / session_context rather
+ * than relying on this fallback.  The sessionId is returned in the session_start
+ * response data for this purpose.
+ */
 let _currentProcessSessionId: string | undefined;
+
+/** Per-connection session map keyed by arbitrary connection ID (if provided). */
+const _sessionMap = new Map<string, string>();
 
 /** Get the current process's session ID (set by session_start). */
 export function getCurrentSessionId(): string | undefined {
@@ -49,7 +60,7 @@ function writeSessionStateFile(file: string, state: SessionState): void {
   fs.renameSync(tempFile, file);
 }
 
-/** Find the most recent session file by mtime. */
+/** Find the most recent *active* (not ended) session file by mtime. */
 function findMostRecentSession(cortexPath: string): { file: string; state: SessionState } | null {
   const dir = sessionsDir(cortexPath);
   let entries: fs.Dirent[];
@@ -64,6 +75,9 @@ function findMostRecentSession(cortexPath: string): { file: string; state: Sessi
     if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
     const fullPath = path.join(dir, entry.name);
     try {
+      const state = readSessionStateFile(fullPath);
+      // Skip ended sessions — fallback should only return active sessions
+      if (!state || state.endedAt) continue;
       const stat = fs.statSync(fullPath);
       if (stat.mtimeMs > bestMtime) {
         bestMtime = stat.mtimeMs;
@@ -78,9 +92,9 @@ function findMostRecentSession(cortexPath: string): { file: string; state: Sessi
   return { file: bestFile, state };
 }
 
-/** Resolve session file: use provided sessionId, then _currentProcessSessionId, then fall back to most recent. */
-function resolveSessionFile(cortexPath: string, sessionId?: string): { file: string; state: SessionState } | null {
-  const effectiveId = sessionId ?? _currentProcessSessionId;
+/** Resolve session file: use provided sessionId, then connectionId lookup, then _currentProcessSessionId, then fall back to most recent active session. */
+function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId?: string): { file: string; state: SessionState } | null {
+  const effectiveId = sessionId ?? (connectionId ? _sessionMap.get(connectionId) : undefined) ?? _currentProcessSessionId;
   if (effectiveId) {
     const file = sessionFileForId(cortexPath, effectiveId);
     const state = readSessionStateFile(file);
@@ -159,11 +173,12 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   server.registerTool("session_start", {
     title: "◆ cortex · session start",
-    description: "Mark the start of a new session and retrieve context from prior sessions. Call this at the start of a conversation when not using hooks. Returns prior session summary and recent project findings.",
+    description: "Mark the start of a new session and retrieve context from prior sessions. Call this at the start of a conversation when not using hooks. Returns prior session summary and recent project findings. The returned sessionId should be passed to session_end and session_context to avoid cross-client collisions.",
     inputSchema: z.object({
       project: z.string().optional().describe("Project to load context for."),
+      connectionId: z.string().optional().describe("Optional stable identifier for this client connection. When provided, session_end/session_context can resolve the session without an explicit sessionId."),
     }),
-  }, async ({ project }) => {
+  }, async ({ project, connectionId }) => {
     // Migrate legacy global session file if present
     migrateLegacySession(cortexPath);
 
@@ -184,7 +199,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     };
     const newFile = sessionFileForId(cortexPath, sessionId);
     writeSessionStateFile(newFile, next);
+    // Store in module-global for single-client compatibility; multi-client callers
+    // should use the returned sessionId explicitly on subsequent calls.
     _currentProcessSessionId = sessionId;
+    if (connectionId) _sessionMap.set(connectionId, sessionId);
 
     const parts: string[] = [];
 
@@ -226,13 +244,14 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   server.registerTool("session_end", {
     title: "◆ cortex · session end",
-    description: "Mark the end of a session and save a summary for the next session to pick up. Call this before ending a conversation to preserve context.",
+    description: "Mark the end of a session and save a summary for the next session to pick up. Call this before ending a conversation to preserve context. Pass the sessionId returned by session_start to avoid cross-client collisions.",
     inputSchema: z.object({
       summary: z.string().optional().describe("What was accomplished this session. Shown at the start of the next session."),
-      sessionId: z.string().optional().describe("Session ID to end. If not provided, ends the most recent session."),
+      sessionId: z.string().optional().describe("Session ID to end (returned by session_start). Preferred over relying on the module-global fallback."),
+      connectionId: z.string().optional().describe("Connection ID passed to session_start. Used to resolve the session when sessionId is not provided."),
     }),
-  }, async ({ summary, sessionId }) => {
-    const resolved = resolveSessionFile(cortexPath, sessionId);
+  }, async ({ summary, sessionId, connectionId }) => {
+    const resolved = resolveSessionFile(cortexPath, sessionId, connectionId);
     if (!resolved) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
 
     const { file, state } = resolved;
@@ -264,10 +283,11 @@ export function register(server: McpServer, ctx: McpContext): void {
     title: "◆ cortex · session context",
     description: "Get the current session context -- active project, session duration, findings added, and prior session summary.",
     inputSchema: z.object({
-      sessionId: z.string().optional().describe("Session ID to query. If not provided, returns the most recent session."),
+      sessionId: z.string().optional().describe("Session ID to query (returned by session_start). Preferred over relying on the module-global fallback."),
+      connectionId: z.string().optional().describe("Connection ID passed to session_start. Used to resolve the session when sessionId is not provided."),
     }),
-  }, async ({ sessionId }) => {
-    const resolved = resolveSessionFile(cortexPath, sessionId);
+  }, async ({ sessionId, connectionId }) => {
+    const resolved = resolveSessionFile(cortexPath, sessionId, connectionId);
     if (!resolved) return mcpResponse({ ok: true, message: "No active session. Call session_start to begin.", data: null });
 
     const { state } = resolved;

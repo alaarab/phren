@@ -293,9 +293,29 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (daysMatch) {
             sinceDate = new Date(Date.now() - parseInt(daysMatch[1], 10) * 86400000);
           } else if (/^\d{4}-\d{2}$/.test(since)) {
+            // Validate month is 01-12
+            const [, mm] = since.split("-");
+            const month = parseInt(mm, 10);
+            if (month < 1 || month > 12) {
+              return mcpResponse({ ok: false, error: `Invalid since value "${since}": month must be 01-12.` });
+            }
             sinceDate = new Date(`${since}-01T00:00:00Z`);
           } else if (/^\d{4}-\d{2}-\d{2}$/.test(since)) {
-            sinceDate = new Date(`${since}T00:00:00Z`);
+            // Validate month and day strictly (reject impossible dates like 2026-02-31)
+            const [, mm, dd] = since.split("-");
+            const month = parseInt(mm, 10);
+            const day = parseInt(dd, 10);
+            if (month < 1 || month > 12 || day < 1 || day > 31) {
+              return mcpResponse({ ok: false, error: `Invalid since value "${since}": month or day out of range.` });
+            }
+            const candidate = new Date(`${since}T00:00:00Z`);
+            // new Date() normalizes impossible dates (e.g. Feb 31 → Mar 3); detect by comparing parsed month/day
+            if (candidate.getUTCMonth() + 1 !== month || candidate.getUTCDate() !== day) {
+              return mcpResponse({ ok: false, error: `Invalid since value "${since}": date does not exist on the calendar.` });
+            }
+            sinceDate = candidate;
+          } else if (since) {
+            return mcpResponse({ ok: false, error: `Invalid since format "${since}". Use "7d", "YYYY-MM", or "YYYY-MM-DD".` });
           }
           if (sinceDate && !isNaN(sinceDate.getTime())) {
             const sinceMs = sinceDate.getTime();

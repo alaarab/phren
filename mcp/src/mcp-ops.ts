@@ -8,8 +8,19 @@ import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
 import { approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.js";
 
+import type { CortexResult } from "./shared.js";
+import type { McpToolResult } from "./mcp-types.js";
+
+/** Translate a CortexResult<string> into a standard McpToolResult shape. */
+function cortexResultToMcp(result: CortexResult<string>): McpToolResult {
+  if (result.ok) {
+    return { ok: true, message: result.data };
+  }
+  return { ok: false, error: result.error, errorCode: result.code };
+}
+
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, profile } = ctx;
+  const { cortexPath, profile, updateFileInIndex } = ctx;
 
   // ── get_consolidation_status ───────────────────────────────────────────────
 
@@ -274,7 +285,12 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
       const result = approveQueueItem(cortexPath, project, item);
-      return mcpResponse(result);
+      if (result.ok) {
+        // Approval writes to both FINDINGS.md and MEMORY_QUEUE.md — update both in index
+        updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
+        updateFileInIndex(path.join(cortexPath, project, "MEMORY_QUEUE.md"));
+      }
+      return mcpResponse(cortexResultToMcp(result));
     }
   );
 
@@ -295,7 +311,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
       const result = rejectQueueItem(cortexPath, project, item);
-      return mcpResponse(result);
+      if (result.ok) {
+        updateFileInIndex(path.join(cortexPath, project, "MEMORY_QUEUE.md"));
+      }
+      return mcpResponse(cortexResultToMcp(result));
     }
   );
 
@@ -317,7 +336,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item, new_text }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
       const result = editQueueItem(cortexPath, project, item, new_text);
-      return mcpResponse(result);
+      if (result.ok) {
+        updateFileInIndex(path.join(cortexPath, project, "MEMORY_QUEUE.md"));
+      }
+      return mcpResponse(cortexResultToMcp(result));
     }
   );
 }

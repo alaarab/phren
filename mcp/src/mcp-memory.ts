@@ -14,7 +14,7 @@ import { isValidProjectName } from "./utils.js";
 
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, withWriteQueue } = ctx;
+  const { cortexPath, withWriteQueue, updateFileInIndex } = ctx;
 
   server.registerTool(
     "pin_memory",
@@ -32,6 +32,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = upsertCanonical(cortexPath, project, memory);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        // Update FTS index so newly pinned memory is immediately searchable
+        const canonicalPath = path.join(cortexPath, project, "CANONICAL_MEMORIES.md");
+        updateFileInIndex(canonicalPath);
         return mcpResponse({ ok: true, message: result.data, data: { project, memory } });
       });
     }

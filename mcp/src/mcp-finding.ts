@@ -65,16 +65,29 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
           runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
           const result = addFindingToFile(cortexPath, project, taggedFinding, citation);
-          // Semantic conflict post-check (async, feature-flagged)
+          if (!result.ok) {
+            return mcpResponse({ ok: false, error: result.error });
+          }
+          // Determine status from the returned message string
+          const isSkipped = result.data.startsWith("Skipped duplicate");
+          const isAdded = !isSkipped;
+
+          if (isSkipped) {
+            return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "skipped" } });
+          }
+
+          // Semantic conflict post-check (async, feature-flagged) — only for newly added findings
           const conflicts = await checkSemanticConflicts(cortexPath, project, taggedFinding);
           if (conflicts.checked && conflicts.annotations.length > 0) {
-            // Append conflict annotations to the finding in the file
+            // Append conflict annotations to the exact inserted bullet in the file
             const resolvedDir = safeProjectPath(cortexPath, project);
             if (resolvedDir) {
               const fp = path.join(resolvedDir, "FINDINGS.md");
               if (fs.existsSync(fp)) {
                 let content = fs.readFileSync(fp, "utf8");
+                // Build the full bullet prefix as it was written (with "- " prefix)
                 const bulletPrefix = taggedFinding.startsWith("- ") ? taggedFinding.slice(0, 60) : `- ${taggedFinding.slice(0, 60)}`;
+                // Find the last occurrence of this exact bullet (the one just inserted)
                 const idx = content.lastIndexOf(bulletPrefix);
                 if (idx >= 0) {
                   const lineEnd = content.indexOf("\n", idx);
@@ -89,12 +102,11 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
           const resolvedFindingsDir = safeProjectPath(cortexPath, project);
           if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
-          const ok = result.ok && (result.data.startsWith("Added finding") || result.data.startsWith("Saved finding") || result.data.startsWith("Created FINDINGS.md"));
-          if (ok) {
+          if (isAdded) {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
             incrementSessionFindings(cortexPath);
           }
-          return mcpResponse({ ok, message: result.ok ? result.data : result.error, data: ok ? { project, finding: taggedFinding } : undefined });
+          return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "added" } });
         } catch (err: unknown) {
           if (err instanceof Error && err.message.includes("Rejected:")) {
             return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err), errorCode: "VALIDATION_ERROR" });

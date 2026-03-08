@@ -13,6 +13,7 @@ const importPayloadSchema = z.object({
   overwrite: z.boolean().optional(),
   summary: z.string().optional(),
   claudeMd: z.string().optional(),
+  backlogRaw: z.string().optional(),
   learnings: z
     .array(
       z.object({
@@ -22,9 +23,9 @@ const importPayloadSchema = z.object({
     .optional(),
   backlog: z
     .object({
-      Active: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional() }).passthrough()).optional(),
-      Queue: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional() }).passthrough()).optional(),
-      Done: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional() }).passthrough()).optional(),
+      Active: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional() }).passthrough()).optional(),
+      Queue: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional() }).passthrough()).optional(),
+      Done: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional() }).passthrough()).optional(),
     })
     .partial()
     .optional(),
@@ -58,7 +59,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
 
       const backlogResult = readBacklog(cortexPath, project);
-      if (backlogResult.ok) exported.backlog = backlogResult.data.items;
+      if (backlogResult.ok) {
+        exported.backlog = backlogResult.data.items;
+        // Also export raw backlog.md string for lossless round-trip (preserves priority/pinned/stable IDs)
+        const backlogRawPath = path.join(projectDir, "backlog.md");
+        if (fs.existsSync(backlogRawPath)) exported.backlogRaw = fs.readFileSync(backlogRawPath, "utf8");
+      }
 
       const claudePath = path.join(projectDir, "CLAUDE.md");
       if (fs.existsSync(claudePath)) exported.claudeMd = fs.readFileSync(claudePath, "utf8");
@@ -123,6 +129,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         };
 
         const buildBacklogContent = () => {
+          // Prefer the raw backlog string (lossless: preserves priority/pinned/stable IDs)
+          const backlogRaw = (parsed as Record<string, unknown>).backlogRaw;
+          if (typeof backlogRaw === "string") return backlogRaw;
           if (!parsed.backlog) return null;
           const sections = ["Active", "Queue", "Done"] as const;
           const lines = [`# ${parsed.project} backlog`, ""];
@@ -132,7 +141,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             if (items) {
               for (const item of items) {
                 const prefix = item.checked || section === "Done" ? "- [x] " : "- [ ] ";
-                lines.push(`${prefix}${item.line}`);
+                const priorityTag = item.priority ? ` [${item.priority}]` : "";
+                lines.push(`${prefix}${item.line}${priorityTag}`);
                 if (item.context) lines.push(`  Context: ${item.context}`);
               }
             }
@@ -195,10 +205,39 @@ export function register(server: McpServer, ctx: McpContext): void {
           });
         }
 
-        await rebuildIndex();
+        // Wrap rebuildIndex in a try/catch so that indexing failures trigger backup restore.
+        try {
+          await rebuildIndex();
+        } catch (indexError) {
+          // Index rebuild failed — restore backup if we replaced the project dir
+          if (overwrite) {
+            const backupDir = path.join(cortexPath, `${parsed.project}.import-backup-${Date.now()}`);
+            // Find the backup dir that was created earlier
+            try {
+              for (const entry of fs.readdirSync(cortexPath)) {
+                if (entry.startsWith(`${parsed.project}.import-backup-`)) {
+                  const backupPath = path.join(cortexPath, entry);
+                  if (fs.existsSync(backupPath) && !fs.existsSync(projectDir)) {
+                    fs.renameSync(backupPath, projectDir);
+                  } else if (fs.existsSync(backupPath)) {
+                    // Active dir exists — remove imported dir then restore backup
+                    fs.rmSync(projectDir, { recursive: true, force: true });
+                    fs.renameSync(backupPath, projectDir);
+                  }
+                  break;
+                }
+              }
+            } catch { /* best-effort restore */ }
+          }
+          return mcpResponse({
+            ok: false,
+            error: indexError instanceof Error ? `Index rebuild failed after import: ${indexError.message}` : "Index rebuild failed after import.",
+            errorCode: "INTERNAL_ERROR",
+          });
+        }
+
         // Backup is only deleted after successful rebuild so we can restore on failure
         if (overwrite) {
-          const backupToClean = path.join(cortexPath, `${parsed.project}.import-backup-`);
           try {
             for (const entry of fs.readdirSync(cortexPath)) {
               if (entry.startsWith(`${parsed.project}.import-backup-`)) {

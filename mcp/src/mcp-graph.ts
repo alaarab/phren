@@ -279,7 +279,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok: false, error: "Failed to insert entity link." });
         }
 
-        // 4b. Persist manual link so it survives index rebuilds
+        // 4b. Persist manual link so it survives index rebuilds (mandatory — failure aborts the operation)
         const manualLinksPath = runtimeFile(ctx.cortexPath, "manual-links.json");
         try {
           withFileLock(manualLinksPath, () => {
@@ -289,7 +289,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             }
             const newEntry = { entity: entityName, entityType: resolvedEntityType, sourceDoc, relType };
             const alreadyStored = existing.some(
-              (e) => e.entity === newEntry.entity && e.sourceDoc === newEntry.sourceDoc && e.relType === newEntry.relType
+              (e) => e.entity === newEntry.entity && e.entityType === newEntry.entityType && e.sourceDoc === newEntry.sourceDoc && e.relType === newEntry.relType
             );
             if (!alreadyStored) {
               existing.push(newEntry);
@@ -298,9 +298,16 @@ export function register(server: McpServer, ctx: McpContext): void {
               fs.renameSync(tmpPath, manualLinksPath);
             }
           });
-        } catch { /* non-fatal — link is still in DB for this session */ }
+        } catch (persistErr) {
+          // Persistence failed — return error without rebuilding (in-memory link would be discarded by rebuild)
+          return mcpResponse({
+            ok: false,
+            error: `Failed to persist manual link: ${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+            errorCode: "INTERNAL_ERROR",
+          });
+        }
 
-        // 5. Rebuild index to refresh
+        // 5. Rebuild index to refresh (only after successful persistence)
         await ctx.rebuildIndex();
 
         return mcpResponse({

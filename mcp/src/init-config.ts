@@ -198,8 +198,13 @@ export function removeMcpServerAtPath(filePath: string): boolean {
 }
 
 export function isCortexCommand(command: string): boolean {
+  // Detect CORTEX_PATH= env var prefix (present in all lifecycle hook commands)
+  if (/\bCORTEX_PATH=/.test(command)) return true;
+  // Detect npx/@alaarab/cortex package references
+  if (command.includes("@alaarab/cortex")) return true;
+  // Detect bare "cortex" executable segment
   const segments = command.split(/[/\\\s]+/);
-  return segments.some(seg => seg === "cortex" || seg.startsWith("cortex@") || seg.startsWith("@alaarab/cortex"));
+  return segments.some(seg => seg === "cortex" || seg.startsWith("cortex@"));
 }
 
 export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {

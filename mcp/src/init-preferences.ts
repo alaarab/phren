@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import type { CustomHookEntry } from "./hooks.js";
 
 export interface InstallPreferences {
   mcpEnabled?: boolean;
@@ -12,6 +13,7 @@ export interface InstallPreferences {
   hookTools?: Record<string, boolean>;
   installedVersion?: string;
   updatedAt?: string;
+  customHooks?: CustomHookEntry[];
 }
 
 function preferencesFile(cortexPath: string): string {

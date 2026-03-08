@@ -103,8 +103,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         id: z.string().optional().describe("Backlog item ID like A1, Q3, D2. Requires project."),
         item: z.string().optional().describe("Exact backlog item text. Requires project."),
         status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which backlog sections to include. Defaults to 'active+queue'."),
-        limit: z.number().optional().describe("Max items per Active/Queue section to return. Default 20."),
-        done_limit: z.number().optional().describe("Max Done items to return (most recent). Default 5. Done sections are capped tightly to avoid large responses."),
+        limit: z.number().int().min(1).max(200).optional().describe("Max items per Active/Queue section to return. Default 20."),
+        done_limit: z.number().int().min(1).max(200).optional().describe("Max Done items to return (most recent). Default 5. Done sections are capped tightly to avoid large responses."),
         summary: z.boolean().optional().describe("If true, return counts and titles only (no full content). Reduces token usage."),
       }),
     },
@@ -146,7 +146,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (summary) {
           return mcpResponse({
             ok: true,
-            message: buildBacklogSummary(doc, view.includedSections),
+            message: buildBacklogSummary(view.doc, view.includedSections),
             data: { project, includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
           });
         }
@@ -165,7 +165,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const anyTruncated = views.some(({ view }) => view.truncated);
       let parts: string[];
       if (summary) {
-        parts = views.map(({ doc, view }) => buildBacklogSummary(doc, view.includedSections));
+        parts = views.map(({ view }) => buildBacklogSummary(view.doc, view.includedSections));
       } else {
         parts = views.map(({ project, view }) => `## ${project}\n${backlogMarkdown(view.doc)}`);
       }

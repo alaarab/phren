@@ -39,12 +39,12 @@ function normalizeHookTool(input: string | undefined): HookTool | null {
   return HOOK_TOOLS.includes(lower) ? lower : null;
 }
 
-function hookConfigPaths(cortexPath: string): Record<HookTool, string> {
+function hookConfigPaths(_cortexPath: string): Record<HookTool, string> {
   return {
-    claude: path.join(cortexPath, "cortex.SKILL.md"),
+    claude: path.join(os.homedir(), ".claude", "settings.json"),
     copilot: path.join(os.homedir(), ".github", "hooks", "cortex.json"),
     cursor: path.join(os.homedir(), ".cursor", "hooks.json"),
-    codex: path.join(cortexPath, "codex.json"),
+    codex: path.join(os.homedir(), ".codex", "config.json"),
   };
 }
 
@@ -141,7 +141,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         event: z.enum(VALID_CUSTOM_EVENTS).describe("Hook event name."),
         command: z.string().describe("Shell command to execute."),
-        timeout: z.number().optional().describe("Timeout in ms (default 5000)."),
+        timeout: z.number().int().min(1).optional().describe("Timeout in ms (default 5000)."),
       }),
     },
     async ({ event, command, timeout }) => {
@@ -150,10 +150,10 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       return ctx.withWriteQueue(async () => {
         const prefs = readInstallPreferences(cortexPath);
-        const existing: CustomHookEntry[] = Array.isArray((prefs as any).customHooks) ? (prefs as any).customHooks : [];
-        const newHook: CustomHookEntry = { event: event as CustomHookEvent, command, ...(timeout ? { timeout } : {}) };
+        const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
+        const newHook: CustomHookEntry = { event: event as CustomHookEvent, command, ...(timeout !== undefined ? { timeout } : {}) };
 
-        writeInstallPreferences(cortexPath, { ...prefs, customHooks: [...existing, newHook] } as any);
+        writeInstallPreferences(cortexPath, { ...prefs, customHooks: [...existing, newHook] });
         return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${command}`, data: { hook: newHook, total: existing.length + 1 } });
       });
     }
@@ -174,7 +174,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ event, command }) => {
       return ctx.withWriteQueue(async () => {
         const prefs = readInstallPreferences(cortexPath);
-        const existing: CustomHookEntry[] = Array.isArray((prefs as any).customHooks) ? (prefs as any).customHooks : [];
+        const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
         const remaining = existing.filter(h => h.event !== event || (command && !h.command.includes(command)));
         const removed = existing.length - remaining.length;
 
@@ -182,7 +182,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok: false, error: `No custom hooks matched event="${event}"${command ? ` command containing "${command}"` : ""}.` });
         }
 
-        writeInstallPreferences(cortexPath, { ...prefs, customHooks: remaining } as any);
+        writeInstallPreferences(cortexPath, { ...prefs, customHooks: remaining });
         return mcpResponse({ ok: true, message: `Removed ${removed} custom hook(s) for "${event}".`, data: { removed, remaining: remaining.length } });
       });
     }
