@@ -23,7 +23,7 @@ So I built this. A knowledge base in my own GitHub. Every project, every machine
 
 The more I work, the more it knows. Findings match to entities. Old stuff fades. Good stuff sticks. It's just mining my data as I go and making it smarter over time.
 
-> `npx @alaarab/cortex init` — 30 seconds. No account. Just a git repo you own.
+> `npx @alaarab/cortex init` -- 30 seconds. No account. Just a git repo you own.
 
 <br>
 </div>
@@ -57,7 +57,144 @@ After init, you'll see something like:
   Restart your agent. Your next prompt will already have context.
 ```
 
-If you want hooks-only mode (no MCP tools), install with:
+### Sync across machines
+
+```bash
+cd ~/.cortex
+git init && git add . && git commit -m "Initial cortex"
+git remote add origin git@github.com:YOU/my-cortex.git
+git push -u origin main
+```
+
+On a new machine: clone, run init, done.
+
+---
+
+## What makes this different
+
+**It's not just a CLAUDE.md.** CLAUDE.md loads the whole file every single time. Cortex searches what you actually wrote and injects only what matches. Same bug, same workaround, same decision -- your agents find it when it's relevant, not all the time.
+
+**Your agents draw from what you already know.** Every bug, workaround, and decision gets saved. Next session your agent has it. You stop re-explaining things. They stop rediscovering things.
+
+**Findings match to entities. Old stuff fades. Good stuff sticks.** Knowledge doesn't just pile up. It decays. Patterns solidify. Things that keep coming up stay strong. Things that haven't mattered in months fall back. Your agents are always drawing from what's actually useful right now.
+
+**All your machines share the same store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets. It moves through git and just works.
+
+**Work and personal never mix.** Your work machine sees work projects. Your home machine sees personal ones. Same setup, different profiles.
+
+**550 tokens per prompt, not your whole config.** Less token spend means more agents running in parallel for the same cost. They're not reading noise, so they're not producing slop.
+
+**Your data stays in your own GitHub.** No account, no vendor. Markdown in a private repo you own. Read it, edit it, grep it, delete it.
+
+**It just runs.** Context gets injected before each prompt. Changes get saved and pushed after each response. You don't manage it.
+
+---
+
+## Works with every major agent
+
+Init detects your tools and registers them. A finding saved by Claude Code shows up in Codex next session, and the other way around.
+
+| Agent | Context injection | Auto-save | MCP tools | Instruction files |
+|-------|:-----------------:|:---------:|:---------:|:-----------------:|
+| Claude Code | yes | yes | yes | `CLAUDE.md` |
+| GitHub Copilot CLI | yes | yes | yes | `copilot-instructions.md` |
+| Cursor | yes | yes | yes | via hooks |
+| OpenAI Codex | yes | yes | yes | `AGENTS.md` |
+
+MCP or hooks-only, either works. Same knowledge base either way.
+
+---
+
+## How it runs itself
+
+Three things happen every session without you doing anything:
+
+**Before each prompt** -- a hook pulls keywords from your message, searches the index, and injects the best matches. Trust filtering drops low-confidence or outdated entries.
+
+**After each response** -- changes get committed and pushed. Findings, backlog updates, session state. If nothing changed, the hook skips.
+
+**When context resets** -- a hook re-injects your project summary, recent findings, and active backlog so the agent picks up where it left off.
+
+Two more things run in the background:
+
+**Consolidation.** When findings pile up past the threshold, cortex flags it once per session. `/cortex-consolidate` archives old entries and promotes patterns that show up across two or more projects.
+
+**Review queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
+
+---
+
+## Reference
+
+<details>
+<summary><strong>What lives in your cortex</strong></summary>
+
+`cortex init` creates your project store with starter templates. Each project gets its own directory. Add files as the project grows.
+
+| File | What it's for |
+|------|--------------|
+| `summary.md` | Five-line card: what, stack, status, how to run, key insight |
+| `CLAUDE.md` | Full context: architecture, commands, conventions |
+| `REFERENCE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
+| `FINDINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
+| `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
+| `backlog.md` | Task queue that persists across sessions |
+| `MEMORY_QUEUE.md` | Items waiting for your review |
+| `.claude/skills/` | Project-specific slash commands |
+
+</details>
+
+<details>
+<summary><strong>Multiple machines, one repo</strong></summary>
+
+Your cortex is a git repo. Push it to a private remote, clone it anywhere.
+
+`machines.yaml` maps each hostname to a profile:
+
+```yaml
+work-desktop: work
+home-laptop: personal
+```
+
+Each profile lists its projects:
+
+```yaml
+# profiles/personal.yaml
+name: personal
+projects:
+  - global
+  - my-api
+  - my-frontend
+  - side-project
+```
+
+`cortex link` applies the profile and keeps only the listed projects on disk. First run asks for a machine name and profile. After that, nothing to configure.
+
+For CI or unattended setup:
+
+```bash
+npx @alaarab/cortex init --machine ci-runner --profile work
+```
+
+</details>
+
+<details>
+<summary><strong>Multiple agents, shared knowledge</strong></summary>
+
+When you run multiple agents, they all read and write the same project store. An agent on Codex hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context. No coordination code. No message passing. Just a shared git repo.
+
+- **Parallel agents** share findings on push/pull cycles
+- **Sequential sessions** build on each other. Session 47 knows everything sessions 1 through 46 learned.
+- **Cross-project patterns** surface when the same insight shows up in two or more projects
+- **Backlog items** persist across agents and sessions. One agent adds a task, another finishes it.
+
+Because it's all markdown in git, you have a full record of what your agents learned, when, and which session produced each insight.
+
+</details>
+
+<details>
+<summary><strong>Init options and templates</strong></summary>
+
+Hooks-only mode (no MCP tools):
 
 ```bash
 npx @alaarab/cortex init --mcp off
@@ -85,75 +222,62 @@ cortex hooks-mode on     # re-enable hooks
 
 Use `--from-existing <path>` to import an existing project structure.
 
-### Sync across machines
+### Adding projects
 
 ```bash
-cd ~/.cortex
-git init && git add . && git commit -m "Initial cortex"
-git remote add origin git@github.com:YOU/my-cortex.git
-git push -u origin main
+/cortex-init my-project              # let Claude scaffold it
+# or manually:
+mkdir ~/.cortex/my-project && echo "# my-project" > ~/.cortex/my-project/CLAUDE.md
 ```
 
-On a new machine: clone, run init, done.
+</details>
 
----
+<details>
+<summary><strong>Skills</strong></summary>
 
-## What makes this different
+Four skills for the things that can't be automatic:
 
-**It's not just a CLAUDE.md.** CLAUDE.md loads the whole file every single time. Cortex searches what you actually wrote and injects only what matches. Same bug, same workaround, same decision — your agents find it when it's relevant, not all the time.
+| Skill | What it does |
+|-------|-------------|
+| `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. |
+| `/cortex-init` | Scaffold a new project. Creates summary.md, CLAUDE.md, backlog, adds to your profile. |
+| `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
+| `/cortex-consolidate` | Read findings across all projects and surface patterns that repeat. |
 
-**Your agents draw from what you already know.** Every bug, workaround, and decision gets saved. Next session your agent has it. You stop re-explaining things. They stop rediscovering things.
+**When to run these manually:**
 
-**Findings match to entities. Old stuff fades. Good stuff sticks.** Knowledge doesn't just pile up. It decays. Patterns solidify. Things that keep coming up stay strong. Things that haven't mattered in months fall back. Your agents are always drawing from what's actually useful right now.
+- **`/cortex-discover`** -- Run after your first week on a new project, or when you feel like things are slipping through the cracks. It tells you what's missing, what's stale, and what's stuck.
+- **`/cortex-consolidate`** -- Run after a burst of work across multiple projects, or monthly. It finds patterns that repeat across projects and promotes them to global knowledge so every agent benefits.
+- **`cortex maintain govern`** -- Run when search results feel noisy or after a long break from a project. It queues low-value and stale entries for review.
+- **`cortex maintain consolidate`** -- Run when findings in a single project feel repetitive. It deduplicates bullets in FINDINGS.md. Use `--dry-run` first to preview.
 
-**All your machines share the same store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets. It moves through git and just works.
+Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlinks them to `~/.claude/skills/` so they're available everywhere.
 
-**Work and personal never mix.** Your work machine sees work projects. Your home machine sees personal ones. Same setup, different profiles.
+### Per-project agent config
 
-**550 tokens per prompt, not your whole config.** Less token spend means more agents running in parallel for the same cost. They're not reading noise, so they're not producing slop.
+Drop a `cortex.project.yaml` in `~/.cortex/<project>/` to control what gets injected for that project:
 
-**Your data stays in your own GitHub.** No account, no vendor. Markdown in a private repo you own. Read it, edit it, grep it, delete it.
+```yaml
+# Opt out of global skill injection for this project
+skills: false
 
-**It just runs.** Context gets injected before each prompt. Changes get saved and pushed after each response. You don't manage it.
+# Register extra MCP servers when this project is linked
+mcpServers:
+  my-tool:
+    command: node
+    args: [/path/to/server.js]
+  my-api:
+    command: /usr/local/bin/api-server
+    env:
+      API_KEY: "from-your-env"
+```
 
----
+`cortex link` merges project MCP servers into your agent config under namespaced keys (`cortex__<project>__<name>`) and cleans them up when the config changes.
 
-## What lives in your cortex
+</details>
 
-`cortex init` creates your project store with starter templates. Each project gets its own directory. Add files as the project grows.
-
-| File | What it's for |
-|------|--------------|
-| `summary.md` | Five-line card: what, stack, status, how to run, key insight |
-| `CLAUDE.md` | Full context: architecture, commands, conventions |
-| `REFERENCE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
-| `FINDINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
-| `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
-| `backlog.md` | Task queue that persists across sessions |
-| `MEMORY_QUEUE.md` | Items waiting for your review (see [Review queue](#review-queue) below) |
-| `.claude/skills/` | Project-specific slash commands |
-
----
-
-## How it runs itself
-
-Three things happen every session without you doing anything:
-
-**Before each prompt** — a hook pulls keywords from your message, searches the index, and injects the best matches. Trust filtering drops low-confidence or outdated entries.
-
-**After each response** — changes get committed and pushed. Findings, backlog updates, session state. If nothing changed, the hook skips.
-
-**When context resets** — a hook re-injects your project summary, recent findings, and active backlog so the agent picks up where it left off.
-
-Two more things run in the background:
-
-**Consolidation.** When findings pile up past the threshold, cortex flags it once per session. `/cortex-consolidate` archives old entries and promotes patterns that show up across two or more projects.
-
-**Review queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
-
----
-
-## The MCP server
+<details>
+<summary><strong>The MCP server (47 tools)</strong></summary>
 
 The MCP server indexes your project store into a local SQLite FTS5 database and exposes 47 tools:
 
@@ -225,9 +349,10 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 
 Governance, policy, and maintenance tools are CLI-only (see `cortex config` and `cortex maintain`).
 
----
+</details>
 
-## Interactive shell
+<details>
+<summary><strong>Interactive shell</strong></summary>
 
 `cortex` in a terminal opens the shell. Seven views, single-key navigation:
 
@@ -262,9 +387,10 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 
 The shell works the same on every machine, for every agent.
 
----
+</details>
 
-## CLI
+<details>
+<summary><strong>CLI reference</strong></summary>
 
 For scripting, hooks, and quick lookups from the terminal:
 
@@ -299,7 +425,7 @@ cortex hooks enable <tool>              # enable hooks for tool (claude/copilot/
 cortex hooks disable <tool>             # disable hooks for tool
 ```
 
-Use `cortex config` for policy tuning and `cortex maintain` for governance operations. Run `--dry-run` before destructive maintenance commands. See [Skills](#skills) for guidance on when to run discover and consolidate.
+Use `cortex config` for policy tuning and `cortex maintain` for governance operations. Run `--dry-run` before destructive maintenance commands.
 
 ### cortex doctor
 
@@ -331,123 +457,10 @@ Four roles: `admin`, `maintainer`, `contributor`, `viewer`. Set in `.governance/
 
 See [docs/environment.md](docs/environment.md) for all feature flags and env vars.
 
----
+</details>
 
-## Works with every major agent
-
-Init detects your tools and registers them. A finding saved by Claude Code shows up in Codex next session, and the other way around.
-
-| Agent | Context injection | Auto-save | MCP tools | Instruction files |
-|-------|:-----------------:|:---------:|:---------:|:-----------------:|
-| Claude Code | yes | yes | yes | `CLAUDE.md` |
-| GitHub Copilot CLI | yes | yes | yes | `copilot-instructions.md` |
-| Cursor | yes | yes | yes | via hooks |
-| OpenAI Codex | yes | yes | yes | `AGENTS.md` |
-
-MCP or hooks-only, either works. Same knowledge base either way.
-
----
-
-## Multiple machines, one repo
-
-Your cortex is a git repo. Push it to a private remote, clone it anywhere.
-
-`machines.yaml` maps each hostname to a profile:
-
-```yaml
-work-desktop: work
-home-laptop: personal
-```
-
-Each profile lists its projects:
-
-```yaml
-# profiles/personal.yaml
-name: personal
-projects:
-  - global
-  - my-api
-  - my-frontend
-  - side-project
-```
-
-`cortex link` applies the profile and keeps only the listed projects on disk. First run asks for a machine name and profile. After that, nothing to configure.
-
-For CI or unattended setup:
-
-```bash
-npx @alaarab/cortex init --machine ci-runner --profile work
-```
-
----
-
-## Multiple agents, shared knowledge
-
-When you run multiple agents, they all read and write the same project store. An agent on Codex hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context. No coordination code. No message passing. Just a shared git repo.
-
-- **Parallel agents** share findings on push/pull cycles
-- **Sequential sessions** build on each other. Session 47 knows everything sessions 1 through 46 learned.
-- **Cross-project patterns** surface when the same insight shows up in two or more projects
-- **Backlog items** persist across agents and sessions. One agent adds a task, another finishes it.
-
-Because it's all markdown in git, you have a full record of what your agents learned, when, and which session produced each insight.
-
----
-
-## Skills
-
-Four skills for the things that can't be automatic:
-
-| Skill | What it does |
-|-------|-------------|
-| `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. |
-| `/cortex-init` | Scaffold a new project. Creates summary.md, CLAUDE.md, backlog, adds to your profile. |
-| `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
-| `/cortex-consolidate` | Read findings across all projects and surface patterns that repeat. |
-
-**When to run these manually:**
-
-- **`/cortex-discover`** -- Run after your first week on a new project, or when you feel like things are slipping through the cracks. It tells you what's missing, what's stale, and what's stuck.
-- **`/cortex-consolidate`** -- Run after a burst of work across multiple projects, or monthly. It finds patterns that repeat across projects and promotes them to global knowledge so every agent benefits.
-- **`cortex maintain govern`** -- Run when search results feel noisy or after a long break from a project. It queues low-value and stale entries for review.
-- **`cortex maintain consolidate`** -- Run when findings in a single project feel repetitive. It deduplicates bullets in FINDINGS.md. Use `--dry-run` first to preview.
-
-Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlinks them to `~/.claude/skills/` so they're available everywhere.
-
-### Per-project agent config
-
-Drop a `cortex.project.yaml` in `~/.cortex/<project>/` to control what gets injected for that project:
-
-```yaml
-# Opt out of global skill injection for this project
-skills: false
-
-# Register extra MCP servers when this project is linked
-mcpServers:
-  my-tool:
-    command: node
-    args: [/path/to/server.js]
-  my-api:
-    command: /usr/local/bin/api-server
-    env:
-      API_KEY: "from-your-env"
-```
-
-`cortex link` merges project MCP servers into your agent config under namespaced keys (`cortex__<project>__<name>`) and cleans them up when the config changes.
-
----
-
-## Adding projects
-
-```bash
-/cortex-init my-project              # let Claude scaffold it
-# or manually:
-mkdir ~/.cortex/my-project && echo "# my-project" > ~/.cortex/my-project/CLAUDE.md
-```
-
----
-
-## Troubleshooting
+<details>
+<summary><strong>Troubleshooting</strong></summary>
 
 **Cortex not injecting context into prompts**
 
@@ -468,6 +481,8 @@ Project directory probably moved or symlinks are stale. Run `cortex doctor --fix
 **Merge conflicts after pulling on a new machine**
 
 Run `cortex` and type `:conflicts`. Cortex auto-merges most cases (backlog items, findings). If a manual merge is needed, conflict markers show in the files.
+
+</details>
 
 ---
 
