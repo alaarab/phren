@@ -29,3 +29,14 @@ export function findWasmBinary(): Buffer | undefined {
   }
   return undefined;
 }
+
+const _initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<unknown>;
+
+/**
+ * Bootstrap sql.js-fts5: find the WASM binary and initialise the library.
+ * Shared across shared-index.ts and embedding.ts to avoid duplication.
+ */
+export async function bootstrapSqlJs(): Promise<unknown> {
+  const wasmBinary = findWasmBinary();
+  return _initSqlJs(wasmBinary ? { wasmBinary } : {});
+}
