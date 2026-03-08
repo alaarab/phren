@@ -8,6 +8,7 @@ import {
 import { isFeatureEnabled } from "./utils.js";
 import { annotateStale } from "./cli-hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "./cli-hooks-retrieval.js";
+import { approximateTokens } from "./cli-hooks-retrieval.js";
 
 // ── Progressive disclosure helpers ────────────────────────────────────────────
 
@@ -77,6 +78,24 @@ export function buildHookOutput(
         ...selected.slice(2),           // remaining → middle
         selected[1],                    // second most → end
       ];
+    }
+
+    // Re-verify token budget after reordering; trim middle items if over budget
+    if (ordered.length > 2) {
+      let totalTokens = 36; // base overhead
+      const keep: boolean[] = ordered.map(() => true);
+      for (let i = 0; i < ordered.length; i++) {
+        totalTokens += approximateTokens(ordered[i].snippet) + 14;
+      }
+      // Trim from the middle (indices 1..N-2) if over budget
+      if (totalTokens > tokenBudget) {
+        for (let i = ordered.length - 2; i >= 1; i--) {
+          if (totalTokens <= tokenBudget) break;
+          totalTokens -= approximateTokens(ordered[i].snippet) + 14;
+          keep[i] = false;
+        }
+        ordered = ordered.filter((_, i) => keep[i]);
+      }
     }
 
     for (const injected of ordered) {
