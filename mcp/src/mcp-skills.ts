@@ -53,18 +53,36 @@ function getAllSkills(cortexPath: string, profile: string): SkillEntry[] {
   return all;
 }
 
-type FindSkillResult = { path: string } | { error: string } | null;
+function getScopedSkills(cortexPath: string, project: string | undefined, profile: string): SkillEntry[] {
+  if (!project) return getAllSkills(cortexPath, profile);
+  const seen = new Set<string>();
+  if (project.toLowerCase() === "global") {
+    return collectSkills(path.join(cortexPath, "global", "skills"), "global", seen);
+  }
+  const projectDir = path.join(cortexPath, project);
+  return [
+    ...collectSkills(path.join(projectDir, "skills"), project, seen),
+    ...collectSkills(path.join(projectDir, ".claude", "skills"), project, seen),
+  ];
+}
 
-function findSkill(cortexPath: string, profile: string, project: string | undefined, name: string): FindSkillResult {
+type FindSkillResult = { path: string } | { error: string } | null;
+type ResolvedSkill = { path: string; format: "flat" | "folder"; root: string };
+
+function findSkill(cortexPath: string, profile: string, project: string | undefined, name: string): ResolvedSkill | { error: string } | null {
   const needle = name.replace(/\.md$/i, "").toLowerCase();
-  const matches = getAllSkills(cortexPath, profile).filter(s =>
+  const matches = getScopedSkills(cortexPath, project, profile).filter(s =>
     s.name.toLowerCase() === needle && (!project || s.source.toLowerCase() === project.toLowerCase())
   );
   if (matches.length === 0) return null;
   if (matches.length > 1 && !project) {
     return { error: `Skill '${name}' exists in multiple scopes: ${matches.map(m => m.source).join(', ')}. Pass project= to disambiguate.` };
   }
-  return { path: matches[0].path };
+  return {
+    path: matches[0].path,
+    format: matches[0].format,
+    root: matches[0].format === "folder" ? path.dirname(matches[0].path) : matches[0].path,
+  };
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -178,8 +196,14 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         fs.mkdirSync(destDir, { recursive: true });
-        const dest = path.join(destDir, `${name.replace(/\.md$/i, "")}.md`);
-        const existed = fs.existsSync(dest);
+        const existing = findSkill(cortexPath, profile, scope, safeName);
+        if (existing && "error" in existing) {
+          return mcpResponse({ ok: false, error: existing.error });
+        }
+        const dest = existing
+          ? existing.path
+          : path.join(destDir, `${safeName}.md`);
+        const existed = Boolean(existing) || fs.existsSync(dest);
 
         fs.writeFileSync(dest, content);
         updateFileInIndex(dest);
@@ -215,9 +239,13 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       return withWriteQueue(async () => {
-        fs.unlinkSync(result.path);
+        if (result.format === "folder") {
+          fs.rmSync(result.root, { recursive: true, force: true });
+        } else {
+          fs.unlinkSync(result.path);
+        }
         updateFileInIndex(result.path); // called after delete so indexer removes the entry
-        return mcpResponse({ ok: true, message: `Removed skill "${name}" (${result.path}).`, data: { path: result.path } });
+        return mcpResponse({ ok: true, message: `Removed skill "${name}" (${result.root}).`, data: { path: result.root } });
       });
     }
   );
