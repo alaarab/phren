@@ -12,7 +12,7 @@ import {
 // SQLite cache (Q17) — replaces embed-cache.jsonl with O(1) lookup
 // ---------------------------------------------------------------------------
 
-interface SqlJsDatabase {
+export interface SqlJsDatabase {
   run(sql: string, params?: (string | number | null | Uint8Array)[]): void;
   exec(sql: string, params?: (string | number | null | Uint8Array)[]): { columns: string[]; values: (string | number | null | Uint8Array)[][] }[];
   export(): Uint8Array;
@@ -28,9 +28,6 @@ const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) =
 
 const EMBED_CACHE_DB = "embed-cache.db";
 const EMBED_CACHE_JSONL = "embed-cache.jsonl"; // legacy file for migration
-
-// Module-level cache of open databases keyed by db file path
-const dbByFile = new Map<string, SqlJsDatabase>();
 
 function findWasmBinary(): Buffer | undefined {
   try {
@@ -85,55 +82,54 @@ function getSql(): Promise<SqlJsStatic> {
 
 async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
   const dbPath = getCacheDbPath(cortexPath);
-  const existing = dbByFile.get(dbPath);
-  if (existing) return existing;
-
   const SQL = await getSql();
 
-  let db: SqlJsDatabase;
-  if (fs.existsSync(dbPath)) {
-    const data = fs.readFileSync(dbPath);
-    db = new SQL.Database(data);
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run(`CREATE TABLE IF NOT EXISTS embeddings (
-    model TEXT NOT NULL,
-    hash TEXT NOT NULL,
-    embedding BLOB NOT NULL,
-    PRIMARY KEY (model, hash)
-  )`);
-
-  // Migrate legacy JSONL cache if it exists
-  const legacyPath = path.join(runtimeDir(cortexPath), EMBED_CACHE_JSONL);
-  if (fs.existsSync(legacyPath)) {
-    try {
-      const lines = fs.readFileSync(legacyPath, "utf-8").split("\n").filter(Boolean);
-      if (lines.length > 0) {
-        db.run("BEGIN TRANSACTION");
-        for (const line of lines) {
-          const entry = JSON.parse(line) as { hash: string; model: string; embedding: number[] };
-          db.run(
-            "INSERT OR IGNORE INTO embeddings (model, hash, embedding) VALUES (?, ?, ?)",
-            [entry.model, entry.hash, encodeEmbedding(entry.embedding)]
-          );
-        }
-        db.run("COMMIT");
-        // Persist after migration
-        fs.writeFileSync(dbPath, Buffer.from(db.export()));
-        // Remove legacy file after successful migration
-        fs.unlinkSync(legacyPath);
-        debugLog(`embedding: migrated ${lines.length} entries from JSONL to SQLite`);
-      }
-    } catch (err) {
-      try { db.run("ROLLBACK"); } catch { /* ignore */ }
-      debugLog(`embedding: JSONL migration failed: ${err instanceof Error ? err.message : String(err)}`);
+  let db: SqlJsDatabase | undefined;
+  try {
+    if (fs.existsSync(dbPath)) {
+      const data = fs.readFileSync(dbPath);
+      db = new SQL.Database(data);
+    } else {
+      db = new SQL.Database();
     }
-  }
 
-  dbByFile.set(dbPath, db);
-  return db;
+    db.run(`CREATE TABLE IF NOT EXISTS embeddings (
+      model TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      embedding BLOB NOT NULL,
+      PRIMARY KEY (model, hash)
+    )`);
+
+    // Migrate legacy JSONL cache if it exists
+    const legacyPath = path.join(runtimeDir(cortexPath), EMBED_CACHE_JSONL);
+    if (fs.existsSync(legacyPath)) {
+      try {
+        const lines = fs.readFileSync(legacyPath, "utf-8").split("\n").filter(Boolean);
+        if (lines.length > 0) {
+          db.run("BEGIN TRANSACTION");
+          for (const line of lines) {
+            const entry = JSON.parse(line) as { hash: string; model: string; embedding: number[] };
+            db.run(
+              "INSERT OR IGNORE INTO embeddings (model, hash, embedding) VALUES (?, ?, ?)",
+              [entry.model, entry.hash, encodeEmbedding(entry.embedding)]
+            );
+          }
+          db.run("COMMIT");
+          fs.writeFileSync(dbPath, Buffer.from(db.export()));
+          fs.unlinkSync(legacyPath);
+          debugLog(`embedding: migrated ${lines.length} entries from JSONL to SQLite`);
+        }
+      } catch (err) {
+        try { db.run("ROLLBACK"); } catch { /* ignore */ }
+        debugLog(`embedding: JSONL migration failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    return db;
+  } catch (err) {
+    try { db?.close(); } catch { /* ignore */ }
+    throw err;
+  }
 }
 
 function persistDb(cortexPath: string, db: SqlJsDatabase): void {
@@ -278,6 +274,15 @@ export async function getApiEmbeddings(
   return sorted.map(d => d.embedding);
 }
 
+export const embeddingOps = {
+  openCacheDb,
+  persistDb,
+  lookupCache,
+  insertCache,
+  getApiEmbedding,
+  getApiEmbeddings,
+};
+
 // ---------------------------------------------------------------------------
 // Cached embedding (uses SQLite cache)
 // ---------------------------------------------------------------------------
@@ -291,15 +296,23 @@ export async function getCachedEmbedding(
   apiKey: string,
   model: string
 ): Promise<number[]> {
-  const hash = sha256(`${model}:${text}`);
-  const db = await openCacheDb(cortexPath);
-  const cached = lookupCache(db, model, hash);
-  if (cached) return cached;
+  let db: SqlJsDatabase | undefined;
+  try {
+    const hash = sha256(`${model}:${text}`);
+    db = await embeddingOps.openCacheDb(cortexPath);
+    const cached = embeddingOps.lookupCache(db, model, hash);
+    if (cached) return cached;
 
-  const embedding = await getApiEmbedding(text, apiKey, model);
-  insertCache(db, model, hash, embedding);
-  persistDb(cortexPath, db);
-  return embedding;
+    const embedding = await embeddingOps.getApiEmbedding(text, apiKey, model);
+    embeddingOps.insertCache(db, model, hash, embedding);
+    embeddingOps.persistDb(cortexPath, db);
+    return embedding;
+  } catch (err) {
+    debugLog(`embedding: getCachedEmbedding failed: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  } finally {
+    try { db?.close(); } catch { /* ignore */ }
+  }
 }
 
 /**
@@ -313,37 +326,45 @@ export async function getCachedEmbeddings(
 ): Promise<number[][]> {
   if (texts.length === 0) return [];
 
-  const db = await openCacheDb(cortexPath);
-  const results: (number[] | null)[] = texts.map(text => {
-    const hash = sha256(`${model}:${text}`);
-    return lookupCache(db, model, hash);
-  });
+  let db: SqlJsDatabase | undefined;
+  try {
+    db = await embeddingOps.openCacheDb(cortexPath);
+    const results: (number[] | null)[] = texts.map(text => {
+      const hash = sha256(`${model}:${text}`);
+      return embeddingOps.lookupCache(db!, model, hash);
+    });
 
-  const uncachedIndices: number[] = [];
-  const uncachedTexts: string[] = [];
-  for (let i = 0; i < results.length; i++) {
-    if (results[i] === null) {
-      uncachedIndices.push(i);
-      uncachedTexts.push(texts[i]);
-    }
-  }
-
-  if (uncachedTexts.length > 0) {
-    const BATCH_SIZE = 20;
-    for (let start = 0; start < uncachedTexts.length; start += BATCH_SIZE) {
-      const batch = uncachedTexts.slice(start, start + BATCH_SIZE);
-      const batchEmbeddings = await getApiEmbeddings(batch, apiKey, model);
-      for (let j = 0; j < batch.length; j++) {
-        const idx = uncachedIndices[start + j];
-        results[idx] = batchEmbeddings[j];
-        const hash = sha256(`${model}:${batch[j]}`);
-        insertCache(db, model, hash, batchEmbeddings[j]);
+    const uncachedIndices: number[] = [];
+    const uncachedTexts: string[] = [];
+    for (let i = 0; i < results.length; i++) {
+      if (results[i] === null) {
+        uncachedIndices.push(i);
+        uncachedTexts.push(texts[i]);
       }
     }
-    persistDb(cortexPath, db);
-  }
 
-  return results as number[][];
+    if (uncachedTexts.length > 0) {
+      const BATCH_SIZE = 20;
+      for (let start = 0; start < uncachedTexts.length; start += BATCH_SIZE) {
+        const batch = uncachedTexts.slice(start, start + BATCH_SIZE);
+        const batchEmbeddings = await embeddingOps.getApiEmbeddings(batch, apiKey, model);
+        for (let j = 0; j < batch.length; j++) {
+          const idx = uncachedIndices[start + j];
+          results[idx] = batchEmbeddings[j];
+          const hash = sha256(`${model}:${batch[j]}`);
+          embeddingOps.insertCache(db, model, hash, batchEmbeddings[j]);
+        }
+      }
+      embeddingOps.persistDb(cortexPath, db);
+    }
+
+    return results.map(result => result ?? []);
+  } catch (err) {
+    debugLog(`embedding: getCachedEmbeddings failed: ${err instanceof Error ? err.message : String(err)}`);
+    return texts.map(() => []);
+  } finally {
+    try { db?.close(); } catch { /* ignore */ }
+  }
 }
 
 /**

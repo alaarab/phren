@@ -12,7 +12,7 @@ import {
   collectNativeMemoryFiles,
   runtimeFile,
 } from "./shared.js";
-import { getIndexPolicy } from "./shared-governance.js";
+import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
 import { cosineFallback, COSINE_CANDIDATE_CAP, invalidateDfCache } from "./shared-search-fallback.js";
 import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities } from "./shared-entity-graph.js";
@@ -648,15 +648,83 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   return db;
 }
 
-export async function buildIndex(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
-  });
+function createEmptyIndexDb(SQL: SqlJsStatic): SqlJsDatabase {
+  const db = new SQL.Database();
+  db.run(`
+    CREATE VIRTUAL TABLE docs USING fts5(
+      project, filename, type, content, path,
+      tokenize = "porter unicode61"
+    );
+  `);
+  db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, UNIQUE(name, type))`);
+  db.run(`CREATE TABLE IF NOT EXISTS entity_links (source_id INTEGER REFERENCES entities(id), target_id INTEGER REFERENCES entities(id), rel_type TEXT NOT NULL, source_doc TEXT, PRIMARY KEY (source_id, target_id, rel_type))`);
+  ensureGlobalEntitiesTable(db);
+  return db;
+}
+
+function isRebuildLockHeld(cortexPath: string): boolean {
+  const lockTarget = runtimeFile(cortexPath, "index-rebuild");
+  const lockPath = lockTarget + ".lock";
   try {
-    return await Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
-  } finally {
-    clearTimeout(timer!);
+    const stat = fs.statSync(lockPath);
+    const staleThreshold = Number.parseInt(process.env.CORTEX_FILE_LOCK_STALE_MS || "30000", 10) || 30000;
+    return Date.now() - stat.mtimeMs <= staleThreshold;
+  } catch {
+    return false;
+  }
+}
+
+async function loadIndexSnapshotOrEmpty(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
+  const wasmBinary = findWasmBinary();
+  const SQL = await initSqlJs(wasmBinary ? { wasmBinary } : {});
+  let userSuffix: string;
+  try {
+    userSuffix = String(os.userInfo().uid);
+  } catch {
+    userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
+  }
+  const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
+  const globResult = globAllFiles(cortexPath, profile);
+  const hash = computeCortexHash(cortexPath, profile, globResult.filePaths);
+  const cacheFile = path.join(cacheDir, `${hash}.db`);
+
+  if (fs.existsSync(cacheFile)) {
+    try {
+      return new SQL.Database(fs.readFileSync(cacheFile));
+    } catch (err: unknown) {
+      debugLog(`Failed to open cached FTS snapshot while rebuild lock held: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  debugLog("FTS rebuild already in progress; returning empty snapshot");
+  return createEmptyIndexDb(SQL);
+}
+
+export async function buildIndex(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
+  const lockTarget = runtimeFile(cortexPath, "index-rebuild");
+  if (isRebuildLockHeld(cortexPath)) {
+    return loadIndexSnapshotOrEmpty(cortexPath, profile);
+  }
+
+  try {
+    return await withFileLock(lockTarget, async () => {
+      let timer: ReturnType<typeof setTimeout>;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
+      });
+      try {
+        return await Promise.race([buildIndexImpl(cortexPath, profile), timeout]);
+      } finally {
+        clearTimeout(timer!);
+      }
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("could not acquire lock")) {
+      debugLog(`FTS rebuild skipped because another process holds the rebuild lock: ${message}`);
+      return loadIndexSnapshotOrEmpty(cortexPath, profile);
+    }
+    throw err;
   }
 }
 
