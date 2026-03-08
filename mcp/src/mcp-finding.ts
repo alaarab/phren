@@ -23,7 +23,7 @@ import {
 } from "./shared-content.js";
 import { withFileLock } from "./shared-governance.js";
 import { runCustomHooks } from "./hooks.js";
-import { incrementSessionFindings } from "./mcp-session.js";
+import { incrementSessionFindings, getCurrentSessionId } from "./mcp-session.js";
 
 
 
@@ -88,18 +88,22 @@ export function register(server: McpServer, ctx: McpContext): void {
               const fp = path.join(resolvedDir, "FINDINGS.md");
               if (fs.existsSync(fp)) {
                 withFileLock(fp, () => {
-                  let content = fs.readFileSync(fp, "utf8");
-                  // Build the full bullet prefix as it was written (with "- " prefix)
-                  const bulletPrefix = taggedFinding.startsWith("- ") ? taggedFinding.slice(0, 60) : `- ${taggedFinding.slice(0, 60)}`;
-                  // Find the last occurrence of this exact bullet (the one just inserted)
-                  const idx = content.lastIndexOf(bulletPrefix);
-                  if (idx >= 0) {
-                    const lineEnd = content.indexOf("\n", idx);
-                    const insertAt = lineEnd >= 0 ? lineEnd : content.length;
-                    content = content.slice(0, insertAt) + " " + conflicts.annotations.join(" ") + " <!-- conflicts_checked: true -->" + content.slice(insertAt);
-                    const tmpFp = fp + `.tmp-${crypto.randomUUID()}`;
-                    fs.writeFileSync(tmpFp, content);
-                    fs.renameSync(tmpFp, fp);
+                  try {
+                    let content = fs.readFileSync(fp, "utf8");
+                    // Build the full bullet prefix as it was written (with "- " prefix)
+                    const bulletPrefix = taggedFinding.startsWith("- ") ? taggedFinding.slice(0, 60) : `- ${taggedFinding.slice(0, 60)}`;
+                    // Find the last occurrence of this exact bullet (the one just inserted)
+                    const idx = content.lastIndexOf(bulletPrefix);
+                    if (idx >= 0) {
+                      const lineEnd = content.indexOf("\n", idx);
+                      const insertAt = lineEnd >= 0 ? lineEnd : content.length;
+                      content = content.slice(0, insertAt) + " " + conflicts.annotations.join(" ") + " <!-- conflicts_checked: true -->" + content.slice(insertAt);
+                      const tmpFp = fp + `.tmp-${crypto.randomUUID()}`;
+                      fs.writeFileSync(tmpFp, content);
+                      fs.renameSync(tmpFp, fp);
+                    }
+                  } catch (e: unknown) {
+                    debugLog(`add_finding: failed to append conflict annotations: ${e instanceof Error ? e.message : String(e)}`);
                   }
                 });
               }
@@ -109,7 +113,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
           if (isAdded) {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
-            incrementSessionFindings(cortexPath);
+            incrementSessionFindings(cortexPath, 1, getCurrentSessionId());
           }
           return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "added" } });
         } catch (err: unknown) {
@@ -143,7 +147,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const { added, skipped, rejected } = result.data;
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
-          incrementSessionFindings(cortexPath, added.length);
+          incrementSessionFindings(cortexPath, added.length, getCurrentSessionId());
           const resolvedFindingsDir = safeProjectPath(cortexPath, project);
           if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
         }

@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { runtimeFile, resolveFindingsPath, debugLog } from "./shared.js";
+import { runtimeFile, resolveFindingsPath, debugLog, tryUnlink } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName } from "./utils.js";
 
@@ -125,7 +125,7 @@ function cleanupStaleSessions(cortexPath: string): number {
         ? Date.now() - new Date(state.startedAt).getTime()
         : Date.now() - fs.statSync(fullPath).mtimeMs;
       if (ageMs > STALE_SESSION_MS) {
-        try { fs.unlinkSync(fullPath); } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
+        tryUnlink(fullPath);
         cleaned++;
       }
     } catch { /* skip */ }
@@ -147,12 +147,12 @@ function migrateLegacySession(cortexPath: string): SessionState | null {
         const tempFile = `${newFile}.${process.pid}.${Date.now()}.tmp`;
         fs.writeFileSync(tempFile, JSON.stringify(state, null, 2));
         fs.renameSync(tempFile, newFile);
-      } catch (e: any) {
+      } catch (e: unknown) {
         // If file already exists from another concurrent migration, that's fine
-        if (e?.code !== "EEXIST") throw e;
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
       }
     }
-    try { fs.unlinkSync(legacyFile); } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
+    tryUnlink(legacyFile);
     return state;
   } catch {
     try { fs.unlinkSync(legacyFile); } catch { /* ignore */ }
