@@ -13,6 +13,8 @@ export const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosi
 // incremental index mutations produce distinct cache entries rather than reusing stale counts.
 // Intentionally not locked: single-threaded JS event loop, cache is eventually consistent,
 // worst case is a redundant recompute. No data loss is possible since this is a pure computation cache.
+// Max 100 entries to bound memory (LRU-style: oldest key evicted on overflow).
+const MAX_DF_CACHE_SIZE = 100;
 const dfCache = new Map<string, Map<string, number>>();
 
 /** Invalidate the DF cache. Call after a full index rebuild. */
@@ -97,7 +99,10 @@ function tfidfCosine(docs: string[], query: string, corpusN?: number): number[] 
       df.set(term, count);
     }
   }
-  if (!cachedDf) dfCache.set(cacheKey, df);
+  if (!cachedDf) {
+    if (dfCache.size >= MAX_DF_CACHE_SIZE) dfCache.delete(dfCache.keys().next().value ?? "");
+    dfCache.set(cacheKey, df);
+  }
 
   function buildVector(tokens: string[]): number[] {
     const tf = new Map<string, number>();

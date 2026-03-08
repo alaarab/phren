@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, type CortexResult } from "./shared.js";
+import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, tryUnlink, type CortexResult } from "./shared.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import { withFileLock } from "./shared-governance.js";
 
@@ -159,15 +159,12 @@ export function autoArchiveToReference(
           return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
         }
         // Stale lock: delete then re-create atomically with wx.
-        // If unlink fails with ENOENT, another thread already cleaned it up.
-        try { fs.unlinkSync(lockFile); } catch (unlinkErr: any) {
-          if (unlinkErr?.code !== "ENOENT") throw unlinkErr;
-        }
+        tryUnlink(lockFile);
         // Re-attempt atomic create. If EEXIST, another thread won the race.
         try {
           fs.writeFileSync(lockFile, String(Date.now()), { flag: "wx" });
-        } catch (wxErr: any) {
-          if (wxErr?.code === "EEXIST") return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
+        } catch (wxErr: unknown) {
+          if ((wxErr as NodeJS.ErrnoException).code === "EEXIST") return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
           throw wxErr;
         }
       } catch { return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT); }

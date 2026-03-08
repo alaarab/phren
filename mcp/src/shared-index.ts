@@ -235,13 +235,9 @@ function saveHashMap(cortexPath: string, hashes: Record<string, string>): void {
       // Read-merge-write: load existing hashes, merge new values (new wins), then write
       let existing: Record<string, string> = {};
       try {
-        if (fs.existsSync(hashFile)) {
-          const data = JSON.parse(fs.readFileSync(hashFile, "utf-8"));
-          if (data.hashes && typeof data.hashes === "object") {
-            existing = data.hashes;
-          }
-        }
-      } catch { /* treat as empty on corrupt read */ }
+        const data = JSON.parse(fs.readFileSync(hashFile, "utf-8"));
+        if (data.hashes && typeof data.hashes === "object") existing = data.hashes;
+      } catch { /* file missing or corrupt — treat as empty */ }
       const merged = { ...existing, ...hashes };
       fs.writeFileSync(
         hashFile,

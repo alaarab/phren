@@ -64,6 +64,15 @@ export function runtimeDir(cortexPath: string): string {
   return path.join(cortexPath, ".runtime");
 }
 
+/** Unlink a file, ignoring ENOENT. Rethrows any other error. */
+export function tryUnlink(filePath: string): void {
+  try {
+    fs.unlinkSync(filePath);
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+}
+
 export function sessionsDir(cortexPath: string): string {
   return path.join(cortexPath, ".sessions");
 }
