@@ -16,6 +16,7 @@ import {
   getMcpEnabledPreference,
   isVersionNewer,
   logMcpTargetStatus,
+  patchJsonFile,
   setMcpEnabledPreference,
   type McpMode,
 } from "./init.js";
@@ -78,6 +79,12 @@ export interface DoctorResult {
   checks: Array<{ name: string; ok: boolean; detail: string }>;
 }
 
+interface McpServerEntry {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 interface ProjectConfig {
   skills?: boolean;
   hooks?: {
@@ -85,6 +92,7 @@ interface ProjectConfig {
     Stop?: boolean;
     SessionStart?: boolean;
   };
+  mcpServers?: Record<string, McpServerEntry>;
 }
 
 // ── Helpers (exported for link-doctor) ──────────────────────────────────────
@@ -392,6 +400,40 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   if (config.skills !== false && fs.existsSync(projectSkills)) {
     const targetSkills = path.join(target, ".claude", "skills");
     linkSkillsDir(projectSkills, targetSkills, cortexPath, symlinkFile);
+  }
+
+  // Per-project MCP servers
+  if (config.mcpServers && typeof config.mcpServers === "object") {
+    linkProjectMcpServers(project, config.mcpServers);
+  }
+}
+
+/**
+ * Merge per-project MCP servers into Claude's settings.json.
+ * Keys are namespaced as "cortex__<project>__<name>" so we can identify
+ * and clean them up without touching user-managed servers.
+ */
+function linkProjectMcpServers(project: string, servers: Record<string, McpServerEntry>): void {
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  if (!fs.existsSync(settingsPath) && Object.keys(servers).length === 0) return;
+  try {
+    patchJsonFile(settingsPath, (data) => {
+      if (!data.mcpServers || typeof data.mcpServers !== "object") data.mcpServers = {};
+      // Remove stale entries for this project (keys we previously wrote)
+      for (const key of Object.keys(data.mcpServers)) {
+        if (key.startsWith(`cortex__${project}__`)) delete data.mcpServers[key];
+      }
+      // Add current entries
+      for (const [name, entry] of Object.entries(servers)) {
+        const key = `cortex__${project}__${name}`;
+        const server: Record<string, unknown> = { command: entry.command };
+        if (Array.isArray(entry.args)) server.args = entry.args;
+        if (entry.env && typeof entry.env === "object") server.env = entry.env;
+        data.mcpServers[key] = server;
+      }
+    });
+  } catch (err: unknown) {
+    debugLog(`linkProjectMcpServers: failed for ${project}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
