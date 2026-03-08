@@ -230,10 +230,22 @@ function saveHashMap(cortexPath: string, hashes: Record<string, string>): void {
   const runtimeDir = path.join(cortexPath, ".runtime");
   try {
     fs.mkdirSync(runtimeDir, { recursive: true });
-    withFileLock(path.join(runtimeDir, INDEX_HASHES_FILENAME), () => {
+    const hashFile = path.join(runtimeDir, INDEX_HASHES_FILENAME);
+    withFileLock(hashFile, () => {
+      // Read-merge-write: load existing hashes, merge new values (new wins), then write
+      let existing: Record<string, string> = {};
+      try {
+        if (fs.existsSync(hashFile)) {
+          const data = JSON.parse(fs.readFileSync(hashFile, "utf-8"));
+          if (data.hashes && typeof data.hashes === "object") {
+            existing = data.hashes;
+          }
+        }
+      } catch { /* treat as empty on corrupt read */ }
+      const merged = { ...existing, ...hashes };
       fs.writeFileSync(
-        path.join(runtimeDir, INDEX_HASHES_FILENAME),
-        JSON.stringify({ version: INDEX_SCHEMA_VERSION, hashes }, null, 2)
+        hashFile,
+        JSON.stringify({ version: INDEX_SCHEMA_VERSION, hashes: merged }, null, 2)
       );
     });
   } catch {
