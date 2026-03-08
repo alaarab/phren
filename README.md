@@ -7,7 +7,7 @@
 
 # cortex
 
-**Your agents keep forgetting. They don't have to.**
+**Long-term memory for your AI agents.**
 
 [![npm](https://img.shields.io/npm/v/@alaarab/cortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
 [![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fcortex-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/)
@@ -15,13 +15,13 @@
 
 <br>
 
-You're running Claude Code, Codex, Cursor, maybe on a few machines at the same time. Every session starts over. Everything your agents figure out disappears when the context clears.
+I run 3-5 machines doing AI development at the same time. Claude Code, Codex, Cursor. Every session starts from zero. Every bug I've already traced gets traced again. Every decision I've already made gets made again.
 
-Cortex stores it. A private git repo you own, shared across all your tools and machines. Work projects stay on your work machine. Personal projects stay personal. Every agent reads from the same knowledge base, and every session builds on the last.
+So I built this. A knowledge base that lives in my own GitHub and works across all of them. My work machine only sees work projects. My home machine only sees personal ones. Every agent on every machine reads from the same store.
 
-You stop re-explaining things. Your agents stop rediscovering things. The work you've already done starts working for you.
+When something comes up, my agents draw from what I've already figured out instead of starting from scratch. It only pulls what's relevant so it doesn't eat the context window. I can run more agents at the same time for less. And the more I work, the more it knows.
 
-> `npx @alaarab/cortex init` — one command, 30 seconds, no account needed.
+> `npx @alaarab/cortex init` — 30 seconds. No account. Just a git repo you own.
 
 <br>
 </div>
@@ -98,19 +98,19 @@ On a new machine: clone, run init, done.
 
 ## What makes this different
 
-**You stop figuring out the same things twice.** Every bug you traced, every workaround you found, every decision you made — it gets saved. Next session your agent already knows it. You draw from your knowledge instead of rebuilding it.
+**Your agents draw from what you already know.** Every bug, workaround, and decision gets saved. Next session your agent has it. You stop re-explaining things. They stop rediscovering things.
 
-**All your agents share one brain.** Running Claude Code and Codex at the same time, on different machines. They all read from the same store. What one figures out, the others get. No coordination needed, it just flows through git.
+**All your machines share the same store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets. It moves through git and just works.
 
-**Work and personal stay separate.** Your work machine sees work projects. Your home machine sees personal ones. Same system, same commands, different profiles. Nothing bleeds across.
+**Work and personal never mix.** Your work machine sees work projects. Your home machine sees personal ones. Same setup, different profiles.
 
-**It doesn't clog your context.** Loading your whole `CLAUDE.md` into every session is slow and expensive. Cortex pulls in only what's relevant to what you're working on right now. Less token spend per run means you can run more agents at the same time.
+**It doesn't eat your context window.** Loading all of `CLAUDE.md` into every session is expensive and slow. Cortex pulls in only what's relevant to the current prompt. Less token spend means you can run more agents at the same time for the same cost.
 
-**Your data lives in your own GitHub.** No account, no vendor, no cloud service. Markdown in a private repo you control. You can read it, edit it, grep it, delete it. Nothing leaves unless you push it.
+**Your data stays in your own GitHub.** No account, no vendor. Markdown in a private repo you own. Read it, edit it, grep it, delete it.
 
-**It runs on its own.** Before each prompt, relevant context gets injected. After each response, changes save and push. You don't think about it.
+**It just runs.** Context gets injected before each prompt. Changes get saved and pushed after each response. You don't manage it.
 
-**You can see what your agents know.** Everything is in git. `git log` shows what your agents learned and when. `git diff` shows what changed. No dashboards, just files.
+**Everything is visible in git.** `git log` shows what your agents learned. `git diff` shows what changed. It's just files.
 
 ---
 
