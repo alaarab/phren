@@ -101,9 +101,10 @@ describe("supersession", () => {
 
 describe("secret rejection", () => {
   it("rejects finding containing AWS key pattern", () => {
-    expect(() => {
-      addFindingToFile(tmp.path, PROJECT, "The AWS key is AKIAIOSFODNN7EXAMPLE and it works great");
-    }).toThrow(/secret/i);
+    const result = addFindingToFile(tmp.path, PROJECT, "The AWS key is AKIAIOSFODNN7EXAMPLE and it works great");
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toMatch(/secret/i);
+    expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
     // FINDINGS.md should not exist or should not contain the key
     if (fs.existsSync(findingsPath())) {
       const content = fs.readFileSync(findingsPath(), "utf-8");
@@ -112,9 +113,10 @@ describe("secret rejection", () => {
   });
 
   it("rejects finding containing generic API token", () => {
-    expect(() => {
-      addFindingToFile(tmp.path, PROJECT, "Use token sk-proj-abcdefghijklmnopqrstuvwxyz1234567890 for auth");
-    }).toThrow(/secret/i);
+    const result = addFindingToFile(tmp.path, PROJECT, "Use token sk-proj-abcdefghijklmnopqrstuvwxyz1234567890 for auth");
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toMatch(/secret/i);
+    expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
   });
 });
 
