@@ -1,1 +1,0 @@
-/home/alaarab/.cortex/cortex/CLAUDE.md
