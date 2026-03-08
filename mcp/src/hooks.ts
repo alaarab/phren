@@ -337,9 +337,7 @@ function appendHookErrorLog(cortexPath: string, event: string, message: string):
     if (stat.size > 200_000) {
       const content = fs.readFileSync(logPath, "utf-8");
       const lines = content.split("\n").filter(Boolean);
-      if (lines.length > HOOK_ERROR_LOG_MAX_LINES) {
-        fs.writeFileSync(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
-      }
+      fs.writeFileSync(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
     }
   } catch { /* non-fatal */ }
 }

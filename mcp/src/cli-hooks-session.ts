@@ -39,6 +39,14 @@ import {
 import type { SelectedSnippet } from "./cli-hooks-retrieval.js";
 import { filterBacklogByPriority } from "./cli-hooks-retrieval.js";
 
+/** Read JSON from stdin if it's not a TTY. Returns null if stdin is a TTY or parsing fails. */
+function readStdinJson<T>(): T | null {
+  if (process.stdin.isTTY) return null;
+  try {
+    return JSON.parse(fs.readFileSync(0, "utf-8")) as T;
+  } catch { return null; }
+}
+
 /** Validate that a transcript path points to a safe, expected location.
  * Uses realpathSync to dereference symlinks, preventing traversal attacks
  * where a symlink inside a safe dir points outside it.
@@ -433,13 +441,7 @@ export async function handleHookStop() {
 
   // Read stdin early — it's a stream and can only be consumed once.
   // Needed for auto-capture transcript_path parsing.
-  let stdinPayload: { transcript_path?: string } | null = null;
-  if (!process.stdin.isTTY) {
-    try {
-      const stdinData = fs.readFileSync(0, "utf-8");
-      stdinPayload = JSON.parse(stdinData) as { transcript_path?: string };
-    } catch { /* stdin not available or not JSON */ }
-  }
+  const stdinPayload = readStdinJson<{ transcript_path?: string }>();
 
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
   // Gated behind CORTEX_FEATURE_AUTO_CAPTURE=1.
@@ -603,15 +605,8 @@ export async function handleHookContext() {
   }
 
   let cwd = process.cwd();
-  if (!process.stdin.isTTY) {
-    try {
-      const input = fs.readFileSync(0, "utf-8");
-      const data = JSON.parse(input);
-      if (data.cwd) cwd = data.cwd;
-    } catch (err: unknown) {
-      debugLog(`hook-context: no stdin or invalid JSON, using cwd: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
+  const ctxStdin = readStdinJson<{ cwd?: string }>();
+  if (ctxStdin?.cwd) cwd = ctxStdin.cwd;
 
   const project = detectProject(getCortexPath(), cwd, profile);
 

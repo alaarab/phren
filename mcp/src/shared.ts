@@ -158,19 +158,26 @@ function requireDirectory(resolved: string, label: string): string {
 
 // Pure lookup: find an existing cortex root directory, returns null if none found
 // Priority: CORTEX_PATH env > ~/.cortex > ~/cortex
+// Memoized: keyed on CORTEX_PATH+HOME so test overrides are respected.
+let _cachedCortexPath: string | null | undefined;
+let _cachedCortexPathKey: string | undefined;
 export function findCortexPath(): string | null {
-  if (process.env.CORTEX_PATH) {
-    const p = process.env.CORTEX_PATH;
+  const envVal = process.env.CORTEX_PATH;
+  const cacheKey = `${envVal ?? ""}|${process.env.HOME ?? ""}|${process.env.USERPROFILE ?? ""}`;
+  if (_cachedCortexPath !== undefined && _cachedCortexPathKey === cacheKey) return _cachedCortexPath;
+  _cachedCortexPathKey = cacheKey;
+  if (envVal) {
     try {
-      if (fs.statSync(p).isDirectory()) return p;
-    } catch { /* path does not exist or is not accessible */ }
-    return null;
+      _cachedCortexPath = fs.statSync(envVal).isDirectory() ? envVal : null;
+    } catch { _cachedCortexPath = null; }
+    return _cachedCortexPath;
   }
   const home = process.env.HOME || process.env.USERPROFILE || "";
   for (const name of [".cortex", "cortex"]) {
     const candidate = path.join(home, name);
-    if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(candidate)) { _cachedCortexPath = candidate; return candidate; }
   }
+  _cachedCortexPath = null;
   return null;
 }
 

@@ -64,7 +64,7 @@ export function extractFactFromFinding(cortexPath: string, project: string, find
   callLlm(prompt, undefined, 60)
     .then(raw => {
       if (!raw || raw.toLowerCase() === "none") return;
-      // Truncate and sanitize to prevent unbounded or injected content from being stored
+      // cap and strip newlines before storing
       const fact = raw.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
       if (!fact) return;
       // Re-read inside the callback to minimize race window (best-effort; not locked)

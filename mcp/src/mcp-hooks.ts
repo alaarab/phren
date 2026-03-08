@@ -27,7 +27,7 @@ function validateHookCommand(command: string): string | null {
   if (/[`$(){}&|;<>]/.test(trimmed)) {
     return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < >";
   }
-  // Reject eval and source — allow arbitrary code execution bypass
+  // eval and source can execute arbitrary code
   if (/\b(eval|source)\b/.test(trimmed)) return "eval and source are not permitted in hook commands.";
   // Command must start with a word character, path, or quoted string
   if (!/^[\w./~"'"]/.test(trimmed)) return "Command must begin with an executable name or path.";
@@ -174,7 +174,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             h.endsWith(".local") ||
             h.endsWith(".internal");
           if (ssrfBlocked) {
-            return mcpResponse({ ok: false, error: `webhook hostname "${hostname}" resolves to a private or loopback address, which is not permitted.` });
+            return mcpResponse({ ok: false, error: `webhook hostname "${hostname}" is a private or loopback address.` });
           }
         } catch {
           return mcpResponse({ ok: false, error: "webhook is not a valid URL." });
