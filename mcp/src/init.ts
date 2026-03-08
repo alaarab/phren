@@ -471,8 +471,10 @@ export async function runInit(opts: InitOptions = {}) {
 
       log(`\ncortex updated successfully`);
       log(`\nNext steps:`);
-      log(`  1. Start a new Claude session -- hooks are now active`);
+      log(`  1. Start a new Claude session in your project directory — cortex injects context automatically`);
       log(`  2. Run \`cortex doctor\` to verify everything is wired correctly`);
+      log(`  3. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
+      log(`  4. After working across projects, run /cortex-consolidate to find cross-project patterns`);
       log(``);
       return;
   }
@@ -716,7 +718,7 @@ export async function runInit(opts: InitOptions = {}) {
   log(`\ncortex initialized`);
   log(`\nNext steps:`);
   let step = 1;
-  log(`  ${step++}. Start a new Claude session — hooks are now active`);
+  log(`  ${step++}. Start a new Claude session in your project directory — cortex injects context automatically`);
   log(`  ${step++}. Run \`cortex doctor\` to verify everything is wired correctly`);
 
   const gh = opts._walkthroughGithub;
@@ -747,6 +749,8 @@ export async function runInit(opts: InitOptions = {}) {
   if (!mcpEnabled) {
     log(`  ${step++}. Turn MCP on: npx @alaarab/cortex mcp-mode on`);
   }
+  log(`  ${step++}. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
+  log(`  ${step++}. After working across projects, run /cortex-consolidate to find cross-project patterns`);
   log(`\n  Read ${cortexPath}/README.md for a guided tour of each file.`);
 
   if (opts.fromExisting) {

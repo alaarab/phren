@@ -618,4 +618,8 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   log(`\nDone. Profile '${profile}' is active.`);
   if (opts.task) log(`Task mode: ${opts.task}`);
+  log(`\nWhat's next:`);
+  log(`  Start Claude in your project directory — cortex injects context automatically.`);
+  log(`  Run /cortex-discover after your first week to surface gaps in project knowledge.`);
+  log(`  Run /cortex-consolidate after working across projects to find shared patterns.`);
 }
