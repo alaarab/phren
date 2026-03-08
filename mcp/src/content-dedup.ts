@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, runtimeFile } from "./shared.js";
+import { debugLog, runtimeFile, FINDING_TYPES } from "./shared.js";
 import { safeProjectPath } from "./utils.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
@@ -280,14 +280,7 @@ export function isDuplicateFinding(existingContent: string, newLearning: string,
 
 // ── Typed observation tags ────────────────────────────────────────────────────
 
-export const KNOWN_OBSERVATION_TAGS = new Set([
-  "decision",
-  "pitfall",
-  "pattern",
-  "tradeoff",
-  "architecture",
-  "bug",
-]);
+export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TYPES);
 
 /**
  * Normalize known observation tags in learning text to lowercase.

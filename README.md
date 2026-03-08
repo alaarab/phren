@@ -96,24 +96,6 @@ On a new machine: clone, run init, done.
 
 ---
 
-## What's new
-
-- **RRF hybrid search**: three-tier retrieval (FTS5 + token-overlap + vector embeddings) merged with Reciprocal Rank Fusion and recency boost
-- **Cloud embeddings**: set `CORTEX_EMBEDDING_API_URL` + `CORTEX_EMBEDDING_API_KEY` to use any OpenAI-compatible embedding endpoint
-- **Auto-capture**: `CORTEX_FEATURE_AUTO_CAPTURE=1` passively extracts insights from conversation transcripts at session end
-- **Project management CLI**: `cortex projects list/add/remove` for managing projects from the terminal
-- **Init walkthrough**: `cortex init` now prompts for auto-capture and semantic memory quality features (dedup, conflict detection)
-- **Terminal shell**: open `cortex` and get tabs for Backlog, Findings, Review Queue, Skills, Hooks, and Health. No agent needed
-- **Synonym search**: type "throttling" and find "rate limit" and "429". You don't need to remember what you called it
-- **Bulk operations**: `add_findings`, `add_backlog_items`, `complete_backlog_items`, `remove_findings` for batch work
-- **Memory quality**: confidence scoring, age decay, and a feedback loop. Stale or low-signal entries stop appearing
-- **Starter templates**: `cortex init --template python-project|monorepo|library|frontend`
-- **Multi-agent access control**: four roles (admin, maintainer, contributor, viewer) for shared cortex repos
-- **Deep reference**: `reference/` subdirectories indexed separately so API docs don't drown out your findings
-- **Data portability**: export/import projects as JSON, archive/unarchive anytime
-
----
-
 ## What makes this different
 
 **It runs itself.** Hooks inject context before every prompt and auto-save after every response. Trust filtering checks confidence, age decay, and citation validity before anything lands in your context.

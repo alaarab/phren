@@ -30,25 +30,7 @@ const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) =
 const EMBED_CACHE_DB = "embed-cache.db";
 const EMBED_CACHE_JSONL = "embed-cache.jsonl"; // legacy file for migration
 
-function findWasmBinary(): Buffer | undefined {
-  try {
-    const resolved = require.resolve("sql.js-fts5/dist/sql-wasm.wasm") as string;
-    if (fs.existsSync(resolved)) return fs.readFileSync(resolved);
-  } catch {
-    // fall through to path probing
-  }
-
-  const __filename = fileURLToPath(import.meta.url);
-  let dir = path.dirname(__filename);
-  for (let i = 0; i < 5; i++) {
-    const candidateA = path.join(dir, "node_modules", "sql.js-fts5", "dist", "sql-wasm.wasm");
-    if (fs.existsSync(candidateA)) return fs.readFileSync(candidateA);
-    const candidateB = path.join(dir, "sql.js-fts5", "dist", "sql-wasm.wasm");
-    if (fs.existsSync(candidateB)) return fs.readFileSync(candidateB);
-    dir = path.dirname(dir);
-  }
-  return undefined;
-}
+import { findWasmBinary } from "./shared-sqljs.js";
 
 function getCacheDbPath(cortexPath: string): string {
   const dir = runtimeDir(cortexPath);

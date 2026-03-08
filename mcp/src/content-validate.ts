@@ -3,6 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "./shared.js";
+import { countActiveFindings } from "./content-archive.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;
@@ -47,23 +48,15 @@ export function checkConsolidationNeeded(cortexPath: string, profile?: string): 
     if (!fs.existsSync(learningsPath)) continue;
 
     const content = fs.readFileSync(learningsPath, "utf8");
-    const lines = content.split("\n");
-
     const markerMatch = content.match(/<!--\s*consolidated:\s*(\d{4}-\d{2}-\d{2})/);
     const lastConsolidated = markerMatch ? markerMatch[1] : null;
 
-    let startLine = 0;
-    if (markerMatch) {
-      startLine = lines.findIndex(l => l.includes("consolidated:")) + 1;
-    }
-
-    let inDetails = false;
-    let entriesSince = 0;
-    for (let i = startLine; i < lines.length; i++) {
-      if (lines[i].includes("<details>")) { inDetails = true; continue; }
-      if (lines[i].includes("</details>")) { inDetails = false; continue; }
-      if (!inDetails && lines[i].match(/^- /)) entriesSince++;
-    }
+    // Count entries since last consolidated marker, skipping both <details> and
+    // <!-- cortex:archive:start/end --> blocks via countActiveFindings.
+    const contentSinceMarker = markerMatch
+      ? content.slice(content.indexOf(markerMatch[0]) + markerMatch[0].length)
+      : content;
+    const entriesSince = countActiveFindings(contentSinceMarker);
 
     let daysSince: number | null = null;
     if (lastConsolidated) {
