@@ -1007,7 +1007,12 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
     fs.writeFileSync(tmpFile, out.join("\n").trimEnd() + "\n");
     fs.renameSync(tmpFile, file);
     appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
-    runCustomHooks(cortexPath, "post-consolidate", { CORTEX_PROJECT: project });
     return cortexOk(`Consolidated findings for ${project}.`);
   });
+  // Fire post-consolidate hook outside the file lock to avoid deadlock
+  // if the hook command reads or writes FINDINGS.md.
+  if (result.ok) {
+    runCustomHooks(cortexPath, "post-consolidate", { CORTEX_PROJECT: project });
+  }
+  return result;
 }

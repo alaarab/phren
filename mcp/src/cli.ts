@@ -982,7 +982,6 @@ function handleDetectSkills(args: string[]) {
   for (const entry of fs.readdirSync(nativeSkillsDir)) {
     const entryPath = path.join(nativeSkillsDir, entry);
     const stat = fs.statSync(entryPath);
-    if (stat.isSymbolicLink()) continue;
     try {
       if (fs.lstatSync(entryPath).isSymbolicLink()) continue;
     } catch { /* skip */ }

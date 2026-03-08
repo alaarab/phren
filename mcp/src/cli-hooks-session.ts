@@ -434,10 +434,12 @@ export async function handleHookStop() {
   // Read stdin early — it's a stream and can only be consumed once.
   // Needed for auto-capture transcript_path parsing.
   let stdinPayload: { transcript_path?: string } | null = null;
-  try {
-    const stdinData = fs.readFileSync(0, "utf-8");
-    stdinPayload = JSON.parse(stdinData) as { transcript_path?: string };
-  } catch { /* stdin not available or not JSON */ }
+  if (!process.stdin.isTTY) {
+    try {
+      const stdinData = fs.readFileSync(0, "utf-8");
+      stdinPayload = JSON.parse(stdinData) as { transcript_path?: string };
+    } catch { /* stdin not available or not JSON */ }
+  }
 
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
   // Gated behind CORTEX_FEATURE_AUTO_CAPTURE=1.
@@ -601,12 +603,14 @@ export async function handleHookContext() {
   }
 
   let cwd = process.cwd();
-  try {
-    const input = fs.readFileSync(0, "utf-8");
-    const data = JSON.parse(input);
-    if (data.cwd) cwd = data.cwd;
-  } catch (err: unknown) {
-    debugLog(`hook-context: no stdin or invalid JSON, using cwd: ${err instanceof Error ? err.message : String(err)}`);
+  if (!process.stdin.isTTY) {
+    try {
+      const input = fs.readFileSync(0, "utf-8");
+      const data = JSON.parse(input);
+      if (data.cwd) cwd = data.cwd;
+    } catch (err: unknown) {
+      debugLog(`hook-context: no stdin or invalid JSON, using cwd: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   const project = detectProject(getCortexPath(), cwd, profile);
@@ -694,10 +698,12 @@ export async function handleHookTool() {
     const start = Date.now();
 
     let raw = "";
-    try {
-      raw = fs.readFileSync(0, "utf-8");
-    } catch {
-      process.exit(0);
+    if (!process.stdin.isTTY) {
+      try {
+        raw = fs.readFileSync(0, "utf-8");
+      } catch {
+        process.exit(0);
+      }
     }
 
     let data: Record<string, unknown>;

@@ -72,7 +72,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         let startLine = 0;
         if (markerMatch) {
-          startLine = lines.findIndex(l => l.includes("consolidated:")) + 1;
+          startLine = lines.findIndex(l => /<!--\s*consolidated:/.test(l)) + 1;
         }
 
         let inDetails = false;

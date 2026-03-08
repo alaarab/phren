@@ -449,7 +449,7 @@ async function semanticDedup(a: string, b: string, cortexPath: string, signal?: 
 
   try {
     const answer = await callLlm(`Are these two findings semantically equivalent? Reply YES or NO only.\nA: ${a}\nB: ${b}`, signal);
-    const result = answer.startsWith("YES");
+    const result = answer.trim().toUpperCase().startsWith("YES");
 
     // Cache result
     try {
@@ -578,7 +578,7 @@ async function llmConflictCheck(
 
   try {
     const answer = await callLlm(`Finding A: ${existing}. Finding B: ${newFinding}. Do these contradict each other about how to use ${entity}? Reply CONFLICT or OK only.`, signal);
-    const result = answer.startsWith("CONFLICT")
+    const result = answer.trim().toUpperCase().startsWith("CONFLICT")
       ? ("CONFLICT" as const)
       : ("OK" as const);
 

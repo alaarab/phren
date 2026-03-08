@@ -159,7 +159,13 @@ function requireDirectory(resolved: string, label: string): string {
 // Pure lookup: find an existing cortex root directory, returns null if none found
 // Priority: CORTEX_PATH env > ~/.cortex > ~/cortex
 export function findCortexPath(): string | null {
-  if (process.env.CORTEX_PATH) return process.env.CORTEX_PATH;
+  if (process.env.CORTEX_PATH) {
+    const p = process.env.CORTEX_PATH;
+    try {
+      if (fs.statSync(p).isDirectory()) return p;
+    } catch { /* path does not exist or is not accessible */ }
+    return null;
+  }
   const home = process.env.HOME || process.env.USERPROFILE || "";
   for (const name of [".cortex", "cortex"]) {
     const candidate = path.join(home, name);
@@ -238,7 +244,7 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
   }
 
   return fs.readdirSync(cortexPath, { withFileTypes: true })
-    .filter(d => d.isDirectory() && !d.name.startsWith(".") && d.name !== "profiles" && d.name !== "templates" && d.name !== "global")
+    .filter(d => d.isDirectory() && !d.name.startsWith(".") && !d.name.endsWith(".archived") && d.name !== "profiles" && d.name !== "templates" && d.name !== "global")
     .map(d => path.join(cortexPath, d.name));
 }
 

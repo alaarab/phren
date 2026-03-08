@@ -305,6 +305,7 @@ export function getHookTarget(h: CustomHookEntry): string {
 
 const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
 const HOOK_TIMEOUT_MS = parseInt(process.env.CORTEX_HOOK_TIMEOUT_MS || '14000', 10);
+const HOOK_ERROR_LOG_MAX_LINES = 1000;
 
 export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
   try {
@@ -325,6 +326,22 @@ export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
     debugLog(`readCustomHooks: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
+}
+
+function appendHookErrorLog(cortexPath: string, event: string, message: string): void {
+  const logPath = runtimeFile(cortexPath, "hook-errors.log");
+  const line = `[${new Date().toISOString()}] [${event}] ${message}\n`;
+  fs.appendFileSync(logPath, line);
+  try {
+    const stat = fs.statSync(logPath);
+    if (stat.size > 200_000) {
+      const content = fs.readFileSync(logPath, "utf-8");
+      const lines = content.split("\n").filter(Boolean);
+      if (lines.length > HOOK_ERROR_LOG_MAX_LINES) {
+        fs.writeFileSync(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
+      }
+    }
+  } catch { /* non-fatal */ }
 }
 
 export function runCustomHooks(
@@ -352,8 +369,7 @@ export function runCustomHooks(
           const message = `${event}: ${hook.webhook}: ${err instanceof Error ? err.message : String(err)}`;
           debugLog(`runCustomHooks webhook: ${message}`);
           try {
-            const logPath = runtimeFile(cortexPath, "hook-errors.log");
-            fs.appendFileSync(logPath, `[${new Date().toISOString()}] [${event}] ${message}\n`);
+            appendHookErrorLog(cortexPath, event, message);
           } catch { /* best-effort */ }
         });
       continue;
@@ -372,8 +388,7 @@ export function runCustomHooks(
       debugLog(`runCustomHooks: ${message}`);
       errors.push({ code: CortexError.VALIDATION_ERROR, message });
       try {
-        const logPath = runtimeFile(cortexPath, "hook-errors.log");
-        fs.appendFileSync(logPath, `[${new Date().toISOString()}] [${event}] ${err instanceof Error ? err.message : String(err)}\n`);
+        appendHookErrorLog(cortexPath, event, err instanceof Error ? err.message : String(err));
       } catch { /* best-effort logging */ }
     }
   }

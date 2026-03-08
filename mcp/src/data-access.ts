@@ -640,7 +640,7 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
     const next = lines[i + 1] || "";
     const citation = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/.test(next.trim()) ? next.trim() : undefined;
     const rawText = line.replace(/^-\s+/, "").trim();
-    const confMatch = rawText.match(/\s*\[confidence\s+([\d.]+)\]\s*$/);
+    const confMatch = rawText.match(/\s*\[confidence\s+([01](?:\.\d+)?)\]\s*$/i);
     const confidence = confMatch ? parseFloat(confMatch[1]) : undefined;
     const text = confMatch ? rawText.slice(0, rawText.length - confMatch[0].length).trim() : rawText;
     items.push({

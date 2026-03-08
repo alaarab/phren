@@ -243,7 +243,7 @@ export async function handleHookPrompt() {
       let runningTokens = 36;
       for (const s of sorted) {
         const est = approximateTokens(s.snippet) + 14;
-        if (runningTokens + est <= maxInjectTokens || kept.length === 0) {
+        if (runningTokens + est <= maxInjectTokens) {
           kept.push(s);
           runningTokens += est;
         }
