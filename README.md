@@ -104,6 +104,8 @@ On a new machine: clone, run init, done.
 
 **All your agents, one brain.** Claude Code hits a pitfall at 2 AM. Codex on another machine gets that context tomorrow morning. The finding travels through git — no coordination code, no message passing. Just a shared repo every tool reads from.
 
+**Lean context, lower cost, more agents.** Stuffing everything into `CLAUDE.md` bloats every session. Cortex injects only what's relevant to the current prompt — 550 tokens by default, not 50,000. Less token spend per run means you can run more agents in parallel for the same cost. More parallel agents means more throughput. It compounds.
+
 **It runs itself.** Before each prompt, relevant context gets pulled in. After each response, changes commit and push. Trust filtering drops stale and low-confidence entries automatically. You don't manage it.
 
 **You can see what they know.** Everything is markdown in git. `git log` shows what your agents learned and when. `git diff` shows what changed between sessions. No dashboards — just files you can grep, edit, and read.
