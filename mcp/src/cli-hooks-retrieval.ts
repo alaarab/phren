@@ -371,7 +371,7 @@ export function rankResults(
 
     const isFindingsA = a.type === "findings";
     const isFindingsB = b.type === "findings";
-    if (isFindingsA !== isFindingsB) return isFindingsA ? 1 : -1;
+    if (isFindingsA !== isFindingsB) return isFindingsA ? -1 : 1;
     if (isFindingsA && isFindingsB) {
       const byDate = mostRecentDate(b.content).localeCompare(mostRecentDate(a.content));
       if (byDate !== 0) return byDate;
@@ -516,7 +516,7 @@ export function selectSnippets(
       snippet = compactSnippet(snippet, 3, Math.floor(charBudget * 0.55));
       est = approximateTokens(snippet) + 14;
     }
-    const key = entryScoreKey(doc.project, doc.filename, snippet);
+    const key = entryScoreKey(doc.project, doc.filename, doc.content);
     selected.push({ doc, snippet, key });
     usedTokens += est;
     if (selected.length >= 3) break;

@@ -18,6 +18,7 @@ import { runGit as runGitShared, isFeatureEnabled, clampInt } from "./utils.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 
 let _cortexPath: string | undefined;
@@ -114,9 +115,10 @@ export async function runGhJson<T>(cwd: string, args: string[]): Promise<T | nul
 }
 
 export function ghCachePath(repoRoot: string): string {
-  const repoKey = path.basename(repoRoot).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const absPath = path.resolve(repoRoot);
+  const repoHash = crypto.createHash("sha1").update(absPath).digest("hex").slice(0, 12);
   const dateKey = new Date().toISOString().slice(0, 10);
-  return path.join(os.tmpdir(), `cortex-gh-cache-${repoKey}-${dateKey}.json`);
+  return path.join(os.tmpdir(), `cortex-gh-cache-${repoHash}-${dateKey}.json`);
 }
 
 const GH_CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour

@@ -181,11 +181,11 @@ describe("COMMIT_MSG_PREFIX filter", () => {
 // ── ghCachePath ──────────────────────────────────────────────────────────────
 
 describe("ghCachePath", () => {
-  it("returns a path in os.tmpdir with sanitized repo name", () => {
+  it("returns a path in os.tmpdir keyed by repo path hash", () => {
     const p = ghCachePath("/home/user/my-repo");
     expect(p).toContain(os.tmpdir());
-    expect(p).toContain("my-repo");
     expect(p).toMatch(/cortex-gh-cache-/);
+    expect(p).toMatch(/cortex-gh-cache-[0-9a-f]{12}-/);
   });
 
   it("includes the current date", () => {
@@ -194,7 +194,13 @@ describe("ghCachePath", () => {
     expect(p).toContain(dateKey);
   });
 
-  it("sanitizes special characters in repo name", () => {
+  it("produces different paths for repos with the same basename but different absolute paths", () => {
+    const p1 = ghCachePath("/path/to/my-repo");
+    const p2 = ghCachePath("/other/path/my-repo");
+    expect(p1).not.toBe(p2);
+  });
+
+  it("produces paths with no special characters from repo path", () => {
     const p = ghCachePath("/path/to/my repo!@#");
     expect(p).not.toMatch(/[!@#\s]/);
   });

@@ -9,14 +9,12 @@ const COSINE_MAX_CORPUS = 10000;
 export const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosine scoring
 
 // Module-level cache for TF-IDF document frequencies.
-// Keyed by generation counter, which is only incremented on full index rebuilds (not incremental updates).
-// This prevents every incremental add_finding from flushing the entire DF cache.
+// Keyed by a fingerprint of the candidate doc IDs so that different candidate subsets and
+// incremental index mutations produce distinct cache entries rather than reusing stale counts.
 const dfCache = new Map<string, Map<string, number>>();
-let dfCacheGeneration = 0;
 
-/** Invalidate the DF cache. Call after a full index rebuild (not incremental file updates). */
+/** Invalidate the DF cache. Call after a full index rebuild. */
 export function invalidateDfCache(): void {
-  dfCacheGeneration++;
   dfCache.clear();
   tokenCache.clear();
 }
@@ -79,9 +77,10 @@ function tfidfCosine(docs: string[], query: string, corpusN?: number): number[] 
   // Use the full corpus N for IDF so scores are comparable even when docs is a subset.
   const N = corpusN ?? docs.length;
 
-  // Compute document frequency for each term, using generation-keyed cache.
-  // Cache survives individual file adds/removes; only full rebuilds bump the generation.
-  const cacheKey = `gen:${dfCacheGeneration}`;
+  // Compute document frequency for each term, keyed by a fingerprint of the candidate doc set
+  // so that different subsets and incremental index mutations get distinct cache entries.
+  const candidateFingerprint = docTokenLists.map(tl => tl.slice(0, 4).join(",")).join("|").slice(0, 128);
+  const cacheKey = `fp:${candidateFingerprint}`;
   const cachedDf = dfCache.get(cacheKey);
   const df: Map<string, number> = cachedDf ?? new Map<string, number>();
   // Compute DF for any terms not yet in cache

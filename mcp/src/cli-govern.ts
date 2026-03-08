@@ -232,9 +232,10 @@ export async function handlePruneMemories(args: string[] = []) {
       const ageDays = Math.floor((now - createdMs) / 86400000);
       if (ageDays <= ttlDays) continue;
 
-      // Check if retrieved within the grace period
-      const bulletText = line.slice(2).trim().slice(0, 100);
-      const retrievalKey = `${project}/FINDINGS.md:${bulletText}`;
+      // Check if retrieved within the grace period.
+      // Retrieval is logged at document level (project/FINDINGS.md + doc.type), so look up
+      // by the document-level key to match the format written by cli-hooks-output recordRetrieval.
+      const retrievalKey = `${project}/FINDINGS.md:findings`;
       const lastRetrieval = lastRetrievalByKey.get(retrievalKey) || 0;
       const daysSinceRetrieval = lastRetrieval ? Math.floor((now - lastRetrieval) / 86400000) : Infinity;
       if (daysSinceRetrieval <= retrievalGraceDays) continue;
@@ -534,6 +535,17 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     const governance = await handleGovernMemories(projectArg, true);
     const pruneResult = pruneDeadMemories(getCortexPath(), projectArg);
     const pruneMsg = pruneResult.ok ? pruneResult.data : pruneResult.error;
+    if (!pruneResult.ok) {
+      updateRuntimeHealth(getCortexPath(), {
+        lastGovernance: {
+          at: startedAt,
+          status: "error",
+          detail: `prune failed: ${pruneMsg}`,
+        },
+      });
+      appendAuditLog(getCortexPath(), "background_maintenance_failed", `error=prune_failed: ${pruneMsg}`);
+      return;
+    }
     fs.writeFileSync(markers.done, new Date().toISOString() + "\n");
     updateRuntimeHealth(getCortexPath(), {
       lastGovernance: {

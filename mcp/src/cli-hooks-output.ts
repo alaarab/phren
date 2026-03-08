@@ -62,7 +62,7 @@ export function buildHookOutput(
     for (const injected of indexEntries) {
       recordInjection(cortexPathLocal, injected.key, sessionId);
       try {
-        recordRetrieval(cortexPathLocal, injected.doc.path ?? injected.doc.filename, injected.doc.type);
+        recordRetrieval(cortexPathLocal, `${injected.doc.project}/${injected.doc.filename}`, injected.doc.type);
       } catch {
         // best-effort
       }

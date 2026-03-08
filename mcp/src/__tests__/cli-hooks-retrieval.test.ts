@@ -34,18 +34,18 @@ describe("rankResults", () => {
     expect(ranked.some(r => r.project === "myapp")).toBe(true);
   });
 
-  it("prioritizes non-learnings types for detected project", () => {
+  it("prioritizes findings type over non-findings types", () => {
     const rows: DocRow[] = [
       makeDocRow("myapp", "FINDINGS.md", "findings", "## 2025-01-01\n- An insight"),
       makeDocRow("myapp", "CLAUDE.md", "claude", "# myapp\nSetup instructions"),
     ];
 
     const ranked = rankResults(rows, "general", null, "myapp", tmpCortex, null);
-    // CLAUDE.md (claude type) should rank before LEARNINGS.md
+    // findings should rank before claude/non-findings types
     const claudeIdx = ranked.findIndex(r => r.type === "claude");
     const learningsIdx = ranked.findIndex(r => r.type === "findings");
     if (claudeIdx !== -1 && learningsIdx !== -1) {
-      expect(claudeIdx).toBeLessThan(learningsIdx);
+      expect(learningsIdx).toBeLessThan(claudeIdx);
     }
   });
 });
