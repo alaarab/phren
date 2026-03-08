@@ -826,6 +826,53 @@ describe("file locking", () => {
   });
 });
 
+// --- findItemByMatch returns explicit error on no match ---
+
+describe("findItemByMatch via completeBacklogItem", () => {
+  it("returns error with 'Item not found' when no item matches (not undefined)", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const msg = completeBacklogItem(tmpDir, PROJECT, "completely nonexistent item zzz");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) {
+      expect(msg.error).toContain("not found");
+    }
+  });
+});
+
+// --- Backlog header whitespace tolerance ---
+
+describe("backlog header whitespace tolerance", () => {
+  it("parses section headers with extra trailing whitespace", () => {
+    const content = [
+      "# testproject backlog",
+      "",
+      "## Active   ",
+      "",
+      "- [ ] task in active",
+      "",
+      "##   Queue  ",
+      "",
+      "- [ ] task in queue",
+      "",
+      "## Done ",
+      "",
+      "- [x] task done",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
+    const result = readBacklog(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.items.Active).toHaveLength(1);
+    expect(result.data.items.Active[0].line).toBe("task in active");
+    expect(result.data.items.Queue).toHaveLength(1);
+    expect(result.data.items.Queue[0].line).toBe("task in queue");
+    expect(result.data.items.Done).toHaveLength(1);
+    expect(result.data.items.Done[0].line).toBe("task done");
+  });
+});
+
 // --- Structured error codes ---
 
 describe("structured error codes in data-access", () => {
