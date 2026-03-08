@@ -1344,7 +1344,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       Object.keys(bySource).sort().forEach(function(src) {
         html += '<div class="split-group-label">' + esc(src) + '</div>';
         bySource[src].forEach(function(s) {
-          html += '<div class="split-item" onclick="selectSkill(' + JSON.stringify(s.path).replace(/"/g, "'") + ', this, ' + JSON.stringify(s.name).replace(/"/g, "'") + ')">' +
+          html += '<div class="split-item" data-path="' + esc(s.path) + '" data-name="' + esc(s.name) + '" onclick="selectSkillFromEl(this)">' +
             '<span>' + esc(s.name) + '</span>' +
             '<span class="text-muted" style="font-size:11px">' + esc(s.source) + '</span>' +
           '</div>';
@@ -1353,6 +1353,11 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       list.innerHTML = html;
     });
   }
+
+  window.selectSkillFromEl = function(el) {
+    if (!el) return;
+    selectSkill(el.getAttribute('data-path') || '', el, el.getAttribute('data-name') || '');
+  };
 
   window.selectSkill = function(filePath, el, name) {
     if (_editingSkill && !confirm('Discard unsaved changes?')) return;
@@ -1446,7 +1451,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       var list = document.getElementById('hooks-list');
       var html = '<div class="split-group-label">Lifecycle Hooks</div>';
       data.tools.forEach(function(t) {
-        html += '<div class="hook-item" onclick="selectHook(' + JSON.stringify(t.configPath).replace(/"/g,"'") + ', this, ' + JSON.stringify(t.tool).replace(/"/g,"'") + ', ' + t.exists + ')">' +
+        html += '<div class="hook-item" data-config-path="' + esc(t.configPath) + '" data-tool="' + esc(t.tool) + '" data-exists="' + (t.exists ? 'true' : 'false') + '" onclick="selectHookFromEl(this)">' +
           '<span class="hook-name">' + esc(t.tool) + '</span>' +
           '<span class="badge ' + (t.enabled ? 'badge-on' : 'badge-off') + '">' + (t.enabled ? 'on' : 'off') + '</span>' +
         '</div>';
@@ -1463,6 +1468,16 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       list.innerHTML = html;
     });
   }
+
+  window.selectHookFromEl = function(el) {
+    if (!el) return;
+    selectHook(
+      el.getAttribute('data-config-path') || '',
+      el,
+      el.getAttribute('data-tool') || '',
+      el.getAttribute('data-exists') === 'true'
+    );
+  };
 
   window.selectHook = function(filePath, el, toolName, exists) {
     if (_editingHook && !confirm('Discard unsaved changes?')) return;
@@ -1483,7 +1498,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         '<span class="reader-path">' + esc(filePath) + '</span>' +
         '<span id="hook-status"></span>' +
         '<button class="btn btn-sm" onclick="editHook()">Edit</button>' +
-        '<button class="btn btn-sm btn-primary" onclick="toggleHookTool(' + JSON.stringify(toolName).replace(/"/g,"'") + ')">Toggle</button>' +
+        '<button class="btn btn-sm btn-primary" data-tool="' + esc(toolName) + '" onclick="toggleHookToolFromEl(this)">Toggle</button>' +
       '</div>' +
       '<div class="reader-content"><div class="reader-empty">Loading...</div></div>';
     fetch('/api/skill-content?path=' + encodeURIComponent(filePath))
@@ -1494,6 +1509,11 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         if (!data.ok) { content.innerHTML = '<div class="reader-empty">' + esc(data.error || 'Error loading file') + '</div>'; return; }
         content.innerHTML = '<pre id="hook-pre">' + esc(data.content) + '</pre>';
       });
+  };
+
+  window.toggleHookToolFromEl = function(el) {
+    if (!el) return;
+    toggleHookTool(el.getAttribute('data-tool') || '');
   };
 
   window.editHook = function() {
@@ -1891,6 +1911,10 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 </script>
 </body>
 </html>`;
+}
+
+export function renderPageForTests(cortexPath: string, csrfToken?: string, authToken?: string): string {
+  return renderPage(cortexPath, csrfToken, authToken);
 }
 
 // ── Server ───────────────────────────────────────────────────────────────────

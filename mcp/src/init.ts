@@ -6,7 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { configureAllHooks } from "./hooks.js";
-import { debugLog } from "./shared.js";
+import { debugLog, isRecord } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 
 // Re-export everything consumers need from the helper modules
@@ -91,6 +91,8 @@ interface HookEntry {
   matcher?: string;
   hooks?: Array<{ type?: string; command?: string; timeout?: number }>;
 }
+
+type HookMap = Partial<Record<"UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", HookEntry[]>> & Record<string, unknown>;
 
 function parseVersion(version: string): { major: number; minor: number; patch: number; pre: string } {
   const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?/);
@@ -873,6 +875,7 @@ export async function runUninstall() {
   if (fs.existsSync(settingsPath)) {
     try {
       patchJsonFile(settingsPath, (data) => {
+        const hooksMap = isRecord(data.hooks) ? data.hooks as HookMap : (data.hooks = {} as HookMap);
         // Remove MCP server
         if (data.mcpServers?.cortex) {
           delete data.mcpServers.cortex;
@@ -881,15 +884,15 @@ export async function runUninstall() {
 
         // Remove hooks containing cortex references
         for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const) {
-          const hooks = data.hooks?.[hookEvent] as HookEntry[] | undefined;
+          const hooks = hooksMap[hookEvent] as HookEntry[] | undefined;
           if (!Array.isArray(hooks)) continue;
           const before = hooks.length;
-          (data.hooks as Record<string, unknown>)[hookEvent] = hooks.filter(
+          hooksMap[hookEvent] = hooks.filter(
             (h: HookEntry) => !h.hooks?.some(
               (hook) => typeof hook.command === "string" && isCortexCommand(hook.command)
             )
           );
-          const removed = before - ((data.hooks as Record<string, unknown>)[hookEvent] as HookEntry[]).length;
+          const removed = before - (hooksMap[hookEvent] as HookEntry[]).length;
           if (removed > 0) log(`  Removed ${removed} cortex hook(s) from ${hookEvent}`);
         }
       });

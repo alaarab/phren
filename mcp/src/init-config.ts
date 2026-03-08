@@ -254,8 +254,7 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
     const settingsStatus = upsertMcpServer(data, mcpEnabled, "mcpServers", cortexPath);
     if (status === "already_disabled") status = settingsStatus;
 
-    if (!data.hooks) data.hooks = {};
-    const hooksMap = data.hooks as Record<string, unknown>;
+    const hooksMap = isRecord(data.hooks) ? data.hooks as HookMap : (data.hooks = {} as HookMap);
 
     const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", hookBody: { type: string; command: string; timeout?: number }) => {
       if (!Array.isArray(hooksMap[eventName])) hooksMap[eventName] = [];
@@ -328,9 +327,9 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
       }
     } else {
       for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const) {
-        const hooks = data.hooks?.[hookEvent] as HookEntry[] | undefined;
+        const hooks = hooksMap[hookEvent] as HookEntry[] | undefined;
         if (!Array.isArray(hooks)) continue;
-        data.hooks[hookEvent] = hooks.filter(
+        hooksMap[hookEvent] = hooks.filter(
           (h: HookEntry) => !h.hooks?.some(
             (hook) => typeof hook.command === "string" && isCortexCommand(hook.command)
           )

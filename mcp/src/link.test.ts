@@ -219,6 +219,39 @@ describe("link", () => {
       expect(fs.readFileSync(destClaude, "utf8")).toBe("# Real content");
     });
 
+    it("normalizes array mcpServers in Claude settings before linking project MCP entries", async () => {
+      setupProfile(["mcp-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "mcp-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "mcp-project");
+      fs.mkdirSync(cortexProject, { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+      fs.writeFileSync(
+        path.join(cortexProject, "cortex.project.yaml"),
+        yaml.dump({
+          mcpServers: {
+            local: {
+              command: "node",
+              args: ["server.js"],
+            },
+          },
+        })
+      );
+
+      const settingsPath = path.join(homeDir, ".claude", "settings.json");
+      fs.writeFileSync(settingsPath, JSON.stringify({ mcpServers: [] }, null, 2));
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      expect(Array.isArray(settings.mcpServers)).toBe(false);
+      expect(settings.mcpServers?.["cortex__mcp-project__local"]?.command).toBe("node");
+      expect(settings.mcpServers?.["cortex__mcp-project__local"]?.args).toEqual(["server.js"]);
+    });
+
     it("replaces identical managed file content with a symlink", async () => {
       setupProfile(["identical-project"]);
 
@@ -289,10 +322,7 @@ describe("link", () => {
       fs.mkdirSync(cortexProject, { recursive: true });
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
 
-      // Context file is written to the module-level CONTEXT_FILE path (resolved at import)
-      // which uses the real os.homedir(), not the test override.
-      // We capture the real path before HOME is overridden for assertion.
-      const realContextFile = path.join(origHome!, ".cortex-context.md");
+      const realContextFile = path.join(homeDir, ".cortex-context.md");
       await runLink(cortexPath, { machine: "test-machine", profile: "test" });
 
       expect(fs.existsSync(realContextFile)).toBe(true);
@@ -312,7 +342,7 @@ describe("link", () => {
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
       fs.writeFileSync(path.join(cortexProject, "FINDINGS.md"), "# FINDINGS\n\n## 2025-01-01\n\n- debug insight\n");
 
-      const realContextFile = path.join(origHome!, ".cortex-context.md");
+      const realContextFile = path.join(homeDir, ".cortex-context.md");
       await runLink(cortexPath, { machine: "test-machine", profile: "test", task: "debugging" });
 
       const content = fs.readFileSync(realContextFile, "utf8");
@@ -332,7 +362,7 @@ describe("link", () => {
       fs.writeFileSync(path.join(cortexProject, "summary.md"), "**What:** A planning test project\n");
       fs.writeFileSync(path.join(cortexProject, "backlog.md"), "# Backlog\n\n## Active\n\n- Important task\n");
 
-      const realContextFile = path.join(origHome!, ".cortex-context.md");
+      const realContextFile = path.join(homeDir, ".cortex-context.md");
       await runLink(cortexPath, { machine: "test-machine", profile: "test", task: "planning" });
 
       const content = fs.readFileSync(realContextFile, "utf8");
@@ -350,7 +380,7 @@ describe("link", () => {
       fs.mkdirSync(cortexProject, { recursive: true });
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
 
-      const realContextFile = path.join(origHome!, ".cortex-context.md");
+      const realContextFile = path.join(homeDir, ".cortex-context.md");
       await runLink(cortexPath, { machine: "test-machine", profile: "test", task: "clean" });
 
       const content = fs.readFileSync(realContextFile, "utf8");

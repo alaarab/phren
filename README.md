@@ -19,11 +19,11 @@ I run 3-5 machines doing AI development at the same time. Claude Code, Codex, Cu
 
 I didn't want to just dump everything into a CLAUDE.md and read the whole thing every time. That burns tokens and still doesn't give you what you actually need right now.
 
-So I built this. A knowledge base in my own GitHub. Every project, every machine. When something comes up, my agents pull only what's relevant. 550 tokens instead of the whole file. I can run more agents in parallel for the same cost and they're not producing slop from noise.
+So I built this. A knowledge base in a git repo I own. Every project, every machine. When something comes up, my agents pull only what's relevant. A default target of about 550 tokens instead of the whole file. I can run more agents in parallel for the same cost and they're not producing slop from noise.
 
 The more I work, the more it knows. Findings match to entities. Old stuff fades. Good stuff sticks. It's just mining my data as I go and making it smarter over time.
 
-> `npx @alaarab/cortex init` -- 30 seconds. No account. Just a git repo you own.
+> `npx @alaarab/cortex init` -- one-command local bootstrap. No account. Just a git repo you own.
 
 <br>
 </div>
@@ -38,7 +38,7 @@ npx @alaarab/cortex init
 npx @alaarab/cortex init --dry-run
 ```
 
-That's it. This:
+This one command bootstraps Cortex locally. It:
 - Creates `~/.cortex` with starter templates
 - Registers MCP for detected tools (Claude Code, VS Code, Copilot CLI, Cursor, Codex)
 - Sets up hooks for automatic context injection and auto-save
@@ -57,6 +57,12 @@ After init, you'll see something like:
   Restart your agent. Your next prompt will already have context.
 ```
 
+## Core mode and semantic mode
+
+**Core mode (default).** Markdown is the source of truth. Git handles sync and audit history. Retrieval runs through a local SQLite FTS5 index. This is the simplest and most portable setup: no required hosted service, predictable token budgets, and a repo you can inspect with normal tools.
+
+**Optional semantic mode.** Cortex can also use Ollama or an embeddings API for better paraphrase recall in some paths. That's useful when vocabulary mismatch matters, but it adds runtime dependencies and more moving pieces. The default story is still local markdown + git + FTS5.
+
 ### Sync across machines
 
 ```bash
@@ -66,7 +72,13 @@ git remote add origin git@github.com:YOU/my-cortex.git
 git push -u origin main
 ```
 
-On a new machine: clone, run init, done.
+On a new machine: clone, run init, relink your tools.
+
+### How sync actually works
+
+`SessionStart` tries a `git pull --rebase` so the local store starts current. The Stop hook commits changes locally after a response. If a remote is configured, Cortex then attempts a best-effort push.
+
+If that push succeeds, other machines see the update on their next pull. If the push is debounced, you're offline, or git rejects it, the commit stays local until the next successful push. That's the trade: git gives you portability and auditability, but this is eventual consistency, not a centralized real-time memory service.
 
 ---
 
@@ -78,15 +90,24 @@ On a new machine: clone, run init, done.
 
 **Findings match to entities. Old stuff fades. Good stuff sticks.** Knowledge doesn't just pile up. It decays. Patterns solidify. Things that keep coming up stay strong. Things that haven't mattered in months fall back. Your agents are always drawing from what's actually useful right now.
 
-**All your machines share the same store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets. It moves through git and just works.
+**All your machines share the same store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets through ordinary git sync cycles.
 
 **Work and personal never mix.** Your work machine sees work projects. Your home machine sees personal ones. Same setup, different profiles.
 
-**550 tokens per prompt, not your whole config.** Less token spend means more agents running in parallel for the same cost. They're not reading noise, so they're not producing slop.
+**A default target budget of about 550 tokens, not your whole config.** Less token spend means more agents running in parallel for the same cost. They're not reading noise, so they're not producing slop.
 
-**Your data stays in your own GitHub.** No account, no vendor. Markdown in a private repo you own. Read it, edit it, grep it, delete it.
+**Your data stays in a git repo you own.** No account, no vendor. Markdown in a repo you control. Read it, edit it, grep it, delete it.
 
-**It just runs.** Context gets injected before each prompt. Changes get saved and pushed after each response. You don't manage it.
+**It mostly stays out of the way.** Context gets injected before each prompt. Changes get committed locally after each response, with best-effort push when sync is healthy. You still own the repo and the failure modes.
+
+## When Cortex Is The Wrong Choice
+
+Cortex is a strong fit when you want owner-operated memory, git auditability, and token discipline. It is a weaker fit when:
+
+- You want a fully managed shared service with stronger real-time consistency guarantees
+- You never want to think about git remotes, pull/rebase, or occasional sync conflicts
+- Semantic retrieval quality matters more than local ownership, auditability, and portability
+- You're already standardized on one vendor platform and its built-in memory is good enough
 
 ---
 
@@ -131,13 +152,13 @@ Three things happen every session without you doing anything:
 
 **Before each prompt** -- a hook pulls keywords from your message, searches the index, and injects the best matches. Trust filtering drops low-confidence or outdated entries.
 
-**After each response** -- changes get committed and pushed. Findings, backlog updates, session state. If nothing changed, the hook skips.
+**After each response** -- changes get committed locally. If a remote is configured, Cortex attempts a best-effort push. If nothing changed, the hook skips.
 
 **When context resets** -- a hook re-injects your project summary, recent findings, and active backlog so the agent picks up where it left off.
 
 Two more things run in the background:
 
-**Consolidation.** When findings pile up past the threshold, cortex flags it once per session. `/cortex-consolidate` archives old entries and promotes patterns that show up across two or more projects.
+**Consolidation.** When findings pile up past the threshold, cortex flags it once per session. Background maintenance governs and prunes on its own schedule, and `/cortex-consolidate` remains the direct operator command for cleanup and pattern promotion.
 
 **Review queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
 
@@ -200,7 +221,7 @@ npx @alaarab/cortex init --machine ci-runner --profile work
 <details>
 <summary><strong>Multiple agents, shared knowledge</strong></summary>
 
-When you run multiple agents, they all read and write the same project store. An agent on Codex hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context. No coordination code. No message passing. Just a shared git repo.
+When you run multiple agents, they all read and write the same project store. An agent on Codex hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context after the next successful sync cycle. No coordination service or custom broker layer, just a shared git repo.
 
 - **Parallel agents** share findings on push/pull cycles
 - **Sequential sessions** build on each other. Session 47 knows everything sessions 1 through 46 learned.

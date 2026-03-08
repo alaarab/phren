@@ -421,7 +421,7 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   }
 
   // Per-project MCP servers
-  if (config.mcpServers && typeof config.mcpServers === "object") {
+  if (isRecord(config.mcpServers)) {
     linkProjectMcpServers(project, config.mcpServers);
   }
 }
@@ -436,10 +436,10 @@ function linkProjectMcpServers(project: string, servers: Record<string, McpServe
   if (!fs.existsSync(settingsPath) && Object.keys(servers).length === 0) return;
   try {
     patchJsonFile(settingsPath, (data) => {
-      if (!data.mcpServers || typeof data.mcpServers !== "object") data.mcpServers = {};
+      const mcpServers = isRecord(data.mcpServers) ? data.mcpServers : (data.mcpServers = {});
       // Remove stale entries for this project (keys we previously wrote)
-      for (const key of Object.keys(data.mcpServers)) {
-        if (key.startsWith(`cortex__${project}__`)) delete data.mcpServers[key];
+      for (const key of Object.keys(mcpServers)) {
+        if (key.startsWith(`cortex__${project}__`)) delete mcpServers[key];
       }
       // Add current entries
       for (const [name, entry] of Object.entries(servers)) {
@@ -447,7 +447,7 @@ function linkProjectMcpServers(project: string, servers: Record<string, McpServe
         const server: Record<string, unknown> = { command: entry.command };
         if (Array.isArray(entry.args)) server.args = entry.args;
         if (entry.env && typeof entry.env === "object") server.env = entry.env;
-        data.mcpServers[key] = server;
+        mcpServers[key] = server;
       }
     });
   } catch (err: unknown) {
@@ -461,15 +461,16 @@ function pruneStaleProjectMcpServers(activeProjects: string[]): void {
   if (!fs.existsSync(settingsPath)) return;
   try {
     patchJsonFile(settingsPath, (data) => {
-      if (!data.mcpServers || typeof data.mcpServers !== "object") return;
-      for (const key of Object.keys(data.mcpServers)) {
+      const mcpServers = isRecord(data.mcpServers) ? data.mcpServers : undefined;
+      if (!mcpServers) return;
+      for (const key of Object.keys(mcpServers)) {
         if (!key.startsWith("cortex__")) continue;
         // Key format: cortex__<project>__<name>
         const parts = key.split("__");
         if (parts.length < 3) continue;
         const project = parts[1];
         if (!activeProjects.includes(project)) {
-          delete data.mcpServers[key];
+          delete mcpServers[key];
           debugLog(`pruneStaleProjectMcpServers: removed stale entry "${key}"`);
         }
       }

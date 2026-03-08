@@ -3,14 +3,15 @@ import * as path from "path";
 import * as os from "os";
 import * as yaml from "js-yaml";
 
-
-const CONTEXT_FILE = path.join(os.homedir(), ".cortex-context.md");
-
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
 // Cross-platform home directory helper
 function homeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || os.homedir();
+}
+
+function contextFilePath(): string {
+  return path.join(homeDir(), ".cortex-context.md");
 }
 
 export function claudeProjectKey(): string {
@@ -37,20 +38,21 @@ function allKnownProjects(cortexPath: string): string[] {
 // ── Context file writing ────────────────────────────────────────────────────
 
 export function writeContextFile(managedContent: string) {
+  const contextFile = contextFilePath();
   const wrapped = `<!-- cortex-managed -->\n${managedContent}\n<!-- /cortex-managed -->`;
-  if (fs.existsSync(CONTEXT_FILE)) {
-    const existing = fs.readFileSync(CONTEXT_FILE, "utf8");
+  if (fs.existsSync(contextFile)) {
+    const existing = fs.readFileSync(contextFile, "utf8");
     if (existing.includes("<!-- cortex-managed -->")) {
       const startIdx = existing.indexOf("<!-- cortex-managed -->");
       const endIdx = existing.indexOf("<!-- /cortex-managed -->");
       const before = startIdx > 0 ? existing.slice(0, startIdx).trimEnd() : "";
       const after = endIdx !== -1 ? existing.slice(endIdx + "<!-- /cortex-managed -->".length).trimStart() : "";
       const parts = [before, wrapped, after].filter(Boolean);
-      fs.writeFileSync(CONTEXT_FILE, parts.join("\n") + "\n");
+      fs.writeFileSync(contextFile, parts.join("\n") + "\n");
       return;
     }
   }
-  fs.writeFileSync(CONTEXT_FILE, wrapped + "\n");
+  fs.writeFileSync(contextFile, wrapped + "\n");
 }
 
 export function formatMcpStatus(status: string): string {
@@ -78,7 +80,7 @@ export function writeContextDefault(machine: string, profile: string, mcpStatus:
     `Last synced: ${new Date().toISOString().slice(0, 10)}`,
   ];
   writeContextFile(lines.join("\n"));
-  log(`  wrote ${CONTEXT_FILE}`);
+  log(`  wrote ${contextFilePath()}`);
 }
 
 export function writeContextDebugging(machine: string, profile: string, mcpStatus: string, projects: string[], cortexPath: string) {
@@ -107,7 +109,7 @@ export function writeContextDebugging(machine: string, profile: string, mcpStatu
     }
   }
   writeContextFile(content);
-  log(`  wrote ${CONTEXT_FILE} (debugging mode)`);
+  log(`  wrote ${contextFilePath()} (debugging mode)`);
 }
 
 export function writeContextPlanning(machine: string, profile: string, mcpStatus: string, projects: string[], cortexPath: string) {
@@ -142,7 +144,7 @@ export function writeContextPlanning(machine: string, profile: string, mcpStatus
     }
   }
   writeContextFile(content);
-  log(`  wrote ${CONTEXT_FILE} (planning mode)`);
+  log(`  wrote ${contextFilePath()} (planning mode)`);
 }
 
 export function writeContextClean(machine: string, profile: string, mcpStatus: string, projects: string[]) {
@@ -150,7 +152,7 @@ export function writeContextClean(machine: string, profile: string, mcpStatus: s
   let content = `# cortex context (clean)\nMachine: ${machine} | Profile: ${profile} | Projects: ${projects.join(", ")}\n`;
   if (mcpLine) content += mcpLine + "\n";
   writeContextFile(content);
-  log(`  wrote ${CONTEXT_FILE} (clean mode)`);
+  log(`  wrote ${contextFilePath()} (clean mode)`);
 }
 
 // ── Memory management ───────────────────────────────────────────────────────

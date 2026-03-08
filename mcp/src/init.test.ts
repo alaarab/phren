@@ -278,6 +278,21 @@ describe.sequential("mcp mode configuration", () => {
     expect(() => configureClaude(cortexPath, { mcpEnabled: true })).toThrow("top-level JSON value must be an object");
   });
 
+  it("normalizes non-object hooks values before writing Claude hooks", () => {
+    const claudeDir = path.join(homeDir, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = path.join(claudeDir, "settings.json");
+    fs.writeFileSync(settingsPath, JSON.stringify({ hooks: [] }, null, 2));
+
+    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: true });
+
+    const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    expect(Array.isArray(cfg.hooks)).toBe(false);
+    expect(Array.isArray(cfg.hooks?.UserPromptSubmit)).toBe(true);
+    expect(Array.isArray(cfg.hooks?.Stop)).toBe(true);
+    expect(Array.isArray(cfg.hooks?.SessionStart)).toBe(true);
+  });
+
   it("preserves non-cortex hooks when configuring (isCortexCommand filtering)", () => {
     const claudeDir = path.join(homeDir, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });

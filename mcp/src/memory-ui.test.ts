@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import * as http from "http";
 import * as querystring from "querystring";
-import { createReviewUiServer } from "./memory-ui.js";
+import { createReviewUiServer, renderPageForTests } from "./memory-ui.js";
 
 function seedProject(root: string): void {
   write(
@@ -350,5 +350,23 @@ describe.sequential("review-ui CSRF protection", () => {
       line: "- [2026-03-05] Keep this memory [confidence 0.90]",
     });
     expect(replay.status).toBe(403);
+  });
+});
+
+describe("review-ui HTML rendering", () => {
+  it("uses element-based handlers for skills and hooks instead of inline quoted values", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain("selectSkillFromEl(this)");
+      expect(body).toContain("selectHookFromEl(this)");
+      expect(body).toContain("toggleHookToolFromEl(this)");
+      expect(body).not.toContain('JSON.stringify(s.path).replace(/"/g, "\'")');
+      expect(body).not.toContain('JSON.stringify(t.configPath).replace(/"/g,"\'")');
+      expect(body).not.toContain('JSON.stringify(toolName).replace(/"/g,"\'")');
+    } finally {
+      cleanup();
+    }
   });
 });
