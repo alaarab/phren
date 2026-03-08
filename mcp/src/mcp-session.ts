@@ -302,7 +302,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         } catch { /* file disappeared between check and read */ }
       }
       const backlogPath = path.join(cortexPath, activeProject, "backlog.md");
-      if (fs.existsSync(backlogPath)) {
+      try {
         const content = fs.readFileSync(backlogPath, "utf-8");
         const queueStart = content.indexOf("## Queue");
         if (queueStart >= 0) {
@@ -311,7 +311,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             parts.push(`## Active backlog (${activeProject})\n${queueItems.join("\n")}`);
           }
         }
-      }
+      } catch { /* backlog file absent or unreadable */ }
       // Surface extracted preferences/facts for this project
       try {
         const facts = readExtractedFacts(cortexPath, activeProject).slice(-10);

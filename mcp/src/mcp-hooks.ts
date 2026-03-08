@@ -22,10 +22,15 @@ function validateHookCommand(command: string): string | null {
   const trimmed = command.trim();
   if (!trimmed) return "Command cannot be empty.";
   if (trimmed.length > 1000) return "Command too long (max 1000 characters).";
-  // Reject eval — allows arbitrary code execution bypass
-  if (/\beval\b/.test(trimmed)) return "eval is not permitted in hook commands.";
+  // Reject shell metacharacters that allow injection or arbitrary execution
+  // when the command is later run via `sh -c`.
+  if (/[`$(){}&|;<>]/.test(trimmed)) {
+    return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < >";
+  }
+  // Reject eval and source — allow arbitrary code execution bypass
+  if (/\b(eval|source)\b/.test(trimmed)) return "eval and source are not permitted in hook commands.";
   // Command must start with a word character, path, or quoted string
-  if (!/^[\w./~"'(]/.test(trimmed)) return "Command must begin with an executable name or path.";
+  if (!/^[\w./~"'"]/.test(trimmed)) return "Command must begin with an executable name or path.";
   return null;
 }
 
@@ -153,6 +158,26 @@ export function register(server: McpServer, ctx: McpContext): void {
         const trimmed = webhook.trim();
         if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
           return mcpResponse({ ok: false, error: "webhook must be an http:// or https:// URL." });
+        }
+        // Reject private/loopback hostnames to prevent SSRF
+        try {
+          const { hostname } = new URL(trimmed);
+          const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+          const ssrfBlocked =
+            h === "localhost" ||
+            h === "::1" ||
+            /^127\./.test(h) ||
+            /^10\./.test(h) ||
+            /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+            /^192\.168\./.test(h) ||
+            /^169\.254\./.test(h) ||
+            h.endsWith(".local") ||
+            h.endsWith(".internal");
+          if (ssrfBlocked) {
+            return mcpResponse({ ok: false, error: `webhook hostname "${hostname}" resolves to a private or loopback address, which is not permitted.` });
+          }
+        } catch {
+          return mcpResponse({ ok: false, error: "webhook is not a valid URL." });
         }
         newHook = { event, webhook: trimmed, ...(secret ? { secret } : {}), ...(timeout !== undefined ? { timeout } : {}) } satisfies WebhookHookEntry;
       } else {

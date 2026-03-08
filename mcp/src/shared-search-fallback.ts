@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { debugLog } from "./shared.js";
 import { STOP_WORDS } from "./utils.js";
 import { porterStem } from "./shared-stemmer.js";
@@ -36,8 +37,7 @@ const MAX_TOKEN_CACHE = 2000;
 const tokenCache = new Map<string, string[]>();
 
 function cachedTokenize(text: string): string[] {
-  // Use prefix + length + suffix as a cheap key that avoids collisions
-  const key = `${text.slice(0, 64)}|${text.length}|${text.slice(-32)}`;
+  const key = createHash("sha256").update(text).digest("hex").slice(0, 16);
   const hit = tokenCache.get(key);
   if (hit) return hit;
   const tokens = tokenize(text);

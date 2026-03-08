@@ -39,7 +39,7 @@ function writeExtractedFacts(cortexPath: string, project: string, facts: Extract
   if (!p) return;
   try {
     const trimmed = facts.slice(-MAX_FACTS);
-    const tmp = p + ".tmp";
+    const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
     fs.writeFileSync(tmp, JSON.stringify(trimmed, null, 2));
     fs.renameSync(tmp, p);
   } catch (err: unknown) {
@@ -64,11 +64,14 @@ export function extractFactFromFinding(cortexPath: string, project: string, find
   callLlm(prompt, undefined, 60)
     .then(raw => {
       if (!raw || raw.toLowerCase() === "none") return;
+      // Truncate and sanitize to prevent unbounded or injected content from being stored
+      const fact = raw.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
+      if (!fact) return;
+      // Re-read inside the callback to minimize race window (best-effort; not locked)
       const existing = readExtractedFacts(cortexPath, project);
-      const normalized = raw.toLowerCase();
-      // skip if already stored
+      const normalized = fact.toLowerCase();
       if (existing.some(f => f.fact.toLowerCase() === normalized)) return;
-      existing.push({ fact: raw, source: finding.slice(0, 120), at: new Date().toISOString() });
+      existing.push({ fact, source: finding.slice(0, 120), at: new Date().toISOString() });
       writeExtractedFacts(cortexPath, project, existing);
     })
     .catch((err: unknown) => {

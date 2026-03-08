@@ -452,7 +452,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         let synthesis: string | undefined;
         if (synthesize && results.length > 0) {
           try {
-            const synthKey = createHash("sha256").update(query + (filterProject ?? "")).digest("hex").slice(0, 16);
+            const synthKey = createHash("sha256").update([query, filterProject ?? "", filterType ?? "", filterTag ?? "", since ?? ""].join("|")).digest("hex").slice(0, 16);
             const synthCachePath = runtimeFile(cortexPath, "synth-cache.json");
             let synthCache: Record<string, { result: string; ts: number }> = {};
             try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch { /* file absent or corrupt */ }
