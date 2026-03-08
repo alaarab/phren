@@ -20,10 +20,10 @@ interface TelemetryData {
   stats: UsageStats;
 }
 
-// In-memory buffer to batch disk writes
-let buffer: TelemetryData | null = null;
-let bufferPath: string | null = null;
-let pendingEvents = 0;
+// In-memory buffers keyed by cortexPath to batch disk writes
+// Keeping per-path buffers avoids silently losing events when the active path changes.
+const buffers = new Map<string, TelemetryData>();
+const pendingCounts = new Map<string, number>();
 const FLUSH_THRESHOLD = 10;
 
 function telemetryPath(cortexPath: string): string {
@@ -58,29 +58,37 @@ function loadFromDisk(cortexPath: string): TelemetryData {
 }
 
 function loadTelemetry(cortexPath: string): TelemetryData {
-  if (buffer && bufferPath === cortexPath) return buffer;
+  const cached = buffers.get(cortexPath);
+  if (cached) return cached;
   const data = loadFromDisk(cortexPath);
-  buffer = data;
-  bufferPath = cortexPath;
+  buffers.set(cortexPath, data);
   return data;
 }
 
 function saveTelemetry(cortexPath: string, data: TelemetryData): void {
-  buffer = data;
-  bufferPath = cortexPath;
-  pendingEvents++;
-  if (pendingEvents >= FLUSH_THRESHOLD) {
-    flushTelemetry();
+  buffers.set(cortexPath, data);
+  const pending = (pendingCounts.get(cortexPath) ?? 0) + 1;
+  pendingCounts.set(cortexPath, pending);
+  if (pending >= FLUSH_THRESHOLD) {
+    flushTelemetryForPath(cortexPath);
   }
 }
 
-export function flushTelemetry(): void {
-  if (!buffer || !bufferPath || pendingEvents === 0) return;
-  const file = telemetryPath(bufferPath);
+function flushTelemetryForPath(cortexPath: string): void {
+  const data = buffers.get(cortexPath);
+  const pending = pendingCounts.get(cortexPath) ?? 0;
+  if (!data || pending === 0) return;
+  const file = telemetryPath(cortexPath);
   try {
-    fs.writeFileSync(file, JSON.stringify(buffer, null, 2) + "\n");
+    fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
   } catch { /* best effort */ }
-  pendingEvents = 0;
+  pendingCounts.set(cortexPath, 0);
+}
+
+export function flushTelemetry(): void {
+  for (const cortexPath of buffers.keys()) {
+    flushTelemetryForPath(cortexPath);
+  }
 }
 
 // Register flush on process exit
@@ -102,10 +110,9 @@ export function setTelemetryEnabled(cortexPath: string, enabled: boolean): void 
     data.config.enabledAt = new Date().toISOString();
   }
   // Config changes flush immediately
-  buffer = data;
-  bufferPath = cortexPath;
-  pendingEvents = 1;
-  flushTelemetry();
+  buffers.set(cortexPath, data);
+  pendingCounts.set(cortexPath, 1);
+  flushTelemetryForPath(cortexPath);
 }
 
 export function trackToolCall(cortexPath: string, toolName: string): void {
@@ -174,15 +181,13 @@ export function resetTelemetry(cortexPath: string): void {
   const data = loadTelemetry(cortexPath);
   data.stats = { toolCalls: {}, cliCommands: {}, errors: 0, sessions: 0, lastActive: "" };
   // Reset flushes immediately
-  buffer = data;
-  bufferPath = cortexPath;
-  pendingEvents = 1;
-  flushTelemetry();
+  buffers.set(cortexPath, data);
+  pendingCounts.set(cortexPath, 1);
+  flushTelemetryForPath(cortexPath);
 }
 
 // Reset internal buffer state (for testing)
 export function _resetBuffer(): void {
-  buffer = null;
-  bufferPath = null;
-  pendingEvents = 0;
+  buffers.clear();
+  pendingCounts.clear();
 }

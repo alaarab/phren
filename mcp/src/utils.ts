@@ -2,7 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import * as yaml from "js-yaml";
+import { fileURLToPath } from "url";
 import { findCortexPath } from "./shared.js";
+
+const _synonymsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "synonyms.json");
+const _synonymsJson: Record<string, string[]> = (() => {
+  try { return JSON.parse(fs.readFileSync(_synonymsPath, "utf8")); } catch { return {}; }
+})();
 
 // ── Shared Git helper ────────────────────────────────────────────────────────
 
@@ -57,157 +63,9 @@ export function clampInt(raw: string | undefined, fallback: number, min: number,
   return Math.min(max, Math.max(min, parsed));
 }
 
-// Synonym map for fuzzy search expansion
-const SYNONYMS: Record<string, string[]> = {
-  // ── Existing groups (23) ──────────────────────────────────────────────────
-  "rate limit": ["throttle", "throttling", "429", "too many requests"],
-  "throttle": ["rate limit", "throttling", "429", "debounce"],
-  "throttling": ["rate limit", "throttle", "429"],
-  "429": ["rate limit", "throttle", "throttling", "too many requests"],
-  "error": ["exception", "failure", "crash", "bug"],
-  "exception": ["error", "failure", "crash"],
-  "bug": ["error", "failure", "crash"],
-  "auth": ["authentication", "authorization", "login", "oauth", "jwt"],
-  "authentication": ["auth", "login", "oauth"],
-  "authorization": ["auth", "login", "oauth"],
-  "login": ["auth", "authentication", "oauth"],
-  "cache": ["caching", "memoize", "memoization"],
-  "caching": ["cache", "memoize", "memoization"],
-  "deploy": ["deployment", "release", "publish", "ship"],
-  "deployment": ["deploy", "release", "publish"],
-  "test": ["testing", "spec", "jest", "vitest", "pytest"],
-  "testing": ["test", "spec", "jest", "vitest"],
-  "api": ["endpoint", "route", "handler"],
-  "endpoint": ["api", "route", "handler"],
-  "database": ["db", "sqlite", "postgres", "sql"],
-  "db": ["database", "sqlite", "postgres", "sql"],
-  "env": ["environment", "dotenv", "config"],
-  "environment": ["env", "dotenv", "config"],
-  "ci": ["pipeline", "github actions", "workflow"],
-  "pipeline": ["ci", "github actions", "workflow"],
-  "websocket": ["ws", "socket", "real-time"],
-  "hook": ["hooks", "lifecycle", "callback"],
-  "hooks": ["hook", "lifecycle", "callback"],
-  "middleware": ["interceptor", "handler", "filter"],
-  "queue": ["job", "worker", "background"],
-  "docker": ["container", "dockerfile", "compose"],
-  "container": ["docker", "dockerfile", "compose"],
+// Synonym map for fuzzy search expansion — source of truth is mcp/src/synonyms.json
+const SYNONYMS: Record<string, string[]> = _synonymsJson;
 
-  // ── Frontend / CSS ────────────────────────────────────────────────────────
-  "flexbox": ["flex", "css", "layout"],
-  "grid": ["css grid", "layout", "display"],
-  "css": ["stylesheet", "style", "sass", "scss", "tailwind"],
-  "stylesheet": ["css", "sass", "scss"],
-  "selector": ["css", "querySelector", "specificity"],
-  "animation": ["transition", "keyframes", "css"],
-  "transition": ["animation", "keyframes", "css"],
-  "responsive": ["media query", "breakpoint", "viewport"],
-  "media query": ["responsive", "breakpoint", "viewport"],
-  "tailwind": ["css", "utility classes", "postcss"],
-  "sass": ["scss", "css", "preprocessor"],
-  "scss": ["sass", "css", "preprocessor"],
-
-  // ── Security ──────────────────────────────────────────────────────────────
-  "cors": ["cross-origin", "origin", "preflight"],
-  "xss": ["cross-site scripting", "sanitize", "escape"],
-  "csrf": ["cross-site request forgery", "token", "security"],
-  "injection": ["sql injection", "xss", "sanitize"],
-  "sanitize": ["escape", "xss", "injection", "validate"],
-  "escape": ["sanitize", "xss", "encode"],
-  "oauth": ["auth", "jwt", "token", "openid"],
-  "jwt": ["token", "auth", "oauth", "bearer"],
-  "rbac": ["role", "permission", "access control"],
-  "permission": ["rbac", "role", "access control", "authorization"],
-  "rate-limit": ["throttle", "429", "rate limit"],
-  "csp": ["content security policy", "security", "header"],
-
-  // ── State management ──────────────────────────────────────────────────────
-  "redux": ["store", "dispatch", "reducer", "action"],
-  "zustand": ["store", "state", "react"],
-  "context": ["provider", "consumer", "react"],
-  "store": ["state", "redux", "zustand"],
-  "dispatch": ["action", "redux", "event"],
-  "reducer": ["redux", "action", "state"],
-  "action": ["dispatch", "reducer", "redux"],
-  "recoil": ["atom", "selector", "state"],
-  "jotai": ["atom", "state", "react"],
-  "signal": ["reactive", "state", "observable"],
-
-  // ── Performance / profiling ───────────────────────────────────────────────
-  "profiler": ["benchmark", "performance", "flame graph"],
-  "benchmark": ["profiler", "performance", "latency"],
-  "latency": ["performance", "throughput", "response time"],
-  "throughput": ["performance", "latency", "bandwidth"],
-  "memory leak": ["gc", "heap", "memory"],
-  "memory-leak": ["gc", "heap", "memory"],
-  "gc": ["garbage collection", "memory", "heap"],
-  "memoize": ["cache", "memoization", "useMemo"],
-  "memoization": ["memoize", "cache", "useMemo"],
-  "debounce": ["throttle", "rate limit", "delay"],
-  "lazy-load": ["code splitting", "dynamic import", "lazy"],
-  "lazy load": ["code splitting", "dynamic import", "lazy"],
-
-  // ── Infrastructure / k8s ──────────────────────────────────────────────────
-  "kubernetes": ["k8s", "helm", "pod", "deployment"],
-  "k8s": ["kubernetes", "helm", "pod", "deployment"],
-  "helm": ["kubernetes", "k8s", "chart"],
-  "pod": ["kubernetes", "k8s", "container"],
-  "ingress": ["kubernetes", "k8s", "routing", "service"],
-  "namespace": ["kubernetes", "k8s", "scope"],
-  "dockerfile": ["docker", "container", "build"],
-  "compose": ["docker", "docker-compose", "container"],
-
-  // ── Data / ML ─────────────────────────────────────────────────────────────
-  "embedding": ["vector", "cosine", "similarity"],
-  "vector": ["embedding", "cosine", "similarity"],
-  "cosine": ["similarity", "vector", "embedding"],
-  "similarity": ["cosine", "vector", "distance"],
-  "model": ["inference", "training", "ml"],
-  "inference": ["model", "prediction", "ml"],
-  "training": ["model", "dataset", "ml"],
-  "dataset": ["data", "training", "pipeline"],
-  "feature": ["label", "dataset", "ml"],
-  "label": ["feature", "annotation", "dataset"],
-  "tokenize": ["tokenizer", "nlp", "parse"],
-
-  // ── Mobile ────────────────────────────────────────────────────────────────
-  "rn": ["react-native", "expo", "mobile"],
-  "react-native": ["rn", "expo", "mobile"],
-  "expo": ["react-native", "rn", "mobile"],
-  "ios": ["apple", "swift", "xcode", "mobile"],
-  "android": ["kotlin", "gradle", "mobile"],
-  "native": ["ios", "android", "platform"],
-  "gesture": ["touch", "swipe", "pan"],
-  "navigation": ["router", "screen", "stack"],
-  "deep-link": ["universal link", "app link", "url scheme"],
-  "deep link": ["universal link", "app link", "url scheme"],
-
-  // ── Accessibility ─────────────────────────────────────────────────────────
-  "a11y": ["accessibility", "aria", "wcag"],
-  "aria": ["a11y", "accessibility", "role"],
-  "wcag": ["a11y", "accessibility", "contrast"],
-  "screen-reader": ["a11y", "aria", "voiceover"],
-  "screen reader": ["a11y", "aria", "voiceover"],
-  "focus": ["keyboard-nav", "tabindex", "a11y"],
-  "keyboard-nav": ["focus", "tabindex", "a11y"],
-  "contrast": ["wcag", "a11y", "color"],
-  "semantic": ["html", "a11y", "landmark"],
-
-  // ── Testing ───────────────────────────────────────────────────────────────
-  "jest": ["test", "vitest", "testing"],
-  "vitest": ["test", "jest", "testing"],
-  "mocha": ["test", "chai", "testing"],
-  "pytest": ["test", "python", "testing"],
-  "cypress": ["e2e", "testing", "browser"],
-  "playwright": ["e2e", "testing", "browser"],
-  "e2e": ["end-to-end", "cypress", "playwright"],
-  "unit": ["test", "testing", "spec"],
-  "integration": ["test", "testing", "e2e"],
-  "mock": ["stub", "spy", "fake"],
-  "stub": ["mock", "spy", "fake"],
-  "fixture": ["test data", "factory", "seed"],
-  "snapshot": ["test", "jest", "vitest"],
-};
 
 // Common English stop words to strip from prompts before searching
 export const STOP_WORDS = new Set([

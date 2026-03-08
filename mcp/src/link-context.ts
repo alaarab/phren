@@ -13,7 +13,7 @@ function homeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || os.homedir();
 }
 
-function claudeProjectKey(): string {
+export function claudeProjectKey(): string {
   return homeDir().replace(/[/\\:]/g, "-").replace(/^-/, "");
 }
 
@@ -219,14 +219,47 @@ export function rebuildMemory(cortexPath: string, projects: string[]) {
   fs.writeFileSync(memoryFile, (header || freshHeader) + managed + "\n");
   log(`  rebuilt ${memoryFile} (pointer format)`);
 
+  const SUMMARY_START = "<!-- cortex:summary:start -->";
+  const SUMMARY_END = "<!-- cortex:summary:end -->";
+
   for (const project of projects) {
     if (project === "global") continue;
     const summaryFile = path.join(cortexPath, project, "summary.md");
     if (!fs.existsSync(summaryFile)) continue;
+    const summaryContent = fs.readFileSync(summaryFile, "utf8");
     const projectMemory = path.join(memoryDir, `MEMORY-${project}.md`);
+
     if (!fs.existsSync(projectMemory)) {
-      fs.writeFileSync(projectMemory, `# ${displayName(project)}\n\n${fs.readFileSync(summaryFile, "utf8")}\n\n## Notes\n<!-- Session findings, patterns, decisions -->\n`);
+      // Create fresh file with managed summary section and user-editable notes block
+      fs.writeFileSync(
+        projectMemory,
+        `# ${displayName(project)}\n\n${SUMMARY_START}\n${summaryContent.trimEnd()}\n${SUMMARY_END}\n\n## Notes\n<!-- Session findings, patterns, decisions -->\n`
+      );
       log(`  created ${projectMemory}`);
+    } else {
+      // Refresh only the managed summary section; preserve user-editable content outside it
+      const existing = fs.readFileSync(projectMemory, "utf8");
+      const startIdx = existing.indexOf(SUMMARY_START);
+      const endIdx = existing.indexOf(SUMMARY_END);
+      if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        const before = existing.slice(0, startIdx);
+        const after = existing.slice(endIdx + SUMMARY_END.length);
+        const updated = `${before}${SUMMARY_START}\n${summaryContent.trimEnd()}\n${SUMMARY_END}${after}`;
+        if (updated !== existing) {
+          fs.writeFileSync(projectMemory, updated);
+          log(`  refreshed ${projectMemory} (summary section updated)`);
+        }
+      } else if (startIdx === -1) {
+        // Legacy file without managed section: prepend summary block before the first heading or append
+        const firstHeading = existing.indexOf("\n## ");
+        const insertAt = firstHeading !== -1 ? firstHeading : existing.length;
+        const updated =
+          existing.slice(0, insertAt) +
+          `\n\n${SUMMARY_START}\n${summaryContent.trimEnd()}\n${SUMMARY_END}` +
+          existing.slice(insertAt);
+        fs.writeFileSync(projectMemory, updated);
+        log(`  refreshed ${projectMemory} (added managed summary section)`);
+      }
     }
   }
 }

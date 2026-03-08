@@ -148,9 +148,10 @@ describe("link", () => {
 
       await runLink(cortexPath, { machine: "test-machine", profile: "test" });
 
-      const linkedSkill = path.join(projectDir, ".claude", "skills", "my-skill.md");
+      // Q69 fix: whole skill directory is symlinked, not just SKILL.md flattened to a .md file
+      const linkedSkill = path.join(projectDir, ".claude", "skills", "my-skill");
       expect(fs.existsSync(linkedSkill)).toBe(true);
-      expect(fs.readlinkSync(linkedSkill)).toBe(path.join(skillsSrc, "SKILL.md"));
+      expect(fs.readlinkSync(linkedSkill)).toBe(skillsSrc);
     });
 
     it("preserves existing regular files at destination", async () => {

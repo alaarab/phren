@@ -30,7 +30,7 @@
     "vitest": "^4.0.18"
   },
   "scripts": {
-    "build": "rm -rf mcp/dist && tsc -p mcp/tsconfig.json && chmod +x mcp/dist/index.js",
+    "build": "rm -rf mcp/dist && tsc -p mcp/tsconfig.json && chmod +x mcp/dist/index.js && cp mcp/src/synonyms.json mcp/dist/synonyms.json",
     "dev": "tsx mcp/src/index.ts",
     "lint": "eslint mcp/src/ --ignore-pattern '*.test.ts'",
     "validate-docs": "bash scripts/validate-docs.sh",

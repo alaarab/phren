@@ -23,6 +23,7 @@ import {
   findProjectDir,
   safeUsername,
 } from "./link.js";
+import { claudeProjectKey } from "./link-context.js";
 import type { DoctorResult } from "./link.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
@@ -105,7 +106,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     os.homedir(),
     ".claude",
     "projects",
-    `-home-${safeUsername()}`,
+    claudeProjectKey(),
     "memory",
     "MEMORY.md"
   );
@@ -411,9 +412,9 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       }
     }
 
-    // Validate skill frontmatter in bundled skills
-    const bundledSkills = path.join(cortexPath, "..", "skills");
-    const skillResults = validateSkillsDir(fs.existsSync(bundledSkills) ? bundledSkills : path.join(cortexPath, "skills"));
+    // Validate skill frontmatter in global/skills under cortex data dir
+    const globalSkillsDir = path.join(cortexPath, "global", "skills");
+    const skillResults = validateSkillsDir(fs.existsSync(globalSkillsDir) ? globalSkillsDir : path.join(cortexPath, "global"));
     const invalidSkills = skillResults.filter(r => !r.valid);
     checks.push({
       name: "data:skills-frontmatter",

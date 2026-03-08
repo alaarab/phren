@@ -332,10 +332,10 @@ export async function runInit(opts: InitOptions = {}) {
 
       if (opts.fromExisting) {
         try {
-          const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting);
+          const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting, opts.profile);
           log(`\nBootstrapped project "${projectName}" from ${opts.fromExisting}`);
-        } catch (e: any) {
-          log(`\nCould not bootstrap from existing: ${e.message}`);
+        } catch (e: unknown) {
+          log(`\nCould not bootstrap from existing: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
@@ -546,14 +546,14 @@ export async function runInit(opts: InitOptions = {}) {
 
   if (opts.fromExisting) {
     try {
-      const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting);
+      const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting, opts.profile);
       log(`\nBootstrapped project "${projectName}" from ${opts.fromExisting}`);
       log(`  ${cortexPath}/${projectName}/CLAUDE.md`);
       log(`  ${cortexPath}/${projectName}/FINDINGS.md`);
       log(`  ${cortexPath}/${projectName}/backlog.md`);
       log(`  ${cortexPath}/${projectName}/summary.md`);
-    } catch (e: any) {
-      log(`\nCould not bootstrap from existing: ${e.message}`);
+    } catch (e: unknown) {
+      log(`\nCould not bootstrap from existing: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -577,7 +577,6 @@ export async function runMcpMode(modeArg?: string) {
     throw new Error(`Invalid mode "${modeArg}". Use: on | off | status`);
   }
   const enabled = mode === "on";
-  setMcpEnabledPreference(cortexPath, enabled);
 
   let claudeStatus: ToolStatus = "no_settings";
   let vscodeStatus: ToolStatus = "no_vscode";
@@ -589,6 +588,9 @@ export async function runMcpMode(modeArg?: string) {
   try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled: enabled }) ?? cursorStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCursorMcp failed: ${errorMessage(err)}`); }
   try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled: enabled }) ?? copilotStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCopilotMcp failed: ${errorMessage(err)}`); }
   try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled: enabled }) ?? codexStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCodexMcp failed: ${errorMessage(err)}`); }
+
+  // Persist preference only after config writes have been attempted
+  setMcpEnabledPreference(cortexPath, enabled);
 
   log(`MCP mode set to ${mode}.`);
   log(`Claude status: ${claudeStatus}`);
@@ -614,7 +616,6 @@ export async function runHooksMode(modeArg?: string) {
   }
 
   const enabled = mode === "on";
-  setHooksEnabledPreference(cortexPath, enabled);
 
   let claudeStatus: ToolStatus = "no_settings";
   try {
@@ -632,6 +633,9 @@ export async function runHooksMode(modeArg?: string) {
   } else {
     log("Hooks will no-op immediately via preference and Claude hooks are removed.");
   }
+
+  // Persist preference only after config writes have been attempted
+  setHooksEnabledPreference(cortexPath, enabled);
 
   log(`Hooks mode set to ${mode}.`);
   log(`Claude status: ${claudeStatus}`);
@@ -667,7 +671,7 @@ export async function runUninstall() {
         }
 
         // Remove hooks containing cortex references
-        for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart"] as const) {
+        for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const) {
           const hooks = data.hooks?.[hookEvent] as HookEntry[] | undefined;
           if (!Array.isArray(hooks)) continue;
           const before = hooks.length;

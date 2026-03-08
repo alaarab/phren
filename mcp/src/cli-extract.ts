@@ -128,8 +128,8 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
     if (Date.now() - stat.mtimeMs < GH_CACHE_MAX_AGE_MS) {
       return JSON.parse(fs.readFileSync(cacheFile, "utf8")) as Candidate[];
     }
-  } catch (err: any) {
-    debugLog(`mineGithubCandidates: cache read failed for ${cacheFile}: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`mineGithubCandidates: cache read failed for ${cacheFile}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const candidates: Candidate[] = [];
@@ -207,8 +207,8 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
 
   try {
     fs.writeFileSync(cacheFile, JSON.stringify(candidates));
-  } catch (err: any) {
-    debugLog(`mineGithubCandidates: cache write failed for ${cacheFile}: ${err?.message || err}`);
+  } catch (err: unknown) {
+    debugLog(`mineGithubCandidates: cache write failed for ${cacheFile}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return candidates;
