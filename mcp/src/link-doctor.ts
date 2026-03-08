@@ -125,7 +125,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   });
   checks.push({
     name: "node-version",
-    ok: versionAtLeast(nodeVersion, 18),
+    ok: versionAtLeast(nodeVersion, 20),
     detail: nodeVersion || "node not found in PATH",
   });
   const gitRemote = gitRemoteStatus(cortexPath);
