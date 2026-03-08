@@ -25,7 +25,7 @@ const DEFAULT_BACKLOG_LIMIT = 20;
 /** Done items are historical — cap tightly by default to avoid large responses. */
 const DEFAULT_DONE_LIMIT = 5;
 
-function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: number, doneLimit?: number): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number; truncated: boolean } {
+function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: number, doneLimit?: number, offset?: number): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number; totalUnpaged: number; truncated: boolean } {
   let includedSections: BacklogSection[];
   if (status === "all") {
     includedSections = BACKLOG_SECTION_ORDER;
@@ -41,6 +41,7 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
 
   const effectiveLimit = limit ?? DEFAULT_BACKLOG_LIMIT;
   const effectiveDoneLimit = doneLimit ?? DEFAULT_DONE_LIMIT;
+  const effectiveOffset = offset ?? 0;
   let truncated = false;
 
   const items: Record<BacklogSection, BacklogDoc["items"][BacklogSection]> = {
@@ -49,26 +50,28 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
     Done: [],
   };
 
+  let totalUnpaged = 0;
+
   for (const section of includedSections) {
     const sectionItems = doc.items[section];
     const cap = section === "Done" ? effectiveDoneLimit : effectiveLimit;
-    if (sectionItems.length > cap) {
-      items[section] = sectionItems.slice(0, cap); // most recent Done items (Done prepends, so index 0 is newest)
+    const sliced = effectiveOffset > 0 ? sectionItems.slice(effectiveOffset) : sectionItems;
+    totalUnpaged += sectionItems.length;
+    if (sliced.length > cap) {
+      items[section] = sliced.slice(0, cap);
       truncated = true;
     } else {
-      items[section] = sectionItems;
+      items[section] = sliced;
     }
   }
 
   const totalItems = BACKLOG_SECTION_ORDER.reduce((sum, section) => sum + items[section].length, 0);
 
   return {
-    doc: {
-      ...doc,
-      items,
-    },
+    doc: { ...doc, items },
     includedSections,
     totalItems,
+    totalUnpaged,
     truncated,
   };
 }
@@ -105,10 +108,11 @@ export function register(server: McpServer, ctx: McpContext): void {
         status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which backlog sections to include. Defaults to 'active+queue'."),
         limit: z.number().int().min(1).max(200).optional().describe("Max items per Active/Queue section to return. Default 20."),
         done_limit: z.number().int().min(1).max(200).optional().describe("Max Done items to return (most recent). Default 5. Done sections are capped tightly to avoid large responses."),
+        offset: z.number().int().min(0).optional().describe("Skip the first N items in each section before applying limit. Use with limit for pagination (e.g. offset:20, limit:20 for page 2)."),
         summary: z.boolean().optional().describe("If true, return counts and titles only (no full content). Reduces token usage."),
       }),
     },
-    async ({ project, id, item, status, limit, done_limit, summary }) => {
+    async ({ project, id, item, status, limit, done_limit, offset, summary }) => {
       // Single item lookup
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
@@ -135,7 +139,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = readBacklog(cortexPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
-        const view = buildBacklogView(doc, status, limit, done_limit);
+        const view = buildBacklogView(doc, status, limit, done_limit, offset);
         if (!fs.existsSync(doc.path)) {
           return mcpResponse({
             ok: true,
@@ -150,18 +154,20 @@ export function register(server: McpServer, ctx: McpContext): void {
             data: { project, includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
           });
         }
-        const truncationNote = view.truncated ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_BACKLOG_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
+        const paginationNote = view.truncated
+          ? `\n\n_Showing ${offset ?? 0}–${(offset ?? 0) + view.totalItems} of ${view.totalUnpaged} items. Use offset/limit to page._`
+          : (offset ? `\n\n_Page offset: ${offset}. ${view.totalItems} items returned._` : "");
         return mcpResponse({
           ok: true,
-          message: `## ${project}\n${backlogMarkdown(view.doc)}${truncationNote}`,
-          data: { project, items: view.doc.items, issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, truncated: view.truncated },
+          message: `## ${project}\n${backlogMarkdown(view.doc)}${paginationNote}`,
+          data: { project, items: view.doc.items, issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, totalUnpaged: view.totalUnpaged, offset: offset ?? 0, truncated: view.truncated },
         });
       }
 
       // All projects
       const docs = readBacklogs(cortexPath, profile);
       if (!docs.length) return mcpResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
-      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildBacklogView(doc, status, limit, done_limit), issues: doc.issues }));
+      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildBacklogView(doc, status, limit, done_limit, offset), issues: doc.issues }));
       const anyTruncated = views.some(({ view }) => view.truncated);
       let parts: string[];
       if (summary) {
