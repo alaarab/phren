@@ -90,7 +90,8 @@ function buildBacklogSummary(doc: BacklogDoc, includedSections: BacklogSection[]
     // Show first 3 items as preview
     for (const item of items.slice(0, 3)) {
       const prio = item.priority ? ` [${item.priority}]` : "";
-      lines.push(`  - ${item.line.slice(0, 80)}${item.line.length > 80 ? "\u2026" : ""}${prio}`);
+      const bidPrefix = item.stableId ? `bid:${item.stableId} ` : "";
+      lines.push(`  - ${bidPrefix}${item.line.slice(0, 80)}${item.line.length > 80 ? "\u2026" : ""}${prio}`);
     }
     if (items.length > 3) lines.push(`  ... and ${items.length - 3} more`);
   }
@@ -125,8 +126,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
+        const bidLookup = id && id.startsWith("bid:") ? id.slice(4) : null;
         const match = all.find((entry) =>
-          (id && entry.id.toLowerCase() === id.toLowerCase()) ||
+          (bidLookup && entry.stableId === bidLookup) ||
+          (id && !bidLookup && entry.id.toLowerCase() === id.toLowerCase()) ||
           (item && entry.line.trim() === item.trim())
         );
         if (!match) return mcpResponse({ ok: false, error: `No backlog item found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
