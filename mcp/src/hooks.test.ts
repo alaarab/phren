@@ -636,6 +636,78 @@ describe("hooks", () => {
       expect(result.errors).toHaveLength(0);
     });
   });
+
+  describe("runCustomHooks error structure", () => {
+    it("returns HookError[] with code and message properties, not plain strings", () => {
+      fs.writeFileSync(
+        path.join(cortexPath, ".governance", "install-preferences.json"),
+        JSON.stringify({
+          customHooks: [
+            { event: "pre-index", command: "exit 42" },
+          ],
+        })
+      );
+      const result = runCustomHooks(cortexPath, "pre-index");
+      expect(result.ran).toBe(1);
+      expect(result.errors).toHaveLength(1);
+
+      const err = result.errors[0];
+      // Verify structured shape: { code, message }
+      expect(err).toHaveProperty("code");
+      expect(err).toHaveProperty("message");
+      expect(typeof err.code).toBe("string");
+      expect(typeof err.message).toBe("string");
+      expect(err.code).toBe("VALIDATION_ERROR");
+      expect(err.message).toContain("pre-index");
+    });
+
+    it("successful hooks produce no errors", () => {
+      fs.writeFileSync(
+        path.join(cortexPath, ".governance", "install-preferences.json"),
+        JSON.stringify({
+          customHooks: [
+            { event: "post-save", command: "true" },
+          ],
+        })
+      );
+      const result = runCustomHooks(cortexPath, "post-save");
+      expect(result.ran).toBe(1);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it("failed hook writes to debug log when CORTEX_DEBUG is set", () => {
+      const origDebug = process.env.CORTEX_DEBUG;
+      const origCortexPath = process.env.CORTEX_PATH;
+      try {
+        // Enable debug logging and point to our temp dir
+        process.env.CORTEX_DEBUG = "1";
+        process.env.CORTEX_PATH = cortexPath;
+
+        fs.writeFileSync(
+          path.join(cortexPath, ".governance", "install-preferences.json"),
+          JSON.stringify({
+            customHooks: [
+              { event: "pre-finding", command: "exit 99" },
+            ],
+          })
+        );
+
+        runCustomHooks(cortexPath, "pre-finding");
+
+        // Check that debug.log was written
+        const debugLogPath = path.join(cortexPath, ".runtime", "debug.log");
+        expect(fs.existsSync(debugLogPath)).toBe(true);
+        const logContent = fs.readFileSync(debugLogPath, "utf8");
+        expect(logContent).toContain("runCustomHooks");
+        expect(logContent).toContain("pre-finding");
+      } finally {
+        if (origDebug === undefined) delete process.env.CORTEX_DEBUG;
+        else process.env.CORTEX_DEBUG = origDebug;
+        if (origCortexPath === undefined) delete process.env.CORTEX_PATH;
+        else process.env.CORTEX_PATH = origCortexPath;
+      }
+    });
+  });
 });
 
 // ── Tests for gamma sprint changes ─────────────────────────────────────────

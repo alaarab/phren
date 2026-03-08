@@ -2438,3 +2438,49 @@ describe("resolveImports", () => {
     expect(result).toContain("@import shared/d5.md");
   });
 });
+
+// --- New error codes (VALIDATION_ERROR, INDEX_ERROR, NETWORK_ERROR) ---
+
+describe("CortexError new codes", () => {
+  it("VALIDATION_ERROR exists and is a string", () => {
+    expect(CortexError.VALIDATION_ERROR).toBe("VALIDATION_ERROR");
+    expect(typeof CortexError.VALIDATION_ERROR).toBe("string");
+  });
+
+  it("INDEX_ERROR exists and is a string", () => {
+    expect(CortexError.INDEX_ERROR).toBe("INDEX_ERROR");
+    expect(typeof CortexError.INDEX_ERROR).toBe("string");
+  });
+
+  it("NETWORK_ERROR exists and is a string", () => {
+    expect(CortexError.NETWORK_ERROR).toBe("NETWORK_ERROR");
+    expect(typeof CortexError.NETWORK_ERROR).toBe("string");
+  });
+
+  it("parseCortexErrorCode extracts new codes from prefixed messages", () => {
+    expect(parseCortexErrorCode("VALIDATION_ERROR: invalid input")).toBe(CortexError.VALIDATION_ERROR);
+    expect(parseCortexErrorCode("INDEX_ERROR: index rebuild failed")).toBe(CortexError.INDEX_ERROR);
+    expect(parseCortexErrorCode("NETWORK_ERROR: connection refused")).toBe(CortexError.NETWORK_ERROR);
+  });
+
+  it("all 13 CortexError codes are present", () => {
+    const expectedKeys = [
+      "PROJECT_NOT_FOUND",
+      "INVALID_PROJECT_NAME",
+      "FILE_NOT_FOUND",
+      "PERMISSION_DENIED",
+      "MALFORMED_JSON",
+      "MALFORMED_YAML",
+      "NOT_FOUND",
+      "AMBIGUOUS_MATCH",
+      "LOCK_TIMEOUT",
+      "EMPTY_INPUT",
+      "VALIDATION_ERROR",
+      "INDEX_ERROR",
+      "NETWORK_ERROR",
+    ];
+    const actualKeys = Object.keys(CortexError);
+    expect(actualKeys).toEqual(expect.arrayContaining(expectedKeys));
+    expect(actualKeys.length).toBe(expectedKeys.length);
+  });
+});
