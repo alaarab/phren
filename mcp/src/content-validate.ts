@@ -21,6 +21,15 @@ export interface ConsolidationNeeded {
   lastConsolidated: string | null;
 }
 
+export interface ConsolidationStatus extends ConsolidationNeeded {
+  recommended: boolean;
+}
+
+/** Thresholds used for consolidation recommendations. */
+export const CONSOLIDATION_ENTRY_THRESHOLD = 25;
+export const CONSOLIDATION_TIME_THRESHOLD_DAYS = 60;
+export const CONSOLIDATION_MIN_FOR_TIME_CHECK = 10;
+
 /**
  * Validate a single finding text before it is persisted.
  * Returns null if valid, or an error message string if invalid.
@@ -32,45 +41,56 @@ export function validateFinding(text: string): string | null {
 }
 
 /**
+ * Compute consolidation status for a single project directory.
+ * Returns null if the project has no FINDINGS.md.
+ */
+export function getProjectConsolidationStatus(dir: string): ConsolidationStatus | null {
+  const learningsPath = path.join(dir, "FINDINGS.md");
+  if (!fs.existsSync(learningsPath)) return null;
+
+  const content = fs.readFileSync(learningsPath, "utf8");
+  const markerMatch = content.match(/<!--\s*consolidated:\s*(\d{4}-\d{2}-\d{2})/);
+  const lastConsolidated = markerMatch ? markerMatch[1] : null;
+
+  // Count entries since last consolidated marker, skipping both <details> and
+  // <!-- cortex:archive:start/end --> blocks via countActiveFindings.
+  const contentSinceMarker = markerMatch
+    ? content.slice(content.indexOf(markerMatch[0]) + markerMatch[0].length)
+    : content;
+  const entriesSince = countActiveFindings(contentSinceMarker);
+
+  let daysSince: number | null = null;
+  if (lastConsolidated) {
+    const consolidated = safeParseDate(lastConsolidated);
+    daysSince = consolidated ? Math.floor((Date.now() - consolidated.getTime()) / 86400000) : null;
+  }
+
+  const recommended =
+    entriesSince >= CONSOLIDATION_ENTRY_THRESHOLD ||
+    (daysSince !== null && daysSince >= CONSOLIDATION_TIME_THRESHOLD_DAYS && entriesSince >= CONSOLIDATION_MIN_FOR_TIME_CHECK) ||
+    (lastConsolidated === null && entriesSince >= CONSOLIDATION_ENTRY_THRESHOLD);
+
+  return {
+    project: path.basename(dir),
+    entriesSince,
+    daysSince,
+    lastConsolidated,
+    recommended,
+  };
+}
+
+/**
  * Check which projects have enough new findings to warrant consolidation.
  * Returns projects that exceed the entry or time thresholds.
  */
 export function checkConsolidationNeeded(cortexPath: string, profile?: string): ConsolidationNeeded[] {
-  const ENTRY_THRESHOLD = 25;
-  const TIME_THRESHOLD_DAYS = 60;
-  const MIN_FOR_TIME_CHECK = 10;
-
   const projectDirs = getProjectDirs(cortexPath, profile);
   const results: ConsolidationNeeded[] = [];
-  const today = new Date();
 
   for (const dir of projectDirs) {
-    const learningsPath = path.join(dir, "FINDINGS.md");
-    if (!fs.existsSync(learningsPath)) continue;
-
-    const content = fs.readFileSync(learningsPath, "utf8");
-    const markerMatch = content.match(/<!--\s*consolidated:\s*(\d{4}-\d{2}-\d{2})/);
-    const lastConsolidated = markerMatch ? markerMatch[1] : null;
-
-    // Count entries since last consolidated marker, skipping both <details> and
-    // <!-- cortex:archive:start/end --> blocks via countActiveFindings.
-    const contentSinceMarker = markerMatch
-      ? content.slice(content.indexOf(markerMatch[0]) + markerMatch[0].length)
-      : content;
-    const entriesSince = countActiveFindings(contentSinceMarker);
-
-    let daysSince: number | null = null;
-    if (lastConsolidated) {
-      const consolidated = safeParseDate(lastConsolidated);
-      daysSince = consolidated ? Math.floor((today.getTime() - consolidated.getTime()) / 86400000) : null;
-    }
-
-    const needsByCount = entriesSince >= ENTRY_THRESHOLD;
-    const needsByTime = daysSince !== null && daysSince >= TIME_THRESHOLD_DAYS && entriesSince >= MIN_FOR_TIME_CHECK;
-    const needsFirst = lastConsolidated === null && entriesSince >= ENTRY_THRESHOLD;
-
-    if (needsByCount || needsByTime || needsFirst) {
-      results.push({ project: path.basename(dir), entriesSince, daysSince, lastConsolidated });
+    const status = getProjectConsolidationStatus(dir);
+    if (status && status.recommended) {
+      results.push(status);
     }
   }
 
