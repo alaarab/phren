@@ -6,6 +6,8 @@ dependencies:
 ---
 # /cortex-profiles - Manage your profiles
 
+> **Multi-machine only.** This skill is for users who sync cortex across multiple machines and need to control which projects appear where. If you only use one machine, you can skip this -- `/cortex-sync` handles everything you need.
+
 > Add projects to profiles, move projects between profiles, create new profiles, and check what's in each one.
 
 Manage which projects appear on which machines by editing your profile definitions. Each machine maps to one profile, and each profile is a list of projects.

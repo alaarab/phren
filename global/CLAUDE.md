@@ -22,6 +22,7 @@ These skills are available as a full set via cortex, or individually from the Cl
 | `/cortex-init` | Scaffold a new project with summary, CLAUDE.md, backlog |
 | `/cortex-discover` | Research what's missing in a project and surface gaps and opportunities |
 | `/cortex-consolidate` | Find patterns across all project FINDINGS.md files |
+| `/cortex-profiles` | Manage machine-to-profile mappings (multi-machine only) |
 
 ### Your own skills
 
