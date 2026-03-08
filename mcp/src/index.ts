@@ -271,6 +271,9 @@ const PACKAGE_VERSION = (() => {
   }
 })();
 const profile = process.env.CORTEX_PROFILE || "";
+const TOOL_NAME_ALIASES: Record<string, string> = {
+  search_cortex: "search_knowledge",
+};
 
 const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
 
@@ -355,6 +358,7 @@ async function main() {
   // The real type safety comes from each domain module's z.object() inputSchema.
   // TODO: tighten when SDK exposes simpler handler types.
   server.registerTool = function (name: string, config: any, handler: any) {
+    const registeredName = TOOL_NAME_ALIASES[name] ?? name;
     const wrapped = async (...args: any[]) => {
       if (!indexReady || !db) {
         return {
@@ -367,10 +371,13 @@ async function main() {
           }],
         };
       }
-      try { trackToolCall(cortexPath, name); } catch { /* best-effort */ }
+      try { trackToolCall(cortexPath, registeredName); } catch { /* best-effort */ }
       return handler(...args);
     };
-    return origRegisterTool(name, config, wrapped);
+    if (registeredName !== name) {
+      debugLog(`Remapped MCP tool "${name}" to canonical name "${registeredName}"`);
+    }
+    return origRegisterTool(registeredName, config, wrapped);
   } as typeof server.registerTool;
 
   // Register all tool handlers from domain modules
