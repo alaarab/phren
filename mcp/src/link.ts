@@ -437,6 +437,30 @@ function linkProjectMcpServers(project: string, servers: Record<string, McpServe
   }
 }
 
+/** Remove any cortex__<project>__* MCP entries for projects no longer in the active set. */
+function pruneStaleProjectMcpServers(activeProjects: string[]): void {
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  if (!fs.existsSync(settingsPath)) return;
+  try {
+    patchJsonFile(settingsPath, (data) => {
+      if (!data.mcpServers || typeof data.mcpServers !== "object") return;
+      for (const key of Object.keys(data.mcpServers)) {
+        if (!key.startsWith("cortex__")) continue;
+        // Key format: cortex__<project>__<name>
+        const parts = key.split("__");
+        if (parts.length < 3) continue;
+        const project = parts[1];
+        if (!activeProjects.includes(project)) {
+          delete data.mcpServers[key];
+          debugLog(`pruneStaleProjectMcpServers: removed stale entry "${key}"`);
+        }
+      }
+    });
+  } catch (err: unknown) {
+    debugLog(`pruneStaleProjectMcpServers: failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // ── Main orchestrator ───────────────────────────────────────────────────────
 
 export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
@@ -491,6 +515,8 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   for (const p of projects) {
     if (p !== "global") linkProject(cortexPath, p, detectedTools);
   }
+  // Remove stale cortex__<project>__* MCP entries for removed projects
+  pruneStaleProjectMcpServers(projects.filter(p => p !== "global"));
   log("");
 
   // Step 6: Configure MCP

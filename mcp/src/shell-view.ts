@@ -203,8 +203,11 @@ function sectionBullet(title: string): { bullet: string; colorFn: (s: string) =>
 
 export interface SubsectionsCache {
   project: string;
+  /** Keys are stable item IDs (bid hash when present, else "row:N") mapped to subsection name */
   map: Map<string, string>;
 }
+
+const BID_RE = /<!--\s*bid:([a-z0-9]{8})\s*-->/;
 
 export function parseSubsections(backlogPath: string, project: string, cache: SubsectionsCache | null): { map: Map<string, string>; cache: SubsectionsCache } {
   if (cache?.project === project) return { map: cache.map, cache };
@@ -212,13 +215,18 @@ export function parseSubsections(backlogPath: string, project: string, cache: Su
   try {
     const raw = fs.readFileSync(backlogPath, "utf8");
     let currentSub = "";
+    let rowIdx = 0;
     for (const line of raw.split("\n")) {
       const subMatch = line.match(/^###\s+(.+)/);
       if (subMatch) { currentSub = subMatch[1].trim(); continue; }
       if (line.match(/^##\s/)) { currentSub = ""; continue; }
       if (line.startsWith("- ")) {
-        const body = line.replace(/^- \[[ x]\]\s*/, "").trim();
-        if (currentSub && body) map.set(body, currentSub);
+        if (currentSub) {
+          const bidMatch = line.match(BID_RE);
+          const key = bidMatch ? bidMatch[1] : `row:${rowIdx}`;
+          map.set(key, currentSub);
+        }
+        rowIdx++;
       }
     }
   } catch { /* best effort */ }
@@ -280,7 +288,7 @@ export function renderBacklogView(ctx: ViewContext, cursor: number, height: numb
       allLines.push(`  ${bullet} ${colorFn(section)}`);
     }
 
-    const sub = subsections.get(item.line) || "";
+    const sub = (item.stableId ? subsections.get(item.stableId) : undefined) ?? subsections.get(`row:${absIdx}`) ?? "";
     if (sub && sub !== lastSub) {
       lastSub = sub;
       allLines.push(`    ${style.boldYellow(sub)}`);

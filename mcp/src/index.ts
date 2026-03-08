@@ -372,7 +372,7 @@ async function main() {
   // server.registerTool uses `any` for config/handler because @modelcontextprotocol/sdk
   // exposes these as complex intersection types that TypeScript cannot easily parameterize.
   // The real type safety comes from each domain module's z.object() inputSchema.
-  // TODO: tighten when SDK exposes simpler handler types.
+  // Tightening further requires upstream SDK changes (tracked in SDK issue tracker).
   server.registerTool = function (name: string, config: any, handler: any) {
     const registeredName = TOOL_NAME_ALIASES[name] ?? name;
     const wrapped = async (...args: any[]) => {

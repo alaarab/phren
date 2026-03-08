@@ -34,11 +34,21 @@ function saveChecksums(cortexPath: string, store: ChecksumStore): void {
 
 export function updateFileChecksums(cortexPath: string, profileName?: string): { updated: number; files: string[] } {
   const store = loadChecksums(cortexPath);
+
+  // Migrate legacy CANONICAL.md checksum keys to CANONICAL_MEMORIES.md
+  for (const key of Object.keys(store)) {
+    if (key.endsWith("/CANONICAL.md")) {
+      const newKey = key.replace(/\/CANONICAL\.md$/, "/CANONICAL_MEMORIES.md");
+      if (!store[newKey]) store[newKey] = store[key];
+      delete store[key];
+    }
+  }
+
   const now = new Date().toISOString();
   const tracked: string[] = [];
   const dirs = getProjectDirs(cortexPath, profileName);
   for (const dir of dirs) {
-    for (const name of ["FINDINGS.md", "backlog.md", "CANONICAL.md"]) {
+    for (const name of ["FINDINGS.md", "backlog.md", "CANONICAL_MEMORIES.md"]) {
       const full = path.join(dir, name);
       if (!fs.existsSync(full)) continue;
       const rel = path.relative(cortexPath, full).replace(/\\/g, "/");

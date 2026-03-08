@@ -32,6 +32,7 @@ import {
   workNextBacklogItem,
   loadShellState,
 } from "./data-access.js";
+import { runtimeFile } from "./shared.js";
 import { style } from "./shell-render.js";
 import { SUB_VIEWS, TAB_ICONS, type ShellDeps, type ShellView } from "./shell-types.js";
 import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./shell-view.js";
@@ -402,7 +403,9 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
         }
       } catch { /* not a git repo */ }
 
-      const auditPath = path.join(host.cortexPath, ".governance", "audit.log");
+      const auditPathNew = runtimeFile(host.cortexPath, "audit.log");
+      const auditPathLegacy = path.join(host.cortexPath, ".governance", "audit.log");
+      const auditPath = fs.existsSync(auditPathNew) ? auditPathNew : auditPathLegacy;
       if (fs.existsSync(auditPath)) {
         const auditLines = fs.readFileSync(auditPath, "utf8").split("\n")
           .filter((l) => l.includes("auto_merge"))
@@ -592,7 +595,10 @@ export function getListItems(
     }
     case "Skills": {
       if (!state.project) return [];
-      return getProjectSkills(cortexPath, state.project).map((s) => ({ name: s.name, text: s.path }));
+      const allSkills = getProjectSkills(cortexPath, state.project).map((s) => ({ name: s.name, text: s.path }));
+      return state.filter
+        ? allSkills.filter((s) => `${s.name} ${s.text}`.toLowerCase().includes(state.filter!.toLowerCase()))
+        : allSkills;
     }
     case "Hooks": {
       return getHookEntries(cortexPath).map((e) => ({ name: e.event, text: e.enabled ? "active" : "inactive" }));
@@ -697,6 +703,7 @@ export async function doViewAction(host: NavigationHost, key: string): Promise<v
           host.setCursor(Math.max(0, cursor - 1));
         });
       } else if (key === "e" && item?.id) {
+        host.inputMqId = item.id;
         host.startInput("mq-edit", item.text || "");
       }
       break;

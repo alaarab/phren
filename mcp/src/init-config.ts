@@ -45,7 +45,8 @@ export function patchJsonFile(filePath: string, patch: (data: Record<string, any
 
 function commandExists(cmd: string): boolean {
   try {
-    execFileSync("which", [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
+    const whichCmd = process.platform === "win32" ? "where.exe" : "which";
+    execFileSync(whichCmd, [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
     return true;
   } catch {
     return false;
@@ -199,7 +200,13 @@ export function removeMcpServerAtPath(filePath: string): boolean {
 
 export function isCortexCommand(command: string): boolean {
   const segments = command.split(/[/\\\s]+/);
-  return segments.some(seg => seg === "cortex" || seg.startsWith("cortex@") || seg.startsWith("@alaarab/cortex"));
+  if (segments.some(seg => seg === "cortex" || seg.startsWith("cortex@") || seg.startsWith("@alaarab/cortex"))) return true;
+  // Also match commands that include cortex hook subcommands (used when installed via absolute path)
+  const HOOK_MARKERS = ["hook-prompt", "hook-stop", "hook-session-start", "hook-tool", "hook-tool"];
+  if (HOOK_MARKERS.some(m => command.includes(m))) return true;
+  // Match commands that set CORTEX_PATH env var (all lifecycle hooks do this)
+  if (command.includes("CORTEX_PATH=") || command.includes("CORTEX_PATH ")) return true;
+  return false;
 }
 
 export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {
@@ -231,7 +238,8 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
         : eventName === "PostToolUse" ? "hook-tool"
         : "hook-session-start";
       const legacyMarker = eventName === "Stop" ? "auto-save" : eventName === "SessionStart" ? "doctor --fix" : "hook-prompt";
-      const existingIdx = eventHooks.findIndex(
+      // Find the HookEntry containing a cortex hook command
+      const existingEntryIdx = eventHooks.findIndex(
         (h: HookEntry) => h?.hooks?.some(
           (hook) =>
             typeof hook?.command === "string" &&
@@ -242,9 +250,28 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
             )
         )
       );
-      const payload = { matcher: "", hooks: [hookBody] };
-      if (existingIdx >= 0) eventHooks[existingIdx] = payload;
-      else eventHooks.push(payload);
+      if (existingEntryIdx >= 0) {
+        // Only rewrite the matching inner hook item; preserve sibling non-cortex hooks
+        const entry = eventHooks[existingEntryIdx];
+        const innerIdx = (entry.hooks ?? []).findIndex(
+          (hook) =>
+            typeof hook?.command === "string" &&
+            (
+              hook.command.includes(marker) ||
+              hook.command.includes(legacyMarker) ||
+              isCortexCommand(hook.command)
+            )
+        );
+        if (innerIdx >= 0 && entry.hooks) {
+          entry.hooks[innerIdx] = hookBody;
+        } else {
+          // No matching inner hook found; append our hook body
+          if (!entry.hooks) entry.hooks = [];
+          entry.hooks.push(hookBody);
+        }
+      } else {
+        eventHooks.push({ matcher: "", hooks: [hookBody] });
+      }
     };
 
     const toolHookEnabled = hooksEnabled && isFeatureEnabled("CORTEX_FEATURE_TOOL_HOOK", false);
