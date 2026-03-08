@@ -1,0 +1,5 @@
+[allowlist]
+  description = "Suppress known-safe test fixtures"
+  paths = [
+    "mcp/src/__tests__/shared-content-secrets.test.ts",
+  ]

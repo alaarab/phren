@@ -7,6 +7,13 @@ import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 
+// Test fixtures are constructed at runtime so static secret scanners don't
+// flag this file. These are not real credentials — they are synthetic strings
+// that match the detector regexes and nothing else.
+const FAKE_AWS_KEY    = "AKIA" + "TESTFAKEKEY00001";          // matches /AKIA[0-9A-Z]{16}/
+const FAKE_JWT        = "eyJmYWtl" + "." + "eyJmYWtl" + "." + "ZmFrZXNpZw";  // matches JWT three-part pattern
+const FAKE_SK_LIVE    = "sk_live_" + "TESTONLYFAKEKEY0000001"; // matches Stripe secret key pattern
+
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
 
@@ -33,18 +40,18 @@ afterEach(() => {
 
 describe("scanForSecrets", () => {
   it("detects AWS access key", () => {
-    const result = scanForSecrets("Use AKIAIOSFODNN7EXAMPLE for auth");
+    const result = scanForSecrets(`Use ${FAKE_AWS_KEY} for auth`);
     expect(result).toBe("AWS access key");
   });
 
   it("detects JWT token", () => {
-    const result = scanForSecrets("token is eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U");
+    const result = scanForSecrets(`token is ${FAKE_JWT}`);
     expect(result).toBe("JWT token");
   });
 
   it("detects connection strings with credentials", () => {
-    expect(scanForSecrets("mongodb://admin:password123@localhost:27017/db")).toBe("connection string with credentials");
-    expect(scanForSecrets("postgres://user:secret@host:5432/mydb")).toBe("connection string with credentials");
+    expect(scanForSecrets("mongodb://testuser:testpass@localhost:27017/db")).toBe("connection string with credentials");
+    expect(scanForSecrets("postgres://testuser:testpass@localhost:5432/testdb")).toBe("connection string with credentials");
   });
 
   it("detects SSH private key", () => {
@@ -53,7 +60,7 @@ describe("scanForSecrets", () => {
   });
 
   it("detects API key patterns", () => {
-    const result = scanForSecrets('api_key = "sk_live_abcdefghijklmnopqrst"');
+    const result = scanForSecrets(`api_key = "${FAKE_SK_LIVE}"`);
     expect(result).toBe("API key or secret");
   });
 
@@ -69,7 +76,7 @@ describe("addFindingToFile rejects secrets", () => {
     grantAdmin(cortex);
     makeProject(cortex, "myproj", { "summary.md": "# myproj\n" });
 
-    const result = addFindingToFile(cortex, "myproj", "Use AKIAIOSFODNN7EXAMPLE for the API");
+    const result = addFindingToFile(cortex, "myproj", `Use ${FAKE_AWS_KEY} for the API`);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toContain("Rejected: finding appears to contain a secret (AWS access key)");
     expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
@@ -80,7 +87,7 @@ describe("addFindingToFile rejects secrets", () => {
     grantAdmin(cortex);
     makeProject(cortex, "myproj", { "summary.md": "# myproj\n" });
 
-    const result = addFindingToFile(cortex, "myproj", "Set token to eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U");
+    const result = addFindingToFile(cortex, "myproj", `Set token to ${FAKE_JWT}`);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toContain("Rejected: finding appears to contain a secret (JWT token)");
     expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
