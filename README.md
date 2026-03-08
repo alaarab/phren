@@ -98,6 +98,8 @@ On a new machine: clone, run init, done.
 
 ## What makes this different
 
+**Solve it once.** Without persistent memory, every session re-figures out things you've already solved. Same bug traced twice. Same workaround rediscovered. Same decision re-litigated. Cortex saves it the first time, so every future agent draws from that instead of starting over. Your time compounds in your favor.
+
 **It compounds.** Every bug, pattern, and decision your agents encounter gets saved. Session 47 knows everything sessions 1 through 46 learned. It doesn't just remember — it accumulates. The more you work, the more context your agents carry.
 
 **Your data, your repo.** No vendor. No cloud service. No account required. A private git repo you control. What your work machine knows stays on the work profile. What your home machine knows stays on the personal one. Nobody else touches it.
