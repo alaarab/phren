@@ -253,7 +253,7 @@ export async function handleHookPrompt() {
 
     const changedCount = gitCtx?.changedFiles.size ?? 0;
     if (sessionId) {
-      trackSessionMetrics(getCortexPath(), sessionId, selected, changedCount);
+      trackSessionMetrics(getCortexPath(), sessionId, budgetSelected, changedCount);
     }
 
     flushEntryScores(getCortexPath());
