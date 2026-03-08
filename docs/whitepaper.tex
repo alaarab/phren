@@ -173,6 +173,26 @@ Three hook stages automate retrieval and persistence \cite{cortex-cli,cortex-hoo
 \end{enumerate}
 This cuts manual tool invocations and keeps session behavior consistent.
 
+\subsection{MCP Context Optimization}
+\label{sec:context-opt}
+
+MCP tool responses consume context tokens. A full backlog fetch can return $\sim$10k tokens, which is 5\% of a 200k context window from a single tool call. For multi-step agent workflows with many tool calls, uncontrolled fetches compound quickly.
+
+Cortex addresses this with progressive disclosure at two levels: the automatic hook path and the MCP tool path.
+
+\textbf{Hook-level progressive disclosure.} When \texttt{CORTEX\_FEATURE\_PROGRESSIVE\_DISCLOSURE=1}, the \texttt{UserPromptSubmit} hook switches strategy based on result count. For 1--2 results, full snippets are injected directly (small enough that overhead is negligible). For 3+ results, the hook emits a compact memory index: one line per result with a \texttt{mem:project/filename} ID and a one-line summary truncated at 80 characters. The agent then calls \texttt{get\_memory\_detail(id)} to expand only the entries it needs. This keeps automatic injection small and predictable while still surfacing all relevant matches.
+
+\textbf{Backlog progressive disclosure.} The \texttt{get\_backlog} tool supports three retrieval tiers:
+\begin{enumerate}
+  \item \textbf{Summary} (\texttt{summary:true}): counts and titles only, $\sim$200 tokens. Use for planning and status checks.
+  \item \textbf{Paginated} (\texttt{limit}, \texttt{offset}): full item content with pagination, $\sim$1k tokens per page. Use when reviewing item details.
+  \item \textbf{Single item} (\texttt{id:"bid:XXXXXXXX"}): one item by stable hash, $\sim$100 tokens. Use during execution.
+\end{enumerate}
+
+\textbf{Stable backlog identifiers.} Every backlog item embeds a content-addressed 8-character hex hash as an HTML comment (\texttt{<!-- bid:a3f9c2e1 -->}). These hashes survive reordering, completions, and edits to other items. Positional IDs (A1, Q3, D2) shift when items move between sections; stable \texttt{bid:} hashes do not. For multi-agent coordination, pass \texttt{bid:} hashes in task descriptions so downstream agents can fetch their specific item with \texttt{get\_backlog(id:"bid:xxxx")} instead of scanning the full backlog.
+
+The general principle: default to the smallest fetch that answers the current question. Expand only when the agent needs more detail to proceed. This applies equally to \texttt{get\_findings}, \texttt{search\_knowledge}, and any other tool that returns variable-length content.
+
 \subsection{Governance}
 \label{sec:governance}
 

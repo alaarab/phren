@@ -205,6 +205,28 @@ Query:
   -> rank by relevance, boost recent files (1.2x for last 30 days)
 ```
 
+## MCP Context Optimization
+
+MCP tool responses consume context tokens. Cortex provides progressive disclosure patterns to minimize overhead. See [Context Optimization](context-optimization.md) for the full guide.
+
+**Backlog progressive disclosure:**
+
+```
+Tier 1: get_backlog(summary:true)        ~200 tokens   planning/status
+Tier 2: get_backlog(limit:10, offset:0)  ~1,000 tokens  reviewing details
+Tier 3: get_backlog(id:"bid:a3f9c2e1")   ~100 tokens   single item execution
+```
+
+**Search progressive disclosure** (when `CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1`):
+
+```
+1-2 results: full snippets injected directly
+3+ results:  compact index injected (mem:project/filename + summary)
+             agent calls get_memory_detail(id) to expand
+```
+
+**Stable identifiers:** Backlog items embed `<!-- bid:XXXXXXXX -->` content-addressed hashes that survive reordering and completions. Use these instead of positional IDs (A1, Q3) for cross-session or multi-agent references.
+
 ## Memory Governance
 
 Automated quality control for FINDINGS.md entries.
