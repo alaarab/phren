@@ -52,6 +52,7 @@ export {
   detectTaskIntent,
   filterBacklogByPriority,
   searchDocuments,
+  searchDocumentsAsync,
   applyTrustFilter,
   rankResults,
   selectSnippets,
@@ -83,6 +84,7 @@ export {
 
 import {
   searchDocuments,
+  searchDocumentsAsync,
   applyTrustFilter,
   rankResults,
   selectSnippets,
@@ -171,7 +173,7 @@ export async function handleHookPrompt() {
 
   try {
     const tSearch0 = Date.now();
-    let rows = searchDocuments(db, safeQuery, prompt, keywords, detectedProject);
+    let rows = await searchDocumentsAsync(db, safeQuery, prompt, keywords, detectedProject, false, getCortexPath());
     stage.searchMs = Date.now() - tSearch0;
     if (!rows || !rows.length) process.exit(0);
 

@@ -222,6 +222,11 @@ Legacy files at the root are auto-migrated on first access.
 | `CORTEX_FEATURE_AUTO_CAPTURE` | disabled | Set to `'1'` to extract insights from conversation transcripts at session end (written by init walkthrough to `~/.cortex/.env`). |
 | `CORTEX_EMBEDDING_API_URL` | — | OpenAI-compatible `/embeddings` endpoint (e.g. `https://api.openai.com/v1`). Takes priority over Ollama when set. |
 | `CORTEX_EMBEDDING_API_KEY` | — | Bearer token for `CORTEX_EMBEDDING_API_URL`. |
+| `CORTEX_FEATURE_SEMANTIC_DEDUP` | disabled | Set to `'1'` to enable LLM-based semantic deduplication on `add_finding`. Checks whether a new finding is semantically equivalent to existing ones, even with different wording. Requires LLM configured via `CORTEX_LLM_ENDPOINT` or `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`. |
+| `CORTEX_FEATURE_SEMANTIC_CONFLICT` | disabled | Set to `'1'` to enable LLM-based conflict detection on `add_finding`. Detects contradictions between the new finding and existing ones (e.g. "always use X" vs "never use X"). Appends `<!-- conflicts_with: "..." -->` annotations when a conflict is found. |
+| `CORTEX_LLM_MODEL` | `gpt-4o-mini` / `claude-haiku-4-5-20251001` | Override the LLM model used for semantic dedup and conflict detection. |
+| `CORTEX_LLM_ENDPOINT` | — | OpenAI-compatible `/chat/completions` base URL for semantic dedup/conflict (e.g. `https://api.openai.com/v1`). When set, takes priority over the Anthropic fallback. |
+| `CORTEX_LLM_KEY` | — | API key for `CORTEX_LLM_ENDPOINT`. Also falls back to `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
 
 ## Finding Quality Rules
 

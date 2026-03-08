@@ -429,6 +429,7 @@ async function semanticDedup(a: string, b: string, cortexPath: string): Promise<
  * LLM-based conflict check. Only called when CORTEX_FEATURE_SEMANTIC_CONFLICT=1.
  * Call after detectConflicts() in addFindingToFile flow.
  * Returns conflict annotations to append to the bullet.
+ * Also scans global findings and up to 2 other recent projects for cross-project contradictions.
  */
 export async function checkSemanticConflicts(
   cortexPath: string,
@@ -439,27 +440,68 @@ export async function checkSemanticConflicts(
 
   const resolvedDir = safeProjectPath(cortexPath, project);
   if (!resolvedDir) return { annotations: [], checked: false };
-  const findingsPath = path.join(resolvedDir, "FINDINGS.md");
-  if (!fs.existsSync(findingsPath)) return { annotations: [], checked: false };
-
-  const content = fs.readFileSync(findingsPath, "utf8");
-  const existingBullets = content.split("\n").filter((l) => l.startsWith("- "));
 
   const newEntities = extractProseEntities(newFinding);
   if (newEntities.length === 0) return { annotations: [], checked: true };
 
-  const annotations: string[] = [];
-  for (const line of existingBullets) {
-    const lineEntities = extractProseEntities(line);
-    const shared = lineEntities.filter((e) => newEntities.includes(e));
-    if (shared.length === 0) continue;
+  // Collect bullet sources: { bullets, sourceProject } pairs
+  const sources: Array<{ bullets: string[]; sourceProject: string | null }> = [];
 
-    const result = await llmConflictCheck(line, newFinding, shared[0], cortexPath);
-    if (result === "CONFLICT") {
-      const snippet = line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
-      annotations.push(`<!-- conflicts_with: "${snippet}" -->`);
+  // Current project
+  const findingsPath = path.join(resolvedDir, "FINDINGS.md");
+  if (fs.existsSync(findingsPath)) {
+    const content = fs.readFileSync(findingsPath, "utf8");
+    sources.push({ bullets: content.split("\n").filter((l) => l.startsWith("- ")), sourceProject: null });
+  }
+
+  // Global project findings
+  const globalFindingsPath = path.join(cortexPath, "global", "FINDINGS.md");
+  if (fs.existsSync(globalFindingsPath)) {
+    const content = fs.readFileSync(globalFindingsPath, "utf8");
+    const bullets = content.split("\n").filter((l) => l.startsWith("- "));
+    if (bullets.length > 0) sources.push({ bullets, sourceProject: "global" });
+  }
+
+  // Top 2 other projects by recency (mtime of FINDINGS.md)
+  try {
+    const entries = fs.readdirSync(cortexPath, { withFileTypes: true });
+    const otherProjects = entries
+      .filter((e) => e.isDirectory() && e.name !== project && e.name !== "global" && !e.name.startsWith("."))
+      .map((e) => {
+        const fp = path.join(cortexPath, e.name, "FINDINGS.md");
+        if (!fs.existsSync(fp)) return null;
+        try {
+          return { name: e.name, mtime: fs.statSync(fp).mtimeMs, fp };
+        } catch { return null; }
+      })
+      .filter((x): x is { name: string; mtime: number; fp: string } => x !== null)
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 2);
+
+    for (const proj of otherProjects) {
+      const content = fs.readFileSync(proj.fp, "utf8");
+      const bullets = content.split("\n").filter((l) => l.startsWith("- "));
+      if (bullets.length > 0) sources.push({ bullets, sourceProject: proj.name });
+    }
+  } catch { /* non-fatal: cross-project scan is best-effort */ }
+
+  const annotations: string[] = [];
+
+  for (const { bullets, sourceProject } of sources) {
+    for (const line of bullets) {
+      const lineEntities = extractProseEntities(line);
+      const shared = lineEntities.filter((e) => newEntities.includes(e));
+      if (shared.length === 0) continue;
+
+      const result = await llmConflictCheck(line, newFinding, shared[0], cortexPath);
+      if (result === "CONFLICT") {
+        const snippet = line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
+        const sourceLabel = sourceProject ? ` (from project: ${sourceProject})` : "";
+        annotations.push(`<!-- conflicts_with: "${snippet}"${sourceLabel} -->`);
+      }
     }
   }
+
   return { annotations, checked: true };
 }
 
