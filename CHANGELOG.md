@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing yet.
 
+## [1.15.5] - 2026-03-08
+
+### Added
+- `global` project appears at the top of the Projects view in the shell. Select it to manage global skills, findings, backlog, and synonyms just like any other project.
+
 ## [1.15.4] - 2026-03-08
 
 ### Changed

@@ -21,7 +21,9 @@ type BacklogStatus = "all" | "active" | "queue" | "done" | "active+queue";
 
 const BACKLOG_SECTION_ORDER: BacklogSection[] = ["Active", "Queue", "Done"];
 
-function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number } {
+const DEFAULT_BACKLOG_LIMIT = 20;
+
+function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: number): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number; truncated: boolean } {
   let includedSections: BacklogSection[];
   if (status === "all") {
     includedSections = BACKLOG_SECTION_ORDER;
@@ -35,11 +37,24 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus): { doc: Backl
     includedSections = ["Active", "Queue"];
   }
 
+  const effectiveLimit = limit ?? DEFAULT_BACKLOG_LIMIT;
+  let truncated = false;
+
   const items: Record<BacklogSection, BacklogDoc["items"][BacklogSection]> = {
-    Active: includedSections.includes("Active") ? doc.items.Active : [],
-    Queue: includedSections.includes("Queue") ? doc.items.Queue : [],
-    Done: includedSections.includes("Done") ? doc.items.Done : [],
+    Active: [],
+    Queue: [],
+    Done: [],
   };
+
+  for (const section of includedSections) {
+    const sectionItems = doc.items[section];
+    if (sectionItems.length > effectiveLimit) {
+      items[section] = sectionItems.slice(0, effectiveLimit);
+      truncated = true;
+    } else {
+      items[section] = sectionItems;
+    }
+  }
 
   const totalItems = BACKLOG_SECTION_ORDER.reduce((sum, section) => sum + items[section].length, 0);
 
@@ -50,7 +65,25 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus): { doc: Backl
     },
     includedSections,
     totalItems,
+    truncated,
   };
+}
+
+function buildBacklogSummary(doc: BacklogDoc, includedSections: BacklogSection[]): string {
+  const lines: string[] = [`## ${doc.project}`];
+  for (const section of includedSections) {
+    const items = doc.items[section];
+    const highCount = items.filter(i => i.priority === "high").length;
+    const medCount = items.filter(i => i.priority === "medium").length;
+    lines.push(`**${section}**: ${items.length} items${highCount ? ` (${highCount} high` + (medCount ? `, ${medCount} medium` : "") + ")" : ""}`);
+    // Show first 3 items as preview
+    for (const item of items.slice(0, 3)) {
+      const prio = item.priority ? ` [${item.priority}]` : "";
+      lines.push(`  - ${item.line.slice(0, 80)}${item.line.length > 80 ? "\u2026" : ""}${prio}`);
+    }
+    if (items.length > 3) lines.push(`  ... and ${items.length - 3} more`);
+  }
+  return lines.join("\n");
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -66,9 +99,11 @@ export function register(server: McpServer, ctx: McpContext): void {
         id: z.string().optional().describe("Backlog item ID like A1, Q3, D2. Requires project."),
         item: z.string().optional().describe("Exact backlog item text. Requires project."),
         status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which backlog sections to include. Defaults to 'active+queue'."),
+        limit: z.number().optional().describe("Max items per section to return. Default 20."),
+        summary: z.boolean().optional().describe("If true, return counts and titles only (no full content). Reduces token usage."),
       }),
     },
-    async ({ project, id, item, status }) => {
+    async ({ project, id, item, status, limit, summary }) => {
       // Single item lookup
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
@@ -95,7 +130,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = readBacklog(cortexPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
-        const view = buildBacklogView(doc, status);
+        const view = buildBacklogView(doc, status, limit);
         if (!fs.existsSync(doc.path)) {
           return mcpResponse({
             ok: true,
@@ -103,26 +138,42 @@ export function register(server: McpServer, ctx: McpContext): void {
             data: { project, items: view.doc.items, includedSections: view.includedSections, totalItems: view.totalItems },
           });
         }
+        if (summary) {
+          return mcpResponse({
+            ok: true,
+            message: buildBacklogSummary(doc, view.includedSections),
+            data: { project, includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
+          });
+        }
+        const truncationNote = view.truncated ? `\n\n_Showing first ${limit ?? DEFAULT_BACKLOG_LIMIT} items per section. Pass a higher limit to see more._` : "";
         return mcpResponse({
           ok: true,
-          message: `## ${project}\n${backlogMarkdown(view.doc)}`,
-          data: { project, items: view.doc.items, issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems },
+          message: `## ${project}\n${backlogMarkdown(view.doc)}${truncationNote}`,
+          data: { project, items: view.doc.items, issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, truncated: view.truncated },
         });
       }
 
       // All projects
       const docs = readBacklogs(cortexPath, profile);
       if (!docs.length) return mcpResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
-      const views = docs.map((doc) => ({ project: doc.project, view: buildBacklogView(doc, status), issues: doc.issues }));
-      const parts = views.map(({ project, view }) => `## ${project}\n${backlogMarkdown(view.doc)}`);
+      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildBacklogView(doc, status, limit), issues: doc.issues }));
+      const anyTruncated = views.some(({ view }) => view.truncated);
+      let parts: string[];
+      if (summary) {
+        parts = views.map(({ doc, view }) => buildBacklogSummary(doc, view.includedSections));
+      } else {
+        parts = views.map(({ project, view }) => `## ${project}\n${backlogMarkdown(view.doc)}`);
+      }
+      const truncationNote = anyTruncated && !summary ? `\n\n_Showing first ${limit ?? DEFAULT_BACKLOG_LIMIT} items per section. Pass a higher limit to see more._` : "";
       const projectData = views.map(({ project, view, issues }) => ({
         project,
         items: view.doc.items,
         issues,
         includedSections: view.includedSections,
         totalItems: view.totalItems,
+        truncated: view.truncated,
       }));
-      return mcpResponse({ ok: true, message: parts.join("\n\n"), data: { projects: projectData } });
+      return mcpResponse({ ok: true, message: parts.join("\n\n") + truncationNote, data: { projects: projectData, summary: summary || false } });
     }
   );
 

@@ -67,7 +67,19 @@ export function buildHookOutput(
       }
     }
   } else {
-    for (const injected of selected) {
+    // Position-aware injection: place most relevant at START and END (LaRA benchmark).
+    // Input `selected` is already ranked by relevance (best first).
+    // Reorder so: [0] stays first, [1] goes last, middle positions get [2..N-1].
+    let ordered = selected;
+    if (selected.length >= 3) {
+      ordered = [
+        selected[0],                    // most relevant → start
+        ...selected.slice(2),           // remaining → middle
+        selected[1],                    // second most → end
+      ];
+    }
+
+    for (const injected of ordered) {
       const { doc, snippet, key } = injected;
       recordInjection(cortexPathLocal, key, sessionId);
       try {

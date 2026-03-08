@@ -612,7 +612,37 @@ export async function handleHookTool() {
   }
 
   const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
-  const activeProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
+  let activeProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
+
+  // Check cooldown
+  const cooldownMs = Number.parseInt(process.env.CORTEX_HOOK_TOOL_COOLDOWN_MS || "30000", 10) || 30000;
+  const cooldownFile = runtimeFile(getCortexPath(), "hook-tool-cooldown");
+  try {
+    if (fs.existsSync(cooldownFile)) {
+      const age = Date.now() - fs.statSync(cooldownFile).mtimeMs;
+      if (age < cooldownMs) {
+        debugLog(`hook-tool: cooldown active (${Math.round(age / 1000)}s < ${Math.round(cooldownMs / 1000)}s), skipping extraction`);
+        // Skip to the log-only path
+        activeProject = null; // prevent extraction below
+      }
+    }
+  } catch { /* best effort */ }
+
+  // Check session cap
+  const sessionCap = Number.parseInt(process.env.CORTEX_HOOK_TOOL_SESSION_CAP || "10", 10) || 10;
+  if (activeProject && sessionId) {
+    try {
+      const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
+      let count = 0;
+      if (fs.existsSync(capFile)) {
+        count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
+      }
+      if (count >= sessionCap) {
+        debugLog(`hook-tool: session cap reached (${count}/${sessionCap}), skipping extraction`);
+        activeProject = null; // prevent extraction below
+      }
+    } catch { /* best effort */ }
+  }
 
   if (activeProject) {
     try {
@@ -624,6 +654,20 @@ export async function handleHookTool() {
         } else {
           appendReviewQueue(getCortexPath(), activeProject, "Review", [text]);
           debugLog(`hook-tool: queued candidate (conf=${confidence}): ${text.slice(0, 60)}`);
+        }
+      }
+
+      // Update cooldown and session counter
+      if (candidates.length > 0) {
+        try { fs.writeFileSync(cooldownFile, Date.now().toString()); } catch { /* best effort */ }
+        if (sessionId) {
+          try {
+            const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
+            let count = 0;
+            try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch { /* new file */ }
+            count += candidates.filter(c => c.confidence >= 0.85).length; // only count directly added ones
+            fs.writeFileSync(capFile, count.toString());
+          } catch { /* best effort */ }
         }
       }
     } catch (err: unknown) {

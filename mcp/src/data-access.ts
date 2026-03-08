@@ -898,27 +898,34 @@ export function removeProjectFromProfile(cortexPath: string, profile: string, pr
   });
 }
 
+function buildProjectCard(dir: string): ProjectCard {
+  const name = path.basename(dir);
+  const summaryFile = path.join(dir, "summary.md");
+  const claudeFile = path.join(dir, "CLAUDE.md");
+  const summarySource = fs.existsSync(summaryFile)
+    ? fs.readFileSync(summaryFile, "utf8")
+    : fs.existsSync(claudeFile)
+      ? fs.readFileSync(claudeFile, "utf8")
+      : "";
+  const summary = summarySource
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith("#")) || "";
+  const docs = ["CLAUDE.md", "FINDINGS.md", "LEARNINGS.md", "summary.md", "backlog.md", "MEMORY_QUEUE.md"]
+    .filter((file) => fs.existsSync(path.join(dir, file)));
+  return { name, summary, docs };
+}
+
 export function listProjectCards(cortexPath: string, profile?: string): ProjectCard[] {
   const dirs = getProjectDirs(cortexPath, profile).sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
-  const cards: ProjectCard[] = [];
-  for (const dir of dirs) {
-    const name = path.basename(dir);
-    const summaryFile = path.join(dir, "summary.md");
-    const claudeFile = path.join(dir, "CLAUDE.md");
-    const summarySource = fs.existsSync(summaryFile)
-      ? fs.readFileSync(summaryFile, "utf8")
-      : fs.existsSync(claudeFile)
-        ? fs.readFileSync(claudeFile, "utf8")
-        : "";
-    const summary = summarySource
-      .split("\n")
-      .map((line) => line.trim())
-      .find((line) => line && !line.startsWith("#")) || "";
+  const cards: ProjectCard[] = dirs.map(buildProjectCard);
 
-    const docs = ["CLAUDE.md", "FINDINGS.md", "LEARNINGS.md", "summary.md", "backlog.md", "MEMORY_QUEUE.md"]
-      .filter((file) => fs.existsSync(path.join(dir, file)));
-    cards.push({ name, summary, docs });
+  // Prepend global as a pinned entry so it's always accessible from the shell
+  const globalDir = path.join(cortexPath, "global");
+  if (fs.existsSync(globalDir)) {
+    cards.unshift(buildProjectCard(globalDir));
   }
+
   return cards;
 }
 

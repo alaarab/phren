@@ -1002,6 +1002,8 @@ export function getQualityMultiplier(cortexPath: string, key: string): number {
   let helpful = entry ? entry.helpful : 0;
   let repromptPenalty = entry ? entry.repromptPenalty : 0;
   let regressionPenalty = entry ? entry.regressionPenalty : 0;
+  let impressions = entry ? entry.impressions : 0;
+  let lastUsedAt = entry ? entry.lastUsedAt : "";
 
   // Include unflushed journal deltas
   const journalEntries = readScoreJournal(cortexPath).filter(e => e.key === key);
@@ -1009,11 +1011,40 @@ export function getQualityMultiplier(cortexPath: string, key: string): number {
     if (je.delta.helpful) helpful += je.delta.helpful;
     if (je.delta.repromptPenalty) repromptPenalty += je.delta.repromptPenalty;
     if (je.delta.regressionPenalty) regressionPenalty += je.delta.regressionPenalty;
+    if (je.delta.impressions) impressions += je.delta.impressions;
+    // Track most recent journal timestamp as lastUsedAt
+    if (je.at && (!lastUsedAt || je.at > lastUsedAt)) lastUsedAt = je.at;
   }
 
   if (!entry && journalEntries.length === 0) return 1;
+
+  // ACT-R activation scoring components:
+
+  // 1. Temporal decay: recency of last retrieval
+  let recencyBoost = 0;
+  if (lastUsedAt) {
+    const lastUsedMs = new Date(lastUsedAt).getTime();
+    if (!Number.isNaN(lastUsedMs)) {
+      const daysSinceUse = Math.max(0, (Date.now() - lastUsedMs) / 86_400_000);
+      if (daysSinceUse <= 7) {
+        recencyBoost = 0.15;          // recently used: boost
+      } else if (daysSinceUse <= 30) {
+        recencyBoost = 0;             // neutral
+      } else {
+        recencyBoost = -0.1 * Math.min(3, (daysSinceUse - 30) / 30); // decay up to -0.3
+      }
+    }
+  }
+
+  // 2. Usage frequency: log-scaled impressions (diminishing returns)
+  const frequencyBoost = impressions > 0 ? Math.min(0.2, Math.log2(impressions + 1) * 0.05) : 0;
+
+  // 3. Feedback signals (existing)
   const penalties = repromptPenalty + regressionPenalty * 2;
-  const raw = 1 + helpful * 0.15 - penalties * 0.2;
+  const feedbackScore = helpful * 0.15 - penalties * 0.2;
+
+  // Combine all components
+  const raw = 1 + feedbackScore + recencyBoost + frequencyBoost;
   return Math.max(0.2, Math.min(1.5, raw));
 }
 
