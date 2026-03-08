@@ -157,6 +157,12 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use 'global' or a project name.` });
       }
 
+      // Validate name is a safe basename: no path separators, no .. segments
+      const safeName = name.replace(/\.md$/i, "");
+      if (!safeName || safeName.includes("/") || safeName.includes("\\") || safeName.includes("..") || path.basename(safeName) !== safeName) {
+        return mcpResponse({ ok: false, error: `Invalid skill name: "${name}". Must be a simple filename with no path separators or traversal sequences.` });
+      }
+
       const { valid, errors } = validateSkillFrontmatter(content);
       if (!valid) {
         return mcpResponse({ ok: false, error: `Invalid frontmatter: ${errors.join("; ")}` });

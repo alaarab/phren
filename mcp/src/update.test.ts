@@ -49,8 +49,9 @@ describe("runCortexUpdate", () => {
 
     const result = await runCortexUpdate();
 
-    expect(result).toContain("Updated local cortex repo at");
-    expect(result).toContain("(Already up to date.)");
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain("Updated local cortex repo at");
+    expect(result.message).toContain("(Already up to date.)");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "git",
       ["pull", "--rebase", "--autostash"],
@@ -78,7 +79,8 @@ describe("runCortexUpdate", () => {
 
     const result = await runCortexUpdate();
 
-    expect(result).toBe("Local repo update failed: pull failed");
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe("Local repo update failed: pull failed");
     expect(
       mockExecFileSync.mock.calls.some(
         (call: unknown[]) => call[0] === "npm" && Array.isArray(call[1]) && call[1][0] === "install"
@@ -96,7 +98,8 @@ describe("runCortexUpdate", () => {
 
     const result = await runCortexUpdate();
 
-    expect(result).toBe("Updated cortex via npm global install (@latest).");
+    expect(result.ok).toBe(true);
+    expect(result.message).toBe("Updated cortex via npm global install (@latest).");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "npm",
       ["install", "-g", "@alaarab/cortex@latest"],
@@ -116,7 +119,8 @@ describe("runCortexUpdate", () => {
 
     const result = await runCortexUpdate();
 
-    expect(result).toBe(
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe(
       "Global update failed: network down. Try manually: npm install -g @alaarab/cortex@latest"
     );
   });

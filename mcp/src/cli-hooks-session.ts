@@ -188,14 +188,25 @@ export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?:
   if (!spawnArgs) return false;
 
   try {
-    fs.writeFileSync(
-      markers.lock,
-      JSON.stringify({
-        startedAt: new Date().toISOString(),
-        project: project || "all",
-        pid: process.pid,
-      }) + "\n"
-    );
+    // Use exclusive open (O_EXCL) to atomically claim the lock; if another process
+    // already holds it this throws and we return false without spawning a duplicate.
+    const lockContent = JSON.stringify({
+      startedAt: new Date().toISOString(),
+      project: project || "all",
+      pid: process.pid,
+    }) + "\n";
+    let fd: number;
+    try {
+      fd = fs.openSync(markers.lock, "wx");
+    } catch {
+      // Another process already claimed the lock
+      return false;
+    }
+    try {
+      fs.writeSync(fd, lockContent);
+    } finally {
+      fs.closeSync(fd);
+    }
     if (project) spawnArgs.push(project);
     const logDir = path.join(cortexPathLocal, ".governance");
     fs.mkdirSync(logDir, { recursive: true });
@@ -646,13 +657,10 @@ export async function handleHookTool() {
       try {
         const candidates = extractToolFindings(toolName, input, responseStr);
         for (const { text, confidence } of candidates) {
-          if (confidence >= 0.85) {
-            addFindingToFile(getCortexPath(), activeProject, text);
-            debugLog(`hook-tool: auto-added finding (conf=${confidence}): ${text.slice(0, 60)}`);
-          } else {
-            appendReviewQueue(getCortexPath(), activeProject, "Review", [text]);
-            debugLog(`hook-tool: queued candidate (conf=${confidence}): ${text.slice(0, 60)}`);
-          }
+          // Queue all candidates for review rather than auto-promoting to FINDINGS.md;
+          // requires human review and provenance confirmation before promotion.
+          appendReviewQueue(getCortexPath(), activeProject, "Review", [text]);
+          debugLog(`hook-tool: queued candidate for review (conf=${confidence}): ${text.slice(0, 60)}`);
         }
 
         if (candidates.length > 0) {
@@ -662,7 +670,7 @@ export async function handleHookTool() {
               const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
               let count = 0;
               try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch { /* new file */ }
-              count += candidates.filter(c => c.confidence >= 0.85).length;
+              count += candidates.length;
               fs.writeFileSync(capFile, count.toString());
             } catch { /* best effort */ }
           }

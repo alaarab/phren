@@ -115,7 +115,8 @@ export async function defaultRunHooks(cortexPath: string): Promise<string> {
 }
 
 export async function defaultRunUpdate(): Promise<string> {
-  return runCortexUpdate();
+  const result = await runCortexUpdate();
+  return result.message;
 }
 
 export async function defaultRunRelink(cortexPath: string): Promise<string> {

@@ -90,7 +90,7 @@ export async function runStatus() {
       const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
       mcpConfigured = Boolean(settings.mcpServers?.cortex || settings.servers?.cortex);
       const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
-      hooksInstalled = hookEvents.some((event) => {
+      hooksInstalled = hookEvents.every((event) => {
         const hooks = settings.hooks?.[event];
         if (!Array.isArray(hooks)) return false;
         return hooks.some((h: any) =>

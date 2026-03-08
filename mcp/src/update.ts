@@ -28,7 +28,12 @@ function run(cmd: string, args: string[], cwd?: string): string {
   }).trim();
 }
 
-export async function runCortexUpdate(): Promise<string> {
+export interface UpdateResult {
+  ok: boolean;
+  message: string;
+}
+
+export async function runCortexUpdate(): Promise<UpdateResult> {
   const root = packageRootFromRuntime();
   const pkgName = readPackageName(root);
   const hasGit = fs.existsSync(path.join(root, ".git"));
@@ -44,18 +49,18 @@ export async function runCortexUpdate(): Promise<string> {
       } catch { /* best effort */ }
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
       run("npm", ["install"], root);
-      return `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.`;
+      return { ok: true, message: `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.` };
     } catch (err: any) {
       const detail = String(err?.message || err || "update failed");
-      return `Local repo update failed: ${detail}`;
+      return { ok: false, message: `Local repo update failed: ${detail}` };
     }
   }
 
   try {
     run("npm", ["install", "-g", "@alaarab/cortex@latest"]);
-    return "Updated cortex via npm global install (@latest).";
+    return { ok: true, message: "Updated cortex via npm global install (@latest)." };
   } catch (err: any) {
     const detail = String(err?.message || err || "update failed");
-    return `Global update failed: ${detail}. Try manually: npm install -g @alaarab/cortex@latest`;
+    return { ok: false, message: `Global update failed: ${detail}. Try manually: npm install -g @alaarab/cortex@latest` };
   }
 }
