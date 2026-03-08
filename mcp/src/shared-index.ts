@@ -2,9 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
-import { fileURLToPath } from "url";
 import { globSync } from "glob";
-import { createRequire } from "module";
 import {
   debugLog,
   appendIndexEvent,
@@ -17,6 +15,7 @@ import { stripBacklogDoneSection } from "./shared-content.js";
 import { cosineFallback, invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
 import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities } from "./shared-entity-graph.js";
+import { bootstrapSqlJs } from "./shared-sqljs.js";
 
 // Re-export for backward compatibility
 export { porterStem } from "./shared-stemmer.js";
@@ -36,9 +35,6 @@ export interface SqlJsDatabase {
 interface SqlJsStatic {
   Database: new (data?: ArrayLike<number>) => SqlJsDatabase;
 }
-
-const require = createRequire(import.meta.url);
-const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<SqlJsStatic>;
 
 // ── Async embedding queue ───────────────────────────────────────────────────
 const _embQueue = new Map<string, { cortexPath: string; content: string }>();
@@ -172,8 +168,6 @@ export function resolveImports(
 ): string {
   return _resolveImportsRecursive(content, cortexPath, new Set<string>(), 0);
 }
-
-import { findWasmBinary } from "./shared-sqljs.js";
 
 function touchSentinel(cortexPath: string): void {
   const dir = path.join(cortexPath, ".runtime");
@@ -713,8 +707,7 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   }
   const cacheFile = path.join(cacheDir, `${hash}.db`);
 
-  const wasmBinary = findWasmBinary();
-  const SQL = await initSqlJs(wasmBinary ? { wasmBinary } : {});
+  const SQL = await bootstrapSqlJs() as SqlJsStatic;
 
   // ── Incremental update (cache hit path) ───────────────────────────────────
   // Load saved per-file hashes for incremental updates
@@ -993,8 +986,7 @@ function isRebuildLockHeld(cortexPath: string): boolean {
 }
 
 async function loadIndexSnapshotOrEmpty(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
-  const wasmBinary = findWasmBinary();
-  const SQL = await initSqlJs(wasmBinary ? { wasmBinary } : {});
+  const SQL = await bootstrapSqlJs() as SqlJsStatic;
   let userSuffix: string;
   try {
     userSuffix = String(os.userInfo().uid);

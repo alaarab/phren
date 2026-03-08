@@ -1,14 +1,13 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { createRequire } from "module";
-import { fileURLToPath } from "url";
 import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
+import { bootstrapSqlJs } from "./shared-sqljs.js";
 
 // ---------------------------------------------------------------------------
 // SQLite cache (Q17) — replaces embed-cache.jsonl with O(1) lookup
@@ -25,14 +24,10 @@ interface SqlJsStatic {
   Database: new (data?: ArrayLike<number>) => SqlJsDatabase;
 }
 
-const require = createRequire(import.meta.url);
-const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<SqlJsStatic>;
-let sqlJsLoader = initSqlJs;
+let sqlJsLoader: () => Promise<SqlJsStatic> = bootstrapSqlJs as () => Promise<SqlJsStatic>;
 
 const EMBED_CACHE_DB = "embed-cache.db";
 const EMBED_CACHE_JSONL = "embed-cache.jsonl"; // legacy file for migration
-
-import { findWasmBinary } from "./shared-sqljs.js";
 
 function getCacheDbPath(cortexPath: string): string {
   const dir = runtimeDir(cortexPath);
@@ -61,8 +56,7 @@ let sqlPromise: Promise<SqlJsStatic> | null = null;
 let sqlResolved: SqlJsStatic | null = null;
 function getSql(): Promise<SqlJsStatic> {
   if (!sqlPromise) {
-    const wasmBinary = findWasmBinary();
-    sqlPromise = sqlJsLoader(wasmBinary ? { wasmBinary } : {})
+    sqlPromise = sqlJsLoader()
       .then(sql => {
         sqlResolved = sql;
         return sql;
@@ -77,14 +71,14 @@ function getSql(): Promise<SqlJsStatic> {
   return sqlPromise;
 }
 
-export function setSqlJsLoaderForTests(loader: (config?: Record<string, unknown>) => Promise<SqlJsStatic>): void {
+export function setSqlJsLoaderForTests(loader: () => Promise<SqlJsStatic>): void {
   sqlJsLoader = loader;
   sqlPromise = null;
   sqlResolved = null;
 }
 
 export function resetSqlJsStateForTests(): void {
-  sqlJsLoader = initSqlJs;
+  sqlJsLoader = bootstrapSqlJs as () => Promise<SqlJsStatic>;
   sqlPromise = null;
   sqlResolved = null;
 }
