@@ -127,7 +127,7 @@ function overlapScore(queryTokens: string[], content: string): number {
  * Documents appearing in multiple tiers get a higher combined score.
  * Formula: score(d) = Σ 1/(k + rank_i) for each tier i containing d, where k=60 (standard).
  */
-function rrfMerge(tiers: DocRow[][], k = 60): DocRow[] {
+export function rrfMerge(tiers: DocRow[][], k = 60): DocRow[] {
   const scores = new Map<string, number>();
   const docs = new Map<string, DocRow>();
   for (const tier of tiers) {
@@ -365,7 +365,7 @@ function ageInDaysFromDate(dateStr: string): number {
 }
 
 /** Item 3: Recency boost for findings. Recent findings rank higher. Accepts pre-computed date string. */
-function recencyBoost(docType: string, latestDate: string): number {
+export function recencyBoost(docType: string, latestDate: string): number {
   if (docType !== "findings") return 0;
   const age = ageInDaysFromDate(latestDate);
   if (age <= 7) return 0.3;

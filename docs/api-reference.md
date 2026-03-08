@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Cortex exposes 40 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
+Cortex exposes 47 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -138,7 +138,7 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 | `project` | string | yes | Project name. |
 | `finding` | string | yes | The insight, as a single bullet point. Be specific enough to act on without extra context. |
 | `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit? }`. |
-| `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`. |
+| `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
 
 ### `add_findings`
 
@@ -296,6 +296,84 @@ Mark the end of a session and save a summary for the next session. Reports durat
 Get the current session state including project, duration, and findings added so far.
 
 No parameters.
+
+---
+
+## Skills Management
+
+### `list_skills`
+
+List all installed skills with metadata (name, description, scope).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Filter skills to a specific project. Omit to list all skills (global + per-project). |
+
+### `read_skill`
+
+Read the full content of a skill file including parsed frontmatter.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name (e.g. "commit", "review-pr"). |
+| `project` | string | no | Project scope. Omit to search global skills. |
+
+### `write_skill`
+
+Create or update a skill file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name. |
+| `content` | string | yes | Full skill file content (frontmatter + body). |
+| `scope` | string | yes | Where to save: `global` or a project name. |
+
+### `remove_skill`
+
+Delete a skill file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name to remove. |
+| `project` | string | no | Project scope. Omit to remove from global skills. |
+
+---
+
+## Hooks Management
+
+### `list_hooks`
+
+Show hook enable/disable status for all tools (claude, copilot, cursor, codex), custom hooks, and config file paths.
+
+No parameters.
+
+### `toggle_hooks`
+
+Enable or disable hooks globally or for a specific tool.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `enabled` | boolean | yes | Whether to enable or disable hooks. |
+| `tool` | string | no | Specific tool to toggle (e.g. "claude", "cursor"). Omit for global toggle. |
+
+### `add_custom_hook`
+
+Add a custom integration hook that runs on cortex events.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | string | yes | Hook event (e.g. "pre-finding", "post-finding", "pre-save", "post-save"). |
+| `command` | string | yes | Shell command to execute. |
+| `timeout` | number | no | Timeout in milliseconds. |
+
+### `remove_custom_hook`
+
+Remove custom hooks by event and optional command match.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | string | yes | Hook event to remove. |
+| `command` | string | no | Specific command to remove. Omit to remove all hooks for the event. |
 
 ---
 

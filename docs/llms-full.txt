@@ -24,7 +24,7 @@ MCP Tools (47):
 
   Finding capture:
     add_finding(project, finding, citation?, findingType?) - append finding with optional citation and type tag
-      findingType: "decision" | "pitfall" | "pattern"
+      findingType: "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug"
     add_findings(project, findings[]) - bulk add multiple findings
     remove_finding(project, finding) - remove by matching text
     remove_findings(project, findings[]) - bulk remove multiple findings
@@ -50,6 +50,21 @@ MCP Tools (47):
     export_project(project) - export project data as portable JSON
     import_project(data) - import project from exported JSON
     manage_project(project, action) - archive or unarchive a project
+
+  Skills management:
+    list_skills(project?) - list all installed skills with metadata
+    read_skill(name, project?) - read full skill file content and parsed frontmatter
+    write_skill(name, content, scope) - create or update a skill (scope: 'global' or project name)
+    remove_skill(name, project?) - delete a skill file
+
+  Hooks management:
+    list_hooks() - show hook status for all tools + custom hooks + config paths
+    toggle_hooks(enabled, tool?) - enable/disable hooks globally or per tool
+    add_custom_hook(event, command, timeout?) - add a custom integration hook
+    remove_custom_hook(event, command?) - remove custom hooks by event/command match
+
+  Finding retrieval:
+    get_findings(project, limit?) - read recent findings without a search query
 
 CLI Commands:
 
@@ -98,8 +113,11 @@ Environment Variables:
   CORTEX_LLM_KEY                 - API key for LLM endpoint (or OPENAI_API_KEY)
   CORTEX_LLM_MODEL               - model name for LLM endpoint
   CORTEX_EMBEDDING_PROVIDER      - "api" or unset; enables semantic search fallback
+  CORTEX_EMBEDDING_API_URL       - OpenAI-compatible /embeddings endpoint (e.g. https://api.openai.com/v1)
+  CORTEX_EMBEDDING_API_KEY       - Bearer token for CORTEX_EMBEDDING_API_URL
   CORTEX_FEATURE_SEMANTIC_DEDUP  - set 1 to enable LLM-based paraphrase dedup
   CORTEX_FEATURE_SEMANTIC_CONFLICT - set 1 to enable LLM-based contradiction detection
+  CORTEX_FEATURE_AUTO_CAPTURE    - set 1 to extract insights from conversation transcripts at session end
 
 Key File Locations:
 
@@ -119,10 +137,13 @@ Key File Locations:
 
 Finding Tags:
 
-  Findings can be tagged with [decision], [pitfall], or [pattern]:
-    [decision] architectural choice with rationale
-    [pitfall]  bug or failure mode to avoid
-    [pattern]  reusable approach that works well
+  Findings can be tagged with one of six types:
+    [decision]     architectural choice with rationale
+    [pitfall]      bug or failure mode to avoid
+    [pattern]      reusable approach that works well
+    [tradeoff]     deliberate compromise
+    [architecture] structural design note
+    [bug]          confirmed defect or failure
   Use findingType param in add_finding, or prefix manually: "- [pitfall] ..."
   Tags are filterable in search_knowledge via the tag parameter.
 

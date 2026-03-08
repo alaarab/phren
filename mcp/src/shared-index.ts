@@ -450,6 +450,42 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, cortexPat
   invalidateDfCache();
 }
 
+/** Read/write a sentinel that caches the cortex hash to skip full recomputation. */
+function readHashSentinel(cortexPath: string): { hash: string; computedAt: number } | null {
+  try {
+    const sentinelPath = runtimeFile(cortexPath, "index-sentinel.json");
+    if (!fs.existsSync(sentinelPath)) return null;
+    const data = JSON.parse(fs.readFileSync(sentinelPath, "utf-8")) as { hash?: string; computedAt?: number };
+    if (typeof data.hash === "string" && typeof data.computedAt === "number") {
+      return { hash: data.hash, computedAt: data.computedAt };
+    }
+  } catch { /* corrupt or missing */ }
+  return null;
+}
+
+function writeHashSentinel(cortexPath: string, hash: string): void {
+  try {
+    const sentinelPath = runtimeFile(cortexPath, "index-sentinel.json");
+    fs.writeFileSync(sentinelPath, JSON.stringify({ hash, computedAt: Date.now() }));
+  } catch { /* best-effort */ }
+}
+
+function isSentinelFresh(cortexPath: string, sentinel: { computedAt: number }): boolean {
+  // Check mtime of key directories — if any are newer than the sentinel, it's stale
+  const dirsToCheck = [
+    cortexPath,
+    path.join(cortexPath, ".governance"),
+    path.join(cortexPath, ".runtime"),
+  ];
+  for (const dir of dirsToCheck) {
+    try {
+      const stat = fs.statSync(dir);
+      if (stat.mtimeMs > sentinel.computedAt) return false;
+    } catch { /* dir doesn't exist, skip */ }
+  }
+  return true;
+}
+
 async function buildIndexImpl(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
   const t0 = Date.now();
   let userSuffix: string;
@@ -459,8 +495,28 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
     userSuffix = crypto.createHash("sha1").update(os.homedir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `cortex-fts-${userSuffix}`);
-  const globResult = globAllFiles(cortexPath, profile);
-  const hash = computeCortexHash(cortexPath, profile, globResult.filePaths);
+
+  // Fast path: if the sentinel is fresh, skip the expensive glob + hash computation
+  const sentinel = readHashSentinel(cortexPath);
+  let hash: string;
+  let globResult: { filePaths: string[]; entries: FileEntry[] };
+  if (sentinel && isSentinelFresh(cortexPath, sentinel)) {
+    hash = sentinel.hash;
+    const cacheFile = path.join(cacheDir, `${hash}.db`);
+    if (fs.existsSync(cacheFile)) {
+      // Sentinel cache hit — defer full glob until we actually need it
+      globResult = globAllFiles(cortexPath, profile);
+    } else {
+      // Cache file was cleaned up, fall through to full computation
+      globResult = globAllFiles(cortexPath, profile);
+      hash = computeCortexHash(cortexPath, profile, globResult.filePaths);
+      writeHashSentinel(cortexPath, hash);
+    }
+  } else {
+    globResult = globAllFiles(cortexPath, profile);
+    hash = computeCortexHash(cortexPath, profile, globResult.filePaths);
+    writeHashSentinel(cortexPath, hash);
+  }
   const cacheFile = path.join(cacheDir, `${hash}.db`);
 
   const wasmBinary = findWasmBinary();

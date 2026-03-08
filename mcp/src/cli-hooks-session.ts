@@ -24,6 +24,7 @@ import {
 import { runGit, isFeatureEnabled } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
@@ -37,6 +38,17 @@ import {
 } from "./shared-index.js";
 import type { SelectedSnippet } from "./cli-hooks-retrieval.js";
 import { filterBacklogByPriority } from "./cli-hooks-retrieval.js";
+
+/** Validate that a transcript path points to a safe, expected location. */
+function isSafeTranscriptPath(p: string): boolean {
+  const normalized = path.resolve(p);
+  const safePrefixes = [
+    path.resolve(os.tmpdir()),
+    path.resolve(os.homedir(), ".claude"),
+    path.resolve(os.homedir(), ".config", "claude"),
+  ];
+  return safePrefixes.some(prefix => normalized.startsWith(prefix + path.sep) || normalized === prefix);
+}
 
 let _cortexPath: string | undefined;
 function getCortexPath(): string {
@@ -448,7 +460,18 @@ export async function handleHookStop() {
     return;
   }
 
-  const push = await runBestEffortGit(["push"], getCortexPath());
+  const lastPushMarker = sessionMarker(getCortexPath(), "last-push");
+  const DEBOUNCE_MS = 10_000;
+  let shouldPush = true;
+  try {
+    const stat = fs.statSync(lastPushMarker);
+    if (Date.now() - stat.mtimeMs < DEBOUNCE_MS) shouldPush = false;
+  } catch { /* marker doesn't exist, push normally */ }
+
+  const push = shouldPush ? await runBestEffortGit(["push"], getCortexPath()) : { ok: true, output: "debounced" };
+  if (shouldPush && push.ok) {
+    fs.writeFileSync(lastPushMarker, String(Date.now()));
+  }
   if (push.ok) {
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
@@ -466,7 +489,10 @@ export async function handleHookStop() {
           try {
             const stdinData = fs.readFileSync(0, "utf-8");
             const hookPayload = JSON.parse(stdinData) as { transcript_path?: string };
-            if (hookPayload.transcript_path && fs.existsSync(hookPayload.transcript_path)) {
+            if (hookPayload.transcript_path && !isSafeTranscriptPath(hookPayload.transcript_path)) {
+              debugLog(`auto-capture: skipping unsafe transcript_path: ${hookPayload.transcript_path}`);
+            }
+            if (hookPayload.transcript_path && isSafeTranscriptPath(hookPayload.transcript_path) && fs.existsSync(hookPayload.transcript_path)) {
               // Cap at last 500 lines (~50 KB) to bound memory usage for long sessions
               const raw = fs.readFileSync(hookPayload.transcript_path, "utf-8");
               const allLines = raw.split("\n").filter(Boolean);
