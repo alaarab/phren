@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 Nothing yet.
 
-## [1.15.1] - 2026-03-08
+## [1.15.2] - 2026-03-08
 
 ### Added
 - **Per-project MCP servers**: declare extra MCP servers in `cortex.project.yaml` under `mcpServers`. `cortex link` merges them into agent config using namespaced keys (`cortex__<project>__<name>`)
