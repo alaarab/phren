@@ -22,7 +22,7 @@ When to use: documentation too long or structured for a bullet point in FINDINGS
 
 **Location:** `~/.cortex/global/`
 
-Patterns that apply across all projects: coding conventions, workflow preferences, tool configuration, shared skills. Global findings are indexed and searchable from any project context.
+Patterns that apply across all projects: conventions, workflow preferences, tool configuration, shared skills. Global findings are indexed and searchable from any project context.
 
 When to use: a pattern confirmed in 3+ projects (the `/cortex-consolidate` skill promotes these automatically), personal workflow preferences, or shared skills.
 

@@ -54,26 +54,14 @@
 \title{\vspace{-1.2em}Long-Term Memory for AI Agents\\
 \large Architecture, Governance, Multi-Agent Coordination, and Comparative Evaluation}
 \author{Ala Arab}
-\date{March 8, 2026 \quad\textbar\quad v1.17.0}
+\date{March 8, 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Persistent memory is a first-order requirement for multi-session coding workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. Cortex v1.17.0 ships a policy engine (retention, decay, access control), index-level filtering, user-extensible synonym configuration, cross-project age-decay ranking, per-project skill injection controls, and a skills/hooks management CLI. The report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory. The core argument is operational: in real engineering teams, memory quality has to be optimized alongside auditability, governance, portability, and token predictability.
+Persistent memory is a first-order requirement for multi-session agent workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. The core argument is operational: memory quality must be optimized alongside auditability, governance, portability, and token predictability. Cortex optimizes for ownership and controllability. Alternatives outperform on managed convenience, setup simplicity, or deep platform integration. The right choice depends on which constraints are binding. This report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, and separates \textit{architecture judgments} from \textit{measured performance}; sections without empirical data say so directly.
 \end{abstract}
-
-\section{Executive Summary}
-A memory system for coding agents must solve four coupled problems:
-\begin{enumerate}
-  \item preserve context over time,
-  \item retrieve relevant context under token constraints,
-  \item suppress stale or low-confidence memory,
-  \item remain operable at team scale.
-\end{enumerate}
-
-Cortex optimizes for ownership and controllability. Alternatives can outperform on managed convenience, setup simplicity, or deep platform integration. The right choice depends on which constraints are binding.
-This report separates \textit{architecture judgments} from \textit{measured performance}; they are not interchangeable. Sections without empirical data say so directly.
 
 \section{Decision Criteria}
 This report evaluates systems on eight dimensions:
@@ -243,6 +231,11 @@ Figure~\ref{fig:decay} visualizes the four-tier decay curve and the effect of mi
   legend style={font=\scriptsize, at={(0.98,0.98)}, anchor=north east},
   clip=true,
 ]
+% Suppression zone — entries below this threshold are never injected
+\addplot[draw=none, fill=red!8, forget plot] coordinates {
+  (0,0)(0,0.35)(135,0.35)(135,0)
+} \closedcycle;
+\node[font=\scriptsize, text=red!60!black, anchor=west] at (axis cs:1,0.12) {not injected};
 % Cited entries (full score)
 \addplot[blue!70!black, thick, mark=*, mark size=2pt] coordinates {
   (0,  1.0)
@@ -280,7 +273,7 @@ Beyond the three lifecycle hooks, Cortex supports user-defined hooks for seven e
 Projects can be exported as self-contained JSON bundles via \texttt{export\_project} and re-imported with \texttt{import\_project}. The \texttt{manage\_project} tool supports archiving inactive projects without deleting data. Migration tooling (\texttt{cortex maintain migrate <project>}) scans git history and GitHub PR reviews, CI failures, and issue comments, routing extracted candidates to \texttt{FINDINGS.md} or \texttt{MEMORY\_QUEUE.md} based on confidence.
 
 \section{Multi-Agent Coordination}
-Modern coding workflows frequently involve multiple agents running concurrently. Memory systems that assume a single serial session break under this pattern.
+Modern agent workflows frequently involve multiple agents running concurrently. Memory systems that assume a single serial session break under this pattern.
 
 Cortex handles multi-agent use through three mechanisms. First, \textbf{shared git-backed state}: all agents read and write the same \texttt{\textasciitilde/.cortex} directory. Concurrent reads are safe at the file system layer. Within a single process, MCP writes are serialized and guarded by file locks; across separate agent processes or machines, final synchronization still relies on git pull/push behavior.
 
@@ -298,16 +291,7 @@ Third, \textbf{hook isolation}: each agent session gets its own hook execution c
   \item \textbf{Copilot Memory}: repository-scoped managed memory with policy controls and expiry semantics, with active rollout changes in 2026 \cite{gh-memory-docs,gh-changelog-jan2026,gh-changelog-mar2026}.
 \end{itemize}
 
-\subsection{Known figures used in this report}
-\begin{itemize}
-  \item Cortex injection defaults: token budget $\approx$550, snippet lines 6, snippet chars 520 \cite{cortex-cli,cortex-index}.
-  \item Governance defaults: \texttt{ttlDays=120}, \texttt{retentionDays=365} \cite{cortex-shared}.
-  \item Trust filter defaults: decay curve 1.0/0.85/0.65/0.45 at 30/60/90/120 days, \texttt{minInjectConfidence=0.35}, citation-absent multiplier 0.8 \cite{cortex-shared}.
-  \item Access control: 4 roles (admin, maintainer, contributor, viewer), 6 action types \cite{cortex-shared}.
-  \item MCP tool surface: 47 tools across search, backlog, finding capture, entity graph, session management, skills, hooks, portability, and quality feedback categories \cite{cortex-index}.
-  \item Claude Opus 4.6 includes a 1M-token context window (beta) \cite{anthropic-opus46}.
-\end{itemize}
-No comparable public p95 coding-latency benchmark exists across all systems/models; cross-system speed claims must be measured directly.
+No comparable public retrieval-latency benchmark exists across all systems and models; cross-system speed claims must be measured directly.
 
 \subsection{Scorecard (architecture-level, non-empirical)}
 
@@ -322,7 +306,7 @@ Column definitions: \textbf{Ease} = zero-to-working setup friction (H=easy). \te
 \toprule
 \textbf{System} & \textbf{Ease} & \textbf{Token ctrl} & \textbf{Governance} & \textbf{Audit} & \textbf{Trust} & \textbf{Multi-agent} & \textbf{Shell/CLI} & \textbf{Daily ops} & \textbf{Lock-in} \\
 \midrule
-Cortex 1.17.0   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreLklo}L \\
+Cortex 1.18.0   & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreHi}H & \cellcolor{scoreMed}M & \cellcolor{scoreLklo}L \\
 Supermemory     & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
 claude-mem      & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M \\
 Copilot Memory  & \cellcolor{scoreHi}H  & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreMed}M & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreLow}L & \cellcolor{scoreHi}H  & \cellcolor{scoreLkin}H \\
@@ -340,10 +324,10 @@ The systems in this comparison differ less in whether they can retrieve a releva
 For Cortex, the main operational differentiators are:
 
 \begin{itemize}
-  \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed API systems have no equivalent.
+  \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed API systems rarely offer equivalent transparency.
   \item \textbf{Policy and access governance}: role-based access control, approval workflows for risky queue items, TTL and retention policy, and canonical locks are first-class features.
   \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection.
-  \item \textbf{CLI shell for human review}: \texttt{cortex shell} provides a model-free interface for reviewing, approving, and cleaning memories before any agent consumes them. This is operationally essential at team scale.
+  \item \textbf{CLI shell for human review}: \texttt{cortex shell} provides a model-free interface for reviewing, approving, and cleaning memories before any agent consumes them. This is particularly useful at team scale.
 \end{itemize}
 
 Any memory system can add a vector index. Governance, auditability, and operational tooling require deliberate architectural choices that are harder to retrofit. This is where Cortex is differentiated most clearly.
@@ -377,34 +361,12 @@ A hybrid approach -- FTS5 for exact matches, semantic or statistical fallback fo
 \subsection{Hybrid Retrieval: Current State}
 \label{sec:hybrid}
 
-Cortex does not currently have one unified hybrid retrieval pipeline. The manual search path (\texttt{search\_knowledge}) and the automatic hook-injection path use different fallback stacks.
-
-Today, the manual search path works as follows:
-
-\begin{enumerate}
-  \item \textbf{FTS5 primary}: run the standard BM25 query with synonym expansion.
-  \item \textbf{Cosine fallback}: when FTS5 returns few results, compute TF-IDF cosine similarity over a bounded local candidate set.
-  \item \textbf{Optional embedding fallback}: when API embeddings are configured, an additional embedding-based fallback can fill remaining result slots.
-  \item \textbf{Deduplication}: FTS5 results come first. Cosine results are excluded by rowid to avoid duplicates. FTS5 results are always preferred because they represent exact token matches.
-  \item \textbf{Performance guard}: if the corpus exceeds 10,000 documents, the TF-IDF cosine fallback is skipped entirely.
-\end{enumerate}
-
-The automatic hook-injection path is more conservative: it stays centered on FTS5 ranking plus a smaller heuristic fallback, with tighter token budgeting and heavier emphasis on determinism.
-
-\textbf{What this means in practice:}
-
-\begin{itemize}
-  \item Cortex is not ``FTS-only,'' but it is also not a single, fully unified hybrid system yet.
-  \item The strongest current hybrid behavior is in manual search, not automatic prompt injection.
-  \item This is a meaningful product distinction because benchmark claims about one path should not automatically be generalized to the other.
-\end{itemize}
-
-This design reflects a deliberate choice: a personal project store is not the same retrieval problem as a large enterprise corpus. FTS5 handles the dominant case efficiently, while the fallback layers extend recall where exact vocabulary matching is weak. The remaining design gap is consistency across entrypoints.
+Cortex does not have a single unified hybrid retrieval pipeline. The manual search path (\texttt{search\_knowledge}) chains FTS5 primary \textrightarrow\ TF-IDF cosine fallback (skipped above 10,000 documents) \textrightarrow\ optional embedding fallback when configured, with FTS5 results always preferred and cosine results deduplicated by rowid. The automatic hook-injection path is more conservative: FTS5 ranking with a smaller heuristic fallback and tighter token budgets. Benchmark results from one path should not be generalized to the other.
 
 \section{Limitations}
 \label{sec:limitations}
 
-Honest systems documentation acknowledges what doesn't work well. Here is what Cortex gets wrong or trades away:
+Cortex makes real tradeoffs. Here is where they bind:
 
 \textbf{FTS5 retrieval ceiling.} As described in Section~\ref{sec:fts5}, keyword search misses semantically related content. In practice, synonym expansion helps on the most common cases, but vocabulary mismatch remains a real failure mode in large projects.
 
@@ -412,7 +374,7 @@ Honest systems documentation acknowledges what doesn't work well. Here is what C
 
 \textbf{Hook-path indexing overhead.} The FTS5 index is cached, but hook and MCP entrypoints still pay index load and validation costs. For large cortex repos (thousands of markdown files), that adds perceptible latency even when the cache is warm.
 
-\textbf{Ranking quality.} BM25 is not calibrated to coding-context relevance. The quality feedback loop (helpful/reprompt/regression signals) partially compensates over time, but requires enough usage to build signal. New projects start with little or no feedback history, which may surface noisy results early on.
+\textbf{Ranking quality.} BM25 is not calibrated to agent-context relevance. The quality feedback loop (helpful/reprompt/regression signals) partially compensates over time, but requires enough usage to build signal. New projects start with little or no feedback history, which may surface noisy results early on.
 
 \textbf{Read-path side effects.} In the current implementation, trust filtering can queue stale or conflicting findings during retrieval. This helps surface cleanup work, but it also means some read operations mutate repo state.
 
@@ -425,7 +387,7 @@ Honest systems documentation acknowledges what doesn't work well. Here is what C
 \section{Conclusion}
 The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex pushes toward production readiness: trust filtering reduces noise in injected context, the governance engine gives teams real policy control, and the interactive shell makes daily memory management possible without starting an LLM session.
 
-Multi-agent support is increasingly non-optional. As coding workflows move from single-agent to team-based coordination, memory systems that assume serial sessions become a bottleneck. Cortex's git-backed architecture provides a workable shared-memory baseline, with the acknowledged caveat that heavy concurrent writes still create contention that requires care.
+Multi-agent support is increasingly non-optional. As agent workflows move from single-agent to team-based coordination, memory systems that assume serial sessions become a bottleneck. Cortex's git-backed architecture provides a workable shared-memory baseline, with the acknowledged caveat that heavy concurrent writes still create contention that requires care.
 
 Managed alternatives remain strong choices where integration speed and platform convenience dominate, or where semantic retrieval quality outweighs portability concerns. The right answer depends on which constraints are binding -- and that answer should be made with eyes open on the tradeoffs documented here.
 

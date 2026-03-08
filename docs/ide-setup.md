@@ -1,6 +1,6 @@
 # Cross-Agent Setup Guide
 
-cortex works across all major AI coding agents. One memory layer, one command to install. `npx @alaarab/cortex init` auto-detects and configures every agent it finds.
+cortex works across all major AI agents. One memory layer, one command to install. `npx @alaarab/cortex init` auto-detects and configures every agent it finds.
 
 ```bash
 cortex status          # see which agents are active on this machine

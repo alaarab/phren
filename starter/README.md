@@ -34,7 +34,7 @@ New to cortex? Here's what each file does and when it matters.
 
 **backlog.md** is your task queue. Three sections: Active (working now), Queue (up next), Done (finished). Claude reads this to understand priorities and checks off tasks as it completes them. You can also manage it from `cortex shell`.
 
-**global/CLAUDE.md** applies everywhere. Your coding style preferences, tool choices, things Claude should always know regardless of which project you're in.
+**global/CLAUDE.md** applies everywhere. Your style preferences, tool choices, things Claude should always know regardless of which project you're in.
 
 **profiles/** and **machines.yaml** handle multi-machine setups. Map hostnames to profiles, and profiles to project lists. Your work laptop sees work projects, your home machine sees personal ones.
 
