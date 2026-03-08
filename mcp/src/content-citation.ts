@@ -1,8 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import { spawnSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
-import { errorMessage } from "./utils.js";
+import { errorMessage, runGitOrThrow } from "./utils.js";
 import type { RetentionPolicy } from "./shared-governance.js";
 
 export interface FindingCitation {
@@ -26,25 +25,9 @@ export interface TrustFilterOptions {
   decay?: Partial<RetentionPolicy["decay"]>;
 }
 
-function runGit(args: string[], cwd: string, timeout: number): string {
-  const result = spawnSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    const stderr = (result.stderr ?? "").trim();
-    const suffix = stderr ? `: ${stderr}` : result.signal ? ` (signal: ${result.signal})` : "";
-    throw new Error(`git ${args.join(" ")} exited with status ${result.status ?? "unknown"}${suffix}`);
-  }
-  return result.stdout ?? "";
-}
-
 export function getHeadCommit(cwd: string): string | undefined {
   try {
-    const commit = runGit(["rev-parse", "HEAD"], cwd, EXEC_TIMEOUT_QUICK_MS).trim();
+    const commit = runGitOrThrow(cwd, ["rev-parse", "HEAD"], EXEC_TIMEOUT_QUICK_MS).trim();
     return commit || undefined;
   } catch (err: unknown) {
     debugLog(`getHeadCommit: git rev-parse HEAD failed in ${cwd}: ${errorMessage(err)}`);
@@ -54,7 +37,7 @@ export function getHeadCommit(cwd: string): string | undefined {
 
 export function getRepoRoot(cwd: string): string | undefined {
   try {
-    const root = runGit(["rev-parse", "--show-toplevel"], cwd, EXEC_TIMEOUT_QUICK_MS).trim();
+    const root = runGitOrThrow(cwd, ["rev-parse", "--show-toplevel"], EXEC_TIMEOUT_QUICK_MS).trim();
     return root || undefined;
   } catch (err: unknown) {
     debugLog(`getRepoRoot: not a git repo or git unavailable in ${cwd}: ${errorMessage(err)}`);
@@ -64,7 +47,7 @@ export function getRepoRoot(cwd: string): string | undefined {
 
 export function inferCitationLocation(repoPath: string, commit: string): { file?: string; line?: number } {
   try {
-    const raw = runGit(["show", "--pretty=format:", "--unified=0", "--no-color", commit], repoPath, EXEC_TIMEOUT_MS);
+    const raw = runGitOrThrow(repoPath, ["show", "--pretty=format:", "--unified=0", "--no-color", commit], EXEC_TIMEOUT_MS);
     let currentFile = "";
     for (const line of raw.split("\n")) {
       if (line.startsWith("+++ b/")) {
@@ -144,7 +127,7 @@ function commitExists(repoPath: string, commit: string): boolean {
   const cached = commitExistsCache.get(key);
   if (cached !== undefined) return cached;
   try {
-    runGit(["cat-file", "-e", `${commit}^{commit}`], repoPath, EXEC_TIMEOUT_QUICK_MS);
+    runGitOrThrow(repoPath, ["cat-file", "-e", `${commit}^{commit}`], EXEC_TIMEOUT_QUICK_MS);
     commitExistsCache.set(key, true);
     return true;
   } catch (err: unknown) {
@@ -159,7 +142,7 @@ function cachedBlame(repoPath: string, relFile: string, line: number): string | 
   const cached = blameCache.get(key);
   if (cached !== undefined) return cached;
   try {
-    const out = runGit(["blame", "-L", `${line},${line}`, "--porcelain", relFile], repoPath, 10_000).trim();
+    const out = runGitOrThrow(repoPath, ["blame", "-L", `${line},${line}`, "--porcelain", relFile], 10_000).trim();
     const first = out.split("\n")[0] || "";
     blameCache.set(key, first);
     return first;

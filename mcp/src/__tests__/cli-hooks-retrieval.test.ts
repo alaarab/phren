@@ -75,4 +75,29 @@ describe("searchDocuments", () => {
     searchDocuments(mockDb, "test query", "test query", "test,query", null);
     expect(queryCalled).toBe(true);
   });
+
+  it("uses deterministic rowid windows for semantic fallback instead of ORDER BY RANDOM", () => {
+    const sqlCalls: string[] = [];
+    const row = [42, "proj", "FINDINGS.md", "findings", "retry transient failures in background jobs", "/tmp/proj/FINDINGS.md"];
+    const mockDb = {
+      exec: (sql: string, params: any[]) => {
+        sqlCalls.push(sql);
+        if (sql.includes("MATCH")) return [];
+        if (sql.includes("MIN(rowid)")) {
+          return [{ columns: ["min_rowid", "max_rowid", "count"], values: [[1, 500, 500]] }];
+        }
+        if (sql.includes("rowid >= ?")) {
+          return [{ columns: ["rowid", "project", "filename", "type", "content", "path"], values: [row] }];
+        }
+        if (sql.includes("rowid < ?")) return [];
+        return [];
+      },
+    };
+
+    const result = searchDocuments(mockDb as any, "missing", "retry transient failures", "retry failures", null);
+    expect(result).not.toBeNull();
+    expect(result?.[0]?.path).toBe("/tmp/proj/FINDINGS.md");
+    expect(sqlCalls.some((sql) => sql.includes("ORDER BY RANDOM"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("rowid >= ?"))).toBe(true);
+  });
 });

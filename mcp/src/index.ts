@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-import { parseMcpMode, runInit } from "./init.js";
-import * as os from "os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as fs from "fs";
@@ -15,8 +13,6 @@ import {
 import { log as structuredLog } from "./logger.js";
 import {
   buildIndex,
-  decodeStringRow,
-  queryRows,
   updateFileInIndex as updateFileInIndexFn,
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
@@ -33,285 +29,10 @@ import { register as registerHooks } from "./mcp-hooks.js";
 import { register as registerExtract } from "./mcp-extract.js";
 import type { McpContext } from "./mcp-types.js";
 import { errorMessage } from "./utils.js";
+import { runTopLevelCommand } from "./entrypoint.js";
+import { startEmbeddingWarmup } from "./startup-embedding.js";
 
-const argvCommand = process.argv[2];
-let handledTopLevelCommand = false;
-
-async function flushTopLevelOutput(): Promise<void> {
-  await Promise.all([
-    new Promise<void>((resolve) => process.stdout.write("", () => resolve())),
-    new Promise<void>((resolve) => process.stderr.write("", () => resolve())),
-  ]);
-}
-
-if (argvCommand === "--help" || argvCommand === "-h" || argvCommand === "help") {
-  console.log(`cortex - Long-term memory for Claude Code
-
-Usage:
-  cortex                                 Open interactive shell
-  cortex quickstart                      Quick setup: init + link + project scaffold
-  cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--from-existing <path>] [--dry-run] [-y]
-                                         Set up cortex (templates: python-project, monorepo, library, frontend)
-  cortex projects list                   List all projects in cortex
-  cortex projects add <name>             Create a new project
-  cortex projects remove <name>          Remove a project (asks for confirmation)
-  cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
-  cortex skills list                     List installed skills
-  cortex skills add <project> <path>    Link or copy a skill file into one project
-  cortex skills remove <project> <name> Remove a project skill by name
-  cortex hooks list                      Show hook tool preferences
-  cortex hooks enable <tool>             Enable hooks for one tool
-  cortex hooks disable <tool>            Disable hooks for one tool
-  cortex status                          Health, active project, stats
-  cortex search <query> [--project <n>] [--type <t>] [--limit <n>]
-                                         Search your cortex
-  cortex add-finding <project> "..."     Save an insight
-  cortex pin <project> "..."             Pin a canonical memory
-  cortex backlog                         Cross-project backlog view
-  cortex skill-list                      List installed skills
-  cortex doctor [--fix] [--check-data] [--agents]
-                                         Health check and self-heal (--agents: show agent integrations only)
-  cortex review-ui [--port=3499]         Memory review web UI
-  cortex debug-injection --prompt "..."  Preview hook-prompt injection output
-  cortex inspect-index [--project <n>]   Inspect FTS index contents for debugging
-  cortex update                          Update to latest version
-
-Configuration:
-  cortex config policy [get|set ...]     Retention, TTL, confidence, decay
-  cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds
-  cortex config access [get|set ...]     Role-based permissions
-  cortex config index [get|set ...]      Indexer include/exclude globs
-  cortex config machines                 Registered machines
-  cortex config profiles                 Profiles and projects
-
-Maintenance:
-  cortex maintain govern [project]       Queue stale/low-value memories for review
-  cortex maintain prune [project]        Delete expired entries
-  cortex maintain consolidate [project]  Deduplicate FINDINGS.md
-  cortex maintain migrate <project> [--pin] [--dry-run]
-                                         Promote legacy findings into FINDINGS/CANONICAL
-  cortex maintain extract [project]      Mine git/GitHub signals
-  cortex migrate-findings <project> [--pin] [--dry-run]
-                                         Legacy alias for maintain migrate
-
-Setup:
-  cortex link [--machine <n>] [--profile <n>]
-                                         Sync profile, symlinks, hooks
-  cortex mcp-mode [on|off|status]        Toggle MCP integration
-  cortex hooks-mode [on|off|status]      Toggle hook execution
-  cortex verify                          Check init completed OK
-  cortex uninstall                       Remove cortex config and hooks
-
-Environment:
-  CORTEX_PATH                Override cortex directory (default: ~/.cortex)
-  CORTEX_PROFILE             Active profile name
-  CORTEX_DEBUG               Enable debug logging (set to 1)
-  CORTEX_OLLAMA_URL          Ollama base URL (default: http://localhost:11434; set to 'off' to disable)
-  CORTEX_EMBEDDING_API_URL   OpenAI-compatible /embeddings endpoint (cloud alternative to Ollama)
-  CORTEX_EMBEDDING_API_KEY   API key for CORTEX_EMBEDDING_API_URL
-  CORTEX_EMBEDDING_MODEL     Embedding model (default: nomic-embed-text)
-  CORTEX_EXTRACT_MODEL       Ollama model for memory extraction (default: llama3.2)
-  CORTEX_EMBEDDING_PROVIDER  Set to 'api' to use OpenAI API for search_knowledge embeddings
-  CORTEX_FEATURE_AUTO_CAPTURE=1      Extract insights from conversations at session end
-  CORTEX_FEATURE_SEMANTIC_DEDUP=1    LLM-based dedup on add_finding
-  CORTEX_FEATURE_SEMANTIC_CONFLICT=1 LLM-based conflict detection on add_finding
-  CORTEX_FEATURE_HYBRID_SEARCH=0     Disable TF-IDF cosine fallback in search_knowledge
-  CORTEX_FEATURE_AUTO_EXTRACT=0      Disable automatic memory extraction on each prompt
-  CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1  Compact memory index injection
-  CORTEX_LLM_MODEL           LLM model for semantic dedup/conflict (default: gpt-4o-mini)
-  CORTEX_LLM_ENDPOINT        OpenAI-compatible /chat/completions base URL for dedup/conflict
-  CORTEX_LLM_KEY             API key for CORTEX_LLM_ENDPOINT
-  CORTEX_CONTEXT_TOKEN_BUDGET    Max tokens injected per hook-prompt (default: 550)
-  CORTEX_CONTEXT_SNIPPET_LINES   Max lines per injected snippet (default: 6)
-  CORTEX_CONTEXT_SNIPPET_CHARS   Max chars per injected snippet (default: 520)
-  CORTEX_MAX_INJECT_TOKENS       Hard cap on total injected tokens (default: 2000)
-  CORTEX_BACKLOG_PRIORITY        Priorities to include in injection: high,medium,low (default: high,medium)
-  CORTEX_MEMORY_TTL_DAYS         Override memory TTL for trust filtering
-  CORTEX_HOOK_TIMEOUT_MS         Hook subprocess timeout in ms (default: 14000)
-  CORTEX_FINDINGS_CAP            Max findings per date section before consolidation (default: 20)
-  CORTEX_CONSOLIDATION_CAP       Max total findings before forced consolidation (default: 150)
-  CORTEX_GH_PR_LIMIT/RUN_LIMIT/ISSUE_LIMIT  GitHub extraction limits (defaults: 40/25/25)
-
-Examples:
-  cortex search "rate limiting"          Search across all projects
-  cortex search "auth" --project my-api  Search within one project
-  cortex add-finding my-app "Redis connections need explicit close in finally blocks"
-  cortex doctor --fix                    Fix common config issues
-  cortex config policy set --ttlDays=90  Change memory retention to 90 days
-  cortex maintain govern my-app          Queue stale memories for review
-  cortex status                          Quick health check
-`);
-  handledTopLevelCommand = true;
-}
-
-if (!handledTopLevelCommand && argvCommand === "init") {
-  const initArgs = process.argv.slice(3);
-  const machineIdx = initArgs.indexOf("--machine");
-  const profileIdx = initArgs.indexOf("--profile");
-  const mcpIdx = initArgs.indexOf("--mcp");
-  const templateIdx = initArgs.indexOf("--template");
-  const fromExistingIdx = initArgs.indexOf("--from-existing");
-  const mcpMode = mcpIdx !== -1 ? parseMcpMode(initArgs[mcpIdx + 1]) : undefined;
-  if (mcpIdx !== -1 && !mcpMode) {
-    console.error(`Invalid --mcp value "${initArgs[mcpIdx + 1] || ""}". Use "on" or "off".`);
-    process.exit(1);
-  }
-  await runInit({
-    machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
-    profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
-    mcp: mcpMode,
-    template: templateIdx !== -1 ? initArgs[templateIdx + 1] : undefined,
-    fromExisting: fromExistingIdx !== -1 ? initArgs[fromExistingIdx + 1] : undefined,
-    applyStarterUpdate: initArgs.includes("--apply-starter-update"),
-    dryRun: initArgs.includes("--dry-run"),
-    yes: initArgs.includes("--yes") || initArgs.includes("-y"),
-  });
-  handledTopLevelCommand = true;
-}
-
-if (!handledTopLevelCommand && argvCommand === "uninstall") {
-  const { runUninstall } = await import("./init.js");
-  await runUninstall();
-  handledTopLevelCommand = true;
-}
-
-if (!handledTopLevelCommand && argvCommand === "status") {
-  const { runStatus } = await import("./status.js");
-  await runStatus();
-  handledTopLevelCommand = true;
-}
-
-if (!handledTopLevelCommand && argvCommand === "verify") {
-  const { runPostInitVerify } = await import("./init.js");
-  const cortexPath = process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex");
-  const result = runPostInitVerify(cortexPath);
-  console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
-  for (const check of result.checks) {
-    console.log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
-    if (!check.ok && check.fix) {
-      console.log(`       fix: ${check.fix}`);
-    }
-  }
-  if (!result.ok) {
-    console.log(`\nRun \`npx @alaarab/cortex init\` to fix setup issues.`);
-  }
-  if (!result.ok) process.exit(1);
-  handledTopLevelCommand = true;
-}
-
-if (!handledTopLevelCommand && argvCommand === "mcp-mode") {
-  const { runMcpMode } = await import("./init.js");
-  try {
-    await runMcpMode(process.argv[3]);
-  } catch (e: unknown) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
-  handledTopLevelCommand = true;
-}
-
-if (!handledTopLevelCommand && argvCommand === "hooks-mode") {
-  const { runHooksMode } = await import("./init.js");
-  try {
-    await runHooksMode(process.argv[3]);
-  } catch (e: unknown) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
-  }
-  handledTopLevelCommand = true;
-}
-
-if (!handledTopLevelCommand && argvCommand === "link") {
-  const { runLink } = await import("./link.js");
-  const linkArgs = process.argv.slice(3);
-  const getFlag = (flag: string) => {
-    const idx = linkArgs.indexOf(flag);
-    return idx !== -1 ? linkArgs[idx + 1] : undefined;
-  };
-  const taskArg = getFlag("--task") as "debugging" | "planning" | "clean" | undefined;
-  const mcpArg = getFlag("--mcp");
-  const mcpMode = mcpArg ? parseMcpMode(mcpArg) : undefined;
-  if (mcpArg && !mcpMode) {
-    console.error(`Invalid --mcp value "${mcpArg}". Use "on" or "off".`);
-    process.exit(1);
-  }
-  await runLink(process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex"), {
-    machine: getFlag("--machine"),
-    profile: getFlag("--profile"),
-    register: linkArgs.includes("--register"),
-    task: taskArg,
-    allTools: linkArgs.includes("--all-tools"),
-    mcp: mcpMode,
-  });
-  handledTopLevelCommand = true;
-}
-
-if (!handledTopLevelCommand && argvCommand === "--health") {
-  handledTopLevelCommand = true;
-}
-
-// Terminal-first behavior: open shell for no-arg human invocations.
-if (!handledTopLevelCommand && !argvCommand && process.stdin.isTTY && process.stdout.isTTY) {
-  const { runCliCommand } = await import("./cli.js");
-  await runCliCommand("shell", []);
-  handledTopLevelCommand = true;
-}
-
-// CLI subcommands (run before MCP server starts)
-const CLI_COMMANDS = [
-  "search",
-  "shell",
-  "update",
-  "config",
-  "maintain",
-  "hook-prompt",
-  "hook-session-start",
-  "hook-stop",
-  "hook-context",
-  "hook-tool",
-  "add-finding",
-  "pin",
-  "doctor",
-  "debug-injection",
-  "inspect-index",
-  "review-ui",
-  "quality-feedback",
-  "skill-list",
-  "skills",
-  "hooks",
-  "detect-skills",
-  "backlog",
-  "quickstart",
-  "background-maintenance",
-  "projects",
-  // Legacy aliases (still work, route to old handlers)
-  "extract-memories",
-  "govern-memories",
-  "prune-memories",
-  "consolidate-memories",
-  "migrate-findings",
-  "index-policy",
-  "policy",
-  "workflow",
-  "access",
-];
-if (!handledTopLevelCommand && argvCommand && CLI_COMMANDS.includes(argvCommand)) {
-  const { runCliCommand } = await import("./cli.js");
-  const cmd = argvCommand;
-  // Track CLI usage if telemetry is opt-in enabled
-  try {
-    const { trackCliCommand } = await import("./telemetry.js");
-    trackCliCommand(process.env.CORTEX_PATH || path.join(os.homedir(), ".cortex"), cmd);
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli trackCliCommand: ${errorMessage(err)}\n`);
-  }
-  await runCliCommand(cmd, process.argv.slice(3));
-  handledTopLevelCommand = true;
-}
-
-if (handledTopLevelCommand) {
-  await flushTopLevelOutput();
-}
+const handledTopLevelCommand = await runTopLevelCommand(process.argv.slice(2));
 
 // MCP mode: first non-flag arg is the cortex path. Resolve it lazily so CLI commands
 // like `maintain` are not misinterpreted as a filesystem path after the command has run.
@@ -336,9 +57,6 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
 };
 
 const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
-
-/** Throttle delay between embedding requests in the background embed loop. */
-const BACKGROUND_EMBED_THROTTLE_MS = 50;
 
 function cleanStaleLocks(cortexPath: string): void {
   const dir = runtimeDir(cortexPath);
@@ -373,10 +91,7 @@ async function main() {
     // Load embedding cache and kick off background embedding (fire-and-forget)
     const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
     const embCache = getEmbeddingCache(cortexPath);
-    void embCache.load().catch((err: unknown) => {
-      debugLog(`Embedding cache startup load failed: ${errorMessage(err)}`);
-    });
-    void backgroundEmbedMissingDocs(cortexPath, db, embCache);
+    void startEmbeddingWarmup(db, embCache);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     structuredLog("error", "startup", `Failed to build cortex index: ${msg}`);
@@ -501,37 +216,6 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`cortex-mcp running (${cortexPath})`);
-}
-
-async function backgroundEmbedMissingDocs(
-  cortexPath: string,
-  db: Awaited<ReturnType<typeof buildIndex>>,
-  cache: import("./shared-embedding-cache.js").EmbeddingCache
-): Promise<void> {
-  try {
-    const { checkOllamaAvailable, embedText, getEmbeddingModel, getOllamaUrl } = await import("./shared-ollama.js");
-    if (!getOllamaUrl()) return;
-    if (!await checkOllamaAvailable()) return;
-    const rows = queryRows(db, "SELECT path, content FROM docs", []);
-    if (!rows) return;
-    const model = getEmbeddingModel();
-    let count = 0;
-    for (const row of rows) {
-      const [docPath, content] = decodeStringRow(row, 2, "backgroundEmbedMissingDocs");
-      if (cache.get(docPath, model)) continue;
-      const vec = await embedText(content.slice(0, 8000));
-      if (vec) {
-        cache.set(docPath, model, vec);
-        count++;
-        if (count % 10 === 0) await cache.flush();
-      }
-      await new Promise(r => setTimeout(r, BACKGROUND_EMBED_THROTTLE_MS));
-    }
-    if (count > 0) await cache.flush();
-    debugLog(`backgroundEmbedMissingDocs: embedded ${count} new docs`);
-  } catch (e: unknown) {
-    debugLog(`backgroundEmbedMissingDocs error: ${errorMessage(e)}`);
-  }
 }
 
 if (!handledTopLevelCommand) {

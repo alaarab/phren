@@ -296,13 +296,3 @@ export class CortexShell {
 }
 
 export { startShell } from "./shell-entry.js";
-
-// ── Utilities exported for tests ──────────────────────────────────────────────
-
-function shellStatePath(cortexPath: string): string {
-  return path.join(cortexPath, ".governance", "shell-state.json");
-}
-
-function shellStateExists(cortexPath: string): boolean {
-  return fs.existsSync(shellStatePath(cortexPath));
-}

@@ -5,11 +5,14 @@ import {
 } from "./shared-governance.js";
 import {
   queryDocRows,
+  queryRows,
   type DocRow,
   type SqlJsDatabase,
   extractSnippet,
   getDocSourceKey,
   getEntityBoostDocs,
+  decodeFiniteNumber,
+  rowToDocWithRowid,
 } from "./shared-index.js";
 import {
   filterTrustedFindingsDetailed,
@@ -28,6 +31,7 @@ import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 
 /** Number of docs sampled for token-overlap semantic fallback search. */
 const SEMANTIC_FALLBACK_SAMPLE_LIMIT = 100;
+const SEMANTIC_FALLBACK_WINDOW_COUNT = 4;
 
 /** Minimum overlap score for a doc to be included in semantic fallback results. */
 const SEMANTIC_OVERLAP_MIN_SCORE = 0.25;
@@ -132,6 +136,39 @@ function overlapScore(queryTokens: string[], content: string): number {
   return matched / denominator;
 }
 
+function semanticFallbackSeed(text: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function loadSemanticFallbackWindow(
+  db: SqlJsDatabase,
+  startRowid: number,
+  limit: number,
+  project?: string | null,
+  wrapBefore?: number,
+): Array<{ rowid: number; doc: DocRow }> {
+  const where = [
+    project ? "project = ?" : "",
+    wrapBefore === undefined ? "rowid >= ?" : "rowid < ?",
+  ].filter(Boolean).join(" AND ");
+  const params = [
+    ...(project ? [project] : []),
+    wrapBefore ?? startRowid,
+    limit,
+  ];
+  const rows = queryRows(
+    db,
+    `SELECT rowid, project, filename, type, content, path FROM docs WHERE ${where} ORDER BY rowid LIMIT ?`,
+    params
+  ) || [];
+  return rows.map((row) => rowToDocWithRowid(row));
+}
+
 // k=60 is the standard RRF constant from Cormack et al. (2009); higher values reduce
 // the impact of top-ranked results, lower values amplify them. 60 is the community default.
 const RRF_K = 60;
@@ -161,18 +198,59 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
   const terms = tokenizeForOverlap(prompt);
   if (!terms.length) return [];
   const sampleLimit = SEMANTIC_FALLBACK_SAMPLE_LIMIT;
-  // ORDER BY RANDOM() avoids insertion-order bias — older docs get equal sampling probability.
-  const docs = project
-    ? queryDocRows(
-      db,
-      "SELECT project, filename, type, content, path FROM docs WHERE project = ? ORDER BY RANDOM() LIMIT ?",
-      [project, sampleLimit]
-    ) || []
-    : queryDocRows(
-      db,
-      "SELECT project, filename, type, content, path FROM docs ORDER BY RANDOM() LIMIT ?",
-      [sampleLimit]
-    ) || [];
+  const statsRows = queryRows(
+    db,
+    project
+      ? "SELECT MIN(rowid), MAX(rowid), COUNT(*) FROM docs WHERE project = ?"
+      : "SELECT MIN(rowid), MAX(rowid), COUNT(*) FROM docs",
+    project ? [project] : []
+  );
+  if (!statsRows?.length) return [];
+
+  let minRowid = 0;
+  let maxRowid = 0;
+  let rowCount = 0;
+  try {
+    minRowid = decodeFiniteNumber(statsRows[0][0], "semanticFallbackDocs.minRowid");
+    maxRowid = decodeFiniteNumber(statsRows[0][1], "semanticFallbackDocs.maxRowid");
+    rowCount = decodeFiniteNumber(statsRows[0][2], "semanticFallbackDocs.rowCount");
+  } catch {
+    return [];
+  }
+  if (rowCount <= 0 || maxRowid < minRowid) return [];
+
+  const cappedLimit = Math.min(sampleLimit, rowCount);
+  const docs: DocRow[] = [];
+  const seenRowids = new Set<number>();
+  const pushRows = (rows: Array<{ rowid: number; doc: DocRow }>) => {
+    for (const row of rows) {
+      if (seenRowids.has(row.rowid)) continue;
+      seenRowids.add(row.rowid);
+      docs.push(row.doc);
+      if (docs.length >= cappedLimit) break;
+    }
+  };
+
+  if (rowCount <= cappedLimit) {
+    pushRows(loadSemanticFallbackWindow(db, minRowid, cappedLimit, project));
+  } else {
+    const span = Math.max(1, maxRowid - minRowid + 1);
+    const windowCount = Math.min(SEMANTIC_FALLBACK_WINDOW_COUNT, cappedLimit);
+    const perWindow = Math.max(1, Math.ceil(cappedLimit / windowCount));
+    const stride = Math.max(1, Math.floor(span / windowCount));
+    const seed = semanticFallbackSeed(`${project ?? "*"}\n${terms.join(" ")}`);
+    for (let i = 0; i < windowCount && docs.length < cappedLimit; i++) {
+      const offset = (seed + i * stride) % span;
+      const startRowid = minRowid + offset;
+      pushRows(loadSemanticFallbackWindow(db, startRowid, perWindow, project));
+      if (docs.length >= cappedLimit) break;
+      pushRows(loadSemanticFallbackWindow(db, startRowid, perWindow, project, startRowid));
+    }
+  }
+
+  if (docs.length < cappedLimit) {
+    pushRows(loadSemanticFallbackWindow(db, minRowid, cappedLimit - docs.length, project));
+  }
 
   const scored = docs
     .map((doc) => {
