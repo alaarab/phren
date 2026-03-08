@@ -45,12 +45,95 @@ export function isWrapperActive(tool: string): boolean {
   }
 }
 
+function commandVersion(cmd: string, args: string[] = ["--version"]): string | null {
+  try {
+    return execFileSync(cmd, args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    }).trim();
+  } catch (err: unknown) {
+    debugLog(`doctor: commandVersion ${cmd} failed: ${errorMessage(err)}`);
+    return null;
+  }
+}
+
+function parseSemverTriple(raw: string): [number, number, number] | null {
+  const match = raw.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return [Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), Number.parseInt(match[3], 10)];
+}
+
+function versionAtLeast(raw: string | null, major: number, minor: number = 0): boolean {
+  if (!raw) return false;
+  const parsed = parseSemverTriple(raw);
+  if (!parsed) return false;
+  const [m, n] = parsed;
+  if (m !== major) return m > major;
+  return n >= minor;
+}
+
+function nearestWritableTarget(filePath: string): boolean {
+  let probe = fs.existsSync(filePath) ? filePath : path.dirname(filePath);
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe);
+    if (parent === probe) return false;
+    probe = parent;
+  }
+  try {
+    fs.accessSync(probe, fs.constants.W_OK);
+    return true;
+  } catch (err: unknown) {
+    debugLog(`doctor: writable check failed for ${filePath}: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
+function gitRemoteStatus(cortexPath: string): { ok: boolean; detail: string } {
+  try {
+    execFileSync("git", ["-C", cortexPath, "rev-parse", "--is-inside-work-tree"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+  } catch {
+    return { ok: false, detail: "cortex path is not a git repository" };
+  }
+  try {
+    const remote = execFileSync("git", ["-C", cortexPath, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    }).trim();
+    return remote ? { ok: true, detail: `origin=${remote}` } : { ok: false, detail: "git origin remote not configured" };
+  } catch {
+    return { ok: false, detail: "git origin remote not configured" };
+  }
+}
+
 export async function runDoctor(cortexPath: string, fix: boolean = false, checkData: boolean = false): Promise<DoctorResult> {
   // Import runLink lazily to avoid circular dependency at module load time
   const { runLink } = await import("./link.js");
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
   const machine = getMachineName();
   const profile = lookupProfile(cortexPath, machine);
+  const gitVersion = commandVersion("git");
+  const nodeVersion = commandVersion("node");
+  checks.push({
+    name: "git-installed",
+    ok: Boolean(gitVersion),
+    detail: gitVersion || "git not found in PATH",
+  });
+  checks.push({
+    name: "node-version",
+    ok: versionAtLeast(nodeVersion, 18),
+    detail: nodeVersion || "node not found in PATH",
+  });
+  const gitRemote = gitRemoteStatus(cortexPath);
+  checks.push({
+    name: "git-remote",
+    ok: gitRemote.ok,
+    detail: gitRemote.detail,
+  });
 
   checks.push({
     name: "machine-registered",
@@ -162,6 +245,12 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   }
 
   const settingsPath = hookConfigPath("claude");
+  const configWritable = nearestWritableTarget(settingsPath);
+  checks.push({
+    name: "config-writable",
+    ok: configWritable,
+    detail: configWritable ? `writable: ${settingsPath}` : `not writable: ${settingsPath}`,
+  });
   let hookOk = false;
   let lifecycleOk = false;
   try {
@@ -247,6 +336,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       ok: fs.existsSync(copilotHooks),
       detail: fs.existsSync(copilotHooks) ? "copilot hooks config present" : "missing ~/.github/hooks/cortex.json",
     });
+    checks.push({
+      name: "copilot-config-writable",
+      ok: nearestWritableTarget(copilotHooks),
+      detail: nearestWritableTarget(copilotHooks) ? `writable: ${copilotHooks}` : `not writable: ${copilotHooks}`,
+    });
   }
   if (detected.has("cursor")) {
     const cursorHooks = homePath(".cursor", "hooks.json");
@@ -255,6 +349,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       ok: fs.existsSync(cursorHooks),
       detail: fs.existsSync(cursorHooks) ? "cursor hooks config present" : "missing ~/.cursor/hooks.json",
     });
+    checks.push({
+      name: "cursor-config-writable",
+      ok: nearestWritableTarget(cursorHooks),
+      detail: nearestWritableTarget(cursorHooks) ? `writable: ${cursorHooks}` : `not writable: ${cursorHooks}`,
+    });
   }
   if (detected.has("codex")) {
     const codexHooks = path.join(cortexPath, "codex.json");
@@ -262,6 +361,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       name: "codex-hooks",
       ok: fs.existsSync(codexHooks),
       detail: fs.existsSync(codexHooks) ? "codex hooks config present" : "missing codex.json in cortex root",
+    });
+    checks.push({
+      name: "codex-config-writable",
+      ok: nearestWritableTarget(codexHooks),
+      detail: nearestWritableTarget(codexHooks) ? `writable: ${codexHooks}` : `not writable: ${codexHooks}`,
     });
   }
   for (const tool of ["copilot", "cursor", "codex"]) {

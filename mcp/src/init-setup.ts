@@ -10,7 +10,9 @@ import {
   debugLog,
   findProjectNameCaseInsensitive,
   hookConfigPath,
+  EXEC_TIMEOUT_QUICK_MS,
 } from "./shared.js";
+import { execFileSync } from "child_process";
 import {
   GOVERNANCE_SCHEMA_VERSION,
   migrateGovernanceFiles,
@@ -25,6 +27,71 @@ export interface PostInitCheck {
   ok: boolean;
   detail: string;
   fix?: string;
+}
+
+function commandVersion(cmd: string, args: string[] = ["--version"]): string | null {
+  try {
+    return execFileSync(cmd, args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    }).trim();
+  } catch (err: unknown) {
+    debugLog(`commandVersion ${cmd} failed: ${errorMessage(err)}`);
+    return null;
+  }
+}
+
+function parseSemverTriple(raw: string): [number, number, number] | null {
+  const match = raw.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return [Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), Number.parseInt(match[3], 10)];
+}
+
+function versionAtLeast(raw: string | null, major: number, minor: number = 0): boolean {
+  if (!raw) return false;
+  const parsed = parseSemverTriple(raw);
+  if (!parsed) return false;
+  const [m, n] = parsed;
+  if (m !== major) return m > major;
+  return n >= minor;
+}
+
+function nearestWritableTarget(filePath: string): boolean {
+  let probe = fs.existsSync(filePath) ? filePath : path.dirname(filePath);
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe);
+    if (parent === probe) return false;
+    probe = parent;
+  }
+  try {
+    fs.accessSync(probe, fs.constants.W_OK);
+    return true;
+  } catch (err: unknown) {
+    debugLog(`nearestWritableTarget failed for ${filePath}: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
+function gitRemoteStatus(cortexPath: string): { ok: boolean; detail: string } {
+  try {
+    execFileSync("git", ["-C", cortexPath, "rev-parse", "--is-inside-work-tree"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+  } catch {
+    return { ok: false, detail: "cortex path is not a git repository" };
+  }
+  try {
+    const remote = execFileSync("git", ["-C", cortexPath, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    }).trim();
+    return remote ? { ok: true, detail: `origin=${remote}` } : { ok: false, detail: "git origin remote not configured" };
+  } catch {
+    return { ok: false, detail: "git origin remote not configured" };
+  }
 }
 
 function copyStarterFile(src: string, dest: string) {
@@ -442,8 +509,37 @@ export function updateMachinesYaml(cortexPath: string, machine?: string, profile
 
 export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: PostInitCheck[] } {
   const checks: PostInitCheck[] = [];
+  const gitVersion = commandVersion("git");
+  const nodeVersion = commandVersion("node");
+  checks.push({
+    name: "git-installed",
+    ok: Boolean(gitVersion),
+    detail: gitVersion || "git not found in PATH",
+    fix: gitVersion ? undefined : "Install git and re-run `npx @alaarab/cortex init`.",
+  });
+  checks.push({
+    name: "node-version",
+    ok: versionAtLeast(nodeVersion, 20),
+    detail: nodeVersion || "node not found in PATH",
+    fix: versionAtLeast(nodeVersion, 20) ? undefined : "Install Node.js 20+ before using cortex.",
+  });
+
+  const gitRemote = gitRemoteStatus(cortexPath);
+  checks.push({
+    name: "git-remote",
+    ok: gitRemote.ok,
+    detail: gitRemote.detail,
+    fix: gitRemote.ok ? undefined : "Initialize a repo and add an origin remote for cross-machine sync.",
+  });
 
   const settingsPath = hookConfigPath("claude");
+  const configWritable = nearestWritableTarget(settingsPath);
+  checks.push({
+    name: "config-writable",
+    ok: configWritable,
+    detail: configWritable ? `writable: ${settingsPath}` : `not writable: ${settingsPath}`,
+    fix: configWritable ? undefined : "Fix permissions for ~/.claude or its settings.json before enabling hooks/MCP.",
+  });
   let mcpOk = false;
   let hooksOk = false;
   try {

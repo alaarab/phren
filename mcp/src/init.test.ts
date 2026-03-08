@@ -18,6 +18,7 @@ import {
   parseMcpMode,
   resetVSCodeProbeCache,
   runInit,
+  runPostInitVerify,
   setHooksEnabledPreference,
   setMcpEnabledPreference,
 } from "./init.js";
@@ -639,6 +640,36 @@ describe("migrateRootFiles", () => {
 
     expect(moved).toEqual([]);
     cleanup();
+  });
+});
+
+describe("runPostInitVerify", () => {
+  it("reports setup hardening checks for git, node, remote, and config writability", () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-verify-test-");
+    const home = path.join(tmpDir, "home");
+    const cortex = path.join(tmpDir, "cortex");
+    const origHome = process.env.HOME;
+    const origProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
+      fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
+      fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
+
+      const result = runPostInitVerify(cortex);
+      const names = result.checks.map((check) => check.name);
+      expect(names).toContain("git-installed");
+      expect(names).toContain("node-version");
+      expect(names).toContain("git-remote");
+      expect(names).toContain("config-writable");
+    } finally {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origProfile;
+      cleanup();
+    }
   });
 });
 
