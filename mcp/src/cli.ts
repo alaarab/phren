@@ -724,6 +724,19 @@ function findSkillPath(name: string, project?: string): string | null {
   }
 
   const cortexPath = getCortexPath();
+  if (project) {
+    const roots = project.toLowerCase() === "global"
+      ? [path.join(cortexPath, "global", "skills")]
+      : [
+        path.join(cortexPath, project, "skills"),
+        path.join(cortexPath, project, ".claude", "skills"),
+      ];
+    for (const root of roots) {
+      const found = search(root, project);
+      if (found) return found;
+    }
+    return null;
+  }
   const found = search(path.join(cortexPath, "global", "skills"), "global");
   if (found) return found;
 
@@ -842,14 +855,18 @@ function handleSkillsNamespace(args: string[]) {
       process.exit(1);
     }
 
-    const dest = path.join(getCortexPath(), project, ".claude", "skills", `${name.replace(/\.md$/i, "")}.md`);
-    if (!fs.existsSync(dest)) {
-      console.error(`Skill not found: ${dest}`);
+    const resolved = findSkillPath(name, project);
+    if (!resolved) {
+      console.error(`Skill not found: "${name}" in project "${project}"`);
       process.exit(1);
     }
-
-    fs.unlinkSync(dest);
-    console.log(`Removed skill ${name.replace(/\.md$/i, "")}.md from ${project}.`);
+    const removePath = path.basename(resolved) === "SKILL.md" ? path.dirname(resolved) : resolved;
+    if (fs.statSync(removePath).isDirectory()) {
+      fs.rmSync(removePath, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(removePath);
+    }
+    console.log(`Removed skill ${name.replace(/\.md$/i, "")} from ${project}.`);
     return;
   }
 

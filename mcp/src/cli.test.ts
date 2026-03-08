@@ -1022,6 +1022,20 @@ describe("CLI integration: skill-list", () => {
     expect(stdout).toContain("folder");
     expect(stdout).toContain("1 skill(s) found");
   });
+
+  it("removes folder-format project skills without leaving broken folders behind", () => {
+    const skillDir = path.join(cortexDir, "demo", ".claude", "skills", "ss");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# ss\ncontent");
+
+    const { stdout, exitCode } = runCli(
+      ["skills", "remove", "demo", "ss"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Removed skill ss from demo");
+    expect(fs.existsSync(skillDir)).toBe(false);
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
