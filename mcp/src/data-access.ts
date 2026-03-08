@@ -79,6 +79,7 @@ export interface QueueItem {
   line: string;
   confidence?: number;
   risky: boolean;
+  machine?: string;
 }
 
 export interface ProfileInfo {
@@ -717,16 +718,18 @@ export function removeFinding(cortexPath: string, project: string, match: string
 // Use shared queueFilePath from utils.ts; alias for local brevity.
 const queuePath = queueFilePath;
 
-function parseQueueLine(line: string): { date?: string; text: string; confidence?: number } {
+function parseQueueLine(line: string): { date?: string; text: string; confidence?: number; machine?: string } {
   const parsed = line.match(/^- \[(\d{4}-\d{2}-\d{2})\]\s*(.+)$/);
   const rawText = parsed ? parsed[2] : line.replace(/^-\s+/, "").trim();
   const confidence = rawText.match(/\[confidence\s+([01](?:\.\d+)?)\]/i);
+  const machineMatch = line.match(/<!--\s*machine:\s*([^>]+?)\s*-->/);
   // Strip the confidence marker from the canonical text so it doesn't pollute FINDINGS.md
   const text = rawText.replace(/\s*\[confidence\s+[01](?:\.\d+)?\]/gi, "").trim();
   return {
     date: parsed?.[1],
     text,
     confidence: confidence ? Number.parseFloat(confidence[1]) : undefined,
+    machine: machineMatch?.[1]?.trim(),
   };
 }
 
@@ -763,6 +766,7 @@ export function readReviewQueue(cortexPath: string, project: string): CortexResu
       line,
       confidence: parsed.confidence,
       risky,
+      machine: parsed.machine,
     });
     index++;
   }

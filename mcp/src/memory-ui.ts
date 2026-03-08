@@ -375,7 +375,8 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         <div class="review-card">
           <div class="review-card-header">
             <span class="badge badge-project">${h(project)}</span>
-            <span class="badge">${h(item.section)}</span>
+            <span class="badge">${h(item.section)}</span>${item.machine ? `
+            <span class="badge" style="background:#e0e7ff;color:#3730a3;font-size:11px" title="Captured on machine: ${h(item.machine)}">${h(item.machine)}</span>` : ""}
             <span class="text-muted" style="font-size:12px;margin-left:auto">${h(item.date)}</span>
           </div>
           <div class="review-card-text">${h(item.text)}</div>

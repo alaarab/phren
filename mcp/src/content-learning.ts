@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import * as os from "os";
 import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
 import { checkPermission, loadCanonicalLocks, saveCanonicalLocksUnlocked, hashContent, withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
@@ -119,7 +120,8 @@ function prepareFinding(
     project,
     file: citationInput?.file,
   });
-  let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} <!-- created: ${today} -->`;
+  const hostname = os.hostname();
+  let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} <!-- created: ${today} --> <!-- machine: ${hostname} -->`;
 
   if (isDuplicateFinding(fullHistory, bullet)) {
     return { status: "duplicate" };
