@@ -127,7 +127,7 @@ export function ensureGlobalEntitiesTable(db: SqlJsDatabase): void {
  * Parse user-defined entity names from CLAUDE.md frontmatter.
  * Looks for: <!-- cortex:entities: Redis,MyService,InternalAPI -->
  */
-export function parseUserDefinedEntities(cortexPath: string, project: string): string[] {
+function parseUserDefinedEntities(cortexPath: string, project: string): string[] {
   const claudeMdPath = `${cortexPath}/${project}/CLAUDE.md`;
   try {
     if (!fs.existsSync(claudeMdPath)) return [];
@@ -291,7 +291,7 @@ export function queryCrossProjectEntities(
   return results;
 }
 
-export function getEntityBoostDocs(db: SqlJsDatabase, query: string, _cortexPath: string): Set<string> {
+export function getEntityBoostDocs(db: SqlJsDatabase, query: string): Set<string> {
   const normalizedQuery = query.toLowerCase();
   try {
     const rows = db.exec(

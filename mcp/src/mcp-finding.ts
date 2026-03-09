@@ -33,7 +33,7 @@ function extractConflictsWith(annotations: string[]): string[] {
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, withWriteQueue, rebuildIndex, updateFileInIndex } = ctx;
+  const { cortexPath, withWriteQueue, updateFileInIndex } = ctx;
 
   server.registerTool(
     "add_finding",

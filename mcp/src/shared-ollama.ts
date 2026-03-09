@@ -37,7 +37,7 @@ export function getCloudEmbeddingUrl(): string | null {
   return val.trim().replace(/\/$/, ""); // strip trailing slash
 }
 
-export function getCloudEmbeddingKey(): string | null {
+function getCloudEmbeddingKey(): string | null {
   return process.env["CORTEX_EMBEDDING_API_KEY"] ?? null;
 }
 

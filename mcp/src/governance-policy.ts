@@ -107,8 +107,6 @@ const DEFAULT_POLICY: RetentionPolicy = {
   },
 };
 
-export const DEFAULT_RETENTION_POLICY = DEFAULT_POLICY;
-
 const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   requireMaintainerApproval: true,
@@ -750,7 +748,7 @@ export function loadCanonicalLocks(cortexPath: string): Record<string, Canonical
   return normalizeVersionedEntries(parsed, isCanonicalLock).entries;
 }
 
-export function saveCanonicalLocks(cortexPath: string, locks: Record<string, CanonicalLock>) {
+function saveCanonicalLocks(cortexPath: string, locks: Record<string, CanonicalLock>) {
   writeJsonFile(govFile(cortexPath, "canonical-locks"), {
     schemaVersion: GOVERNANCE_SCHEMA_VERSION,
     entries: locks,

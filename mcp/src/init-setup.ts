@@ -17,7 +17,7 @@ import {
   GOVERNANCE_SCHEMA_VERSION,
   migrateGovernanceFiles,
 } from "./shared-governance.js";
-import { isValidProjectName, errorMessage } from "./utils.js";
+import { errorMessage } from "./utils.js";
 import { ROOT, STARTER_DIR } from "./init-shared.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

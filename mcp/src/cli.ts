@@ -25,7 +25,6 @@ import { buildFtsQueryVariants, isValidProjectName, errorMessage } from "./utils
 import { keywordFallbackSearch } from "./core-search.js";
 import { addFinding as addFindingCore } from "./core-finding.js";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
 
@@ -39,7 +38,6 @@ import { readBacklogs, readRuntimeHealth } from "./data-access.js";
 export {
   detectTaskIntent,
   parseHookInput,
-  searchDocuments,
   applyTrustFilter,
   rankResults,
   selectSnippets,
@@ -65,7 +63,6 @@ import {
   handleBackgroundSync,
   handleHookContext,
   handleHookTool,
-  scheduleBackgroundMaintenance,
   resolveSubprocessArgs,
 } from "./cli-hooks.js";
 import { handleExtractMemories } from "./cli-extract.js";

@@ -4,7 +4,6 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { execFileSync } from "child_process";
 import { buildLifecycleCommands } from "./hooks.js";
 import {
@@ -107,7 +106,7 @@ function buildMcpServerConfig(cortexPath: string) {
   };
 }
 
-export function upsertMcpServer(
+function upsertMcpServer(
   data: JsonObject,
   mcpEnabled: boolean,
   preferredRoot: McpRootKey,

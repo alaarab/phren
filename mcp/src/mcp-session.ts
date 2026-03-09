@@ -178,7 +178,6 @@ function cleanupStaleSessions(cortexPath: string): number {
     return 0;
   }
 
-  const now = Date.now();
   let cleaned = 0;
 
   for (const entry of entries) {

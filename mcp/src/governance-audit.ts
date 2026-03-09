@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { appendAuditLog as appendAuditLogShared, debugLog, runtimeFile } from "./shared.js";
+import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
 
 export interface AuditLogEntry {
@@ -8,31 +8,6 @@ export interface AuditLogEntry {
   event: string;
   details: string;
   raw: string;
-}
-
-export const appendAuditLog = appendAuditLogShared;
-
-export function readAuditLog(cortexPath: string, limit: number = 200): AuditLogEntry[] {
-  const logPath = runtimeFile(cortexPath, "audit.log");
-  if (!fs.existsSync(logPath)) return [];
-  try {
-    return fs.readFileSync(logPath, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .slice(-Math.max(0, limit))
-      .map((line: string) => {
-        const match = line.match(/^\[([^\]]+)\]\s+(\S+)\s*(.*)$/);
-        return {
-          at: match?.[1] || "",
-          event: match?.[2] || "",
-          details: match?.[3] || "",
-          raw: line,
-        };
-      });
-  } catch (err: unknown) {
-    debugLog(`readAuditLog failed: ${errorMessage(err)}`);
-    return [];
-  }
 }
 
 interface RetrievalLogEntry {

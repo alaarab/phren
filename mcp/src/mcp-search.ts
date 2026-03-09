@@ -23,8 +23,6 @@ import {
   queryDocBySourceKey,
   normalizeMemoryId,
   rowToDocWithRowid,
-  type DocRow,
-  type SqlJsDatabase,
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier } from "./shared-governance.js";

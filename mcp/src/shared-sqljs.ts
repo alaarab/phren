@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
  * Locate the sql.js-fts5 WASM binary by require.resolve with path-probe fallback.
  * Shared between shared-index.ts and embedding.ts to avoid duplication.
  */
-export function findWasmBinary(): Buffer | undefined {
+function findWasmBinary(): Buffer | undefined {
   try {
     const resolved = require.resolve("sql.js-fts5/dist/sql-wasm.wasm") as string;
     if (fs.existsSync(resolved)) return fs.readFileSync(resolved);

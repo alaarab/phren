@@ -230,7 +230,6 @@ export function register(server: McpServer, ctx: McpContext): void {
         } catch (indexError) {
           // Index rebuild failed — restore backup if we replaced the project dir
           if (overwrite) {
-            const backupDir = path.join(cortexPath, `${projectName}.import-backup-${Date.now()}`);
             // Find the backup dir that was created earlier
             try {
               for (const entry of fs.readdirSync(cortexPath)) {

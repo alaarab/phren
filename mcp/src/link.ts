@@ -65,8 +65,6 @@ interface ProfileData {
   projects?: string[];
 }
 
-type MachinesConfig = Record<string, string>;
-
 export interface LinkOptions {
   machine?: string;
   profile?: string;
@@ -122,13 +120,6 @@ const DEFAULT_SEARCH_PATHS = [
 ];
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
-
-export function safeUsername(): string {
-  try { return os.userInfo().username; } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] safeUsername: ${errorMessage(err)}\n`);
-    return "unknown";
-  }
-}
 
 export function getMachineName(): string {
   const mf = machineFilePath();
@@ -187,11 +178,6 @@ export function findProjectDir(name: string): string | null {
     }
   }
   return null;
-}
-
-function displayName(slug: string): string {
-  if (!slug) return "";
-  return slug.split("-").map(w => w[0]?.toUpperCase() + w.slice(1)).join(" ");
 }
 
 function currentPackageVersion(): string | null {

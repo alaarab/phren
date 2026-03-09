@@ -6,7 +6,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
-  BacklogItem,
   listProjectCards,
   readBacklog,
   readFindings,
@@ -29,7 +28,6 @@ import {
 import {
   SUB_VIEWS,
   TAB_ICONS,
-  type ShellView,
   type DoctorResultLike,
 } from "./shell-types.js";
 import {
@@ -40,7 +38,7 @@ import {
   listMachines,
   listProfiles,
 } from "./data-access.js";
-import { readInstallPreferences, writeInstallPreferences } from "./init-preferences.js";
+import { readInstallPreferences } from "./init-preferences.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
@@ -54,7 +52,7 @@ export interface ViewContext {
 
 // ── Tab bar ────────────────────────────────────────────────────────────────
 
-export function renderTabBar(state: ShellState): string {
+function renderTabBar(state: ShellState): string {
   const cols = process.stdout.columns || 80;
 
   if (state.view === "Health") {
@@ -85,7 +83,7 @@ export function renderTabBar(state: ShellState): string {
 
 // ── Bottom bar ─────────────────────────────────────────────────────────────
 
-export function renderBottomBar(state: ShellState, navMode: "navigate" | "input", inputCtx: string, inputBuf: string): string {
+function renderBottomBar(state: ShellState, navMode: "navigate" | "input", inputCtx: string, inputBuf: string): string {
   const cols = process.stdout.columns || 80;
   const sep = separator(cols);
   const dot = style.dim("  ·  ");
@@ -130,14 +128,14 @@ export function renderBottomBar(state: ShellState, navMode: "navigate" | "input"
 
 // ── Content height ─────────────────────────────────────────────────────────
 
-export function contentHeight(): number {
+function contentHeight(): number {
   const rows = process.stdout.rows || 24;
   return Math.max(4, rows - 7);
 }
 
 // ── Projects view ──────────────────────────────────────────────────────────
 
-export function renderProjectsView(ctx: ViewContext, cursor: number, height: number): string[] {
+function renderProjectsView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = process.stdout.columns || 80;
   const cards = listProjectCards(ctx.cortexPath, ctx.profile);
   const filtered = ctx.state.filter
@@ -210,7 +208,7 @@ export interface SubsectionsCache {
 
 const BID_RE = /<!--\s*bid:([a-z0-9]{8})\s*-->/;
 
-export function parseSubsections(backlogPath: string, project: string, cache: SubsectionsCache | null): { map: Map<string, string>; cache: SubsectionsCache } {
+function parseSubsections(backlogPath: string, project: string, cache: SubsectionsCache | null): { map: Map<string, string>; cache: SubsectionsCache } {
   if (cache?.project === project) return { map: cache.map, cache };
   const map = new Map<string, string>();
   try {
@@ -239,7 +237,7 @@ export function parseSubsections(backlogPath: string, project: string, cache: Su
 
 // ── Backlog view ───────────────────────────────────────────────────────────
 
-export function renderBacklogView(ctx: ViewContext, cursor: number, height: number, subsectionsCache: SubsectionsCache | null): { lines: string[]; subsectionsCache: SubsectionsCache | null } {
+function renderBacklogView(ctx: ViewContext, cursor: number, height: number, subsectionsCache: SubsectionsCache | null): { lines: string[]; subsectionsCache: SubsectionsCache | null } {
   const cols = process.stdout.columns || 80;
   const project = ctx.state.project;
   if (!project) {
@@ -340,7 +338,7 @@ export function renderBacklogView(ctx: ViewContext, cursor: number, height: numb
 
 // ── Findings view ──────────────────────────────────────────────────────────
 
-export function renderFindingsView(ctx: ViewContext, cursor: number, height: number): string[] {
+function renderFindingsView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = process.stdout.columns || 80;
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
@@ -408,7 +406,7 @@ function queueSectionBadge(section: string): string {
   }
 }
 
-export function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: number): string[] {
+function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = process.stdout.columns || 80;
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
@@ -507,7 +505,7 @@ export function getProjectSkills(cortexPath: string, project: string): SkillEntr
   return skills;
 }
 
-export function renderSkillsView(ctx: ViewContext, cursor: number, height: number): string[] {
+function renderSkillsView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = process.stdout.columns || 80;
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
@@ -572,7 +570,7 @@ export function getHookEntries(cortexPath: string): HookEntry[] {
   return LIFECYCLE_HOOKS.map((h) => ({ ...h, enabled: hooksEnabled }));
 }
 
-export function renderHooksView(ctx: ViewContext, cursor: number, height: number): string[] {
+function renderHooksView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = process.stdout.columns || 80;
   const entries = getHookEntries(ctx.cortexPath);
   const allEnabled = entries.every((e) => e.enabled);
@@ -616,7 +614,7 @@ export { writeInstallPreferences } from "./init-preferences.js";
 
 // ── Machines/Profiles view ─────────────────────────────────────────────────
 
-export function renderMachinesView(cortexPath: string): string[] {
+function renderMachinesView(cortexPath: string): string[] {
   const machines = listMachines(cortexPath);
   const profiles = listProfiles(cortexPath);
   const lines: string[] = [];
@@ -653,7 +651,7 @@ export function renderMachinesView(cortexPath: string): string[] {
 
 // ── Health view ────────────────────────────────────────────────────────────
 
-export function renderHealthView(
+function renderHealthView(
   cortexPath: string,
   doctor: DoctorResultLike,
   cursor: number,
@@ -714,7 +712,6 @@ export async function renderShell(
   setHealthLineCount: (n: number) => void,
   setSubsectionsCache: (c: SubsectionsCache | null) => void,
 ): Promise<string> {
-  const cols = process.stdout.columns || 80;
   const cursor = ctx.currentCursor();
   const height = contentHeight();
 

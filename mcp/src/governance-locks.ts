@@ -75,5 +75,3 @@ export function withFileLock<T>(filePath: string, fn: () => T): T extends Promis
   releaseFileLock(lockPath);
   return result as T extends Promise<infer U> ? Promise<U> : T;
 }
-
-export const withFileLockRaw = withFileLock;

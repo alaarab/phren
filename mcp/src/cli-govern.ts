@@ -1,6 +1,5 @@
 import {
   appendAuditLog,
-  runtimeFile,
   qualityMarkers,
   getProjectDirs,
   getCortexPath,

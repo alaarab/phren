@@ -1,6 +1,6 @@
 // ── ANSI utilities ──────────────────────────────────────────────────────────
 
-export const ESC = "\x1b[";
+const ESC = "\x1b[";
 export const RESET = `${ESC}0m`;
 
 export const style = {
@@ -57,7 +57,7 @@ export function truncateLine(s: string, cols: number): string {
 // ── Cortex theme ────────────────────────────────────────────────────────────
 
 // Neural gradient palette: purple → blue → cyan (256-color ANSI)
-export const CORTEX_GRADIENT = [
+const CORTEX_GRADIENT = [
   "\x1b[38;5;93m",   // vivid purple
   "\x1b[38;5;99m",   // purple-blue
   "\x1b[38;5;105m",  // blue-purple

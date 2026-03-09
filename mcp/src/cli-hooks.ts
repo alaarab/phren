@@ -51,14 +51,10 @@ export {
   detectTaskIntent,
   filterBacklogByPriority,
   searchDocuments,
-  searchDocumentsAsync,
   applyTrustFilter,
   rankResults,
   selectSnippets,
   type SelectedSnippet,
-  type GitContext,
-  type TrustFilterResult,
-  type TrustFilterQueueItem,
 } from "./cli-hooks-retrieval.js";
 
 // Output
@@ -75,15 +71,12 @@ export {
   handleHookTool,
   trackSessionMetrics,
   extractToolFindings,
-  scheduleBackgroundMaintenance,
   resolveSubprocessArgs,
-  getGitContext,
 } from "./cli-hooks-session.js";
 
 // ── Imports for the orchestrator ─────────────────────────────────────────────
 
 import {
-  searchDocuments,
   searchDocumentsAsync,
   applyTrustFilter,
   rankResults,
@@ -188,7 +181,7 @@ export async function handleHookPrompt() {
       process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10
     );
     const trustResult = applyTrustFilter(
-      rows, getCortexPath(),
+      rows,
       Number.isNaN(memoryTtlDays) ? policy.ttlDays : memoryTtlDays,
       policy.minInjectConfidence, policy.decay
     );
@@ -258,9 +251,8 @@ export async function handleHookPrompt() {
       }
     }
 
-    const changedCount = gitCtx?.changedFiles.size ?? 0;
     if (sessionId) {
-      trackSessionMetrics(getCortexPath(), sessionId, budgetSelected, changedCount);
+      trackSessionMetrics(getCortexPath(), sessionId, budgetSelected);
     }
 
     // Reads stay side-effect free: trust filter output informs ranking/snippets now,

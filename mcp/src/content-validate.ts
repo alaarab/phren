@@ -27,8 +27,8 @@ export interface ConsolidationStatus extends ConsolidationNeeded {
 
 /** Thresholds used for consolidation recommendations. */
 export const CONSOLIDATION_ENTRY_THRESHOLD = 25;
-export const CONSOLIDATION_TIME_THRESHOLD_DAYS = 60;
-export const CONSOLIDATION_MIN_FOR_TIME_CHECK = 10;
+const CONSOLIDATION_TIME_THRESHOLD_DAYS = 60;
+const CONSOLIDATION_MIN_FOR_TIME_CHECK = 10;
 
 /**
  * Validate a single finding text before it is persisted.

@@ -95,7 +95,7 @@ function oneBitNeighbors(key: string): string[] {
   return neighbors;
 }
 
-export function buildVectorIndexData(entries: EmbeddingEntryLike[]): Record<string, ModelVectorIndex> {
+function buildVectorIndexData(entries: EmbeddingEntryLike[]): Record<string, ModelVectorIndex> {
   const byModel = new Map<string, EmbeddingEntryLike[]>();
   for (const entry of entries) {
     if (!entry.model || entry.vec.length === 0) continue;
@@ -123,7 +123,7 @@ export function buildVectorIndexData(entries: EmbeddingEntryLike[]): Record<stri
   return models;
 }
 
-export class PersistentVectorIndex {
+class PersistentVectorIndex {
   private cortexPath: string;
   private loaded = false;
   private source: SourceMarker | null = null;

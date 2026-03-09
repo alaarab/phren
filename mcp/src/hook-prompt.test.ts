@@ -226,7 +226,7 @@ describe("applyTrustFilter", () => {
       { project: "proj", filename: "summary.md", type: "summary", content: "project summary text", path: "/path" },
       { project: "proj", filename: "CLAUDE.md", type: "claude", content: "instructions", path: "/path2" },
     ];
-    const result = applyTrustFilter(rows, cortexDir, 365, 0.5, { enabled: false });
+    const result = applyTrustFilter(rows, 365, 0.5, { enabled: false });
     expect(result.rows).toHaveLength(2);
     expect(result.rows[0].content).toBe("project summary text");
   });
@@ -245,7 +245,7 @@ describe("applyTrustFilter", () => {
     const rows = [
       { project: "testproj", filename: "FINDINGS.md", type: "findings", content: findingsContent, path: "/FINDINGS.md" },
     ];
-    const result = applyTrustFilter(rows, cortexDir, 365, 0.0, { enabled: false });
+    const result = applyTrustFilter(rows, 365, 0.0, { enabled: false });
     expect(result.rows).toHaveLength(1);
     // Content should still contain the fresh finding
     expect(result.rows[0].content).toContain("Fresh finding");
@@ -267,7 +267,7 @@ describe("applyTrustFilter", () => {
       { project: "testproj", filename: "FINDINGS.md", type: "findings", content: oldFindings, path: "/FINDINGS.md" },
     ];
     // Very short TTL should filter out old entries
-    const result = applyTrustFilter(rows, cortexDir, 1, 0.99, { enabled: true, halfLifeDays: 30 });
+    const result = applyTrustFilter(rows, 1, 0.99, { enabled: true, halfLifeDays: 30 });
     // The row should be filtered out because all content is stale
     expect(result.rows.length).toBeLessThanOrEqual(1);
     if (result.rows.length === 1) {
@@ -296,7 +296,7 @@ describe("trackSessionMetrics", () => {
       snippet: "snippet",
       key: "proj:f.md:abc",
     }];
-    trackSessionMetrics(cortexDir, "session-1", selected, 0);
+    trackSessionMetrics(cortexDir, "session-1", selected);
 
     const metricsFile = path.join(cortexDir, ".governance", "session-metrics.json");
     expect(fs.existsSync(metricsFile)).toBe(true);
@@ -313,9 +313,9 @@ describe("trackSessionMetrics", () => {
       snippet: "snippet",
       key: "proj:f.md:abc",
     }];
-    trackSessionMetrics(cortexDir, "session-2", selected, 0);
-    trackSessionMetrics(cortexDir, "session-2", selected, 0);
-    trackSessionMetrics(cortexDir, "session-2", selected, 0);
+    trackSessionMetrics(cortexDir, "session-2", selected);
+    trackSessionMetrics(cortexDir, "session-2", selected);
+    trackSessionMetrics(cortexDir, "session-2", selected);
 
     const metricsFile = path.join(cortexDir, ".governance", "session-metrics.json");
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
@@ -335,7 +335,7 @@ describe("trackSessionMetrics", () => {
       snippet: "s",
       key: "k",
     }];
-    trackSessionMetrics(cortexDir, "new-session", selected, 0);
+    trackSessionMetrics(cortexDir, "new-session", selected);
 
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
     expect(metrics["old-session"]).toBeUndefined();

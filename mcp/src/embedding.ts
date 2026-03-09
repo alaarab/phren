@@ -230,7 +230,7 @@ function insertCache(db: SqlJsDatabase, model: string, hash: string, embedding: 
  * Get embedding from OpenAI-compatible API.
  * Calls POST https://api.openai.com/v1/embeddings (or compatible endpoint).
  */
-export async function getApiEmbedding(
+async function getApiEmbedding(
   text: string,
   apiKey: string,
   model: string = "text-embedding-3-small"
@@ -264,7 +264,7 @@ export async function getApiEmbedding(
  * Get embeddings for multiple texts in a single API call.
  * The OpenAI embeddings API supports array input natively.
  */
-export async function getApiEmbeddings(
+async function getApiEmbeddings(
   texts: string[],
   apiKey: string,
   model: string = "text-embedding-3-small"
@@ -414,4 +414,4 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 // Export helpers for testing
-export { encodeEmbedding, decodeEmbedding, openCacheDb, lookupCache, insertCache, persistDb };
+export { encodeEmbedding, decodeEmbedding, openCacheDb };

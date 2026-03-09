@@ -75,7 +75,7 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     ].join("\n");
 
     const rows: DocRow[] = [makeDocRow("reference", staleContent)];
-    const filtered = applyTrustFilter(rows, tmp.path, 90, 0.35, {});
+    const filtered = applyTrustFilter(rows, 90, 0.35, {});
     // The stale bullet is removed but the heading "# Findings" remains,
     // so the doc passes through with reduced content (not fully excluded)
     expect(filtered.rows.length).toBe(1);
@@ -93,7 +93,7 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     ].join("\n");
 
     const rows: DocRow[] = [makeDocRow("knowledge", staleContent)];
-    const filtered = applyTrustFilter(rows, tmp.path, 90, 0.35, {});
+    const filtered = applyTrustFilter(rows, 90, 0.35, {});
     // The stale bullet is removed but the heading "# Findings" remains
     expect(filtered.rows.length).toBe(1);
     expect(filtered.rows[0].content).not.toContain("Ancient knowledge entry");
@@ -109,7 +109,7 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     ].join("\n");
 
     const rows: DocRow[] = [makeDocRow("claude", content)];
-    const filtered = applyTrustFilter(rows, tmp.path, 90, 0.35, {});
+    const filtered = applyTrustFilter(rows, 90, 0.35, {});
     // claude type should pass through unfiltered
     expect(filtered.rows.length).toBe(1);
     expect(filtered.rows[0].content).toBe(content);

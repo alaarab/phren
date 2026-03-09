@@ -36,7 +36,6 @@ import {
   completeInput as completeInputFn,
   getListItems,
   handleNavigateKey,
-  type PaletteHost,
   type NavigationHost,
 } from "./shell-input.js";
 import { errorMessage } from "./utils.js";
@@ -231,7 +230,6 @@ export class CortexShell {
   // ── Navigation host adapter ────────────────────────────────────────────
 
   private asNavigationHost(): NavigationHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
     return {
       cortexPath: this.cortexPath, profile: this.profile, state: this.state, deps: this.deps,
