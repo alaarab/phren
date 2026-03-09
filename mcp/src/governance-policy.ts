@@ -453,9 +453,17 @@ function writeJsonFile(filePath: string, data: unknown): void {
   });
 }
 
+function allowEnvironmentActorOverride(): boolean {
+  return process.env.CORTEX_TRUST_ENV_ACTOR === "1"
+    || process.env.VITEST_WORKER_ID !== undefined
+    || process.env.NODE_ENV === "test";
+}
+
 function actorName(): string {
-  const envActor = process.env.CORTEX_ACTOR || process.env.USER || process.env.USERNAME;
-  if (envActor) return envActor;
+  if (allowEnvironmentActorOverride()) {
+    const envActor = process.env.CORTEX_ACTOR?.trim();
+    if (envActor) return envActor;
+  }
   try {
     return os.userInfo().username;
   } catch (err: unknown) {

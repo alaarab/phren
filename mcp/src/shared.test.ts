@@ -722,6 +722,34 @@ describe("RBAC and canonical locks", () => {
       expect(denial).toContain("viewer");
       expect(denial).toContain("write");
     });
+
+    it("ignores caller-controlled env actors outside explicit test mode", () => {
+      const origEnvActor = process.env.CORTEX_ACTOR;
+      const origUser = process.env.USER;
+      const origNodeEnv = process.env.NODE_ENV;
+      const origVitestWorkerId = process.env.VITEST_WORKER_ID;
+      const currentUser = os.userInfo().username;
+      setupAccess({ admins: [currentUser], viewers: ["spoofed-admin"] });
+
+      delete process.env.VITEST_WORKER_ID;
+      delete process.env.NODE_ENV;
+      delete process.env.CORTEX_TRUST_ENV_ACTOR;
+      process.env.CORTEX_ACTOR = "spoofed-admin";
+      process.env.USER = "spoofed-admin";
+
+      try {
+        expect(checkPermission(cortex, "write")).toBeNull();
+      } finally {
+        if (origEnvActor === undefined) delete process.env.CORTEX_ACTOR;
+        else process.env.CORTEX_ACTOR = origEnvActor;
+        if (origUser === undefined) delete process.env.USER;
+        else process.env.USER = origUser;
+        if (origNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = origNodeEnv;
+        if (origVitestWorkerId === undefined) delete process.env.VITEST_WORKER_ID;
+        else process.env.VITEST_WORKER_ID = origVitestWorkerId;
+      }
+    });
   });
 
   describe("enforceCanonicalLocks", () => {

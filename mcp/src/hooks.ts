@@ -365,7 +365,13 @@ export function runCustomHooks(
       if (hook.secret) {
         headers["X-Cortex-Signature"] = `sha256=${createHmac("sha256", hook.secret).update(payload).digest("hex")}`;
       }
-      fetch(hook.webhook, { method: "POST", headers, body: payload, signal: AbortSignal.timeout(hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT) })
+      fetch(hook.webhook, {
+        method: "POST",
+        headers,
+        body: payload,
+        redirect: "manual",
+        signal: AbortSignal.timeout(hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT),
+      })
         .catch((err: unknown) => {
           const message = `${event}: ${hook.webhook}: ${errorMessage(err)}`;
           debugLog(`runCustomHooks webhook: ${message}`);
