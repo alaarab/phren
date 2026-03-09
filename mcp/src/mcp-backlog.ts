@@ -12,13 +12,21 @@ import {
   type BacklogSection,
   completeBacklogItem as completeBacklogItemStore,
   completeBacklogItems as completeBacklogItemsBatch,
+  linkBacklogItemIssue,
   pinBacklogItem,
   workNextBacklogItem,
   tidyBacklogDone,
   readBacklog,
   readBacklogs,
+  resolveBacklogItem,
   updateBacklogItem as updateBacklogItemStore,
 } from "./data-access.js";
+import {
+  buildBacklogIssueBody,
+  createGithubIssueForBacklog,
+  parseGithubIssueUrl,
+  resolveProjectGithubRepo,
+} from "./backlog-github.js";
 
 type BacklogStatus = "all" | "active" | "queue" | "done" | "active+queue";
 
@@ -83,15 +91,16 @@ function buildBacklogSummary(doc: BacklogDoc, includedSections: BacklogSection[]
   const lines: string[] = [`## ${doc.project}`];
   for (const section of includedSections) {
     const items = doc.items[section];
-    const highCount = items.filter(i => i.priority === "high").length;
-    const medCount = items.filter(i => i.priority === "medium").length;
-    lines.push(`**${section}**: ${items.length} items${highCount ? ` (${highCount} high` + (medCount ? `, ${medCount} medium` : "") + ")" : ""}`);
-    // Show first 3 items as preview
-    for (const item of items.slice(0, 3)) {
-      const prio = item.priority ? ` [${item.priority}]` : "";
-      const bidPrefix = item.stableId ? `bid:${item.stableId} ` : "";
-      lines.push(`  - ${bidPrefix}${item.line.slice(0, 80)}${item.line.length > 80 ? "\u2026" : ""}${prio}`);
-    }
+      const highCount = items.filter(i => i.priority === "high").length;
+      const medCount = items.filter(i => i.priority === "medium").length;
+      lines.push(`**${section}**: ${items.length} items${highCount ? ` (${highCount} high` + (medCount ? `, ${medCount} medium` : "") + ")" : ""}`);
+      // Show first 3 items as preview
+      for (const item of items.slice(0, 3)) {
+        const prio = item.priority ? ` [${item.priority}]` : "";
+        const bidPrefix = item.stableId ? `bid:${item.stableId} ` : "";
+        const githubTag = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
+        lines.push(`  - ${bidPrefix}${item.line.slice(0, 80)}${item.line.length > 80 ? "\u2026" : ""}${prio}${githubTag}`);
+      }
     if (items.length > 3) lines.push(`  ... and ${items.length - 3} more`);
   }
   return lines.join("\n");
@@ -135,7 +144,18 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({
           ok: true,
           message: `${match.id}: ${match.line} (${match.section})`,
-          data: { project, id: match.id, section: match.section, checked: match.checked, line: match.line, context: match.context || null, priority: match.priority || null },
+          data: {
+            project,
+            id: match.id,
+            stableId: match.stableId || null,
+            section: match.section,
+            checked: match.checked,
+            line: match.line,
+            context: match.context || null,
+            priority: match.priority || null,
+            githubIssue: match.githubIssue ?? null,
+            githubUrl: match.githubUrl || null,
+          },
         });
       }
 
@@ -292,6 +312,9 @@ export function register(server: McpServer, ctx: McpContext): void {
           priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
           context: z.string().optional().describe("Text to append to (or create) the Context: line below the item."),
           section: z.enum(["queue", "active", "done", "Queue", "Active", "Done"]).optional().describe("Move item to this section: Queue, Active, or Done."),
+          github_issue: z.union([z.number().int().positive(), z.string()]).optional().describe("GitHub issue number (for example 14 or '#14')."),
+          github_url: z.string().optional().describe("GitHub issue URL to associate with the backlog item."),
+          unlink_github: z.boolean().optional().describe("If true, remove any linked GitHub issue metadata from the item."),
         }).describe("Fields to update. All are optional."),
       }),
     },
@@ -304,6 +327,123 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
       });
     }
+  );
+
+  server.registerTool(
+    "link_backlog_item_issue",
+    {
+      title: "◆ cortex · link task issue",
+      description: "Link or unlink a backlog item to an existing GitHub issue.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Backlog item text, ID, or stable bid to link."),
+        issue_number: z.union([z.number().int().positive(), z.string()]).optional().describe("Existing GitHub issue number (for example 14 or '#14')."),
+        issue_url: z.string().optional().describe("Existing GitHub issue URL."),
+        unlink: z.boolean().optional().describe("If true, remove any linked issue from the backlog item."),
+      }),
+    },
+    async ({ project, item, issue_number, issue_url, unlink }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        if (unlink && (issue_number !== undefined || issue_url)) {
+          return mcpResponse({ ok: false, error: "Use either unlink=true or issue_number/issue_url, not both." });
+        }
+        if (!unlink && issue_number === undefined && !issue_url) {
+          return mcpResponse({ ok: false, error: "Provide issue_number or issue_url to link, or unlink=true to remove the link." });
+        }
+        if (issue_url) {
+          const parsed = parseGithubIssueUrl(issue_url);
+          if (!parsed) return mcpResponse({ ok: false, error: "issue_url must be a valid GitHub issue URL." });
+          if (issue_number !== undefined) {
+            const normalizedIssue = Number.parseInt(String(issue_number).replace(/^#/, ""), 10);
+            if (normalizedIssue !== parsed.issueNumber) {
+              return mcpResponse({ ok: false, error: "issue_number and issue_url refer to different issues." });
+            }
+          }
+        }
+
+        const result = linkBacklogItemIssue(cortexPath, project, item, {
+          github_issue: issue_number,
+          github_url: issue_url,
+          unlink: unlink ?? false,
+        });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        return mcpResponse({
+          ok: true,
+          message: unlink
+            ? `Removed GitHub link from ${project} backlog item.`
+            : `Linked ${project} backlog item to ${result.data.githubIssue ? `#${result.data.githubIssue}` : result.data.githubUrl}.`,
+          data: {
+            project,
+            item,
+            stableId: result.data.stableId || null,
+            githubIssue: result.data.githubIssue ?? null,
+            githubUrl: result.data.githubUrl || null,
+          },
+        });
+      });
+    },
+  );
+
+  server.registerTool(
+    "promote_backlog_item_to_issue",
+    {
+      title: "◆ cortex · promote task",
+      description: "Create a GitHub issue from a backlog item and link it back into the backlog.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Backlog item text, ID, or stable bid to promote."),
+        repo: z.string().optional().describe("Target GitHub repo in owner/name form. If omitted, cortex tries to infer it from CLAUDE.md or summary.md."),
+        title: z.string().optional().describe("Optional GitHub issue title. Defaults to the backlog item text."),
+        body: z.string().optional().describe("Optional GitHub issue body. Defaults to a body built from the backlog item plus context."),
+        mark_done: z.boolean().optional().describe("If true, mark the backlog item Done after creating and linking the issue."),
+      }),
+    },
+    async ({ project, item, repo, title, body, mark_done }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const match = resolveBacklogItem(cortexPath, project, item);
+        if (!match.ok) return mcpResponse({ ok: false, error: match.error, errorCode: match.code });
+
+        const targetRepo = repo || resolveProjectGithubRepo(cortexPath, project);
+        if (!targetRepo) {
+          return mcpResponse({ ok: false, error: "Could not infer a GitHub repo for this project. Provide repo in owner/name form or add a GitHub URL to CLAUDE.md/summary.md." });
+        }
+
+        const created = createGithubIssueForBacklog({
+          repo: targetRepo,
+          title: title?.trim() || match.data.line.replace(/\s*\[(high|medium|low)\]\s*$/i, "").trim(),
+          body: body?.trim() || buildBacklogIssueBody(project, match.data),
+        });
+        if (!created.ok) return mcpResponse({ ok: false, error: created.error, errorCode: created.code });
+
+        const linked = linkBacklogItemIssue(cortexPath, project, match.data.stableId ? `bid:${match.data.stableId}` : match.data.id, {
+          github_issue: created.data.issueNumber,
+          github_url: created.data.url,
+        });
+        if (!linked.ok) return mcpResponse({ ok: false, error: linked.error, errorCode: linked.code });
+
+        if (mark_done) {
+          const completed = completeBacklogItemStore(cortexPath, project, linked.data.stableId ? `bid:${linked.data.stableId}` : linked.data.id);
+          if (!completed.ok) return mcpResponse({ ok: false, error: completed.error, errorCode: completed.code });
+        }
+
+        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        return mcpResponse({
+          ok: true,
+          message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} backlog item.`,
+          data: {
+            project,
+            item,
+            repo: targetRepo,
+            githubIssue: created.data.issueNumber ?? null,
+            githubUrl: created.data.url,
+            markDone: mark_done ?? false,
+          },
+        });
+      });
+    },
   );
 
   server.registerTool(

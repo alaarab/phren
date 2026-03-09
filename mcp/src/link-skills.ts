@@ -1,12 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { fileURLToPath } from "url";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { buildLifecycleCommands } from "./hooks.js";
-
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+import { VERSION } from "./package-metadata.js";
+import { getToolCount, renderToolCatalogMarkdown } from "./tool-registry.js";
+import { isSkillEnabled } from "./skill-state.js";
 
 // ── Skill frontmatter parsing and validation ────────────────────────────────
 
@@ -144,36 +144,59 @@ export function readSkillManifestHooks(cortexPath: string): ManifestHooks | null
 
 // ── Skill linking helpers ───────────────────────────────────────────────────
 
-export function linkSkillsDir(srcDir: string, destDir: string, managedRoot: string, symlinkFile: (src: string, dest: string, managedRoot: string) => boolean) {
+function cleanupManagedSkillLinks(destDir: string, expectedNames: Set<string>, managedRoot: string): void {
+  if (!fs.existsSync(destDir)) return;
+  for (const entry of fs.readdirSync(destDir)) {
+    if (expectedNames.has(entry)) continue;
+    const destPath = path.join(destDir, entry);
+    try {
+      const stat = fs.lstatSync(destPath);
+      if (!stat.isSymbolicLink()) continue;
+      const target = fs.readlinkSync(destPath);
+      const resolvedTarget = path.resolve(path.dirname(destPath), target);
+      const managedPrefix = path.resolve(managedRoot) + path.sep;
+      if (!resolvedTarget.startsWith(managedPrefix)) continue;
+      fs.unlinkSync(destPath);
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanupManagedSkillLinks: ${errorMessage(err)}\n`);
+    }
+  }
+}
+
+export function linkSkillsDir(
+  srcDir: string,
+  destDir: string,
+  managedRoot: string,
+  symlinkFile: (src: string, dest: string, managedRoot: string) => boolean,
+  opts?: { cortexPath?: string; scope?: string },
+) {
   if (!fs.existsSync(srcDir)) return;
   fs.mkdirSync(destDir, { recursive: true });
+  const expectedNames = new Set<string>();
 
   for (const entry of fs.readdirSync(srcDir)) {
     const srcPath = path.join(srcDir, entry);
     const stat = fs.statSync(srcPath);
+    const skillName = stat.isDirectory() ? entry : entry.replace(/\.md$/, "");
+    if (opts?.cortexPath && opts.scope && !isSkillEnabled(opts.cortexPath, opts.scope, skillName)) {
+      continue;
+    }
 
     if (stat.isFile() && entry.endsWith(".md")) {
+      expectedNames.add(entry);
       symlinkFile(srcPath, path.join(destDir, entry), managedRoot);
     } else if (stat.isDirectory()) {
       const skillFile = path.join(srcPath, "SKILL.md");
       if (fs.existsSync(skillFile)) {
+        expectedNames.add(entry);
         // Symlink the entire skill directory so bundled scripts and assets are accessible.
         // Relative paths in the skill body remain valid because the directory structure is preserved.
         symlinkFile(srcPath, path.join(destDir, entry), managedRoot);
       }
     }
   }
-}
 
-function getPackageVersion(): string {
-  try {
-    const pkgPath = path.join(ROOT, "package.json");
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-    return pkg.version || "1.0.0";
-  } catch (err: unknown) {
-    debugLog(`getPackageVersion: failed to read package.json: ${errorMessage(err)}`);
-    return "1.0.0";
-  }
+  cleanupManagedSkillLinks(destDir, expectedNames, managedRoot);
 }
 
 export function writeSkillMd(cortexPath: string) {
@@ -181,7 +204,9 @@ export function writeSkillMd(cortexPath: string) {
   const sessionStartCmd = lifecycle.sessionStart.replace(/"/g, '\\"');
   const promptCmd = lifecycle.userPromptSubmit.replace(/"/g, '\\"');
   const stopCmd = lifecycle.stop.replace(/"/g, '\\"');
-  const version = getPackageVersion();
+  const version = VERSION;
+  const toolCount = getToolCount();
+  const toolCatalog = renderToolCatalogMarkdown();
 
   const content = `---
 name: cortex
@@ -216,38 +241,9 @@ Cursor, Codex, and more.
 - **UserPromptSubmit**: searches cortex, injects matching context with trust filtering and token budgeting
 - **Stop**: commits and pushes any cortex changes to remote
 
-## MCP tools (29)
+## MCP tools (${toolCount})
 
-**Search and browse:**
-- \`search_knowledge\`: FTS5 search with synonym expansion across the project store
-- \`get_memory_detail\`: fetch full content of a memory by id (progressive disclosure)
-- \`get_project_summary\`: project summary card and available docs
-- \`list_projects\`: all projects in the active profile
-- \`get_findings\`: read recent findings without a search query
-
-**Backlog management:**
-- \`get_backlog\`: read tasks for one or all projects, or fetch a single item by ID or text
-- \`add_backlog_item\`: add a task to the Queue section
-- \`add_backlog_items\`: bulk add multiple tasks in one call
-- \`complete_backlog_item\`: match by text, move to Done
-- \`complete_backlog_items\`: bulk complete multiple items in one call
-- \`update_backlog_item\`: change priority, context, or section
-
-**Finding capture:**
-- \`add_finding\`: append insight under today\'s date with optional citation metadata
-- \`add_findings\`: bulk add multiple findings in one call
-- \`remove_finding\`: remove a finding by matching text
-- \`remove_findings\`: bulk remove multiple findings in one call
-- \`push_changes\`: commit and push all cortex changes
-
-**Memory quality:**
-- \`pin_memory\`: promote important memory into CANONICAL_MEMORIES.md
-- \`memory_feedback\`: record helpful/reprompt/regression outcomes
-
-**Data management:**
-- \`export_project\`: export project data as portable JSON for sharing or backup
-- \`import_project\`: import project from previously exported JSON
-- \`manage_project(project, action: "archive"|"unarchive")\`: archive or restore a project
+${toolCatalog}
 
 `;
 

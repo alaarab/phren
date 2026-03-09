@@ -128,7 +128,7 @@ function gitRemoteStatus(cortexPath: string): { ok: boolean; detail: string } {
   }
 }
 
-function copyStarterFile(src: string, dest: string): string | null {
+function copyStarterFile(cortexPath: string, src: string, dest: string): string | null {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   if (!fs.existsSync(dest)) {
     fs.copyFileSync(src, dest);
@@ -141,9 +141,12 @@ function copyStarterFile(src: string, dest: string): string | null {
     return null;
   }
 
-  const backupPath = `${dest}.bak`;
-  const stagedPath = `${dest}.new`;
-  fs.copyFileSync(dest, backupPath);
+  const relative = path.relative(cortexPath, dest);
+  const stagingDir = path.join(cortexPath, ".runtime", "starter-updates", path.dirname(relative));
+  fs.mkdirSync(stagingDir, { recursive: true });
+  const currentPath = path.join(stagingDir, `${path.basename(dest)}.current`);
+  const stagedPath = path.join(stagingDir, `${path.basename(dest)}.new`);
+  fs.copyFileSync(dest, currentPath);
   fs.copyFileSync(src, stagedPath);
   return stagedPath;
 }
@@ -156,7 +159,7 @@ export function applyStarterTemplateUpdates(cortexPath: string): string[] {
   const starterClaude = path.join(starterGlobal, "CLAUDE.md");
   const targetClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(starterClaude)) {
-    const written = copyStarterFile(starterClaude, targetClaude);
+    const written = copyStarterFile(cortexPath, starterClaude, targetClaude);
     if (written) updates.push(path.relative(cortexPath, written));
   }
 
@@ -166,7 +169,7 @@ export function applyStarterTemplateUpdates(cortexPath: string): string[] {
     fs.mkdirSync(targetSkillsDir, { recursive: true });
     for (const f of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
       if (!f.isFile()) continue;
-      const written = copyStarterFile(path.join(starterSkillsDir, f.name), path.join(targetSkillsDir, f.name));
+      const written = copyStarterFile(cortexPath, path.join(starterSkillsDir, f.name), path.join(targetSkillsDir, f.name));
       if (written) updates.push(path.relative(cortexPath, written));
     }
   }

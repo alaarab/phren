@@ -53,7 +53,7 @@ export function backlogsByFilter(items: BacklogItem[], filter: string): BacklogI
   const needle = filter.toLowerCase().trim();
   if (!needle) return items;
   return items.filter((item) =>
-    `${item.id} ${item.line} ${item.context || ""}`.toLowerCase().includes(needle),
+    `${item.id} ${item.line} ${item.context || ""} ${item.githubIssue ? `#${item.githubIssue}` : ""} ${item.githubUrl || ""}`.toLowerCase().includes(needle),
   );
 }
 

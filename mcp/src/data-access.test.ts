@@ -4,6 +4,8 @@ import {
   addBacklogItem,
   completeBacklogItem,
   updateBacklogItem,
+  linkBacklogItemIssue,
+  resolveBacklogItem,
   workNextBacklogItem,
   pinBacklogItem,
   unpinBacklogItem,
@@ -196,6 +198,30 @@ describe("readBacklog", () => {
     expect(result.data.items.Done).toHaveLength(1);
     expect(result.data.items.Done[0].line).toBe("task completed");
   });
+
+  it("parses GitHub issue metadata stored under backlog items", () => {
+    const content = `# testproject backlog
+
+## Active
+
+- [ ] Implement auth middleware [high] <!-- bid:deadbeef -->
+  Context: protect admin routes
+  GitHub: #14 https://github.com/alaarab/cortex/issues/14
+
+## Queue
+
+## Done
+`;
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
+    const result = readBacklog(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.items.Active[0].stableId).toBe("deadbeef");
+    expect(result.data.items.Active[0].context).toBe("protect admin routes");
+    expect(result.data.items.Active[0].githubIssue).toBe(14);
+    expect(result.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+  });
 });
 
 describe("addBacklogItem", () => {
@@ -290,6 +316,60 @@ describe("backlog mutation helpers", () => {
     expect(moved).toBeDefined();
     expect(moved?.priority).toBe("high");
     expect(moved?.context).toContain("burst traffic");
+  });
+
+  it("updateBacklogItem links and unlinks GitHub issue metadata", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    let msg = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", {
+      github_issue: "#14",
+      github_url: "https://github.com/alaarab/cortex/issues/14",
+    });
+    expect(resultMsg(msg)).toContain("github -> #14");
+
+    let after = resolveBacklogItem(tmpDir, PROJECT, "Add rate limiting");
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.githubIssue).toBe(14);
+    expect(after.data.githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+
+    msg = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", {
+      unlink_github: true,
+    });
+    expect(resultMsg(msg)).toContain("github link removed");
+
+    after = resolveBacklogItem(tmpDir, PROJECT, "Add rate limiting");
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.githubIssue).toBeUndefined();
+    expect(after.data.githubUrl).toBeUndefined();
+  });
+
+  it("linkBacklogItemIssue persists GitHub metadata across section moves", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const linked = linkBacklogItemIssue(tmpDir, PROJECT, "Add rate limiting", {
+      github_issue: 22,
+      github_url: "https://github.com/alaarab/cortex/issues/22",
+    });
+    expect(linked.ok).toBe(true);
+
+    const moved = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", { section: "active" });
+    expect(moved.ok).toBe(true);
+
+    const after = resolveBacklogItem(tmpDir, PROJECT, "Add rate limiting");
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.section).toBe("Active");
+    expect(after.data.githubIssue).toBe(22);
+    expect(after.data.githubUrl).toBe("https://github.com/alaarab/cortex/issues/22");
+  });
+
+  it("rejects invalid github_url values during backlog updates", () => {
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    const msg = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", {
+      github_url: "https://example.com/issues/14",
+    });
+    expect(msg.ok).toBe(false);
+    expect(resultMsg(msg)).toContain("github_url must be a valid GitHub issue URL");
   });
 
   it("tidyBacklogDone writes archive and trims done list", () => {

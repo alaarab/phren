@@ -43,6 +43,8 @@ export interface BacklogItem {
   priority?: "high" | "medium" | "low";
   context?: string;
   pinned?: boolean;
+  githubIssue?: number;
+  githubUrl?: string;
 }
 
 export interface BacklogDoc {
@@ -78,13 +80,72 @@ function stripBulletPrefix(line: string): { checked: boolean; body: string } {
   return { checked, body };
 }
 
-function parseContext(lines: string[], idx: number): { context?: string; linesToSkip: number } {
-  const next = lines[idx + 1] || "";
-  if (!next.trim().startsWith("Context:")) return { linesToSkip: 0 };
+function parseGitHubIssueReference(raw: string): { githubIssue?: number; githubUrl?: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+
+  const urlMatch = trimmed.match(/https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/(\d+)(?:[?#][^\s]*)?/);
+  const issueMatch = trimmed.match(/#?(\d+)/);
+
+  const githubIssue = urlMatch
+    ? Number.parseInt(urlMatch[1], 10)
+    : issueMatch
+      ? Number.parseInt(issueMatch[1], 10)
+      : undefined;
+  const githubUrl = urlMatch ? urlMatch[0] : undefined;
+
   return {
-    context: next.trim().slice("Context:".length).trim(),
-    linesToSkip: 1,
+    githubIssue: Number.isFinite(githubIssue) ? githubIssue : undefined,
+    githubUrl,
   };
+}
+
+function isValidGitHubIssueUrl(raw: string): boolean {
+  return Boolean(parseGitHubIssueReference(raw).githubUrl);
+}
+
+function formatGitHubIssueReference(item: BacklogItem): string | undefined {
+  if (!item.githubIssue && !item.githubUrl) return undefined;
+  if (item.githubIssue && item.githubUrl) return `#${item.githubIssue} ${item.githubUrl}`;
+  if (item.githubIssue) return `#${item.githubIssue}`;
+  return item.githubUrl;
+}
+
+function parseContinuation(lines: string[], idx: number): {
+  context?: string;
+  githubIssue?: number;
+  githubUrl?: string;
+  linesToSkip: number;
+} {
+  let context: string | undefined;
+  let githubIssue: number | undefined;
+  let githubUrl: string | undefined;
+  let linesToSkip = 0;
+
+  for (let cursor = idx + 1; cursor < lines.length; cursor++) {
+    const raw = lines[cursor];
+    if (!raw.startsWith("  ")) break;
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      linesToSkip++;
+      continue;
+    }
+    if (trimmed.startsWith("Context:")) {
+      context = trimmed.slice("Context:".length).trim();
+      linesToSkip++;
+      continue;
+    }
+    if (trimmed.startsWith("GitHub:")) {
+      const parsed = parseGitHubIssueReference(trimmed.slice("GitHub:".length));
+      githubIssue = parsed.githubIssue;
+      githubUrl = parsed.githubUrl;
+      linesToSkip++;
+      continue;
+    }
+    break;
+  }
+
+  return { context, githubIssue, githubUrl, linesToSkip };
 }
 
 function ensureProject(cortexPath: string, project: string): CortexResult<string> {
@@ -160,7 +221,7 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
     const { clean: cleanBody, bid } = stripBid(parsed.body);
     const pinned = detectPinned(cleanBody);
     const priority = normalizePriority(cleanBody);
-    const context = parseContext(lines, i);
+    const continuation = parseContinuation(lines, i);
     const sectionPrefix = section === "Active" ? "A" : section === "Queue" ? "Q" : "D";
     sectionCounters[section]++;
     items[section].push({
@@ -170,10 +231,12 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
       line: cleanBody,
       checked: parsed.checked || section === "Done",
       priority,
-      context: context.context,
+      context: continuation.context,
       pinned: pinned || undefined,
+      githubIssue: continuation.githubIssue,
+      githubUrl: continuation.githubUrl,
     });
-    i += context.linesToSkip;
+    i += continuation.linesToSkip;
   }
 
   return {
@@ -192,6 +255,8 @@ function renderBacklog(doc: BacklogDoc): string {
     for (const item of doc.items[section]) {
       out.push(normalizeBacklogItemLine(item));
       if (item.context) out.push(`  Context: ${item.context}`);
+      const githubRef = formatGitHubIssueReference(item);
+      if (githubRef) out.push(`  GitHub: ${githubRef}`);
     }
     out.push("");
   }
@@ -295,6 +360,15 @@ export function readBacklogs(cortexPath: string, profile?: string): BacklogDoc[]
     result.push(parsed.data);
   }
   return result;
+}
+
+export function resolveBacklogItem(cortexPath: string, project: string, match: string): CortexResult<BacklogItem> {
+  const parsed = readBacklog(cortexPath, project);
+  if (!parsed.ok) return forwardErr(parsed);
+  const found = findItemByMatch(parsed.data, match);
+  if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+  if (!found.match) return backlogItemNotFound(project, match);
+  return cortexOk(parsed.data.items[found.match.section][found.match.index]);
 }
 
 export function addBacklogItem(cortexPath: string, project: string, item: string): CortexResult<string> {
@@ -406,7 +480,7 @@ export function updateBacklogItem(
   cortexPath: string,
   project: string,
   match: string,
-  updates: { priority?: string; context?: string; section?: string }
+  updates: { priority?: string; context?: string; section?: string; github_issue?: number | string; github_url?: string; unlink_github?: boolean }
 ): CortexResult<string> {
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
@@ -436,6 +510,31 @@ export function updateBacklogItem(
       if (item.context) item.context = `${item.context}; ${updates.context}`;
       else item.context = updates.context;
       changes.push("context updated");
+    }
+
+    if (updates.unlink_github) {
+      item.githubIssue = undefined;
+      item.githubUrl = undefined;
+      changes.push("github link removed");
+    } else if (updates.github_issue !== undefined || updates.github_url !== undefined) {
+      if (updates.github_url && !isValidGitHubIssueUrl(updates.github_url)) {
+        return cortexErr("github_url must be a valid GitHub issue URL.", CortexError.VALIDATION_ERROR);
+      }
+      const githubIssueRaw = typeof updates.github_issue === "string"
+        ? updates.github_issue.trim()
+        : updates.github_issue !== undefined
+          ? String(updates.github_issue)
+          : "";
+      const parsedIssue = parseGitHubIssueReference([
+        githubIssueRaw,
+        updates.github_url?.trim() || "",
+      ].filter(Boolean).join(" "));
+      if (!parsedIssue.githubIssue && !parsedIssue.githubUrl) {
+        return cortexErr("GitHub link update requires a valid issue number and/or GitHub issue URL.", CortexError.VALIDATION_ERROR);
+      }
+      item.githubIssue = parsedIssue.githubIssue;
+      item.githubUrl = parsedIssue.githubUrl;
+      changes.push(item.githubIssue ? `github -> #${item.githubIssue}` : "github link updated");
     }
 
     if (updates.section) {
@@ -562,4 +661,50 @@ export function tidyBacklogDone(cortexPath: string, project: string, keep: numbe
 
 export function backlogMarkdown(doc: BacklogDoc): string {
   return renderBacklog(doc);
+}
+
+export function linkBacklogItemIssue(
+  cortexPath: string,
+  project: string,
+  match: string,
+  link: { github_issue?: number | string; github_url?: string; unlink?: boolean }
+): CortexResult<BacklogItem> {
+  const bPath = backlogFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+
+  return withSafeLock(bPath, () => {
+    const parsed = readBacklog(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return backlogItemNotFound(project, match);
+
+    const item = parsed.data.items[found.match.section][found.match.index];
+    if (link.unlink) {
+      item.githubIssue = undefined;
+      item.githubUrl = undefined;
+    } else {
+      if (link.github_url && !isValidGitHubIssueUrl(link.github_url)) {
+        return cortexErr("github_url must be a valid GitHub issue URL.", CortexError.VALIDATION_ERROR);
+      }
+      const githubIssueRaw = typeof link.github_issue === "string"
+        ? link.github_issue.trim()
+        : link.github_issue !== undefined
+          ? String(link.github_issue)
+          : "";
+      const parsedLink = parseGitHubIssueReference([
+        githubIssueRaw,
+        link.github_url?.trim() || "",
+      ].filter(Boolean).join(" "));
+      if (!parsedLink.githubIssue && !parsedLink.githubUrl) {
+        return cortexErr("GitHub link update requires a valid issue number and/or GitHub issue URL.", CortexError.VALIDATION_ERROR);
+      }
+      item.githubIssue = parsedLink.githubIssue;
+      item.githubUrl = parsedLink.githubUrl;
+    }
+
+    writeBacklogDoc(parsed.data);
+    return cortexOk(item);
+  });
 }

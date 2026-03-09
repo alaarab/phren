@@ -2,7 +2,7 @@
 
 MCP server that indexes your personal cortex and exposes it to AI agents via full-text search.
 
-On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index. 48 tools let agents search, browse, manage backlogs, capture findings, and track entities across your projects.
+On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index. 51 tools let agents search, browse, manage backlogs, capture findings, link backlog items to GitHub issues, and track entities across your projects.
 
 ## Install
 

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startLiveStatePoller } from "./shell-entry.js";
+import * as path from "path";
+import { startLiveStatePoller, resolveStartupIntroPlan } from "./shell-entry.js";
+import { makeTempDir, writeFile } from "./test-helpers.js";
 
 describe("startLiveStatePoller", () => {
   beforeEach(() => {
@@ -130,5 +132,54 @@ describe("startLiveStatePoller", () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(shell.invalidateSubsectionsCache).not.toHaveBeenCalled();
     expect(repaint).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveStartupIntroPlan", () => {
+  it("holds on first run of a version and marks it seen", () => {
+    const tmp = makeTempDir("shell-intro-plan-");
+    try {
+      const plan = resolveStartupIntroPlan(tmp.path, "9.9.9");
+      expect(plan.mode).toBe("once-per-version");
+      expect(plan.variant).toBe("full");
+      expect(plan.holdForKeypress).toBe(true);
+      expect(plan.markSeen).toBe(true);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("uses a short final-frame dwell after the version has already been seen", () => {
+    const tmp = makeTempDir("shell-intro-plan-");
+    try {
+      writeFile(path.join(tmp.path, ".governance", "shell-state.json"), JSON.stringify({
+        version: 2,
+        view: "Projects",
+        introMode: "once-per-version",
+        introSeenVersion: "9.9.9",
+      }, null, 2));
+      const plan = resolveStartupIntroPlan(tmp.path, "9.9.9");
+      expect(plan.variant).toBe("final-frame");
+      expect(plan.holdForKeypress).toBe(false);
+      expect(plan.dwellMs).toBeGreaterThan(0);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("skips the intro entirely when disabled", () => {
+    const tmp = makeTempDir("shell-intro-plan-");
+    try {
+      writeFile(path.join(tmp.path, ".governance", "shell-state.json"), JSON.stringify({
+        version: 2,
+        view: "Projects",
+        introMode: "off",
+      }, null, 2));
+      const plan = resolveStartupIntroPlan(tmp.path, "9.9.9");
+      expect(plan.variant).toBe("skip");
+      expect(plan.mode).toBe("off");
+    } finally {
+      tmp.cleanup();
+    }
   });
 });

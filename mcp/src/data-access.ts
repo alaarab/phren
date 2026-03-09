@@ -27,11 +27,13 @@ export type { BacklogSection, BacklogItem, BacklogDoc } from "./data-backlog.js"
 export {
   readBacklog,
   readBacklogs,
+  resolveBacklogItem,
   addBacklogItem,
   addBacklogItems,
   completeBacklogItems,
   completeBacklogItem,
   updateBacklogItem,
+  linkBacklogItemIssue,
   pinBacklogItem,
   unpinBacklogItem,
   workNextBacklogItem,

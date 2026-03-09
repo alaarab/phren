@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, homePath, type CortexErrorCode } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
-import { VERSION } from "./init-shared.js";
+import { PACKAGE_SPEC } from "./package-metadata.js";
 
 export interface HookError {
   code: CortexErrorCode;
@@ -73,7 +73,7 @@ function resolveCliEntryScript(): string | null {
 }
 
 function cortexPackageSpec(): string {
-  return `@alaarab/cortex@${VERSION}`;
+  return PACKAGE_SPEC;
 }
 
 export interface LifecycleCommands {

@@ -2,12 +2,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { runtimeFile, getProjectDirs } from "./shared.js";
 import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
 import { approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.js";
 import { addProjectFromPath } from "./core-project.js";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 import type { CortexResult } from "./shared.js";
 import type { McpToolResult } from "./mcp-types.js";
@@ -134,6 +136,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({}),
     },
     async () => {
+      const activeProfile = (() => {
+        try {
+          return resolveRuntimeProfile(cortexPath);
+        } catch {
+          return profile || "";
+        }
+      })();
+
       // Version
       let version = "unknown";
       try {
@@ -147,7 +157,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       // FTS index (lives in /tmp/cortex-fts-*/, not .runtime/)
       let indexStatus: { exists: boolean; sizeBytes?: number } = { exists: false };
       try {
-        indexStatus = findFtsCacheForPath(cortexPath, profile);
+        indexStatus = findFtsCacheForPath(cortexPath, activeProfile);
       } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck ftsCacheCheck: ${err instanceof Error ? err.message : String(err)}\n`);
       }
@@ -170,26 +180,20 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       // Profile/machine info
-      const activeProfile = profile || "(default)";
       const machineName = (() => {
         try {
-          const machinesPath = path.join(cortexPath, "machines.yaml");
-          if (fs.existsSync(machinesPath)) {
-            const content = fs.readFileSync(machinesPath, "utf8");
-            const hostnameMatch = content.match(new RegExp(`^\\s*(\\S+):`, "m"));
-            return hostnameMatch ? hostnameMatch[1] : undefined;
-          }
+          return os.hostname();
         } catch (err: unknown) {
           if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck machineName: ${err instanceof Error ? err.message : String(err)}\n`);
         }
         return undefined;
       })();
 
-      const projectCount = getProjectDirs(cortexPath, profile).length;
+      const projectCount = getProjectDirs(cortexPath, activeProfile).length;
 
       const lines = [
         `Cortex v${version}`,
-        `Profile: ${activeProfile}`,
+        `Profile: ${activeProfile || "(default)"}`,
         machineName ? `Machine: ${machineName}` : null,
         `Projects: ${projectCount}`,
         `FTS index: ${indexStatus.exists ? `ok (${Math.round((indexStatus.sizeBytes ?? 0) / 1024)} KB)` : "missing"}`,
@@ -203,7 +207,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         message: lines.join("\n"),
         data: {
           version,
-          profile: activeProfile,
+          profile: activeProfile || "(default)",
           machine: machineName ?? null,
           projectCount,
           index: indexStatus,

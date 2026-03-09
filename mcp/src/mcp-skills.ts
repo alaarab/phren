@@ -3,87 +3,10 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { getProjectDirs } from "./shared.js";
 import { isValidProjectName } from "./utils.js";
 import { parseSkillFrontmatter, validateSkillFrontmatter } from "./link-skills.js";
-import { removeSkillPath } from "./skill-files.js";
-
-interface SkillEntry {
-  name: string;
-  source: string;
-  format: "flat" | "folder";
-  path: string;
-  description?: string;
-}
-
-function collectSkills(root: string, sourceLabel: string, seen: Set<string>): SkillEntry[] {
-  if (!fs.existsSync(root)) return [];
-  const results: SkillEntry[] = [];
-
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const isFolder = entry.isDirectory();
-    const filePath = isFolder
-      ? path.join(root, entry.name, "SKILL.md")
-      : entry.name.endsWith(".md") ? path.join(root, entry.name) : null;
-
-    if (!filePath || seen.has(filePath) || !fs.existsSync(filePath)) continue;
-    seen.add(filePath);
-
-    const { frontmatter } = parseSkillFrontmatter(fs.readFileSync(filePath, "utf8"));
-    results.push({
-      name: isFolder ? entry.name : entry.name.replace(/\.md$/, ""),
-      source: sourceLabel,
-      format: isFolder ? "folder" : "flat",
-      path: filePath,
-      description: frontmatter?.description as string | undefined,
-    });
-  }
-  return results;
-}
-
-function getAllSkills(cortexPath: string, profile: string): SkillEntry[] {
-  const seen = new Set<string>();
-  const all = collectSkills(path.join(cortexPath, "global", "skills"), "global", seen);
-
-  for (const dir of getProjectDirs(cortexPath, profile)) {
-    const name = path.basename(dir);
-    if (name === "global") continue;
-    all.push(...collectSkills(path.join(dir, "skills"), name, seen));
-    all.push(...collectSkills(path.join(dir, ".claude", "skills"), name, seen));
-  }
-  return all;
-}
-
-function getScopedSkills(cortexPath: string, project: string | undefined, profile: string): SkillEntry[] {
-  if (!project) return getAllSkills(cortexPath, profile);
-  const seen = new Set<string>();
-  if (project.toLowerCase() === "global") {
-    return collectSkills(path.join(cortexPath, "global", "skills"), "global", seen);
-  }
-  const projectDir = path.join(cortexPath, project);
-  return [
-    ...collectSkills(path.join(projectDir, "skills"), project, seen),
-    ...collectSkills(path.join(projectDir, ".claude", "skills"), project, seen),
-  ];
-}
-
-type ResolvedSkill = { path: string; format: "flat" | "folder"; root: string };
-
-function findSkill(cortexPath: string, profile: string, project: string | undefined, name: string): ResolvedSkill | { error: string } | null {
-  const needle = name.replace(/\.md$/i, "").toLowerCase();
-  const matches = getScopedSkills(cortexPath, project, profile).filter(s =>
-    s.name.toLowerCase() === needle && (!project || s.source.toLowerCase() === project.toLowerCase())
-  );
-  if (matches.length === 0) return null;
-  if (matches.length > 1 && !project) {
-    return { error: `Skill '${name}' exists in multiple scopes: ${matches.map(m => m.source).join(', ')}. Pass project= to disambiguate.` };
-  }
-  return {
-    path: matches[0].path,
-    format: matches[0].format,
-    root: matches[0].format === "folder" ? path.dirname(matches[0].path) : matches[0].path,
-  };
-}
+import { removeSkillPath, setSkillEnabledAndSync } from "./skill-files.js";
+import { findSkill, getAllSkills } from "./skill-registry.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, profile, withWriteQueue, updateFileInIndex } = ctx;
@@ -111,11 +34,11 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: true, message: project ? `No skills found for "${project}".` : "No skills found.", data: { skills: [] } });
       }
 
-      const lines = skills.map(s => `${s.name} (${s.source})${s.description ? ` — ${s.description}` : ""}`);
+      const lines = skills.map(s => `${s.name} (${s.source}; ${s.enabled ? "enabled" : "disabled"})${s.description ? ` — ${s.description}` : ""}`);
       return mcpResponse({
         ok: true,
         message: `${skills.length} skill(s):\n${lines.join("\n")}`,
-        data: { skills: skills.map(({ name, source, format, path: p, description }) => ({ name, source, format, path: p, description: description ?? null })) },
+        data: { skills: skills.map(({ name, source, format, path: p, description, enabled }) => ({ name, source, format, path: p, description: description ?? null, enabled })) },
       });
     }
   );
@@ -245,4 +168,43 @@ export function register(server: McpServer, ctx: McpContext): void {
       });
     }
   );
+
+  for (const action of [
+    { tool: "enable_skill", enabled: true, verb: "Enable" },
+    { tool: "disable_skill", enabled: false, verb: "Disable" },
+  ] as const) {
+    server.registerTool(
+      action.tool,
+      {
+        title: `◆ cortex · ${action.enabled ? "enable" : "disable"} skill`,
+        description: `${action.verb} a skill without deleting its file.`,
+        inputSchema: z.object({
+          name: z.string().describe("Skill name (without .md)."),
+          project: z.string().describe("Project scope or 'global'."),
+        }),
+      },
+      async ({ name, project }) => {
+        if (project.toLowerCase() !== "global" && !isValidProjectName(project)) {
+          return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        }
+
+        const result = findSkill(cortexPath, profile, project, name);
+        if (!result) {
+          return mcpResponse({ ok: false, error: `Skill "${name}" not found in "${project}".` });
+        }
+        if ("error" in result) {
+          return mcpResponse({ ok: false, error: result.error });
+        }
+
+        return withWriteQueue(async () => {
+          setSkillEnabledAndSync(cortexPath, project, result.name, action.enabled);
+          return mcpResponse({
+            ok: true,
+            message: `${action.verb}d skill "${result.name}" in ${project}.`,
+            data: { name: result.name, project, enabled: action.enabled },
+          });
+        });
+      }
+    );
+  }
 }

@@ -201,7 +201,7 @@ describe("mcp-data: export/import round-trip", () => {
     const payload = {
       project: "backlog-test",
       backlog: {
-        Active: [{ line: "Active task", checked: false }],
+        Active: [{ line: "Active task", checked: false, githubIssue: 14, githubUrl: "https://github.com/alaarab/cortex/issues/14" }],
         Queue: [{ line: "Queued task", checked: false }],
         Done: [{ line: "Done task", checked: true }],
       },
@@ -213,8 +213,25 @@ describe("mcp-data: export/import round-trip", () => {
 
     const backlog = fs.readFileSync(path.join(tmp.path, "backlog-test", "backlog.md"), "utf8");
     expect(backlog).toContain("- [ ] Active task");
+    expect(backlog).toContain("GitHub: #14 https://github.com/alaarab/cortex/issues/14");
     expect(backlog).toContain("- [ ] Queued task");
     expect(backlog).toContain("- [x] Done task");
+  });
+
+  it("export includes structured GitHub issue linkage on backlog items", async () => {
+    const projectDir = path.join(tmp.path, "gh-backlog");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(
+      path.join(projectDir, "backlog.md"),
+      "# gh-backlog backlog\n\n## Active\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  GitHub: #14 https://github.com/alaarab/cortex/issues/14\n\n## Queue\n\n## Done\n"
+    );
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("export_project", { project: "gh-backlog" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.backlog.Active[0].githubIssue).toBe(14);
+    expect(res.data.backlog.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
   });
 
   it("import builds findings content from learnings array", async () => {

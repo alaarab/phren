@@ -12,6 +12,7 @@ export interface InstallPreferences {
   mcpEnabled?: boolean;
   hooksEnabled?: boolean;
   hookTools?: Record<string, boolean>;
+  disabledSkills?: Record<string, boolean>;
   installedVersion?: string;
   updatedAt?: string;
   customHooks?: CustomHookEntry[];

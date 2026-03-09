@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Cortex exposes 48 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
+Cortex exposes 51 tools through the Model Context Protocol. Available to any MCP-compatible client when the cortex server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -109,7 +109,7 @@ Move multiple backlog items to Done in one call.
 
 ### `update_backlog_item`
 
-Update a backlog item's priority, context, or section.
+Update a backlog item's priority, context, section, or linked GitHub issue.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -124,6 +124,34 @@ The `updates` object accepts:
 | `priority` | string | New priority tag: `high`, `medium`, or `low`. |
 | `context` | string | Text to append to the Context line below the item. |
 | `section` | string | Move item to this section: `Queue`, `Active`, or `Done`. |
+| `github_issue` | number or string | GitHub issue number (for example `14` or `#14`). |
+| `github_url` | string | GitHub issue URL to associate with the item. |
+| `unlink_github` | boolean | Remove any linked issue metadata from the item. |
+
+### `link_backlog_item_issue`
+
+Link or unlink an existing GitHub issue on a backlog item.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string | yes | Backlog item text, ID, or stable `bid:` hash. |
+| `issue_number` | number or string | no | Existing GitHub issue number (for example `14` or `#14`). |
+| `issue_url` | string | no | Existing GitHub issue URL. |
+| `unlink` | boolean | no | If true, remove any linked issue metadata from the backlog item. |
+
+### `promote_backlog_item_to_issue`
+
+Create a GitHub issue from a backlog item and link it back into the backlog.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string | yes | Backlog item text, ID, or stable `bid:` hash. |
+| `repo` | string | no | Target GitHub repo in `owner/name` form. If omitted, cortex tries to infer it from the project's `CLAUDE.md` or `summary.md`. |
+| `title` | string | no | Optional GitHub issue title. Defaults to the backlog item text. |
+| `body` | string | no | Optional GitHub issue body. Defaults to a body built from the backlog item plus any `Context:` line. |
+| `mark_done` | boolean | no | If true, mark the backlog item Done after creating and linking the issue. |
 
 ---
 
@@ -354,6 +382,24 @@ Delete a skill file.
 |-----------|------|----------|-------------|
 | `name` | string | yes | Skill name to remove. |
 | `project` | string | no | Project scope. Omit to remove from global skills. |
+
+### `enable_skill`
+
+Enable a skill without deleting its file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name to enable. |
+| `project` | string | yes | Skill scope: `global` or a project name. |
+
+### `disable_skill`
+
+Disable a skill without deleting its file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name to disable. |
+| `project` | string | yes | Skill scope: `global` or a project name. |
 
 ---
 

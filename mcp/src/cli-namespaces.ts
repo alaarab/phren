@@ -10,6 +10,8 @@ import {
 } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
+import { findSkill, getAllSkills } from "./skill-registry.js";
+import { setSkillEnabledAndSync } from "./skill-files.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
@@ -20,6 +22,8 @@ function printSkillsUsage() {
   console.log("  cortex skills show <name> [--project <name>]");
   console.log("  cortex skills edit <name> [--project <name>]");
   console.log("  cortex skills add <project> <path>");
+  console.log("  cortex skills enable <project|global> <name>");
+  console.log("  cortex skills disable <project|global> <name>");
   console.log("  cortex skills remove <project> <name>");
 }
 
@@ -40,53 +44,9 @@ function normalizeHookTool(raw: string | undefined): HookToolName | null {
 }
 
 function findSkillPath(name: string, profile: string, project?: string): string | null {
-  const needle = name.replace(/\.md$/i, "").toLowerCase();
-  const seenPaths = new Set<string>();
-
-  function search(root: string, sourceLabel: string): string | null {
-    if (!fs.existsSync(root)) return null;
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      const isDir = entry.isDirectory();
-      const filePath = isDir
-        ? path.join(root, entry.name, "SKILL.md")
-        : entry.name.endsWith(".md") ? path.join(root, entry.name) : null;
-      if (!filePath || seenPaths.has(filePath) || !fs.existsSync(filePath)) continue;
-      seenPaths.add(filePath);
-      const entryName = isDir ? entry.name : entry.name.replace(/\.md$/, "");
-      if (entryName.toLowerCase() === needle && (!project || sourceLabel.toLowerCase() === project.toLowerCase())) {
-        return filePath;
-      }
-    }
-    return null;
-  }
-
-  const cortexPath = getCortexPath();
-  if (project) {
-    const roots = project.toLowerCase() === "global"
-      ? [path.join(cortexPath, "global", "skills")]
-      : [
-        path.join(cortexPath, project, "skills"),
-        path.join(cortexPath, project, ".claude", "skills"),
-      ];
-    for (const root of roots) {
-      const found = search(root, project);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  const globalMatch = search(path.join(cortexPath, "global", "skills"), "global");
-  if (globalMatch) return globalMatch;
-
-  for (const dir of getProjectDirs(cortexPath, profile)) {
-    const projectName = path.basename(dir);
-    if (projectName === "global") continue;
-    const projectMatch = search(path.join(dir, "skills"), projectName);
-    if (projectMatch) return projectMatch;
-    const claudeMatch = search(path.join(dir, ".claude", "skills"), projectName);
-    if (claudeMatch) return claudeMatch;
-  }
-  return null;
+  const found = findSkill(getCortexPath(), profile, project, name);
+  if (!found || "error" in found) return null;
+  return found.path;
 }
 
 function openInEditor(filePath: string): void {
@@ -170,6 +130,27 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       fs.copyFileSync(source, dest);
       console.log(`Copied skill ${fileName} into ${project}.`);
     }
+    return;
+  }
+
+  if (subcommand === "enable" || subcommand === "disable") {
+    const scope = args[1];
+    const name = args[2];
+    if (!scope || !name) {
+      printSkillsUsage();
+      process.exit(1);
+    }
+    if (scope.toLowerCase() !== "global" && !isValidProjectName(scope)) {
+      console.error(`Invalid project name: "${scope}"`);
+      process.exit(1);
+    }
+    const resolved = findSkill(getCortexPath(), profile, scope, name);
+    if (!resolved || "error" in resolved) {
+      console.error(`Skill not found: "${name}" in "${scope}"`);
+      process.exit(1);
+    }
+    setSkillEnabledAndSync(getCortexPath(), scope, resolved.name, subcommand === "enable");
+    console.log(`${subcommand === "enable" ? "Enabled" : "Disabled"} skill ${resolved.name} in ${scope}.`);
     return;
   }
 
@@ -273,46 +254,7 @@ export function handleHooksNamespace(args: string[]) {
 }
 
 export function handleSkillList(profile: string) {
-  const sources: Array<{ name: string; source: string; format: "flat" | "folder"; path: string }> = [];
-  const seenPaths = new Set<string>();
-
-  function collectSkills(root: string, sourceLabel: string) {
-    if (!fs.existsSync(root)) return;
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      const entryPath = path.join(root, entry.name);
-      if (entry.isFile() && entry.name.endsWith(".md")) {
-        if (seenPaths.has(entryPath)) continue;
-        seenPaths.add(entryPath);
-        sources.push({
-          name: entry.name.replace(/\.md$/, ""),
-          source: sourceLabel,
-          format: "flat",
-          path: entryPath,
-        });
-        continue;
-      }
-      if (!entry.isDirectory()) continue;
-      const skillFile = path.join(entryPath, "SKILL.md");
-      if (!fs.existsSync(skillFile) || seenPaths.has(skillFile)) continue;
-      seenPaths.add(skillFile);
-      sources.push({
-        name: entry.name,
-        source: sourceLabel,
-        format: "folder",
-        path: skillFile,
-      });
-    }
-  }
-
-  const cortexPath = getCortexPath();
-  collectSkills(path.join(cortexPath, "global", "skills"), "global");
-
-  for (const dir of getProjectDirs(cortexPath, profile)) {
-    const projectName = path.basename(dir);
-    if (projectName === "global") continue;
-    collectSkills(path.join(dir, "skills"), projectName);
-    collectSkills(path.join(dir, ".claude", "skills"), projectName);
-  }
+  const sources = getAllSkills(getCortexPath(), profile);
 
   if (!sources.length) {
     console.log("No skills found.");
@@ -322,16 +264,17 @@ export function handleSkillList(profile: string) {
   const nameWidth = Math.max(4, ...sources.map((source) => source.name.length));
   const sourceWidth = Math.max(6, ...sources.map((source) => source.source.length));
   const formatWidth = Math.max(6, ...sources.map((source) => source.format.length));
+  const statusWidth = 8;
 
   console.log(
-    `${"Name".padEnd(nameWidth)}  ${"Source".padEnd(sourceWidth)}  ${"Format".padEnd(formatWidth)}  Path`
+    `${"Name".padEnd(nameWidth)}  ${"Source".padEnd(sourceWidth)}  ${"Format".padEnd(formatWidth)}  ${"Status".padEnd(statusWidth)}  Path`
   );
   console.log(
-    `${"─".repeat(nameWidth)}  ${"─".repeat(sourceWidth)}  ${"─".repeat(formatWidth)}  ${"─".repeat(30)}`
+    `${"─".repeat(nameWidth)}  ${"─".repeat(sourceWidth)}  ${"─".repeat(formatWidth)}  ${"─".repeat(statusWidth)}  ${"─".repeat(30)}`
   );
   for (const skill of sources) {
     console.log(
-      `${skill.name.padEnd(nameWidth)}  ${skill.source.padEnd(sourceWidth)}  ${skill.format.padEnd(formatWidth)}  ${skill.path}`
+      `${skill.name.padEnd(nameWidth)}  ${skill.source.padEnd(sourceWidth)}  ${skill.format.padEnd(formatWidth)}  ${(skill.enabled ? "enabled" : "disabled").padEnd(statusWidth)}  ${skill.path}`
     );
   }
   console.log(`\n${sources.length} skill(s) found.`);

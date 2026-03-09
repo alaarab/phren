@@ -13,7 +13,7 @@ This creates `~/.cortex`, configures MCP for Claude Code (and any detected agent
 
 Compatibility note:
 - `cortex add` is the supported enrollment path for an existing repo.
-- Legacy compatibility paths: `cortex projects add`, `cortex link`, and `init --from-existing` remain available only for older flows.
+- `cortex projects add`, `cortex link`, and `init --from-existing` are quarantined behind `CORTEX_ENABLE_LEGACY_ENROLLMENT=1` for one-off legacy recovery.
 
 To update the installed package:
 
@@ -21,11 +21,13 @@ To update the installed package:
 cortex update
 ```
 
-To refresh shipped starter globals after upgrading:
+To update the installed package and refresh shipped starter globals in one flow:
 
 ```bash
-npx @alaarab/cortex init --apply-starter-update
+cortex update --refresh-starter
 ```
+
+The older `npx @alaarab/cortex init --apply-starter-update` path still works when you only want to refresh starter assets without running the full update flow.
 
 To remove everything:
 
@@ -59,7 +61,7 @@ cortex migrate-findings <project> --dry-run
 
 Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, cortex creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (48)
+## MCP Tools (51)
 
 ### Search and Browse
 
@@ -78,7 +80,9 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 | `add_backlog_item` | `project`, `item` | Append a task to a project's backlog Queue section. |
 | `complete_backlog_item` | `project`, `item` | Move a backlog item to Done by text match. |
 | `complete_backlog_items` | `project`, `items[]` | Bulk complete multiple items in one call. |
-| `update_backlog_item` | `project`, `item`, `updates` | Update an item's priority, context, or section. |
+| `update_backlog_item` | `project`, `item`, `updates` | Update an item's priority, context, section, or linked GitHub issue. |
+| `link_backlog_item_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a backlog item. |
+| `promote_backlog_item_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a backlog item and write the link back. |
 
 ### Finding Capture
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, writeFile } from "./test-helpers.js";
-import { removeSkillPath } from "./skill-files.js";
+import { removeSkillPath, setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 
 let cleanup: (() => void) | undefined;
 
@@ -41,5 +41,37 @@ describe("removeSkillPath", () => {
     expect(removed).toBe(target);
     expect(fs.existsSync(target)).toBe(false);
     expect(fs.existsSync(sibling)).toBe(true);
+  });
+
+  it("disables a global skill without deleting its file and prunes the linked symlink", () => {
+    const tmp = makeTempDir("skill-files-test-");
+    cleanup = tmp.cleanup;
+
+    const priorHome = process.env.HOME;
+    const priorUserProfile = process.env.USERPROFILE;
+    process.env.HOME = tmp.path;
+    process.env.USERPROFILE = tmp.path;
+
+    try {
+      const cortexPath = path.join(tmp.path, "cortex");
+      const skillPath = path.join(cortexPath, "global", "skills", "helper.md");
+      writeFile(skillPath, "---\nname: helper\ndescription: test\n---\nbody\n");
+
+      syncSkillLinksForScope(cortexPath, "global");
+      const linked = path.join(tmp.path, ".claude", "skills", "helper.md");
+      expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
+
+      setSkillEnabledAndSync(cortexPath, "global", "helper", false);
+      expect(fs.existsSync(skillPath)).toBe(true);
+      expect(fs.existsSync(linked)).toBe(false);
+
+      setSkillEnabledAndSync(cortexPath, "global", "helper", true);
+      expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
+    } finally {
+      if (priorHome === undefined) delete process.env.HOME;
+      else process.env.HOME = priorHome;
+      if (priorUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = priorUserProfile;
+    }
   });
 });

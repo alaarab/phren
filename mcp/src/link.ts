@@ -331,7 +331,7 @@ function addTokenAnnotation(filePath: string) {
 function linkGlobal(cortexPath: string, tools: Set<string>) {
   log("  global skills -> ~/.claude/skills/");
   const skillsDir = homePath(".claude", "skills");
-  linkSkillsDir(path.join(cortexPath, "global", "skills"), skillsDir, cortexPath, symlinkFile);
+  linkSkillsDir(path.join(cortexPath, "global", "skills"), skillsDir, cortexPath, symlinkFile, { cortexPath, scope: "global" });
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
@@ -397,7 +397,7 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   const config = readProjectConfig(cortexPath, project);
   if (config.skills !== false && fs.existsSync(projectSkills)) {
     const targetSkills = path.join(target, ".claude", "skills");
-    linkSkillsDir(projectSkills, targetSkills, cortexPath, symlinkFile);
+    linkSkillsDir(projectSkills, targetSkills, cortexPath, symlinkFile, { cortexPath, scope: project });
   }
 
   // Per-project MCP servers

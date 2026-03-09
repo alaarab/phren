@@ -2,15 +2,11 @@
  * Shared constants and utilities for init modules.
  * Kept separate to avoid circular dependencies between init-config and init-setup.
  */
-import * as fs from "fs";
 import * as path from "path";
-import { fileURLToPath } from "url";
 import { homePath } from "./shared.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const ROOT = path.join(__dirname, "..", "..");
-const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-export const VERSION = pkg.version as string;
+import { ROOT as PACKAGE_ROOT, VERSION } from "./package-metadata.js";
+export const ROOT = PACKAGE_ROOT;
+export { VERSION };
 export const STARTER_DIR = path.join(ROOT, "starter");
 export const DEFAULT_CORTEX_PATH = homePath(".cortex");
 

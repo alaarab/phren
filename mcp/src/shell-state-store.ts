@@ -23,9 +23,11 @@ export interface ShellState {
   filter?: string;
   page?: number;
   perPage?: number;
+  introMode?: "always" | "once-per-version" | "off";
+  introSeenVersion?: string;
 }
 
-const SHELL_STATE_VERSION = 1;
+const SHELL_STATE_VERSION = 2;
 
 function shellStatePath(cortexPath: string): string {
   return path.join(cortexPath, ".governance", "shell-state.json");
@@ -38,6 +40,7 @@ export function loadShellState(cortexPath: string): ShellState {
     view: "Projects",
     page: 1,
     perPage: 40,
+    introMode: "once-per-version",
   };
 
   if (!fs.existsSync(file)) return fallback;
@@ -52,6 +55,8 @@ export function loadShellState(cortexPath: string): ShellState {
       filter: raw.filter,
       page: Number.isFinite(raw.page) ? Number(raw.page) : fallback.page,
       perPage: Number.isFinite(raw.perPage) ? Number(raw.perPage) : fallback.perPage,
+      introMode: raw.introMode === "always" || raw.introMode === "off" ? raw.introMode : "once-per-version",
+      introSeenVersion: typeof raw.introSeenVersion === "string" ? raw.introSeenVersion : undefined,
     };
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadShellState parse: ${errorMessage(err)}\n`);
@@ -70,6 +75,8 @@ export function saveShellState(cortexPath: string, state: ShellState): void {
       filter: state.filter,
       page: state.page,
       perPage: state.perPage,
+      introMode: state.introMode,
+      introSeenVersion: state.introSeenVersion,
     };
     fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
     return cortexOk(undefined);

@@ -28,6 +28,8 @@ import {
   recentAccepted,
   recentUsage,
 } from "./memory-ui-data.js";
+import { findSkill } from "./skill-registry.js";
+import { setSkillEnabledAndSync } from "./skill-files.js";
 
 export interface ReviewUiOptions {
   authToken?: string;
@@ -352,6 +354,32 @@ export function createReviewUiHttpServer(
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
         }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/skill-toggle") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const name = String(parsed.name || "");
+        const enabled = String(parsed.enabled || "") === "true";
+        if (!project || !name || (project.toLowerCase() !== "global" && !isValidProjectName(project))) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Invalid skill toggle request" }));
+          return;
+        }
+        const skill = findSkill(cortexPath, profile || "", project, name);
+        if (!skill || "error" in skill) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: skill && "error" in skill ? skill.error : "Skill not found" }));
+          return;
+        }
+        setSkillEnabledAndSync(cortexPath, project, skill.name, enabled);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, enabled }));
       });
       return;
     }

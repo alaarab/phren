@@ -4,7 +4,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as fs from "fs";
 import * as path from "path";
-import { fileURLToPath } from "url";
 import {
   findCortexPathWithArg,
   debugLog,
@@ -32,6 +31,7 @@ import { errorMessage } from "./utils.js";
 import { runTopLevelCommand } from "./entrypoint.js";
 import { startEmbeddingWarmup } from "./startup-embedding.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { VERSION as PACKAGE_VERSION } from "./package-metadata.js";
 
 const handledTopLevelCommand = await runTopLevelCommand(process.argv.slice(2));
 
@@ -40,17 +40,6 @@ const handledTopLevelCommand = await runTopLevelCommand(process.argv.slice(2));
 const cortexArg = handledTopLevelCommand ? undefined : process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
 const cortexPath = handledTopLevelCommand ? "" : findCortexPathWithArg(cortexArg);
 
-const __indexDirname = path.dirname(fileURLToPath(import.meta.url));
-const __packageRoot = path.join(__indexDirname, "..", "..");
-const PACKAGE_VERSION = (() => {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__packageRoot, "package.json"), "utf8"));
-    return pkg.version || "0.0.0";
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] PACKAGE_VERSION: ${errorMessage(err)}\n`);
-    return "0.0.0";
-  }
-})();
 const TOOL_NAME_ALIASES: Record<string, string> = {
   // Backwards compat: old clients calling search_cortex still resolve
   search_cortex: "search_knowledge",

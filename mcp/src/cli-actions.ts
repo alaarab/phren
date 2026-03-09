@@ -212,11 +212,12 @@ export async function handleShell(args: string[], profile: string) {
 
 export async function handleUpdate(args: string[]) {
   if (args.includes("--help") || args.includes("-h")) {
-    console.log("Usage: cortex update");
+    console.log("Usage: cortex update [--refresh-starter]");
     console.log("Updates cortex to the latest version (local git clone when available, otherwise npm global package).");
+    console.log("Pass --refresh-starter to refresh global starter assets in the same flow.");
     return;
   }
-  const result = await runCortexUpdate();
+  const result = await runCortexUpdate({ refreshStarter: args.includes("--refresh-starter") });
   console.log(result.message);
   if (!result.ok) {
     process.exitCode = 1;

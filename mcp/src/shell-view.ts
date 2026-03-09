@@ -39,6 +39,7 @@ import {
   listProfiles,
 } from "./data-access.js";
 import { readInstallPreferences } from "./init-preferences.js";
+import { getScopedSkills } from "./skill-registry.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
@@ -104,11 +105,11 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
   }
 
   const viewHints: Record<string, string[]> = {
-    Projects: [`${k("↵")} ${d("open project")}`],
+    Projects: [`${k("↵")} ${d("open project")}`, `${k("i")} ${d("intro mode")}`],
     Backlog: [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
     Findings: [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
     "Review Queue": [`${k("a")} ${d("keep")}`, `${k("d")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
-    Skills: [`${k("d")} ${d("remove")}`],
+    Skills: [`${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
     Hooks: [`${k("a")} ${d("enable")}`, `${k("d")} ${d("disable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
   };
@@ -128,16 +129,97 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
 
 // ── Content height ─────────────────────────────────────────────────────────
 
-function contentHeight(): number {
+function countRenderedLines(block: string): number {
+  return block.split("\n").length;
+}
+
+function contentHeight(tabBar: string, bottomBar: string): number {
   const rows = process.stdout.rows || 24;
-  return Math.max(4, rows - 7);
+  const reserved = 1 + countRenderedLines(tabBar) + 1 + countRenderedLines(bottomBar);
+  return Math.max(4, rows - reserved);
 }
 
 // ── Projects view ──────────────────────────────────────────────────────────
 
+interface ProjectDashboardEntry {
+  name: string;
+  summary: string;
+  docs: string[];
+  activeCount: number;
+  queueCount: number;
+  findingCount: number;
+  reviewCount: number;
+}
+
+function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry[] {
+  const cards = listProjectCards(ctx.cortexPath, ctx.profile);
+  return cards.map((card) => {
+    if (card.name === "global") {
+      return {
+        ...card,
+        activeCount: 0,
+        queueCount: 0,
+        findingCount: 0,
+        reviewCount: 0,
+      };
+    }
+
+    const backlog = readBacklog(ctx.cortexPath, card.name);
+    const findings = readFindings(ctx.cortexPath, card.name);
+    const review = readReviewQueue(ctx.cortexPath, card.name);
+
+    return {
+      ...card,
+      activeCount: backlog.ok ? backlog.data.items.Active.length : 0,
+      queueCount: backlog.ok ? backlog.data.items.Queue.length : 0,
+      findingCount: findings.ok ? findings.data.length : 0,
+      reviewCount: review.ok ? review.data.length : 0,
+    };
+  });
+}
+
+function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntry[], height: number): string[] {
+  const runtime = readRuntimeHealth(ctx.cortexPath);
+  const scoped = entries.filter((entry) => entry.name !== "global");
+  const totals = scoped.reduce((acc, entry) => {
+    acc.active += entry.activeCount;
+    acc.queue += entry.queueCount;
+    acc.findings += entry.findingCount;
+    acc.review += entry.reviewCount;
+    return acc;
+  }, { active: 0, queue: 0, findings: 0, review: 0 });
+
+  const activePreview = scoped
+    .filter((entry) => entry.activeCount > 0 || entry.queueCount > 0)
+    .slice(0, 3)
+    .map((entry) => `${style.bold(entry.name)} ${style.dim(`A${entry.activeCount} · Q${entry.queueCount}`)}`);
+  const findingsPreview = scoped
+    .filter((entry) => entry.findingCount > 0)
+    .slice(0, 3)
+    .map((entry) => `${style.bold(entry.name)} ${style.dim(`${entry.findingCount} findings`)}`);
+
+  const lines = [
+    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
+    ctx.state.project
+      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim("· ↵ opens selected project backlog")}`
+      : `  ${style.dim("No project selected yet")}  ${style.dim("· ↵ sets context and opens backlog")}`,
+    `  ${style.dim("Sync")} ${style.dim(runtime.lastSync?.lastPushStatus || runtime.lastAutoSave?.status || "unknown")}  ${style.dim("·")}  ${style.dim("unsynced")} ${style.bold(String(runtime.lastSync?.unsyncedCommits ?? 0))}  ${style.dim("·")}  ${style.dim("intro")} ${style.cyan(ctx.state.introMode || "once-per-version")}`,
+  ];
+
+  if (height >= 12) {
+    lines.push("");
+    lines.push(`  ${style.bold("Backlog pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active backlog across this profile.")}`);
+    lines.push(`  ${style.bold("Recent findings")}  ${findingsPreview.length ? findingsPreview.join(style.dim("  ·  ")) : style.dim("No findings yet.")}`);
+  }
+
+  lines.push("");
+  lines.push(`  ${style.bold("Projects")}  ${style.dim("press ↵ to open a project, / to filter, :intro to tune startup")}`);
+  return lines;
+}
+
 function renderProjectsView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = process.stdout.columns || 80;
-  const cards = listProjectCards(ctx.cortexPath, ctx.profile);
+  const cards = collectProjectDashboardEntries(ctx);
   const filtered = ctx.state.filter
     ? cards.filter((c) =>
       `${c.name} ${c.summary} ${c.docs.join(" ")}`.toLowerCase().includes(ctx.state.filter!.toLowerCase()),
@@ -147,6 +229,9 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
   if (!filtered.length) {
     return [style.dim("  No projects in this profile.")];
   }
+
+  const dashboardLines = renderProjectsDashboard(ctx, cards, height);
+  const listHeight = Math.max(4, height - dashboardLines.length);
 
   const allLines: string[] = [];
   let cursorFirstLine = 0;
@@ -161,10 +246,10 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
     const cursorChar = isSelected ? style.cyan("▶") : " ";
     const bullet = isActive ? style.green("●") : style.dim("○");
     const nameStr = isActive ? style.boldGreen(card.name) : style.bold(card.name);
-    const docsStr = style.dim(`[${card.docs.join(" · ") || "no docs"}]`);
+    const docsStr = style.dim(`[A${card.activeCount} · Q${card.queueCount} · F${card.findingCount} · R${card.reviewCount}]`);
 
     let nameRow = `  ${cursorChar} ${bullet} ${nameStr}  ${docsStr}`;
-    let summaryRow = `        ${style.dim(card.summary || "")}`;
+    let summaryRow = `        ${style.dim(card.summary || "No summary yet.")}`;
 
     if (isSelected) {
       nameRow = `\x1b[7m${padToWidth(nameRow, cols)}${RESET}`;
@@ -176,7 +261,7 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
     if (isSelected) cursorLastLine = allLines.length - 1;
   }
 
-  const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
+  const usableHeight = Math.max(1, listHeight - (allLines.length > listHeight ? 1 : 0));
   const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
   ctx.setScroll(vp.scrollStart);
   const lines = vp.lines;
@@ -186,7 +271,7 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
     lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
   }
 
-  return lines;
+  return [...dashboardLines, ...lines];
 }
 
 // ── Backlog helpers ────────────────────────────────────────────────────────
@@ -479,30 +564,15 @@ function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: number)
 export interface SkillEntry {
   name: string;
   path: string;
+  enabled: boolean;
 }
 
 export function getProjectSkills(cortexPath: string, project: string): SkillEntry[] {
-  const dirs = [
-    path.join(cortexPath, project, "skills"),
-    path.join(cortexPath, project, ".claude", "skills"),
-  ];
-  const seen = new Set<string>();
-  const skills: SkillEntry[] = [];
-  for (const dir of dirs) {
-    if (!fs.existsSync(dir)) continue;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isFile() && entry.name.endsWith(".md")) {
-        const name = entry.name.replace(/\.md$/, "");
-        if (!seen.has(name)) { seen.add(name); skills.push({ name, path: path.join(dir, entry.name) }); }
-      } else if (entry.isDirectory()) {
-        const skillFile = path.join(dir, entry.name, "SKILL.md");
-        if (fs.existsSync(skillFile) && !seen.has(entry.name)) {
-          seen.add(entry.name); skills.push({ name: entry.name, path: skillFile });
-        }
-      }
-    }
-  }
-  return skills;
+  return getScopedSkills(cortexPath, "", project).map((skill) => ({
+    name: skill.name,
+    path: skill.path,
+    enabled: skill.enabled,
+  }));
 }
 
 function renderSkillsView(ctx: ViewContext, cursor: number, height: number): string[] {
@@ -530,7 +600,8 @@ function renderSkillsView(ctx: ViewContext, cursor: number, height: number): str
 
     const isSymlink = (() => { try { return fs.lstatSync(s.path).isSymbolicLink(); } catch { return false; } })();
     const linkTag = isSymlink ? style.dim(" →") : "";
-    let row = `  ${style.dim((i + 1).toString().padEnd(3))} ${style.bold(s.name)}${linkTag}`;
+    const status = s.enabled ? style.boldGreen("enabled ") : style.dim("disabled");
+    let row = `  ${style.dim((i + 1).toString().padEnd(3))} ${status} ${style.bold(s.name)}${linkTag}`;
     if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
     else row = truncateLine(row, cols);
     allLines.push(row);
@@ -712,9 +783,6 @@ export async function renderShell(
   setHealthLineCount: (n: number) => void,
   setSubsectionsCache: (c: SubsectionsCache | null) => void,
 ): Promise<string> {
-  const cursor = ctx.currentCursor();
-  const height = contentHeight();
-
   const projectLabel = ctx.state.project
     ? `  ${style.dim("·")}  ${style.cyan(ctx.state.project)}`
     : "";
@@ -723,6 +791,9 @@ export async function renderShell(
     : "";
   const header = `  ${gradient("◆ cortex")}${projectLabel}${filterLabel}`;
   const tabBar = renderTabBar(ctx.state);
+  const bottomBar = renderBottomBar(ctx.state, navMode, inputCtx, inputBuf);
+  const cursor = ctx.currentCursor();
+  const height = contentHeight(tabBar, bottomBar);
 
   let contentLines: string[];
   if (showHelp) {
@@ -769,7 +840,6 @@ export async function renderShell(
   while (displayed.length < height) displayed.push("");
 
   const msgLine = `  ${style.dimItalic(stripAnsi(message).trimStart() ? message : "")}`;
-  const bottomBar = renderBottomBar(ctx.state, navMode, inputCtx, inputBuf);
 
   const parts = [header, tabBar, ...displayed, msgLine, bottomBar];
   return parts.map(line => {
@@ -777,5 +847,5 @@ export async function renderShell(
       return line.split("\n").map(sub => sub + "\x1b[K").join("\n");
     }
     return line + "\x1b[K";
-  }).join("\n") + "\n";
+  }).join("\n");
 }

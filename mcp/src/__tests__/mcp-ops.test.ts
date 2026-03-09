@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import { register } from "../mcp-ops.js";
@@ -163,6 +164,29 @@ describe("mcp-ops: health_check", () => {
     expect(typeof res.data.mcpEnabled).toBe("boolean");
     expect(typeof res.data.hooksEnabled).toBe("boolean");
     expect(typeof res.data.projectCount).toBe("number");
+  });
+
+  it("resolves active profile and machine at call time instead of stale ctx state", async () => {
+    fs.mkdirSync(path.join(tmp.path, "profiles"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp.path, "profiles", "personal.yaml"),
+      "name: personal\nprojects:\n  - global\n  - alpha\n"
+    );
+    fs.writeFileSync(
+      path.join(tmp.path, "profiles", "work.yaml"),
+      "name: work\nprojects:\n  - global\n  - bravo\n  - charlie\n"
+    );
+    fs.writeFileSync(path.join(tmp.path, "machines.yaml"), `${os.hostname()}: work\n`);
+    for (const project of ["global", "alpha", "bravo", "charlie"]) {
+      fs.mkdirSync(path.join(tmp.path, project), { recursive: true });
+      fs.writeFileSync(path.join(tmp.path, project, "summary.md"), `# ${project}\n`);
+    }
+
+    const res = parseResult(await server.call("health_check", {}));
+    expect(res.ok).toBe(true);
+    expect(res.data.profile).toBe("work");
+    expect(res.data.machine).toBe(os.hostname());
+    expect(res.data.projectCount).toBe(3);
   });
 });
 

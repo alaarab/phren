@@ -24,12 +24,11 @@ else
   echo "OK: package.json version is $VERSION"
 fi
 
-# 3. Verify index.ts reads version from package.json (not hardcoded)
-# Check that PACKAGE_VERSION is derived from readFileSync + package.json (across multiple lines)
-if grep -q 'PACKAGE_VERSION' mcp/src/index.ts && grep -q 'readFileSync.*package\.json' mcp/src/index.ts; then
-  echo "OK: index.ts reads version dynamically from package.json"
+# 3. Verify runtime version comes from shared package metadata (not a hardcoded string)
+if grep -q 'export const VERSION' mcp/src/package-metadata.ts && grep -q 'package.json' mcp/src/package-metadata.ts && grep -q 'version: PACKAGE_VERSION' mcp/src/index.ts; then
+  echo "OK: runtime version is derived from shared package metadata"
 else
-  echo "FAIL: index.ts may have a hardcoded version instead of reading package.json"
+  echo "FAIL: runtime version metadata may be hardcoded or disconnected from package.json"
   ERRORS=$((ERRORS + 1))
 fi
 
