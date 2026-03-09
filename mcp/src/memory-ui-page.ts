@@ -9,6 +9,162 @@ function h(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function renderSkillUiEnhancementScript(authToken: string): string {
+  return `(function() {
+    var _skillAuthToken = '${authToken}';
+    var _skillCurrent = null;
+    var _skillEditing = false;
+
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function authUrl(base) {
+      return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(_skillAuthToken);
+    }
+    function authBody(body) {
+      return body + (_skillAuthToken ? '&_auth=' + encodeURIComponent(_skillAuthToken) : '');
+    }
+    function fetchCsrfToken(cb) {
+      var url = '/api/csrf-token' + (_skillAuthToken ? '?_auth=' + encodeURIComponent(_skillAuthToken) : '');
+      fetch(url).then(function(r) { return r.json(); }).then(function(d) { cb(d.token || null); }).catch(function() { cb(null); });
+    }
+    function renderSkillReader(content) {
+      var reader = document.getElementById('skills-reader');
+      if (!_skillCurrent || !reader) return;
+      var statusBadge = '<span class="badge ' + (_skillCurrent.enabled ? 'badge-on' : 'badge-off') + '" id="skill-enabled-badge">' + (_skillCurrent.enabled ? 'enabled' : 'disabled') + '</span>';
+      var toggleLabel = _skillCurrent.enabled ? 'Disable' : 'Enable';
+      reader.innerHTML =
+        '<div class="reader-toolbar">' +
+          '<span class="reader-title">' + esc(_skillCurrent.name) + '</span>' +
+          '<span class="reader-path">' + esc(_skillCurrent.path) + '</span>' +
+          statusBadge +
+          '<span id="skill-status"></span>' +
+          '<button class="btn btn-sm" onclick="cortexToggleSkill()">' + toggleLabel + '</button>' +
+          '<button class="btn btn-sm" onclick="cortexEditSkill()">Edit</button>' +
+        '</div>' +
+        '<div class="reader-content"><pre id="skill-pre">' + esc(content) + '</pre></div>';
+    }
+    function loadSkills(selectPath) {
+      fetch(authUrl('/api/skills')).then(function(r) { return r.json(); }).then(function(data) {
+        var list = document.getElementById('skills-list');
+        if (!list) return;
+        if (!data.length) {
+          list.innerHTML = '<div style="padding:40px 20px;color:var(--muted);text-align:center">No skills installed</div>';
+          return;
+        }
+        var bySource = {};
+        data.forEach(function(s) { (bySource[s.source] = bySource[s.source] || []).push(s); });
+        var html = '';
+        Object.keys(bySource).sort().forEach(function(src) {
+          html += '<div class="split-group-label">' + esc(src) + '</div>';
+          bySource[src].forEach(function(s) {
+            html += '<div class="split-item" data-path="' + esc(s.path) + '" data-name="' + esc(s.name) + '" data-source="' + esc(s.source) + '" data-enabled="' + (s.enabled ? 'true' : 'false') + '" onclick="cortexSelectSkillFromEl(this)">' +
+              '<span>' + esc(s.name) + '</span>' +
+              '<span class="badge ' + (s.enabled ? 'badge-on' : 'badge-off') + '">' + (s.enabled ? 'enabled' : 'disabled') + '</span>' +
+            '</div>';
+          });
+        });
+        list.innerHTML = html;
+        if (selectPath) {
+          var current = list.querySelector('.split-item[data-path="' + CSS.escape(selectPath) + '"]');
+          if (current) current.click();
+        }
+      });
+    }
+    window.cortexSelectSkillFromEl = function(el) {
+      if (!el) return;
+      window.cortexSelectSkill(
+        el.getAttribute('data-path') || '',
+        el.getAttribute('data-name') || '',
+        el.getAttribute('data-source') || '',
+        el.getAttribute('data-enabled') === 'true',
+        el
+      );
+    };
+    window.cortexSelectSkill = function(filePath, name, source, enabled, el) {
+      if (_skillEditing && !confirm('Discard unsaved changes?')) return;
+      _skillEditing = false;
+      _skillCurrent = { path: filePath, name: name, source: source, enabled: enabled };
+      document.querySelectorAll('#skills-list .split-item').forEach(function(i) { i.classList.remove('selected'); });
+      if (el) el.classList.add('selected');
+      var reader = document.getElementById('skills-reader');
+      if (reader) reader.innerHTML = '<div class="reader-empty">Loading...</div>';
+      fetch(authUrl('/api/skill-content?path=' + encodeURIComponent(filePath))).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          if (reader) reader.innerHTML = '<div class="reader-empty">' + esc(data.error || 'Error loading file') + '</div>';
+          return;
+        }
+        renderSkillReader(data.content);
+      });
+    };
+    window.cortexEditSkill = function() {
+      var pre = document.getElementById('skill-pre');
+      if (!pre || !_skillCurrent) return;
+      _skillEditing = true;
+      var content = pre.textContent || '';
+      var toolbar = document.querySelector('#skills-reader .reader-toolbar');
+      if (!toolbar) return;
+      Array.from(toolbar.querySelectorAll('.btn')).forEach(function(btn) { btn.remove(); });
+      toolbar.insertAdjacentHTML('beforeend', '<button class="btn btn-sm btn-primary" onclick="cortexSaveSkill()">Save</button><button class="btn btn-sm" onclick="cortexCancelSkillEdit()">Cancel</button>');
+      var ta = document.createElement('textarea');
+      ta.id = 'skill-textarea';
+      ta.value = content;
+      pre.replaceWith(ta);
+      ta.focus();
+    };
+    window.cortexCancelSkillEdit = function() {
+      _skillEditing = false;
+      if (_skillCurrent) window.cortexSelectSkill(_skillCurrent.path, _skillCurrent.name, _skillCurrent.source, _skillCurrent.enabled);
+    };
+    window.cortexSaveSkill = function() {
+      var ta = document.getElementById('skill-textarea');
+      if (!ta || !_skillCurrent) return;
+      fetchCsrfToken(function(csrfToken) {
+        var csrfPart = csrfToken ? '&_csrf=' + encodeURIComponent(csrfToken) : '';
+        fetch('/api/skill-save', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: authBody('path=' + encodeURIComponent(_skillCurrent.path) + '&content=' + encodeURIComponent(ta.value)) + csrfPart,
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          var status = document.getElementById('skill-status');
+          if (status) {
+            status.textContent = data.ok ? 'Saved' : (data.error || 'Save failed');
+            status.className = data.ok ? 'text-success' : 'text-danger';
+          }
+          if (data.ok) {
+            _skillEditing = false;
+            renderSkillReader(ta.value);
+          }
+        });
+      });
+    };
+    window.cortexToggleSkill = function() {
+      if (!_skillCurrent) return;
+      fetchCsrfToken(function(csrfToken) {
+        var csrfPart = csrfToken ? '&_csrf=' + encodeURIComponent(csrfToken) : '';
+        var nextEnabled = !_skillCurrent.enabled;
+        fetch('/api/skill-toggle', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: authBody('project=' + encodeURIComponent(_skillCurrent.source) + '&name=' + encodeURIComponent(_skillCurrent.name) + '&enabled=' + encodeURIComponent(String(nextEnabled))) + csrfPart,
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (!data.ok) return;
+          _skillCurrent.enabled = nextEnabled;
+          loadSkills(_skillCurrent.path);
+          window.cortexSelectSkill(_skillCurrent.path, _skillCurrent.name, _skillCurrent.source, _skillCurrent.enabled);
+        });
+      });
+    };
+    var baseSwitchTab = window.switchTab;
+    if (typeof baseSwitchTab === 'function') {
+      window.switchTab = function(tab) {
+        baseSwitchTab(tab);
+        if (tab === 'skills') setTimeout(function() { loadSkills(_skillCurrent && _skillCurrent.path); }, 0);
+      };
+    }
+  })();`;
+}
+
 export function renderReviewUiPage(cortexPath: string, authToken?: string): string {
   const sync = readSyncSnapshot(cortexPath) as {
     autoSaveStatus?: string;
@@ -206,6 +362,9 @@ ${REVIEW_UI_STYLES}
 
 <script>
 ${renderReviewUiScript(h(authToken || ""))}
+</script>
+<script>
+${renderSkillUiEnhancementScript(h(authToken || ""))}
 </script>
 </body>
 </html>`;

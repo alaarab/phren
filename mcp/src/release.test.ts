@@ -3,9 +3,11 @@ import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { configureAllHooks } from "./hooks.js";
 import { configureClaude } from "./init.js";
+import { getToolCount } from "./tool-registry.js";
 
 describe.sequential("1.10.x release hardening gates", () => {
   let tmpRoot: string;
@@ -36,10 +38,44 @@ describe.sequential("1.10.x release hardening gates", () => {
   it("keeps package and MCP server versions consistent", () => {
     const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
     const indexTs = fs.readFileSync(path.join(root, "mcp", "src", "index.ts"), "utf8");
+    const metadataTs = fs.readFileSync(path.join(root, "mcp", "src", "package-metadata.ts"), "utf8");
 
-    // Version is now read dynamically from package.json at runtime, not hardcoded
+    // Version is read from shared package metadata, which itself reads package.json.
     expect(indexTs).toContain("version: PACKAGE_VERSION");
     expect(indexTs).not.toMatch(/version:\s*"[\d.]+/);
+    expect(metadataTs).toContain("package.json");
+  });
+
+  it("ships a dry-run npm pack with built entrypoints and without source ts files", () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+    const builtRegistry = path.join(root, "mcp", "dist", "tool-registry.js");
+    if (!fs.existsSync(builtRegistry)) {
+      execFileSync("npm", ["run", "build"], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    }
+    const raw = execFileSync("npm", ["pack", "--json", "--dry-run"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const packInfo = JSON.parse(raw) as Array<{ files: Array<{ path: string }> }>;
+    const files = packInfo[0]?.files?.map((file) => file.path) || [];
+
+    expect(files).toContain("package.json");
+    expect(files).toContain("mcp/dist/index.js");
+    expect(files).toContain("mcp/dist/tool-registry.js");
+    expect(files).not.toContain("mcp/src/index.ts");
+  });
+
+  it("keeps generated skill metadata aligned with the live tool registry", async () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+    const linkSkillsTs = fs.readFileSync(path.join(root, "mcp", "src", "link-skills.ts"), "utf8");
+    expect(linkSkillsTs).toContain("getToolCount()");
+    expect(linkSkillsTs).toContain("renderToolCatalogMarkdown()");
+    expect(getToolCount()).toBe(50);
   });
 
   it.skipIf(process.platform === "win32")("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {

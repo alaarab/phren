@@ -96,13 +96,15 @@ For a brand-new project scaffold inside Claude:
 
 Compatibility note:
 - `cortex add` is the canonical path for existing repos.
-- Legacy compatibility paths: `cortex projects add`, `cortex link`, and `init --from-existing` should not be your default workflow.
+- `cortex projects add`, `cortex link`, and `init --from-existing` are quarantined behind `CORTEX_ENABLE_LEGACY_ENROLLMENT=1` for one-off legacy recovery only.
 - Platform-specific behavior is documented in `docs/platform-matrix.md`.
 - Best-effort vs fail-closed behavior is documented in `docs/error-reporting.md`.
+- Package/update behavior is documented in `docs/versioning.md`.
+- The local backlog is still the primary planning surface. GitHub issue links are optional metadata on backlog items, and promotion is one-way by default to avoid issue spam.
 
 ## Does cortex require MCP?
 
-No. MCP is recommended — it gives agents 48 tools for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended — it gives agents 51 tools for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
 npx @alaarab/cortex init --mcp off

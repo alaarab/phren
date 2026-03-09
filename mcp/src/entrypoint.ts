@@ -5,6 +5,10 @@ import { errorMessage } from "./utils.js";
 import { defaultCortexPath } from "./shared.js";
 import { addProjectFromPath } from "./core-project.js";
 
+function legacyEnrollmentEnabled(): boolean {
+  return process.env.CORTEX_ENABLE_LEGACY_ENROLLMENT === "1";
+}
+
 const HELP_TEXT = `cortex - Long-term memory for Claude Code
 
 Usage:
@@ -34,7 +38,7 @@ Usage:
   cortex review-ui [--port=3499]         Memory review web UI
   cortex debug-injection --prompt "..."  Preview hook-prompt injection output
   cortex inspect-index [--project <n>]   Inspect FTS index contents for debugging
-  cortex update                          Update to latest version
+  cortex update [--refresh-starter]      Update to latest version
 
 Configuration:
   cortex config policy [get|set ...]     Retention, TTL, confidence, decay
@@ -198,6 +202,11 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       return finish(1);
     }
     if (fromExistingIdx !== -1) {
+      if (!legacyEnrollmentEnabled()) {
+        console.error("`init --from-existing` is a quarantined legacy path.");
+        console.error("Use `cortex add <path>` instead, or set CORTEX_ENABLE_LEGACY_ENROLLMENT=1 for one-off legacy recovery.");
+        return finish(1);
+      }
       console.error("Note: `init --from-existing` is legacy compatibility. Prefer `cortex add <path>` after init.");
     }
     await runInit({
@@ -265,6 +274,11 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "link") {
+    if (!legacyEnrollmentEnabled()) {
+      console.error("`cortex link` is a quarantined legacy path.");
+      console.error("Use `npx @alaarab/cortex init`, or set CORTEX_ENABLE_LEGACY_ENROLLMENT=1 for one-off legacy recovery.");
+      return finish(1);
+    }
     console.error("Note: `cortex link` is legacy compatibility. Prefer `npx @alaarab/cortex init`.");
     const { runLink } = await import("./link.js");
     const linkArgs = argv.slice(1);

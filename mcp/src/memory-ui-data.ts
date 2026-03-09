@@ -9,6 +9,7 @@ import { errorMessage } from "./utils.js";
 import { readInstallPreferences } from "./init-preferences.js";
 import { readCustomHooks } from "./hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "./provider-adapters.js";
+import { getAllSkills } from "./skill-registry.js";
 
 interface GraphNode {
   id: string;
@@ -102,31 +103,13 @@ export function isAllowedFilePath(filePath: string, cortexPath: string): boolean
   return allowedRealRoots.some((root) => realResolved === root || realResolved.startsWith(root + path.sep));
 }
 
-export function collectSkillsForUI(cortexPath: string, profile?: string): Array<{ name: string; source: string; path: string }> {
-  const seen = new Set<string>();
-  const results: Array<{ name: string; source: string; path: string }> = [];
-
-  function scan(dir: string, label: string) {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const isDir = entry.isDirectory();
-      const filePath = isDir
-        ? path.join(dir, entry.name, "SKILL.md")
-        : entry.name.endsWith(".md") ? path.join(dir, entry.name) : null;
-      if (!filePath || seen.has(filePath) || !fs.existsSync(filePath)) continue;
-      seen.add(filePath);
-      results.push({ name: isDir ? entry.name : entry.name.replace(/\.md$/, ""), source: label, path: filePath });
-    }
-  }
-
-  scan(path.join(cortexPath, "global", "skills"), "global");
-  for (const dir of getProjectDirs(cortexPath, profile)) {
-    const name = path.basename(dir);
-    if (name === "global") continue;
-    scan(path.join(dir, "skills"), name);
-    scan(path.join(dir, ".claude", "skills"), name);
-  }
-  return results;
+export function collectSkillsForUI(cortexPath: string, profile = ""): Array<{ name: string; source: string; path: string; enabled: boolean }> {
+  return getAllSkills(cortexPath, profile).map((skill) => ({
+    name: skill.name,
+    source: skill.source,
+    path: skill.path,
+    enabled: skill.enabled,
+  }));
 }
 
 export function getHooksData(cortexPath: string) {

@@ -39,7 +39,7 @@ import { consolidateProjectFindings } from "./governance-policy.js";
 import { style } from "./shell-render.js";
 import { SUB_VIEWS, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./shell-types.js";
 import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./shell-view.js";
-import { removeSkillPath } from "./skill-files.js";
+import { removeSkillPath, setSkillEnabledAndSync } from "./skill-files.js";
 import {
   resultMsg,
   editDistance,
@@ -130,6 +130,19 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     } catch (err: unknown) {
       host.setMessage(`  Search failed: ${errorMessage(err)}`);
     }
+    return;
+  }
+
+  if (command === "intro") {
+    const modeRaw = (parts[1] || "").toLowerCase();
+    const mode = modeRaw === "always" || modeRaw === "off" ? modeRaw : modeRaw === "once" ? "once-per-version" : modeRaw;
+    if (!["always", "once-per-version", "off"].includes(mode)) {
+      host.setMessage("  Usage: :intro always|once-per-version|off");
+      return;
+    }
+    host.state.introMode = mode as ShellState["introMode"];
+    saveShellState(host.cortexPath, host.state);
+    host.setMessage(`  Intro mode: ${style.boldCyan(mode)}`);
     return;
   }
 
@@ -603,7 +616,7 @@ export function getListItems(
     }
     case "Skills": {
       if (!state.project) return [];
-      const allSkills = getProjectSkills(cortexPath, state.project).map((s) => ({ name: s.name, text: s.path }));
+      const allSkills = getProjectSkills(cortexPath, state.project).map((s) => ({ name: s.name, text: `${s.enabled ? "enabled" : "disabled"} · ${s.path}` }));
       return state.filter
         ? allSkills.filter((s) => `${s.name} ${s.text}`.toLowerCase().includes(state.filter!.toLowerCase()))
         : allSkills;
@@ -721,13 +734,18 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
         const skillPath = item.text!;
         host.confirmThen(`Remove skill "${item.name}"?`, () => {
           try {
-            removeSkillPath(skillPath);
+            removeSkillPath(skillPath.split("·").slice(-1)[0].trim());
             host.setMessage(`  Removed ${item.name}`);
             host.setCursor(Math.max(0, cursor - 1));
           } catch (err: unknown) {
             host.setMessage(`  Failed: ${errorMessage(err)}`);
           }
         });
+      } else if (key === "t" && item?.name) {
+        if (!project) { host.setMessage("Select a project first."); return; }
+        const isEnabled = !item.text?.startsWith("disabled");
+        setSkillEnabledAndSync(host.cortexPath, project, item.name, !isEnabled);
+        host.setMessage(`  ${!isEnabled ? "Enabled" : "Disabled"} ${item.name}`);
       } else if (key === "a") {
         if (!project) { host.setMessage("Select a project first."); return; }
         host.startInput("skill-add", "");
@@ -760,8 +778,8 @@ function showCursorPosition(host: NavigationHost): void {
 export async function handleNavigateKey(host: NavigationHost, key: string): Promise<boolean> {
   if (key === "\x1b[A") { host.moveCursor(-1); showCursorPosition(host); return true; }
   if (key === "\x1b[B") { host.moveCursor(1); showCursorPosition(host); return true; }
-  if (key === "\x1b[D") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("press ↵ to open a project first")}`); } else { prevTab(host); } return true; }
-  if (key === "\x1b[C") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("press ↵ to open a project first")}`); } else { nextTab(host); } return true; }
+  if (key === "\x1b[D") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Projects is the dashboard landing screen")}`); } else { prevTab(host); } return true; }
+  if (key === "\x1b[C") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Press ↵ to enter the selected project's backlog")}`); } else { nextTab(host); } return true; }
   if (key === "\x1b[5~") { host.moveCursor(-10); showCursorPosition(host); return true; }
   if (key === "\x1b[6~") { host.moveCursor(10); showCursorPosition(host); return true; }
   if (key === "\x1b[H" || key === "\x1b[1~") { host.setCursor(0); showCursorPosition(host); return true; }
@@ -776,7 +794,7 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
   if (key === "\x1b") {
     if (host.filter) { host.setFilter(""); }
     else if (host.state.view === "Health") { const returnTo = host.prevHealthView ?? "Projects"; host.setView(returnTo); host.prevHealthView = undefined; host.setMessage(`  ${TAB_ICONS[returnTo] ?? TAB_ICONS.Projects} ${returnTo}`); }
-    else if (host.state.view !== "Projects") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} ${style.dim("select a project")}`); }
+    else if (host.state.view !== "Projects") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} ${style.dim("dashboard")}`); }
     else { host.setMessage(`  ${style.dim("press")} ${style.boldCyan("q")} ${style.dim("to quit")}`); }
     return true;
   }
@@ -787,7 +805,14 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
   if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
   if (key === "k") { host.setView("Hooks"); host.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
   if (key === "h") { host.prevHealthView = host.state.view === "Health" ? host.prevHealthView : host.state.view; host.healthCache = undefined; host.setView("Health"); host.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`); return true; }
-  if (["a", "d", "e", "\x7f"].includes(key)) { await doViewAction(host, key); return true; }
+  if (key === "i" && host.state.view === "Projects") {
+    const next = host.state.introMode === "always" ? "once-per-version" : host.state.introMode === "off" ? "always" : "off";
+    host.state.introMode = next;
+    saveShellState(host.cortexPath, host.state);
+    host.setMessage(`  Intro mode: ${style.boldCyan(next)}`);
+    return true;
+  }
+  if (["a", "d", "e", "t", "\x7f"].includes(key)) { await doViewAction(host, key); return true; }
   return true;
 }
 

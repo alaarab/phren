@@ -100,11 +100,15 @@ describe.sequential("mcp mode configuration", () => {
     fs.writeFileSync(targetSkill, "# custom pipeline\n");
 
     const updates = applyStarterTemplateUpdates(cortexPath);
+    const stagedSkill = path.join(cortexPath, ".runtime", "starter-updates", "global", "skills", "pipeline.md.new");
+    const currentSkill = path.join(cortexPath, ".runtime", "starter-updates", "global", "skills", "pipeline.md.current");
 
     expect(fs.readFileSync(targetSkill, "utf8")).toBe("# custom pipeline\n");
-    expect(fs.existsSync(`${targetSkill}.bak`)).toBe(true);
-    expect(fs.existsSync(`${targetSkill}.new`)).toBe(true);
-    expect(updates.some((entry) => entry.endsWith(path.join("global", "skills", "pipeline.md.new")))).toBe(true);
+    expect(fs.existsSync(`${targetSkill}.bak`)).toBe(false);
+    expect(fs.existsSync(`${targetSkill}.new`)).toBe(false);
+    expect(fs.existsSync(stagedSkill)).toBe(true);
+    expect(fs.existsSync(currentSkill)).toBe(true);
+    expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "skills", "pipeline.md.new"));
   });
 
   it("defaults to mcp enabled and persists preference updates", () => {

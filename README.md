@@ -15,13 +15,9 @@
 
 <br>
 
-I run 3-5 machines doing AI development at the same time. Claude Code, Codex, Cursor. Every session starts from zero. Every bug I've already traced gets traced again. Every decision I've already made gets made again.
+AI agents forget everything between sessions. Cortex is a shared memory in a git repo you own that changes that. Agents search it automatically, and you get one place to see what they've learned across every project and machine. The knowledge keeps evolving as you work.
 
-So I built this. A knowledge base in a git repo I own. Every project, every machine. When something comes up, my agents pull only what's relevant. About 550 tokens by default instead of everything. I run more agents in parallel for the same cost and they're not reading noise.
-
-The more I work, the more it knows. Findings match to entities. Old stuff fades. Good stuff sticks. It's just mining my data as I go.
-
-> `npx @alaarab/cortex init` -- one-command local bootstrap. No account. Just a git repo you own.
+> `npx @alaarab/cortex init` · Claude Code, Codex, Cursor, Copilot
 
 <br>
 </div>
@@ -245,9 +241,11 @@ For a brand-new scaffold inside Claude:
 
 Legacy compatibility note:
 - `cortex add` is the supported path for existing repos.
-- Legacy compatibility paths: `cortex projects add`, `cortex link`, and `init --from-existing` still exist, but they are not the recommended workflow.
+- `cortex projects add`, `cortex link`, and `init --from-existing` are quarantined legacy paths. They only run when `CORTEX_ENABLE_LEGACY_ENROLLMENT=1` is set for one-off recovery.
 - Platform support and release expectations are documented in [docs/platform-matrix.md](docs/platform-matrix.md).
 - Best-effort vs fail-closed behavior is documented in [docs/error-reporting.md](docs/error-reporting.md).
+- Package/update behavior is documented in [docs/versioning.md](docs/versioning.md).
+- Backlog items stay local by default. GitHub issue linkage is optional, and promotion is one-way unless you explicitly act on the linked issue.
 
 </details>
 
@@ -296,9 +294,9 @@ mcpServers:
 </details>
 
 <details>
-<summary><strong>The MCP server (48 tools)</strong></summary>
+<summary><strong>The MCP server (51 tools)</strong></summary>
 
-The MCP server indexes your project store into a local SQLite FTS5 database and exposes 48 tools:
+The MCP server indexes your project store into a local SQLite FTS5 database and exposes 51 tools:
 
 ### Search and browse
 
@@ -321,7 +319,9 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 | `add_backlog_items` | Bulk add multiple tasks in one call. |
 | `complete_backlog_item` | Match by text, move to Done. |
 | `complete_backlog_items` | Bulk complete multiple items in one call. |
-| `update_backlog_item` | Change priority, context, or section. |
+| `update_backlog_item` | Change priority, context, section, or linked GitHub issue. |
+| `link_backlog_item_issue` | Link or unlink an existing GitHub issue on a backlog item. |
+| `promote_backlog_item_to_issue` | Create a GitHub issue from a backlog item and write the link back. |
 
 ### Finding capture
 
@@ -424,7 +424,7 @@ cortex status                            # health, active project, stats
 cortex doctor [--fix]                    # health checks + optional self-heal
 cortex verify                            # check init completed correctly
 cortex review-ui [--port=3499]           # lightweight review UI in the browser
-cortex update                            # update to latest version
+cortex update [--refresh-starter]        # update package; optionally refresh starter globals too
 cortex uninstall                         # remove cortex config and hooks
 
 cortex add [path]                           # add current directory (or path) as a project
@@ -436,6 +436,8 @@ cortex hooks-mode [on|off|status]        # toggle hook execution
 
 cortex skills list                       # list all installed skills
 cortex skills add <project> <path>       # add a skill to a project
+cortex skills enable <project|global> <name>   # enable a disabled skill without rewriting it
+cortex skills disable <project|global> <name>  # disable a skill without deleting it
 cortex skills remove <project> <name>    # remove a skill from a project
 cortex skill-list                        # alias for skills list
 

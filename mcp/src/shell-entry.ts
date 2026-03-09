@@ -8,6 +8,7 @@ import { style, clearScreen, clearToEnd, shellStartupFrames } from "./shell-rend
 import { errorMessage } from "./utils.js";
 import { computeCortexLiveStateToken } from "./shared.js";
 import { VERSION } from "./init-shared.js";
+import { loadShellState, saveShellState } from "./shell-state-store.js";
 
 const LIVE_STATE_POLL_MS = 2000;
 
@@ -16,14 +17,80 @@ interface LiveStateHost {
   setMessage(message: string): void;
 }
 
-async function playStartupIntro(): Promise<void> {
-  if (!process.stdout.isTTY) return;
+export interface StartupIntroPlan {
+  mode: "always" | "once-per-version" | "off";
+  variant: "full" | "final-frame" | "skip";
+  holdForKeypress: boolean;
+  dwellMs: number;
+  markSeen: boolean;
+}
+
+function renderIntroFrame(frame: string, footer?: string): void {
+  clearScreen();
+  process.stdout.write(footer ? `${frame}\n${footer}\n` : `${frame}\n`);
+  clearToEnd();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForAnyKeypress(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const onData = () => {
+      process.stdin.removeListener("data", onData);
+      resolve();
+    };
+    process.stdin.on("data", onData);
+  });
+}
+
+export function resolveStartupIntroPlan(cortexPath: string, version = VERSION): StartupIntroPlan {
+  const state = loadShellState(cortexPath);
+  const mode = state.introMode === "always" || state.introMode === "off" ? state.introMode : "once-per-version";
+
+  if (mode === "off") {
+    return { mode, variant: "skip", holdForKeypress: false, dwellMs: 0, markSeen: false };
+  }
+  if (mode === "always") {
+    return { mode, variant: "full", holdForKeypress: false, dwellMs: 700, markSeen: true };
+  }
+  if (state.introSeenVersion !== version) {
+    return { mode, variant: "full", holdForKeypress: true, dwellMs: 0, markSeen: true };
+  }
+  return { mode, variant: "final-frame", holdForKeypress: false, dwellMs: 550, markSeen: false };
+}
+
+function markStartupIntroSeen(cortexPath: string, version = VERSION): void {
+  const state = loadShellState(cortexPath);
+  if (state.introSeenVersion === version) return;
+  saveShellState(cortexPath, { ...state, introSeenVersion: version });
+}
+
+async function playStartupIntro(cortexPath: string, plan = resolveStartupIntroPlan(cortexPath)): Promise<void> {
+  if (!process.stdout.isTTY || plan.variant === "skip") return;
+
   const frames = shellStartupFrames(VERSION);
-  for (const frame of frames) {
-    clearScreen();
-    process.stdout.write(frame);
-    clearToEnd();
-    await new Promise((resolve) => setTimeout(resolve, 80));
+  const renderHint = plan.holdForKeypress
+    ? `${style.dim("Press any key to enter")}`
+    : `${style.dim("Loading shell…")}`;
+
+  if (plan.variant === "full") {
+    for (const frame of frames.slice(0, -1)) {
+      renderIntroFrame(frame);
+      await sleep(160);
+    }
+  }
+
+  renderIntroFrame(frames[frames.length - 1], renderHint);
+  if (plan.holdForKeypress) {
+    await waitForAnyKeypress();
+  } else if (plan.dwellMs > 0) {
+    await sleep(plan.dwellMs);
+  }
+
+  if (plan.markSeen) {
+    markStartupIntroSeen(cortexPath);
   }
 }
 
@@ -148,7 +215,7 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
   process.once("exit", onProcessExit);
 
   try {
-    await playStartupIntro();
+    await playStartupIntro(cortexPath);
     await repaint();
     await exitPromise;
   } finally {

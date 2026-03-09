@@ -24,9 +24,9 @@ const importPayloadSchema = z.object({
     .optional(),
   backlog: z
     .object({
-      Active: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional() }).passthrough()).optional(),
-      Queue: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional() }).passthrough()).optional(),
-      Done: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional() }).passthrough()).optional(),
+      Active: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional(), githubIssue: z.number().optional(), githubUrl: z.string().optional() }).passthrough()).optional(),
+      Queue: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional(), githubIssue: z.number().optional(), githubUrl: z.string().optional() }).passthrough()).optional(),
+      Done: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional(), githubIssue: z.number().optional(), githubUrl: z.string().optional() }).passthrough()).optional(),
     })
     .partial()
     .optional(),
@@ -163,6 +163,14 @@ export function register(server: McpServer, ctx: McpContext): void {
                 const priorityTag = item.priority ? ` [${item.priority}]` : "";
                 lines.push(`${prefix}${item.line}${priorityTag}`);
                 if (item.context) lines.push(`  Context: ${item.context}`);
+                if (item.githubIssue || item.githubUrl) {
+                  const githubRef = item.githubIssue && item.githubUrl
+                    ? `#${item.githubIssue} ${item.githubUrl}`
+                    : item.githubIssue
+                      ? `#${item.githubIssue}`
+                      : item.githubUrl!;
+                  lines.push(`  GitHub: ${githubRef}`);
+                }
               }
             }
             lines.push("");

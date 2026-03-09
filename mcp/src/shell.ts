@@ -4,7 +4,6 @@ import {
   addBacklogItem,
   addFinding,
   editQueueItem,
-  listProjectCards,
   loadShellState,
   saveShellState,
   ShellState,
@@ -75,12 +74,10 @@ export class CortexShell {
     },
   ) {
     this.state = loadShellState(cortexPath);
-    const cards = listProjectCards(cortexPath, profile);
     this.state.view = "Projects";
-    if (!this.state.project && cards.length > 0) this.state.project = cards[0].name;
     this.message = this.state.project
-      ? `  Open ${style.boldCyan(this.state.project)} with ${style.boldCyan("↵")} · ${style.boldCyan("?")} for help`
-      : `  Press ${style.boldCyan("?")} for help`;
+      ? `  Dashboard ready — active context ${style.boldCyan(this.state.project)}`
+      : `  Dashboard ready — choose a project with ${style.boldCyan("↵")} or stay global`;
   }
 
   close(): void { saveShellState(this.cortexPath, this.state); }
@@ -281,7 +278,7 @@ export class CortexShell {
     if (input === "m") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
     if (input === "s") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Skills"); this.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
     if (input === "k") { this.setView("Hooks"); this.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
-    if (input === "h") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.healthCache = undefined; this.setView("Health"); this.setMessage(`  ${TAB_ICONS.Health} Health`); return true; }
+    if (input === "h") { this.healthCache = undefined; this.setView("Health"); this.setMessage(`  ${TAB_ICONS.Health} Health`); return true; }
     if (input.startsWith("/")) { this.setFilter(input.slice(1)); return true; }
     if (input.startsWith(":")) { await this.runPalette(input.slice(1)); return true; }
     await this.runPalette(input);

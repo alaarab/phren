@@ -11,7 +11,7 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 48 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 50 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findCortexPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
 | `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, memory queue, audit log |
@@ -42,7 +42,7 @@ npm publish        # publish to npm (needs OTP)
 
 v1.23.0
 
-## MCP Tools (48)
+## MCP Tools (50)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -59,7 +59,9 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `add_backlog_items(project, items[])` : bulk add multiple tasks in one call
 - `complete_backlog_item(project, item)` : move task to done by text match
 - `complete_backlog_items(project, items[])` : bulk complete multiple items in one call
-- `update_backlog_item(project, item, updates)` : update priority, context, or section
+- `update_backlog_item(project, item, updates)` : update priority, context, section, or linked GitHub issue
+- `link_backlog_item_issue(project, item, issue_number?, issue_url?, unlink?)` : link or unlink an existing GitHub issue on a backlog item
+- `promote_backlog_item_to_issue(project, item, repo?, title?, body?, mark_done?)` : create a GitHub issue from a backlog item and link it back
 
 **Finding capture:**
 - `add_finding(project, finding, citation?: { file?, line?, repo?, commit? })` : append finding with optional citation

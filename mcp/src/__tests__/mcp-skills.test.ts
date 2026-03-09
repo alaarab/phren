@@ -1,0 +1,81 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { makeTempDir, grantAdmin } from "../test-helpers.js";
+import { register } from "../mcp-skills.js";
+import type { McpContext } from "../mcp-types.js";
+
+type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
+
+function makeMockServer() {
+  const tools = new Map<string, ToolHandler>();
+  return {
+    registerTool(name: string, _meta: unknown, handler: ToolHandler) {
+      tools.set(name, handler);
+    },
+    call(name: string, args: Record<string, unknown>) {
+      const handler = tools.get(name);
+      if (!handler) throw new Error(`Tool "${name}" not registered`);
+      return handler(args);
+    },
+  };
+}
+
+function parseResult(res: { content: { type: string; text: string }[] }) {
+  return JSON.parse(res.content[0].text);
+}
+
+describe("mcp-skills", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-skills-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+    fs.mkdirSync(path.join(tmp.path, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(tmp.path, "profiles", "work.yaml"), "name: work\nprojects:\n  - demo\n");
+    fs.mkdirSync(path.join(tmp.path, "demo", ".claude", "skills"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp.path, "demo", ".claude", "skills", "helper.md"),
+      "---\nname: helper\ndescription: test helper\n---\nbody\n"
+    );
+
+    const ctx: McpContext = {
+      cortexPath: tmp.path,
+      profile: "work",
+      db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.CORTEX_ACTOR;
+    tmp.cleanup();
+  });
+
+  it("lists enabled state for skills", async () => {
+    const res = parseResult(await server.call("list_skills", { project: "demo" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.skills[0].name).toBe("helper");
+    expect(res.data.skills[0].enabled).toBe(true);
+  });
+
+  it("disables and re-enables a skill without deleting it", async () => {
+    let res = parseResult(await server.call("disable_skill", { project: "demo", name: "helper" }));
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "demo", ".claude", "skills", "helper.md"))).toBe(true);
+
+    res = parseResult(await server.call("list_skills", { project: "demo" }));
+    expect(res.data.skills[0].enabled).toBe(false);
+
+    res = parseResult(await server.call("enable_skill", { project: "demo", name: "helper" }));
+    expect(res.ok).toBe(true);
+
+    res = parseResult(await server.call("list_skills", { project: "demo" }));
+    expect(res.data.skills[0].enabled).toBe(true);
+  });
+});

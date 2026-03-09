@@ -35,14 +35,16 @@ export function handleBacklogView(profile: string) {
       console.log("  Active:");
       for (const item of doc.items.Active) {
         const tag = item.priority ? ` [${item.priority}]` : "";
-        console.log(`    - ${item.line}${tag}`);
+        const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
+        console.log(`    - ${item.line}${tag}${github}`);
       }
     }
     if (queueCount > 0) {
       console.log("  Queue:");
       for (const item of doc.items.Queue) {
         const tag = item.priority ? ` [${item.priority}]` : "";
-        console.log(`    - ${item.line}${tag}`);
+        const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
+        console.log(`    - ${item.line}${tag}${github}`);
       }
     }
   }

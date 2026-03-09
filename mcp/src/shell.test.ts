@@ -98,6 +98,21 @@ function createShell(cortexPath: string) {
   });
 }
 
+async function withTerminalSize<T>(rows: number, columns: number, run: () => Promise<T>): Promise<T> {
+  const rowDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+  const colDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+  Object.defineProperty(process.stdout, "rows", { configurable: true, value: rows });
+  Object.defineProperty(process.stdout, "columns", { configurable: true, value: columns });
+  try {
+    return await run();
+  } finally {
+    if (rowDescriptor) Object.defineProperty(process.stdout, "rows", rowDescriptor);
+    else Reflect.deleteProperty(process.stdout, "rows");
+    if (colDescriptor) Object.defineProperty(process.stdout, "columns", colDescriptor);
+    else Reflect.deleteProperty(process.stdout, "columns");
+  }
+}
+
 describe("CortexShell", () => {
   let dir: string;
   let dirCleanup: () => void;
@@ -140,6 +155,25 @@ describe("CortexShell", () => {
     shell.close();
     const state = loadShellState(dir);
     expect(state.project).toBe("demo");
+  });
+
+  it("renders a useful dashboard before project selection", async () => {
+    const shell = createShell(dir);
+    const output = await shell.render();
+    expect(output).toContain("◉ Projects");
+    expect(output).toContain("Backlog pulse");
+    expect(output).toContain("Recent findings");
+    expect(output).toContain("No project selected yet");
+  });
+
+  it("keeps the projects view within the terminal viewport on small screens", async () => {
+    await withTerminalSize(14, 80, async () => {
+      const shell = createShell(dir);
+      const output = await shell.render();
+      expect(output).toContain("◉ Projects");
+      expect(output).toContain("demo");
+      expect(output.split("\n").length).toBeLessThanOrEqual(14);
+    });
   });
 
   it("supports backlog mutations including work next and tidy", async () => {
@@ -228,6 +262,12 @@ describe("CortexShell", () => {
     expect(output).toContain("demo");
   });
 
+  it("persists intro mode changes from the palette", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":intro off");
+    expect(loadShellState(dir).introMode).toBe("off");
+  });
+
   it(":help renders help text as main content and clears on next input", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":help");
@@ -286,6 +326,22 @@ describe("CortexShell", () => {
     } finally {
       tmp.cleanup();
     }
+  });
+
+  it("toggles skill enabled state without deleting the file", async () => {
+    write(path.join(dir, "demo", ".claude", "skills", "helper.md"), "---\nname: helper\ndescription: test\n---\nbody\n");
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("s");
+    await shell.handleRawKey("t");
+
+    let output = await shell.render();
+    expect(output).toContain("Disabled helper");
+    expect(fs.existsSync(path.join(dir, "demo", ".claude", "skills", "helper.md"))).toBe(true);
+
+    await shell.handleRawKey("t");
+    output = await shell.render();
+    expect(output).toContain("Enabled helper");
   });
 
   it("shows loading indicators during async operations", async () => {

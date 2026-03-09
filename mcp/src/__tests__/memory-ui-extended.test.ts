@@ -681,6 +681,54 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("POST /api/skill-toggle disables and re-enables a skill without deleting it", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, "---\nname: test-skill\ndescription: UI toggle\n---\nbody\n");
+
+    let skillsRes = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
+    expect(skillsRes.status).toBe(200);
+    let skills = JSON.parse(skillsRes.body);
+    expect(skills.some((entry: any) => entry.name === "test-skill" && entry.enabled === true)).toBe(true);
+
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+
+    const disableRes = await postForm(port, "/api/skill-toggle", {
+      _auth: authToken,
+      _csrf: csrf,
+      project: "global",
+      name: "test-skill",
+      enabled: "false",
+    });
+    expect(disableRes.status).toBe(200);
+    expect(JSON.parse(disableRes.body).ok).toBe(true);
+    expect(fs.existsSync(skillPath)).toBe(true);
+
+    skillsRes = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
+    skills = JSON.parse(skillsRes.body);
+    expect(skills.some((entry: any) => entry.name === "test-skill" && entry.enabled === false)).toBe(true);
+
+    const secondCsrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(secondCsrfRes.status).toBe(200);
+    const secondCsrf = JSON.parse(secondCsrfRes.body).token as string;
+
+    const enableRes = await postForm(port, "/api/skill-toggle", {
+      _auth: authToken,
+      _csrf: secondCsrf,
+      project: "global",
+      name: "test-skill",
+      enabled: "true",
+    });
+    expect(enableRes.status).toBe(200);
+    expect(JSON.parse(enableRes.body).ok).toBe(true);
+
+    skillsRes = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
+    skills = JSON.parse(skillsRes.body);
+    expect(skills.some((entry: any) => entry.name === "test-skill" && entry.enabled === true)).toBe(true);
+  });
+
   it("GET /api/hooks requires auth", async () => {
     const denied = await httpGet(port, "/api/hooks");
     expect(denied.status).toBe(401);

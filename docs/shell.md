@@ -12,9 +12,11 @@ The shell has eight views. Switch between them with single-key shortcuts or pale
 
 ### Projects (`p`)
 
-Lists all indexed projects in the active profile. Each project shows its name, available doc types (CLAUDE.md, FINDINGS, summary, backlog), and a brief description pulled from summary.md or CLAUDE.md.
+Projects is the shell landing screen. It opens as a dashboard first, then lists all indexed projects in the active profile underneath.
 
-The currently selected project is marked with a green dot. Use `:open <project>` to change the active project context, which persists across all views.
+The dashboard shows profile-wide counts for projects, active backlog, queued backlog, findings, review queue, sync state, and intro mode. The project list below that includes per-project workload counts so you can stay global until you actually want to open a project.
+
+The currently selected project is marked with a green dot. Use `↵` or `:open <project>` to change the active project context, which persists across all views.
 
 ### Backlog (`b`)
 
@@ -31,6 +33,11 @@ Shows pending review items from `MEMORY_QUEUE.md`. Each item displays its sectio
 ### Skills (`s`)
 
 Shows installed global and project-local skills and lets you inspect what is available in the current context.
+
+Skills now have first-class lifecycle state:
+- enabled skills are active and participate in linking/discovery
+- disabled skills stay on disk but are excluded from active use
+- remove is still separate and destructive
 
 ### Hooks (`k`)
 
@@ -56,6 +63,8 @@ Runs doctor checks and shows results alongside runtime health data: last hook ru
 | `k` | Switch to Hooks view |
 | `h` | Switch to Health view |
 | `q` | Quit the shell |
+| `i` | Cycle intro mode on the Projects dashboard |
+| `t` | Toggle enabled/disabled state in Skills view |
 | `/text` | Set a filter (filters items in the current view by text match) |
 | `/` | Clear the filter |
 | `:` | Enter a palette command |
@@ -69,6 +78,7 @@ All palette commands start with `:`. You can also type them without the colon pr
 | Command | Description |
 |---------|-------------|
 | `:open <project>` | Set the active project context across all views |
+| `:intro always\|once-per-version\|off` | Tune the startup intro behavior |
 
 ### Backlog
 
@@ -122,7 +132,7 @@ All palette commands start with `:`. You can also type them without the colon pr
 
 ## State Persistence
 
-The shell saves its state (current view, selected project, filter, page, rows per page) to `.governance/shell-state.json`. This means your view and project selection are preserved between shell sessions. Use `:reset` to clear saved state.
+The shell saves its state (selected project, filter, page, rows per page, intro mode, and last-seen intro version) to `.governance/shell-state.json`. This means your context and intro preference are preserved between shell sessions. Use `:reset` to clear saved state.
 
 ## Filtering
 

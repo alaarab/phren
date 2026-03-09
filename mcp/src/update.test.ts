@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
+import * as path from "path";
 
 const { mockExistsSync } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("child_process", () => ({
 }));
 
 import { runCortexUpdate } from "./update.js";
+import { PACKAGE_SPEC } from "./package-metadata.js";
 
 describe("runCortexUpdate", () => {
   beforeEach(() => {
@@ -54,6 +56,7 @@ describe("runCortexUpdate", () => {
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Updated local cortex repo at");
     expect(result.message).toContain("(Already up to date.)");
+    expect(result.message).toContain("Run `cortex update --refresh-starter`");
     expect(result.message).toContain("Rebuilt and verified CLI health.");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "git",
@@ -133,7 +136,8 @@ describe("runCortexUpdate", () => {
     const result = await runCortexUpdate();
 
     expect(result.ok).toBe(true);
-    expect(result.message).toBe("Updated cortex via npm global install (@latest) and verified the package is installed.");
+    expect(result.message).toContain("Updated cortex via npm global install (@latest) and verified the package is installed.");
+    expect(result.message).toContain("Run `cortex update --refresh-starter`");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "npm",
       ["install", "-g", "@alaarab/cortex@latest"],
@@ -160,7 +164,37 @@ describe("runCortexUpdate", () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toBe(
-      "Global update failed: network down. Try manually: npm install -g @alaarab/cortex@latest"
+      `Global update failed: network down. Try manually: npm install -g ${PACKAGE_SPEC}`
+    );
+  });
+
+  it("can refresh starter assets as part of update", async () => {
+    mockExistsSync.mockImplementation((filePath: fs.PathLike) => {
+      const value = String(filePath);
+      if (value.endsWith(".git")) return true;
+      if (value.endsWith("package.json")) return true;
+      if (value.includes(path.join(".runtime", "starter-updates"))) return false;
+      return false;
+    });
+
+    mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === "git" && args[0] === "status") return "";
+      if (cmd === "git" && args[0] === "pull") return "Fast-forward";
+      if (cmd === "npm" && args[0] === "install") return "";
+      if (cmd === "npm" && args[0] === "run" && args[1] === "build") return "";
+      if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "--health") return "";
+      if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "init") return "";
+      throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
+    });
+
+    const result = await runCortexUpdate({ refreshStarter: true });
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain("Refreshed starter assets.");
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      process.execPath,
+      [expect.stringMatching(/mcp[\\/]dist[\\/]index\.js$/), "init", "--apply-starter-update", "-y"],
+      expect.objectContaining({ encoding: "utf8" })
     );
   });
 });
