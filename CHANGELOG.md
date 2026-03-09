@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-03-09
+
+### Changed
+- Retrieval now retries zero-hit lexical searches with a relaxed FTS query that matches any two salient clauses, then uses bounded lexical rescue before opening the vector gate.
+- Overlap scoring no longer truncates long document tokenization to the query-token cap, which fixes false negatives when the relevant terms appear later in large backlog or findings files.
+- Session lifecycle tools now require an explicit `sessionId` or a `connectionId` bound at `session_start`; implicit process-global session fallback has been removed.
+- `add_finding` and `add_findings` accept an optional `sessionId` so session metrics can still be updated without relying on global process state.
+
+### Fixed
+- Large-corpus cosine fallback no longer fills its candidate set with `ORDER BY RANDOM()`. It now uses deterministic rowid windows after FTS prefiltering, which keeps the fallback reproducible and avoids reintroducing table-wide random-sort cost.
+- `session_context` and `session_end` now fail fast when callers omit explicit session identity instead of silently resolving the wrong active session in multi-client MCP processes.
+
+### Docs
+- README, API reference, LLM install docs, architecture notes, benchmark protocol, and whitepaper were updated to reflect the current lexical-first retrieval design, published benchmark numbers, and explicit session identity contract.
+
 ## [1.16.0] - 2026-03-08
 
 ### Added
