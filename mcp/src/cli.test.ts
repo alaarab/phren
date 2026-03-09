@@ -1461,6 +1461,8 @@ describe("CLI integration: maintain migrate argument edge cases", () => {
 // CLI integration: init (subprocess-based, #96)
 // ────────────────────────────────────────────────────────────────────────────
 
+const CLI_INTEGRATION_TIMEOUT_MS = process.platform === "win32" ? 15000 : 8000;
+
 describe("CLI integration: init", () => {
   let cortexDir: string;
   let homeDir: string;
@@ -1484,7 +1486,7 @@ describe("CLI integration: init", () => {
     expect(exitCode).toBe(0);
     expect(stdout.toLowerCase()).toContain("dry run");
     expect(fs.existsSync(cortexDir)).toBe(false);
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init -y creates cortex directory and governance files", () => {
     const { stdout, exitCode } = runCli(
@@ -1495,7 +1497,7 @@ describe("CLI integration: init", () => {
     expect(fs.existsSync(cortexDir)).toBe(true);
     const govDir = path.join(cortexDir, ".governance");
     expect(fs.existsSync(govDir)).toBe(true);
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init with --machine sets machine name", () => {
     const { exitCode } = runCli(
@@ -1508,7 +1510,7 @@ describe("CLI integration: init", () => {
       const content = fs.readFileSync(machinesPath, "utf8");
       expect(content).toContain("test-box");
     }
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init is idempotent (re-running does not fail)", () => {
     runCli(
@@ -1520,7 +1522,7 @@ describe("CLI integration: init", () => {
       { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init --mcp with invalid value exits with error", () => {
     const { stderr, exitCode } = runCli(
@@ -1529,7 +1531,7 @@ describe("CLI integration: init", () => {
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Invalid --mcp value");
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init --dry-run on existing install describes update plan", () => {
     runCli(
@@ -1543,7 +1545,7 @@ describe("CLI integration: init", () => {
     expect(exitCode).toBe(0);
     expect(stdout.toLowerCase()).toContain("dry run");
     expect(stdout).toContain("install detected");
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1577,7 +1579,7 @@ describe("CLI integration: verify", () => {
     const output = stdout + stderr;
     expect(output).toContain("cortex verify:");
     expect(output).toMatch(/(pass|FAIL)/);
-  }, process.platform === "win32" ? 15000 : 8000);
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify on empty directory reports issues", () => {
     fs.mkdirSync(cortexDir, { recursive: true });
@@ -1587,7 +1589,7 @@ describe("CLI integration: verify", () => {
     );
     const output = stdout + stderr;
     expect(output).toContain("cortex verify:");
-  }, process.platform === "win32" ? 15000 : 8000);
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify checks fts-index and hook-entrypoint", () => {
     runCli(
@@ -1601,7 +1603,7 @@ describe("CLI integration: verify", () => {
     const output = stdout + stderr;
     expect(output).toContain("fts-index");
     expect(output).toContain("hook-entrypoint");
-  }, process.platform === "win32" ? 15000 : 8000);
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify shows fix suggestions for failures", () => {
     fs.mkdirSync(cortexDir, { recursive: true });
@@ -1612,7 +1614,7 @@ describe("CLI integration: verify", () => {
     const output = stdout + stderr;
     expect(output).toContain("issues found");
     expect(output).toContain("fix:");
-  }, process.platform === "win32" ? 15000 : 8000);
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2059,7 +2061,7 @@ describe("CLI integration: init --from-existing", () => {
     // Verify CLAUDE.md content was copied
     const claude = fs.readFileSync(path.join(cortexDir, "my-app", "CLAUDE.md"), "utf8");
     expect(claude).toContain("web application for managing tasks");
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("finds CLAUDE.md in .claude/ subdirectory", () => {
     const claudeDir = path.join(projectDir, ".claude");
@@ -2076,7 +2078,7 @@ describe("CLI integration: init --from-existing", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Bootstrapped project");
     expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("reports error when no CLAUDE.md exists", () => {
     const { stdout, exitCode } = runCli(
@@ -2086,7 +2088,7 @@ describe("CLI integration: init --from-existing", () => {
     expect(exitCode).toBe(0); // init itself succeeds, bootstrap fails gracefully
     expect(stdout).toContain("Could not bootstrap");
     expect(stdout).toContain("No CLAUDE.md found");
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("reports error when path does not exist", () => {
     const { stdout, exitCode } = runCli(
@@ -2096,7 +2098,7 @@ describe("CLI integration: init --from-existing", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Could not bootstrap");
     expect(stdout).toContain("does not exist");
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("works on existing cortex install (update path)", () => {
     // First, init normally
@@ -2119,7 +2121,7 @@ describe("CLI integration: init --from-existing", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Bootstrapped project");
     expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("rejects case-insensitive project collisions", () => {
     const sourceDir = path.join(path.dirname(projectDir), "cortex");
@@ -2134,5 +2136,5 @@ describe("CLI integration: init --from-existing", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Could not bootstrap");
     expect(stdout).toContain("already exists with different casing");
-  }, process.platform === "win32" ? 15000 : 8000);
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 });
