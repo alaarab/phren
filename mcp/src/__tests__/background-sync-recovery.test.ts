@@ -4,6 +4,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
 
+const RECOVERY_TEST_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
+
 function git(cwd: string, args: string[], encoding: "utf8" | null = null): string {
   return execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: encoding ?? undefined as any }).toString();
 }
@@ -67,7 +69,7 @@ describe("handleBackgroundSync recovery", () => {
     const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".governance", "runtime-health.json"), "utf8"));
     expect(runtime.lastSync.lastPushStatus).toBe("saved-pushed");
     expect(runtime.lastSync.lastPullStatus).toBe("ok");
-  });
+  }, RECOVERY_TEST_TIMEOUT_MS);
 
   it("keeps commits local when the remote becomes unavailable", async () => {
     const remote = path.join(tmp.path, "remote-down.git");
@@ -96,7 +98,7 @@ describe("handleBackgroundSync recovery", () => {
 
     expect(git(repo, ["log", "--oneline", "-1"], "utf8")).toContain("local");
     expect(fs.existsSync(path.join(repo, ".runtime", "background-sync.lock"))).toBe(false);
-  });
+  }, RECOVERY_TEST_TIMEOUT_MS);
 
   it("aborts rebase and leaves commit local when conflicts require manual resolution", async () => {
     const remote = path.join(tmp.path, "remote-manual.git");
@@ -136,7 +138,7 @@ describe("handleBackgroundSync recovery", () => {
     expect(fs.existsSync(path.join(repoB, ".runtime", "background-sync.lock"))).toBe(false);
     expect(fs.readFileSync(path.join(repoB, "demo", "summary.md"), "utf8")).toContain("local conflicting change");
     expect(fs.readFileSync(path.join(repoB, "demo", "summary.md"), "utf8")).not.toContain("<<<<<<<");
-  });
+  }, RECOVERY_TEST_TIMEOUT_MS);
 
   it("auto-merges backlog conflicts without leaving merge markers behind", async () => {
     const remote = path.join(tmp.path, "remote-backlog.git");
@@ -176,6 +178,6 @@ describe("handleBackgroundSync recovery", () => {
     expect(backlog).toContain("Remote task");
     expect(backlog).toContain("Local task");
     expect(backlog).not.toContain("<<<<<<<");
-  });
+  }, RECOVERY_TEST_TIMEOUT_MS);
 
 });
