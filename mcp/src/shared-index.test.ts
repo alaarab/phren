@@ -240,11 +240,11 @@ describe("detectProject", () => {
 
   it("matches short names (<=3 chars) only on last segment", () => {
     const cortex = makeCortex();
-    makeProject(cortex, "web-project-4", { "SUMMARY.md": "# Summary" });
-    // "web-project-4" is 3 chars: only matches if it's the last segment
-    const match = detectProject(cortex, "/home/user/web-project-4");
-    expect(match).toBe("web-project-4");
-    const noMatch = detectProject(cortex, "/home/user/web-project-4/src");
+    makeProject(cortex, "abc", { "SUMMARY.md": "# Summary" });
+    // "abc" is 3 chars: only matches if it's the last segment
+    const match = detectProject(cortex, "/home/user/abc");
+    expect(match).toBe("abc");
+    const noMatch = detectProject(cortex, "/home/user/abc/src");
     expect(noMatch).toBeNull();
   });
 
