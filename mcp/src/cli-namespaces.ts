@@ -3,12 +3,10 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import {
   expandHomePath,
-  findProjectNameCaseInsensitive,
   getCortexPath,
   getProjectDirs,
   homePath,
   hookConfigPath,
-  normalizeProjectNameForCreate,
 } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
@@ -438,13 +436,9 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
   }
 
   if (subcommand === "add") {
-    const name = args[1];
-    if (!name) {
-      console.error("Usage: cortex projects add <name>");
-      process.exit(1);
-    }
-    console.error("`cortex projects add` is legacy. Prefer `cd ~/your-project && cortex add`.");
-    return handleProjectsAdd(name);
+    console.error("`cortex projects add` has been removed from the supported workflow.");
+    console.error("Use `cd ~/your-project && cortex add` so enrollment stays path-based.");
+    process.exit(1);
   }
 
   if (subcommand === "remove") {
@@ -492,58 +486,6 @@ function handleProjectsList(profile: string) {
   }
   console.log(`\n${projects.length} project(s) total.`);
   console.log("Add another project: cd ~/your-project && cortex add");
-}
-
-function handleProjectsAdd(name: string) {
-  const projectName = normalizeProjectNameForCreate(name);
-  if (!isValidProjectName(projectName)) {
-    console.error(`Invalid project name: "${name}". Use lowercase letters, numbers, and hyphens.`);
-    process.exit(1);
-  }
-
-  const cortexPath = getCortexPath();
-  const existingProject = findProjectNameCaseInsensitive(cortexPath, projectName);
-  if (existingProject && existingProject !== projectName) {
-    console.error(
-      `Project "${existingProject}" already exists with different casing. Refusing to create "${projectName}" because it would split the same project on case-sensitive filesystems.`
-    );
-    process.exit(1);
-  }
-  const projectDir = path.join(cortexPath, projectName);
-
-  if (fs.existsSync(projectDir)) {
-    console.error(`Project "${projectName}" already exists at ${projectDir}`);
-    process.exit(1);
-  }
-
-  fs.mkdirSync(projectDir, { recursive: true });
-
-  const today = new Date().toISOString().slice(0, 10);
-
-  fs.writeFileSync(
-    path.join(projectDir, "summary.md"),
-    `# ${projectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
-  );
-  fs.writeFileSync(
-    path.join(projectDir, "CLAUDE.md"),
-    `# ${projectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
-  );
-  fs.writeFileSync(
-    path.join(projectDir, "FINDINGS.md"),
-    `# ${projectName} Findings\n\n<!-- created: ${today} -->\n`
-  );
-  fs.writeFileSync(
-    path.join(projectDir, "backlog.md"),
-    `# ${projectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
-  );
-
-  console.log(`\nCreated project "${projectName}" at ${projectDir}`);
-  console.log("\nFiles created:");
-  console.log("  summary.md     — one-liner description, stack, run command");
-  console.log("  CLAUDE.md      — project instructions for Claude");
-  console.log("  FINDINGS.md    — auto-captured insights");
-  console.log("  backlog.md     — task queue");
-  console.log(`\nNext: edit ${projectDir}/summary.md to describe your project.`);
 }
 
 async function handleProjectsRemove(name: string, profile: string) {

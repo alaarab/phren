@@ -94,6 +94,12 @@ For a brand-new project scaffold inside Claude:
 /cortex-init my-project
 ```
 
+Compatibility note:
+- `cortex add` is the canonical path for existing repos.
+- Legacy compatibility paths: `cortex projects add`, `cortex link`, and `init --from-existing` should not be your default workflow.
+- Platform-specific behavior is documented in `docs/platform-matrix.md`.
+- Best-effort vs fail-closed behavior is documented in `docs/error-reporting.md`.
+
 ## Does cortex require MCP?
 
 No. MCP is recommended — it gives agents 48 tools for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
@@ -120,6 +126,10 @@ Prints what would be created or updated and exits without touching anything.
 ## Which agents are supported?
 
 Claude Code, GitHub Copilot CLI, Cursor, and OpenAI Codex. `cortex init` detects which ones are installed and configures them automatically. All four share the same knowledge base — a finding saved by any one of them is available to all the others on the next pull.
+
+## Which platforms are supported?
+
+Linux is the primary validation path. macOS and Windows are supported, with explicit config-path handling for their user-home layouts and MCP config locations. The current support matrix and known differences live in `docs/platform-matrix.md`.
 
 ## Where does cortex store data?
 

@@ -80,4 +80,55 @@ describe("startLiveStatePoller", () => {
 
     stop();
   });
+
+  it("stops polling once the shell is exiting", async () => {
+    const shell = {
+      invalidateSubsectionsCache: vi.fn(),
+      setMessage: vi.fn(),
+    };
+    const repaint = vi.fn(async () => {});
+    const computeToken = vi.fn()
+      .mockReturnValueOnce("token-a")
+      .mockReturnValue("token-b");
+
+    const stop = startLiveStatePoller({
+      cortexPath: "/tmp/cortex",
+      shell,
+      repaint,
+      intervalMs: 100,
+      isExiting: () => true,
+      computeToken,
+    });
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(shell.invalidateSubsectionsCache).not.toHaveBeenCalled();
+    expect(repaint).not.toHaveBeenCalled();
+
+    stop();
+  });
+
+  it("does not repaint after stop() is called", async () => {
+    const shell = {
+      invalidateSubsectionsCache: vi.fn(),
+      setMessage: vi.fn(),
+    };
+    const repaint = vi.fn(async () => {});
+    const computeToken = vi.fn()
+      .mockReturnValueOnce("token-a")
+      .mockReturnValueOnce("token-b")
+      .mockReturnValue("token-c");
+
+    const stop = startLiveStatePoller({
+      cortexPath: "/tmp/cortex",
+      shell,
+      repaint,
+      intervalMs: 100,
+      computeToken,
+    });
+
+    stop();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(shell.invalidateSubsectionsCache).not.toHaveBeenCalled();
+    expect(repaint).not.toHaveBeenCalled();
+  });
 });

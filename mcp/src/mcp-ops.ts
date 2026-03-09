@@ -7,8 +7,7 @@ import { runtimeFile, getProjectDirs } from "./shared.js";
 import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
 import { approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.js";
-import { bootstrapFromExisting } from "./init-setup.js";
-import { resolveActiveProfile } from "./profile-store.js";
+import { addProjectFromPath } from "./core-project.js";
 
 import type { CortexResult } from "./shared.js";
 import type { McpToolResult } from "./mcp-types.js";
@@ -35,47 +34,28 @@ export function register(server: McpServer, ctx: McpContext): void {
         "Bootstrap a project into cortex from a repo or working directory. " +
         "Copies or creates CLAUDE.md/summary/backlog/findings under ~/.cortex/<project> and adds the project to the active profile.",
       inputSchema: z.object({
-        path: z.string().optional().describe("Project path to import. Pass the current repo path explicitly."),
+        path: z.string().describe("Project path to import. Pass the current repo path explicitly."),
         profile: z.string().optional().describe("Profile to update. Defaults to the active profile."),
       }),
     },
     async ({ path: targetPath, profile: requestedProfile }) => {
       return withWriteQueue(async () => {
         try {
-          if (!targetPath) {
+          const added = addProjectFromPath(cortexPath, targetPath, requestedProfile || profile || undefined);
+          if (!added.ok) {
             return mcpResponse({
               ok: false,
-              error: "Path is required. Pass the current project directory explicitly to avoid adding the wrong working directory.",
+              error: added.error,
             });
           }
-          const resolvedPath = path.resolve(targetPath);
-          const activeProfile = resolveActiveProfile(cortexPath, requestedProfile || profile || undefined);
-          if (!activeProfile.ok) {
-            return mcpResponse({
-              ok: false,
-              error: activeProfile.error,
-            });
-          }
-          const selectedProfile = activeProfile.data;
-          const projectName = bootstrapFromExisting(cortexPath, resolvedPath, selectedProfile);
-          updateFileInIndex(path.join(cortexPath, projectName, "CLAUDE.md"));
-          updateFileInIndex(path.join(cortexPath, projectName, "summary.md"));
-          updateFileInIndex(path.join(cortexPath, projectName, "FINDINGS.md"));
-          updateFileInIndex(path.join(cortexPath, projectName, "backlog.md"));
+          updateFileInIndex(added.data.files.claude);
+          updateFileInIndex(added.data.files.summary);
+          updateFileInIndex(added.data.files.findings);
+          updateFileInIndex(added.data.files.backlog);
           return mcpResponse({
             ok: true,
-            message: `Added project "${projectName}" from ${resolvedPath}.`,
-            data: {
-              project: projectName,
-              path: resolvedPath,
-              profile: selectedProfile ?? null,
-              files: {
-                claude: path.join(cortexPath, projectName, "CLAUDE.md"),
-                summary: path.join(cortexPath, projectName, "summary.md"),
-                findings: path.join(cortexPath, projectName, "FINDINGS.md"),
-                backlog: path.join(cortexPath, projectName, "backlog.md"),
-              },
-            },
+            message: `Added project "${added.data.project}" from ${added.data.path}.`,
+            data: added.data,
           });
         } catch (err: unknown) {
           return mcpResponse({

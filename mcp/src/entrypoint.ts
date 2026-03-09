@@ -3,6 +3,7 @@ import * as path from "path";
 import { parseMcpMode, runInit } from "./init.js";
 import { errorMessage } from "./utils.js";
 import { defaultCortexPath } from "./shared.js";
+import { addProjectFromPath } from "./core-project.js";
 
 const HELP_TEXT = `cortex - Long-term memory for Claude Code
 
@@ -167,19 +168,16 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       return finish(1);
     }
     try {
-      const { bootstrapFromExisting } = await import("./init-setup.js");
-      const { resolveActiveProfile } = await import("./profile-store.js");
-      const activeProfile = resolveActiveProfile(cortexPath, profile);
-      if (!activeProfile.ok) {
-        console.error(activeProfile.error);
+      const added = addProjectFromPath(cortexPath, path.resolve(targetPath), profile);
+      if (!added.ok) {
+        console.error(added.error);
         return finish(1);
       }
-      const projectName = bootstrapFromExisting(cortexPath, path.resolve(targetPath), activeProfile.data);
-      console.log(`Added project "${projectName}"`);
-      console.log(`  ${cortexPath}/${projectName}/CLAUDE.md`);
-      console.log(`  ${cortexPath}/${projectName}/FINDINGS.md`);
-      console.log(`  ${cortexPath}/${projectName}/backlog.md`);
-      console.log(`  ${cortexPath}/${projectName}/summary.md`);
+      console.log(`Added project "${added.data.project}"`);
+      console.log(`  ${added.data.files.claude}`);
+      console.log(`  ${added.data.files.findings}`);
+      console.log(`  ${added.data.files.backlog}`);
+      console.log(`  ${added.data.files.summary}`);
     } catch (e) {
       console.error(`Could not add project: ${e instanceof Error ? e.message : String(e)}`);
       return finish(1);
@@ -198,6 +196,9 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     if (mcpIdx !== -1 && !mcpMode) {
       console.error(`Invalid --mcp value "${initArgs[mcpIdx + 1] || ""}". Use "on" or "off".`);
       return finish(1);
+    }
+    if (fromExistingIdx !== -1) {
+      console.error("Note: `init --from-existing` is legacy compatibility. Prefer `cortex add <path>` after init.");
     }
     await runInit({
       machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
@@ -264,6 +265,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "link") {
+    console.error("Note: `cortex link` is legacy compatibility. Prefer `npx @alaarab/cortex init`.");
     const { runLink } = await import("./link.js");
     const linkArgs = argv.slice(1);
     const getFlag = (flag: string) => {

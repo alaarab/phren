@@ -206,12 +206,11 @@ Record feedback on whether an injected memory was helpful or noisy.
 ### `add_project`
 
 Bootstraps a repo or working directory into cortex and adds it to the active profile. Pass the path explicitly; when no `profile` is provided, cortex uses `CORTEX_PROFILE` or the current machine mapping from `machines.yaml`.
-
-Bootstrap a repo or working directory into cortex and add it to the active profile. Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `backlog.md` under `~/.cortex/<project>`.
+Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `backlog.md` under `~/.cortex/<project>`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `path` | string | no | Project path to import. Defaults to the MCP server process working directory. |
+| `path` | string | yes | Project path to import. Pass the current repo path explicitly. |
 | `profile` | string | no | Profile to update. Defaults to the active profile. |
 
 ### `export_project`

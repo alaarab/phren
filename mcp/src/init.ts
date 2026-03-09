@@ -616,6 +616,9 @@ export async function runInit(opts: InitOptions = {}) {
               const created = bootstrapFromExisting(cortexPath, cwdProject, opts.profile);
               log(`\nDetected project in current directory — bootstrapped "${created}"`);
             } catch (e: unknown) {
+              // Auto-bootstrap here is opportunistic. Keep init running and surface
+              // details only in debug mode rather than turning a successful install
+              // into a hard failure.
               debugLog(`Auto-bootstrap from CWD failed: ${e instanceof Error ? e.message : String(e)}`);
             }
           }
@@ -747,6 +750,8 @@ export async function runInit(opts: InitOptions = {}) {
       const created = bootstrapFromExisting(cortexPath, cwdProjectPath, opts.profile);
       log(`  Detected project in current directory — bootstrapped "${created}"`);
     } catch (e: unknown) {
+      // Fresh-install auto-bootstrap is best-effort. If it fails, the install
+      // still succeeded and the user can add the project explicitly later.
       debugLog(`Auto-bootstrap from CWD during fresh install failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }

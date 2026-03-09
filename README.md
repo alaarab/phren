@@ -243,6 +243,12 @@ For a brand-new scaffold inside Claude:
 /cortex-init my-project
 ```
 
+Legacy compatibility note:
+- `cortex add` is the supported path for existing repos.
+- Legacy compatibility paths: `cortex projects add`, `cortex link`, and `init --from-existing` still exist, but they are not the recommended workflow.
+- Platform support and release expectations are documented in [docs/platform-matrix.md](docs/platform-matrix.md).
+- Best-effort vs fail-closed behavior is documented in [docs/error-reporting.md](docs/error-reporting.md).
+
 </details>
 
 <details>

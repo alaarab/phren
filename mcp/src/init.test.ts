@@ -769,6 +769,7 @@ describe("runPostInitVerify", () => {
       expect(names).toContain("node-version");
       expect(names).toContain("git-remote");
       expect(names).toContain("config-writable");
+      expect(names).toContain("installed-version");
     } finally {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origProfile;
@@ -788,6 +789,36 @@ describe("runPostInitVerify", () => {
 
     expect(hookCheck.ok).toBe(true);
     expect(hookCheck.detail).toContain("npx fallback");
+  });
+
+  it("flags install metadata drift when installedVersion does not match runtime", () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-verify-version-test-");
+    const home = path.join(tmpDir, "home");
+    const cortex = path.join(tmpDir, "cortex");
+    const origHome = process.env.HOME;
+    const origProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
+      fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
+      fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
+      fs.writeFileSync(
+        path.join(cortex, ".governance", "install-preferences.json"),
+        JSON.stringify({ installedVersion: "0.0.1" }, null, 2)
+      );
+
+      const result = runPostInitVerify(cortex);
+      const versionCheck = result.checks.find((check) => check.name === "installed-version");
+      expect(versionCheck?.ok).toBe(false);
+      expect(versionCheck?.detail).toContain("runtime");
+    } finally {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origProfile;
+      cleanup();
+    }
   });
 });
 
