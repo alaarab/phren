@@ -5,9 +5,18 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
+import * as yaml from "js-yaml";
+import { execFileSync } from "child_process";
 import { configureAllHooks } from "./hooks.js";
 import { debugLog, isRecord, hookConfigPath, homeDir, homePath } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
+import {
+  codexJsonCandidates,
+  copilotMcpCandidates,
+  cursorMcpCandidates,
+  vscodeMcpCandidates,
+} from "./provider-adapters.js";
 
 // Re-export everything consumers need from the helper modules
 export type { McpConfigStatus, McpRootKey, ToolStatus } from "./init-config.js";
@@ -36,6 +45,8 @@ export {
   migrateRootFiles,
   runPostInitVerify,
   listTemplates,
+  detectProjectDir,
+  isProjectTracked,
 } from "./init-setup.js";
 
 // Imports from helpers (used internally in this file)
@@ -71,6 +82,8 @@ import {
   applyTemplate,
   bootstrapFromExisting,
   updateMachinesYaml,
+  detectProjectDir,
+  isProjectTracked,
 } from "./init-setup.js";
 
 import { DEFAULT_CORTEX_PATH, STARTER_DIR, VERSION, log, confirmPrompt } from "./init-shared.js";
@@ -83,6 +96,13 @@ interface HookEntry {
 }
 
 type HookMap = Partial<Record<"UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", HookEntry[]>> & Record<string, unknown>;
+
+function atomicWriteText(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, filePath);
+}
 
 function parseVersion(version: string): { major: number; minor: number; patch: number; pre: string } {
   const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?/);
@@ -142,10 +162,48 @@ export interface InitOptions {
   _walkthroughSemanticDedup?: boolean;
   /** Set by walkthrough when user enables LLM conflict detection */
   _walkthroughSemanticConflict?: boolean;
+  /** Set by walkthrough when user provides a git clone URL for existing cortex */
+  _walkthroughCloneUrl?: string;
+}
+
+function normalizedBootstrapProjectName(projectPath: string): string {
+  return path.basename(projectPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+}
+
+function updateStarterProfiles(cortexPath: string, mutate: (projects: string[]) => string[]): void {
+  const profilesDir = path.join(cortexPath, "profiles");
+  if (!fs.existsSync(profilesDir)) return;
+  for (const pf of fs.readdirSync(profilesDir)) {
+    if (!pf.endsWith(".yaml")) continue;
+    const pfPath = path.join(profilesDir, pf);
+    try {
+      const parsed = yaml.load(fs.readFileSync(pfPath, "utf8"), { schema: yaml.CORE_SCHEMA });
+      if (!isRecord(parsed) || !Array.isArray(parsed.projects)) continue;
+      const projects = parsed.projects.map((project) => String(project));
+      const nextProjects = mutate(projects);
+      if (nextProjects.join("\n") === projects.join("\n")) continue;
+      const tmpPath = `${pfPath}.tmp-${crypto.randomUUID()}`;
+      fs.writeFileSync(tmpPath, yaml.dump({ ...parsed, projects: nextProjects }, { lineWidth: 1000 }));
+      fs.renameSync(tmpPath, pfPath);
+    } catch (err: unknown) {
+      debugLog(`updateStarterProfiles failed for ${pfPath}: ${errorMessage(err)}`);
+    }
+  }
+}
+
+function getPendingBootstrapTarget(cortexPath: string, opts: InitOptions): { path: string; mode: "explicit" | "detected" } | null {
+  if (opts.fromExisting) {
+    return { path: path.resolve(opts.fromExisting), mode: "explicit" };
+  }
+  const cwdProject = detectProjectDir(process.cwd(), cortexPath);
+  if (!cwdProject) return null;
+  const projectName = normalizedBootstrapProjectName(cwdProject);
+  if (isProjectTracked(cortexPath, projectName)) return null;
+  return { path: cwdProject, mode: "detected" };
 }
 
 // Interactive walkthrough for first-time init
-async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp: McpMode; hooks: McpMode; ollamaEnabled: boolean; autoCaptureEnabled: boolean; semanticDedupEnabled: boolean; semanticConflictEnabled: boolean; githubUsername?: string; githubRepo?: string }> {
+async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp: McpMode; hooks: McpMode; ollamaEnabled: boolean; autoCaptureEnabled: boolean; semanticDedupEnabled: boolean; semanticConflictEnabled: boolean; githubUsername?: string; githubRepo?: string; cloneUrl?: string }> {
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string): Promise<string> => new Promise(r => rl.question(q, r));
@@ -153,6 +211,16 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   log("\nWelcome to cortex. Let's set up persistent memory for your AI agents.\n");
   log("We'll ask a few questions. Every option can be changed later.\n");
 
+  log("─── Existing cortex? ──────────────────────────────────────────────────");
+  log("If you've already set up cortex on another machine, paste the git");
+  log("clone URL to pull your existing memory. Otherwise, press Enter.\n");
+  const cloneAnswer = (await ask(`Clone URL (or Enter to skip): `)).trim();
+  if (cloneAnswer) {
+    rl.close();
+    return { machine: os.hostname(), profile: "personal", mcp: "on", hooks: "on", ollamaEnabled: false, autoCaptureEnabled: false, semanticDedupEnabled: false, semanticConflictEnabled: false, cloneUrl: cloneAnswer };
+  }
+
+  log("");
   const defaultMachine = os.hostname();
   const machineAnswer = (await ask(`Machine name [${defaultMachine}]: `)).trim();
   const machine = machineAnswer || defaultMachine;
@@ -330,7 +398,7 @@ export async function runInit(opts: InitOptions = {}) {
   // Treat as existing install only when cortex-specific files are present.
   // An empty or non-cortex directory (e.g. from a partial clone) should not
   // trigger the update path.
-  const hasExistingInstall = existing && (
+  let hasExistingInstall = existing && (
     fs.existsSync(path.join(cortexPath, "machines.yaml")) ||
     fs.existsSync(path.join(cortexPath, ".governance")) ||
     fs.existsSync(path.join(cortexPath, "global"))
@@ -343,6 +411,9 @@ export async function runInit(opts: InitOptions = {}) {
     opts.profile = opts.profile || answers.profile;
     opts.mcp = opts.mcp || answers.mcp;
     opts.hooks = opts.hooks || answers.hooks;
+    if (answers.cloneUrl) {
+      opts._walkthroughCloneUrl = answers.cloneUrl;
+    }
     if (answers.githubRepo) {
       opts._walkthroughGithub = { username: answers.githubUsername, repo: answers.githubRepo };
     }
@@ -364,10 +435,28 @@ export async function runInit(opts: InitOptions = {}) {
     }
   }
 
+  // If the walkthrough provided a clone URL, clone it and treat as existing install
+  if (opts._walkthroughCloneUrl) {
+    log(`\nCloning existing cortex from ${opts._walkthroughCloneUrl}...`);
+    try {
+      execFileSync("git", ["clone", opts._walkthroughCloneUrl, cortexPath], {
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 60_000,
+      });
+      log(`  Cloned to ${cortexPath}`);
+      // Re-check: the cloned repo should now be treated as an existing install
+      hasExistingInstall = true;
+    } catch (e: unknown) {
+      log(`  Clone failed: ${e instanceof Error ? e.message : String(e)}`);
+      log(`  Continuing with fresh install instead.`);
+    }
+  }
+
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
   const hooksEnabled = opts.hooks ? opts.hooks === "on" : getHooksEnabledPreference(cortexPath);
   const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
   const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
+  const pendingBootstrap = getPendingBootstrapTarget(cortexPath, opts);
 
   if (dryRun) {
     log("\nInit dry run. No files will be written.\n");
@@ -380,6 +469,11 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  Reconfigure VS Code, Cursor, Copilot CLI, and Codex MCP targets`);
       if (hooksEnabled) {
         log(`  Reconfigure lifecycle hooks for detected tools`);
+      }
+      if (pendingBootstrap?.mode === "explicit") {
+        log(`  Would bootstrap project from ${pendingBootstrap.path}`);
+      } else if (pendingBootstrap?.mode === "detected") {
+        log(`  Would auto-bootstrap current project directory (${pendingBootstrap.path})`);
       }
       if (opts.applyStarterUpdate) {
         log(`  Apply starter template updates to global/CLAUDE.md and global skills`);
@@ -399,6 +493,11 @@ export async function runInit(opts: InitOptions = {}) {
     log(`  Configure Claude Code plus detected MCP targets (VS Code/Cursor/Copilot/Codex)`);
     if (hooksEnabled) {
       log(`  Configure lifecycle hooks for detected tools`);
+    }
+    if (pendingBootstrap?.mode === "explicit") {
+      log(`  Would bootstrap project from ${pendingBootstrap.path}`);
+    } else if (pendingBootstrap?.mode === "detected") {
+      log(`  Would auto-bootstrap current project directory (${pendingBootstrap.path})`);
     }
     log(`  Write install preferences and run post-init verification checks`);
     log(`\nDry run complete.\n`);
@@ -507,6 +606,20 @@ export async function runInit(opts: InitOptions = {}) {
         } catch (e: unknown) {
           log(`\nCould not bootstrap from existing: ${e instanceof Error ? e.message : String(e)}`);
         }
+      } else {
+        // Auto-detect: if CWD looks like a project, bootstrap it automatically
+        const cwdProject = detectProjectDir(process.cwd(), cortexPath);
+        if (cwdProject) {
+          const projectName = normalizedBootstrapProjectName(cwdProject);
+          if (!isProjectTracked(cortexPath, projectName)) {
+            try {
+              const created = bootstrapFromExisting(cortexPath, cwdProject, opts.profile);
+              log(`\nDetected project in current directory — bootstrapped "${created}"`);
+            } catch (e: unknown) {
+              debugLog(`Auto-bootstrap from CWD failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+        }
       }
 
       log(`\ncortex updated successfully`);
@@ -536,6 +649,11 @@ export async function runInit(opts: InitOptions = {}) {
       process.exit(1);
     }
   }
+
+  // Determine if CWD is a project that should be bootstrapped instead of
+  // creating a dummy "my-first-project".
+  const cwdProjectPath = !walkthroughProject ? detectProjectDir(process.cwd(), cortexPath) : null;
+  const useTemplateProject = Boolean(walkthroughProject) || Boolean(opts.template);
   const firstProjectName = walkthroughProject || "my-first-project";
 
   // Copy bundled starter to ~/.cortex
@@ -561,18 +679,20 @@ export async function runInit(opts: InitOptions = {}) {
       if (fs.existsSync(defaultDir) && !fs.existsSync(customDir)) {
         fs.renameSync(defaultDir, customDir);
         // Update profile to reference the new project name
-        const profilesDir = path.join(cortexPath, "profiles");
-        if (fs.existsSync(profilesDir)) {
-          for (const pf of fs.readdirSync(profilesDir)) {
-            const pfPath = path.join(profilesDir, pf);
-            if (!pf.endsWith(".yaml")) continue;
-            const content = fs.readFileSync(pfPath, "utf8");
-            if (content.includes("my-first-project")) {
-              fs.writeFileSync(pfPath, content.replace(/my-first-project/g, walkthroughProject));
-            }
-          }
-        }
+        updateStarterProfiles(cortexPath, (projects) => projects.map((project) => project === "my-first-project" ? walkthroughProject : project));
       }
+    }
+    // When no walkthrough project was specified and no template requested,
+    // remove the dummy my-first-project that the starter ships with.
+    // If CWD is a project, we'll bootstrap from it later; otherwise the user
+    // starts with just global config and can `cortex add` projects explicitly.
+    if (!useTemplateProject) {
+      const defaultDir = path.join(cortexPath, "my-first-project");
+      if (fs.existsSync(defaultDir)) {
+        fs.rmSync(defaultDir, { recursive: true, force: true });
+      }
+      // Clean up profile yaml to not reference my-first-project
+      updateStarterProfiles(cortexPath, (projects) => projects.filter((project) => project !== "my-first-project"));
     }
     if (opts.template) {
       const targetProject = walkthroughProject || firstProjectName;
@@ -588,32 +708,47 @@ export async function runInit(opts: InitOptions = {}) {
     log(`  Starter not found in package, creating minimal structure...`);
     fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
     fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
-    fs.mkdirSync(path.join(cortexPath, firstProjectName), { recursive: true });
-    fs.writeFileSync(
+    atomicWriteText(
       path.join(cortexPath, "global", "CLAUDE.md"),
       `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`
     );
-    fs.writeFileSync(
-      path.join(cortexPath, firstProjectName, "summary.md"),
-      `# ${firstProjectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
-    );
-    fs.writeFileSync(
-      path.join(cortexPath, firstProjectName, "CLAUDE.md"),
-      `# ${firstProjectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
-    );
-    fs.writeFileSync(
-      path.join(cortexPath, firstProjectName, "FINDINGS.md"),
-      `# ${firstProjectName} FINDINGS\n\n<!-- Findings are captured automatically during sessions and committed on exit -->\n`
-    );
-    fs.writeFileSync(
-      path.join(cortexPath, firstProjectName, "backlog.md"),
-      `# ${firstProjectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
-    );
+    if (useTemplateProject) {
+      fs.mkdirSync(path.join(cortexPath, firstProjectName), { recursive: true });
+      atomicWriteText(
+        path.join(cortexPath, firstProjectName, "summary.md"),
+        `# ${firstProjectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
+      );
+      atomicWriteText(
+        path.join(cortexPath, firstProjectName, "CLAUDE.md"),
+        `# ${firstProjectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
+      );
+      atomicWriteText(
+        path.join(cortexPath, firstProjectName, "FINDINGS.md"),
+        `# ${firstProjectName} FINDINGS\n\n<!-- Findings are captured automatically during sessions and committed on exit -->\n`
+      );
+      atomicWriteText(
+        path.join(cortexPath, firstProjectName, "backlog.md"),
+        `# ${firstProjectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
+      );
+    }
     const profileName = opts.profile || "personal";
-    fs.writeFileSync(
+    const profileProjects = useTemplateProject
+      ? `  - global\n  - ${firstProjectName}`
+      : `  - global`;
+    atomicWriteText(
       path.join(cortexPath, "profiles", `${profileName}.yaml`),
-      `name: ${profileName}\ndescription: Default profile\nprojects:\n  - global\n  - ${firstProjectName}\n`
+      `name: ${profileName}\ndescription: Default profile\nprojects:\n${profileProjects}\n`
     );
+  }
+
+  // If CWD is a project dir, bootstrap it now (replaces the old my-first-project flow)
+  if (cwdProjectPath) {
+    try {
+      const created = bootstrapFromExisting(cortexPath, cwdProjectPath, opts.profile);
+      log(`  Detected project in current directory — bootstrapped "${created}"`);
+    } catch (e: unknown) {
+      debugLog(`Auto-bootstrap from CWD during fresh install failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   // Update machines.yaml with hostname (--machine overrides auto-detected hostname)
@@ -748,7 +883,9 @@ export async function runInit(opts: InitOptions = {}) {
       }
     }
     if (changed) {
-      fs.writeFileSync(envFile, envContent);
+      const tmpPath = `${envFile}.tmp-${crypto.randomUUID()}`;
+      fs.writeFileSync(tmpPath, envContent);
+      fs.renameSync(tmpPath, envFile);
     }
     for (const { label } of envFlags) {
       log(`  ${label}: enabled (${envFile})`);
@@ -793,7 +930,7 @@ export async function runInit(opts: InitOptions = {}) {
     log(`     git push -u origin main`);
   }
 
-  log(`  ${step++}. Add more projects: cortex init --from-existing ~/your-project`);
+  log(`  ${step++}. Add more projects: cd ~/your-project && cortex add`);
 
   if (!mcpEnabled) {
     log(`  ${step++}. Turn MCP on: npx @alaarab/cortex mcp-mode on`);
@@ -802,6 +939,8 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  ${step++}. After working across projects, run /cortex-consolidate to find cross-project patterns`);
   log(`\n  Read ${cortexPath}/README.md for a guided tour of each file.`);
 
+  // --from-existing flag: bootstrap a specific path (CWD auto-detect already
+  // happened earlier in the fresh-install flow, so we only handle the explicit flag here)
   if (opts.fromExisting) {
     try {
       const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting, opts.profile);
@@ -951,11 +1090,7 @@ export async function runUninstall() {
   }
 
   // Remove from VS Code mcp.json
-  const vsCandidates = [
-    path.join(home, ".config", "Code", "User", "mcp.json"),
-    path.join(home, "Library", "Application Support", "Code", "User", "mcp.json"),
-    path.join(home, "AppData", "Roaming", "Code", "User", "mcp.json"),
-  ];
+  const vsCandidates = vscodeMcpCandidates().map((dir) => path.join(dir, "mcp.json"));
   for (const mcpFile of vsCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
@@ -965,12 +1100,7 @@ export async function runUninstall() {
   }
 
   // Remove from Cursor MCP config
-  const cursorCandidates = [
-    path.join(home, ".cursor", "mcp.json"),
-    path.join(home, ".config", "Cursor", "User", "mcp.json"),
-    path.join(home, "Library", "Application Support", "Cursor", "User", "mcp.json"),
-    path.join(home, "AppData", "Roaming", "Cursor", "User", "mcp.json"),
-  ];
+  const cursorCandidates = cursorMcpCandidates();
   for (const mcpFile of cursorCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
@@ -980,13 +1110,7 @@ export async function runUninstall() {
   }
 
   // Remove from Copilot CLI MCP config
-  const copilotCandidates = [
-    path.join(home, ".copilot", "mcp-config.json"),
-    path.join(home, ".github", "mcp.json"),
-    path.join(home, ".config", "github-copilot", "mcp.json"),
-    path.join(home, "Library", "Application Support", "github-copilot", "mcp.json"),
-    path.join(home, "AppData", "Roaming", "github-copilot", "mcp.json"),
-  ];
+  const copilotCandidates = copilotMcpCandidates();
   for (const mcpFile of copilotCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
@@ -1003,11 +1127,7 @@ export async function runUninstall() {
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${codexToml}: ${errorMessage(err)}`); }
 
-  const codexCandidates = [
-    path.join(home, ".codex", "config.json"),
-    path.join(home, ".codex", "mcp.json"),
-    path.join(process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH, "codex.json"),
-  ];
+  const codexCandidates = codexJsonCandidates(process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH);
   for (const mcpFile of codexCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
@@ -1017,7 +1137,7 @@ export async function runUninstall() {
   }
 
   // Remove Copilot hooks file (written by configureAllHooks)
-  const copilotHooksFile = path.join(home, ".github", "hooks", "cortex.json");
+  const copilotHooksFile = hookConfigPath("copilot", process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH);
   try {
     if (fs.existsSync(copilotHooksFile)) {
       fs.unlinkSync(copilotHooksFile);
@@ -1026,7 +1146,7 @@ export async function runUninstall() {
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${copilotHooksFile}: ${errorMessage(err)}`); }
 
   // Remove cortex entries from Cursor hooks file (may contain non-cortex entries)
-  const cursorHooksFile = path.join(home, ".cursor", "hooks.json");
+  const cursorHooksFile = hookConfigPath("cursor", process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH);
   try {
     if (fs.existsSync(cursorHooksFile)) {
       const raw = JSON.parse(fs.readFileSync(cursorHooksFile, "utf8"));
@@ -1038,7 +1158,7 @@ export async function runUninstall() {
         }
       }
       if (changed) {
-        fs.writeFileSync(cursorHooksFile, JSON.stringify(raw, null, 2));
+        atomicWriteText(cursorHooksFile, JSON.stringify(raw, null, 2));
         log(`  Removed cortex entries from Cursor hooks (${cursorHooksFile})`);
       }
     }
@@ -1046,7 +1166,7 @@ export async function runUninstall() {
 
   // Remove Codex hooks file in cortex path
   const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
-  const codexHooksFile = path.join(cortexPath, "codex.json");
+  const codexHooksFile = hookConfigPath("codex", cortexPath);
   try {
     if (fs.existsSync(codexHooksFile)) {
       fs.unlinkSync(codexHooksFile);

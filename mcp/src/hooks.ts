@@ -1,14 +1,23 @@
 import * as fs from "fs";
 import * as path from "path";
-import { createHmac } from "crypto";
+import { createHmac, randomUUID } from "crypto";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, homePath, type CortexErrorCode } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import { hookConfigPath } from "./provider-adapters.js";
+import { VERSION } from "./init-shared.js";
 
 export interface HookError {
   code: CortexErrorCode;
   message: string;
+}
+
+function atomicWriteText(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp-${randomUUID()}`;
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, filePath);
 }
 
 export function commandExists(cmd: string): boolean {
@@ -63,6 +72,10 @@ function resolveCliEntryScript(): string | null {
   return fs.existsSync(local) ? local : null;
 }
 
+function cortexPackageSpec(): string {
+  return `@alaarab/cortex@${VERSION}`;
+}
+
 export interface LifecycleCommands {
   sessionStart: string;
   userPromptSubmit: string;
@@ -73,10 +86,10 @@ export interface LifecycleCommands {
 export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
   const entry = resolveCliEntryScript();
   const isWindows = process.platform === "win32";
+  const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
   if (entry) {
     const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     if (isWindows) {
       return {
         sessionStart: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-session-start`,
@@ -93,20 +106,20 @@ export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
     };
   }
 
-  const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const packageSpec = cortexPackageSpec();
   if (isWindows) {
     return {
-      sessionStart: `set "CORTEX_PATH=${escapedCortex}" && npx @alaarab/cortex hook-session-start`,
-      userPromptSubmit: `set "CORTEX_PATH=${escapedCortex}" && npx @alaarab/cortex hook-prompt`,
-      stop: `set "CORTEX_PATH=${escapedCortex}" && npx @alaarab/cortex hook-stop`,
-      hookTool: `set "CORTEX_PATH=${escapedCortex}" && npx @alaarab/cortex hook-tool`,
+      sessionStart: `set "CORTEX_PATH=${escapedCortex}" && npx -y ${packageSpec} hook-session-start`,
+      userPromptSubmit: `set "CORTEX_PATH=${escapedCortex}" && npx -y ${packageSpec} hook-prompt`,
+      stop: `set "CORTEX_PATH=${escapedCortex}" && npx -y ${packageSpec} hook-stop`,
+      hookTool: `set "CORTEX_PATH=${escapedCortex}" && npx -y ${packageSpec} hook-tool`,
     };
   }
   return {
-    sessionStart: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-session-start`,
-    userPromptSubmit: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-prompt`,
-    stop: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-stop`,
-    hookTool: `CORTEX_PATH="${escapedCortex}" npx @alaarab/cortex hook-tool`,
+    sessionStart: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-session-start`,
+    userPromptSubmit: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-prompt`,
+    stop: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-stop`,
+    hookTool: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-tool`,
   };
 }
 
@@ -122,12 +135,13 @@ function installSessionWrapper(tool: string, cortexPath: string): boolean {
   const escapedBinary = realBinary.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const escapedEntry = entry ? entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"') : "";
+  const packageSpec = cortexPackageSpec();
   const sessionStartCmd = entry
     ? `env CORTEX_PATH="$CORTEX_PATH" node "$ENTRY_SCRIPT" hook-session-start`
-    : `env CORTEX_PATH="$CORTEX_PATH" npx @alaarab/cortex hook-session-start`;
+    : `env CORTEX_PATH="$CORTEX_PATH" npx -y ${packageSpec} hook-session-start`;
   const stopCmd = entry
     ? `env CORTEX_PATH="$CORTEX_PATH" node "$ENTRY_SCRIPT" hook-stop`
-    : `env CORTEX_PATH="$CORTEX_PATH" npx @alaarab/cortex hook-stop`;
+    : `env CORTEX_PATH="$CORTEX_PATH" npx -y ${packageSpec} hook-stop`;
   const content = `#!/bin/sh
 set -u
 
@@ -171,7 +185,7 @@ exit $status
 
   try {
     fs.mkdirSync(localBinDir, { recursive: true });
-    fs.writeFileSync(wrapperPath, content);
+    atomicWriteText(wrapperPath, content);
     fs.chmodSync(wrapperPath, 0o755);
     return true;
   } catch (err: unknown) {
@@ -337,7 +351,7 @@ function appendHookErrorLog(cortexPath: string, event: string, message: string):
     if (stat.size > 200_000) {
       const content = fs.readFileSync(logPath, "utf-8");
       const lines = content.split("\n").filter(Boolean);
-      fs.writeFileSync(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
+      atomicWriteText(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
     }
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendHookErrorLog rotate: ${errorMessage(err)}\n`);
@@ -426,8 +440,8 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
 
   // ── GitHub Copilot CLI (user-level: ~/.github/hooks/cortex.json) ──────────
   if (detected.has("copilot")) {
-    const copilotHooksDir = homePath(".github", "hooks");
-    const copilotFile = path.join(copilotHooksDir, "cortex.json");
+    const copilotFile = hookConfigPath("copilot", cortexPath);
+    const copilotHooksDir = path.dirname(copilotFile);
     try {
       fs.mkdirSync(copilotHooksDir, { recursive: true });
       const config: CopilotHookConfig = {
@@ -439,7 +453,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
         },
       };
       if (!validateCopilotConfig(config)) throw new Error("invalid copilot hook config shape");
-      fs.writeFileSync(copilotFile, JSON.stringify(config, null, 2));
+      atomicWriteText(copilotFile, JSON.stringify(config, null, 2));
       configured.push("Copilot CLI");
     } catch (err: unknown) {
       debugLog(`configureAllHooks: copilot failed: ${errorMessage(err)}`);
@@ -449,7 +463,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
   if (detected.has("cursor")) {
-    const cursorFile = homePath(".cursor", "hooks.json");
+    const cursorFile = hookConfigPath("cursor", cortexPath);
     try {
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
       let existing: Record<string, unknown> = {};
@@ -465,7 +479,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
         stop: { command: stopCmd },
       };
       if (!validateCursorConfig(config)) throw new Error("invalid cursor hook config shape");
-      fs.writeFileSync(cursorFile, JSON.stringify(config, null, 2));
+      atomicWriteText(cursorFile, JSON.stringify(config, null, 2));
       configured.push("Cursor");
     } catch (err: unknown) {
       debugLog(`configureAllHooks: cursor failed: ${errorMessage(err)}`);
@@ -475,7 +489,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
 
   // ── Codex (codex.json in cortex path) ────────────────────────────────────
   if (detected.has("codex")) {
-    const codexFile = path.join(cortexPath, "codex.json");
+    const codexFile = hookConfigPath("codex", cortexPath);
     try {
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
@@ -490,7 +504,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
         },
       };
       if (!validateCodexConfig(config)) throw new Error("invalid codex hook config shape");
-      fs.writeFileSync(codexFile, JSON.stringify(config, null, 2));
+      atomicWriteText(codexFile, JSON.stringify(config, null, 2));
       configured.push("Codex");
     } catch (err: unknown) {
       debugLog(`configureAllHooks: codex failed: ${errorMessage(err)}`);

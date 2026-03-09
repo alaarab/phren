@@ -31,14 +31,21 @@ import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
 import { getHooksEnabledPreference } from "./init.js";
+import { detectProjectDir, isProjectTracked } from "./init-setup.js";
 import { isToolHookEnabled } from "./hooks.js";
 import { appendFindingJournal } from "./finding-journal.js";
+import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import {
   buildIndex,
   queryRows,
 } from "./shared-index.js";
-import type { SelectedSnippet } from "./cli-hooks-retrieval.js";
-import { filterBacklogByPriority } from "./cli-hooks-retrieval.js";
+import type { SelectedSnippet } from "./shared-retrieval.js";
+import { filterBacklogByPriority } from "./shared-retrieval.js";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
+
+function getRuntimeProfile(): string {
+  return resolveRuntimeProfile(getCortexPath());
+}
 
 /** Read JSON from stdin if it's not a TTY. Returns null if stdin is a TTY or parsing fails. */
 function readStdinJson<T>(): T | null {
@@ -77,7 +84,21 @@ function isSafeTranscriptPath(p: string): boolean {
   return safePrefixes.some(prefix => normalized.startsWith(prefix + path.sep) || normalized === prefix);
 }
 
-const profile = process.env.CORTEX_PROFILE || "";
+export function getUntrackedProjectNotice(cortexPath: string, cwd: string): string | null {
+  const profile = resolveRuntimeProfile(cortexPath);
+  const projectDir = detectProjectDir(cwd, cortexPath);
+  if (!projectDir) return null;
+  const projectName = path.basename(projectDir).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  if (isProjectTracked(cortexPath, projectName, profile || undefined)) return null;
+  return [
+    "<cortex-notice>",
+    "This project directory is not tracked by cortex.",
+    "Ask the user whether they want to add it to cortex.",
+    `If they say yes, use the \`add_project\` MCP tool with path="${projectDir}" or run \`cortex add\` from that directory.`,
+    "</cortex-notice>",
+    "",
+  ].join("\n");
+}
 
 // ── Git helpers ──────────────────────────────────────────────────────────────
 
@@ -224,7 +245,7 @@ function scheduleBackgroundSync(cortexPathLocal: string): boolean {
       env: {
         ...process.env,
         CORTEX_PATH: cortexPathLocal,
-        CORTEX_PROFILE: profile,
+        CORTEX_PROFILE: getRuntimeProfile(),
       },
     });
     child.unref();
@@ -292,7 +313,7 @@ function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string
       env: {
         ...process.env,
         CORTEX_PATH: cortexPathLocal,
-        CORTEX_PROFILE: profile,
+        CORTEX_PROFILE: getRuntimeProfile(),
       },
     });
     child.on("exit", (code, signal) => {
@@ -527,6 +548,21 @@ export async function handleHookSessionStart() {
     "hook_session_start",
     `pull=${pull.ok ? "ok" : "fail"} doctor=${doctor.ok ? "ok" : "issues"} maintenance=${maintenanceScheduled ? "scheduled" : "skipped"}`
   );
+
+  // Untracked project detection: suggest `cortex add` if CWD looks like a project but isn't tracked
+  try {
+    const cortexPath = getCortexPath();
+    if (cortexPath) {
+      const cwd = process.cwd();
+      const notice = getUntrackedProjectNotice(cortexPath, cwd);
+      if (notice) {
+        process.stdout.write(notice);
+        debugLog(`untracked project detected at ${cwd}`);
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`untracked project detection failed: ${errorMessage(err)}`);
+  }
 }
 
 // ── Q21: Conversation memory capture ─────────────────────────────────────────
@@ -571,32 +607,9 @@ export function extractConversationInsights(text: string): string[] {
   return insights.slice(0, 5);
 }
 
-/**
- * Load ~/.cortex/.env into process.env. Only sets keys that are not already set.
- * Called at the start of handleHookStop so feature flags written by init are active.
- */
-function loadCortexDotEnv(cortexPathLocal: string): void {
-  try {
-    const content = fs.readFileSync(path.join(cortexPathLocal, ".env"), "utf8");
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx < 1) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      // Strip matching surrounding quotes (both ends must use the same quote character)
-      const raw = trimmed.slice(eqIdx + 1).trim();
-      const val = /^(["'])(.*)\1$/.test(raw) ? raw.slice(1, -1) : raw;
-      if (key && !(key in process.env)) process.env[key] = val;
-    }
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadCortexDotEnv: ${errorMessage(err)}\n`);
-  }
-}
-
 export async function handleHookStop() {
   const now = new Date().toISOString();
-  loadCortexDotEnv(getCortexPath());
+  bootstrapCortexDotEnv(getCortexPath());
   if (!getHooksEnabledPreference(getCortexPath())) {
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
@@ -650,7 +663,7 @@ export async function handleHookStop() {
       }
       if (captureInput) {
         const cwd = process.cwd();
-        const activeProject = detectProject(getCortexPath(), cwd, profile);
+        const activeProject = detectProject(getCortexPath(), cwd, getRuntimeProfile());
         if (activeProject) {
           const insights = extractConversationInsights(captureInput);
           for (const insight of insights) {
@@ -861,9 +874,9 @@ export async function handleHookContext() {
   const ctxStdin = readStdinJson<{ cwd?: string }>();
   if (ctxStdin?.cwd) cwd = ctxStdin.cwd;
 
-  const project = detectProject(getCortexPath(), cwd, profile);
+  const project = detectProject(getCortexPath(), cwd, getRuntimeProfile());
 
-  const db = await buildIndex(getCortexPath(), profile);
+  const db = await buildIndex(getCortexPath(), getRuntimeProfile());
   const contextLabel = project ? `\u25c6 cortex \u00b7 ${project} \u00b7 context` : `\u25c6 cortex \u00b7 context`;
   const parts: string[] = [contextLabel, "<cortex-context>"];
 
@@ -1008,7 +1021,7 @@ export async function handleHookTool() {
     }
 
     const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
-    let activeProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
+    let activeProject = cwd ? detectProject(getCortexPath(), cwd, getRuntimeProfile()) : null;
 
     const cooldownFile = runtimeFile(getCortexPath(), "hook-tool-cooldown");
     try {

@@ -10,7 +10,7 @@ vi.mock("../shared-ollama.js", () => ({
   getCloudEmbeddingUrl: vi.fn().mockReturnValue(null),
 }));
 
-import { searchDocumentsAsync, shouldRunVectorExpansion } from "../cli-hooks-retrieval.js";
+import { searchDocumentsAsync, shouldRunVectorExpansion } from "../shared-retrieval.js";
 import { vectorFallback } from "../shared-search-fallback.js";
 
 function makeDb(ftsRows: DbRow[]): SqlJsDatabase {

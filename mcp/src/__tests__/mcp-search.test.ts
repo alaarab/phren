@@ -497,6 +497,20 @@ describe("mcp-search: get_findings", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Invalid project name");
   });
+
+  it("surfaces provenance metadata in get_findings output", async () => {
+    makeProject(tmp.path, "withmeta", {
+      "FINDINGS.md": "# withmeta FINDINGS\n\n## 2026-03-09\n\n- Provenance stays attached <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->\n  <!-- cortex:cite {\"created_at\":\"2026-03-09T10:00:00Z\",\"backlog_item\":\"deadbeef\"} -->\n",
+    });
+
+    const res = parseResult(await server.call("get_findings", { project: "withmeta" }));
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("backlog=deadbeef");
+    expect(res.message).toContain("actor=codex");
+    expect(res.message).toContain("model=gpt-5");
+    expect(res.data.findings[0].backlogItem).toBe("deadbeef");
+    expect(res.data.findings[0].tool).toBe("codex");
+  });
 });
 
 describe("mcp-search: get_memory_detail URL decode", () => {

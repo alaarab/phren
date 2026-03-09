@@ -23,6 +23,7 @@ import {
   setMcpEnabledPreference,
   warmSemanticSearch,
 } from "./init.js";
+import { applyStarterTemplateUpdates, getHookEntrypointCheck } from "./init-setup.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 
 describe.sequential("mcp mode configuration", () => {
@@ -67,6 +68,43 @@ describe.sequential("mcp mode configuration", () => {
 
     expect(fs.existsSync(dryRunPath)).toBe(false);
     delete process.env.CORTEX_PATH;
+  });
+
+  it("dry-run reports auto-bootstrap when run inside an untracked repo", async () => {
+    const dryRunPath = path.join(tmpRoot, "dry-run-bootstrap-cortex");
+    const projectDir = path.join(tmpRoot, "tracked-repo");
+    const origCwd = process.cwd();
+    process.env.CORTEX_PATH = dryRunPath;
+    fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+    process.chdir(projectDir);
+
+    const chunks: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { chunks.push(String(chunk)); return true; }) as any;
+    try {
+      await runInit({ dryRun: true });
+    } finally {
+      process.stdout.write = origWrite;
+      process.chdir(origCwd);
+    }
+
+    const output = chunks.join("");
+    expect(output).toContain("Would auto-bootstrap current project directory");
+    expect(output).toContain(projectDir);
+    delete process.env.CORTEX_PATH;
+  });
+
+  it("stages starter updates for modified global skills instead of overwriting them", () => {
+    const targetSkill = path.join(cortexPath, "global", "skills", "pipeline.md");
+    fs.mkdirSync(path.dirname(targetSkill), { recursive: true });
+    fs.writeFileSync(targetSkill, "# custom pipeline\n");
+
+    const updates = applyStarterTemplateUpdates(cortexPath);
+
+    expect(fs.readFileSync(targetSkill, "utf8")).toBe("# custom pipeline\n");
+    expect(fs.existsSync(`${targetSkill}.bak`)).toBe(true);
+    expect(fs.existsSync(`${targetSkill}.new`)).toBe(true);
+    expect(updates.some((entry) => entry.endsWith(path.join("global", "skills", "pipeline.md.new")))).toBe(true);
   });
 
   it("defaults to mcp enabled and persists preference updates", () => {
@@ -483,7 +521,7 @@ describe("runInit walkthrough integration", () => {
     expect(fs.existsSync(path.join(cortexPath, ".governance", "retention-policy.json"))).toBe(true);
   });
 
-  it("init output mentions restart requirement", async () => {
+  it("init output explains next steps without a restart step", async () => {
     const cortexPath = path.join(tmpRoot, "cortex-restart-msg");
     process.env.CORTEX_PATH = cortexPath;
     const chunks: string[] = [];
@@ -497,6 +535,7 @@ describe("runInit walkthrough integration", () => {
     const output = chunks.join("");
     expect(output).toContain("Start a new Claude session");
     expect(output).toContain("Next steps:");
+    expect(output).not.toContain("Restart your agent");
   });
 
   it("walkthrough project name renames starter default project", async () => {
@@ -735,6 +774,20 @@ describe("runPostInitVerify", () => {
       process.env.USERPROFILE = origProfile;
       cleanup();
     }
+  });
+
+  it("accepts npx fallback when local hook entrypoint is not built", () => {
+    const hookCheck = getHookEntrypointCheck({
+      pathExists: () => false,
+      versionReader: (cmd, args = ["--version"]) => {
+        expect(cmd).toBe("npx");
+        expect(args).toEqual(["--version"]);
+        return "10.0.0";
+      },
+    });
+
+    expect(hookCheck.ok).toBe(true);
+    expect(hookCheck.detail).toContain("npx fallback");
   });
 });
 

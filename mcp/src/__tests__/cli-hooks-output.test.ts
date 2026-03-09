@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildHookOutput } from "../cli-hooks-output.js";
-import type { SelectedSnippet } from "../cli-hooks-retrieval.js";
+import type { SelectedSnippet } from "../shared-retrieval.js";
 
 function makeSnippet(overrides: Partial<SelectedSnippet> = {}): SelectedSnippet {
   return {

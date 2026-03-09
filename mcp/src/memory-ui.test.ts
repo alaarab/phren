@@ -220,6 +220,40 @@ describe.sequential("review-ui server", () => {
     expect(after).not.toBe(before);
   });
 
+  it("lists shared hook config paths for Claude and Codex", async () => {
+    const origHome = process.env.HOME;
+    const origProfile = process.env.USERPROFILE;
+    process.env.HOME = tmpRoot;
+    process.env.USERPROFILE = tmpRoot;
+    fs.mkdirSync(path.join(tmpRoot, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
+    fs.writeFileSync(path.join(tmpRoot, "codex.json"), JSON.stringify({ hooks: {} }, null, 2));
+
+    try {
+      const body = await new Promise<string>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/api/hooks`, (res) => {
+          let out = "";
+          res.on("data", (chunk) => { out += String(chunk); });
+          res.on("end", () => resolve(out));
+        }).on("error", reject);
+      });
+
+      const parsed = JSON.parse(body) as {
+        tools: Array<{ tool: string; configPath: string; exists: boolean }>;
+      };
+      const claude = parsed.tools.find((tool) => tool.tool === "claude");
+      const codex = parsed.tools.find((tool) => tool.tool === "codex");
+
+      expect(claude?.configPath).toBe(path.join(tmpRoot, ".claude", "settings.json"));
+      expect(claude?.exists).toBe(true);
+      expect(codex?.configPath).toBe(path.join(tmpRoot, "codex.json"));
+      expect(codex?.exists).toBe(true);
+    } finally {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origProfile;
+    }
+  });
+
   it("returns 413 for request body exceeding 1MB", async () => {
     const bigPayload = querystring.stringify({
       project: "demo",

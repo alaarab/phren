@@ -18,6 +18,20 @@ function findingsPath(project = PROJECT) {
   return path.join(tmp.path, project, "FINDINGS.md");
 }
 
+function writeSession(sessionId: string, project = PROJECT) {
+  const dir = path.join(tmp.path, ".runtime", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `session-${sessionId}.json`),
+    JSON.stringify({
+      sessionId,
+      project,
+      startedAt: "2026-03-09T10:00:00.000Z",
+      findingsAdded: 0,
+    }),
+  );
+}
+
 beforeEach(() => {
   tmp = makeTempDir("content-learning-test-");
   grantAdmin(tmp.path);
@@ -26,6 +40,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.CORTEX_ACTOR;
+  delete process.env.OPENAI_MODEL;
   tmp.cleanup();
 });
 
@@ -114,6 +129,74 @@ describe("supersession", () => {
     const content2 = fs.readFileSync(findingsPath(), "utf-8");
     expect(content2).toContain("superseded_by");
     expect(content2).toContain("explicit TTL of 300s");
+  });
+});
+
+describe("finding provenance", () => {
+  it("auto-stamps active backlog and active session context", () => {
+    grantAdmin(tmp.path, "codex-worker");
+    writeFile(
+      path.join(tmp.path, PROJECT, "backlog.md"),
+      `# ${PROJECT} backlog
+
+## Active
+
+- [ ] Finish phase seven [high] <!-- bid:deadbeef -->
+
+## Queue
+
+- [ ] Later item <!-- bid:cafebabe -->
+`,
+    );
+    writeSession("session-1234");
+    process.env.OPENAI_MODEL = "gpt-5";
+
+    const result = addFindingToFile(tmp.path, PROJECT, "Operator-surface refactor is safe to continue in smaller slices");
+    expect(result.ok).toBe(true);
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    expect(content).toContain('"backlog_item":"deadbeef"');
+    expect(content).toContain("actor:codex-worker");
+    expect(content).toContain("model:gpt-5");
+    expect(content).toContain("session:session-1234");
+  });
+
+  it("resolves explicit backlog_item references to the stable ID", () => {
+    writeFile(
+      path.join(tmp.path, PROJECT, "backlog.md"),
+      `# ${PROJECT} backlog
+
+## Active
+
+- [ ] Finish phase seven [high] <!-- bid:deadbeef -->
+`,
+    );
+
+    const result = addFindingToFile(tmp.path, PROJECT, "Backlog linkage should survive reordering", {
+      backlog_item: "A1",
+    });
+    expect(result.ok).toBe(true);
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    expect(content).toContain('"backlog_item":"deadbeef"');
+  });
+
+  it("rejects invalid backlog_item references", () => {
+    writeFile(
+      path.join(tmp.path, PROJECT, "backlog.md"),
+      `# ${PROJECT} backlog
+
+## Active
+
+- [ ] Finish phase seven [high] <!-- bid:deadbeef -->
+`,
+    );
+
+    const result = addFindingToFile(tmp.path, PROJECT, "This should not save", {
+      backlog_item: "missing item",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
   });
 });
 

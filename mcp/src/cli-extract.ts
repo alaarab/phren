@@ -20,21 +20,25 @@ import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
-
-const profile = process.env.CORTEX_PROFILE || "";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 function runGit(cwd: string, args: string[]): string | null {
   return runGitShared(cwd, args, EXEC_TIMEOUT_MS, debugLog);
 }
 
 function shouldRetryGh(err: unknown): boolean {
-  const msg = String((err as any)?.message ?? err ?? "");
+  const message = err instanceof Error
+    ? err.message
+    : (typeof err === "object" && err !== null && "message" in err && typeof (err as { message: unknown }).message === "string")
+      ? (err as { message: string }).message
+      : String(err ?? "");
+  const msg = String(message);
   return /(rate limit|secondary rate limit|timed out|ecconn|network|502|503|504|bad gateway|service unavailable)/i.test(msg);
 }
 
 function inferProject(arg?: string): string | null {
   if (arg) return arg;
-  return detectProject(getCortexPath(), process.cwd(), profile);
+  return detectProject(getCortexPath(), process.cwd(), resolveRuntimeProfile(getCortexPath()));
 }
 
 // ── Git log parsing ──────────────────────────────────────────────────────────

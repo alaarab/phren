@@ -105,7 +105,7 @@ All palette commands start with `:`. You can also type them without the colon pr
 | `:profile add-project <profile> <project>` | Add a project to a profile |
 | `:profile remove-project <profile> <project>` | Remove a project from a profile |
 | `:run fix` | Run `doctor --fix` to self-heal configuration |
-| `:relink` | Rerun `cortex link` to rebuild symlinks and hooks |
+| `:relink` | Refresh generated links, context files, and hook wiring |
 | `:rerun hooks` | Execute lifecycle hooks now (session-start + stop) |
 | `:update` | Update cortex to the latest version |
 | `:reset` | Reset shell state to defaults |

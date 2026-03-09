@@ -4,6 +4,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import {
@@ -12,6 +13,7 @@ import {
   hookConfigPath,
   EXEC_TIMEOUT_QUICK_MS,
 } from "./shared.js";
+import { addProjectToProfile, listProfiles, resolveActiveProfile } from "./profile-store.js";
 import { execFileSync } from "child_process";
 import {
   GOVERNANCE_SCHEMA_VERSION,
@@ -22,11 +24,23 @@ import { ROOT, STARTER_DIR } from "./init-shared.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function atomicWriteText(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, filePath);
+}
+
 export interface PostInitCheck {
   name: string;
   ok: boolean;
   detail: string;
   fix?: string;
+}
+
+interface HookEntrypointCheckDeps {
+  pathExists?: typeof fs.existsSync;
+  versionReader?: typeof commandVersion;
 }
 
 function commandVersion(cmd: string, args: string[] = ["--version"]): string | null {
@@ -40,6 +54,25 @@ function commandVersion(cmd: string, args: string[] = ["--version"]): string | n
     debugLog(`commandVersion ${cmd} failed: ${errorMessage(err)}`);
     return null;
   }
+}
+
+export function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): PostInitCheck {
+  const pathExists = deps.pathExists ?? fs.existsSync;
+  const versionReader = deps.versionReader ?? commandVersion;
+  const distIndex = path.join(__dirname, "index.js");
+  const localEntrypointOk = pathExists(distIndex);
+  const hookEntrypointOk = localEntrypointOk || Boolean(versionReader("npx", ["--version"]));
+  const detail = localEntrypointOk
+    ? "Hook entrypoint available via local dist/index.js"
+    : hookEntrypointOk
+      ? "Hook entrypoint available via npx fallback"
+      : "Hook entrypoint missing and npx unavailable, hooks will fail";
+  return {
+    name: "hook-entrypoint",
+    ok: hookEntrypointOk,
+    detail,
+    fix: hookEntrypointOk ? undefined : "Rebuild cortex: `npm run build` or reinstall the package, and ensure npm/npx is available for hook fallbacks",
+  };
 }
 
 function parseSemverTriple(raw: string): [number, number, number] | null {
@@ -94,16 +127,24 @@ function gitRemoteStatus(cortexPath: string): { ok: boolean; detail: string } {
   }
 }
 
-function copyStarterFile(src: string, dest: string) {
+function copyStarterFile(src: string, dest: string): string | null {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  if (fs.existsSync(dest)) {
-    const existing = fs.readFileSync(dest);
-    const incoming = fs.readFileSync(src);
-    if (!existing.equals(incoming)) {
-      fs.copyFileSync(dest, dest + ".bak");
-    }
+  if (!fs.existsSync(dest)) {
+    fs.copyFileSync(src, dest);
+    return dest;
   }
-  fs.copyFileSync(src, dest);
+
+  const existing = fs.readFileSync(dest);
+  const incoming = fs.readFileSync(src);
+  if (existing.equals(incoming)) {
+    return null;
+  }
+
+  const backupPath = `${dest}.bak`;
+  const stagedPath = `${dest}.new`;
+  fs.copyFileSync(dest, backupPath);
+  fs.copyFileSync(src, stagedPath);
+  return stagedPath;
 }
 
 export function applyStarterTemplateUpdates(cortexPath: string): string[] {
@@ -114,8 +155,8 @@ export function applyStarterTemplateUpdates(cortexPath: string): string[] {
   const starterClaude = path.join(starterGlobal, "CLAUDE.md");
   const targetClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(starterClaude)) {
-    copyStarterFile(starterClaude, targetClaude);
-    updates.push("global/CLAUDE.md");
+    const written = copyStarterFile(starterClaude, targetClaude);
+    if (written) updates.push(path.relative(cortexPath, written));
   }
 
   const starterSkillsDir = path.join(starterGlobal, "skills");
@@ -124,8 +165,8 @@ export function applyStarterTemplateUpdates(cortexPath: string): string[] {
     fs.mkdirSync(targetSkillsDir, { recursive: true });
     for (const f of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
       if (!f.isFile()) continue;
-      copyStarterFile(path.join(starterSkillsDir, f.name), path.join(targetSkillsDir, f.name));
-      updates.push(`global/skills/${f.name}`);
+      const written = copyStarterFile(path.join(starterSkillsDir, f.name), path.join(targetSkillsDir, f.name));
+      if (written) updates.push(path.relative(cortexPath, written));
     }
   }
 
@@ -270,7 +311,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
   const runtimeHealth = path.join(govDir, "runtime-health.json");
 
   if (!fs.existsSync(policy)) {
-    fs.writeFileSync(
+    atomicWriteText(
       policy,
       JSON.stringify({
         schemaVersion: sv,
@@ -284,7 +325,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
   }
   if (!fs.existsSync(access)) {
     const user = process.env.USER || process.env.USERNAME || "owner";
-    fs.writeFileSync(
+    atomicWriteText(
       access,
       JSON.stringify({
         schemaVersion: sv,
@@ -296,7 +337,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
     );
   }
   if (!fs.existsSync(workflow)) {
-    fs.writeFileSync(
+    atomicWriteText(
       workflow,
       JSON.stringify({
         schemaVersion: sv,
@@ -307,7 +348,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
     );
   }
   if (!fs.existsSync(indexPolicy)) {
-    fs.writeFileSync(
+    atomicWriteText(
       indexPolicy,
       JSON.stringify({
         schemaVersion: sv,
@@ -321,17 +362,14 @@ export function ensureGovernanceFiles(cortexPath: string) {
   migrateGovernanceFiles(cortexPath);
 
   if (!fs.existsSync(runtimeHealth)) {
-    fs.writeFileSync(runtimeHealth, JSON.stringify({ schemaVersion: sv }, null, 2) + "\n");
+    atomicWriteText(runtimeHealth, JSON.stringify({ schemaVersion: sv }, null, 2) + "\n");
   } else {
     try {
       const current = JSON.parse(fs.readFileSync(runtimeHealth, "utf8"));
       if (current && typeof current === "object" && !Array.isArray(current)) {
         const existingSchema = typeof current.schemaVersion === "number" ? current.schemaVersion : 0;
         if (existingSchema < sv) {
-          fs.writeFileSync(
-            runtimeHealth,
-            JSON.stringify({ ...current, schemaVersion: sv }, null, 2) + "\n"
-          );
+          atomicWriteText(runtimeHealth, JSON.stringify({ ...current, schemaVersion: sv }, null, 2) + "\n");
         }
       }
     } catch (err: unknown) {
@@ -365,7 +403,7 @@ export function applyTemplate(projectDir: string, templateName: string, projectN
         let content = fs.readFileSync(src, "utf8");
         content = content.replace(/\{\{project\}\}/g, projectName);
         content = content.replace(/\{\{date\}\}/g, new Date().toISOString().slice(0, 10));
-        fs.writeFileSync(dest, content);
+        atomicWriteText(dest, content);
       }
     }
   }
@@ -394,11 +432,7 @@ export function bootstrapFromExisting(cortexPath: string, projectPath: string, p
     }
   }
 
-  if (!claudeMdPath) {
-    throw new Error(`No CLAUDE.md found in ${resolvedPath} or ${resolvedPath}/.claude/`);
-  }
-
-  const claudeContent = fs.readFileSync(claudeMdPath, "utf8");
+  const claudeContent = claudeMdPath ? fs.readFileSync(claudeMdPath, "utf8") : null;
   const projectName = path.basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
   const existingProject = findProjectNameCaseInsensitive(cortexPath, projectName);
   if (existingProject && existingProject !== projectName) {
@@ -409,59 +443,71 @@ export function bootstrapFromExisting(cortexPath: string, projectPath: string, p
   const projDir = path.join(cortexPath, projectName);
   fs.mkdirSync(projDir, { recursive: true });
 
-  fs.writeFileSync(path.join(projDir, "CLAUDE.md"), claudeContent);
-
-  const lines = claudeContent.split("\n");
-  const summaryLines: string[] = [];
-  let foundHeading = false;
-  for (const line of lines) {
-    if (line.startsWith("# ") && !foundHeading) {
-      foundHeading = true;
-      summaryLines.push(line);
-      continue;
+  const claudePath = path.join(projDir, "CLAUDE.md");
+  if (claudeContent) {
+    if (!fs.existsSync(claudePath)) {
+      atomicWriteText(claudePath, claudeContent);
     }
-    if (foundHeading && line.trim() === "") {
-      if (summaryLines.length > 1) break;
-      continue;
-    }
-    if (foundHeading && summaryLines.length < 10) {
-      summaryLines.push(line);
+  } else {
+    // No CLAUDE.md found — create a starter one
+    if (!fs.existsSync(claudePath)) {
+      atomicWriteText(
+        claudePath,
+        `# ${projectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
+      );
     }
   }
 
-  fs.writeFileSync(
-    path.join(projDir, "summary.md"),
-    `# ${projectName}\n\n**What:** Bootstrapped from ${resolvedPath}\n**Source CLAUDE.md:** ${claudeMdPath}\n\n${summaryLines.length > 1 ? summaryLines.slice(1).join("\n") : ""}\n`
-  );
+  const summaryLines: string[] = [];
+  if (claudeContent) {
+    const lines = claudeContent.split("\n");
+    let foundHeading = false;
+    for (const line of lines) {
+      if (line.startsWith("# ") && !foundHeading) {
+        foundHeading = true;
+        summaryLines.push(line);
+        continue;
+      }
+      if (foundHeading && line.trim() === "") {
+        if (summaryLines.length > 1) break;
+        continue;
+      }
+      if (foundHeading && summaryLines.length < 10) {
+        summaryLines.push(line);
+      }
+    }
+  }
+
+  const sourceInfo = claudeMdPath ? `**Source CLAUDE.md:** ${claudeMdPath}` : `**Source:** ${resolvedPath}`;
+  const summaryPath = path.join(projDir, "summary.md");
+  if (!fs.existsSync(summaryPath)) {
+    atomicWriteText(
+      summaryPath,
+      `# ${projectName}\n\n**What:** Bootstrapped from ${resolvedPath}\n${sourceInfo}\n\n${summaryLines.length > 1 ? summaryLines.slice(1).join("\n") : ""}\n`
+    );
+  }
 
   if (!fs.existsSync(path.join(projDir, "FINDINGS.md"))) {
-    fs.writeFileSync(
+    atomicWriteText(
       path.join(projDir, "FINDINGS.md"),
-      `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${claudeMdPath} -->\n`
+      `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${resolvedPath} -->\n`
     );
   }
   if (!fs.existsSync(path.join(projDir, "backlog.md"))) {
-    fs.writeFileSync(
+    atomicWriteText(
       path.join(projDir, "backlog.md"),
       `# ${projectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
     );
   }
 
-  const profilesDir = path.join(cortexPath, "profiles");
-  if (fs.existsSync(profilesDir)) {
-    // Only update the explicitly selected profile (or the first one found if none specified)
-    // to avoid leaking the project into unrelated profiles on other machines.
-    const allProfiles = fs.readdirSync(profilesDir).filter(f => f.endsWith(".yaml"));
-    const targetProfile = profile
-      ? allProfiles.find(f => f === `${profile}.yaml` || f === profile) ?? allProfiles[0]
-      : allProfiles[0];
-    if (targetProfile) {
-      const pfPath = path.join(profilesDir, targetProfile);
-      const content = fs.readFileSync(pfPath, "utf8");
-      if (!content.includes(projectName)) {
-        fs.writeFileSync(pfPath, content.trimEnd() + `\n  - ${projectName}\n`);
-      }
+  const activeProfile = resolveActiveProfile(cortexPath, profile);
+  if (activeProfile.ok && activeProfile.data) {
+    const addResult = addProjectToProfile(cortexPath, activeProfile.data, projectName);
+    if (!addResult.ok) {
+      throw new Error(addResult.error);
     }
+  } else if (!activeProfile.ok && activeProfile.code !== "FILE_NOT_FOUND") {
+    throw new Error(activeProfile.error);
   }
 
   return projectName;
@@ -504,7 +550,47 @@ export function updateMachinesYaml(cortexPath: string, machine?: string, profile
 
   const header = commentLines.length ? commentLines.join("\n") + "\n" : "";
   const body = yaml.dump(parsed, { lineWidth: -1 });
-  fs.writeFileSync(machinesFile, header + body);
+  atomicWriteText(machinesFile, header + body);
+}
+
+/**
+ * Detect if a directory looks like a project that should be bootstrapped.
+ * Returns the path if it qualifies, null otherwise.
+ * A directory qualifies if it:
+ * - Is not the home directory or cortex directory
+ * - Has a CLAUDE.md, .claude/CLAUDE.md, or .git directory
+ */
+export function detectProjectDir(dir: string, cortexPath: string): string | null {
+  const home = os.homedir();
+  const resolvedCortexPath = path.resolve(cortexPath);
+  let current = path.resolve(dir);
+  while (true) {
+    if (current === home || current === resolvedCortexPath) return null;
+    if (current.startsWith(resolvedCortexPath + path.sep)) return null;
+    const hasClaude = fs.existsSync(path.join(current, "CLAUDE.md")) ||
+      fs.existsSync(path.join(current, ".claude", "CLAUDE.md"));
+    const hasGit = fs.existsSync(path.join(current, ".git"));
+    if (hasClaude || hasGit) return current;
+    const parent = path.dirname(current);
+    if (parent === current || parent === home) break;
+    current = parent;
+  }
+  return null;
+}
+
+/**
+ * Check if a project name is already tracked in any profile.
+ */
+export function isProjectTracked(cortexPath: string, projectName: string, profile?: string): boolean {
+  const profiles = listProfiles(cortexPath);
+  if (profiles.ok) {
+    if (profile) {
+      return profiles.data.some((entry) => entry.name === profile && entry.projects.includes(projectName));
+    }
+    return profiles.data.some((entry) => entry.projects.includes(projectName));
+  }
+  const projDir = path.join(cortexPath, projectName);
+  return fs.existsSync(projDir);
 }
 
 export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: PostInitCheck[] } {
@@ -563,7 +649,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "hooks-registered",
     ok: hooksOk,
     detail: hooksOk ? "All lifecycle hooks registered" : "One or more hooks missing from ~/.claude/settings.json",
-    fix: hooksOk ? undefined : "Run `npx @alaarab/cortex init` to install hooks, or `cortex link` to re-register",
+    fix: hooksOk ? undefined : "Run `npx @alaarab/cortex init` to install or refresh hooks",
   });
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
@@ -596,17 +682,10 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "fts-index",
     ok: ftsOk,
     detail: ftsOk ? "Project directories found for indexing" : "No project directories found in cortex path",
-    fix: ftsOk ? undefined : "Create a project: `cortex add-finding my-project \"first insight\"`",
+    fix: ftsOk ? undefined : "Create a project: `cd ~/your-project && cortex add`",
   });
 
-  const distIndex = path.join(__dirname, "index.js");
-  const hookEntrypointOk = fs.existsSync(distIndex);
-  checks.push({
-    name: "hook-entrypoint",
-    ok: hookEntrypointOk,
-    detail: hookEntrypointOk ? "Hook entrypoint (dist/index.js) exists" : "Hook entrypoint missing, hooks will fail",
-    fix: hookEntrypointOk ? undefined : "Rebuild cortex: `npm run build` or reinstall the package",
-  });
+  checks.push(getHookEntrypointCheck());
 
   const ok = checks.every((c) => c.ok);
   return { ok, checks };

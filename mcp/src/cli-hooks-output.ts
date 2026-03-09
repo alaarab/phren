@@ -7,8 +7,8 @@ import {
 } from "./shared-index.js";
 import { isFeatureEnabled } from "./utils.js";
 import { annotateStale } from "./cli-hooks-citations.js";
-import type { SelectedSnippet, GitContext } from "./cli-hooks-retrieval.js";
-import { approximateTokens, fileRelevanceBoost, branchMatchBoost } from "./cli-hooks-retrieval.js";
+import type { SelectedSnippet, GitContext } from "./shared-retrieval.js";
+import { approximateTokens, fileRelevanceBoost, branchMatchBoost } from "./shared-retrieval.js";
 
 // ── Progressive disclosure helpers ────────────────────────────────────────────
 

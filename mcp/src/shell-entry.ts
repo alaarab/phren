@@ -9,6 +9,13 @@ import { errorMessage } from "./utils.js";
 import { computeCortexLiveStateToken } from "./shared.js";
 import { VERSION } from "./init-shared.js";
 
+const LIVE_STATE_POLL_MS = 2000;
+
+interface LiveStateHost {
+  invalidateSubsectionsCache(): void;
+  setMessage(message: string): void;
+}
+
 async function playStartupIntro(): Promise<void> {
   if (!process.stdout.isTTY) return;
   const frames = shellStartupFrames(VERSION);
@@ -20,30 +27,67 @@ async function playStartupIntro(): Promise<void> {
   }
 }
 
-export async function startShell(cortexPath: string, profile: string): Promise<void> {
-  const shell = new CortexShell(cortexPath, profile);
-  let liveStateToken = computeCortexLiveStateToken(cortexPath);
+export function startLiveStatePoller({
+  cortexPath,
+  shell,
+  repaint,
+  isExiting = () => false,
+  intervalMs = LIVE_STATE_POLL_MS,
+  computeToken = computeCortexLiveStateToken,
+}: {
+  cortexPath: string;
+  shell: LiveStateHost;
+  repaint: () => Promise<void>;
+  isExiting?: () => boolean;
+  intervalMs?: number;
+  computeToken?: (cortexPath: string) => string;
+}): () => void {
+  let liveStateToken = computeToken(cortexPath);
+  let stopped = false;
+  let inFlight = false;
 
-  if (!process.stdin.isTTY) {
-    const { createInterface } = await import("readline");
-    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const repaint = async () => { clearScreen(); process.stdout.write(await shell.render()); rl.setPrompt(`\n${style.boldCyan(":cortex>")} `); rl.prompt(); };
-    const poll = setInterval(async () => {
-      const nextToken = computeCortexLiveStateToken(cortexPath);
+  const pollOnce = async () => {
+    if (stopped || inFlight || isExiting()) return;
+    inFlight = true;
+    try {
+      const nextToken = computeToken(cortexPath);
       if (nextToken === liveStateToken) return;
       liveStateToken = nextToken;
       shell.invalidateSubsectionsCache();
       shell.setMessage(`  ${style.boldCyan("Live")} ${style.dim("store updated")}`);
       await repaint();
-    }, 2000);
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  const poll = setInterval(() => {
+    void pollOnce();
+  }, intervalMs);
+  poll.unref?.();
+
+  return () => {
+    stopped = true;
+    clearInterval(poll);
+  };
+}
+
+export async function startShell(cortexPath: string, profile: string): Promise<void> {
+  const shell = new CortexShell(cortexPath, profile);
+
+  if (!process.stdin.isTTY) {
+    const { createInterface } = await import("readline");
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    const repaint = async () => { clearScreen(); process.stdout.write(await shell.render()); rl.setPrompt(`\n${style.boldCyan(":cortex>")} `); rl.prompt(); };
+    const stopPoll = startLiveStatePoller({ cortexPath, shell, repaint });
     await repaint();
     rl.on("line", async (line) => {
       try { const keep = await shell.handleInput(line); if (!keep) { shell.close(); rl.close(); return; } }
       catch (err: unknown) { process.stdout.write(`\n${style.red("Error:")} ${String(errorMessage(err))}\n`); }
       await repaint();
     });
-    rl.on("SIGINT", () => { clearInterval(poll); shell.close(); rl.close(); });
-    rl.on("close", () => { clearInterval(poll); });
+    rl.on("SIGINT", () => { stopPoll(); shell.close(); rl.close(); });
+    rl.on("close", () => { stopPoll(); });
     await new Promise<void>((resolve) => { rl.on("close", () => { shell.close(); resolve(); }); });
     return;
   }
@@ -53,29 +97,59 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
   process.stdin.setEncoding("utf8");
   process.stdout.write("\x1b[?1049h");
   let exiting = false;
+  let cleanedUp = false;
   const repaint = async () => { clearScreen(); process.stdout.write(await shell.render()); clearToEnd(); };
-  await playStartupIntro();
-  const poll = setInterval(async () => {
-    if (exiting) return;
-    const nextToken = computeCortexLiveStateToken(cortexPath);
-    if (nextToken === liveStateToken) return;
-    liveStateToken = nextToken;
-    shell.invalidateSubsectionsCache();
-    shell.setMessage(`  ${style.boldCyan("Live")} ${style.dim("store updated")}`);
-    await repaint();
-  }, 2000);
-  await repaint();
+  let done!: () => void;
+  const exitPromise = new Promise<void>((resolve) => { done = resolve; });
+
+  const restoreTerminal = () => {
+    try { process.stdin.setRawMode(false); } catch {}
+    try { process.stdin.pause(); } catch {}
+    try { process.stdout.write("\x1b[?1049l"); } catch {}
+  };
+
   const onData = async (key: string) => {
     if (exiting) return;
     try {
       const keep = await shell.handleRawKey(key);
-      if (!keep) { exiting = true; clearInterval(poll); process.stdin.setRawMode(false); process.stdin.pause(); process.stdin.removeListener("data", onData); shell.close(); process.stdout.write("\x1b[?1049l"); done(); return; }
+      if (!keep) { exiting = true; finish(); return; }
       await repaint();
     } catch (err: unknown) { shell.setMessage(`Error: ${errorMessage(err)}`); await repaint(); }
   };
-  let done: () => void;
-  const exitPromise = new Promise<void>((resolve) => { done = resolve; });
+  const onResize = async () => { if (!exiting) await repaint(); };
+  const onSignal = () => {
+    if (exiting) return;
+    exiting = true;
+    finish();
+  };
+  const onProcessExit = () => { restoreTerminal(); };
+  const stopPoll = startLiveStatePoller({ cortexPath, shell, repaint, isExiting: () => exiting });
+
+  const finish = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    stopPoll();
+    process.stdin.removeListener("data", onData);
+    process.stdout.removeListener("resize", onResize);
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+    process.removeListener("exit", onProcessExit);
+    restoreTerminal();
+    shell.close();
+    done();
+  };
+
   process.stdin.on("data", onData);
-  process.stdout.on("resize", async () => { if (!exiting) await repaint(); });
-  await exitPromise;
+  process.stdout.on("resize", onResize);
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  process.once("exit", onProcessExit);
+
+  try {
+    await playStartupIntro();
+    await repaint();
+    await exitPromise;
+  } finally {
+    finish();
+  }
 }

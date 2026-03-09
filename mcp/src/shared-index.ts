@@ -17,21 +17,30 @@ import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
 import { extractAndLinkEntities, ensureGlobalEntitiesTable } from "./shared-entity-graph.js";
 import { bootstrapSqlJs } from "./shared-sqljs.js";
+import {
+  buildSourceDocKey,
+  queryDocRows,
+  type SqlJsDatabase,
+} from "./index-query.js";
 
 // Re-export for backward compatibility
 export { porterStem } from "./shared-stemmer.js";
 export { cosineFallback } from "./shared-search-fallback.js";
 export { queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities, logEntityMiss } from "./shared-entity-graph.js";
-
-export type SqlValue = string | number | null | Uint8Array;
-export type DbRow = SqlValue[];
-
-export interface SqlJsDatabase {
-  run(sql: string, params?: SqlValue[]): void;
-  exec(sql: string, params?: SqlValue[]): { columns: string[]; values: DbRow[] }[];
-  export(): Uint8Array;
-  close(): void;
-}
+export {
+  buildSourceDocKey,
+  decodeFiniteNumber,
+  decodeStringRow,
+  extractSnippet,
+  getDocSourceKey,
+  normalizeMemoryId,
+  queryDocBySourceKey,
+  queryDocRows,
+  queryRows,
+  rowToDoc,
+  rowToDocWithRowid,
+} from "./index-query.js";
+export type { SqlValue, DbRow, DocRow, SqlJsDatabase } from "./index-query.js";
 
 interface SqlJsStatic {
   Database: new (data?: ArrayLike<number>) => SqlJsDatabase;
@@ -346,22 +355,6 @@ function normalizeDocSegment(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
-function getProjectRoot(cortexPath: string, project: string): string {
-  return path.join(path.resolve(cortexPath), project);
-}
-
-export function buildSourceDocKey(project: string, docPath: string, cortexPath: string, fallbackFilename?: string): string {
-  const normalizedProject = normalizeDocSegment(project);
-  const normalizedDocPath = path.resolve(docPath);
-  const projectRoot = getProjectRoot(cortexPath, project);
-  if (normalizedDocPath.startsWith(projectRoot + path.sep) || normalizedDocPath === projectRoot) {
-    const relPath = normalizeDocSegment(path.relative(projectRoot, normalizedDocPath));
-    if (relPath) return `${normalizedProject}/${relPath}`;
-  }
-  const fallback = fallbackFilename ?? path.basename(docPath);
-  return `${normalizedProject}/${normalizeDocSegment(fallback)}`;
-}
-
 function getEntrySourceDocKey(entry: FileEntry, cortexPath: string): string {
   if (entry.relFile) {
     return `${normalizeDocSegment(entry.project)}/${normalizeDocSegment(entry.relFile)}`;
@@ -429,7 +422,10 @@ export function listIndexedDocumentPaths(cortexPath: string, profile?: string): 
 export function normalizeIndexedContent(content: string, type: string, cortexPath: string, maxChars?: number): string {
   let normalized = content
     .replace(/<!-- cortex:archive:start -->[\s\S]*?<!-- cortex:archive:end -->/g, "")
-    .replace(/<details>[\s\S]*?<\/details>/gi, "");
+    .replace(/<details>[\s\S]*?<\/details>/gi, "")
+    .replace(/<!--\s*created:\s*.*?-->/g, "")
+    .replace(/<!--\s*source:\s*.*?-->/g, "")
+    .replace(/<!--\s*cortex:cite\s+\{[\s\S]*?\}\s*-->/g, "");
   normalized = resolveImports(normalized, cortexPath);
   if (type === "backlog") {
     normalized = stripBacklogDoneSection(normalized);
@@ -1081,180 +1077,6 @@ async function _buildIndexGuarded(cortexPath: string, profile?: string): Promise
     throw err;
   }
 }
-
-export interface DocRow {
-  project: string;
-  filename: string;
-  type: string;
-  content: string;
-  path: string;
-}
-
-function describeSqlValue(value: SqlValue | undefined): string {
-  if (value === null) return "null";
-  if (value === undefined) return "undefined";
-  if (value instanceof Uint8Array) return "Uint8Array";
-  return typeof value;
-}
-
-function expectRowWidth(row: DbRow, minColumns: number, context: string): void {
-  if (!Array.isArray(row) || row.length < minColumns) {
-    throw new Error(`${context}: expected at least ${minColumns} columns, got ${Array.isArray(row) ? row.length : typeof row}`);
-  }
-}
-
-export function decodeStringRow(row: DbRow, width: number, context: string): string[] {
-  expectRowWidth(row, width, context);
-  return row.slice(0, width).map((value, index) => {
-    if (typeof value !== "string") {
-      throw new Error(`${context}: expected column ${index} to be string, got ${describeSqlValue(value)}`);
-    }
-    return value;
-  });
-}
-
-export function decodeFiniteNumber(value: SqlValue | undefined, context: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`${context}: expected finite number, got ${describeSqlValue(value)}`);
-  }
-  return value;
-}
-
-export function getDocSourceKey(doc: Pick<DocRow, "project" | "filename" | "path">, cortexPath: string): string {
-  return buildSourceDocKey(doc.project, doc.path, cortexPath, doc.filename);
-}
-
-/**
- * Normalize a memory ID to canonical format: `mem:project/path/to/file.md`.
- * Handles URL-encoded slashes, missing `mem:` prefix, backslashes, and
- * legacy formats with colons after the filename (e.g. `mem:project/file:linenum`).
- */
-export function normalizeMemoryId(rawId: string): string {
-  let id = decodeURIComponent(rawId).replace(/\\/g, "/");
-  if (!id.startsWith("mem:")) id = `mem:${id}`;
-  // Strip trailing :linenum if present (legacy format)
-  id = id.replace(/:(\d+)$/, "");
-  return id;
-}
-
-export function rowToDoc(row: DbRow): DocRow {
-  const [project, filename, type, content, path] = decodeStringRow(row, 5, "rowToDoc");
-  return { project, filename, type, content, path };
-}
-
-export function rowToDocWithRowid(row: DbRow): { rowid: number; doc: DocRow } {
-  expectRowWidth(row, 6, "rowToDocWithRowid");
-  const rowid = decodeFiniteNumber(row[0], "rowToDocWithRowid");
-  const [project, filename, type, content, path] = decodeStringRow(row.slice(1), 5, "rowToDocWithRowid.doc");
-  return {
-    rowid,
-    doc: { project, filename, type, content, path },
-  };
-}
-
-export function queryDocRows(db: SqlJsDatabase, sql: string, params: (string | number)[]): DocRow[] | null {
-  const raw = queryRows(db, sql, params);
-  if (!raw) return null;
-  return raw.map(rowToDoc);
-}
-
-export function queryDocBySourceKey(db: SqlJsDatabase, cortexPath: string, sourceKey: string): DocRow | null {
-  const match = sourceKey.match(/^([^/]+)\/(.+)$/);
-  if (!match) return null;
-  const [, project, rest] = match;
-  const filename = rest.includes("/") ? path.basename(rest) : rest;
-  const rows = queryDocRows(
-    db,
-    "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND filename = ?",
-    [project, filename]
-  );
-  if (!rows) return null;
-  return rows.find((row) => getDocSourceKey(row, cortexPath) === sourceKey) ?? null;
-}
-
-export function queryRows(db: SqlJsDatabase, sql: string, params: (string | number)[]): DbRow[] | null {
-  try {
-    const results = db.exec(sql, params);
-    if (!Array.isArray(results) || !results.length || !results[0]?.values?.length) return null;
-    return results[0].values;
-  } catch (err: unknown) {
-    debugLog(`queryRows failed: ${err instanceof Error ? err.message : "unknown error"}`);
-    return null;
-  }
-}
-
-export function extractSnippet(content: string, query: string, lines: number = 5): string {
-  const terms = query.replace(/\b(AND|OR|NOT|NEAR)\b/gi, "")
-    .replace(/['"]/g, "")
-    .split(/\s+/)
-    .filter(t => t.length > 1)
-    .map(t => t.toLowerCase());
-
-  if (terms.length === 0) {
-    return content.split("\n").slice(0, lines).join("\n");
-  }
-
-  const contentLines = content.split("\n");
-
-  const headingIndices: number[] = [];
-  for (let i = 0; i < contentLines.length; i++) {
-    if (contentLines[i].trimStart().startsWith("#")) headingIndices.push(i);
-  }
-
-  function nearestHeadingDist(idx: number): number {
-    let min = Infinity;
-    for (const h of headingIndices) {
-      const d = Math.abs(idx - h);
-      if (d < min) min = d;
-    }
-    return min;
-  }
-
-  function sectionMiddle(idx: number): number {
-    let sectionStart = 0;
-    let sectionEnd = contentLines.length;
-    for (const h of headingIndices) {
-      if (h <= idx) sectionStart = h;
-      else { sectionEnd = h; break; }
-    }
-    return (sectionStart + sectionEnd) / 2;
-  }
-
-  let bestIdx = 0;
-  let bestScore = 0;
-  let bestHeadingDist = Infinity;
-  let bestMidDist = Infinity;
-
-  for (let i = 0; i < contentLines.length; i++) {
-    const lineLower = contentLines[i].toLowerCase();
-    let score = 0;
-    for (const term of terms) {
-      if (lineLower.includes(term)) score++;
-    }
-    if (score === 0) continue;
-
-    const hDist = nearestHeadingDist(i);
-    const nearHeading = hDist <= 3;
-    const mDist = Math.abs(i - sectionMiddle(i));
-
-    const better =
-      score > bestScore ||
-      (score === bestScore && nearHeading && bestHeadingDist > 3) ||
-      (score === bestScore && nearHeading === (bestHeadingDist <= 3) && mDist < bestMidDist);
-
-    if (better) {
-      bestScore = score;
-      bestIdx = i;
-      bestHeadingDist = hDist;
-      bestMidDist = mDist;
-    }
-  }
-
-  const start = Math.max(0, bestIdx - 1);
-  const end = Math.min(contentLines.length, bestIdx + lines - 1);
-  return contentLines.slice(start, end).join("\n");
-}
-
 
 /** Find the FTS cache file for a specific cortexPath+profile. Returns exists + size. */
 export function findFtsCacheForPath(cortexPath: string, profile?: string): { exists: boolean; sizeBytes?: number } {

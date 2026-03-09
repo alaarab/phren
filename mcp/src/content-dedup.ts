@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "./shared.js";
-import { safeProjectPath } from "./utils.js";
+import { isFeatureEnabled, safeProjectPath } from "./utils.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
 
@@ -400,7 +400,7 @@ export async function checkSemanticDedup(
   newLearning: string,
   signal?: AbortSignal
 ): Promise<boolean> {
-  if (process.env.CORTEX_FEATURE_SEMANTIC_DEDUP !== "1") return false;
+  if (!isFeatureEnabled("CORTEX_FEATURE_SEMANTIC_DEDUP", false)) return false;
 
   const resolvedDir = safeProjectPath(cortexPath, project);
   if (!resolvedDir) return false;
@@ -477,7 +477,7 @@ export async function checkSemanticConflicts(
   newFinding: string,
   signal?: AbortSignal
 ): Promise<{ annotations: string[]; checked: boolean }> {
-  if (process.env.CORTEX_FEATURE_SEMANTIC_CONFLICT !== "1") return { annotations: [], checked: false };
+  if (!isFeatureEnabled("CORTEX_FEATURE_SEMANTIC_CONFLICT", false)) return { annotations: [], checked: false };
 
   const resolvedDir = safeProjectPath(cortexPath, project);
   if (!resolvedDir) return { annotations: [], checked: false };

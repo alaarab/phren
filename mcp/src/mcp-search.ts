@@ -3,8 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import { createHash } from "crypto";
-import { isValidProjectName, buildFtsQueryVariants, errorMessage } from "./utils.js";
-import { keywordFallbackSearch } from "./core-search.js";
+import { isValidProjectName, errorMessage } from "./utils.js";
 import { readFindings } from "./data-access.js";
 import {
   debugLog,
@@ -16,19 +15,16 @@ import {
   decodeStringRow,
   queryRows,
   queryDocRows,
-  cosineFallback,
   queryEntityLinks,
   logEntityMiss,
   extractSnippet,
   queryDocBySourceKey,
   normalizeMemoryId,
-  rowToDocWithRowid,
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier } from "./shared-governance.js";
 import { callLlm } from "./content-dedup.js";
-import { rankResults, shouldRunVectorExpansion } from "./cli-hooks-retrieval.js";
-import { vectorFallback } from "./shared-search-fallback.js";
+import { rankResults, searchKnowledgeRows } from "./shared-retrieval.js";
 
 /**
  * Q30: Log zero-result queries to .runtime/search-misses.jsonl.
@@ -166,104 +162,21 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (filterProject && !isValidProjectName(filterProject)) {
           return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         }
-        const queryVariants = buildFtsQueryVariants(query, filterProject, cortexPath);
-        const safeQuery = queryVariants[0] ?? "";
-
-        if (!safeQuery) return mcpResponse({ ok: false, error: "Search query is empty after sanitization." });
-
-        let sql = "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ?";
-        const params: (string | number)[] = [safeQuery];
-        if (filterProject) {
-          sql += " AND project = ?";
-          params.push(filterProject);
-        }
-        if (filterType) {
-          sql += " AND type = ?";
-          params.push(filterType);
-        }
-        // When post-query filters are active, fetch more candidates so filtering
-        // doesn't leave fewer results than requested (capped at 200).
         const hasPostFilter = Boolean(filterTag || since);
         const fetchLimit = hasPostFilter ? Math.min(maxResults * 5, 200) : maxResults;
-        sql += " ORDER BY rank LIMIT ?";
-        params.push(fetchLimit);
+        const retrieval = await searchKnowledgeRows(db, {
+          query,
+          maxResults,
+          fetchLimit,
+          filterProject,
+          filterType,
+          cortexPath,
+        });
+        const safeQuery = retrieval.safeQuery;
 
-        let activeFtsQuery = safeQuery;
-        let rows = queryDocRows(db, sql, params);
-        if ((!rows || rows.length === 0) && queryVariants.length > 1) {
-          for (const variant of queryVariants.slice(1)) {
-            const relaxedParams = [...params];
-            relaxedParams[0] = variant;
-            rows = queryDocRows(db, sql, relaxedParams);
-            if (rows?.length) {
-              activeFtsQuery = variant;
-              break;
-            }
-          }
-        }
-        let usedFallback = false;
-
-        // Hybrid search: if FTS5 returns fewer than 3 results, try cosine fallback
-        if (rows && rows.length < 3) {
-          const ftsRowids = new Set<number>();
-          try {
-            let rowidSql = "SELECT rowid, project, filename, type, content, path FROM docs WHERE docs MATCH ?";
-            const rowidParams: (string | number)[] = [activeFtsQuery];
-            if (filterProject) { rowidSql += " AND project = ?"; rowidParams.push(filterProject); }
-            if (filterType) { rowidSql += " AND type = ?"; rowidParams.push(filterType); }
-            rowidSql += " ORDER BY rank LIMIT ?";
-            rowidParams.push(maxResults);
-            const rowidResult = db.exec(rowidSql, rowidParams);
-            if (rowidResult?.length && rowidResult[0]?.values?.length) {
-              for (const row of rowidResult[0].values) {
-                ftsRowids.add(rowToDocWithRowid(row).rowid);
-              }
-            }
-          } catch (err: unknown) { debugLog(`rowid dedup query failed: ${errorMessage(err)}`); }
-
-          const cosineResults = cosineFallback(db, query, ftsRowids, maxResults - rows.length)
-            .filter(d => (!filterProject || d.project === filterProject) && (!filterType || d.type === filterType));
-          if (cosineResults.length > 0) {
-            rows = [...rows, ...cosineResults];
-            usedFallback = true;
-          }
-        }
-
-        // Also try cosine fallback when FTS5 returns null (0 results)
-        if (!rows) {
-          const cosineResults = cosineFallback(db, query, new Set<number>(), maxResults)
-            .filter(d => (!filterProject || d.project === filterProject) && (!filterType || d.type === filterType));
-          if (cosineResults.length > 0) {
-            rows = cosineResults;
-            usedFallback = true;
-          }
-        }
-
-        if (!rows) {
-          // Keyword overlap fallback: scan all docs and rank by term overlap
-          const fallbackRows = keywordFallbackSearch(db, query, { project: filterProject, type: filterType, limit: maxResults });
-          if (fallbackRows) {
-            rows = fallbackRows;
-            usedFallback = true;
-          }
-        }
-
-        // Vector semantic fallback: reuse the persistent embedding cache/index path
-        // instead of query-time random sampling and ad hoc re-embedding.
-        if (shouldRunVectorExpansion(rows, query, maxResults)) {
-          try {
-            const existingRows = rows ?? [];
-            const alreadyFoundPaths = new Set(existingRows.map(row => row.path));
-            const vecRows = await vectorFallback(cortexPath, query, alreadyFoundPaths, maxResults - existingRows.length, filterProject);
-            const filteredVecRows = filterType ? vecRows.filter((row) => row.type === filterType) : vecRows;
-            if (filteredVecRows.length > 0) {
-              rows = [...existingRows, ...filteredVecRows];
-              usedFallback = true;
-            }
-          } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
-          }
-        }
+        if (!safeQuery) return mcpResponse({ ok: false, error: "Search query is empty after sanitization." });
+        let rows = retrieval.rows;
+        const usedFallback = retrieval.usedFallback;
 
         if (!rows || rows.length === 0) {
           logSearchMiss(cortexPath, query, filterProject);
@@ -556,7 +469,15 @@ export function register(server: McpServer, ctx: McpContext): void {
       const items = result.data;
       if (!items.length) return mcpResponse({ ok: true, message: `No findings found for "${project}".`, data: { project, findings: [], total: 0 } });
       const capped = items.slice(0, limit ?? 50);
-      const lines = capped.map((entry) => `- [${entry.id}] ${entry.date}: ${entry.text}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`);
+      const lines = capped.map((entry) => {
+        const metadata: string[] = [];
+        if (entry.backlogItem) metadata.push(`backlog=${entry.backlogItem}`);
+        if (entry.sessionId) metadata.push(`session=${entry.sessionId.slice(0, 8)}`);
+        if (entry.actor) metadata.push(`actor=${entry.actor}`);
+        if (entry.tool) metadata.push(`tool=${entry.tool}`);
+        if (entry.model) metadata.push(`model=${entry.model}`);
+        return `- [${entry.id}] ${entry.date}: ${entry.text}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
+      });
       return mcpResponse({
         ok: true,
         message: `Findings for ${project} (${capped.length}/${items.length}):\n` + lines.join("\n"),

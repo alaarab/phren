@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import { parseMcpMode, runInit } from "./init.js";
 import { errorMessage } from "./utils.js";
 import { defaultCortexPath } from "./shared.js";
@@ -6,11 +8,11 @@ const HELP_TEXT = `cortex - Long-term memory for Claude Code
 
 Usage:
   cortex                                 Open interactive shell
-  cortex quickstart                      Quick setup: init + link + project scaffold
-  cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--from-existing <path>] [--dry-run] [-y]
-                                         Set up cortex (templates: python-project, monorepo, library, frontend)
-  cortex projects list                   List all projects in cortex
-  cortex projects add <name>             Create a new project
+  cortex quickstart                      Quick setup: init + project scaffold
+  cortex add [path]                      Add current directory (or path) as a cortex project
+  cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--dry-run] [-y]
+                                         Set up cortex and auto-bootstrap the current project directory
+  cortex projects list                   List all tracked projects
   cortex projects remove <name>          Remove a project (asks for confirmation)
   cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
   cortex skills list                     List installed skills
@@ -54,8 +56,6 @@ Maintenance:
                                          Legacy alias for maintain migrate
 
 Setup:
-  cortex link [--machine <n>] [--profile <n>]
-                                         Sync profile, symlinks, hooks
   cortex mcp-mode [on|off|status]        Toggle MCP integration
   cortex hooks-mode [on|off|status]      Toggle hook execution
   cortex verify                          Check init completed OK
@@ -63,7 +63,7 @@ Setup:
 
 Environment:
   CORTEX_PATH                Override cortex directory (default: ~/.cortex)
-  CORTEX_PROFILE             Active profile name
+  CORTEX_PROFILE             Active profile name (otherwise cortex uses machines.yaml when available)
   CORTEX_DEBUG               Enable debug logging (set to 1)
   CORTEX_OLLAMA_URL          Ollama base URL (default: http://localhost:11434; set to 'off' to disable)
   CORTEX_EMBEDDING_API_URL   OpenAI-compatible /embeddings endpoint (cloud alternative to Ollama)
@@ -155,6 +155,35 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
 
   if (argvCommand === "--help" || argvCommand === "-h" || argvCommand === "help") {
     console.log(HELP_TEXT);
+    return finish();
+  }
+
+  if (argvCommand === "add") {
+    const targetPath = argv[1] || process.cwd();
+    const cortexPath = defaultCortexPath();
+    const profile = process.env.CORTEX_PROFILE || undefined;
+    if (!fs.existsSync(cortexPath) || !fs.existsSync(path.join(cortexPath, ".governance"))) {
+      console.log("cortex is not set up yet. Run: npx @alaarab/cortex init");
+      return finish(1);
+    }
+    try {
+      const { bootstrapFromExisting } = await import("./init-setup.js");
+      const { resolveActiveProfile } = await import("./profile-store.js");
+      const activeProfile = resolveActiveProfile(cortexPath, profile);
+      if (!activeProfile.ok) {
+        console.error(activeProfile.error);
+        return finish(1);
+      }
+      const projectName = bootstrapFromExisting(cortexPath, path.resolve(targetPath), activeProfile.data);
+      console.log(`Added project "${projectName}"`);
+      console.log(`  ${cortexPath}/${projectName}/CLAUDE.md`);
+      console.log(`  ${cortexPath}/${projectName}/FINDINGS.md`);
+      console.log(`  ${cortexPath}/${projectName}/backlog.md`);
+      console.log(`  ${cortexPath}/${projectName}/summary.md`);
+    } catch (e) {
+      console.error(`Could not add project: ${e instanceof Error ? e.message : String(e)}`);
+      return finish(1);
+    }
     return finish();
   }
 

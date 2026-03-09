@@ -39,6 +39,7 @@ export async function runCortexUpdate(): Promise<UpdateResult> {
   const root = packageRootFromRuntime();
   const pkgName = readPackageName(root);
   const hasGit = fs.existsSync(path.join(root, ".git"));
+  const builtEntry = path.join(root, "mcp", "dist", "index.js");
 
   if (pkgName === "@alaarab/cortex" && hasGit) {
     try {
@@ -53,7 +54,14 @@ export async function runCortexUpdate(): Promise<UpdateResult> {
       }
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
       run("npm", ["install"], root);
-      return { ok: true, message: `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.` };
+      try {
+        run("npm", ["run", "build"], root);
+        run(process.execPath, [builtEntry, "--health"], root);
+      } catch (err: unknown) {
+        const detail = errorMessage(err);
+        return { ok: false, message: `Local repo updated but rebuild/health check failed: ${detail}` };
+      }
+      return { ok: true, message: `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}. Rebuilt and verified CLI health.` };
     } catch (err: unknown) {
       const detail = errorMessage(err);
       return { ok: false, message: `Local repo update failed: ${detail}` };

@@ -4,9 +4,9 @@ npm package: @alaarab/cortex
 Quick start:
   npx @alaarab/cortex init
   This creates ~/.cortex, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
-  Restart your agent after init. Context injection starts immediately.
+  Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (47):
+MCP Tools (48):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?) - FTS5 search with synonym expansion
@@ -23,7 +23,7 @@ MCP Tools (47):
     update_backlog_item(project, item, updates) - change priority, context, or section
 
   Finding capture:
-    add_finding(project, finding, citation?, findingType?, sessionId?) - append finding with optional citation and type tag
+    add_finding(project, finding, citation?: {file?, line?, repo?, commit?, backlog_item?}, findingType?, sessionId?) - append finding with optional citation and type tag
       findingType: "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug"
     add_findings(project, findings[], sessionId?) - bulk add multiple findings
     remove_finding(project, finding) - remove by matching text
@@ -47,6 +47,7 @@ MCP Tools (47):
     memory_feedback(key, feedback) - record helpful/reprompt/regression outcomes
 
   Data management:
+    add_project(path, profile?) - bootstrap a repo or working directory into cortex and add it to the active profile
     export_project(project) - export project data as portable JSON
     import_project(data) - import project from exported JSON
     manage_project(project, action) - archive or unarchive a project

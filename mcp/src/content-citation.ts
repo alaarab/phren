@@ -11,6 +11,15 @@ export interface FindingCitation {
   line?: number;
   commit?: string;
   supersedes?: string;
+  backlog_item?: string;
+}
+
+export interface FindingSource {
+  machine?: string;
+  actor?: string;
+  tool?: string;
+  model?: string;
+  session_id?: string;
 }
 
 export interface FindingTrustIssue {
@@ -69,6 +78,47 @@ export function buildCitationComment(citation: FindingCitation): string {
   return `<!-- cortex:cite ${JSON.stringify(citation)} -->`;
 }
 
+function readSourceToken(match: RegExpMatchArray | null | undefined): string | undefined {
+  if (!match?.[1]) return undefined;
+  const raw = match[1].trim();
+  if (!raw) return undefined;
+  if (raw.startsWith("\"") && raw.endsWith("\"") && raw.length >= 2) {
+    return raw.slice(1, -1);
+  }
+  return raw;
+}
+
+export function buildSourceComment(source: FindingSource): string {
+  const parts: string[] = [];
+  if (source.machine) parts.push(`machine:${source.machine}`);
+  if (source.actor) parts.push(`actor:${source.actor}`);
+  if (source.tool) parts.push(`tool:${source.tool}`);
+  if (source.model) parts.push(`model:${source.model}`);
+  if (source.session_id) parts.push(`session:${source.session_id}`);
+  return parts.length > 0 ? `<!-- source: ${parts.join(" ")} -->` : "";
+}
+
+export function parseSourceComment(line: string): FindingSource | null {
+  const sourceMatch = line.match(/<!--\s*source:\s*(.*?)\s*-->/);
+  if (!sourceMatch) return null;
+
+  const payload = sourceMatch[1];
+  const machine =
+    readSourceToken(payload.match(/(?:^|\s)machine:(".*?"|\S+)/)) ??
+    readSourceToken(payload.match(/(?:^|\s)host:(".*?"|\S+)/));
+  const actor =
+    readSourceToken(payload.match(/(?:^|\s)actor:(".*?"|\S+)/)) ??
+    readSourceToken(payload.match(/(?:^|\s)agent:(".*?"|\S+)/));
+  const tool = readSourceToken(payload.match(/(?:^|\s)tool:(".*?"|\S+)/));
+  const model = readSourceToken(payload.match(/(?:^|\s)model:(".*?"|\S+)/));
+  const session_id =
+    readSourceToken(payload.match(/(?:^|\s)session:(".*?"|\S+)/)) ??
+    readSourceToken(payload.match(/(?:^|\s)session_id:(".*?"|\S+)/));
+
+  if (!machine && !actor && !tool && !model && !session_id) return null;
+  return { machine, actor, tool, model, session_id };
+}
+
 export function parseCitationComment(line: string): FindingCitation | null {
   // Find opening marker and closing --> to handle multiline/escaped JSON.
   // Uses marker-based extraction instead of regex to support multiline JSON.
@@ -92,6 +142,7 @@ export function parseCitationComment(line: string): FindingCitation | null {
       line: typeof parsed.line === "number" ? parsed.line : undefined,
       commit: typeof parsed.commit === "string" ? parsed.commit : undefined,
       supersedes: typeof parsed.supersedes === "string" ? parsed.supersedes : undefined,
+      backlog_item: typeof parsed.backlog_item === "string" ? parsed.backlog_item : undefined,
     };
   } catch (err: unknown) {
     debugLog(`parseCitationComment: malformed citation JSON: ${errorMessage(err)}`);
