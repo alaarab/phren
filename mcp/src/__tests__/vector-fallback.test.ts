@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 
@@ -112,6 +111,29 @@ describe("vectorFallback content hydration", () => {
 
     const results = await vectorFallback(tmp.path, "backlog query", new Set(), 5);
     expect(results.length).toBe(1);
+    expect(results[0].content).toContain("Keep this visible");
+    expect(results[0].content).not.toContain("Hidden completed task");
+  });
+
+  it("classifies Windows-style backlog paths correctly during hydration", async () => {
+    const winCortexPath = path.join(tmp.path, "C:\\cortex");
+    const winBacklogPath = path.join(tmp.path, "C:\\cortex\\proj\\backlog.md");
+    writeFile(
+      winBacklogPath,
+      "# Backlog\r\n\r\n## Active\r\n- Keep this visible\r\n\r\n## Done\r\n- Hidden completed task\r\n"
+    );
+
+    const cache = getEmbeddingCache(winCortexPath);
+    (cache as any)._setEntries([
+      { path: winBacklogPath, model: "nomic-embed-text", vec: [0.1, 0.2, 0.3] },
+    ]);
+
+    vi.mocked(cosineSimilarity).mockReturnValue(0.8);
+
+    const results = await vectorFallback(winCortexPath, "backlog query", new Set(), 5);
+    expect(results.length).toBe(1);
+    expect(results[0].type).toBe("backlog");
+    expect(results[0].project).toBe("proj");
     expect(results[0].content).toContain("Keep this visible");
     expect(results[0].content).not.toContain("Hidden completed task");
   });
