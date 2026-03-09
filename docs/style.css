@@ -1201,7 +1201,7 @@ section {
 .cta-section {
   border-top: 1px solid var(--border);
   text-align: center;
-  padding: 100px 32px 80px;
+  padding: 60px 32px 80px;
 }
 
 .cta-content {
@@ -1210,7 +1210,8 @@ section {
 }
 
 .cta-icon {
-  margin-bottom: 24px;
+  margin-top: 28px;
+  margin-bottom: 28px;
 }
 
 .cta-title {
@@ -1219,7 +1220,7 @@ section {
   letter-spacing: -0.025em;
   line-height: 1.15;
   color: var(--text);
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 
 .cta-tagline {

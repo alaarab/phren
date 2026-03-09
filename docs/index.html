@@ -255,28 +255,15 @@
         </svg>
       </div>
 
-      <div class="hero-badge">
-        <span class="hero-badge-dot"></span>
-        Claude Code<span class="dot-sep">·</span>Copilot<span class="dot-sep">·</span>Cursor<span class="dot-sep">·</span>Codex<span class="dot-sep">·</span>MCP
-      </div>
-
       <h1 class="hero-title">Long-term memory for AI agents.</h1>
 
       <p class="hero-sub">
-        <span class="hero-sub-line">Cortex captures what matters.</span>
         <span class="hero-sub-line">Private. Local. Git-backed.</span>
       </p>
 
       <div id="install" class="hero-install-tabs">
         <div class="install-tabs-container">
-          <div class="install-tab-buttons">
-            <button class="install-tab-btn active" data-tab="claude-code">Claude Code</button>
-            <button class="install-tab-btn" data-tab="vscode">VS Code / Copilot</button>
-            <button class="install-tab-btn" data-tab="cursor">Cursor</button>
-            <button class="install-tab-btn" data-tab="codex">Codex</button>
-          </div>
-
-          <div id="claude-code" class="install-tab-panel active">
+          <div class="install-tab-panel active">
             <div class="install-step-body">
               <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
                 <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
@@ -290,75 +277,6 @@
             </div>
           </div>
 
-          <div id="vscode" class="install-tab-panel">
-            <div class="install-step-body">
-              <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-                <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                  <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                  <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-                </div>
-                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                  Detects VS Code automatically and writes <code style="color:var(--indigo)">mcp.json</code> for you. Or add it manually:
-                </div>
-                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:flex-start">
-                  <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
-  "servers": {
-    "cortex": {
-      "command": "npx",
-      "args": ["@alaarab/cortex", "~/.cortex"]
-    }
-  }
-}</pre>
-                  <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="cursor" class="install-tab-panel">
-            <div class="install-step-body">
-              <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-                <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                  <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                  <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-                </div>
-                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                  Detects Cursor automatically and writes hooks to <code style="color:var(--indigo)">~/.cursor/hooks.json</code>. Prompt injection and auto-save both work. Note: Cursor has no session-start hook, so context re-injection after compaction isn't available.
-                </div>
-                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                  For MCP, add to your Cursor settings:
-                </div>
-                <div style="display:flex;justify-content:space-between;width:100%;align-items:flex-start">
-                  <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
-  "mcpServers": {
-    "cortex": {
-      "command": "npx",
-      "args": ["@alaarab/cortex", "~/.cortex"]
-    }
-  }
-}</pre>
-                  <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"mcpServers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="codex" class="install-tab-panel">
-            <div class="install-step-body">
-              <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-                <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                  <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                  <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-                </div>
-                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                  Detects Codex automatically and writes hooks to <code style="color:var(--indigo)">codex.json</code> in your cortex directory. Per-project <code style="color:var(--indigo)">CLAUDE.md</code> is also symlinked as <code style="color:var(--indigo)">AGENTS.md</code> in each project for full instruction file support.
-                </div>
-                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                  Context injection, auto-save, and session start/end hooks all work with Codex out of the box.
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -369,7 +287,7 @@
   <section class="how-section" id="how">
     <div class="container">
       <div class="how-header reveal">
-        <div class="section-label">The daily loop</div>
+        <div class="section-label">How it works</div>
         <h2 class="section-title">Every session, automatically.</h2>
       </div>
       <div class="steps-grid">
@@ -535,7 +453,7 @@
   <section class="demo-section" id="demo">
     <div class="container">
       <div class="demo-header reveal">
-        <div class="section-label">In action</div>
+        <div class="section-label">Interactive Shell</div>
         <h2 class="section-title">The interactive shell.</h2>
         <p class="section-sub" style="margin-top:12px">Select a project, browse backlog and findings, review the queue, and check sync health. Type <code style="font-size:14px;color:var(--copper-mid)">:</code> to open the command palette from any view.</p>
       </div>
@@ -797,7 +715,8 @@
   <!-- CTA FOOTER -->
   <section class="cta-section">
     <div class="cta-content reveal">
-      <svg class="cta-icon" width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <h2 class="cta-title">Start building your Cortex.</h2>
+      <svg class="cta-icon" width="72" height="72" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
         <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
         <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
         <line x1="72" y1="22" x2="46" y2="26" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
@@ -808,7 +727,6 @@
         <line x1="46" y1="102" x2="72" y2="106" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
         <circle cx="64" cy="64" r="5" fill="#D4892E"/>
       </svg>
-      <h2 class="cta-title">Start building your Cortex.</h2>
       <p class="cta-tagline">Your agents will remember.</p>
       <div class="cta-actions">
         <a href="#install" class="btn-primary">
