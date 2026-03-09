@@ -247,9 +247,28 @@ nav.scrolled {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 48px;
+  margin-top: 16px;
+  margin-bottom: 40px;
   opacity: 0;
   animation: fadeUp 0.8s ease forwards 0.4s;
+}
+
+.btn-hero-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 500;
+  padding: 12px 8px;
+  transition: color 0.2s;
+}
+
+.btn-hero-text:hover {
+  color: var(--text);
 }
 
 
