@@ -252,43 +252,6 @@ nav.scrolled {
   animation: fadeUp 0.8s ease forwards 0.4s;
 }
 
-.btn-hero-github,
-.btn-hero-whitepaper {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 18px;
-  height: 42px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  text-decoration: none;
-  transition: background 0.2s, border-color 0.2s, transform 0.15s;
-}
-
-.btn-hero-github {
-  background: rgba(58,123,174,0.12);
-  border: 1px solid rgba(58,123,174,0.3);
-  color: #6EB0E0;
-}
-
-.btn-hero-github:hover {
-  background: rgba(58,123,174,0.22);
-  border-color: rgba(58,123,174,0.5);
-  transform: translateY(-1px);
-}
-
-.btn-hero-whitepaper {
-  background: rgba(212,137,46,0.1);
-  border: 1px solid rgba(212,137,46,0.28);
-  color: var(--copper-mid);
-}
-
-.btn-hero-whitepaper:hover {
-  background: rgba(212,137,46,0.18);
-  border-color: rgba(212,137,46,0.45);
-  transform: translateY(-1px);
-}
 
 .hero-install-tabs {
   width: 100%;
