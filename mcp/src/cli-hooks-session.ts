@@ -4,10 +4,8 @@ import {
   runtimeFile,
   qualityMarkers,
   sessionMarker,
-  sessionsDir,
   EXEC_TIMEOUT_MS,
   getCortexPath,
-  KNOWN_OBSERVATION_TAGS,
   homePath,
 } from "./shared.js";
 import {
@@ -34,12 +32,10 @@ import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
 import { getHooksEnabledPreference } from "./init.js";
 import { isToolHookEnabled } from "./hooks.js";
-import { handleExtractMemories } from "./cli-extract.js";
 import { appendFindingJournal } from "./finding-journal.js";
 import {
   buildIndex,
   queryRows,
-  queryDocRows,
 } from "./shared-index.js";
 import type { SelectedSnippet } from "./cli-hooks-retrieval.js";
 import { filterBacklogByPriority } from "./cli-hooks-retrieval.js";
@@ -152,8 +148,7 @@ function updateSessionMetrics(
 export function trackSessionMetrics(
   cortexPathLocal: string,
   sessionId: string,
-  selected: SelectedSnippet[],
-  changedCount: number
+  selected: SelectedSnippet[]
 ): void {
   updateSessionMetrics(cortexPathLocal, (metrics) => {
     if (!metrics[sessionId]) metrics[sessionId] = { prompts: 0, keys: {}, lastChangedCount: 0, lastKeys: [] };
@@ -201,7 +196,7 @@ export function resolveSubprocessArgs(command: string): string[] | null {
   return null;
 }
 
-export function scheduleBackgroundSync(cortexPathLocal: string): boolean {
+function scheduleBackgroundSync(cortexPathLocal: string): boolean {
   const lockPath = runtimeFile(cortexPathLocal, "background-sync.lock");
   const logPath = runtimeFile(cortexPathLocal, "background-sync.log");
   const spawnArgs = resolveSubprocessArgs("background-sync");
@@ -242,7 +237,7 @@ export function scheduleBackgroundSync(cortexPathLocal: string): boolean {
   }
 }
 
-export function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string): boolean {
+function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string): boolean {
   if (!isFeatureEnabled("CORTEX_FEATURE_DAILY_MAINTENANCE", true)) return false;
   const markers = qualityMarkers(cortexPathLocal);
   if (fs.existsSync(markers.done)) return false;
