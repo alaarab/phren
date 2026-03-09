@@ -3,6 +3,22 @@ import { debugLog } from "./shared.js";
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 const DEFAULT_EXTRACT_MODEL = "llama3.2";
+const MAX_EMBED_INPUT_CHARS = 6000;
+
+export function prepareEmbeddingInput(text: string): string {
+  return text
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, " "))
+    .replace(/`([^`]+)`/g, " $1 ")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, " $1 ")
+    .replace(/\|/g, " ")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_EMBED_INPUT_CHARS);
+}
 
 /**
  * Cloud embedding API support (Item 6).
@@ -26,7 +42,7 @@ export function getCloudEmbeddingKey(): string | null {
 }
 
 /** Embed text via OpenAI-compatible /embeddings endpoint. */
-async function embedTextCloud(text: string, baseUrl: string, model: string, apiKey: string | null): Promise<number[] | null> {
+async function embedTextCloud(input: string, baseUrl: string, model: string, apiKey: string | null): Promise<number[] | null> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
   try {
@@ -35,7 +51,7 @@ async function embedTextCloud(text: string, baseUrl: string, model: string, apiK
     const res = await fetch(`${baseUrl}/embeddings`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model, input: text.slice(0, 8000) }),
+      body: JSON.stringify({ model, input }),
       signal: controller.signal,
     });
     clearTimeout(id);
@@ -102,11 +118,13 @@ export async function checkModelAvailable(model?: string, url?: string): Promise
 
 export async function embedText(text: string, model?: string, url?: string): Promise<number[] | null> {
   const modelName = model ?? getEmbeddingModel();
+  const input = prepareEmbeddingInput(text);
+  if (!input) return null;
 
   // Cloud embedding takes priority when CORTEX_EMBEDDING_API_URL is set
   const cloudUrl = url ? null : getCloudEmbeddingUrl();
   if (cloudUrl) {
-    return embedTextCloud(text, cloudUrl, modelName, getCloudEmbeddingKey());
+    return embedTextCloud(input, cloudUrl, modelName, getCloudEmbeddingKey());
   }
 
   const baseUrl = url ?? getOllamaUrl();
@@ -117,7 +135,7 @@ export async function embedText(text: string, model?: string, url?: string): Pro
     const res = await fetch(`${baseUrl}/api/embed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: modelName, input: text.slice(0, 8000) }),
+      body: JSON.stringify({ model: modelName, input }),
       signal: controller.signal,
     });
     clearTimeout(id);
@@ -170,4 +188,3 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   const denom = Math.sqrt(normA) * Math.sqrt(normB);
   return denom === 0 ? 0 : dot / denom;
 }
-
