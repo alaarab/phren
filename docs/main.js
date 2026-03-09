@@ -91,26 +91,34 @@ window.addEventListener('scroll', () => {
 
 // --- Rotating terminal command ---
 (function() {
+  const cmdEl = document.getElementById('terminal-cmd');
+  const promptEl = document.getElementById('terminal-prompt');
+  const labelEl = document.getElementById('terminal-label');
+  const dots = Array.from(document.querySelectorAll('.terminal-progress-dot'));
+  if (!cmdEl || !promptEl || !labelEl || dots.length === 0) return;
+
   const steps = [
     {
       cmd: 'npx @alaarab/cortex init',
       prefix: 'One time:',
-      label: 'set everything up',
+      label: 'set up the memory layer',
     },
     {
-      cmd: '\u2713 context injected  \u2713 learnings saved',
-      prefix: 'Every session:',
-      label: 'hooks handle it. you just code.',
+      cmd: 'cortex status',
+      prefix: 'Check it:',
+      label: 'see hooks, sync, semantic, and agents',
+    },
+    {
+      cmd: 'cortex review-ui',
+      prefix: 'Review it:',
+      label: 'watch backlog, findings, and queue update live',
+    },
+    {
+      cmd: 'semantic ready · context injected · findings saved',
+      prefix: 'While you work:',
+      label: 'the hooks keep memory moving',
       output: true,
     },
-  ];
-
-  const cmdEl = document.getElementById('terminal-cmd');
-  const promptEl = document.getElementById('terminal-prompt');
-  const labelEl = document.getElementById('terminal-label');
-  const dots = [
-    document.getElementById('dot-0'),
-    document.getElementById('dot-1'),
   ];
 
   let current = 0;
@@ -122,7 +130,7 @@ window.addEventListener('scroll', () => {
       current = (current + 1) % steps.length;
       const step = steps[current];
       cmdEl.textContent = step.cmd;
-      cmdEl.style.color = step.output ? 'var(--indigo)' : '';
+      cmdEl.style.color = step.output ? 'var(--copper-mid)' : '';
       promptEl.style.display = step.output ? 'none' : '';
       cmdEl.classList.remove('fade-out');
       cmdEl.classList.add('fade-in');
@@ -210,36 +218,69 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
 
   const SCENES = [
     {
-      cmd: 'search "rate limit retries"',
-      outputs: [
-        { type: 'result', project: 'api-gateway', text: 'retry after 429: exponential backoff with jitter, not fixed delay' },
-        { type: 'result', project: 'billing-svc', text: 'stripe webhook retry window is 72h, not 24h as docs suggest' },
-        { type: 'meta', text: '◆ 2 results · 11ms' },
+      project: '',
+      activeTab: 'Projects',
+      rows: [
+        { kind: 'project', selected: true, name: 'web-project-1', meta: '97 findings · 12 queue' },
+        { kind: 'project', name: 'web-project-2', meta: '14 findings · 3 queue' },
+        { kind: 'project', name: 'art-project-1', meta: '8 findings · 0 queue' },
       ],
+      status: 'Press ↵ or run :open <project>',
+      nextCmd: ':open web-project-1',
     },
     {
-      cmd: 'add-finding api-gateway "[pitfall] circuit breaker: 5 failures in 30s, not 10"',
-      outputs: [
-        { type: 'ok', text: 'saved to api-gateway' },
+      project: 'web-project-1',
+      activeTab: 'Backlog',
+      rows: [
+        { kind: 'backlog', badge: 'A', tone: 'active', text: 'Eliminate Angular dev-server linker gap', meta: 'high' },
+        { kind: 'backlog', badge: 'Q', tone: 'queue', text: 'Close Vue autosize callback parity gap', meta: 'low' },
+        { kind: 'backlog', badge: 'D', tone: 'done', text: 'Expand Playwright smoke matrix', meta: 'done' },
       ],
+      status: 'a add · ↵ mark done · d toggle active/queue',
+      nextCmd: ':findings',
     },
     {
-      cmd: 'doctor',
-      outputs: [
-        { type: 'ok', text: 'hooks wired (3/3)' },
-        { type: 'ok', text: 'MCP server registered' },
-        { type: 'ok', text: 'index built  (52 docs)' },
-        { type: 'ok', text: 'all 8 checks passed' },
+      project: 'web-project-1',
+      activeTab: 'Findings',
+      rows: [
+        { kind: 'finding', badge: 'pattern', text: 'Turbo family builds avoid false dist races' },
+        { kind: 'finding', badge: 'pitfall', text: 'ngc rejects undecorated abstract base classes' },
+        { kind: 'finding', badge: 'tooling', text: 'Examples need direct deps, not hoisted assumptions' },
       ],
+      status: '/ filter · a add finding · d remove',
+      nextCmd: ':health',
+    },
+    {
+      project: 'web-project-1',
+      activeTab: 'Health',
+      rows: [
+        { kind: 'health', key: 'Semantic', value: 'ready · 140/142 embedded' },
+        { kind: 'health', key: 'Sync', value: 'saved-pushed · unsynced 0' },
+        { kind: 'health', key: 'Hooks', value: 'Claude Code · Copilot CLI · Codex' },
+        { kind: 'health', key: 'Live', value: 'store updated' },
+      ],
+      status: 'Palette commands work from any view',
+      nextCmd: ':review queue',
+    },
+    {
+      project: 'web-project-1',
+      activeTab: 'Review Queue',
+      rows: [
+        { kind: 'queue', badge: 'M1', text: 'Angular compiler fallback cleanup', meta: 'review' },
+        { kind: 'queue', badge: 'M2', text: 'Docs parity wording drift', meta: 'review' },
+        { kind: 'queue', badge: 'M3', text: 'Semantic setup hardening', meta: 'review' },
+      ],
+      status: 'a approve · r reject · :projects to switch',
+      nextCmd: ':projects',
     },
   ];
 
-  const CHAR_BASE = 42;
-  const CHAR_JITTER = 28;
-  const PRE_OUTPUT = 340;
-  const BETWEEN = 110;
-  const SCENE_PAUSE = 1500;
-  const END_PAUSE = 2200;
+  const TABS = ['Projects', 'Backlog', 'Findings', 'Review Queue', 'Skills', 'Health'];
+  const CHAR_BASE = 34;
+  const CHAR_JITTER = 22;
+  const PRE_TYPE = 520;
+  const AFTER_TYPE = 1100;
+  const END_PAUSE = 1200;
 
   let stopped = false;
   let pending = [];
@@ -255,52 +296,98 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     return el;
   }
 
-  async function typeCmd(text) {
-    const row = mkEl('div', 'demo-dyn-line');
-    row.appendChild(mkEl('span', 'demo-prompt', 'cortex >'));
-    const cmd = mkEl('span', 'demo-dyn-cmd', '');
-    row.appendChild(cmd);
-    const cur = mkEl('span', 'demo-dyn-cursor', '▋');
-    row.appendChild(cur);
-    body.appendChild(row);
-
-    for (const ch of text) {
-      if (stopped) return;
-      cmd.textContent += ch;
-      await wait(CHAR_BASE + Math.random() * CHAR_JITTER);
-    }
-    cur.remove();
+  function makeTab(label, active) {
+    return mkEl('span', `demo-shell-tab${active ? ' active' : ''}`, label);
   }
 
-  function showOutput(out) {
-    const row = mkEl('div', 'demo-dyn-line demo-dyn-output');
-    if (out.type === 'result') {
-      row.appendChild(mkEl('span', 'demo-result-project', out.project));
-      row.appendChild(mkEl('span', 'demo-result-text', '  ' + out.text));
-    } else if (out.type === 'ok') {
-      row.appendChild(mkEl('span', 'demo-result-check', '+'));
-      row.appendChild(mkEl('span', 'demo-result-text', ' ' + out.text));
-    } else {
-      row.appendChild(mkEl('span', 'demo-dyn-meta', out.text));
+  function makeRow(row) {
+    const el = mkEl('div', `demo-shell-row demo-shell-row-${row.kind}`);
+    if (row.kind === 'project') {
+      el.classList.toggle('selected', !!row.selected);
+      el.appendChild(mkEl('span', 'demo-shell-caret', row.selected ? '›' : ' '));
+      el.appendChild(mkEl('span', 'demo-shell-name', row.name));
+      el.appendChild(mkEl('span', 'demo-shell-meta', row.meta));
+      return el;
     }
-    body.appendChild(row);
-    requestAnimationFrame(() => requestAnimationFrame(() => row.classList.add('visible')));
+    if (row.kind === 'backlog' || row.kind === 'queue') {
+      el.appendChild(mkEl('span', `demo-shell-badge ${row.tone || ''}`.trim(), row.badge));
+      el.appendChild(mkEl('span', 'demo-shell-text', row.text));
+      el.appendChild(mkEl('span', 'demo-shell-meta', row.meta));
+      return el;
+    }
+    if (row.kind === 'finding') {
+      el.appendChild(mkEl('span', 'demo-shell-tag', row.badge));
+      el.appendChild(mkEl('span', 'demo-shell-text', row.text));
+      return el;
+    }
+    if (row.kind === 'health') {
+      el.appendChild(mkEl('span', 'demo-shell-key', row.key));
+      el.appendChild(mkEl('span', 'demo-shell-value', row.value));
+      return el;
+    }
+    return el;
+  }
+
+  function renderScene(scene) {
+    body.innerHTML = '';
+
+    const screen = mkEl('div', 'demo-shell-screen');
+    const header = mkEl('div', 'demo-shell-headerline');
+    header.appendChild(mkEl('span', 'demo-shell-brand', '◆ cortex'));
+    if (scene.project) {
+      header.appendChild(mkEl('span', 'demo-shell-sep', '·'));
+      header.appendChild(mkEl('span', 'demo-shell-project', scene.project));
+    }
+
+    const tabs = mkEl('div', 'demo-shell-tabs');
+    TABS.forEach((tab) => tabs.appendChild(makeTab(tab, tab === scene.activeTab)));
+
+    const panel = mkEl('div', 'demo-shell-panel');
+    scene.rows.forEach((row, index) => {
+      const rowEl = makeRow(row);
+      panel.appendChild(rowEl);
+      requestAnimationFrame(() => {
+        const t = setTimeout(() => rowEl.classList.add('visible'), 80 * index);
+        pending.push(t);
+      });
+    });
+
+    const status = mkEl('div', 'demo-shell-status', scene.status);
+    const input = mkEl('div', 'demo-shell-input');
+    input.appendChild(mkEl('span', 'demo-shell-prompt', ':'));
+    const cmd = mkEl('span', 'demo-shell-input-text', '');
+    input.appendChild(cmd);
+    const cursor = mkEl('span', 'demo-dyn-cursor', '▋');
+    input.appendChild(cursor);
+
+    screen.appendChild(header);
+    screen.appendChild(tabs);
+    screen.appendChild(panel);
+    screen.appendChild(status);
+    screen.appendChild(input);
+    body.appendChild(screen);
+
+    return { cmd, cursor };
+  }
+
+  async function typeCmd(cmdEl, text) {
+    for (const ch of text) {
+      if (stopped) return;
+      cmdEl.textContent += ch;
+      await wait(CHAR_BASE + Math.random() * CHAR_JITTER);
+    }
   }
 
   async function runScene(scene) {
-    await typeCmd(scene.cmd);
-    await wait(PRE_OUTPUT);
-    for (const out of scene.outputs) {
-      if (stopped) return;
-      showOutput(out);
-      await wait(BETWEEN);
-    }
-    await wait(SCENE_PAUSE);
+    const ui = renderScene(scene);
+    await wait(PRE_TYPE);
+    await typeCmd(ui.cmd, scene.nextCmd);
+    ui.cursor.remove();
+    await wait(AFTER_TYPE);
   }
 
   async function loop() {
     while (!stopped) {
-      body.innerHTML = '';
       for (const scene of SCENES) {
         if (stopped) return;
         await runScene(scene);
@@ -318,7 +405,8 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     if (entries[0].isIntersecting && !started) {
       started = true;
       loop();
+      obs.disconnect();
     }
-  }, { threshold: 0.25 });
+  }, { threshold: 0.4 });
   obs.observe(section);
 })();
