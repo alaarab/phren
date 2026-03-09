@@ -54,7 +54,7 @@
     <div class="nav-links">
       <a href="#how" class="nav-link">Daily loop</a>
       <a href="#hooks" class="nav-link">Hooks</a>
-      <a href="#features" class="nav-link">Features</a>
+      <a href="#demo" class="nav-link">Shell</a>
       <a href="#install" class="nav-link">Install</a>
       <a href="https://github.com/alaarab/cortex" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -280,23 +280,12 @@
         </a>
       </div>
 
-      <!-- Static install terminal -->
-      <div class="hero-terminal">
-        <div class="terminal-bar">
-          <div class="terminal-dot terminal-dot-red"></div>
-          <div class="terminal-dot terminal-dot-yellow"></div>
-          <div class="terminal-dot terminal-dot-green"></div>
-          <span class="terminal-title">terminal</span>
+      <div class="hero-install-block">
+        <div class="code-block">
+          <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+          <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
         </div>
-        <div class="terminal-body">
-          <div class="terminal-line">
-            <span class="terminal-prompt">$</span>
-            <div class="terminal-cmd-wrap">
-              <span class="terminal-cmd">npx @alaarab/cortex init</span>
-            </div>
-          </div>
-        </div>
-        <div class="terminal-step-label">Run once &mdash; registers MCP + hooks for Claude Code, Copilot, Cursor, and Codex.</div>
+        <div class="hero-install-caption">Registers MCP + hooks for Claude Code, Copilot, Cursor, and Codex.</div>
       </div>
 
     </div>
@@ -468,74 +457,6 @@
     </div>
   </section>
 
-  <!-- FEATURES: V2 -->
-  <section class="features-section" id="features">
-    <div class="container">
-      <div class="features-header reveal">
-        <div class="section-label">Features</div>
-        <h2 class="section-title">Capture. Search. Review. Sync.</h2>
-        <p class="section-sub" style="margin-top:12px">Memory that cleans up after itself. Stale findings decay, useful patterns consolidate, and everything stays auditable through git.</p>
-      </div>
-      <div class="features-grid">
-
-        <div class="feature-card reveal">
-          <div class="feature-card-icon feature-card-icon-copper">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          </div>
-          <div class="feature-card-title">Capture findings automatically</div>
-          <p class="feature-card-desc">Hooks save what matters after every response. Confidence scoring and citation tracking keep weak entries from pretending to be facts.</p>
-          <div class="feature-card-link"><a href="#hooks">See the hook lifecycle</a></div>
-        </div>
-
-        <div class="feature-card reveal reveal-delay-1">
-          <div class="feature-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          </div>
-          <div class="feature-card-title">Search what you actually need</div>
-          <p class="feature-card-desc">FTS5 search with synonym expansion finds relevant context fast. Only matching snippets get injected. No bloated context windows.</p>
-          <div class="feature-card-link"><a href="#how">How it works</a></div>
-        </div>
-
-        <div class="feature-card reveal reveal-delay-2">
-          <div class="feature-card-icon feature-card-icon-copper">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-          </div>
-          <div class="feature-card-title">Review and govern memory</div>
-          <p class="feature-card-desc">Retention policies expire stale entries. Consolidation deduplicates what remains. Approval workflows gate risky writes. The shell and review UI put it all in one place.</p>
-          <div class="feature-card-link"><a href="#demo">See it in action</a></div>
-        </div>
-
-        <div class="feature-card reveal reveal-delay-3">
-          <div class="feature-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          </div>
-          <div class="feature-card-title">Sync across machines</div>
-          <p class="feature-card-desc">Profiles map hostnames to project sets. Push from a laptop, pull on a desktop. Each machine sees only the projects it needs.</p>
-          <div class="feature-card-link"><a href="#install">Get started</a></div>
-        </div>
-
-        <div class="feature-card reveal">
-          <div class="feature-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          </div>
-          <div class="feature-card-title">Full audit trail</div>
-          <p class="feature-card-desc"><code style="font-size:12px;color:var(--copper-mid)">git log</code> shows what was learned and when. <code style="font-size:12px;color:var(--copper-mid)">git diff</code> shows what changed between sessions. Grep to find where something went wrong.</p>
-          <div class="feature-card-link"><a href="#how">How it works</a></div>
-        </div>
-
-        <div class="feature-card reveal reveal-delay-1">
-          <div class="feature-card-icon feature-card-icon-copper">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-          </div>
-          <div class="feature-card-title">Interactive shell</div>
-          <p class="feature-card-desc">Pick a project, switch views, run palette commands, and manage backlog, findings, queue, and health without leaving the terminal.</p>
-          <div class="feature-card-link"><a href="#demo">See it in action</a></div>
-        </div>
-
-      </div>
-    </div>
-  </section>
-
   <!-- TERMINAL DEMO -->
   <section class="demo-section" id="demo">
     <div class="container">
@@ -591,6 +512,11 @@
               <span class="rui-sb-name">mobile-app</span>
               <span class="rui-sb-cnt">23</span>
             </div>
+            <div class="rui-sb-item">
+              <span class="rui-sb-dot rui-sb-dot--4"></span>
+              <span class="rui-sb-name">art-project-1</span>
+              <span class="rui-sb-cnt">19</span>
+            </div>
             <div class="rui-sb-item rui-sb-item--global">
               <span class="rui-sb-dot rui-sb-dot--g"></span>
               <span class="rui-sb-name">global</span>
@@ -602,68 +528,135 @@
             <div class="rui-sb-item rui-sb-item--view">Backlog</div>
           </div>
           <div class="rui-mock-graph">
-            <svg id="rui-graph-svg" viewBox="0 0 540 320" xmlns="http://www.w3.org/2000/svg">
-              <line class="rg-edge rg-edge-p1" x1="130" y1="80" x2="80" y2="155"/>
-              <line class="rg-edge rg-edge-p1" x1="130" y1="80" x2="168" y2="148"/>
-              <line class="rg-edge rg-edge-p1" x1="130" y1="80" x2="100" y2="225"/>
-              <line class="rg-edge rg-edge-p2" x1="380" y1="68" x2="430" y2="135"/>
-              <line class="rg-edge rg-edge-p2" x1="380" y1="68" x2="340" y2="130"/>
-              <line class="rg-edge rg-edge-p3" x1="290" y1="270" x2="310" y2="205"/>
-              <line class="rg-edge rg-edge-p3" x1="290" y1="270" x2="250" y2="212"/>
-              <line class="rg-edge rg-edge-ent" x1="80" y1="155" x2="213" y2="178"/>
-              <line class="rg-edge rg-edge-ent" x1="168" y1="148" x2="213" y2="178"/>
-              <line class="rg-edge rg-edge-ent" x1="430" y1="135" x2="213" y2="178"/>
-              <line class="rg-edge rg-edge-ent" x1="340" y1="130" x2="353" y2="193"/>
-              <line class="rg-edge rg-edge-ent" x1="310" y1="205" x2="353" y2="193"/>
-              <line class="rg-edge rg-edge-ent" x1="250" y1="212" x2="142" y2="253"/>
-              <line class="rg-edge rg-edge-ent" x1="100" y1="225" x2="142" y2="253"/>
-              <line class="rg-edge rg-edge-cross" x1="213" y1="178" x2="353" y2="193"/>
-              <circle cx="168" cy="148" r="14" class="rg-selected-ring"/>
-              <g transform="translate(213,178)">
-                <circle r="24" class="rg-ent-circle"/>
+            <svg id="rui-graph-svg" viewBox="0 0 760 450" xmlns="http://www.w3.org/2000/svg">
+
+              <!-- Project → finding edges -->
+              <!-- web-project-1 (blue) -->
+              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="62" y2="170"/>
+              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="168" y2="152"/>
+              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="85" y2="245"/>
+              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="175" y2="220"/>
+              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="48" y2="112"/>
+              <!-- api-service (purple) -->
+              <line class="rg-edge rg-edge-p2" x1="430" y1="65" x2="400" y2="145"/>
+              <line class="rg-edge rg-edge-p2" x1="430" y1="65" x2="478" y2="130"/>
+              <line class="rg-edge rg-edge-p2" x1="430" y1="65" x2="365" y2="125"/>
+              <line class="rg-edge rg-edge-p2" x1="430" y1="65" x2="495" y2="80"/>
+              <!-- mobile-app (teal) -->
+              <line class="rg-edge rg-edge-p3" x1="635" y1="185" x2="618" y2="112"/>
+              <line class="rg-edge rg-edge-p3" x1="635" y1="185" x2="685" y2="140"/>
+              <line class="rg-edge rg-edge-p3" x1="635" y1="185" x2="668" y2="270"/>
+              <line class="rg-edge rg-edge-p3" x1="635" y1="185" x2="590" y2="280"/>
+              <!-- art-project-1 (green) -->
+              <line class="rg-edge rg-edge-p4" x1="175" y1="375" x2="108" y2="318"/>
+              <line class="rg-edge rg-edge-p4" x1="175" y1="375" x2="230" y2="340"/>
+              <line class="rg-edge rg-edge-p4" x1="175" y1="375" x2="155" y2="430"/>
+              <!-- global (copper dashed) -->
+              <line class="rg-edge rg-edge-pg" x1="530" y1="390" x2="468" y2="335"/>
+              <line class="rg-edge rg-edge-pg" x1="530" y1="390" x2="572" y2="340"/>
+
+              <!-- Finding → entity edges (dashed copper) -->
+              <line class="rg-edge rg-edge-ent" x1="62" y1="170" x2="218" y2="195"/>
+              <line class="rg-edge rg-edge-ent" x1="168" y1="152" x2="218" y2="195"/>
+              <line class="rg-edge rg-edge-ent" x1="168" y1="152" x2="368" y2="230"/>
+              <line class="rg-edge rg-edge-ent" x1="175" y1="220" x2="310" y2="325"/>
+              <line class="rg-edge rg-edge-ent" x1="85" y1="245" x2="140" y2="295"/>
+              <line class="rg-edge rg-edge-ent" x1="400" y1="145" x2="475" y2="178"/>
+              <line class="rg-edge rg-edge-ent" x1="478" y1="130" x2="475" y2="178"/>
+              <line class="rg-edge rg-edge-ent" x1="365" y1="125" x2="368" y2="230"/>
+              <line class="rg-edge rg-edge-ent" x1="495" y1="80" x2="475" y2="178"/>
+              <line class="rg-edge rg-edge-ent" x1="618" y1="112" x2="560" y2="225"/>
+              <line class="rg-edge rg-edge-ent" x1="685" y1="140" x2="560" y2="225"/>
+              <line class="rg-edge rg-edge-ent" x1="668" y1="270" x2="140" y2="295"/>
+              <line class="rg-edge rg-edge-ent" x1="590" y1="280" x2="560" y2="225"/>
+              <line class="rg-edge rg-edge-ent" x1="108" y1="318" x2="140" y2="295"/>
+              <line class="rg-edge rg-edge-ent" x1="230" y1="340" x2="310" y2="325"/>
+              <line class="rg-edge rg-edge-ent" x1="468" y1="335" x2="310" y2="325"/>
+              <line class="rg-edge rg-edge-ent" x1="572" y1="340" x2="368" y2="230"/>
+
+              <!-- Cross-entity links -->
+              <line class="rg-edge rg-edge-cross" x1="218" y1="195" x2="368" y2="230"/>
+              <line class="rg-edge rg-edge-cross" x1="368" y1="230" x2="310" y2="325"/>
+              <line class="rg-edge rg-edge-cross" x1="475" y1="178" x2="560" y2="225"/>
+              <line class="rg-edge rg-edge-cross" x1="140" y1="295" x2="310" y2="325"/>
+
+              <!-- Selected ring -->
+              <circle cx="168" cy="152" r="14" class="rg-selected-ring"/>
+
+              <!-- Entity nodes (drawn before findings so findings sit on top) -->
+              <g transform="translate(218,195)">
+                <circle r="26" class="rg-ent-circle"/>
                 <text class="rg-ent-label" dy="4">auth</text>
               </g>
-              <g transform="translate(353,193)">
-                <circle r="22" class="rg-ent-circle"/>
+              <g transform="translate(368,230)">
+                <circle r="24" class="rg-ent-circle"/>
                 <text class="rg-ent-label" dy="4">build</text>
               </g>
-              <g transform="translate(142,253)">
-                <circle r="18" class="rg-ent-circle"/>
+              <g transform="translate(140,295)">
+                <circle r="20" class="rg-ent-circle"/>
                 <text class="rg-ent-label" dy="4">React</text>
               </g>
-              <g transform="translate(80,155)">
-                <rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/>
+              <g transform="translate(475,178)">
+                <circle r="22" class="rg-ent-circle"/>
+                <text class="rg-ent-label" dy="4">API</text>
               </g>
-              <g transform="translate(168,148)">
-                <rect x="-8" y="-8" width="16" height="16" rx="3" class="rg-finding-rect-sel"/>
+              <g transform="translate(310,325)">
+                <circle r="20" class="rg-ent-circle"/>
+                <text class="rg-ent-label" dy="4">TypeScript</text>
               </g>
-              <g transform="translate(430,135)">
-                <rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/>
+              <g transform="translate(560,225)">
+                <circle r="19" class="rg-ent-circle"/>
+                <text class="rg-ent-label" dy="4">perf</text>
               </g>
-              <g transform="translate(340,130)">
-                <rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/>
+
+              <!-- Finding nodes (small squares) -->
+              <!-- web-project-1 findings -->
+              <g transform="translate(62,170)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(168,152)"><rect x="-8" y="-8" width="16" height="16" rx="3" class="rg-finding-rect-sel"/></g>
+              <g transform="translate(85,245)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(175,220)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(48,112)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
+              <!-- api-service findings -->
+              <g transform="translate(400,145)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(478,130)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(365,125)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(495,80)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
+              <!-- mobile-app findings -->
+              <g transform="translate(618,112)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(685,140)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(668,270)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(590,280)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
+              <!-- art-project-1 findings -->
+              <g transform="translate(108,318)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(230,340)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(155,430)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
+              <!-- global findings -->
+              <g transform="translate(468,335)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
+              <g transform="translate(572,340)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
+
+              <!-- Project nodes (drawn last, on top) -->
+              <g transform="translate(115,90)">
+                <circle r="30" class="rg-proj-circle rg-proj-circle--1"/>
+                <text class="rg-proj-label" dy="-3">web-</text>
+                <text class="rg-proj-label" dy="9">project-1</text>
               </g>
-              <g transform="translate(310,205)">
-                <rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/>
-              </g>
-              <g transform="translate(250,212)">
-                <rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/>
-              </g>
-              <g transform="translate(100,225)">
-                <rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/>
-              </g>
-              <g transform="translate(130,68)">
-                <circle r="28" class="rg-proj-circle rg-proj-circle--1"/>
-                <text class="rg-proj-label" dy="-2">web-</text>
-                <text class="rg-proj-label" dy="10">project-1</text>
-              </g>
-              <g transform="translate(380,56)">
-                <circle r="24" class="rg-proj-circle rg-proj-circle--2"/>
+              <g transform="translate(430,65)">
+                <circle r="26" class="rg-proj-circle rg-proj-circle--2"/>
                 <text class="rg-proj-label" dy="4">api-service</text>
               </g>
-              <g transform="translate(290,275)">
-                <circle r="22" class="rg-proj-circle rg-proj-circle--3"/>
-                <text class="rg-proj-label" dy="4">mobile-app</text>
+              <g transform="translate(635,185)">
+                <circle r="26" class="rg-proj-circle rg-proj-circle--3"/>
+                <text class="rg-proj-label" dy="-3">mobile-</text>
+                <text class="rg-proj-label" dy="9">app</text>
+              </g>
+              <g transform="translate(175,375)">
+                <circle r="22" class="rg-proj-circle rg-proj-circle--4"/>
+                <text class="rg-proj-label" dy="-3">art-</text>
+                <text class="rg-proj-label" dy="9">project-1</text>
+              </g>
+              <g transform="translate(530,390)">
+                <circle r="20" class="rg-proj-circle rg-proj-circle--g"/>
+                <text class="rg-proj-label" dy="4">global</text>
               </g>
             </svg>
           </div>
@@ -872,7 +865,7 @@
       <span>•</span>
       <a href="#hooks">Hooks</a>
       <span>•</span>
-      <a href="#features">Features</a>
+      <a href="#demo">Shell</a>
       <span>•</span>
       <a href="https://github.com/alaarab/cortex/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
       <span>•</span>

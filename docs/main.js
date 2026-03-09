@@ -1,9 +1,3 @@
-// --- Demo cursor: only blink on the last typed element ---
-(function() {
-  const typed = document.querySelectorAll('.demo-typed');
-  if (typed.length) typed[typed.length - 1].classList.add('active-cursor');
-})();
-
 // --- NAV scroll state ---
 const nav = document.getElementById('nav');
 window.addEventListener('scroll', () => {
@@ -244,10 +238,9 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
   const END_PAUSE  = 1200;
 
   let stopped = false;
-  let pending  = [];
 
   function wait(ms) {
-    return new Promise(r => { const t = setTimeout(r, ms); pending.push(t); });
+    return new Promise(r => setTimeout(r, ms));
   }
 
   function mkEl(tag, cls, text) {
@@ -367,8 +360,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
       if (row.kind !== 'section' && row.kind !== 'health-sep') {
         const idx = animIdx++;
         requestAnimationFrame(() => {
-          const t = setTimeout(() => el.classList.add('visible'), 80 * idx);
-          pending.push(t);
+          setTimeout(() => el.classList.add('visible'), 80 * idx);
         });
       }
     });
