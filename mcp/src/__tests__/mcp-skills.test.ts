@@ -35,9 +35,9 @@ describe("mcp-skills", () => {
     server = makeMockServer();
     fs.mkdirSync(path.join(tmp.path, "profiles"), { recursive: true });
     fs.writeFileSync(path.join(tmp.path, "profiles", "work.yaml"), "name: work\nprojects:\n  - demo\n");
-    fs.mkdirSync(path.join(tmp.path, "demo", ".claude", "skills"), { recursive: true });
+    fs.mkdirSync(path.join(tmp.path, "demo", "skills"), { recursive: true });
     fs.writeFileSync(
-      path.join(tmp.path, "demo", ".claude", "skills", "helper.md"),
+      path.join(tmp.path, "demo", "skills", "helper.md"),
       "---\nname: helper\ndescription: test helper\n---\nbody\n"
     );
 
@@ -67,7 +67,7 @@ describe("mcp-skills", () => {
   it("disables and re-enables a skill without deleting it", async () => {
     let res = parseResult(await server.call("disable_skill", { project: "demo", name: "helper" }));
     expect(res.ok).toBe(true);
-    expect(fs.existsSync(path.join(tmp.path, "demo", ".claude", "skills", "helper.md"))).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "demo", "skills", "helper.md"))).toBe(true);
 
     res = parseResult(await server.call("list_skills", { project: "demo" }));
     expect(res.data.skills[0].enabled).toBe(false);
@@ -77,5 +77,28 @@ describe("mcp-skills", () => {
 
     res = parseResult(await server.call("list_skills", { project: "demo" }));
     expect(res.data.skills[0].enabled).toBe(true);
+  });
+
+  it("includes inherited global skills in project resolution", async () => {
+    fs.mkdirSync(path.join(tmp.path, "global", "skills"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp.path, "global", "skills", "humanize.md"),
+      "---\nname: humanize\ndescription: global helper\n---\nbody\n"
+    );
+
+    const res = parseResult(await server.call("list_skills", { project: "demo" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.skills.some((skill: { name: string; source: string }) => skill.name === "humanize" && skill.source === "global")).toBe(true);
+  });
+
+  it("writes project skills into the canonical project skills directory", async () => {
+    const res = parseResult(await server.call("write_skill", {
+      name: "local-review",
+      scope: "demo",
+      content: "---\nname: local-review\ndescription: local review helper\n---\nbody\n",
+    }));
+
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "demo", "skills", "local-review.md"))).toBe(true);
   });
 });

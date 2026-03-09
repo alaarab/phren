@@ -537,6 +537,32 @@ describe("link", () => {
       expect(content).toContain("hooks:");
     });
 
+    it("mirrors resolved global plus project skills and generates AGENTS.md", async () => {
+      setupProfile(["skill-test"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "skill-test");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "skill-test");
+      fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
+      fs.mkdirSync(path.join(cortexProject, "skills"), { recursive: true });
+      fs.writeFileSync(path.join(cortexPath, "global", "skills", "humanize.md"), "---\nname: humanize\ndescription: global\n---\nbody\n");
+      fs.writeFileSync(path.join(cortexProject, "skills", "verify.md"), "---\nname: verify\ndescription: local\n---\nbody\n");
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test", allTools: true });
+
+      const projectMirror = path.join(projectDir, ".claude", "skills");
+      const manifestPath = path.join(projectDir, ".claude", "skill-manifest.json");
+      const agentsPath = path.join(projectDir, "AGENTS.md");
+      expect(fs.lstatSync(path.join(projectMirror, "humanize.md")).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(projectMirror, "verify.md")).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(fs.readFileSync(manifestPath, "utf8")).skills.some((skill: { name: string; source: string }) => skill.name === "humanize" && skill.source === "global")).toBe(true);
+      expect(fs.readFileSync(agentsPath, "utf8")).toContain("<!-- cortex:generated-agents -->");
+      expect(fs.readFileSync(agentsPath, "utf8")).toContain("/humanize");
+    });
+
     it("throws when profile has no projects", async () => {
       setupProfile([]);
 

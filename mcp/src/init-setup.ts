@@ -358,7 +358,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
       indexPolicy,
       JSON.stringify({
         schemaVersion: sv,
-        includeGlobs: ["**/*.md", ".claude/skills/**/*.md"],
+        includeGlobs: ["**/*.md", "**/skills/**/*.md", ".claude/skills/**/*.md"],
         excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
         includeHidden: false,
       }, null, 2) + "\n"

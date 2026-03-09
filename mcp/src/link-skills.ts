@@ -23,6 +23,8 @@ export interface SkillFrontmatter {
   license?: string;
   dependencies?: string[];
   hooks?: Record<string, unknown>;
+  command?: string;
+  aliases?: string[];
 }
 
 export interface SkillValidationResult {
@@ -73,6 +75,18 @@ export function validateSkillFrontmatter(content: string, filePath?: string): Sk
 
   if (frontmatter.version !== undefined && typeof frontmatter.version !== "string") {
     errors.push(`${prefix}"version" must be a string`);
+  }
+
+  if (frontmatter.command !== undefined && typeof frontmatter.command !== "string") {
+    errors.push(`${prefix}"command" must be a string`);
+  }
+
+  if (frontmatter.aliases !== undefined) {
+    if (!Array.isArray(frontmatter.aliases)) {
+      errors.push(`${prefix}"aliases" must be an array`);
+    } else if (frontmatter.aliases.some((alias: unknown) => typeof alias !== "string")) {
+      errors.push(`${prefix}"aliases" entries must be strings`);
+    }
   }
 
   return {

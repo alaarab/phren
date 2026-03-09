@@ -116,7 +116,7 @@ const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
 
 const DEFAULT_INDEX_POLICY: IndexPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-  includeGlobs: ["**/*.md", ".claude/skills/**/*.md"],
+  includeGlobs: ["**/*.md", "**/skills/**/*.md", ".claude/skills/**/*.md"],
   excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
   includeHidden: false,
 };
@@ -999,7 +999,7 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
       }
       if (line.startsWith("- ") && currentDate) {
         totalBullets++;
-        const key = line.trim().toLowerCase().replace(/\s+/g, " ");
+        const key = line.trim().toLowerCase().replace(/<!--\s*fid:[a-z0-9]{8}\s*-->/g, "").replace(/\s+/g, " ");
         const nextLine = activeLines[index + 1] || "";
         const citation = nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/) ? nextLine : undefined;
         const trimmedBullet = line.trimEnd();

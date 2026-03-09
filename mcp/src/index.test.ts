@@ -366,6 +366,7 @@ describe("index policy", () => {
   it("returns defaults when file is missing", () => {
     const policy = getIndexPolicy(cortexDir);
     expect(policy.includeGlobs).toContain("**/*.md");
+    expect(policy.includeGlobs).toContain("**/skills/**/*.md");
     expect(policy.includeGlobs).toContain(".claude/skills/**/*.md");
     expect(policy.excludeGlobs).toContain("**/node_modules/**");
     expect(policy.includeHidden).toBe(false);
@@ -373,7 +374,7 @@ describe("index policy", () => {
 
   it("updates include/exclude globs with admin permission", () => {
     const updated = updateIndexPolicy(cortexDir, {
-      includeGlobs: ["**/*.md", ".claude/skills/**/*.md", "notes/**/*.md"],
+      includeGlobs: ["**/*.md", "**/skills/**/*.md", ".claude/skills/**/*.md", "notes/**/*.md"],
       excludeGlobs: ["**/.git/**", "**/tmp/**"],
       includeHidden: true,
     });

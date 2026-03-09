@@ -6,7 +6,7 @@ import * as path from "path";
 import { isValidProjectName } from "./utils.js";
 import { parseSkillFrontmatter, validateSkillFrontmatter } from "./link-skills.js";
 import { removeSkillPath, setSkillEnabledAndSync } from "./skill-files.js";
-import { findSkill, getAllSkills } from "./skill-registry.js";
+import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, profile, withWriteQueue, updateFileInIndex } = ctx;
@@ -27,18 +27,48 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       }
 
-      const skills = getAllSkills(cortexPath, profile)
-        .filter(s => !project || s.source.toLowerCase() === project.toLowerCase());
+      const resolvedSkills = project ? buildSkillManifest(cortexPath, profile, project).skills : null;
+      const rawSkills = project ? null : getAllSkills(cortexPath, profile);
+      const skills = resolvedSkills || rawSkills || [];
 
       if (!skills.length) {
         return mcpResponse({ ok: true, message: project ? `No skills found for "${project}".` : "No skills found.", data: { skills: [] } });
       }
 
-      const lines = skills.map(s => `${s.name} (${s.source}; ${s.enabled ? "enabled" : "disabled"})${s.description ? ` — ${s.description}` : ""}`);
+      const lines = skills.map(s => `${s.command} -> ${s.name} (${s.source}; ${s.enabled ? "enabled" : "disabled"})${s.description ? ` — ${s.description}` : ""}`);
+      const serialized = resolvedSkills
+        ? resolvedSkills.map(({ name, source, format, path: p, description, enabled, command, aliases, visibleToAgents, commandRegistered, overrides, mirrorTargets }) => ({
+          name,
+          source,
+          format,
+          path: p,
+          description: description ?? null,
+          enabled,
+          command: command ?? null,
+          aliases,
+          visibleToAgents,
+          commandRegistered,
+          overrides,
+          mirrorTargets,
+        }))
+        : (rawSkills || []).map(({ name, source, format, path: p, description, enabled, command, aliases }) => ({
+          name,
+          source,
+          format,
+          path: p,
+          description: description ?? null,
+          enabled,
+          command: command ?? null,
+          aliases,
+          visibleToAgents: enabled,
+          commandRegistered: enabled,
+          overrides: [],
+          mirrorTargets: [],
+        }));
       return mcpResponse({
         ok: true,
         message: `${skills.length} skill(s):\n${lines.join("\n")}`,
-        data: { skills: skills.map(({ name, source, format, path: p, description, enabled }) => ({ name, source, format, path: p, description: description ?? null, enabled })) },
+        data: { skills: serialized },
       });
     }
   );
@@ -112,17 +142,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const destDir = scope.toLowerCase() === "global"
           ? path.join(cortexPath, "global", "skills")
-          : path.join(cortexPath, scope, ".claude", "skills");
+          : path.join(cortexPath, scope, "skills");
 
         if (scope.toLowerCase() !== "global" && !fs.existsSync(path.join(cortexPath, scope))) {
           return mcpResponse({ ok: false, error: `Project "${scope}" not found.` });
         }
 
         fs.mkdirSync(destDir, { recursive: true });
-        const existing = findSkill(cortexPath, profile, scope, safeName);
-        if (existing && "error" in existing) {
-          return mcpResponse({ ok: false, error: existing.error });
-        }
+        const existing = findLocalSkill(cortexPath, scope, safeName);
         const dest = existing
           ? existing.path
           : path.join(destDir, `${safeName}.md`);
@@ -153,7 +180,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       }
 
-      const result = findSkill(cortexPath, profile, project, name);
+      const result = project ? findLocalSkill(cortexPath, project, name) : findSkill(cortexPath, profile, project, name);
       if (!result) {
         return mcpResponse({ ok: false, error: `Skill "${name}" not found${project ? ` in "${project}"` : ""}.` });
       }

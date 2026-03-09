@@ -18,7 +18,7 @@
 
 ## Project skills
 
-Skills in `.claude/skills/` directory: (list them here as you add them)
+Source skills live in the cortex project `skills/` directory. Cortex resolves global + project-local skills and mirrors the effective set into repo-local `.claude/skills/`.
 
 ## Architecture
 

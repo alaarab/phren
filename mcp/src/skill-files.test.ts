@@ -74,4 +74,44 @@ describe("removeSkillPath", () => {
       else process.env.USERPROFILE = priorUserProfile;
     }
   });
+
+  it("syncs a project mirror with inherited global skills and generated artifacts", () => {
+    const tmp = makeTempDir("skill-files-test-");
+    cleanup = tmp.cleanup;
+
+    const priorHome = process.env.HOME;
+    const priorUserProfile = process.env.USERPROFILE;
+    const priorProjectsDir = process.env.PROJECTS_DIR;
+    process.env.HOME = tmp.path;
+    process.env.USERPROFILE = tmp.path;
+    process.env.PROJECTS_DIR = path.join(tmp.path, "projects");
+
+    try {
+      const cortexPath = path.join(tmp.path, "cortex");
+      const projectDir = path.join(tmp.path, "projects", "demo");
+      fs.mkdirSync(projectDir, { recursive: true });
+      writeFile(path.join(cortexPath, "global", "skills", "humanize.md"), "---\nname: humanize\ndescription: global\n---\nbody\n");
+      writeFile(path.join(cortexPath, "demo", "skills", "verify.md"), "---\nname: verify\ndescription: local\n---\nbody\n");
+
+      const manifest = syncSkillLinksForScope(cortexPath, "demo");
+      const linkedGlobal = path.join(projectDir, ".claude", "skills", "humanize.md");
+      const linkedLocal = path.join(projectDir, ".claude", "skills", "verify.md");
+      const manifestPath = path.join(projectDir, ".claude", "skill-manifest.json");
+      const commandsPath = path.join(projectDir, ".claude", "skill-commands.json");
+
+      expect(manifest?.skills.map((skill) => skill.name)).toContain("humanize");
+      expect(manifest?.skills.map((skill) => skill.name)).toContain("verify");
+      expect(fs.lstatSync(linkedGlobal).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(linkedLocal).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(fs.readFileSync(manifestPath, "utf8")).skills.some((skill: { name: string; source: string }) => skill.name === "humanize" && skill.source === "global")).toBe(true);
+      expect(JSON.parse(fs.readFileSync(commandsPath, "utf8")).commands.some((command: { command: string; skillId: string }) => command.command === "/humanize" && command.skillId === "humanize")).toBe(true);
+    } finally {
+      if (priorHome === undefined) delete process.env.HOME;
+      else process.env.HOME = priorHome;
+      if (priorUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = priorUserProfile;
+      if (priorProjectsDir === undefined) delete process.env.PROJECTS_DIR;
+      else process.env.PROJECTS_DIR = priorProjectsDir;
+    }
+  });
 });

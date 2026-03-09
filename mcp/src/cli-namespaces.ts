@@ -10,8 +10,9 @@ import {
 } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
-import { findSkill, getAllSkills } from "./skill-registry.js";
-import { setSkillEnabledAndSync } from "./skill-files.js";
+import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
+import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
+import { findProjectDir } from "./project-locator.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
@@ -22,6 +23,9 @@ function printSkillsUsage() {
   console.log("  cortex skills show <name> [--project <name>]");
   console.log("  cortex skills edit <name> [--project <name>]");
   console.log("  cortex skills add <project> <path>");
+  console.log("  cortex skills resolve <project|global> [--json]");
+  console.log("  cortex skills doctor <project|global>");
+  console.log("  cortex skills sync <project|global>");
   console.log("  cortex skills enable <project|global> <name>");
   console.log("  cortex skills disable <project|global> <name>");
   console.log("  cortex skills remove <project> <name>");
@@ -68,7 +72,9 @@ export function handleSkillsNamespace(args: string[], profile: string) {
   }
 
   if (subcommand === "list") {
-    handleSkillList(profile);
+    const projectIdx = args.indexOf("--project");
+    const project = projectIdx !== -1 ? args[projectIdx + 1] : undefined;
+    handleSkillList(profile, project);
     return;
   }
 
@@ -113,7 +119,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
 
     const baseName = path.basename(source);
     const fileName = baseName.toLowerCase().endsWith(".md") ? baseName : `${baseName}.md`;
-    const destDir = path.join(getCortexPath(), project, ".claude", "skills");
+    const destDir = path.join(getCortexPath(), project, "skills");
     const dest = path.join(destDir, fileName);
     fs.mkdirSync(destDir, { recursive: true });
 
@@ -130,6 +136,45 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       fs.copyFileSync(source, dest);
       console.log(`Copied skill ${fileName} into ${project}.`);
     }
+    return;
+  }
+
+  if (subcommand === "resolve" || subcommand === "doctor" || subcommand === "sync") {
+    const scope = args[1];
+    if (!scope) {
+      printSkillsUsage();
+      process.exit(1);
+    }
+    if (scope.toLowerCase() !== "global" && !isValidProjectName(scope)) {
+      console.error(`Invalid project name: "${scope}"`);
+      process.exit(1);
+    }
+
+    if (subcommand === "sync") {
+      const syncedManifest = syncSkillLinksForScope(getCortexPath(), scope);
+      if (!syncedManifest) {
+        console.error(`Project directory not found for "${scope}".`);
+        process.exit(1);
+      }
+      const mirrorDir = resolveSkillMirrorDir(scope) || homePath(".claude", "skills");
+      console.log(`Synced ${syncedManifest.skills.filter((skill) => skill.visibleToAgents).length} skill(s) for ${scope}.`);
+      console.log(`  ${path.join(path.dirname(mirrorDir), "skill-manifest.json")}`);
+      console.log(`  ${path.join(path.dirname(mirrorDir), "skill-commands.json")}`);
+      return;
+    }
+
+    const destDir = resolveSkillMirrorDir(scope);
+    const manifest = buildSkillManifest(getCortexPath(), profile, scope, destDir || undefined);
+    if (subcommand === "resolve") {
+      if (args.includes("--json")) {
+        console.log(JSON.stringify(manifest, null, 2));
+        return;
+      }
+      printResolvedManifest(scope, manifest, destDir);
+      return;
+    }
+
+    printSkillDoctor(scope, manifest, destDir);
     return;
   }
 
@@ -166,7 +211,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       process.exit(1);
     }
 
-    const resolved = findSkillPath(name, profile, project);
+    const resolved = findLocalSkill(getCortexPath(), project, name)?.path || null;
     if (!resolved) {
       console.error(`Skill not found: "${name}" in project "${project}"`);
       process.exit(1);
@@ -253,7 +298,13 @@ export function handleHooksNamespace(args: string[]) {
   process.exit(1);
 }
 
-export function handleSkillList(profile: string) {
+export function handleSkillList(profile: string, project?: string) {
+  if (project) {
+    const manifest = buildSkillManifest(getCortexPath(), profile, project, resolveSkillMirrorDir(project) || undefined);
+    printResolvedManifest(project, manifest, resolveSkillMirrorDir(project));
+    return;
+  }
+
   const sources = getAllSkills(getCortexPath(), profile);
 
   if (!sources.length) {
@@ -264,17 +315,18 @@ export function handleSkillList(profile: string) {
   const nameWidth = Math.max(4, ...sources.map((source) => source.name.length));
   const sourceWidth = Math.max(6, ...sources.map((source) => source.source.length));
   const formatWidth = Math.max(6, ...sources.map((source) => source.format.length));
+  const commandWidth = Math.max(7, ...sources.map((source) => source.command.length));
   const statusWidth = 8;
 
   console.log(
-    `${"Name".padEnd(nameWidth)}  ${"Source".padEnd(sourceWidth)}  ${"Format".padEnd(formatWidth)}  ${"Status".padEnd(statusWidth)}  Path`
+    `${"Name".padEnd(nameWidth)}  ${"Source".padEnd(sourceWidth)}  ${"Format".padEnd(formatWidth)}  ${"Command".padEnd(commandWidth)}  ${"Status".padEnd(statusWidth)}  Path`
   );
   console.log(
-    `${"─".repeat(nameWidth)}  ${"─".repeat(sourceWidth)}  ${"─".repeat(formatWidth)}  ${"─".repeat(statusWidth)}  ${"─".repeat(30)}`
+    `${"─".repeat(nameWidth)}  ${"─".repeat(sourceWidth)}  ${"─".repeat(formatWidth)}  ${"─".repeat(commandWidth)}  ${"─".repeat(statusWidth)}  ${"─".repeat(30)}`
   );
   for (const skill of sources) {
     console.log(
-      `${skill.name.padEnd(nameWidth)}  ${skill.source.padEnd(sourceWidth)}  ${skill.format.padEnd(formatWidth)}  ${(skill.enabled ? "enabled" : "disabled").padEnd(statusWidth)}  ${skill.path}`
+      `${skill.name.padEnd(nameWidth)}  ${skill.source.padEnd(sourceWidth)}  ${skill.format.padEnd(formatWidth)}  ${skill.command.padEnd(commandWidth)}  ${(skill.enabled ? "enabled" : "disabled").padEnd(statusWidth)}  ${skill.path}`
     );
   }
   console.log(`\n${sources.length} skill(s) found.`);
@@ -300,10 +352,11 @@ export function handleDetectSkills(args: string[], profile: string) {
     }
   }
   for (const dir of getProjectDirs(cortexPath, profile)) {
-    const projectSkillsDir = path.join(dir, ".claude", "skills");
-    if (!fs.existsSync(projectSkillsDir)) continue;
-    for (const entry of fs.readdirSync(projectSkillsDir)) {
-      trackedSkills.add(entry.replace(/\.md$/, ""));
+    for (const projectSkillsDir of [path.join(dir, "skills"), path.join(dir, ".claude", "skills")]) {
+      if (!fs.existsSync(projectSkillsDir)) continue;
+      for (const entry of fs.readdirSync(projectSkillsDir)) {
+        trackedSkills.add(entry.replace(/\.md$/, ""));
+      }
     }
   }
 
@@ -363,6 +416,67 @@ export function handleDetectSkills(args: string[], profile: string) {
     imported++;
   }
   console.log(`\nImported ${imported} skill(s). They are now tracked in cortex global skills.`);
+}
+
+function resolveSkillMirrorDir(scope: string): string | null {
+  if (scope.toLowerCase() === "global") return homePath(".claude", "skills");
+  const projectDir = findProjectDir(scope);
+  return projectDir ? path.join(projectDir, ".claude", "skills") : null;
+}
+
+function printResolvedManifest(scope: string, manifest: ReturnType<typeof buildSkillManifest>, destDir: string | null) {
+  console.log(`Scope: ${scope}`);
+  console.log(`Mirror: ${destDir || "(unavailable on disk)"}`);
+  console.log("");
+  for (const skill of manifest.skills) {
+    const status = skill.visibleToAgents ? "visible" : "disabled";
+    const overrideText = skill.overrides.length ? ` override:${skill.overrides.length}` : "";
+    console.log(`${skill.command}  ${skill.name}  ${skill.source}  ${status}${overrideText}`);
+    console.log(`  ${skill.path}`);
+  }
+  if (manifest.problems.length) {
+    console.log("\nProblems:");
+    for (const problem of manifest.problems) {
+      console.log(`- ${problem.message}`);
+    }
+  }
+}
+
+function printSkillDoctor(scope: string, manifest: ReturnType<typeof buildSkillManifest>, destDir: string | null) {
+  printResolvedManifest(scope, manifest, destDir);
+  const problems: string[] = [];
+
+  if (!destDir) {
+    problems.push(`Mirror target for ${scope} is not discoverable on disk.`);
+  } else {
+    const parentDir = path.dirname(destDir);
+    if (!fs.existsSync(path.join(parentDir, "skill-manifest.json"))) {
+      problems.push(`Missing generated manifest: ${path.join(parentDir, "skill-manifest.json")}`);
+    }
+    if (!fs.existsSync(path.join(parentDir, "skill-commands.json"))) {
+      problems.push(`Missing generated command registry: ${path.join(parentDir, "skill-commands.json")}`);
+    }
+    for (const skill of manifest.skills.filter((entry) => entry.visibleToAgents)) {
+      const dest = path.join(destDir, skill.format === "folder" ? skill.name : path.basename(skill.path));
+      try {
+        if (!fs.existsSync(dest) || fs.realpathSync(dest) !== fs.realpathSync(skill.root)) {
+          problems.push(`Mirror drift for ${skill.name}: expected ${dest} -> ${skill.root}`);
+        }
+      } catch {
+        problems.push(`Mirror drift for ${skill.name}: expected ${dest} -> ${skill.root}`);
+      }
+    }
+  }
+
+  if (!manifest.problems.length && !problems.length) {
+    console.log("\nDoctor: no skill pipeline issues detected.");
+    return;
+  }
+
+  console.log("\nDoctor findings:");
+  for (const problem of [...manifest.problems.map((entry) => entry.message), ...problems]) {
+    console.log(`- ${problem}`);
+  }
 }
 
 export async function handleProjectsNamespace(args: string[], profile: string) {
