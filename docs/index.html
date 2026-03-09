@@ -52,10 +52,12 @@
       <span class="nav-wordmark">cortex</span>
     </a>
     <div class="nav-links">
-      <a href="#how" class="nav-link">Daily loop</a>
+      <a href="#how" class="nav-link">How it works</a>
       <a href="#hooks" class="nav-link">Hooks</a>
+      <a href="#why" class="nav-link">Why</a>
       <a href="#demo" class="nav-link">Shell</a>
-      <a href="#install" class="nav-link">Install</a>
+      <a href="#review-ui" class="nav-link">Graph</a>
+      <a href="#skills" class="nav-link">Skills</a>
       <a href="https://github.com/alaarab/cortex" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
@@ -262,30 +264,102 @@
 
       <p class="hero-sub">
         <span class="hero-sub-line">Cortex captures what matters.</span>
-        <span class="hero-sub-line">Private. Local. Versioned.</span>
+        <span class="hero-sub-line">Private. Local. Git-backed.</span>
       </p>
-      <p class="hero-note">No API calls. No vendor lock-in.</p>
 
-      <div class="hero-actions">
-        <a href="#install" class="btn-primary">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Get started
-        </a>
-        <a href="whitepaper.pdf" class="btn-ghost" target="_blank" rel="noopener">
-          Whitepaper (PDF)
-        </a>
-        <a href="https://github.com/alaarab/cortex" class="btn-ghost" target="_blank" rel="noopener">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          GitHub
-        </a>
-      </div>
+      <div id="install" class="hero-install-tabs">
+        <div class="install-tabs-container">
+          <div class="install-tab-buttons">
+            <button class="install-tab-btn active" data-tab="claude-code">Claude Code</button>
+            <button class="install-tab-btn" data-tab="vscode">VS Code / Copilot</button>
+            <button class="install-tab-btn" data-tab="cursor">Cursor</button>
+            <button class="install-tab-btn" data-tab="codex">Codex</button>
+          </div>
 
-      <div class="hero-install-block">
-        <div class="code-block">
-          <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-          <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+          <div id="claude-code" class="install-tab-panel active">
+            <div class="install-step-body">
+              <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
+                <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+                  <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+                  <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                  Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures MCP, and wires up hooks. Restart your agent.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="vscode" class="install-tab-panel">
+            <div class="install-step-body">
+              <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
+                <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+                  <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+                  <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                  Detects VS Code automatically and writes <code style="color:var(--indigo)">mcp.json</code> for you. Or add it manually:
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:flex-start">
+                  <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
+  "servers": {
+    "cortex": {
+      "command": "npx",
+      "args": ["@alaarab/cortex", "~/.cortex"]
+    }
+  }
+}</pre>
+                  <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="cursor" class="install-tab-panel">
+            <div class="install-step-body">
+              <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
+                <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+                  <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+                  <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                  Detects Cursor automatically and writes hooks to <code style="color:var(--indigo)">~/.cursor/hooks.json</code>. Prompt injection and auto-save both work. Note: Cursor has no session-start hook, so context re-injection after compaction isn't available.
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                  For MCP, add to your Cursor settings:
+                </div>
+                <div style="display:flex;justify-content:space-between;width:100%;align-items:flex-start">
+                  <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
+  "mcpServers": {
+    "cortex": {
+      "command": "npx",
+      "args": ["@alaarab/cortex", "~/.cortex"]
+    }
+  }
+}</pre>
+                  <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"mcpServers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="codex" class="install-tab-panel">
+            <div class="install-step-body">
+              <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
+                <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+                  <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
+                  <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                  Detects Codex automatically and writes hooks to <code style="color:var(--indigo)">codex.json</code> in your cortex directory. Per-project <code style="color:var(--indigo)">CLAUDE.md</code> is also symlinked as <code style="color:var(--indigo)">AGENTS.md</code> in each project for full instruction file support.
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
+                  Context injection, auto-save, and session start/end hooks all work with Codex out of the box.
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="hero-install-caption">Registers MCP + hooks for Claude Code, Copilot, Cursor, and Codex.</div>
       </div>
 
     </div>
@@ -383,11 +457,11 @@
   </section>
 
   <!-- BENTO -->
-  <section class="bento-section">
+  <section class="bento-section" id="why">
     <div class="container">
       <div class="bento-header reveal">
         <div class="section-label">Why cortex</div>
-        <h2 class="section-title">Private. Local.<br>Versioned.</h2>
+        <h2 class="section-title">Private. Local.<br>Git-backed.</h2>
         <p class="section-sub" style="margin-top:12px">No vendor lock-in, no cloud account. Everything lives in a private git repo you own. Profiles keep work and personal separate. What one session learns, the next one gets. Across machines and tools. Stale findings decay. Useful patterns stick.</p>
       </div>
       <div class="bento-grid">
@@ -412,12 +486,12 @@
           </div>
         </div>
 
-        <!-- Card 2: Versioned -->
+        <!-- Card 2: Git-backed -->
         <div class="bento-card bento-card-2 reveal reveal-delay-1">
           <div class="bento-card-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           </div>
-          <div class="bento-card-title">Versioned</div>
+          <div class="bento-card-title">Git-backed</div>
           <p class="bento-card-desc">Push, pull, branch, diff. Full history of what your agents learned. Start on your laptop, pick up on your desktop.</p>
           <div class="bento-tag-row">
             <div class="bento-tag">git push</div>
@@ -686,110 +760,6 @@
     </div>
   </section>
 
-  <!-- INSTALL -->
-  <section class="install-section" id="install">
-    <div class="container">
-      <div class="install-header reveal">
-        <div class="section-label">Install</div>
-        <h2 class="section-title">One command. Done.</h2>
-        <p class="section-sub" style="margin-top:12px">Creates <code style="font-size:14px;color:var(--copper-mid)">~/.cortex</code>, registers the MCP server, and wires hooks into Claude Code, Copilot, Cursor, or Codex. Then add a project with <code style="font-size:14px;color:var(--copper-mid)">cortex init --from-existing ~/project</code>.</p>
-      </div>
-
-      <div class="install-tabs-container">
-        <div class="install-tab-buttons">
-          <button class="install-tab-btn active" data-tab="claude-code">Claude Code</button>
-          <button class="install-tab-btn" data-tab="vscode">VS Code / Copilot</button>
-          <button class="install-tab-btn" data-tab="cursor">Cursor</button>
-          <button class="install-tab-btn" data-tab="codex">Codex</button>
-        </div>
-
-        <div id="claude-code" class="install-tab-panel active">
-          <div class="install-step-body">
-            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures MCP, and wires up hooks. Restart your agent.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="vscode" class="install-tab-panel">
-          <div class="install-step-body">
-            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Detects VS Code automatically and writes <code style="color:var(--indigo)">mcp.json</code> for you. Or add it manually:
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;display:flex;justify-content:space-between;width:100%;align-items:flex-start">
-                <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
-  "servers": {
-    "cortex": {
-      "command": "npx",
-      "args": ["@alaarab/cortex", "~/.cortex"]
-    }
-  }
-}</pre>
-                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"servers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="cursor" class="install-tab-panel">
-          <div class="install-step-body">
-            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Detects Cursor automatically and writes hooks to <code style="color:var(--indigo)">~/.cursor/hooks.json</code>. Prompt injection and auto-save both work. Note: Cursor has no session-start hook, so context re-injection after compaction isn't available.
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                For MCP, add to your Cursor settings:
-              </div>
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:flex-start">
-                <pre style="margin:0;font-size:12px;line-height:1.7;color:var(--text);font-family:monospace">{
-  "mcpServers": {
-    "cortex": {
-      "command": "npx",
-      "args": ["@alaarab/cortex", "~/.cortex"]
-    }
-  }
-}</pre>
-                <button class="copy-btn" style="margin-top:2px;flex-shrink:0" data-cmd='{"mcpServers":{"cortex":{"command":"npx","args":["@alaarab/cortex","~/.cortex"]}}}'>copy</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="codex" class="install-tab-panel">
-          <div class="install-step-body">
-            <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-              <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-                <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Detects Codex automatically and writes hooks to <code style="color:var(--indigo)">codex.json</code> in your cortex directory. Per-project <code style="color:var(--indigo)">CLAUDE.md</code> is also symlinked as <code style="color:var(--indigo)">AGENTS.md</code> in each project for full instruction file support.
-              </div>
-              <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                Context injection, auto-save, and session start/end hooks all work with Codex out of the box.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- SKILLS -->
   <section class="skills-section" id="skills">
     <div class="container">
@@ -827,7 +797,19 @@
   <!-- CTA FOOTER -->
   <section class="cta-section">
     <div class="cta-content reveal">
+      <svg class="cta-icon" width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
+        <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
+        <line x1="72" y1="22" x2="46" y2="26" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
+        <line x1="46" y1="26" x2="26" y2="42" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
+        <line x1="26" y1="42" x2="22" y2="64" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
+        <line x1="22" y1="64" x2="26" y2="86" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
+        <line x1="26" y1="86" x2="46" y2="102" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
+        <line x1="46" y1="102" x2="72" y2="106" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
+        <circle cx="64" cy="64" r="5" fill="#D4892E"/>
+      </svg>
       <h2 class="cta-title">Start building your Cortex.</h2>
+      <p class="cta-tagline">Your agents will remember.</p>
       <div class="cta-actions">
         <a href="#install" class="btn-primary">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -863,15 +845,21 @@
     <div class="footer-right">
       <a href="https://github.com/alaarab/cortex" target="_blank" rel="noopener">github.com/alaarab/cortex</a>
       <span class="dot-sep">•</span>
+      <a href="#how">How it works</a>
+      <span class="dot-sep">•</span>
       <a href="#hooks">Hooks</a>
+      <span class="dot-sep">•</span>
+      <a href="#why">Why</a>
       <span class="dot-sep">•</span>
       <a href="#demo">Shell</a>
       <span class="dot-sep">•</span>
+      <a href="#review-ui">Graph</a>
+      <span class="dot-sep">•</span>
+      <a href="#skills">Skills</a>
+      <span class="dot-sep">•</span>
+      <a href="whitepaper.pdf" target="_blank" rel="noopener">Whitepaper</a>
+      <span class="dot-sep">•</span>
       <a href="https://github.com/alaarab/cortex/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
-      <span class="dot-sep">•</span>
-      <a href="ide-setup.md">IDE Setup Guide</a>
-      <span class="dot-sep">•</span>
-      <a href="context-optimization.md">Context Optimization</a>
     </div>
   </footer>
 
