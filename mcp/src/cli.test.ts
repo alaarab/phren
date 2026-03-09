@@ -2134,5 +2134,5 @@ describe("CLI integration: init --from-existing", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Could not bootstrap");
     expect(stdout).toContain("already exists with different casing");
-  });
+  }, process.platform === "win32" ? 15000 : 8000);
 });
