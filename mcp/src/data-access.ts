@@ -82,6 +82,8 @@ function ensureProject(cortexPath: string, project: string): CortexResult<string
 
 export interface FindingItem {
   id: string;
+  /** Stable 8-char hex ID embedded as `<!-- fid:XXXXXXXX -->`. Survives reordering and consolidation. */
+  stableId?: string;
   date: string;
   text: string;
   citation?: string;
@@ -145,6 +147,7 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
     const citation = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/.test(next.trim()) ? next.trim() : undefined;
     const citationData = citation ? parseCitationComment(citation) ?? undefined : undefined;
     const source = parseSourceComment(line) ?? undefined;
+    const fidMatch = line.match(/<!--\s*fid:([a-z0-9]{8})\s*-->/);
     const rawText = line.replace(/^-\s+/, "").trim();
     const textWithoutComments = rawText.replace(/<!--.*?-->/g, "").trim();
     const confMatch = textWithoutComments.match(/\s*\[confidence\s+([01](?:\.\d+)?)\]\s*$/i);
@@ -154,6 +157,7 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
       : textWithoutComments;
     items.push({
       id: `L${index}`,
+      stableId: fidMatch ? fidMatch[1] : undefined,
       date,
       text,
       confidence,
@@ -196,6 +200,12 @@ export function removeFinding(cortexPath: string, project: string, match: string
     const needle = match.trim().toLowerCase();
     const bulletLines = lines.map((line, i) => ({ line, i })).filter(({ line }) => line.startsWith("- "));
 
+    // 0) Stable finding ID match (fid:XXXXXXXX or just the 8-char hex)
+    const fidNeedle = needle.replace(/^fid:/, "");
+    const fidMatch = /^[a-z0-9]{8}$/.test(fidNeedle)
+      ? bulletLines.filter(({ line }) => new RegExp(`<!--\\s*fid:${fidNeedle}\\s*-->`).test(line))
+      : [];
+
     // 1) Exact text match (strip bullet prefix + metadata for comparison)
     const exactMatches = bulletLines.filter(({ line }) =>
       line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().toLowerCase() === needle
@@ -204,7 +214,9 @@ export function removeFinding(cortexPath: string, project: string, match: string
     const partialMatches = bulletLines.filter(({ line }) => line.toLowerCase().includes(needle));
 
     let idx: number;
-    if (exactMatches.length === 1) {
+    if (fidMatch.length === 1) {
+      idx = fidMatch[0].i;
+    } else if (exactMatches.length === 1) {
       idx = exactMatches[0].i;
     } else if (exactMatches.length > 1) {
       return cortexErr(`"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, CortexError.AMBIGUOUS_MATCH);

@@ -476,7 +476,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (entry.actor) metadata.push(`actor=${entry.actor}`);
         if (entry.tool) metadata.push(`tool=${entry.tool}`);
         if (entry.model) metadata.push(`model=${entry.model}`);
-        return `- [${entry.id}] ${entry.date}: ${entry.text}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
+        const idLabel = entry.stableId ? `${entry.id}|fid:${entry.stableId}` : entry.id;
+        return `- [${idLabel}] ${entry.date}: ${entry.text}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
       });
       return mcpResponse({
         ok: true,

@@ -575,6 +575,26 @@ export function getProjectSkills(cortexPath: string, project: string): SkillEntr
   }));
 }
 
+/** Max lines of skill content to show inline when selected. */
+const SKILL_PREVIEW_LINES = 20;
+
+function readSkillBody(skillPath: string): string[] {
+  try {
+    const raw = fs.readFileSync(skillPath, "utf8");
+    // Strip YAML frontmatter (--- ... ---)
+    const stripped = raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const fmMatch = stripped.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/);
+    const body = fmMatch ? fmMatch[1] : stripped;
+    // Strip leading title (# ...) and blank lines
+    const lines = body.split("\n");
+    let start = 0;
+    while (start < lines.length && (lines[start].trim() === "" || lines[start].startsWith("# "))) start++;
+    return lines.slice(start, start + SKILL_PREVIEW_LINES);
+  } catch {
+    return ["(could not read skill file)"];
+  }
+}
+
 function renderSkillsView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = process.stdout.columns || 80;
   const project = ctx.state.project;
@@ -605,6 +625,18 @@ function renderSkillsView(ctx: ViewContext, cursor: number, height: number): str
     if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
     else row = truncateLine(row, cols);
     allLines.push(row);
+
+    // Show inline content preview for the selected skill
+    if (isSelected) {
+      const bodyLines = readSkillBody(s.path);
+      if (bodyLines.length > 0) {
+        allLines.push("");
+        for (const line of bodyLines) {
+          allLines.push(truncateLine(`      ${style.dim(line)}`, cols));
+        }
+        allLines.push("");
+      }
+    }
 
     if (isSelected) cursorLastLine = allLines.length - 1;
   }
@@ -754,7 +786,11 @@ function renderHealthView(
   allLines.push(`    ${style.dim("last push:      ")} ${style.dim(runtime.lastSync?.lastPushAt || "n/a")}  ${style.dim(runtime.lastSync?.lastPushStatus || "")}`);
   allLines.push(`    ${style.dim("unsynced:       ")} ${style.bold(String(runtime.lastSync?.unsyncedCommits ?? 0))} ${style.dim("commit(s)")}`);
 
-  allLines.push("", `  ${style.dim(":run fix  :relink  :rerun hooks  :update")}`);
+  if (!doctor.ok) {
+    allLines.push("", `  ${style.boldYellow("→")} ${style.bold(":run fix")} ${style.dim("to auto-heal")}  ${style.dim(":relink  :rerun hooks  :update")}`);
+  } else {
+    allLines.push("", `  ${style.dim(":run fix  :relink  :rerun hooks  :update")}`);
+  }
 
   const lineCount = allLines.length;
   if (allLines.length <= height) return { lines: allLines, lineCount };

@@ -340,7 +340,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     return;
   }
 
-  if (command === "run" && parts[1]?.toLowerCase() === "fix") {
+  if ((command === "run" && parts[1]?.toLowerCase() === "fix") || command === "doctor") {
     const t0 = Date.now();
     const doctor = await host.deps.runDoctor(host.cortexPath, true);
     host.healthCache = undefined;

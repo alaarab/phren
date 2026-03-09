@@ -201,9 +201,11 @@ function prepareFinding(
     project,
     file: citationInput?.file,
   });
+  const fid = crypto.randomBytes(4).toString("hex");
+  const fidComment = `<!-- fid:${fid} -->`;
   const createdComment = `<!-- created: ${today} -->`;
   const sourceComment = source ? buildSourceComment(source) : "";
-  let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} ${createdComment}`;
+  let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} ${fidComment} ${createdComment}`;
   if (sourceComment) bullet += ` ${sourceComment}`;
 
   if (isDuplicateFinding(fullHistory, bullet)) {

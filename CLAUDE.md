@@ -212,7 +212,7 @@ Legacy files at the root are auto-migrated on first access.
 - `@import shared/file.md` in indexed docs resolves to global/ dir, with cycle detection and depth cap
 - `reference/` subdirectories in projects are classified as reference type in FTS index (legacy `knowledge/` also accepted)
 - Backlog done sections stripped from FTS index to reduce noise
-- Init supports `--template` (python-project, monorepo, library, frontend); `--from-existing` is hidden legacy compatibility
+- Init supports `--template` (python-project, monorepo, library, frontend); `--from-existing` still works but prefer `cortex add <path>`
 
 ## Environment Variables
 

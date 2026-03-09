@@ -1757,11 +1757,10 @@ describe("CLI integration: help and health", () => {
     expect(exitCode).toBe(0);
   });
 
-  it("link command prints a legacy compatibility warning", () => {
+  it("link command prints removal notice", () => {
     const { stderr, exitCode } = runCli(["link", "--mcp", "bogus"]);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("quarantined legacy path");
-    expect(stderr).toContain("CORTEX_ENABLE_LEGACY_ENROLLMENT=1");
+    expect(stderr).toContain("has been removed");
   });
 });
 
@@ -2163,10 +2162,10 @@ describe("CLI integration: init --from-existing", () => {
 
     const { stdout, stderr, exitCode } = runCli(
       ["init", "-y", "--from-existing", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test", CORTEX_ENABLE_LEGACY_ENROLLMENT: "1" }
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(stderr).toContain("legacy compatibility");
+    expect(stderr).toContain("prefer `cortex add <path>`");
     expect(stdout).toContain("Bootstrapped project");
     expect(stdout).toContain("my-app");
 
@@ -2191,10 +2190,10 @@ describe("CLI integration: init --from-existing", () => {
 
     const { stdout, stderr, exitCode } = runCli(
       ["init", "-y", "--from-existing", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test", CORTEX_ENABLE_LEGACY_ENROLLMENT: "1" }
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(stderr).toContain("legacy compatibility");
+    expect(stderr).toContain("prefer `cortex add <path>`");
     expect(stdout).toContain("Bootstrapped project");
     expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
   }, CLI_INTEGRATION_TIMEOUT_MS);
@@ -2202,7 +2201,7 @@ describe("CLI integration: init --from-existing", () => {
   it("bootstraps project even without CLAUDE.md (creates starter)", () => {
     const { stdout, exitCode } = runCli(
       ["init", "-y", "--from-existing", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test", CORTEX_ENABLE_LEGACY_ENROLLMENT: "1" }
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Bootstrapped project");
@@ -2215,7 +2214,7 @@ describe("CLI integration: init --from-existing", () => {
   it("reports error when path does not exist", () => {
     const { stdout, exitCode } = runCli(
       ["init", "-y", "--from-existing", "/tmp/nonexistent-path-xyz"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test", CORTEX_ENABLE_LEGACY_ENROLLMENT: "1" }
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Could not bootstrap");
@@ -2238,7 +2237,7 @@ describe("CLI integration: init --from-existing", () => {
     // Run init again with --from-existing
     const { stdout, exitCode } = runCli(
       ["init", "-y", "--from-existing", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test", CORTEX_ENABLE_LEGACY_ENROLLMENT: "1" }
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Bootstrapped project");
@@ -2253,7 +2252,7 @@ describe("CLI integration: init --from-existing", () => {
 
     const { stdout, exitCode } = runCli(
       ["init", "-y", "--from-existing", sourceDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test", CORTEX_ENABLE_LEGACY_ENROLLMENT: "1" }
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Could not bootstrap");

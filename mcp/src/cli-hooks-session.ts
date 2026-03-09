@@ -715,7 +715,34 @@ export async function handleHookStop() {
     ["add", "-A", "--", ":(exclude).env", ":(exclude)**/.env", ":(exclude)*.pem", ":(exclude)*.key"],
     getCortexPath()
   );
-  const commit = add.ok ? await runBestEffortGit(["commit", "-m", "auto-save cortex"], getCortexPath()) : { ok: false, error: add.error };
+  let commitMsg = "auto-save cortex";
+  if (add.ok) {
+    const diff = await runBestEffortGit(["diff", "--cached", "--stat", "--no-color"], getCortexPath());
+    if (diff.ok && diff.output) {
+      // Parse "project/file.md | 3 +++" lines into project names and file types
+      const changes = new Map<string, Set<string>>();
+      for (const line of diff.output.split("\n")) {
+        const m = line.match(/^\s*([^/]+)\/([^|]+)\s*\|/);
+        if (!m) continue;
+        const proj = m[1].trim();
+        if (proj.startsWith(".")) continue; // skip .governance, .runtime, etc.
+        const file = m[2].trim();
+        if (!changes.has(proj)) changes.set(proj, new Set());
+        if (/findings/i.test(file)) changes.get(proj)!.add("findings");
+        else if (/backlog/i.test(file)) changes.get(proj)!.add("backlog");
+        else if (/CLAUDE/i.test(file)) changes.get(proj)!.add("config");
+        else if (/summary/i.test(file)) changes.get(proj)!.add("summary");
+        else if (/skill/i.test(file)) changes.get(proj)!.add("skills");
+        else if (/reference/i.test(file)) changes.get(proj)!.add("reference");
+        else changes.get(proj)!.add("update");
+      }
+      if (changes.size > 0) {
+        const parts = [...changes.entries()].map(([proj, types]) => `${proj}(${[...types].join(",")})`);
+        commitMsg = `cortex: ${parts.join(" ")}`;
+      }
+    }
+  }
+  const commit = add.ok ? await runBestEffortGit(["commit", "-m", commitMsg], getCortexPath()) : { ok: false, error: add.error };
   if (!add.ok || !commit.ok) {
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,

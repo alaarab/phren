@@ -236,7 +236,8 @@ function parseFindingsEntries(content: string): Map<string, string[]> {
 
 // Extract the bullet text from a finding block (first line) for dedup purposes
 function findingBulletText(block: string): string {
-  return block.split("\n")[0];
+  // Strip stable finding ID so two entries with different fids but same text are considered duplicates during merge.
+  return block.split("\n")[0].replace(/<!--\s*fid:[a-z0-9]{8}\s*-->/g, "").replace(/\s+/g, " ").trim();
 }
 
 /**
