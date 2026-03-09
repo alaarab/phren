@@ -28,8 +28,8 @@ window.addEventListener('scroll', () => {
 
   function init() {
     resize();
-    const count = Math.floor((W * H) / 14000);
-    nodes = Array.from({ length: Math.min(count, 55) }, mkNode);
+    const count = Math.floor((W * H) / 10000);
+    nodes = Array.from({ length: Math.min(count, 90) }, mkNode);
   }
 
   function draw() {
