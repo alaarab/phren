@@ -201,6 +201,7 @@ nav.scrolled {
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.1;
+  text-wrap: balance;
   color: var(--text);
   margin-bottom: 20px;
   opacity: 0;
@@ -218,11 +219,17 @@ nav.scrolled {
 .hero-sub {
   font-size: clamp(16px, 2vw, 20px);
   color: var(--text-muted);
-  line-height: 1.6;
-  max-width: 520px;
+  line-height: 1.45;
+  max-width: 560px;
+  display: grid;
+  gap: 4px;
   margin-bottom: 44px;
   opacity: 0;
   animation: fadeUp 0.8s ease forwards 0.4s;
+}
+
+.hero-sub-line {
+  display: block;
 }
 
 .hero-actions {
@@ -970,8 +977,170 @@ section {
   padding: 24px 28px;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 13px;
-  line-height: 2;
-  min-height: 220px;
+  line-height: 1.7;
+  min-height: 280px;
+}
+
+.demo-shell-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.demo-shell-headerline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.demo-shell-brand {
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.demo-shell-sep {
+  color: var(--text-dim);
+}
+
+.demo-shell-project {
+  color: var(--indigo);
+}
+
+.demo-shell-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.demo-shell-tab {
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(255,255,255,0.02);
+}
+
+.demo-shell-tab.active {
+  color: var(--text);
+  border-color: rgba(58,123,174,0.35);
+  background: rgba(58,123,174,0.12);
+}
+
+.demo-shell-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  padding: 14px 16px;
+  min-height: 148px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.demo-shell-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  line-height: 1.5;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.demo-shell-row.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.demo-shell-row.selected .demo-shell-name {
+  color: var(--text);
+}
+
+.demo-shell-caret {
+  width: 10px;
+  color: var(--indigo);
+  flex-shrink: 0;
+}
+
+.demo-shell-name,
+.demo-shell-text,
+.demo-shell-value {
+  color: var(--text);
+}
+
+.demo-shell-meta {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.demo-shell-badge,
+.demo-shell-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+.demo-shell-badge {
+  color: var(--text);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.demo-shell-badge.active {
+  color: #F7D77B;
+  border-color: rgba(245,200,64,0.18);
+  background: rgba(245,200,64,0.08);
+}
+
+.demo-shell-badge.queue {
+  color: var(--indigo-soft);
+  border-color: rgba(58,123,174,0.18);
+  background: rgba(58,123,174,0.1);
+}
+
+.demo-shell-badge.done {
+  color: #7CE09B;
+  border-color: rgba(95,216,124,0.18);
+  background: rgba(95,216,124,0.08);
+}
+
+.demo-shell-tag {
+  color: var(--copper-mid);
+  border: 1px solid rgba(245,200,64,0.16);
+  background: rgba(245,200,64,0.08);
+}
+
+.demo-shell-key {
+  width: 76px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.demo-shell-status {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.demo-shell-input {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.demo-shell-prompt {
+  color: var(--indigo);
+  opacity: 0.8;
+}
+
+.demo-shell-input-text {
+  color: var(--text);
 }
 
 .demo-dyn-line {
