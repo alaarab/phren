@@ -115,6 +115,15 @@ function buildFindingCitation(
   return citation;
 }
 
+function resolveInferredCitationRepo(citationInput?: Partial<FindingCitation>): string | undefined {
+  if (citationInput?.repo) return citationInput.repo;
+  if (citationInput?.file) {
+    const fileDir = path.dirname(citationInput.file);
+    return getRepoRoot(fileDir);
+  }
+  return undefined;
+}
+
 function detectFindingModel(): string | undefined {
   const candidates = [
     process.env.CORTEX_MODEL,
@@ -416,7 +425,7 @@ export function addFindingToFile(
   const resolvedCitationInput = resolvedCitationInputResult.data;
   const effectiveSessionId = resolveFindingSessionId(cortexPath, project, opts?.sessionId);
   const source = buildFindingSource(effectiveSessionId);
-  const inferredRepo = resolvedCitationInput?.repo || getRepoRoot(resolvedDir);
+  const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
   const supersedesText = resolvedCitationInput?.supersedes;
   const normalizedForSupersedes = supersedesText
@@ -555,7 +564,7 @@ export function addFindingsToFile(
   const resolvedCitationInput = resolvedCitationInputResult.data;
   const effectiveSessionId = resolveFindingSessionId(cortexPath, project, opts?.sessionId);
   const source = buildFindingSource(effectiveSessionId);
-  const inferredRepo = getRepoRoot(resolvedDir);
+  const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
 
   const added: string[] = [];

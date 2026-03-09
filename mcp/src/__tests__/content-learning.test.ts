@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { execFileSync } from "child_process";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
 import { addFindingToFile, addFindingsToFile } from "../shared-content.js";
 
@@ -197,6 +198,25 @@ describe("finding provenance", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("does not infer citation repo metadata from the enclosing cortex store", () => {
+    execFileSync("git", ["init"], { cwd: tmp.path, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Vitest"], { cwd: tmp.path, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "vitest@example.com"], { cwd: tmp.path, stdio: "ignore" });
+    writeFile(path.join(tmp.path, "notes.md"), "seed\n");
+    execFileSync("git", ["add", "."], { cwd: tmp.path, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "seed"], { cwd: tmp.path, stdio: "ignore" });
+
+    const result = addFindingToFile(tmp.path, PROJECT, "Synthesized findings should not cite the cortex store repo by default");
+    expect(result.ok).toBe(true);
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    expect(content).toContain("<!-- cortex:cite");
+    expect(content).not.toContain(`"repo":"${tmp.path}"`);
+    expect(content).not.toContain('"commit":');
+    expect(content).not.toContain('"file":');
+    expect(content).not.toContain('"line":');
   });
 });
 
