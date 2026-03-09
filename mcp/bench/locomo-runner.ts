@@ -48,6 +48,20 @@ interface SessionResult {
 
 interface BenchmarkResults {
   runDate: string;
+  conditions: {
+    machine: string;
+    platform: string;
+    arch: string;
+    nodeVersion: string;
+    dataset: "toy" | "custom";
+    inputPath: string | null;
+    embeddingsEnabled: boolean;
+    cacheState: string;
+    indexMode: string;
+    sessionsRequested: number;
+    sessionsExecuted: number;
+    totalFindings: number;
+  };
   totalSessions: number;
   totalQuestions: number;
   recall_at_1: number;
@@ -271,6 +285,20 @@ async function runBenchmark(sessions: BenchmarkSession[]): Promise<BenchmarkResu
 
   return {
     runDate: new Date().toISOString(),
+    conditions: {
+      machine: os.hostname(),
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      dataset: "toy",
+      inputPath: null,
+      embeddingsEnabled: Boolean(process.env.CORTEX_EMBEDDING_API_URL || process.env.OLLAMA_HOST || process.env.OLLAMA_BASE_URL),
+      cacheState: "cold temp cortex per session; fresh in-memory FTS index each run",
+      indexMode: "FTS5 only",
+      sessionsRequested: sessions.length,
+      sessionsExecuted: sessionResults.length,
+      totalFindings: sessions.reduce((sum, session) => sum + session.findings.length, 0),
+    },
     totalSessions: sessionResults.length,
     totalQuestions,
     recall_at_1: Math.round(avgRecall1 * 1000) / 1000,
@@ -316,6 +344,10 @@ async function main() {
   }
 
   const results = await runBenchmark(dataset);
+  results.conditions.dataset = input ? "custom" : "toy";
+  results.conditions.inputPath = input;
+  results.conditions.sessionsRequested = maxSessions;
+  results.conditions.sessionsExecuted = dataset.length;
   printSummary(results);
 
   // Write results

@@ -4,9 +4,21 @@
  */
 
 import { CortexShell } from "./shell.js";
-import { style, clearScreen, clearToEnd } from "./shell-render.js";
+import { style, clearScreen, clearToEnd, shellStartupFrames } from "./shell-render.js";
 import { errorMessage } from "./utils.js";
 import { computeCortexLiveStateToken } from "./shared.js";
+import { VERSION } from "./init-shared.js";
+
+async function playStartupIntro(): Promise<void> {
+  if (!process.stdout.isTTY) return;
+  const frames = shellStartupFrames(VERSION);
+  for (const frame of frames) {
+    clearScreen();
+    process.stdout.write(frame);
+    clearToEnd();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+}
 
 export async function startShell(cortexPath: string, profile: string): Promise<void> {
   const shell = new CortexShell(cortexPath, profile);
@@ -42,6 +54,7 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
   process.stdout.write("\x1b[?1049h");
   let exiting = false;
   const repaint = async () => { clearScreen(); process.stdout.write(await shell.render()); clearToEnd(); };
+  await playStartupIntro();
   const poll = setInterval(async () => {
     if (exiting) return;
     const nextToken = computeCortexLiveStateToken(cortexPath);

@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
@@ -19,6 +19,7 @@ describe("handleBackgroundSync recovery", () => {
 
   beforeEach(() => {
     tmp = makeTempDir("cortex-bg-sync-recovery-");
+    vi.resetModules();
   });
 
   afterEach(() => {
@@ -176,4 +177,5 @@ describe("handleBackgroundSync recovery", () => {
     expect(backlog).toContain("Local task");
     expect(backlog).not.toContain("<<<<<<<");
   });
+
 });

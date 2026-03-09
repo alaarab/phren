@@ -4,13 +4,13 @@
 
 `CLAUDE.md` loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time — whether the content is relevant or not. With five agents running in parallel, that's 10,000 tokens of context before anyone types a word.
 
-Cortex searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens regardless of how large your knowledge base grows. You can run more agents in parallel for the same cost, and they're not reading noise — so they're not producing slop from irrelevant context.
+Cortex searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with `CORTEX_CONTEXT_TOKEN_BUDGET`, regardless of how large your knowledge base grows. You can run more agents in parallel for the same cost, and they're not reading noise.
 
 `CLAUDE.md` is also static. Cortex learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.
 
 ## Does this slow down my prompts?
 
-Usually not on a warm local repo. The hook runs locally — keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path. On a warm cache it is typically fast enough that you won't notice it.
+Usually not on a warm local repo. The hook runs locally: keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path. On a healthy warm cache it is often fast enough that you will barely notice it, but the exact latency depends on corpus size, filesystem speed, and whether semantic retrieval is enabled.
 
 The main exceptions are the first prompt in a session, where `SessionStart` pulls the cortex repo from git, and very large or slow filesystems, where index work can become noticeable. On a fast connection the pull is often under a second; on a slow connection it can be a few seconds. This is configurable — you can disable the auto-pull if you prefer to sync manually.
 
@@ -20,7 +20,18 @@ They all read and write the same `~/.cortex` directory. Concurrent reads are saf
 
 In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing — it's just a shared git repo.
 
-The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Cortex retries transient network-style git failures, but non-fast-forward conflicts still require normal git resolution. Under extreme parallelism, think of Cortex as eventually consistent rather than strongly coordinated.
+The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Cortex retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and review UI. Under extreme parallelism, think of Cortex as eventually consistent rather than strongly coordinated.
+
+## What failure modes should I expect?
+
+The common ones are boring infrastructure issues, not mystery behavior:
+
+- No remote configured: auto-save still commits locally, but nothing syncs across machines until you add a remote.
+- Push failed: the commit stays local and Cortex records the last sync error so `cortex status`, shell, and review UI can show it.
+- Hooks disabled or stale: retrieval stops, but your files are still there; rerun `cortex init` or `cortex hooks enable <tool>`.
+- Stale index: search quality drops until the next rebuild; `cortex doctor` and `cortex status` will flag index trouble.
+- Review queue growth: trust filtering is catching too much low-signal or stale content, which usually means your findings need pruning or governance thresholds need adjustment.
+- Governance lockout: if access control blocks a write, nothing is silently discarded; fix `access-control.json` or your actor identity.
 
 ## How does trust decay work?
 

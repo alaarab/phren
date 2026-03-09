@@ -17,11 +17,9 @@
 
 I run 3-5 machines doing AI development at the same time. Claude Code, Codex, Cursor. Every session starts from zero. Every bug I've already traced gets traced again. Every decision I've already made gets made again.
 
-I didn't want to just dump everything into a CLAUDE.md and read the whole thing every time. That burns tokens and still doesn't give you what you actually need right now.
+So I built this. A knowledge base in a git repo I own. Every project, every machine. When something comes up, my agents pull only what's relevant. About 550 tokens by default instead of everything. I run more agents in parallel for the same cost and they're not reading noise.
 
-So I built this. A knowledge base in a git repo I own. Every project, every machine. When something comes up, my agents pull only what's relevant. A default target of about 550 tokens instead of the whole file. I can run more agents in parallel for the same cost and they're not producing slop from noise.
-
-The more I work, the more it knows. Findings match to entities. Old stuff fades. Good stuff sticks. It's just mining my data as I go and making it smarter over time.
+The more I work, the more it knows. Findings match to entities. Old stuff fades. Good stuff sticks. It's just mining my data as I go.
 
 > `npx @alaarab/cortex init` -- one-command local bootstrap. No account. Just a git repo you own.
 
@@ -94,22 +92,11 @@ If that push succeeds, other machines see the update on their next pull. If the 
 
 **Work and personal never mix.** Your work machine sees work projects. Your home machine sees personal ones. Same setup, different profiles.
 
-**A default target budget of about 550 tokens, not your whole config.** Less token spend means more agents running in parallel for the same cost. They're not reading noise, so they're not producing slop.
+**A default target budget of about 550 tokens, not your whole config.** Less token spend means more agents running in parallel for the same cost. They're not reading noise, so they're not producing slop. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET` if you want a larger or smaller default injection target.
 
 **Your data stays in a git repo you own.** No account, no vendor. Markdown in a repo you control. Read it, edit it, grep it, delete it.
 
 **It mostly stays out of the way.** Context gets injected before each prompt. Changes get committed locally after each response, with best-effort push when sync is healthy. You still own the repo and the failure modes.
-
-## When Cortex Is The Wrong Choice
-
-Cortex is a strong fit when you want owner-operated memory, git auditability, and token discipline. It is a weaker fit when:
-
-- You want a fully managed shared service with stronger real-time consistency guarantees
-- You never want to think about git remotes, pull/rebase, or occasional sync conflicts
-- Semantic retrieval quality matters more than local ownership, auditability, and portability
-- You're already standardized on one vendor platform and its built-in memory is good enough
-
----
 
 ## Repository structure
 
@@ -152,7 +139,7 @@ Three things happen every session without you doing anything:
 
 **Before each prompt** -- a hook pulls keywords from your message, searches the index, and injects the best matches. Trust filtering drops low-confidence or outdated entries.
 
-**After each response** -- changes get committed locally. If a remote is configured, Cortex attempts a best-effort push. If nothing changed, the hook skips.
+**After each response** -- changes get committed locally. If a remote is configured, Cortex queues a background sync worker to push safely. If nothing changed, the hook skips.
 
 **When context resets** -- a hook re-injects your project summary, recent findings, and active backlog so the agent picks up where it left off.
 
@@ -518,6 +505,22 @@ Findings are scoped to a project. Try `cortex search "your term" --project <name
 **Doctor says FAIL on symlinks**
 
 Project directory probably moved or symlinks are stale. Run `cortex doctor --fix`.
+
+**Push failed or sync looks stuck**
+
+Run `cortex status` first. If the store says `saved-local`, your data is committed locally and waiting on sync. The shell health view and review UI also show the last push error and unsynced commit count. Fix the remote or network issue, then let the background worker retry or run a normal git push yourself.
+
+**Hooks disabled or stale**
+
+Run `cortex hooks list`. If the target tool is off or misconfigured, enable it again with `cortex hooks enable <tool>` or rerun `cortex init`.
+
+**Review queue keeps growing**
+
+Your trust policy is probably pushing too much low-confidence content into review. Triage with `cortex` then `m`, or tune policy with `cortex config`.
+
+**Governance writes are denied**
+
+Check `.governance/access-control.json` and your `CORTEX_ACTOR` identity. Cortex will reject the write rather than silently dropping it.
 
 **Merge conflicts after pulling on a new machine**
 

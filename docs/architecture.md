@@ -13,9 +13,9 @@ How data flows through the system, from user prompt to persistent memory.
           |
           v
  +--------+----------+     +-------------------+
- | Hook: SessionStart |     | Hook: Stop        |
- | git pull --rebase  |     | git add + commit  |
- | hook-context       |     | git push          |
+| Hook: SessionStart |     | Hook: Stop        |
+| git pull --rebase  |     | git add + commit  |
+| hook-context       |     | queue sync worker |
  +--------+----------+     +--------+----------+
           |                          ^
           v                          |
@@ -57,7 +57,7 @@ This is the core runtime loop from one prompt to the next:
         v
 [4] Persistence Path
     MCP tool writes (findings/backlog/memories)
-    + Stop hook git add/commit/push
+    + Stop hook git add/commit/background sync
     -> updated markdown + governance config become source of truth
         |
         +---------------------------------------------+
@@ -71,7 +71,7 @@ In practice:
 1. A user prompt triggers `UserPromptSubmit`, which runs fast retrieval against the cached FTS5 index.
 2. Matching memories are filtered by governance rules before any context injection.
 3. During the turn, MCP tools can add or update memory/backlog files in `~/.cortex/<project>/`.
-4. `Stop` persists those file changes through git, making them available for the next retrieval cycle.
+4. `Stop` persists those file changes locally through git, then queues background sync work if a remote is configured.
 
 ## Hook Pipeline
 
@@ -129,8 +129,10 @@ Stop
   |
   +-> git add -A ~/.cortex
   +-> git commit (if changes exist)
-  +-> git push (if remote configured)
-        retry with pull --rebase on conflict
+  +-> record saved-local runtime state
+  +-> schedule background sync worker (if remote configured)
+        push in detached step
+        pull --rebase on conflict
         auto-merge FINDINGS.md / backlog.md if possible
 ```
 
@@ -232,7 +234,7 @@ Query
         -> final ranked results
 ```
 
-Previously, search used a waterfall fallback (FTS5 first, then cosine if too few results). RRF replaces this with parallel execution and rank-based merging, which produces better results when different tiers surface different relevant documents.
+Search and hook injection now share the same core ranking path. Benchmark notes still need to publish whether embeddings were enabled and what corpus was indexed, because the quality story depends on those conditions.
 
 ### FTS5 Index
 

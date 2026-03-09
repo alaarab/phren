@@ -68,7 +68,8 @@ export function buildHookOutput(
       }
     }
   } else {
-    // Position-aware injection: place most relevant at START and END (LaRA benchmark).
+    // Position-aware injection: place most relevant at START and END so the
+    // highest-value snippets survive truncation pressure better.
     // Input `selected` is already ranked by relevance (best first).
     // Reorder so: [0] stays first, [1] goes last, middle positions get [2..N-1].
     let ordered = selected;
@@ -127,4 +128,3 @@ export function buildHookOutput(
 
   return parts;
 }
-

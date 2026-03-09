@@ -145,6 +145,16 @@ async function main() {
     date,
     cortexPath,
     project: projectArg || null,
+    conditions: {
+      machine: os.hostname(),
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      projectFilter: projectArg || null,
+      embeddingsEnabled: Boolean(process.env.CORTEX_EMBEDDING_API_URL || process.env.OLLAMA_HOST || process.env.OLLAMA_BASE_URL),
+      cacheState: "cold index build at script start; warm within this single run",
+      indexMode: "FTS5 query against built index",
+    },
     summary: { totalQueries: results.length, avgResults: parseFloat(avgResults), avgLatencyMs: parseFloat(avgLatency), p95LatencyMs: p95Latency, zeroResultQueries: zeroResults },
     queries: results,
   };

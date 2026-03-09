@@ -132,3 +132,18 @@ export function clearToEnd(): void {
     process.stdout.write("\x1b[J");
   }
 }
+
+export function shellStartupFrames(version: string): string[] {
+  const logoStages = ["c", "cor", "cortex"];
+  const spinners = ["◜", "◠", "◝"];
+  const tagline = style.dim("local memory for working agents");
+  const versionBadge = badge(`v${version}`, style.boldBlue);
+
+  return logoStages.map((stage, index) => [
+    "",
+    `  ${style.boldCyan(stage)} ${style.dim(spinners[index] ?? spinners[spinners.length - 1])}`,
+    "",
+    `  ${versionBadge}  ${tagline}`,
+    "",
+  ].join("\n"));
+}

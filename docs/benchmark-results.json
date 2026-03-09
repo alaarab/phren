@@ -1,5 +1,19 @@
 {
-  "runDate": "2026-03-07T06:41:27.582Z",
+  "runDate": "2026-03-09T00:08:57.229Z",
+  "conditions": {
+    "machine": "QL-PF5A48WS",
+    "platform": "linux",
+    "arch": "x64",
+    "nodeVersion": "v24.13.0",
+    "dataset": "toy",
+    "inputPath": null,
+    "embeddingsEnabled": false,
+    "cacheState": "cold temp cortex per session; fresh in-memory FTS index each run",
+    "indexMode": "FTS5 only",
+    "sessionsRequested": 3,
+    "sessionsExecuted": 3,
+    "totalFindings": 9
+  },
   "totalSessions": 3,
   "totalQuestions": 9,
   "recall_at_1": 0.111,

@@ -5,6 +5,7 @@ import * as path from "path";
 import { CortexShell } from "./shell.js";
 import { readBacklog, readFindings, readReviewQueue, loadShellState } from "./data-access.js";
 import { writeFile as write, makeTempDir } from "./test-helpers.js";
+import { shellStartupFrames } from "./shell-render.js";
 
 interface TempContext {
   root: string;
@@ -255,6 +256,14 @@ describe("CortexShell", () => {
     await shell.handleInput("b");
     const stateBackAgain = loadShellState(dir);
     expect(stateBackAgain.view).toBe("Backlog");
+  });
+
+  it("renders a branded startup intro frame set", () => {
+    const frames = shellStartupFrames("1.18.0");
+    expect(frames).toHaveLength(3);
+    expect(frames[0]).toContain("local memory for working agents");
+    expect(frames[2]).toContain("cortex");
+    expect(frames[2]).toContain("v1.18.0");
   });
 
   it(":govern and :consolidate require a selected project", async () => {

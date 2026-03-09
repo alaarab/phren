@@ -22,6 +22,8 @@ import {
 } from "./shared-index.js";
 import {
   autoMergeConflicts,
+  mergeBacklog,
+  mergeFindings,
 } from "./shared-content.js";
 import { runGit, isFeatureEnabled, errorMessage } from "./utils.js";
 import * as fs from "fs";
@@ -387,13 +389,62 @@ async function countUnsyncedCommits(cwd: string): Promise<number> {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function isMergeableMarkdown(relPath: string): boolean {
+  const filename = path.basename(relPath).toLowerCase();
+  return filename === "findings.md" || filename === "backlog.md";
+}
+
+async function snapshotLocalMergeableFiles(cwd: string): Promise<Map<string, string>> {
+  const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
+  if (!upstream.ok || !upstream.output) return new Map();
+  const changed = await runBestEffortGit(["diff", "--name-only", `${upstream.output.trim()}..HEAD`], cwd);
+  if (!changed.ok || !changed.output) return new Map();
+
+  const snapshots = new Map<string, string>();
+  for (const relPath of changed.output.split("\n").map((line) => line.trim()).filter(Boolean)) {
+    if (!isMergeableMarkdown(relPath)) continue;
+    const fullPath = path.join(cwd, relPath);
+    if (!fs.existsSync(fullPath)) continue;
+    snapshots.set(relPath, fs.readFileSync(fullPath, "utf8"));
+  }
+  return snapshots;
+}
+
+async function reconcileMergeableFiles(cwd: string, snapshots: Map<string, string>): Promise<boolean> {
+  let changedAny = false;
+
+  for (const [relPath, localBeforePull] of snapshots.entries()) {
+    const fullPath = path.join(cwd, relPath);
+    if (!fs.existsSync(fullPath)) continue;
+    const current = fs.readFileSync(fullPath, "utf8");
+    const filename = path.basename(relPath).toLowerCase();
+    const merged = filename === "findings.md"
+      ? mergeFindings(current, localBeforePull)
+      : mergeBacklog(current, localBeforePull);
+    if (merged === current) continue;
+    fs.writeFileSync(fullPath, merged);
+    changedAny = true;
+  }
+
+  if (!changedAny) return false;
+
+  const add = await runBestEffortGit(["add", "--", ...snapshots.keys()], cwd);
+  if (!add.ok) return false;
+  const commit = await runBestEffortGit(["commit", "-m", "auto-merge markdown recovery"], cwd);
+  return commit.ok;
+}
+
 async function recoverPushConflict(cwd: string): Promise<{ ok: boolean; detail: string; pullStatus: "ok" | "error"; pullDetail: string }> {
+  const localSnapshots = await snapshotLocalMergeableFiles(cwd);
   const pull = await runBestEffortGit(["pull", "--rebase", "--quiet"], cwd);
   if (pull.ok) {
+    const reconciled = await reconcileMergeableFiles(cwd, localSnapshots);
     const retryPush = await runBestEffortGit(["push"], cwd);
     return {
       ok: retryPush.ok,
-      detail: retryPush.ok ? "commit pushed after pull --rebase" : (retryPush.error || "push failed after pull --rebase"),
+      detail: retryPush.ok
+        ? (reconciled ? "commit pushed after pull --rebase and markdown reconciliation" : "commit pushed after pull --rebase")
+        : (retryPush.error || "push failed after pull --rebase"),
       pullStatus: "ok",
       pullDetail: pull.output || "pull --rebase ok",
     };

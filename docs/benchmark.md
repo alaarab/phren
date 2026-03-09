@@ -1,6 +1,8 @@
 # Benchmark Protocol
 
-This document describes the Section 8 benchmark protocol for evaluating cortex's retrieval quality.
+This document describes the retrieval benchmark protocol for evaluating cortex's search behavior.
+
+The important constraint: benchmark numbers only mean anything when the run conditions are published alongside them. If you do not state machine, dataset, cache state, and retrieval mode, treat the result as anecdotal.
 
 ## Query Types
 
@@ -77,6 +79,20 @@ The harness outputs a markdown results table showing:
 - Score per query
 - Total score and percentage
 
+## Published Conditions Template
+
+Every benchmark run should publish:
+
+- Machine hostname, platform, CPU architecture, and Node.js version
+- Cortex version or git commit
+- Dataset source: toy, LoCoMo-derived, or your own store
+- Corpus size: sessions, findings, and projects indexed
+- Retrieval mode: FTS5-only, shared rerank, or embeddings-enabled
+- Cache state: cold start, warm process, or warm on-disk cache
+- Whether a remote sync step was included in the timing
+
+The bundled runners now emit a `conditions` block in their JSON output. If you publish numbers in docs or release notes, copy that block with the results.
+
 ## Results Table
 
 | # | Type | Query | Score | Notes |
@@ -111,11 +127,11 @@ To get the full LoCoMo dataset, download it from [snap-stanford/locomo](https://
 | FTS5        | TBD      | TBD      | TBD      | TBD | -    |
 | Hybrid      | TBD      | TBD      | TBD      | TBD | -    |
 
-Results are saved to `docs/benchmark-results.json` by default.
+Results are saved to `docs/benchmark-results.json` by default. That JSON should be treated as the source of truth for the run conditions.
 
 ## Interpreting Results
 
-- **80%+**: Excellent retrieval quality. FTS5 and fallback are working well.
-- **60-79%**: Good but with gaps. Check if synonym map covers your terminology.
-- **40-59%**: Needs tuning. Consider adding more structured findings or expanding synonyms.
-- **Below 40%**: Check index health with `cortex doctor` and verify files are being indexed.
+- **80%+**: Strong on this dataset under these conditions. Do not generalize beyond the published corpus and retrieval mode.
+- **60-79%**: Useful but with visible gaps. Check synonym coverage and corpus quality.
+- **40-59%**: Needs tuning. Consider better findings hygiene, a different query set, or semantic retrieval.
+- **Below 40%**: Validate index health and whether the benchmark is asking for paraphrase recall that pure FTS5 will miss.

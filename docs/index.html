@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cortex: Persistent memory for your AI agents</title>
-  <meta name="description" content="Your AI agents forget everything. Cortex captures what they learn — stored in a private git repo you own. Works across Claude Code, Copilot, Cursor, and Codex. Every session builds on the last." />
+  <meta name="description" content="Your AI agents forget everything. Cortex captures what they learn, stored in a private git repo you own. Works across Claude Code, Copilot, Cursor, and Codex. Every session builds on the last." />
   <meta property="og:title" content="Cortex: Mine your AI work. Make your agents smarter." />
-  <meta property="og:description" content="Run 5 machines with AI agents simultaneously. Cortex gives them all the same persistent memory — stored in your own GitHub. Work stays separate from personal. One command to set up." />
+  <meta property="og:description" content="Run 5 machines with AI agents simultaneously. Cortex gives them all the same persistent memory, stored in your own GitHub. Work stays separate from personal. One command to set up." />
   <meta property="og:type" content="website" />
   <link rel="stylesheet" href="style.css">
 </head>
@@ -56,7 +56,6 @@
       <a href="#hooks" class="nav-link">Hooks</a>
       <a href="#features" class="nav-link">Features</a>
       <a href="#install" class="nav-link">Install</a>
-      <a href="#know" class="nav-link">Good to know</a>
       <a href="https://github.com/alaarab/cortex" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
@@ -261,7 +260,7 @@
 
       <h1 class="hero-title">Long-term memory<br>for <em>your AI agents.</em></h1>
 
-      <p class="hero-sub">I run 3-5 machines doing AI development at the same time. Every session starts over. Every bug I've already traced gets traced again. I didn't want to just dump everything into a CLAUDE.md and read the whole thing every time — that burns tokens and still doesn't find what you need. So I built this. A knowledge base in my own GitHub, shared across every tool and machine. My agents pull only what's relevant. The more I work, the more it knows. Findings match to entities. Old stuff fades. Good stuff sticks.</p>
+      <p class="hero-sub">Your agents forget everything between sessions. Cortex captures what they learn and shares it across every tool, machine, and session. One command to set up. It builds from there.</p>
 
       <div class="hero-actions">
         <a href="#install" class="btn-primary">
@@ -376,7 +375,7 @@
             <div class="trace-step"><span class="trace-fn">fts5.search(keywords)</span> <span class="trace-comment">synonym expansion, 20-term cap, sub-ms lookup</span></div>
             <div class="trace-step"><span class="trace-fn">trustFilter(results)</span> <span class="trace-comment">confidence decay, citation check, policy threshold</span></div>
             <div class="trace-step"><span class="trace-fn">inject(top3, budget=550)</span> <span class="trace-comment">best matches enter context. nothing if nothing matches.</span></div>
-            <div class="trace-out">&#8627; <span class="trace-out-example">&#9670; cortex &middot; 3 results</span> &mdash; that status line is this hook reporting what it found</div>
+            <div class="trace-out">&#8627; <span class="trace-out-example">&#9670; cortex &middot; 3 results</span> in your status line, that's this hook reporting what it found</div>
           </div>
         </div>
 
@@ -389,56 +388,11 @@
           <div class="trace-steps">
             <div class="trace-step"><span class="trace-fn">git add -A ~/.cortex</span> <span class="trace-comment">stage whatever changed</span></div>
             <div class="trace-step"><span class="trace-fn">git commit</span> <span class="trace-comment">no-op if nothing changed</span></div>
-            <div class="trace-step"><span class="trace-fn">git push</span> <span class="trace-comment">pull --rebase on conflict, auto-retry</span></div>
+            <div class="trace-step"><span class="trace-fn">background sync worker</span> <span class="trace-comment">push later, rebase on conflict, auto-retry</span></div>
             <div class="trace-out">&#8627; next session, any machine: SessionStart pulls it back down</div>
           </div>
         </div>
       </div>
-    </div>
-  </section>
-
-  <!-- GOOD TO KNOW — man page style, not card grid -->
-  <section class="ref-section" id="know">
-    <div class="container">
-      <div class="ref-header reveal">
-        <div class="section-label">Reference</div>
-        <h2 class="section-title">Good to know.</h2>
-      </div>
-
-      <dl class="ref-list reveal">
-        <div class="ref-entry">
-          <dt>This isn't a CLAUDE.md replacement.</dt>
-          <dd>CLAUDE.md loads the whole file on every session. Cortex searches your actual knowledge base and injects only what matches the current prompt. You can use both. CLAUDE.md for your project setup. Cortex for everything you've learned since.</dd>
-        </div>
-        <div class="ref-entry">
-          <dt>You don't see what gets injected.</dt>
-          <dd>Hook output goes into your agent's context, not your terminal. The <code>&#9670; cortex &middot; 3 results</code> status line is the only feedback. Run <code>cortex search</code> to see what the index has.</dd>
-        </div>
-        <div class="ref-entry">
-          <dt>Stop fires after every response, not at exit.</dt>
-          <dd>Including subagent responses. Ctrl+C doesn't lose work because nothing is batched. If nothing changed, the hook skips.</dd>
-        </div>
-        <div class="ref-entry">
-          <dt>Search is keyword-based first.</dt>
-          <dd>FTS5 finds what you wrote, not what you meant. "component flickering" won't match "React re-render loops." Synonym expansion and token-overlap help, but write findings with the words you'd search for.</dd>
-        </div>
-        <div class="ref-entry">
-          <dt>550 tokens per prompt by default.</dt>
-          <dd>About 3 snippets. If nothing matches, nothing gets injected. Set <code>CORTEX_CONTEXT_TOKEN_BUDGET</code> to raise or lower it.</dd>
-        </div>
-        <div class="ref-entry">
-          <dt>Everything is a text file.</dt>
-          <dd><code>~/.cortex/project/FINDINGS.md</code> is markdown. Read it, edit it, grep it, pipe it. If cortex goes away, your data stays.</dd>
-        </div>
-        <div class="ref-entry">
-          <dt>Old memories fade.</dt>
-          <dd>Confidence decays at 30/60/90/120 days. A six-month-old workaround won't outrank something from yesterday. Pin entries to keep them from aging out.</dd>
-        </div>
-        <div class="ref-entry">
-          <dt>One pull at open. That's the sync model.</dt>
-          <dd>SessionStart runs <code>git pull</code> once. Changes from other machines don't show up mid-session. That's on purpose. Context shouldn't shift while you're working.</dd>
-        </div>
-      </dl>
     </div>
   </section>
 
@@ -447,7 +401,7 @@
     <div class="container">
       <div class="bento-header reveal">
         <div class="section-label">Why cortex</div>
-        <h2 class="section-title">Your data.<br>Your agents. Your repo.</h2>
+        <h2 class="section-title">Your data.<br>Your agents.</h2>
         <p class="section-sub" style="margin-top:12px">No vendor. No account. A private git repo you own. Profiles keep work and personal separate. What one agent learns, every agent gets across machines, tools, and sessions. Old stuff fades. Good stuff sticks. It's just mining your data as you go.</p>
       </div>
       <div class="bento-grid">
@@ -457,7 +411,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
           <div class="bento-card-title">Lean context. Lower cost.</div>
-          <p class="bento-card-desc">CLAUDE.md loads the whole file every time. Cortex searches what you actually wrote and injects only what matches — 550 tokens instead of everything. Less token spend means more agents in parallel and your agents aren't producing slop from noise.</p>
+          <p class="bento-card-desc">CLAUDE.md loads the whole file every time. Cortex searches what you actually wrote and injects only what matches: about 550 tokens by default instead of everything. Less token spend means more agents in parallel and cleaner context. Adjust the target with <code>CORTEX_CONTEXT_TOKEN_BUDGET</code>.</p>
           <div class="token-bars">
             <div class="token-bar-row">
               <div class="token-bar-label">CLAUDE.md</div>
@@ -467,7 +421,7 @@
             <div class="token-bar-row">
               <div class="token-bar-label">Cortex</div>
               <div class="token-bar-track"><div class="token-bar-fill token-bar-fill-after"></div></div>
-              <div class="token-bar-val" style="color:var(--indigo)">550 tokens</div>
+              <div class="token-bar-val" style="color:var(--indigo)">550 default</div>
             </div>
           </div>
         </div>
@@ -507,7 +461,7 @@
           <div class="bento-card-title">Shared knowledge</div>
           <p class="bento-card-desc">Run agents in parallel, across sessions, on different machines. They all read and write the same store. What one agent figures out, the rest get. Findings link to entities. Patterns solidify. Bad info decays. It gets smarter the more you work.</p>
           <div class="bento-stat">
-            <div class="bento-stat-num">n agents</div>
+            <div class="bento-stat-num">any agents</div>
             <div class="bento-stat-label">one knowledge base,<br>insights shared on every push/pull</div>
           </div>
         </div>
@@ -519,7 +473,7 @@
   <section class="features-section" id="features">
     <div class="container">
       <div class="features-header reveal">
-        <div class="section-label">V2 features</div>
+        <div class="section-label">Features</div>
         <h2 class="section-title">Memory that cleans up after itself.</h2>
         <p class="section-sub" style="margin-top:12px">47 MCP tools, quality controls, trust filtering, and a shell. Old stuff fades. Good stuff stays.</p>
       </div>
@@ -540,7 +494,7 @@
           </div>
           <div class="feature-card-title">Quality controls</div>
           <p class="feature-card-desc">Confidence scoring, feedback loops (helpful / reprompt / regression), and citation tracking. Every finding traces back to where it came from.</p>
-          <div class="feature-card-link"><a href="#know">How it works</a></div>
+          <div class="feature-card-link"><a href="#how">How it works</a></div>
         </div>
 
         <div class="feature-card reveal reveal-delay-2">
@@ -576,16 +530,7 @@
           </div>
           <div class="feature-card-title">Agent observability</div>
           <p class="feature-card-desc">See what your agents learned and when. <code style="font-size:12px;color:var(--copper-mid)">git log</code> is the audit trail. <code style="font-size:12px;color:var(--copper-mid)">git diff</code> shows what changed between sessions. Grep to find where something went wrong.</p>
-          <div class="feature-card-link"><a href="#know">How it works</a></div>
-        </div>
-
-        <div class="feature-card reveal reveal-delay-2">
-          <div class="feature-card-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-          </div>
-          <div class="feature-card-title">Self-healing doctor</div>
-          <p class="feature-card-desc">Finds broken symlinks, missing hooks, stale MCP config, orphaned entries. <code style="font-size:12px;color:var(--copper-mid)">--fix</code> repairs what it can.</p>
-          <div class="feature-card-link"><a href="#demo">See it in action</a></div>
+          <div class="feature-card-link"><a href="#how">How it works</a></div>
         </div>
 
       </div>
@@ -790,8 +735,6 @@
       <a href="https://github.com/alaarab/cortex" target="_blank" rel="noopener">github.com/alaarab/cortex</a>
       <span>•</span>
       <a href="#hooks">Hooks</a>
-      <span>•</span>
-      <a href="#know">Good to know</a>
       <span>•</span>
       <a href="#features">Features</a>
       <span>•</span>
