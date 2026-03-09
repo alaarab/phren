@@ -232,6 +232,15 @@ nav.scrolled {
   display: block;
 }
 
+.hero-note {
+  margin: 0 0 20px;
+  max-width: 560px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.35;
+  animation: fadeUp 0.8s ease forwards 0.45s;
+}
+
 .hero-install-block {
   width: 100%;
   max-width: 480px;
@@ -259,6 +268,11 @@ nav.scrolled {
   animation: fadeUp 0.8s ease forwards 0.5s;
   flex-wrap: wrap;
   justify-content: center;
+}
+
+.dot-sep {
+  margin: 0 0.44em;
+  color: var(--text-muted);
 }
 
 .btn-primary {
