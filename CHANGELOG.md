@@ -16,6 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - Large-corpus cosine fallback no longer fills its candidate set with `ORDER BY RANDOM()`. It now uses deterministic rowid windows after FTS prefiltering, which keeps the fallback reproducible and avoids reintroducing table-wide random-sort cost.
 - `session_context` and `session_end` now fail fast when callers omit explicit session identity instead of silently resolving the wrong active session in multi-client MCP processes.
+- `@import` resolution now compares imported files against the realpathed `global/` root, which fixes false `symlink traversal` blocks on macOS temp paths and other symlinked cortex roots.
 
 ### Docs
 - README, API reference, LLM install docs, architecture notes, benchmark protocol, and whitepaper were updated to reflect the current lexical-first retrieval design, published benchmark numbers, and explicit session identity contract.

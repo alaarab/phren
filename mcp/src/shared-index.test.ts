@@ -139,6 +139,20 @@ describe("resolveImports", () => {
     expect(result).toContain("outer");
     expect(result).toContain("inner content");
   });
+
+  it("accepts imports when the cortex root itself is reached through a symlink", () => {
+    const cortex = makeCortex();
+    writeFile(path.join(cortex, "global", "shared.md"), "shared content through symlink");
+    const linkedCortex = path.join(os.tmpdir(), `cortex-index-link-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    fs.symlinkSync(cortex, linkedCortex, process.platform === "win32" ? "junction" : "dir");
+    try {
+      const result = resolveImports("@import shared.md", linkedCortex);
+      expect(result).toContain("shared content through symlink");
+      expect(result).not.toContain("blocked: symlink traversal");
+    } finally {
+      fs.rmSync(linkedCortex, { force: true, recursive: true });
+    }
+  });
 });
 
 // ── extractSnippet ───────────────────────────────────────────────────────────
