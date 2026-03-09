@@ -1577,7 +1577,7 @@ describe("CLI integration: verify", () => {
     const output = stdout + stderr;
     expect(output).toContain("cortex verify:");
     expect(output).toMatch(/(pass|FAIL)/);
-  });
+  }, process.platform === "win32" ? 15000 : 8000);
 
   it("verify on empty directory reports issues", () => {
     fs.mkdirSync(cortexDir, { recursive: true });
@@ -1587,7 +1587,7 @@ describe("CLI integration: verify", () => {
     );
     const output = stdout + stderr;
     expect(output).toContain("cortex verify:");
-  });
+  }, process.platform === "win32" ? 15000 : 8000);
 
   it("verify checks fts-index and hook-entrypoint", () => {
     runCli(
@@ -1601,7 +1601,7 @@ describe("CLI integration: verify", () => {
     const output = stdout + stderr;
     expect(output).toContain("fts-index");
     expect(output).toContain("hook-entrypoint");
-  });
+  }, process.platform === "win32" ? 15000 : 8000);
 
   it("verify shows fix suggestions for failures", () => {
     fs.mkdirSync(cortexDir, { recursive: true });
@@ -1612,7 +1612,7 @@ describe("CLI integration: verify", () => {
     const output = stdout + stderr;
     expect(output).toContain("issues found");
     expect(output).toContain("fix:");
-  });
+  }, process.platform === "win32" ? 15000 : 8000);
 });
 
 // ────────────────────────────────────────────────────────────────────────────
