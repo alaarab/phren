@@ -109,7 +109,9 @@ export function probeVsCodeConfig(commandExists: CommandExistsFn, env: NodeJS.Pr
 } {
   const home = homeDir(env);
   const userProfile = normalizeWindowsPathToWsl(env.USERPROFILE);
-  const userProfileRoaming = userProfile ? path.join(userProfile, "AppData", "Roaming", "Code", "User") : undefined;
+  const userProfileRoaming = userProfile
+    ? joinPortable(userProfile, "AppData", "Roaming", "Code", "User")
+    : undefined;
   const candidates = vscodeMcpCandidates(env);
   const existing = candidates.find((candidate) => fs.existsSync(candidate));
   const installed =
@@ -118,8 +120,8 @@ export function probeVsCodeConfig(commandExists: CommandExistsFn, env: NodeJS.Pr
     Boolean(
       userProfile &&
       (
-        fs.existsSync(path.join(userProfile, "AppData", "Local", "Programs", "Microsoft VS Code")) ||
-        fs.existsSync(path.join(userProfile, "AppData", "Roaming", "Code"))
+        fs.existsSync(joinPortable(userProfile, "AppData", "Local", "Programs", "Microsoft VS Code")) ||
+        fs.existsSync(joinPortable(userProfile, "AppData", "Roaming", "Code"))
       )
     );
   return {
