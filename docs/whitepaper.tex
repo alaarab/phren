@@ -61,13 +61,13 @@
 \begin{document}
 
 % ─── HEADER: full-width title + abstract + criteria ──────────────────────────
-\maketitle\vspace{-0.5em}
+\maketitle\vspace{-1em}
 
 \begin{abstract}
-\noindent Persistent memory is a first-order requirement for multi-session agent workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. The core argument is operational: memory quality must be optimized alongside auditability, governance, portability, and token predictability. Cortex requires no account, no API key, and no required hosted service in its default FTS5 path; the store bootstraps locally and retrieval runs against a local SQLite FTS5 index with no network hop, no token cost, and no rate limits. The main tradeoff is operational shape: managed alternatives reduce operator burden, while Cortex prioritizes portability, auditability, and ownership of the memory corpus. This report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, and separates \textit{architecture judgments} from \textit{measured performance}; sections without empirical data say so directly.
+\noindent Persistent memory is a first-order requirement for multi-session agent workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. The core argument is operational: memory quality must be optimized alongside auditability, governance, portability, and token predictability. The store bootstraps locally with no account, no API key, and no required hosted service; retrieval runs against a local SQLite FTS5 index with no network hop, no token cost, and no rate limits. This report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, separating \textit{architecture judgments} from \textit{measured performance}; sections without empirical data say so directly.
 \end{abstract}
 
-\vspace{0.4em}
+\vspace{0.1em}
 \section{Decision Criteria}
 \label{sec:criteria}
 Systems are evaluated on eight dimensions:
@@ -89,9 +89,9 @@ Systems are evaluated on eight dimensions:
 \section{Cortex Architecture}
 \label{sec:arch}
 
-The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. The diagram below shows how they connect on every prompt cycle.
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Memory is organized around six concepts: \textbf{projects} scope a working directory under \texttt{\textasciitilde/.cortex/<project>/}; \textbf{findings} are discrete insights in \texttt{FINDINGS.md}; \textbf{backlog} items are prioritized tasks; \textbf{canonical memories} are pinned facts that survive consolidation; \textbf{entities} link named objects across projects via a queryable graph; and \textbf{machines} declare profiles that control project visibility. All are plain markdown or YAML. The diagram below shows how the subsystems connect on every prompt cycle.
 
-\vspace{0.4em}
+\vspace{0.2em}
 \begin{center}
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
@@ -146,7 +146,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \label{fig:arch}
 
 % ─── BODY: two columns for dense technical content ───────────────────────────
-\vspace{0.4em}
+\vspace{0.2em}
 \begin{multicols}{2}
 
 \subsection{Storage and Retrieval}
