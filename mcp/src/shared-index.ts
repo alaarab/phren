@@ -122,11 +122,12 @@ function _resolveImportsRecursive(
 
   return content.replace(IMPORT_RE, (_match, importPath: string) => {
     const trimmed = importPath.trim();
-    const resolved = path.join(cortexPath, "global", trimmed);
+    const globalRoot = path.resolve(cortexPath, "global");
+    const resolved = path.join(globalRoot, trimmed);
     // Use lexical resolution first for the prefix check
     const lexical = path.resolve(resolved);
 
-    if (!lexical.startsWith(path.resolve(cortexPath, "global") + path.sep)) {
+    if (lexical !== globalRoot && !lexical.startsWith(globalRoot + path.sep)) {
       return `<!-- @import blocked: path traversal -->`;
     }
 
@@ -140,7 +141,17 @@ function _resolveImportsRecursive(
       return `<!-- @import not found: ${trimmed} -->`;
     }
 
-    if (!normalized.startsWith(path.resolve(cortexPath, "global") + path.sep)) {
+    let normalizedGlobalRoot = globalRoot;
+    try {
+      normalizedGlobalRoot = fs.realpathSync.native(globalRoot);
+    } catch {
+      // Fall back to the lexical global path if the root cannot be resolved.
+    }
+
+    if (
+      normalized !== normalizedGlobalRoot &&
+      !normalized.startsWith(normalizedGlobalRoot + path.sep)
+    ) {
       return `<!-- @import blocked: symlink traversal -->`;
     }
 

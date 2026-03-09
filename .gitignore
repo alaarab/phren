@@ -4,6 +4,7 @@ node_modules/
 mcp/dist/
 mcp/node_modules/
 node_modules
+coverage/
 .github/copilot-instructions.md
 AGENTS.md
 LEARNINGS.md
