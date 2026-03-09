@@ -2434,13 +2434,18 @@ describe("migrateProjectNames", () => {
     fs.mkdirSync(memDir, { recursive: true });
     fs.writeFileSync(path.join(memDir, "MEMORY-SampleAtlas.md"), "# same");
     fs.writeFileSync(path.join(memDir, "MEMORY-sampleatlas.md"), "# same");
+    const distinctCaseVariants = fs.readdirSync(memDir).length === 2;
 
     const result = migrateProjectNames(cortex);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const memoryEntries = fs.readdirSync(memDir);
-    expect(memoryEntries).toContain("MEMORY-SampleAtlas.md.case-migration.bak");
     expect(memoryEntries).toContain("MEMORY-sampleatlas.md");
+    if (distinctCaseVariants) {
+      expect(memoryEntries).toContain("MEMORY-SampleAtlas.md.case-migration.bak");
+    } else {
+      expect(memoryEntries).not.toContain("MEMORY-SampleAtlas.md.case-migration.bak");
+    }
   });
 });
 

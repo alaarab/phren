@@ -386,9 +386,35 @@ export function migrateProjectNames(cortexPath: string, dryRun: boolean = false)
     projectRenames.set(entry.name, target);
   }
 
+  const isSameFilesystemEntry = (fromPath: string, toPath: string): boolean => {
+    try {
+      const fromStat = fs.statSync(fromPath);
+      const toStat = fs.statSync(toPath);
+      return fromStat.dev === toStat.dev && fromStat.ino === toStat.ino;
+    } catch {
+      return false;
+    }
+  };
+
+  const renamePathPreservingCase = (fromPath: string, toPath: string): void => {
+    if (fromPath === toPath) return;
+    if (isSameFilesystemEntry(fromPath, toPath)) {
+      const ext = path.extname(toPath);
+      const base = path.basename(toPath, ext);
+      const tempPath = path.join(
+        path.dirname(fromPath),
+        `.cortex-case-rename-${base}-${process.pid}-${Date.now()}${ext}.tmp`,
+      );
+      fs.renameSync(fromPath, tempPath);
+      fs.renameSync(tempPath, toPath);
+      return;
+    }
+    fs.renameSync(fromPath, toPath);
+  };
+
   for (const [from, to] of projectRenames.entries()) {
     report.renamedProjects.push({ from, to });
-    if (!dryRun) fs.renameSync(path.join(cortexPath, from), path.join(cortexPath, to));
+    if (!dryRun) renamePathPreservingCase(path.join(cortexPath, from), path.join(cortexPath, to));
   }
 
   const profilesDir = path.join(cortexPath, "profiles");
@@ -422,6 +448,11 @@ export function migrateProjectNames(cortexPath: string, dryRun: boolean = false)
     const targetPath = path.join(path.dirname(memory.fullPath), `MEMORY-${targetProject}.md`);
     if (memory.fullPath === targetPath) continue;
     if (fs.existsSync(targetPath)) {
+      if (isSameFilesystemEntry(memory.fullPath, targetPath)) {
+        report.renamedNativeMemories.push({ from: memory.fullPath, to: targetPath });
+        if (!dryRun) renamePathPreservingCase(memory.fullPath, targetPath);
+        continue;
+      }
       const sourceContent = fs.readFileSync(memory.fullPath, "utf8");
       const targetContent = fs.readFileSync(targetPath, "utf8");
       if (sourceContent === targetContent) {
