@@ -547,10 +547,8 @@ section {
   box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(58,123,174,0.08), inset 0 1px 0 rgba(255,255,255,0.03);
 }
 
-.bento-card-1 { grid-column: span 7; }
-.bento-card-2 { grid-column: span 5; }
-.bento-card-3 { grid-column: span 5; }
-.bento-card-4 { grid-column: span 7; }
+.bento-card-1 { grid-column: span 6; }
+.bento-card-4 { grid-column: span 6; }
 
 .bento-card-icon {
   width: 40px;
@@ -565,8 +563,7 @@ section {
   color: var(--copper-mid);
 }
 
-.bento-card-2 .bento-card-icon,
-.bento-card-3 .bento-card-icon {
+.bento-card-4 .bento-card-icon {
   background: rgba(58,123,174,0.07);
   border-color: rgba(58,123,174,0.12);
   color: var(--indigo);
@@ -1355,8 +1352,6 @@ section {
   }
 
   .bento-card-1,
-  .bento-card-2,
-  .bento-card-3,
   .bento-card-4 {
     grid-column: span 1;
   }
