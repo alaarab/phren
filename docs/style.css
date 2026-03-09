@@ -1272,6 +1272,7 @@ section {
 .demo-proj-bullet { color: var(--text-muted); }
 .demo-shell-row-proj.selected .demo-proj-bullet { color: #7CE09B; }
 .demo-shell-row-proj.selected .demo-shell-name  { font-weight: 600; }
+.demo-shell-row-proj.global-entry .demo-shell-name { color: var(--text-muted); }
 .demo-proj-line2 {
   padding-left: 22px;
   color: var(--text-dim);
@@ -1349,6 +1350,15 @@ section {
   flex-wrap: wrap;
 }
 
+.cta-actions .btn-primary,
+.cta-actions .btn-ghost,
+.cta-actions .npm-badge {
+  min-height: 46px;
+  padding: 0 18px;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
 .npm-badge {
   display: inline-flex;
   align-items: center;
@@ -1359,7 +1369,7 @@ section {
   font-size: 12px;
   font-weight: 600;
   font-family: 'SF Mono', 'Fira Code', monospace;
-  padding: 6px 12px;
+  padding: 0 18px;
   border-radius: 6px;
   text-decoration: none;
   transition: background 0.2s, border-color 0.2s;

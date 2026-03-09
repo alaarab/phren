@@ -234,6 +234,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
         { kind: 'project', selected: true,  name: 'web-project-1', summary: '97 findings · 12 queue · synced' },
         { kind: 'project', selected: false, name: 'web-project-2', summary: '14 findings · 3 queue · synced' },
         { kind: 'project', selected: false, name: 'art-project-1', summary: '8 findings · 0 queue · local' },
+        { kind: 'project', selected: false, name: 'global',        summary: 'skills · config · shared memory', isGlobal: true },
       ],
       status: 'Press ↵ to open · ←→ switch tabs · / filter',
       nextCmd: 'open web-project-1',
@@ -352,7 +353,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     }
 
     if (row.kind === 'project') {
-      const wrap = mkEl('div', `demo-shell-row demo-shell-row-proj${row.selected ? ' selected' : ''}`);
+      const wrap = mkEl('div', `demo-shell-row demo-shell-row-proj${row.selected ? ' selected' : ''}${row.isGlobal ? ' global-entry' : ''}`);
       const l1 = mkEl('div', 'demo-proj-line1');
       l1.appendChild(mkEl('span', 'demo-proj-cursor', row.selected ? '▶' : ' '));
       l1.appendChild(mkEl('span', 'demo-proj-bullet', row.selected ? ' ● ' : ' ○ '));
