@@ -241,22 +241,15 @@ nav.scrolled {
   animation: fadeUp 0.8s ease forwards 0.45s;
 }
 
-.hero-install-block {
+.hero-install-tabs {
   width: 100%;
-  max-width: 480px;
+  max-width: 660px;
   opacity: 0;
-  animation: fadeUp 0.8s ease forwards 0.7s;
+  animation: fadeUp 0.8s ease forwards 0.5s;
 }
 
-.hero-install-block .code-block {
+.hero-install-tabs .install-tabs-container {
   border-color: rgba(255,255,255,0.08);
-}
-
-.hero-install-caption {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--text-dim);
-  text-align: center;
 }
 
 .hero-actions {
@@ -1216,12 +1209,23 @@ section {
   margin: 0 auto;
 }
 
+.cta-icon {
+  margin-bottom: 24px;
+}
+
 .cta-title {
   font-size: clamp(28px, 4vw, 44px);
   font-weight: 700;
   letter-spacing: -0.025em;
   line-height: 1.15;
   color: var(--text);
+  margin-bottom: 12px;
+}
+
+.cta-tagline {
+  font-size: clamp(16px, 2vw, 20px);
+  color: var(--text-dim);
+  font-style: italic;
   margin-bottom: 36px;
 }
 

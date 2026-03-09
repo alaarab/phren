@@ -55,69 +55,6 @@ After init, you'll see something like:
   Restart your agent. Your next prompt will already have context.
 ```
 
-## Core mode and semantic mode
-
-**Core mode (default).** Markdown is the source of truth. Git handles sync and audit history. Retrieval runs through a local SQLite FTS5 index. This is the simplest and most portable setup: no required hosted service, predictable token budgets, and a repo you can inspect with normal tools.
-
-**Optional semantic mode.** Cortex can also use Ollama or an embeddings API for gated semantic recovery when lexical retrieval is sparse or weak. After the relaxed lexical rescue pass, that vector stage often stays dormant on exact and near-lexical queries, so the steady-state path is still mostly local markdown + git + FTS5. Semantic mode exists for harder paraphrase recovery, not as a blanket speed claim.
-
-### Sync across machines
-
-```bash
-cd ~/.cortex
-git init && git add . && git commit -m "Initial cortex"
-git remote add origin git@github.com:YOU/my-cortex.git
-git push -u origin main
-```
-
-On a new machine: clone, run init, relink your tools.
-
-### How sync actually works
-
-`SessionStart` tries a `git pull --rebase` so the local store starts current. The Stop hook commits changes locally after a response. If a remote is configured, Cortex then attempts a best-effort push.
-
-If that push succeeds, other machines see the update on their next pull. If the push is debounced, you're offline, or git rejects it, the commit stays local until the next successful push. That's the trade: git gives you portability and auditability, but this is eventual consistency, not a centralized real-time memory service.
-
----
-
-## What makes this different
-
-**It's not just a CLAUDE.md.** CLAUDE.md loads the whole file every single time. Cortex searches what you actually wrote and injects only what matches. Same bug, same workaround, same decision -- your agents find it when it's relevant, not all the time.
-
-**Your agents draw from what you already know.** Every bug, workaround, and decision gets saved. Next session your agent has it. You stop re-explaining things. They stop rediscovering things.
-
-**Findings match to entities. Old stuff fades. Good stuff sticks.** Knowledge doesn't just pile up. It decays. Patterns solidify. Things that keep coming up stay strong. Things that haven't mattered in months fall back. Your agents are always drawing from what's actually useful right now.
-
-**All your machines share the same store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets through ordinary git sync cycles.
-
-**Work and personal never mix.** Your work machine sees work projects. Your home machine sees personal ones. Same setup, different profiles.
-
-**A default target budget of about 550 tokens, not your whole config.** Less token spend means more agents running in parallel for the same cost. They're not reading noise, so they're not producing slop. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET` if you want a larger or smaller default injection target.
-
-**Your data stays in a git repo you own.** No account, no vendor. Markdown in a repo you control. Read it, edit it, grep it, delete it.
-
-**It mostly stays out of the way.** Context gets injected before each prompt. Changes get committed locally after each response, with best-effort push when sync is healthy. You still own the repo and the failure modes.
-
-## Repository structure
-
-This repo has two roles: it's the source code for the `@alaarab/cortex` npm package, and it ships the starter files that `cortex init` copies to `~/.cortex`. The top-level directories break down like this:
-
-| Directory | What it is | When you'd touch it |
-|-----------|-----------|---------------------|
-| `mcp/` | MCP server and CLI source code (TypeScript). The core of cortex. | Adding tools, fixing bugs, changing CLI behavior. |
-| `global/` | Default user-level config shipped with the package. Contains the template `CLAUDE.md`, shared context files, and built-in skill definitions. Copied to `~/.cortex/global/` on init. | Editing the default instructions or adding built-in skills that ship with every install. |
-| `hooks/` | Shell scripts that plug into agent lifecycle events (Stop, SessionStart, UserPromptSubmit). Registered by init into agent settings. | Adding or modifying agent hooks. |
-| `skills/` | Cortex slash commands (`/cortex-init`, `/cortex-sync`, etc.). Each subdirectory has a `SKILL.md` with the full prompt. | Writing or editing built-in cortex skills. |
-| `starter/` | Complete `~/.cortex` skeleton copied on first init: example projects, profiles, machines.yaml, and typed project templates. | Changing what new users get out of the box. |
-| `templates/` | Default project scaffolding used by the `/cortex-init` skill (no `--template` flag). Contains the bare project skeleton and example summary files. | Editing the default project scaffold or adding example files. |
-| `profiles/` | Example profile YAML files (personal, work) showing how to map project sets to machines. Copied to `~/.cortex/profiles/` on init. | Adding new example profiles that ship with the package. |
-| `scripts/` | Dev scripts for maintainers: doc validation, retrieval evaluation. Not shipped to users. | Running CI checks or contributing to the test suite. |
-| `docs/` | Documentation site, whitepaper, architecture docs, and internal design specs. Served via GitHub Pages. | Reading or updating docs. |
-
-**starter/ vs templates/**: `starter/` is the full `~/.cortex` directory tree (projects, profiles, machines.yaml). `templates/` holds the bare project skeleton used by the `/cortex-init` skill. `starter/templates/` holds typed project templates (frontend, library, etc.) used by `cortex init --template`. Three layers: starter seeds the whole store, templates seeds the default project, starter/templates seeds typed projects.
-
----
-
 ## Works with every major agent
 
 Init detects your tools and registers them. A finding saved by Claude Code shows up in Codex next session, and the other way around.
@@ -130,6 +67,18 @@ Init detects your tools and registers them. A finding saved by Claude Code shows
 | OpenAI Codex | yes | yes | yes | `AGENTS.md` |
 
 MCP or hooks-only, either works. Same knowledge base either way.
+
+---
+
+## Why cortex
+
+**Targeted retrieval, not a config dump.** CLAUDE.md loads the whole file every time. Cortex searches what you actually wrote and injects only what matches -- about 550 tokens by default. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET`.
+
+**Knowledge self-cleans.** Findings decay over time. Patterns that keep coming up stay strong. Things that haven't mattered in months fall back. Your agents draw from what's actually useful right now, not everything ever recorded.
+
+**Every machine, every agent, one store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets through ordinary git sync cycles. Profiles keep work and personal separate.
+
+**Your data stays in a git repo you own.** No account, no vendor, no hosted service in the default path. Markdown in a repo you control. Read it, edit it, grep it, delete it.
 
 ---
 
@@ -172,9 +121,20 @@ Two more things run in the background:
 </details>
 
 <details>
-<summary><strong>Multiple machines, one repo</strong></summary>
+<summary><strong>Sync across machines</strong></summary>
 
 Your cortex is a git repo. Push it to a private remote, clone it anywhere.
+
+```bash
+cd ~/.cortex
+git init && git add . && git commit -m "Initial cortex"
+git remote add origin git@github.com:YOU/my-cortex.git
+git push -u origin main
+```
+
+On a new machine: clone, run init, relink your tools.
+
+`SessionStart` pulls on open. The Stop hook commits locally after each response and queues a best-effort push when a remote exists. This is eventual consistency -- git gives you portability and auditability, not real-time sync.
 
 `machines.yaml` maps each hostname to a profile:
 
@@ -216,6 +176,15 @@ When you run multiple agents, they all read and write the same project store. An
 - **Backlog items** persist across agents and sessions. One agent adds a task, another finishes it.
 
 Because it's all markdown in git, you have a full record of what your agents learned, when, and which session produced each insight.
+
+</details>
+
+<details>
+<summary><strong>Retrieval modes</strong></summary>
+
+**Core mode (default).** Markdown is the source of truth. Git handles sync and audit history. Retrieval runs through a local SQLite FTS5 index. This is the simplest and most portable setup: no required hosted service, predictable token budgets, and a repo you can inspect with normal tools.
+
+**Optional semantic mode.** Cortex can also use Ollama or an embeddings API for gated semantic recovery when lexical retrieval is sparse or weak. After the relaxed lexical rescue pass, that vector stage often stays dormant on exact and near-lexical queries, so the steady-state path is still mostly local markdown + git + FTS5. Semantic mode exists for harder paraphrase recovery, not as a blanket speed claim.
 
 </details>
 
@@ -488,6 +457,27 @@ See [docs/environment.md](docs/environment.md) for all feature flags and env var
 </details>
 
 <details>
+<summary><strong>Repository structure</strong></summary>
+
+This repo has two roles: it's the source code for the `@alaarab/cortex` npm package, and it ships the starter files that `cortex init` copies to `~/.cortex`. The top-level directories break down like this:
+
+| Directory | What it is | When you'd touch it |
+|-----------|-----------|---------------------|
+| `mcp/` | MCP server and CLI source code (TypeScript). The core of cortex. | Adding tools, fixing bugs, changing CLI behavior. |
+| `global/` | Default user-level config shipped with the package. Contains the template `CLAUDE.md`, shared context files, and built-in skill definitions. Copied to `~/.cortex/global/` on init. | Editing the default instructions or adding built-in skills that ship with every install. |
+| `hooks/` | Shell scripts that plug into agent lifecycle events (Stop, SessionStart, UserPromptSubmit). Registered by init into agent settings. | Adding or modifying agent hooks. |
+| `skills/` | Cortex slash commands (`/cortex-init`, `/cortex-sync`, etc.). Each subdirectory has a `SKILL.md` with the full prompt. | Writing or editing built-in cortex skills. |
+| `starter/` | Complete `~/.cortex` skeleton copied on first init: example projects, profiles, machines.yaml, and typed project templates. | Changing what new users get out of the box. |
+| `templates/` | Default project scaffolding used by the `/cortex-init` skill (no `--template` flag). Contains the bare project skeleton and example summary files. | Editing the default project scaffold or adding example files. |
+| `profiles/` | Example profile YAML files (personal, work) showing how to map project sets to machines. Copied to `~/.cortex/profiles/` on init. | Adding new example profiles that ship with the package. |
+| `scripts/` | Dev scripts for maintainers: doc validation, retrieval evaluation. Not shipped to users. | Running CI checks or contributing to the test suite. |
+| `docs/` | Documentation site, whitepaper, architecture docs, and internal design specs. Served via GitHub Pages. | Reading or updating docs. |
+
+**starter/ vs templates/**: `starter/` is the full `~/.cortex` directory tree (projects, profiles, machines.yaml). `templates/` holds the bare project skeleton used by the `/cortex-init` skill. `starter/templates/` holds typed project templates (frontend, library, etc.) used by `cortex init --template`. Three layers: starter seeds the whole store, templates seeds the default project, starter/templates seeds typed projects.
+
+</details>
+
+<details>
 <summary><strong>Troubleshooting</strong></summary>
 
 **Cortex not injecting context into prompts**
@@ -530,12 +520,8 @@ Run `cortex` and type `:conflicts`. Cortex auto-merges most cases (backlog items
 
 ---
 
-## Dependency note
-
-Cortex uses `sql.js-fts5` for local SQLite FTS5 in Node. Pinned and tested in CI. If you're in a high-security environment, review dependency updates on upgrade and keep lockfiles committed.
-
----
-
 Found a security issue? See [SECURITY.md](SECURITY.md) for responsible disclosure.
+
+Cortex uses `sql.js-fts5` for local SQLite FTS5 in Node. Pinned and tested in CI.
 
 MIT License. Made by [Ala Arab](https://github.com/alaarab). [Contributions welcome](CONTRIBUTING.md).
