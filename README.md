@@ -17,8 +17,6 @@
 
 AI agents forget everything between sessions. Cortex is a shared memory in a git repo you own that changes that. Agents search it automatically, and you get one place to see what they've learned across every project and machine. The knowledge keeps evolving as you work.
 
-> `npx @alaarab/cortex init` · Claude Code, Codex, Cursor, Copilot
-
 <br>
 </div>
 
@@ -119,7 +117,7 @@ Two more things run in the background:
 | `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
 | `backlog.md` | Task queue that persists across sessions |
 | `MEMORY_QUEUE.md` | Items waiting for your review |
-| `.claude/skills/` | Project-specific slash commands |
+| `skills/` | Project-local Cortex skill source files; the resolved agent-facing mirror is generated into `.claude/skills/` |
 
 </details>
 

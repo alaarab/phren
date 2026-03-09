@@ -5,9 +5,6 @@ import { errorMessage } from "./utils.js";
 import { defaultCortexPath } from "./shared.js";
 import { addProjectFromPath } from "./core-project.js";
 
-function legacyEnrollmentEnabled(): boolean {
-  return process.env.CORTEX_ENABLE_LEGACY_ENROLLMENT === "1";
-}
 
 const HELP_TEXT = `cortex - Long-term memory for Claude Code
 
@@ -22,6 +19,9 @@ Usage:
   cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
   cortex skills list                     List installed skills
   cortex skills add <project> <path>    Link or copy a skill file into one project
+  cortex skills resolve <project|global> Print the resolved skill manifest for one scope
+  cortex skills doctor <project|global> Diagnose resolved skill visibility + mirror state
+  cortex skills sync <project|global>   Regenerate the resolved mirror for one scope
   cortex skills remove <project> <name> Remove a project skill by name
   cortex hooks list                      Show hook tool preferences
   cortex hooks enable <tool>             Enable hooks for one tool
@@ -202,12 +202,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       return finish(1);
     }
     if (fromExistingIdx !== -1) {
-      if (!legacyEnrollmentEnabled()) {
-        console.error("`init --from-existing` is a quarantined legacy path.");
-        console.error("Use `cortex add <path>` instead, or set CORTEX_ENABLE_LEGACY_ENROLLMENT=1 for one-off legacy recovery.");
-        return finish(1);
-      }
-      console.error("Note: `init --from-existing` is legacy compatibility. Prefer `cortex add <path>` after init.");
+      console.error("Note: prefer `cortex add <path>` after init.");
     }
     await runInit({
       machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
@@ -274,34 +269,8 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "link") {
-    if (!legacyEnrollmentEnabled()) {
-      console.error("`cortex link` is a quarantined legacy path.");
-      console.error("Use `npx @alaarab/cortex init`, or set CORTEX_ENABLE_LEGACY_ENROLLMENT=1 for one-off legacy recovery.");
-      return finish(1);
-    }
-    console.error("Note: `cortex link` is legacy compatibility. Prefer `npx @alaarab/cortex init`.");
-    const { runLink } = await import("./link.js");
-    const linkArgs = argv.slice(1);
-    const getFlag = (flag: string) => {
-      const idx = linkArgs.indexOf(flag);
-      return idx !== -1 ? linkArgs[idx + 1] : undefined;
-    };
-    const taskArg = getFlag("--task") as "debugging" | "planning" | "clean" | undefined;
-    const mcpArg = getFlag("--mcp");
-    const mcpMode = mcpArg ? parseMcpMode(mcpArg) : undefined;
-    if (mcpArg && !mcpMode) {
-      console.error(`Invalid --mcp value "${mcpArg}". Use "on" or "off".`);
-      return finish(1);
-    }
-    await runLink(defaultCortexPath(), {
-      machine: getFlag("--machine"),
-      profile: getFlag("--profile"),
-      register: linkArgs.includes("--register"),
-      task: taskArg,
-      allTools: linkArgs.includes("--all-tools"),
-      mcp: mcpMode,
-    });
-    return finish();
+    console.error("`cortex link` has been removed. Use `npx @alaarab/cortex init` instead.");
+    return finish(1);
   }
 
   if (argvCommand === "--health") {

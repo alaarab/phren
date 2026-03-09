@@ -37,7 +37,10 @@ import {
   listProfiles as listProfilesShared,
   setMachineProfile,
 } from "./profile-store.js";
-import { linkSkillsDir, writeSkillMd } from "./link-skills.js";
+import { writeSkillMd } from "./link-skills.js";
+import { syncScopeSkillsToDir } from "./skill-files.js";
+import { renderSkillInstructionsSection } from "./skill-registry.js";
+import { findProjectDir } from "./project-locator.js";
 import {
   writeContextDefault,
   writeContextDebugging,
@@ -50,6 +53,7 @@ import {
 // Re-export sub-modules so existing imports from "./link.js" continue to work
 export { runDoctor } from "./link-doctor.js";
 export { updateFileChecksums, verifyFileChecksums } from "./link-checksums.js";
+export { findProjectDir } from "./project-locator.js";
 export {
   parseSkillFrontmatter,
   validateSkillFrontmatter,
@@ -117,14 +121,6 @@ function machineFilePath(): string {
   return LEGACY_MACHINE_FILE;
 }
 
-const DEFAULT_SEARCH_PATHS = [
-  homeDir(),
-  homePath("Sites"),
-  homePath("Projects"),
-  homePath("Code"),
-  homePath("dev"),
-];
-
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
 function atomicWriteText(filePath: string, content: string): void {
@@ -169,19 +165,6 @@ export function findProfileFile(cortexPath: string, profileName: string): string
 export function getProfileProjects(profileFile: string): string[] {
   const data = yaml.load(fs.readFileSync(profileFile, "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
   return Array.isArray(data?.projects) ? data.projects : [];
-}
-
-export function findProjectDir(name: string): string | null {
-  const extra = process.env.PROJECTS_DIR ? [process.env.PROJECTS_DIR] : [];
-  for (const base of [...extra, ...DEFAULT_SEARCH_PATHS]) {
-    const candidate = path.join(base, name);
-    try {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
-    } catch (err: unknown) {
-      debugLog(`findProjectDir: failed to check ${candidate}: ${errorMessage(err)}`);
-    }
-  }
-  return null;
 }
 
 function currentPackageVersion(): string | null {
@@ -326,12 +309,45 @@ function addTokenAnnotation(filePath: string) {
   atomicWriteText(filePath, `<!-- tokens: ~${rounded} -->\n${content}`);
 }
 
+const GENERATED_AGENTS_MARKER = "<!-- cortex:generated-agents -->";
+
+function writeManagedAgentsFile(src: string, dest: string, content: string, managedRoot: string): void {
+  try {
+    const stat = fs.lstatSync(dest);
+    if (stat.isDirectory()) {
+      log(`  preserve existing directory: ${dest}`);
+      return;
+    }
+    if (stat.isSymbolicLink()) {
+      const currentTarget = fs.readlinkSync(dest);
+      const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
+      const managedPrefix = path.resolve(managedRoot) + path.sep;
+      if (resolvedTarget === path.resolve(src) || resolvedTarget.startsWith(managedPrefix)) {
+        fs.unlinkSync(dest);
+      } else {
+        log(`  preserve existing file: ${dest}`);
+        return;
+      }
+    } else {
+      const existing = fs.readFileSync(dest, "utf8");
+      if (!existing.includes(GENERATED_AGENTS_MARKER)) {
+        log(`  preserve existing file: ${dest}`);
+        return;
+      }
+      fs.unlinkSync(dest);
+    }
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  atomicWriteText(dest, `${content.trimEnd()}\n`);
+}
+
 // ── Linking operations ──────────────────────────────────────────────────────
 
 function linkGlobal(cortexPath: string, tools: Set<string>) {
   log("  global skills -> ~/.claude/skills/");
   const skillsDir = homePath(".claude", "skills");
-  linkSkillsDir(path.join(cortexPath, "global", "skills"), skillsDir, cortexPath, symlinkFile, { cortexPath, scope: "global" });
+  syncScopeSkillsToDir(cortexPath, "global", skillsDir);
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
@@ -358,11 +374,6 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
     if (fs.existsSync(src)) {
       symlinkFile(src, path.join(target, f), cortexPath);
       if (f === "CLAUDE.md") {
-        if (tools.has("codex")) {
-          try { symlinkFile(src, path.join(target, "AGENTS.md"), cortexPath); } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject agentsMd: ${errorMessage(err)}\n`);
-          }
-        }
         if (tools.has("copilot")) {
           try {
             const copilotDir = path.join(target, ".github");
@@ -393,11 +404,20 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   }
 
   // Project-level skills
-  const projectSkills = path.join(cortexPath, project, ".claude", "skills");
   const config = readProjectConfig(cortexPath, project);
-  if (config.skills !== false && fs.existsSync(projectSkills)) {
-    const targetSkills = path.join(target, ".claude", "skills");
-    linkSkillsDir(projectSkills, targetSkills, cortexPath, symlinkFile, { cortexPath, scope: project });
+  const targetSkills = path.join(target, ".claude", "skills");
+  const skillManifest = config.skills !== false
+    ? syncScopeSkillsToDir(cortexPath, project, targetSkills)
+    : undefined;
+
+  if (tools.has("codex") && fs.existsSync(claudeFile)) {
+    try {
+      const manifest = skillManifest || syncScopeSkillsToDir(cortexPath, project, targetSkills);
+      const agentsContent = `${fs.readFileSync(claudeFile, "utf8").trimEnd()}\n\n${GENERATED_AGENTS_MARKER}\n${renderSkillInstructionsSection(manifest)}\n`;
+      writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, cortexPath);
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject agentsMd: ${errorMessage(err)}\n`);
+    }
   }
 
   // Per-project MCP servers

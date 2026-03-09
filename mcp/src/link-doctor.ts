@@ -17,6 +17,7 @@ import { validateBacklogFormat, validateFindingsFormat } from "./shared-content.
 import { detectInstalledTools } from "./hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./link-skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./link-checksums.js";
+import { buildSkillManifest } from "./skill-registry.js";
 import {
   getMachineName,
   lookupProfile,
@@ -107,6 +108,53 @@ function gitRemoteStatus(cortexPath: string): { ok: boolean; detail: string } {
     return remote ? { ok: true, detail: `origin=${remote}` } : { ok: false, detail: "git origin remote not configured" };
   } catch {
     return { ok: false, detail: "git origin remote not configured" };
+  }
+}
+
+function pushSkillMirrorChecks(
+  checks: Array<{ name: string; ok: boolean; detail: string }>,
+  scope: string,
+  manifest: ReturnType<typeof buildSkillManifest>,
+  destDir: string,
+): void {
+  const parentDir = path.dirname(destDir);
+  checks.push({
+    name: `skills-manifest:${scope}`,
+    ok: fs.existsSync(path.join(parentDir, "skill-manifest.json")),
+    detail: fs.existsSync(path.join(parentDir, "skill-manifest.json"))
+      ? `generated: ${path.join(parentDir, "skill-manifest.json")}`
+      : `missing generated manifest at ${path.join(parentDir, "skill-manifest.json")}`,
+  });
+  checks.push({
+    name: `skills-commands:${scope}`,
+    ok: fs.existsSync(path.join(parentDir, "skill-commands.json")),
+    detail: fs.existsSync(path.join(parentDir, "skill-commands.json"))
+      ? `generated: ${path.join(parentDir, "skill-commands.json")}`
+      : `missing generated command registry at ${path.join(parentDir, "skill-commands.json")}`,
+  });
+
+  for (const skill of manifest.skills.filter((entry) => entry.visibleToAgents)) {
+    const dest = path.join(destDir, skill.format === "folder" ? skill.name : path.basename(skill.path));
+    let ok = false;
+    try {
+      ok = fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(skill.root);
+    } catch (err: unknown) {
+      debugLog(`doctor: skill mirror check failed for ${dest}: ${errorMessage(err)}`);
+      ok = false;
+    }
+    checks.push({
+      name: `skills-mirror:${scope}/${skill.name}`,
+      ok,
+      detail: ok ? "ok" : `missing/drifted link at ${dest}`,
+    });
+  }
+
+  for (const problem of manifest.problems) {
+    checks.push({
+      name: `skills-problem:${scope}:${problem.code}`,
+      ok: false,
+      detail: problem.message,
+    });
   }
 }
 
@@ -217,6 +265,12 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     ok: globalLinkOk,
     detail: globalLinkOk ? "global CLAUDE.md symlink ok" : "global CLAUDE.md link drifted/missing",
   });
+  pushSkillMirrorChecks(
+    checks,
+    "global",
+    buildSkillManifest(cortexPath, profile || "", "global", homePath(".claude", "skills")),
+    homePath(".claude", "skills"),
+  );
 
   for (const project of projects) {
     if (project === "global") continue;
@@ -242,6 +296,12 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
         detail: ok ? "ok" : `missing/drifted link at ${dest}`,
       });
     }
+    pushSkillMirrorChecks(
+      checks,
+      project,
+      buildSkillManifest(cortexPath, profile || "", project, path.join(target, ".claude", "skills")),
+      path.join(target, ".claude", "skills"),
+    );
   }
 
   const settingsPath = hookConfigPath("claude");

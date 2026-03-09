@@ -18,7 +18,7 @@
 ### P2: Nice to have
 
 - [ ] Set up profiles for work vs personal machines in profiles/
-- [ ] Add project-specific skills to .claude/skills/
+- [ ] Add project-specific skills to the project `skills/` directory
 
 ## Done
 

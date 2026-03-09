@@ -188,6 +188,8 @@ When the user says "sync this back", "push to cortex", "save this to my cortex":
 ```bash
 diff "$CORTEX_DIR/<project>/CLAUDE.md" ./<project-path>/CLAUDE.md
 diff -r "$CORTEX_DIR/<project>/skills/" ./<project-path>/.claude/skills/
+
+Remember: `.claude/skills/` is a generated mirror. The source-of-truth lives in Cortex `skills/`, and the project mirror also includes inherited global skills after resolution.
 ```
 
 If files are symlinked (same inode), they're already in sync. Just commit from the cortex directory.

@@ -111,7 +111,7 @@ Pre-fill from the project's existing README or package.json if available. Leave 
 ```markdown
 # <project-name> skills
 
-Project-specific skills go here. Add .md files and they'll be symlinked to the project's .claude/skills/ directory on sync.
+Project-specific skills go here. Add `.md` files and Cortex will resolve them together with global skills, then mirror the effective set into the project's `.claude/skills/` directory on sync.
 ```
 
 Write this to `$CORTEX_DIR/<project-name>/skills/README.md`.
