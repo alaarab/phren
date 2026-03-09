@@ -13,6 +13,7 @@ const HYBRID_SEARCH_FLAG = "CORTEX_FEATURE_HYBRID_SEARCH";
 const COSINE_SIMILARITY_MIN = 0.15;
 const COSINE_MAX_CORPUS = 10000;
 export const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosine scoring
+const COSINE_WINDOW_COUNT = 4;
 
 // Module-level cache for TF-IDF document frequencies.
 // Keyed by a fingerprint of the candidate doc IDs so that different candidate subsets and
@@ -48,6 +49,30 @@ function cachedTokenize(text: string): string[] {
   }
   tokenCache.set(key, tokens);
   return tokens;
+}
+
+function deterministicSeed(text: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function loadCosineFallbackWindow(
+  db: SqlJsDatabase,
+  startRowid: number,
+  limit: number,
+  wrapBefore?: number,
+): DbRow[] {
+  const where = wrapBefore === undefined ? "rowid >= ?" : "rowid < ?";
+  const params = [wrapBefore ?? startRowid, limit];
+  const rows = db.exec(
+    `SELECT rowid, project, filename, type, content, path FROM docs WHERE ${where} ORDER BY rowid LIMIT ?`,
+    params
+  );
+  return rows?.[0]?.values ?? [];
 }
 
 /**
@@ -154,10 +179,14 @@ export function cosineFallback(
 
   // Count total docs to guard against large corpora
   let totalDocs = 0;
+  let minRowid = 0;
+  let maxRowid = 0;
   try {
-    const countResult = db.exec("SELECT COUNT(*) FROM docs");
-    if (countResult?.length && countResult[0]?.values?.length) {
-      totalDocs = Number(countResult[0].values[0][0]);
+    const statsResult = db.exec("SELECT MIN(rowid), MAX(rowid), COUNT(*) FROM docs");
+    if (statsResult?.length && statsResult[0]?.values?.length) {
+      minRowid = Number(statsResult[0].values[0][0] ?? 0);
+      maxRowid = Number(statsResult[0].values[0][1] ?? 0);
+      totalDocs = Number(statsResult[0].values[0][2] ?? 0);
     }
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback count: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -178,7 +207,7 @@ export function cosineFallback(
       if (!Array.isArray(results) || !results.length || !results[0]?.values?.length) return [];
       allRows = results[0].values;
     } else {
-      // Pre-filter: use FTS5 to get top candidates, then fill to cap with random sample
+      // Pre-filter: use FTS5 to get top candidates, then fill to cap with deterministic rowid windows
       const safeQ = query.replace(/[^\w\s]/g, " ").trim().split(/\s+/).filter(w => w.length > 2).slice(0, 5).join(" OR ");
       const ftsRows: DbRow[] = [];
       if (safeQ) {
@@ -189,19 +218,37 @@ export function cosineFallback(
           if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback FTS pre-filter: ${err instanceof Error ? err.message : String(err)}\n`);
         }
       }
-      // If FTS gave fewer than cap, supplement with random sample of remaining docs
-      if (ftsRows.length < COSINE_CANDIDATE_CAP) {
+      // If FTS gave fewer than cap, supplement with deterministic rowid windows.
+      if (ftsRows.length < COSINE_CANDIDATE_CAP && totalDocs > 0 && maxRowid >= minRowid) {
         const ftsRowIds = new Set(ftsRows.map(r => Number(r[0])));
         const remaining = COSINE_CANDIDATE_CAP - ftsRows.length;
+        const span = Math.max(1, maxRowid - minRowid + 1);
+        const windowCount = Math.min(COSINE_WINDOW_COUNT, remaining);
+        const perWindow = Math.max(1, Math.ceil(remaining / Math.max(1, windowCount)));
+        const stride = Math.max(1, Math.floor(span / Math.max(1, windowCount)));
+        const seed = deterministicSeed(query);
+        const pushRows = (rows: DbRow[]) => {
+          for (const row of rows) {
+            const rowid = Number(row[0]);
+            if (ftsRowIds.has(rowid)) continue;
+            ftsRowIds.add(rowid);
+            ftsRows.push(row);
+            if (ftsRows.length >= COSINE_CANDIDATE_CAP) break;
+          }
+        };
         try {
-          const sampleRes = db.exec(`SELECT rowid, project, filename, type, content, path FROM docs ORDER BY RANDOM() LIMIT ${remaining}`);
-          if (sampleRes?.length && sampleRes[0]?.values?.length) {
-            for (const r of sampleRes[0].values) {
-              if (!ftsRowIds.has(Number(r[0]))) ftsRows.push(r);
-            }
+          for (let i = 0; i < windowCount && ftsRows.length < COSINE_CANDIDATE_CAP; i++) {
+            const offset = (seed + i * stride) % span;
+            const startRowid = minRowid + offset;
+            pushRows(loadCosineFallbackWindow(db, startRowid, perWindow));
+            if (ftsRows.length >= COSINE_CANDIDATE_CAP) break;
+            pushRows(loadCosineFallbackWindow(db, startRowid, perWindow, startRowid));
+          }
+          if (ftsRows.length < COSINE_CANDIDATE_CAP) {
+            pushRows(loadCosineFallbackWindow(db, minRowid, COSINE_CANDIDATE_CAP - ftsRows.length));
           }
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback randomSample: ${err instanceof Error ? err.message : String(err)}\n`);
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback deterministicSample: ${err instanceof Error ? err.message : String(err)}\n`);
         }
       }
       if (ftsRows.length === 0) return [];

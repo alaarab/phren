@@ -371,9 +371,9 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 
 | Tool | What it does |
 |------|-------------|
-| `session_start` | Start a session. Returns prior summary, recent findings, active backlog. |
-| `session_end` | End session and save summary for next time. |
-| `session_context` | Current session state: project, duration, findings added. |
+| `session_start` | Start a session. Returns prior summary, recent findings, active backlog, and a `sessionId`. |
+| `session_end` | End a session by `sessionId` or bound `connectionId`, and save summary for next time. |
+| `session_context` | Read current session state by `sessionId` or bound `connectionId`. |
 
 Governance, policy, and maintenance tools are CLI-only (see `cortex config` and `cortex maintain`).
 

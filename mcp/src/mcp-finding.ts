@@ -20,7 +20,7 @@ import {
   autoMergeConflicts,
 } from "./shared-content.js";
 import { runCustomHooks } from "./hooks.js";
-import { incrementSessionFindings, getCurrentSessionId } from "./mcp-session.js";
+import { incrementSessionFindings } from "./mcp-session.js";
 import { extractEntityNames } from "./shared-entity-graph.js";
 import { extractFactFromFinding } from "./mcp-extract-facts.js";
 
@@ -54,12 +54,13 @@ export function register(server: McpServer, ctx: McpContext): void {
           commit: z.string().optional().describe("Git commit SHA that supports this finding."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
         }).optional().describe("Optional source citation for traceability."),
+        sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
         findingType: z.enum(FINDING_TYPES)
           .optional()
           .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'tradeoff' (deliberate compromise), 'architecture' (structural design note), 'bug' (confirmed defect or failure)."),
       }),
     },
-    async ({ project, finding, citation, findingType }) => {
+    async ({ project, finding, citation, sessionId, findingType }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       if (finding.length > 5000) return mcpResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
       return withWriteQueue(async () => {
@@ -88,7 +89,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
           if (isAdded) {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
-            incrementSessionFindings(cortexPath, 1, getCurrentSessionId());
+            incrementSessionFindings(cortexPath, 1, sessionId);
             extractFactFromFinding(cortexPath, project, taggedFinding);
           }
           const conflictsWithList = semanticConflicts.checked
@@ -131,9 +132,10 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your cortex)."),
         findings: z.array(z.string()).describe("List of insights to record."),
+        sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
       }),
     },
-    async ({ project, findings }) => {
+    async ({ project, findings, sessionId }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       if (findings.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
       if (findings.some((f) => f.length > 5000)) return mcpResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
@@ -188,7 +190,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const allSkipped = [...skipped, ...semanticSkipped];
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
-          incrementSessionFindings(cortexPath, added.length, getCurrentSessionId());
+          incrementSessionFindings(cortexPath, added.length, sessionId);
           updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
         }
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
