@@ -145,7 +145,7 @@ export function getHooksData(cortexPath: string) {
   return { globalEnabled, tools, customHooks: readCustomHooks(cortexPath) };
 }
 
-export function buildGraph(cortexPath: string, profile?: string): { nodes: GraphNode[]; links: GraphLink[]; total: number } {
+export function buildGraph(cortexPath: string, profile?: string, focusProject?: string): { nodes: GraphNode[]; links: GraphLink[]; total: number } {
   const projects = getProjectDirs(cortexPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];
@@ -170,8 +170,10 @@ export function buildGraph(cortexPath: string, profile?: string): { nodes: Graph
 
     const content = fs.readFileSync(findingsPath, "utf8");
     const lines = content.split("\n");
-    const MAX_TAGGED = 200;
-    const MAX_UNTAGGED = 100;
+    // No cap for focused project; high caps otherwise
+    const isFocused = focusProject && project === focusProject;
+    const MAX_TAGGED = isFocused ? Infinity : 200;
+    const MAX_UNTAGGED = isFocused ? Infinity : 100;
     let taggedCount = 0;
     let untaggedAdded = 0;
 

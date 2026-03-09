@@ -381,8 +381,10 @@ export function createReviewUiHttpServer(
     }
 
     if (req.method === "GET" && pathname.startsWith("/api/graph")) {
+      const graphParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
+      const focusProject = graphParams.get("project") || undefined;
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(buildGraph(cortexPath, profile)));
+      res.end(JSON.stringify(buildGraph(cortexPath, profile, focusProject)));
       return;
     }
 

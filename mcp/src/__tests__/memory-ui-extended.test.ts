@@ -265,6 +265,31 @@ describe.sequential("review-ui graph API", () => {
       expect(node.label.length).toBeLessThanOrEqual(60);
     }
   });
+
+  it("lifts graph caps for a focused project without changing the default graph", async () => {
+    const findings = [
+      "# demo FINDINGS",
+      "",
+      "## 2026-03-01",
+      "",
+      ...Array.from({ length: 205 }, (_, index) => `- [pattern] Focused tagged finding ${index + 1}`),
+      ...Array.from({ length: 105 }, (_, index) => `- Focused plain finding entry ${index + 1} with enough words`),
+      "",
+    ].join("\n");
+    write(path.join(tmpRoot, "demo", "FINDINGS.md"), findings);
+
+    const defaultRes = await httpGet(port, "/api/graph");
+    expect(defaultRes.status).toBe(200);
+    const defaultData = JSON.parse(defaultRes.body);
+    const defaultDemoNodes = defaultData.nodes.filter((n: any) => String(n.id).startsWith("demo:"));
+    expect(defaultDemoNodes).toHaveLength(300);
+
+    const focusedRes = await httpGet(port, "/api/graph?project=demo");
+    expect(focusedRes.status).toBe(200);
+    const focusedData = JSON.parse(focusedRes.body);
+    const focusedDemoNodes = focusedData.nodes.filter((n: any) => String(n.id).startsWith("demo:"));
+    expect(focusedDemoNodes).toHaveLength(310);
+  });
 });
 
 describe.sequential("review-ui profile scoping", () => {
