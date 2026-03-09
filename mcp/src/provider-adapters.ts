@@ -15,7 +15,12 @@ function homeDir(env: NodeJS.ProcessEnv = process.env): string {
 
 function joinPortable(base: string, ...parts: string[]): string {
   const usePosix = base.startsWith("/") && !base.includes("\\");
-  return usePosix ? path.posix.join(base, ...parts) : path.join(base, ...parts);
+  if (usePosix) {
+    const normalizedBase = base.replace(/\/+$/g, "");
+    const normalizedParts = parts.map((part) => part.replace(/^\/+|\/+$/g, ""));
+    return [normalizedBase, ...normalizedParts].join("/").replace(/\/{2,}/g, "/");
+  }
+  return path.join(base, ...parts);
 }
 
 function homePathForEnv(env: NodeJS.ProcessEnv, ...parts: string[]): string {

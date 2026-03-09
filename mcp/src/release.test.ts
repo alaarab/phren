@@ -57,12 +57,14 @@ describe.sequential("1.10.x release hardening gates", () => {
       execFileSync(npmExec(), ["run", "build"], {
         cwd: root,
         encoding: "utf8",
+        shell: process.platform === "win32",
         stdio: ["ignore", "pipe", "pipe"],
       });
     }
     const raw = execFileSync(npmExec(), ["pack", "--json", "--dry-run"], {
       cwd: root,
       encoding: "utf8",
+      shell: process.platform === "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
     const packInfo = JSON.parse(raw) as Array<{ files: Array<{ path: string }> }>;

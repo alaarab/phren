@@ -31,6 +31,7 @@ function run(cmd: string, args: string[], cwd?: string): string {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    shell: process.platform === "win32" && cmd.endsWith(".cmd"),
     timeout: 180_000,
   }).trim();
 }

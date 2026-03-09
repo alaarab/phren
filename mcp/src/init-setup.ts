@@ -50,6 +50,7 @@ function commandVersion(cmd: string, args: string[] = ["--version"]): string | n
     return execFileSync(effectiveCmd, args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      shell: process.platform === "win32" && effectiveCmd.endsWith(".cmd"),
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
   } catch (err: unknown) {

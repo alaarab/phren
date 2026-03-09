@@ -51,7 +51,7 @@ describe("runCortexUpdate", () => {
       if (cmd === "git" && args[0] === "pull") return "Already up to date.";
       if (cmd === npmExec() && args[0] === "install") return "";
       if (cmd === npmExec() && args[0] === "run" && args[1] === "build") return "";
-      if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "--health") return "";
+      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
@@ -186,8 +186,8 @@ describe("runCortexUpdate", () => {
       if (cmd === "git" && args[0] === "pull") return "Fast-forward";
       if (cmd === npmExec() && args[0] === "install") return "";
       if (cmd === npmExec() && args[0] === "run" && args[1] === "build") return "";
-      if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "--health") return "";
-      if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "init") return "";
+      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
+      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "init") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
