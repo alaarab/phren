@@ -194,6 +194,7 @@ describe("ensureCortexPath", () => {
       expect(result).toBe(path.join(tmp.path, ".cortex"));
       expect(fs.existsSync(result)).toBe(true);
       expect(fs.existsSync(path.join(result, "README.md"))).toBe(true);
+      expect(findCortexPath()).toBe(result);
     } finally {
       process.env.HOME = origHome;
       tmp.cleanup();
@@ -212,6 +213,8 @@ describe("path resolution helpers", () => {
       expect(expandHomePath("~/demo/file.txt")).toBe(path.join(tmp.path, "demo", "file.txt"));
       expect(homePath(".claude", "settings.json")).toBe(path.join(tmp.path, ".claude", "settings.json"));
       expect(hookConfigPath("copilot")).toBe(path.join(tmp.path, ".github", "hooks", "cortex.json"));
+      expect(hookConfigPath("claude", path.join(tmp.path, ".cortex"))).toBe(path.join(tmp.path, ".claude", "settings.json"));
+      expect(hookConfigPath("codex", path.join(tmp.path, ".cortex"))).toBe(path.join(tmp.path, ".cortex", "codex.json"));
     } finally {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origProfile;

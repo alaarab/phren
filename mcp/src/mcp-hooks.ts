@@ -39,15 +39,6 @@ function normalizeHookTool(input: string | undefined): HookTool | null {
   return HOOK_TOOLS.includes(lower) ? lower : null;
 }
 
-function hookConfigPaths(): Record<HookTool, string> {
-  return {
-    claude: hookConfigPath("claude"),
-    copilot: hookConfigPath("copilot"),
-    cursor: hookConfigPath("cursor"),
-    codex: hookConfigPath("codex"),
-  };
-}
-
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath } = ctx;
 
@@ -66,7 +57,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       const prefs = readInstallPreferences(cortexPath);
       const globalEnabled = prefs.hooksEnabled !== false;
       const toolPrefs = prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {};
-      const paths = hookConfigPaths();
+      const paths = {
+        claude: hookConfigPath("claude", cortexPath),
+        copilot: hookConfigPath("copilot", cortexPath),
+        cursor: hookConfigPath("cursor", cortexPath),
+        codex: hookConfigPath("codex", cortexPath),
+      };
       const customHooks = readCustomHooks(cortexPath);
 
       const tools = HOOK_TOOLS.map(tool => ({

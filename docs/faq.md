@@ -79,21 +79,24 @@ In practice, well-configured agents save findings automatically as they work. Yo
 
 ## How do I add a new project?
 
+For an existing repo:
+
+```bash
+cd ~/code/my-project
+cortex add
+```
+
+Cortex bootstraps `~/.cortex/my-project/` and adds it to your active profile. If you just open a session in an untracked repo, cortex tells the agent to ask whether you want to add it.
+
+For a brand-new project scaffold inside Claude:
+
 ```bash
 /cortex-init my-project
 ```
 
-This runs through a guided setup: creates `~/.cortex/my-project/` with `summary.md`, `CLAUDE.md`, `FINDINGS.md`, and `backlog.md`, then adds it to your profile. Or manually:
-
-```bash
-mkdir ~/.cortex/my-project
-# add files, then run:
-cortex link
-```
-
 ## Does cortex require MCP?
 
-No. MCP is recommended — it gives agents 47 tools for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended — it gives agents 48 tools for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
 npx @alaarab/cortex init --mcp off

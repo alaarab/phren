@@ -166,6 +166,54 @@ describe("mcp-ops: health_check", () => {
   });
 });
 
+// ── add_project ─────────────────────────────────────────────────────────────
+
+describe("mcp-ops: add_project", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let repoDir: string;
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-ops-add-project-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+    repoDir = path.join(tmp.path, "repo");
+    fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
+    fs.mkdirSync(path.join(tmp.path, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(tmp.path, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - global\n");
+    fs.writeFileSync(path.join(tmp.path, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
+
+    const ctx: McpContext = {
+      cortexPath: tmp.path,
+      profile: "work",
+      db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.CORTEX_ACTOR;
+    tmp.cleanup();
+  });
+
+  it("adds a repo to the active profile by default", async () => {
+    const res = parseResult(await server.call("add_project", { path: repoDir }));
+    expect(res.ok).toBe(true);
+    expect(res.data.project).toBe("repo");
+    expect(fs.readFileSync(path.join(tmp.path, "profiles", "work.yaml"), "utf8")).toContain("- repo");
+    expect(fs.readFileSync(path.join(tmp.path, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
+  });
+
+  it("requires an explicit path", async () => {
+    const res = parseResult(await server.call("add_project", {}));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Path is required");
+  });
+});
+
 // ── list_hook_errors ─────────────────────────────────────────────────────────
 
 describe("mcp-ops: list_hook_errors", () => {

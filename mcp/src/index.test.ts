@@ -26,9 +26,21 @@ import * as fs from "fs";
 import * as os from "os";
 
 const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
+const REPO_ROOT = path.resolve(__dirname, "../..");
+
+function ensureCliBuilt(): void {
+  if (fs.existsSync(CLI_PATH)) return;
+  execFileSync("npm", ["run", "build"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 30000,
+  });
+}
 
 function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
   try {
+    ensureCliBuilt();
     const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
       encoding: "utf8",
       env: { ...process.env, ...env },

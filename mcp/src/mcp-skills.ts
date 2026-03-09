@@ -6,6 +6,7 @@ import * as path from "path";
 import { getProjectDirs } from "./shared.js";
 import { isValidProjectName } from "./utils.js";
 import { parseSkillFrontmatter, validateSkillFrontmatter } from "./link-skills.js";
+import { removeSkillPath } from "./skill-files.js";
 
 interface SkillEntry {
   name: string;
@@ -238,13 +239,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       return withWriteQueue(async () => {
-        if (result.format === "folder") {
-          fs.rmSync(result.root, { recursive: true, force: true });
-        } else {
-          fs.unlinkSync(result.path);
-        }
+        const removedPath = removeSkillPath(result.format === "folder" ? result.root : result.path);
         updateFileInIndex(result.path); // called after delete so indexer removes the entry
-        return mcpResponse({ ok: true, message: `Removed skill "${name}" (${result.root}).`, data: { path: result.root } });
+        return mcpResponse({ ok: true, message: `Removed skill "${name}" (${removedPath}).`, data: { path: removedPath } });
       });
     }
   );

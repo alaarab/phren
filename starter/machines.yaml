@@ -5,4 +5,4 @@
 #   work-laptop: work
 #   home-desktop: personal
 #
-# After adding a line, run: npx @alaarab/cortex link
+# After adding a line, run: npx @alaarab/cortex init

@@ -436,6 +436,31 @@ describe("readFindings", () => {
     expect(result.data[1].id).toBe("L2");
     expect(result.data[2].id).toBe("L3");
   });
+
+  it("strips inline provenance comments and parses structured metadata", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      `# ${PROJECT} FINDINGS
+
+## 2026-03-09
+
+- Refactor slices should stay independently releasable <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->
+  <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","backlog_item":"deadbeef"} -->
+`,
+    );
+    const result = readFindings(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].text).toBe("Refactor slices should stay independently releasable");
+    expect(result.data[0].backlogItem).toBe("deadbeef");
+    expect(result.data[0].actor).toBe("codex");
+    expect(result.data[0].tool).toBe("codex");
+    expect(result.data[0].model).toBe("gpt-5");
+    expect(result.data[0].sessionId).toBe("session-1234");
+    expect(result.data[0].citationData?.backlog_item).toBe("deadbeef");
+  });
 });
 
 describe("addFinding", () => {

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
 import * as readline from "readline";
 import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
@@ -31,6 +32,11 @@ import {
   hookConfigPath,
 } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import {
+  listMachines as listMachinesShared,
+  listProfiles as listProfilesShared,
+  setMachineProfile,
+} from "./profile-store.js";
 import { linkSkillsDir, writeSkillMd } from "./link-skills.js";
 import {
   writeContextDefault,
@@ -121,6 +127,13 @@ const DEFAULT_SEARCH_PATHS = [
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
+function atomicWriteText(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, filePath);
+}
+
 export function getMachineName(): string {
   const mf = machineFilePath();
   if (fs.existsSync(mf)) return fs.readFileSync(mf, "utf8").trim();
@@ -131,24 +144,15 @@ export function getMachineName(): string {
 }
 
 export function lookupProfile(cortexPath: string, machine: string): string {
-  const machinesFile = path.join(cortexPath, "machines.yaml");
-  if (!fs.existsSync(machinesFile)) return "";
-  const data = yaml.load(fs.readFileSync(machinesFile, "utf8"), { schema: yaml.CORE_SCHEMA });
-  if (!isRecord(data)) return "";
-  const value = data[machine];
-  return typeof value === "string" ? value : "";
+  const listed = listMachinesShared(cortexPath);
+  if (!listed.ok) return "";
+  return listed.data[machine] || "";
 }
 
 function listProfiles(cortexPath: string): Array<{ name: string; description: string }> {
-  const profilesDir = path.join(cortexPath, "profiles");
-  if (!fs.existsSync(profilesDir)) return [];
-  return fs.readdirSync(profilesDir)
-    .filter(f => f.endsWith(".yaml"))
-    .map(f => {
-      const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
-      return { name: data?.name ?? "", description: data?.description ?? "" };
-    })
-    .filter(p => p.name);
+  const listed = listProfilesShared(cortexPath);
+  if (!listed.ok) return [];
+  return listed.data.map((profile) => ({ name: profile.name, description: "" }));
 }
 
 export function findProfileFile(cortexPath: string, profileName: string): string | null {
@@ -240,18 +244,9 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
 
   const machineFile = machineFilePath();
   fs.mkdirSync(path.dirname(machineFile), { recursive: true });
-  fs.writeFileSync(machineFile, machine);
-
-  const machinesFile = path.join(cortexPath, "machines.yaml");
-  const existing = fs.existsSync(machinesFile) ? fs.readFileSync(machinesFile, "utf8") : "";
-  const yamlKey = machine.includes(":") || machine.includes('"') || machine.includes("'")
-    ? `"${machine.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : machine;
-  const yamlVal = profile.includes(":") || profile.includes('"') || profile.includes("'")
-    ? `"${profile.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : profile;
-  const alreadyRegistered = new RegExp(`^${yamlKey}\\s*:`, "m").test(existing);
-  if (!alreadyRegistered) {
-    fs.writeFileSync(machinesFile, existing.trimEnd() + `\n${yamlKey}: ${yamlVal}\n`);
-  }
+  atomicWriteText(machineFile, machine);
+  const mapResult = setMachineProfile(cortexPath, machine, profile);
+  if (!mapResult.ok) throw new Error(mapResult.error);
 
   try {
     execFileSync("git", ["add", "machines.yaml"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
@@ -328,7 +323,7 @@ function addTokenAnnotation(filePath: string) {
   const tokens = Math.round(content.length / 3.5 + (content.match(/\s+/g) || []).length * 0.1);
   if (tokens <= 500) return;
   const rounded = Math.round((tokens + 50) / 100) * 100;
-  fs.writeFileSync(filePath, `<!-- tokens: ~${rounded} -->\n${content}`);
+  atomicWriteText(filePath, `<!-- tokens: ~${rounded} -->\n${content}`);
 }
 
 // ── Linking operations ──────────────────────────────────────────────────────

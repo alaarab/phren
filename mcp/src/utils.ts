@@ -4,6 +4,7 @@ import { spawnSync } from "child_process";
 import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { findCortexPath } from "./shared.js";
+import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 
 const _synonymsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "synonyms.json");
 const _synonymsJson: Record<string, string[]> = (() => {
@@ -51,6 +52,7 @@ export function errorMessage(err: unknown): string {
 // ── Feature flag and clamping helpers ────────────────────────────────────────
 
 export function isFeatureEnabled(envName: string, defaultValue: boolean = true): boolean {
+  bootstrapCortexDotEnv();
   const raw = process.env[envName];
   if (!raw) return defaultValue;
   return !["0", "false", "off", "no"].includes(raw.trim().toLowerCase());

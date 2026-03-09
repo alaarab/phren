@@ -154,8 +154,8 @@ export function autoArchiveToReference(
   const lockFile = runtimeFile(cortexPath, `consolidation-${project}.lock`);
   try {
     fs.writeFileSync(lockFile, String(Date.now()), { flag: "wx" });
-  } catch (e: any) {
-    if (e?.code === "EEXIST") {
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
       try {
         const stat = fs.statSync(lockFile);
         if (Date.now() - stat.mtimeMs < STALE_LOCK_MS) {

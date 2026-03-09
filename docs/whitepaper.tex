@@ -89,7 +89,7 @@ Systems are evaluated on eight dimensions:
 \section{Cortex Architecture}
 \label{sec:arch}
 
-The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Memory is organized around six concepts: \textbf{projects} scope a working directory under \texttt{\textasciitilde/.cortex/<project>/}; \textbf{findings} are discrete insights in \texttt{FINDINGS.md}; \textbf{backlog} items are prioritized tasks; \textbf{canonical memories} are pinned facts that survive consolidation; \textbf{entities} link named objects across projects via a queryable graph; and \textbf{machines} declare profiles that control project visibility. All are plain markdown or YAML. The diagram below shows how the subsystems connect on every prompt cycle.
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Memory is organized around six concepts: \textbf{projects} scope a working directory under \texttt{\textasciitilde/.cortex/<project>/}; \textbf{findings} are discrete insights in \texttt{FINDINGS.md}; \textbf{backlog} items are prioritized tasks; \textbf{canonical memories} are pinned facts that survive consolidation; \textbf{entities} link named objects across projects via a queryable graph; and \textbf{machines} declare profiles that control project visibility. All are plain markdown or YAML. Operational onboarding follows three paths: install or connect a machine via \texttt{cortex init}, enroll an existing repo via \texttt{cortex add}/\texttt{add\_project}, and scaffold a brand-new project via \texttt{/cortex-init}. The diagram below shows how the subsystems connect on every prompt cycle.
 
 \vspace{0.2em}
 \begin{center}

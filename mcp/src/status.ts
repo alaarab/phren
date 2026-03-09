@@ -15,6 +15,7 @@ import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
 import { readRuntimeHealth } from "./data-access.js";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -72,7 +73,7 @@ export async function runStatus() {
   }
 
   const cwd = process.cwd();
-  const profile = process.env.CORTEX_PROFILE || "";
+  const profile = resolveRuntimeProfile(cortexPath);
   const activeProject = detectProject(cortexPath, cwd, profile);
 
   const version = readPackageVersion();

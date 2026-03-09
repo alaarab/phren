@@ -1,5 +1,5 @@
 // cli-hooks.ts — Thin orchestrator. Delegates to focused modules:
-//   cli-hooks-retrieval.ts  — search, scoring, ranking, snippet selection
+//   shared-retrieval.ts     — shared search, scoring, ranking, snippet selection
 //   cli-hooks-citations.ts  — citation parsing and validation
 //   cli-hooks-session.ts    — session lifecycle hooks, metrics, background maintenance
 //   cli-hooks-output.ts     — hook output formatting
@@ -55,7 +55,7 @@ export {
   rankResults,
   selectSnippets,
   type SelectedSnippet,
-} from "./cli-hooks-retrieval.js";
+} from "./shared-retrieval.js";
 
 // Output
 export {
@@ -83,15 +83,14 @@ import {
   selectSnippets,
   detectTaskIntent,
   type SelectedSnippet,
-} from "./cli-hooks-retrieval.js";
+} from "./shared-retrieval.js";
 import { buildHookOutput } from "./cli-hooks-output.js";
 import {
   getGitContext,
   trackSessionMetrics,
 } from "./cli-hooks-session.js";
-import { approximateTokens } from "./cli-hooks-retrieval.js";
-
-const profile = process.env.CORTEX_PROFILE || "";
+import { approximateTokens } from "./shared-retrieval.js";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -125,6 +124,7 @@ export function parseHookInput(raw: string): HookPromptInput | null {
 // ── handleHookPrompt: orchestrator using extracted stages ────────────────────
 
 export async function handleHookPrompt() {
+  const profile = resolveRuntimeProfile(getCortexPath());
   const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
 
   let raw = "";

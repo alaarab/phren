@@ -33,16 +33,19 @@ import {
   loadShellState,
 } from "./data-access.js";
 import { runtimeFile } from "./shared.js";
+import { handleGovernMemories } from "./cli-govern.js";
+import { runSearch } from "./cli-search.js";
+import { consolidateProjectFindings } from "./governance-policy.js";
 import { style } from "./shell-render.js";
-import { SUB_VIEWS, TAB_ICONS, type ShellDeps, type ShellView } from "./shell-types.js";
+import { SUB_VIEWS, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./shell-types.js";
 import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./shell-view.js";
+import { removeSkillPath } from "./skill-files.js";
 import {
   resultMsg,
   editDistance,
   tokenize,
   expandIds,
   normalizeSection,
-  resolveEntryScript,
   backlogsByFilter,
   queueByFilter,
 } from "./shell-palette.js";
@@ -55,7 +58,7 @@ export interface PaletteHost {
   state: ShellState;
   deps: ShellDeps;
   showHelp: boolean;
-  healthCache: { at: number; result: any } | undefined;
+  healthCache: { at: number; result: DoctorResultLike } | undefined;
   setMessage(msg: string): void;
   setView(view: ShellState["view"]): void;
   confirmThen(label: string, action: () => void): void;
@@ -118,14 +121,12 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!query) { host.setMessage("  Usage: :search <query>"); return; }
     host.setMessage("  Searching…");
     try {
-      const entry = resolveEntryScript();
-      const args = [entry, "search", query, "--limit", "6"];
-      if (host.state.project) args.push("--project", host.state.project);
-      const out = execFileSync(process.execPath, args, {
-        cwd: host.cortexPath, encoding: "utf8", timeout: 60_000,
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-      host.setMessage(out.split("\n").slice(0, 14).join("\n") || "  No results.");
+      const result = await runSearch({
+        query,
+        limit: 6,
+        project: host.state.project,
+      }, host.cortexPath, host.profile);
+      host.setMessage(result.lines.slice(0, 14).join("\n") || "  No results.");
     } catch (err: unknown) {
       host.setMessage(`  Search failed: ${errorMessage(err)}`);
     }
@@ -185,8 +186,9 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     if (parts.length < 3) { host.setMessage("  Usage: :reprioritize <id|match> <high|medium|low>"); return; }
-    const priority = parts[parts.length - 1].toLowerCase();
-    if (!["high", "medium", "low"].includes(priority)) { host.setMessage("  Priority must be high|medium|low"); return; }
+    const priorityRaw = parts[parts.length - 1].toLowerCase();
+    if (!["high", "medium", "low"].includes(priorityRaw)) { host.setMessage("  Priority must be high|medium|low"); return; }
+    const priority = priorityRaw as "high" | "medium" | "low";
     const match = parts.slice(1, -1).join(" ");
     host.setMessage(`  ${resultMsg(updateBacklogItem(host.cortexPath, project, match, { priority }))}`);
     return;
@@ -361,11 +363,11 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!project) return;
     try {
       const t0 = Date.now();
-      const out = execFileSync(process.execPath, [resolveEntryScript(), "govern-memories", project], {
-        cwd: host.cortexPath, encoding: "utf8", timeout: 60_000,
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-      host.setMessage(`  ${out || "Governance scan completed."} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+      const summary = await handleGovernMemories(project, true);
+      host.setMessage(
+        `  Governed memories: stale=${summary.staleCount}, conflicts=${summary.conflictCount}, review=${summary.reviewCount}` +
+        ` (${((Date.now() - t0) / 1000).toFixed(1)}s)`
+      );
     } catch (err: unknown) {
       host.setMessage(`  Governance failed: ${errorMessage(err)}`);
     }
@@ -377,11 +379,14 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!project) return;
     try {
       const t0 = Date.now();
-      const out = execFileSync(process.execPath, [resolveEntryScript(), "consolidate-memories", project], {
-        cwd: host.cortexPath, encoding: "utf8", timeout: 60_000,
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-      host.setMessage(`  ${out || "Consolidation completed."} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+      const backupPath = path.join(host.cortexPath, project, "FINDINGS.md.bak");
+      const backupBefore = fs.existsSync(backupPath) ? fs.statSync(backupPath).mtimeMs : undefined;
+      const result = consolidateProjectFindings(host.cortexPath, project);
+      const backupAfter = fs.existsSync(backupPath) ? fs.statSync(backupPath).mtimeMs : undefined;
+      const backupNote = result.ok && backupAfter !== undefined && backupAfter !== backupBefore
+        ? `; Updated backup: ${path.relative(host.cortexPath, backupPath).replace(/\\/g, "/")}`
+        : "";
+      host.setMessage(`  ${resultMsg(result)}${backupNote} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     } catch (err: unknown) {
       host.setMessage(`  Consolidation failed: ${errorMessage(err)}`);
     }
@@ -716,7 +721,7 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
         const skillPath = item.text!;
         host.confirmThen(`Remove skill "${item.name}"?`, () => {
           try {
-            fs.unlinkSync(skillPath);
+            removeSkillPath(skillPath);
             host.setMessage(`  Removed ${item.name}`);
             host.setCursor(Math.max(0, cursor - 1));
           } catch (err: unknown) {

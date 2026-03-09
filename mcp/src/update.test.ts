@@ -44,6 +44,8 @@ describe("runCortexUpdate", () => {
       if (cmd === "git" && args[0] === "status") return " M mcp/src/update.ts ";
       if (cmd === "git" && args[0] === "pull") return "Already up to date.";
       if (cmd === "npm" && args[0] === "install") return "";
+      if (cmd === "npm" && args[0] === "run" && args[1] === "build") return "";
+      if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "--health") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
@@ -52,6 +54,7 @@ describe("runCortexUpdate", () => {
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Updated local cortex repo at");
     expect(result.message).toContain("(Already up to date.)");
+    expect(result.message).toContain("Rebuilt and verified CLI health.");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "git",
       ["pull", "--rebase", "--autostash"],
@@ -60,6 +63,16 @@ describe("runCortexUpdate", () => {
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "npm",
       ["install"],
+      expect.objectContaining({ encoding: "utf8" })
+    );
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "npm",
+      ["run", "build"],
+      expect.objectContaining({ encoding: "utf8" })
+    );
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      process.execPath,
+      [expect.stringMatching(/mcp[\\/]dist[\\/]index\.js$/), "--health"],
       expect.objectContaining({ encoding: "utf8" })
     );
   });
@@ -86,6 +99,27 @@ describe("runCortexUpdate", () => {
         (call: unknown[]) => call[0] === "npm" && Array.isArray(call[1]) && call[1][0] === "install"
       )
     ).toBe(false);
+  });
+
+  it("returns a rebuild failure message when build or smoke-check fails after pull", async () => {
+    mockExistsSync.mockImplementation((filePath: fs.PathLike) => {
+      if (String(filePath).endsWith(".git")) return true;
+      if (String(filePath).endsWith("package.json")) return true;
+      return false;
+    });
+
+    mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === "git" && args[0] === "status") return "";
+      if (cmd === "git" && args[0] === "pull") return "Fast-forward";
+      if (cmd === "npm" && args[0] === "install") return "";
+      if (cmd === "npm" && args[0] === "run" && args[1] === "build") throw new Error("build failed");
+      throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
+    });
+
+    const result = await runCortexUpdate();
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe("Local repo updated but rebuild/health check failed: build failed");
   });
 
   it("falls back to global npm update when git checkout is unavailable", async () => {

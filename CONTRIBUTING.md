@@ -93,7 +93,7 @@ docs: update API reference with bulk tools
 
 1. Create a markdown file in `global/skills/your-skill.md`
 2. Follow the existing skill format: name, description, steps
-3. Test locally by running `cortex link` and invoking `/your-skill` in a Claude Code session
+3. Test locally by running `cortex init` and invoking `/your-skill` in a Claude Code session
 
 ## Reporting Bugs
 

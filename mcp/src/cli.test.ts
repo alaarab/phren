@@ -6,14 +6,26 @@ import * as path from "path";
 import * as os from "os";
 
 const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
+const REPO_ROOT = path.resolve(__dirname, "../..");
+
+function ensureCliBuilt(): void {
+  if (fs.existsSync(CLI_PATH)) return;
+  execFileSync("npm", ["run", "build"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 30000,
+  });
+}
 
 function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
   try {
+    ensureCliBuilt();
     const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
       encoding: "utf8",
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 15000,
+      timeout: 30000,
     });
     return { stdout, stderr: "", exitCode: 0 };
   } catch (err: any) {
@@ -187,6 +199,53 @@ describe("CLI integration: status", () => {
   });
 });
 
+describe("CLI integration: hooks", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+  let homeDir: string;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+    homeDir = path.dirname(cortexDir);
+  });
+
+  afterEach(() => cleanup());
+
+  it("shows Claude hook config from ~/.claude/settings.json", () => {
+    const claudeDir = path.join(homeDir, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(claudeDir, "settings.json"),
+      JSON.stringify({ hooks: { Stop: [{ matcher: "", hooks: [{ type: "command", command: "echo stop" }] }] } }, null, 2)
+    );
+
+    const { stdout, exitCode } = runCli(
+      ["hooks", "show", "claude"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("\"Stop\"");
+    expect(stdout).not.toContain("cortex.SKILL.md");
+  });
+
+  it("shows Codex hook config from the active cortex path", () => {
+    fs.writeFileSync(
+      path.join(cortexDir, "codex.json"),
+      JSON.stringify({ hooks: { UserPromptSubmit: [{ type: "command", command: "echo prompt" }] } }, null, 2)
+    );
+
+    const { stdout, exitCode } = runCli(
+      ["hooks", "show", "codex"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("\"UserPromptSubmit\"");
+    expect(stdout).toContain("echo prompt");
+  });
+});
+
 describe("CLI integration: projects add", () => {
   let cortexDir: string;
   let cleanup: () => void;
@@ -215,6 +274,56 @@ describe("CLI integration: projects add", () => {
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("already exists with different casing");
+  });
+});
+
+describe("CLI integration: add project", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+  let projectDir: string;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+    projectDir = path.join(path.dirname(cortexDir), "repo");
+    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(cortexDir, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(cortexDir, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - global\n");
+    fs.writeFileSync(path.join(cortexDir, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
+    fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+  });
+
+  afterEach(() => cleanup());
+
+  it("adds a project to the active profile", () => {
+    const { stdout, exitCode } = runCli(
+      ["add", projectDir],
+      { CORTEX_PATH: cortexDir, CORTEX_PROFILE: "work", CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Added project "repo"');
+    expect(fs.readFileSync(path.join(cortexDir, "profiles", "work.yaml"), "utf8")).toContain("- repo");
+    expect(fs.readFileSync(path.join(cortexDir, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
+  });
+
+  it("uses the machine-mapped profile when CORTEX_PROFILE is unset", () => {
+    fs.writeFileSync(path.join(cortexDir, "machines.yaml"), `${os.hostname()}: work\n`);
+    const { exitCode } = runCli(
+      ["add", projectDir],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(cortexDir, "profiles", "work.yaml"), "utf8")).toContain("- repo");
+    expect(fs.readFileSync(path.join(cortexDir, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
+  });
+
+  it("fails clearly when cortex is not initialized yet", () => {
+    fs.rmSync(path.join(cortexDir, ".governance"), { recursive: true, force: true });
+    const { stdout, exitCode } = runCli(
+      ["add", projectDir],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("cortex is not set up yet");
   });
 });
 
@@ -1628,6 +1737,9 @@ describe("CLI integration: help and health", () => {
     expect(stdout).toContain("cortex");
     expect(stdout).toContain("search");
     expect(stdout).toContain("doctor");
+    expect(stdout).not.toContain("projects add");
+    expect(stdout).not.toContain("cortex link");
+    expect(stdout).not.toContain("--from-existing");
   });
 
   it("-h prints usage information", () => {
@@ -1640,6 +1752,14 @@ describe("CLI integration: help and health", () => {
     const { stdout, exitCode } = runCli(["help"]);
     expect(exitCode).toBe(0);
     expect(stdout).toContain("cortex");
+  });
+
+  it("projects help hides the legacy add flow", () => {
+    const { stdout, exitCode } = runCli(["projects", "--help"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("cortex projects list");
+    expect(stdout).toContain("cortex projects remove <name>");
+    expect(stdout).not.toContain("projects add");
   });
 
   it("--health exits with code 0", () => {
@@ -2080,14 +2200,17 @@ describe("CLI integration: init --from-existing", () => {
     expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
-  it("reports error when no CLAUDE.md exists", () => {
+  it("bootstraps project even without CLAUDE.md (creates starter)", () => {
     const { stdout, exitCode } = runCli(
       ["init", "-y", "--from-existing", projectDir],
       { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
-    expect(exitCode).toBe(0); // init itself succeeds, bootstrap fails gracefully
-    expect(stdout).toContain("Could not bootstrap");
-    expect(stdout).toContain("No CLAUDE.md found");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Bootstrapped project");
+    const projName = path.basename(projectDir).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    expect(fs.existsSync(path.join(cortexDir, projName, "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexDir, projName, "FINDINGS.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexDir, projName, "backlog.md"))).toBe(true);
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("reports error when path does not exist", () => {

@@ -53,6 +53,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           repo: z.string().optional().describe("Git repository root path for citation validation."),
           commit: z.string().optional().describe("Git commit SHA that supports this finding."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
+          backlog_item: z.string().optional().describe("Backlog item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
         }).optional().describe("Optional source citation for traceability."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
         findingType: z.enum(FINDING_TYPES)
@@ -73,6 +74,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           const semanticConflicts = await checkSemanticConflicts(cortexPath, project, taggedFinding);
           runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
           const result = addFindingToFile(cortexPath, project, taggedFinding, citation, {
+            sessionId,
             extraAnnotations: semanticConflicts.checked ? semanticConflicts.annotations : undefined,
           });
           if (!result.ok) {
@@ -89,7 +91,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
           if (isAdded) {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
-            incrementSessionFindings(cortexPath, 1, sessionId);
+            incrementSessionFindings(cortexPath, 1, sessionId, project);
             extractFactFromFinding(cortexPath, project, taggedFinding);
           }
           const conflictsWithList = semanticConflicts.checked
@@ -183,14 +185,17 @@ export function register(server: McpServer, ctx: McpContext): void {
           filteredFindings.push(f);
         }
 
-        const result = addFindingsToFile(cortexPath, project, filteredFindings, { extraAnnotationsByFinding });
+        const result = addFindingsToFile(cortexPath, project, filteredFindings, {
+          extraAnnotationsByFinding,
+          sessionId,
+        });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, skipped, rejected } = result.data;
         // Include semantic skips in the total skipped count
         const allSkipped = [...skipped, ...semanticSkipped];
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
-          incrementSessionFindings(cortexPath, added.length, sessionId);
+          incrementSessionFindings(cortexPath, added.length, sessionId, project);
           updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
         }
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";

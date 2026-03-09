@@ -5,10 +5,23 @@ import * as os from "os";
 import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
 import { checkPermission, loadCanonicalLocks, saveCanonicalLocksUnlocked, hashContent, withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
-import { type FindingCitation, buildCitationComment, getHeadCommit, getRepoRoot, inferCitationLocation } from "./content-citation.js";
+import {
+  type FindingCitation,
+  type FindingSource,
+  buildCitationComment,
+  buildSourceComment,
+  getHeadCommit,
+  getRepoRoot,
+  inferCitationLocation,
+} from "./content-citation.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts } from "./content-dedup.js";
 import { validateFindingsFormat, validateFinding } from "./content-validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./content-archive.js";
+import {
+  resolveAutoFindingBacklogItem,
+  resolveFindingBacklogReference,
+  resolveFindingSessionId,
+} from "./finding-context.js";
 
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;
@@ -63,6 +76,7 @@ interface PreparedFinding {
 interface AddFindingOptions {
   skipLegacyDedup?: boolean;
   extraAnnotations?: string[];
+  sessionId?: string;
 }
 
 interface AddFindingWriteResult {
@@ -90,6 +104,8 @@ function buildFindingCitation(
     file: citationInput?.file,
     line: citationInput?.line,
     commit: citationInput?.commit || (citationInput?.repo || inferredRepo ? headCommit ?? getHeadCommit(citationInput?.repo || inferredRepo || "") : undefined),
+    supersedes: citationInput?.supersedes,
+    backlog_item: citationInput?.backlog_item,
   };
   if (citation.repo && citation.commit && (!citation.file || !citation.line)) {
     const inferred = inferCitationLocation(citation.repo, citation.commit);
@@ -99,12 +115,68 @@ function buildFindingCitation(
   return citation;
 }
 
+function detectFindingModel(): string | undefined {
+  const candidates = [
+    process.env.CORTEX_MODEL,
+    process.env.OPENAI_MODEL,
+    process.env.CLAUDE_MODEL,
+    process.env.CORTEX_LLM_MODEL,
+    process.env.MODEL,
+  ];
+  return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
+}
+
+function detectFindingTool(): string | undefined {
+  const candidates = [
+    process.env.CORTEX_TOOL,
+    process.env.CORTEX_HOOK_TOOL,
+  ];
+  return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
+}
+
+function buildFindingSource(sessionId?: string): FindingSource {
+  const actor = process.env.CORTEX_ACTOR?.trim() || undefined;
+  const source: FindingSource = {
+    machine: os.hostname(),
+    actor,
+    tool: detectFindingTool(),
+    model: detectFindingModel(),
+    session_id: sessionId,
+  };
+  return source;
+}
+
+function resolveFindingCitationInput(
+  cortexPath: string,
+  project: string,
+  citationInput?: Partial<FindingCitation>,
+): CortexResult<Partial<FindingCitation> | undefined> {
+  const resolved = citationInput ? { ...citationInput } : {};
+  if (citationInput?.backlog_item) {
+    const backlogResolution = resolveFindingBacklogReference(cortexPath, project, citationInput.backlog_item);
+    if (backlogResolution.error) {
+      return cortexErr(backlogResolution.error, CortexError.VALIDATION_ERROR);
+    }
+    if (backlogResolution.stableId) {
+      resolved.backlog_item = backlogResolution.stableId;
+    }
+  } else {
+    const backlogItem = resolveAutoFindingBacklogItem(cortexPath, project);
+    if (backlogItem) {
+      resolved.backlog_item = backlogItem;
+    }
+  }
+
+  return cortexOk(Object.keys(resolved).length > 0 ? resolved : undefined);
+}
+
 function prepareFinding(
   learning: string,
   project: string,
   fullHistory: string,
   extraAnnotations?: string[],
   citationInput?: Partial<FindingCitation>,
+  source?: FindingSource,
   nowIso?: string,
   inferredRepo?: string,
   headCommit?: string,
@@ -120,9 +192,10 @@ function prepareFinding(
     project,
     file: citationInput?.file,
   });
-  const hostname = os.hostname();
-  const model = process.env.CLAUDE_MODEL || "unknown";
-  let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} <!-- created: ${today} --> <!-- source: machine:${hostname} model:${model} -->`;
+  const createdComment = `<!-- created: ${today} -->`;
+  const sourceComment = source ? buildSourceComment(source) : "";
+  let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} ${createdComment}`;
+  if (sourceComment) bullet += ` ${sourceComment}`;
 
   if (isDuplicateFinding(fullHistory, bullet)) {
     return { status: "duplicate" };
@@ -338,13 +411,18 @@ export function addFindingToFile(
   // Secret/PII scan — reject before anything else (before existence check, before lock)
   const nowIso = new Date().toISOString();
   const today = nowIso.slice(0, 10);
-  const inferredRepo = citationInput?.repo || getRepoRoot(resolvedDir);
+  const resolvedCitationInputResult = resolveFindingCitationInput(cortexPath, project, citationInput);
+  if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
+  const resolvedCitationInput = resolvedCitationInputResult.data;
+  const effectiveSessionId = resolveFindingSessionId(cortexPath, project, opts?.sessionId);
+  const source = buildFindingSource(effectiveSessionId);
+  const inferredRepo = resolvedCitationInput?.repo || getRepoRoot(resolvedDir);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
-  const supersedesText = citationInput?.supersedes;
+  const supersedesText = resolvedCitationInput?.supersedes;
   const normalizedForSupersedes = supersedesText
     ? resolveCoref(normalizeObservationTags(learning).text, {
         project,
-        file: citationInput?.file,
+        file: resolvedCitationInput?.file,
       })
     : undefined;
 
@@ -357,7 +435,7 @@ export function addFindingToFile(
   if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" does not exist.`, CortexError.INVALID_PROJECT_NAME);
 
   const result: CortexResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
-    const preparedForNewFile = prepareFinding(learning, project, "", opts?.extraAnnotations, citationInput, nowIso, inferredRepo, headCommit);
+    const preparedForNewFile = prepareFinding(learning, project, "", opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit);
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
         return cortexErr(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
@@ -369,7 +447,7 @@ export function addFindingToFile(
       fs.writeFileSync(learningsPath, newContent);
       return cortexOk({
         content: newContent,
-        citation: buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit),
+        citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
         tagWarning: preparedForNewFile.finding.tagWarning,
         created: true,
         bullet: preparedForNewFile.finding.bullet,
@@ -388,7 +466,7 @@ export function addFindingToFile(
           .filter(line => !line.startsWith("- ") || !line.toLowerCase().includes(supersedesText.slice(0, 40).toLowerCase()))
           .join("\n")
       : (legacyHistory ? `${content}\n${legacyHistory}` : content);
-  const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, citationInput, nowIso, inferredRepo, headCommit);
+    const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit);
     if (prepared.status === "rejected") {
       return cortexErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
     }
@@ -423,7 +501,7 @@ export function addFindingToFile(
     fs.renameSync(tmpPath, learningsPath);
     return cortexOk({
       content: updated,
-      citation: buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit),
+      citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
       tagWarning: prepared.finding.tagWarning,
       created: false,
       bullet: prepared.finding.bullet,
@@ -461,7 +539,7 @@ export function addFindingsToFile(
   cortexPath: string,
   project: string,
   learnings: string[],
-  opts?: { extraAnnotationsByFinding?: string[][] }
+  opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string }
 ): CortexResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
   const denial = checkPermission(cortexPath, "write");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
@@ -472,6 +550,11 @@ export function addFindingsToFile(
 
   const today = new Date().toISOString().slice(0, 10);
   const nowIso = new Date().toISOString();
+  const resolvedCitationInputResult = resolveFindingCitationInput(cortexPath, project);
+  if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
+  const resolvedCitationInput = resolvedCitationInputResult.data;
+  const effectiveSessionId = resolveFindingSessionId(cortexPath, project, opts?.sessionId);
+  const source = buildFindingSource(effectiveSessionId);
   const inferredRepo = getRepoRoot(resolvedDir);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
 
@@ -492,7 +575,7 @@ export function addFindingsToFile(
           rejected.push({ text: learning, reason: lengthError });
           continue;
         }
-        const prepared = prepareFinding(learning, project, content, extraAnnotations, undefined, nowIso, inferredRepo, headCommit);
+        const prepared = prepareFinding(learning, project, content, extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit);
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
           continue;
@@ -523,7 +606,17 @@ export function addFindingsToFile(
         rejected.push({ text: learning, reason: lengthError });
         continue;
       }
-      const prepared = prepareFinding(learning, project, legacyHistory ? `${content}\n${legacyHistory}` : content, extraAnnotations, undefined, nowIso, inferredRepo, headCommit);
+      const prepared = prepareFinding(
+        learning,
+        project,
+        legacyHistory ? `${content}\n${legacyHistory}` : content,
+        extraAnnotations,
+        resolvedCitationInput,
+        source,
+        nowIso,
+        inferredRepo,
+        headCommit,
+      );
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });
         continue;

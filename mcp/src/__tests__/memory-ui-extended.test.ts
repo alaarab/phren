@@ -267,6 +267,56 @@ describe.sequential("review-ui graph API", () => {
   });
 });
 
+describe.sequential("review-ui profile scoping", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  const priorHome = process.env.HOME;
+  const priorUserProfile = process.env.USERPROFILE;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-review-ui-profile-"));
+    process.env.HOME = tmpRoot;
+    process.env.USERPROFILE = tmpRoot;
+    seedProject(tmpRoot);
+    seedSecondProject(tmpRoot);
+    write(path.join(tmpRoot, "profiles", "work.yaml"), "name: work\nprojects:\n  - demo\n");
+    server = createReviewUiServer(tmpRoot, undefined, "work");
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorHome === undefined) delete process.env.HOME;
+    else process.env.HOME = priorHome;
+    if (priorUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = priorUserProfile;
+    tmpCleanup();
+  });
+
+  it("limits project and graph APIs to the active profile", async () => {
+    const projectsRes = await httpGet(port, "/api/projects");
+    expect(projectsRes.status).toBe(200);
+    expect(projectsRes.body).toContain("\"name\":\"demo\"");
+    expect(projectsRes.body).not.toContain("\"name\":\"other\"");
+
+    const graphRes = await httpGet(port, "/api/graph");
+    expect(graphRes.status).toBe(200);
+    expect(graphRes.body).toContain("\"id\":\"demo\"");
+    expect(graphRes.body).not.toContain("\"id\":\"other\"");
+  });
+});
+
 describe.sequential("review-ui HTML escaping", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;

@@ -141,7 +141,7 @@ Stop
 
 ## MCP Server
 
-The MCP server exposes 46 tools organized into ten categories.
+The MCP server exposes 48 tools organized into ten categories.
 
 ```
 Claude Code <--stdio--> cortex-mcp

@@ -3,7 +3,7 @@ import { commandExists, detectInstalledTools, buildLifecycleCommands, configureA
 import { makeTempDir } from "./test-helpers.js";
 import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import { CortexError, type CortexErrorCode } from "./shared.js";
-import { selectSnippets, approximateTokens } from "./cli-hooks-retrieval.js";
+import { selectSnippets, approximateTokens } from "./shared-retrieval.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -452,9 +452,9 @@ describe("hooks", () => {
       if (fs.existsSync(localEntryScript)) fs.rmSync(localEntryScript, { force: true });
 
       const cmds = buildLifecycleCommands('/tmp/my "cortex" path\\nested');
-      expect(cmds.sessionStart).toContain("npx @alaarab/cortex hook-session-start");
-      expect(cmds.userPromptSubmit).toContain("npx @alaarab/cortex hook-prompt");
-      expect(cmds.stop).toContain("npx @alaarab/cortex hook-stop");
+      expect(cmds.sessionStart).toMatch(/npx -y @alaarab\/cortex@.+ hook-session-start/);
+      expect(cmds.userPromptSubmit).toMatch(/npx -y @alaarab\/cortex@.+ hook-prompt/);
+      expect(cmds.stop).toMatch(/npx -y @alaarab\/cortex@.+ hook-stop/);
       expect(cmds.sessionStart).toContain('/tmp/my \\"cortex\\" path\\\\nested');
     });
 

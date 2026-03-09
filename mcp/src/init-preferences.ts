@@ -3,6 +3,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import type { CustomHookEntry } from "./hooks.js";
@@ -36,8 +37,9 @@ export function writeInstallPreferences(cortexPath: string, patch: Partial<Insta
   const file = preferencesFile(cortexPath);
   const current = readInstallPreferences(cortexPath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmpPath = `${file}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(
-    file,
+    tmpPath,
     JSON.stringify(
       {
         ...current,
@@ -48,6 +50,7 @@ export function writeInstallPreferences(cortexPath: string, patch: Partial<Insta
       2
     ) + "\n"
   );
+  fs.renameSync(tmpPath, file);
 }
 
 export function getMcpEnabledPreference(cortexPath: string): boolean {

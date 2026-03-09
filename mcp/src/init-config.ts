@@ -4,16 +4,22 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { randomUUID } from "crypto";
 import { execFileSync } from "child_process";
 import { buildLifecycleCommands } from "./hooks.js";
 import {
   EXEC_TIMEOUT_QUICK_MS,
   isRecord,
   hookConfigPath,
-  homeDir,
   homePath,
 } from "./shared.js";
 import { isFeatureEnabled, errorMessage } from "./utils.js";
+import {
+  probeVsCodeConfig,
+  resolveCodexMcpConfig,
+  resolveCopilotMcpConfig,
+  resolveCursorMcpConfig,
+} from "./provider-adapters.js";
 
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init-preferences.js";
 import { resolveEntryScript, VERSION } from "./init-shared.js";
@@ -44,6 +50,13 @@ function getObjectProp(value: JsonObject, key: string): JsonObject | undefined {
   return isRecord(candidate) ? candidate : undefined;
 }
 
+function atomicWriteText(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp-${randomUUID()}`;
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, filePath);
+}
+
 export function patchJsonFile(filePath: string, patch: (data: JsonObject) => void) {
   let data: JsonObject = {};
   if (fs.existsSync(filePath)) {
@@ -58,7 +71,7 @@ export function patchJsonFile(filePath: string, patch: (data: JsonObject) => voi
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
   }
   patch(data);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n");
+  atomicWriteText(filePath, JSON.stringify(data, null, 2) + "\n");
 }
 
 function commandExists(cmd: string): boolean {
@@ -69,27 +82,6 @@ function commandExists(cmd: string): boolean {
   } catch {
     return false;
   }
-}
-
-function pickExistingFile(candidates: string[]): string | null {
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
-function normalizeWindowsPathToWsl(input: string | undefined): string | undefined {
-  if (!input) return undefined;
-  if (input.startsWith("/")) return input;
-  const match = input.match(/^([A-Za-z]):\\(.*)$/);
-  if (!match) return input;
-  const drive = match[1].toLowerCase();
-  const rest = match[2].replace(/\\/g, "/");
-  return `/mnt/${drive}/${rest}`;
-}
-
-function uniqStrings(values: Array<string | undefined>): string[] {
-  return Array.from(new Set(values.filter((v): v is string => Boolean(v && v.trim()))));
 }
 
 function buildMcpServerConfig(cortexPath: string) {
@@ -178,7 +170,7 @@ function patchTomlMcpServer(
   if (mcpEnabled) {
     if (hadSection) {
       content = content.replace(sectionRe, newSection + "\n");
-      fs.writeFileSync(filePath, content);
+      atomicWriteText(filePath, content);
       return "already_configured";
     }
     if (!existed) {
@@ -186,14 +178,14 @@ function patchTomlMcpServer(
     }
     const sep = content.length > 0 && !content.endsWith("\n\n") ? (content.endsWith("\n") ? "\n" : "\n\n") : "";
     content += sep + newSection + "\n";
-    fs.writeFileSync(filePath, content);
+    atomicWriteText(filePath, content);
     return "installed";
   }
 
   if (!hadSection) return "already_disabled";
   content = content.replace(sectionRe, "");
   content = content.replace(/\n{3,}/g, "\n\n");
-  fs.writeFileSync(filePath, content);
+  atomicWriteText(filePath, content);
   return "disabled";
 }
 
@@ -203,7 +195,7 @@ export function removeTomlMcpServer(filePath: string): boolean {
   const sectionRe = /^\[mcp_servers\.cortex\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
   if (!sectionRe.test(content)) return false;
   content = content.replace(sectionRe, "").replace(/\n{3,}/g, "\n\n");
-  fs.writeFileSync(filePath, content);
+  atomicWriteText(filePath, content);
   return true;
 }
 
@@ -349,36 +341,7 @@ export function resetVSCodeProbeCache() { _vscodeProbeCache = null; }
 
 function probeVSCodePath(): { targetDir: string | null; installed: boolean } {
   if (_vscodeProbeCache) return _vscodeProbeCache;
-  const home = homeDir();
-  const userProfile = normalizeWindowsPathToWsl(process.env.USERPROFILE);
-  const username = process.env.USERNAME;
-  const userProfileRoaming = userProfile ? path.join(userProfile, "AppData", "Roaming", "Code", "User") : undefined;
-  const guessedWindowsRoaming = !userProfile && username
-    ? path.join("/mnt/c", "Users", username, "AppData", "Roaming", "Code", "User")
-    : undefined;
-  const candidates = uniqStrings([
-    userProfileRoaming,
-    guessedWindowsRoaming,
-    path.join(home, ".config", "Code", "User"),
-    path.join(home, ".vscode-server", "data", "User"),
-    path.join(home, "Library", "Application Support", "Code", "User"),
-    path.join(home, "AppData", "Roaming", "Code", "User"),
-  ]);
-  const existing = candidates.find((d) => fs.existsSync(d));
-  const installed =
-    Boolean(existing) ||
-    commandExists("code") ||
-    Boolean(
-      userProfile &&
-      (
-        fs.existsSync(path.join(userProfile, "AppData", "Local", "Programs", "Microsoft VS Code")) ||
-        fs.existsSync(path.join(userProfile, "AppData", "Roaming", "Code"))
-      )
-    );
-  const targetDir = installed
-    ? (existing || userProfileRoaming || path.join(home, ".config", "Code", "User"))
-    : null;
-  _vscodeProbeCache = { targetDir, installed };
+  _vscodeProbeCache = probeVsCodeConfig(commandExists);
   return _vscodeProbeCache;
 }
 
@@ -392,80 +355,37 @@ export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean
 
 export function configureCursorMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const home = homeDir();
-  const candidates = [
-    path.join(home, ".cursor", "mcp.json"),
-    path.join(home, ".config", "Cursor", "User", "mcp.json"),
-    path.join(home, "Library", "Application Support", "Cursor", "User", "mcp.json"),
-    path.join(home, "AppData", "Roaming", "Cursor", "User", "mcp.json"),
-  ];
-  const existing = pickExistingFile(candidates);
-  const cursorInstalled =
-    Boolean(existing) ||
-    fs.existsSync(path.join(home, ".cursor")) ||
-    fs.existsSync(path.join(home, ".config", "Cursor")) ||
-    fs.existsSync(path.join(home, "Library", "Application Support", "Cursor")) ||
-    fs.existsSync(path.join(home, "AppData", "Roaming", "Cursor")) ||
-    commandExists("cursor");
-  if (!cursorInstalled) return "no_cursor";
-  return configureMcpAtPath(existing || candidates[0], mcpEnabled, "mcpServers", cortexPath);
+  const resolved = resolveCursorMcpConfig(commandExists);
+  if (!resolved.installed) return "no_cursor";
+  return configureMcpAtPath(resolved.target, mcpEnabled, "mcpServers", cortexPath);
 }
 
 export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const home = homeDir();
-  const candidates = [
-    path.join(home, ".copilot", "mcp-config.json"),
-    path.join(home, ".github", "mcp.json"),
-    path.join(home, ".config", "github-copilot", "mcp.json"),
-    path.join(home, "Library", "Application Support", "github-copilot", "mcp.json"),
-    path.join(home, "AppData", "Roaming", "github-copilot", "mcp.json"),
-  ];
-  const existing = pickExistingFile(candidates);
-  const copilotInstalled =
-    Boolean(existing) ||
-    fs.existsSync(path.join(home, ".copilot")) ||
-    fs.existsSync(path.join(home, ".github")) ||
-    fs.existsSync(path.join(home, ".config", "github-copilot")) ||
-    fs.existsSync(path.join(home, "Library", "Application Support", "github-copilot")) ||
-    fs.existsSync(path.join(home, "AppData", "Roaming", "github-copilot")) ||
-    commandExists("gh");
-  if (!copilotInstalled) return "no_copilot";
-  const copilotCliConfig = candidates[0];
+  const resolved = resolveCopilotMcpConfig(commandExists);
+  if (!resolved.installed) return "no_copilot";
   let status: McpConfigStatus = "already_disabled";
-  if (fs.existsSync(path.join(home, ".copilot"))) {
-    status = configureMcpAtPath(copilotCliConfig, mcpEnabled, "mcpServers", cortexPath);
+  if (resolved.hasCliDir) {
+    status = configureMcpAtPath(resolved.cliConfig, mcpEnabled, "mcpServers", cortexPath);
   }
-  if (existing && existing !== copilotCliConfig) {
-    status = configureMcpAtPath(existing, mcpEnabled, "mcpServers", cortexPath);
+  if (resolved.existing && resolved.existing !== resolved.cliConfig) {
+    status = configureMcpAtPath(resolved.existing, mcpEnabled, "mcpServers", cortexPath);
   }
-  if (!fs.existsSync(path.join(home, ".copilot")) && !existing) {
-    status = configureMcpAtPath(copilotCliConfig, mcpEnabled, "mcpServers", cortexPath);
+  if (!resolved.hasCliDir && !resolved.existing) {
+    status = configureMcpAtPath(resolved.cliConfig, mcpEnabled, "mcpServers", cortexPath);
   }
   return status;
 }
 
 export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const home = homeDir();
-  const tomlPath = path.join(home, ".codex", "config.toml");
-  const jsonCandidates = [
-    path.join(home, ".codex", "config.json"),
-    path.join(home, ".codex", "mcp.json"),
-    path.join(cortexPath, "codex.json"),
-  ];
-  const codexInstalled =
-    fs.existsSync(tomlPath) ||
-    Boolean(pickExistingFile(jsonCandidates)) ||
-    fs.existsSync(path.join(home, ".codex")) ||
-    commandExists("codex");
-  if (!codexInstalled) return "no_codex";
+  const resolved = resolveCodexMcpConfig(cortexPath, commandExists);
+  if (!resolved.installed) return "no_codex";
 
-  if (fs.existsSync(tomlPath) || !pickExistingFile(jsonCandidates)) {
-    return patchTomlMcpServer(tomlPath, mcpEnabled, cortexPath);
+  if (resolved.preferToml) {
+    return patchTomlMcpServer(resolved.tomlPath, mcpEnabled, cortexPath);
   }
-  const existing = pickExistingFile(jsonCandidates)!;
-  return configureMcpAtPath(existing, mcpEnabled, "mcpServers", cortexPath);
+  return configureMcpAtPath(resolved.existingJson!, mcpEnabled, "mcpServers", cortexPath);
 }
 
 export function logMcpTargetStatus(tool: string, status: string, phase: "Configured" | "Updated" = "Configured") {

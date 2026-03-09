@@ -24,12 +24,12 @@ import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
 import { errorMessage } from "./utils.js";
 import { compactFindingJournals } from "./finding-journal.js";
-
-const profile = process.env.CORTEX_PROFILE || "";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
 function targetProjects(projectArg?: string): string[] {
+  const profile = resolveRuntimeProfile(getCortexPath());
   return projectArg
     ? [projectArg]
     : getProjectDirs(getCortexPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
@@ -97,6 +97,7 @@ interface GovernanceSummary {
 }
 
 export async function handleGovernMemories(projectArg?: string, silent: boolean = false, dryRun: boolean = false): Promise<GovernanceSummary> {
+  const profile = resolveRuntimeProfile(getCortexPath());
   const policy = getRetentionPolicy(getCortexPath());
   const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
   const projects = projectArg

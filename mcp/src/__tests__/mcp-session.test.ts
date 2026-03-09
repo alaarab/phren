@@ -66,4 +66,16 @@ describe("incrementSessionFindings", () => {
     const oldState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "old-session"), "utf-8"));
     expect(oldState.findingsAdded).toBe(10); // unchanged
   });
+
+  it("falls back to the most recent active session for the project", () => {
+    writeSession(tmp.path, { sessionId: "other-project", project: "other", startedAt: "2026-03-09T09:00:00.000Z", findingsAdded: 1 });
+    writeSession(tmp.path, { sessionId: "demo-session", project: "demo", startedAt: "2026-03-09T10:00:00.000Z", findingsAdded: 2 });
+
+    incrementSessionFindings(tmp.path, 3, undefined, "demo");
+
+    const demoState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "demo-session"), "utf-8"));
+    const otherState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "other-project"), "utf-8"));
+    expect(demoState.findingsAdded).toBe(5);
+    expect(otherState.findingsAdded).toBe(1);
+  });
 });

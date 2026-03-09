@@ -283,7 +283,12 @@
                   <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
                 </div>
                 <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                  Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures MCP, and wires up hooks. Restart your agent.
+                  Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures MCP, wires up hooks, and bootstraps the current repo when needed.
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;width:100%;font-size:12px;color:var(--text-dim)">
+                  <div><strong>First time</strong><br><code>npx @alaarab/cortex init</code></div>
+                  <div><strong>Add a project</strong><br>Open a session there and let the agent ask, or run <code>cortex add</code></div>
+                  <div><strong>New machine</strong><br><code>npx @alaarab/cortex init</code> and paste your repo URL</div>
                 </div>
               </div>
             </div>
@@ -678,7 +683,7 @@
         </div>
         <div class="skill-card reveal reveal-delay-2">
           <div class="skill-name">/cortex-init</div>
-          <div class="skill-desc">Scaffold a new project entry with summary, CLAUDE.md, backlog, and skills directory.</div>
+          <div class="skill-desc">Scaffold a brand-new project entry. Use <code style="font-size:11px;color:var(--text-muted)">cortex add</code> for an existing repo.</div>
         </div>
         <div class="skill-card reveal">
           <div class="skill-name">/cortex-discover</div>
@@ -690,7 +695,7 @@
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Drop skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code>, <code style="font-size:11px;color:var(--text-muted)">/release</code> in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex link</code> wires them up. Starter templates have examples.</div>
+          <div class="skill-desc">Drop skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code>, <code style="font-size:11px;color:var(--text-muted)">/release</code> in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex init</code> wires them up on the next refresh. Starter templates have examples.</div>
         </div>
       </div>
     </div>

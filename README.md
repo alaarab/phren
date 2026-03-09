@@ -36,11 +36,18 @@ npx @alaarab/cortex init
 npx @alaarab/cortex init --dry-run
 ```
 
+| Scenario | What to do |
+|---|---|
+| First time | `npx @alaarab/cortex init` |
+| Add a project | Open a session there and let the agent ask, or run `cortex add` |
+| New machine | `npx @alaarab/cortex init` and paste your cortex repo URL |
+
 This one command bootstraps Cortex locally. It:
 - Creates `~/.cortex` with starter templates
 - Registers MCP for detected tools (Claude Code, VS Code, Copilot CLI, Cursor, Codex)
 - Sets up hooks for automatic context injection and auto-save
 - Registers your machine
+- Auto-bootstraps the current repo when you run it inside a git project or a folder with `CLAUDE.md`
 
 After init, you'll see something like:
 
@@ -52,7 +59,7 @@ After init, you'll see something like:
   MCP:     registered for Claude Code
   Hooks:   prompt injection, auto-save, session lifecycle
 
-  Restart your agent. Your next prompt will already have context.
+  Open a prompt in your project directory. Your next prompt will already have context.
 ```
 
 ## Works with every major agent
@@ -132,7 +139,7 @@ git remote add origin git@github.com:YOU/my-cortex.git
 git push -u origin main
 ```
 
-On a new machine: clone, run init, relink your tools.
+On a new machine: run `npx @alaarab/cortex init` and paste your repo URL when the walkthrough asks if you have an existing cortex repo.
 
 `SessionStart` pulls on open. The Stop hook commits locally after each response and queues a best-effort push when a remote exists. This is eventual consistency -- git gives you portability and auditability, not real-time sync.
 
@@ -155,7 +162,7 @@ projects:
   - side-project
 ```
 
-`cortex link` applies the profile and keeps only the listed projects on disk. First run asks for a machine name and profile. After that, nothing to configure.
+Profiles decide which projects are active on each machine. `cortex init` is the normal refresh path: it registers the current machine/profile mapping, rewires supported agents, and bootstraps the current repo when needed.
 
 For CI or unattended setup:
 
@@ -217,14 +224,23 @@ cortex hooks-mode on     # re-enable hooks
 | `library` | Reusable libraries |
 | `frontend` | React/Vue/web apps |
 
-Use `--from-existing <path>` to import an existing project structure.
+To add an existing repo, run `cortex add` from that directory, or just open a session there and cortex will suggest it. Cortex auto-detects git repos and folders that already contain `CLAUDE.md`.
 
 ### Adding projects
 
+From a project directory:
+
 ```bash
-/cortex-init my-project              # let Claude scaffold it
-# or manually:
-mkdir ~/.cortex/my-project && echo "# my-project" > ~/.cortex/my-project/CLAUDE.md
+cd ~/code/my-project
+cortex add
+```
+
+Or just open a session in the project directory. Cortex tells the agent to ask whether you want to add it, then the agent can call `add_project` or run `cortex add`.
+
+For a brand-new scaffold inside Claude:
+
+```bash
+/cortex-init my-project
 ```
 
 </details>
@@ -237,7 +253,7 @@ Four skills for the things that can't be automatic:
 | Skill | What it does |
 |-------|-------------|
 | `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. |
-| `/cortex-init` | Scaffold a new project. Creates summary.md, CLAUDE.md, backlog, adds to your profile. |
+| `/cortex-init` | Scaffold a brand-new project entry. Use this when the project does not exist yet; use `cortex add` for an existing repo. |
 | `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
 | `/cortex-consolidate` | Read findings across all projects and surface patterns that repeat. |
 
@@ -248,7 +264,7 @@ Four skills for the things that can't be automatic:
 - **`cortex maintain govern`** -- Run when search results feel noisy or after a long break from a project. It queues low-value and stale entries for review.
 - **`cortex maintain consolidate`** -- Run when findings in a single project feel repetitive. It deduplicates bullets in FINDINGS.md. Use `--dry-run` first to preview.
 
-Put personal workflow skills in `~/.cortex/global/skills/`. `cortex link` symlinks them to `~/.claude/skills/` so they're available everywhere.
+Put personal workflow skills in `~/.cortex/global/skills/`. `cortex init` and later refresh runs wire them into supported agents automatically.
 
 ### Per-project agent config
 
@@ -269,14 +285,14 @@ mcpServers:
       API_KEY: "from-your-env"
 ```
 
-`cortex link` merges project MCP servers into your agent config under namespaced keys (`cortex__<project>__<name>`) and cleans them up when the config changes.
+`cortex init` applies project MCP servers into your agent config under namespaced keys (`cortex__<project>__<name>`) and cleans them up when the config changes.
 
 </details>
 
 <details>
-<summary><strong>The MCP server (47 tools)</strong></summary>
+<summary><strong>The MCP server (48 tools)</strong></summary>
 
-The MCP server indexes your project store into a local SQLite FTS5 database and exposes 47 tools:
+The MCP server indexes your project store into a local SQLite FTS5 database and exposes 48 tools:
 
 ### Search and browse
 
@@ -322,6 +338,7 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 
 | Tool | What it does |
 |------|-------------|
+| `add_project` | Bootstrap a repo or working directory into cortex and add it to the active profile. |
 | `export_project` | Export project data as portable JSON. |
 | `import_project` | Import project from exported JSON. |
 | `manage_project` | Archive or unarchive a project. |
@@ -404,11 +421,10 @@ cortex review-ui [--port=3499]           # lightweight review UI in the browser
 cortex update                            # update to latest version
 cortex uninstall                         # remove cortex config and hooks
 
+cortex add [path]                           # add current directory (or path) as a project
 cortex projects list                        # list all projects
-cortex projects add <name>                  # create a new project
 cortex projects remove <name>               # remove a project (confirmation required)
 
-cortex link [--machine <n>] [--profile <n>]  # sync profile, symlinks, hooks
 cortex mcp-mode [on|off|status]          # toggle MCP integration
 cortex hooks-mode [on|off|status]        # toggle hook execution
 
@@ -433,10 +449,10 @@ Use `cortex config` for policy tuning and `cortex maintain` for governance opera
 | `machine-registered` | Your hostname is in machines.yaml | Run `cortex init` or add your machine manually |
 | `profile-exists` | The profile YAML file exists in profiles/ | Create the profile file or fix the mapping in machines.yaml |
 | `profile-projects` | At least one project is listed in the profile | Add projects to your profile YAML |
-| `context-file` | ~/.cortex-context.md exists | Run `cortex link` or `cortex doctor --fix` to regenerate |
-| `root-memory` | The generated MEMORY.md exists | Run `cortex link` or `cortex doctor --fix` |
-| `global-link` | ~/.claude/CLAUDE.md symlinks to your cortex global | Run `cortex link` to re-create the symlink |
-| `symlink:<project>/<file>` | Per-project file symlinks are correct | Run `cortex link` to re-create symlinks |
+| `context-file` | ~/.cortex-context.md exists | Run `cortex doctor --fix` or rerun `cortex init` to regenerate |
+| `root-memory` | The generated MEMORY.md exists | Run `cortex doctor --fix` or rerun `cortex init` |
+| `global-link` | ~/.claude/CLAUDE.md symlinks to your cortex global | Run `cortex doctor --fix` or rerun `cortex init` |
+| `symlink:<project>/<file>` | Per-project file symlinks are correct | Run `cortex doctor --fix` or rerun `cortex init` |
 | `claude-hooks` | Prompt hook is configured in settings.json | Run `cortex init` to reconfigure hooks |
 | `lifecycle-hooks` | Session-start and stop hooks are configured | Run `cortex init` to reconfigure hooks |
 | `runtime-health-file` | The runtime health tracker file exists | Will be created on next hook run |

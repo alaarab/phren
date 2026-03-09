@@ -330,7 +330,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
 
   const detected = detectInstalledTools();
   if (detected.has("copilot")) {
-    const copilotHooks = homePath(".github", "hooks", "cortex.json");
+    const copilotHooks = hookConfigPath("copilot", cortexPath);
     checks.push({
       name: "copilot-hooks",
       ok: fs.existsSync(copilotHooks),
@@ -343,7 +343,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     });
   }
   if (detected.has("cursor")) {
-    const cursorHooks = homePath(".cursor", "hooks.json");
+    const cursorHooks = hookConfigPath("cursor", cortexPath);
     checks.push({
       name: "cursor-hooks",
       ok: fs.existsSync(cursorHooks),
@@ -356,7 +356,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     });
   }
   if (detected.has("codex")) {
-    const codexHooks = path.join(cortexPath, "codex.json");
+    const codexHooks = hookConfigPath("codex", cortexPath);
     checks.push({
       name: "codex-hooks",
       ok: fs.existsSync(codexHooks),
@@ -438,9 +438,9 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     const missing: string[] = [];
     for (const tool of detectedTools) {
       let configPath = "";
-      if (tool === "copilot") configPath = homePath(".github", "hooks", "cortex.json");
-      else if (tool === "cursor") configPath = homePath(".cursor", "hooks.json");
-      else if (tool === "codex") configPath = path.join(cortexPath, "codex.json");
+      if (tool === "copilot" || tool === "cursor" || tool === "codex") {
+        configPath = hookConfigPath(tool, cortexPath);
+      }
       if (configPath && fs.existsSync(configPath)) hookChecks.push(tool);
       else if (configPath) missing.push(tool);
     }

@@ -8,6 +8,7 @@ import {
   buildSourceDocKey,
   queryRows,
   resolveImports,
+  normalizeIndexedContent,
   detectProject,
   extractSnippet,
   rowToDoc,
@@ -152,6 +153,28 @@ describe("resolveImports", () => {
     } finally {
       fs.rmSync(linkedCortex, { force: true, recursive: true });
     }
+  });
+});
+
+describe("normalizeIndexedContent", () => {
+  it("strips finding provenance comments before indexing", () => {
+    const cortex = makeCortex();
+    const normalized = normalizeIndexedContent(
+      `# proj FINDINGS
+
+## 2026-03-09
+
+- Safe refactors stay incremental <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex model:gpt-5 -->
+  <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","backlog_item":"deadbeef"} -->
+`,
+      "findings",
+      cortex,
+    );
+
+    expect(normalized).toContain("Safe refactors stay incremental");
+    expect(normalized).not.toContain("created:");
+    expect(normalized).not.toContain("source:");
+    expect(normalized).not.toContain("cortex:cite");
   });
 });
 

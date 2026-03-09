@@ -31,6 +31,7 @@ import type { McpContext } from "./mcp-types.js";
 import { errorMessage } from "./utils.js";
 import { runTopLevelCommand } from "./entrypoint.js";
 import { startEmbeddingWarmup } from "./startup-embedding.js";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 const handledTopLevelCommand = await runTopLevelCommand(process.argv.slice(2));
 
@@ -50,7 +51,6 @@ const PACKAGE_VERSION = (() => {
     return "0.0.0";
   }
 })();
-const profile = process.env.CORTEX_PROFILE || "";
 const TOOL_NAME_ALIASES: Record<string, string> = {
   // Backwards compat: old clients calling search_cortex still resolve
   search_cortex: "search_knowledge",
@@ -81,6 +81,7 @@ function cleanStaleLocks(cortexPath: string): void {
 }
 
 async function main() {
+  const profile = resolveRuntimeProfile(cortexPath);
   cleanStaleLocks(cortexPath);
   let db: Awaited<ReturnType<typeof buildIndex>> | null = null;
   let indexReady = false;
@@ -156,13 +157,14 @@ async function main() {
   // Track MCP tool calls for telemetry (opt-in only, best-effort)
   const { trackToolCall } = await import("./telemetry.js");
   const origRegisterTool = server.registerTool.bind(server);
-  // server.registerTool uses `any` for config/handler because @modelcontextprotocol/sdk
-  // exposes these as complex intersection types that TypeScript cannot easily parameterize.
-  // The real type safety comes from each domain module's z.object() inputSchema.
-  // Tightening further requires upstream SDK changes (tracked in SDK issue tracker).
-  server.registerTool = function (name: string, config: any, handler: any) {
+  type RegisterToolFn = typeof server.registerTool;
+  type RegisterToolArgs = Parameters<RegisterToolFn>;
+  type RegisterToolName = RegisterToolArgs[0];
+  type RegisterToolConfig = RegisterToolArgs[1];
+  type RegisterToolHandler = (...args: unknown[]) => unknown;
+  server.registerTool = function (name: RegisterToolName, config: RegisterToolConfig, handler: RegisterToolHandler) {
     const registeredName = TOOL_NAME_ALIASES[name] ?? name;
-    const wrapped = async (...args: any[]) => {
+    const wrapped = async (...args: unknown[]) => {
       if (!indexReady || !db) {
         return {
           content: [{
@@ -182,7 +184,7 @@ async function main() {
     if (registeredName !== name) {
       debugLog(`Remapped MCP tool "${name}" to canonical name "${registeredName}"`);
     }
-    return origRegisterTool(registeredName, config, wrapped);
+    return origRegisterTool(registeredName, config, wrapped as RegisterToolArgs[2]);
   } as typeof server.registerTool;
 
   // Register all tool handlers from domain modules

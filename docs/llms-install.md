@@ -49,7 +49,7 @@ cortex migrate-findings <project> --dry-run
 
 Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, cortex creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (47)
+## MCP Tools (48)
 
 ### Search and Browse
 
@@ -74,7 +74,7 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `add_finding` | `project`, `finding`, `citation?: { file?, line?, repo?, commit? }`, `sessionId?` | Append an insight to FINDINGS.md with optional source citation. Pass `sessionId` to update session metrics. |
+| `add_finding` | `project`, `finding`, `citation?: { file?, line?, repo?, commit?, backlog_item? }`, `sessionId?` | Append an insight to FINDINGS.md with optional source citation. Pass `sessionId` to update session metrics. |
 | `add_findings` | `project`, `findings[]`, `sessionId?` | Bulk add multiple findings in one call. Pass `sessionId` to update session metrics. |
 | `remove_finding` | `project`, `finding` | Remove a finding by text match. Use when an insight is wrong or outdated. |
 | `remove_findings` | `project`, `findings[]` | Bulk remove multiple findings in one call. |
@@ -91,6 +91,7 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
+| `add_project` | `path`, `profile?` | Bootstrap a repo or working directory into cortex and add it to the active profile. |
 | `export_project` | `project` | Export a project's data (findings, backlog, summary) as portable JSON. |
 | `import_project` | `data` | Import project data from a previously exported JSON payload. |
 | `manage_project` | `project`, `action` | Archive or unarchive a project. |

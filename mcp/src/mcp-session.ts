@@ -9,6 +9,7 @@ import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
 import { readExtractedFacts } from "./mcp-extract-facts.js";
+import { resolveFindingSessionId } from "./finding-context.js";
 
 interface SessionState {
   sessionId: string;
@@ -230,14 +231,17 @@ function migrateLegacySession(cortexPath: string): SessionState | null {
   }
 }
 
-/** Increment the findingsAdded counter for a session. Requires an explicit sessionId; no-ops without one. */
-export function incrementSessionFindings(cortexPath: string, count = 1, sessionId?: string): void {
+/** Increment the findingsAdded counter for a session. Falls back to the most relevant active session for the project. */
+export function incrementSessionFindings(cortexPath: string, count = 1, sessionId?: string, project?: string): void {
   try {
-    if (!sessionId) {
-      debugLog("incrementSessionFindings called without explicit sessionId — skipping");
+    const effectiveSessionId = project
+      ? resolveFindingSessionId(cortexPath, project, sessionId)
+      : sessionId;
+    if (!effectiveSessionId) {
+      debugLog("incrementSessionFindings called without a resolvable sessionId — skipping");
       return;
     }
-    const resolved = resolveSessionFile(cortexPath, sessionId);
+    const resolved = resolveSessionFile(cortexPath, effectiveSessionId);
     if (!resolved) return;
     const { file } = resolved;
     withFileLock(file, () => {

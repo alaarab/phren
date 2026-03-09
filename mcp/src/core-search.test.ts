@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { rankResults, selectSnippets } from "./cli-hooks-retrieval.js";
+import { rankResults, selectSnippets } from "./shared-retrieval.js";
 import { queryRows, type DbRow, type SqlJsDatabase } from "./shared-index.js";
 import type { DocRow } from "./shared-index.js";
 import { buildRobustFtsQuery, extractKeywords } from "./utils.js";
