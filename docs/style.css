@@ -241,9 +241,19 @@ nav.scrolled {
   animation: fadeUp 0.8s ease forwards 0.45s;
 }
 
+.hero-cta-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease forwards 0.4s;
+}
+
 .hero-install-tabs {
   width: 100%;
   max-width: 660px;
+  scroll-margin-top: 80px;
   opacity: 0;
   animation: fadeUp 0.8s ease forwards 0.5s;
 }
