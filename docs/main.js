@@ -280,7 +280,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
       activeTab: 'Health',
       rows: [
         { kind: 'health-ok' },
-        { kind: 'health-kv', key: 'machine', value: 'QL-PF5A48WS' },
+        { kind: 'health-kv', key: 'machine', value: 'dev-laptop' },
         { kind: 'health-kv', key: 'profile',  value: 'main · 5 projects' },
         { kind: 'health-sep' },
         { kind: 'health-kv', key: 'Hooks',    value: 'Claude Code · Copilot CLI · Codex' },
@@ -316,12 +316,8 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     return mkEl('div', 'demo-shell-sep-line');
   }
 
-  function makeTabBar(activeTab, project) {
+  function makeTabBar(activeTab) {
     const bar = mkEl('div', 'demo-shell-tabbar');
-    if (project) {
-      bar.appendChild(mkEl('span', 'demo-shell-tabbar-proj', project));
-      bar.appendChild(mkEl('span', 'demo-shell-tabbar-arr', ' › '));
-    }
     TAB_DEFS.forEach((tab, i) => {
       if (i > 0) bar.appendChild(mkEl('span', 'demo-shell-tabbar-pipe', ' │ '));
       const active = tab.id === activeTab;
@@ -415,7 +411,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     }
     screen.appendChild(hdr);
     screen.appendChild(makeSepLine());
-    screen.appendChild(makeTabBar(scene.activeTab, scene.project));
+    screen.appendChild(makeTabBar(scene.activeTab));
     screen.appendChild(makeSepLine());
 
     const panel = mkEl('div', 'demo-shell-panel');
