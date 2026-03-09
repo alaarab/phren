@@ -261,8 +261,9 @@
       <h1 class="hero-title">Long-Term Memory for AI Agents.<br><em>Cortex fixes that.</em></h1>
 
       <p class="hero-sub">
-        <span class="hero-sub-line">Persistent memory that searches, synthesizes, and syncs across machines.</span>
-        <span class="hero-sub-line">Every session builds on the last instead of starting from zero.</span>
+        <span class="hero-sub-line">Agents forget between sessions.</span>
+        <span class="hero-sub-line">Cortex captures what matters.</span>
+        <span class="hero-sub-line">Shared across tools, machines, and sessions.</span>
       </p>
 
       <div class="hero-actions">
@@ -279,29 +280,23 @@
         </a>
       </div>
 
-      <!-- Rotating terminal -->
+      <!-- Static install terminal -->
       <div class="hero-terminal">
         <div class="terminal-bar">
           <div class="terminal-dot terminal-dot-red"></div>
           <div class="terminal-dot terminal-dot-yellow"></div>
           <div class="terminal-dot terminal-dot-green"></div>
-          <span class="terminal-title">cortex workflow</span>
+          <span class="terminal-title">terminal</span>
         </div>
         <div class="terminal-body">
           <div class="terminal-line">
-            <span class="terminal-prompt" id="terminal-prompt">$</span>
+            <span class="terminal-prompt">$</span>
             <div class="terminal-cmd-wrap">
-              <span class="terminal-cmd" id="terminal-cmd">npx @alaarab/cortex init</span>
+              <span class="terminal-cmd">npx @alaarab/cortex init</span>
             </div>
           </div>
         </div>
-        <div class="terminal-step-label" id="terminal-label">Run once: <span id="step-num">creates the memory layer</span></div>
-        <div class="terminal-progress">
-          <div class="terminal-progress-dot active" id="dot-0"></div>
-          <div class="terminal-progress-dot" id="dot-1"></div>
-          <div class="terminal-progress-dot" id="dot-2"></div>
-          <div class="terminal-progress-dot" id="dot-3"></div>
-        </div>
+        <div class="terminal-step-label">Run once &mdash; registers MCP + hooks for Claude Code, Copilot, Cursor, and Codex.</div>
       </div>
 
     </div>
@@ -318,29 +313,29 @@
         <div class="step reveal reveal-delay-1">
           <div class="step-num">01</div>
           <div class="step-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
-          <div class="step-title">Context injected on every prompt</div>
-          <p class="step-desc">When you send a message, hooks extract keywords, search the memory store, and inject only the relevant findings into context -- about 550 tokens, not the whole file.</p>
-          <span class="step-code">SessionStart + UserPromptSubmit</span>
+          <div class="step-title">Claude saves findings through MCP</div>
+          <p class="step-desc">As you work, Claude calls <code>add_finding</code>, <code>add_backlog_item</code>, and <code>search_knowledge</code> through MCP. Findings land in <code>~/.cortex/project/FINDINGS.md</code> automatically.</p>
+          <span class="step-code">add_finding · search_knowledge · add_backlog_item</span>
         </div>
         <div class="step reveal reveal-delay-2">
           <div class="step-num">02</div>
           <div class="step-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           </div>
-          <div class="step-title">Findings captured after every response</div>
-          <p class="step-desc">MCP tools and the Stop hook save new findings, update backlog, and commit changes. Nothing to remember to do manually.</p>
-          <span class="step-code">Stop hook</span>
+          <div class="step-title">Git-backed and synced automatically</div>
+          <p class="step-desc">The Stop hook commits and pushes after every response. SessionStart pulls on open. Switch machines mid-task. Profiles control which projects each machine sees.</p>
+          <span class="step-code">Stop hook · SessionStart · git-backed sync</span>
         </div>
         <div class="step reveal reveal-delay-3">
           <div class="step-num">03</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
-          <div class="step-title">Synced across machines</div>
-          <p class="step-desc">Git push on stop, git pull on start. Switch machines mid-task. Profiles control which projects each machine sees.</p>
-          <span class="step-code">git-backed sync</span>
+          <div class="step-title">Shell and review UI when you want them</div>
+          <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>cortex</code> opens the interactive shell. <code>cortex review-ui</code> opens the browser with your memory graph and review queue.</p>
+          <span class="step-code">cortex · cortex review-ui</span>
         </div>
       </div>
     </div>
@@ -560,6 +555,45 @@
           <span class="terminal-title">cortex shell</span>
         </div>
         <div class="demo-terminal-body" id="demo-terminal-body"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REVIEW UI -->
+  <section class="review-ui-section" id="review-ui">
+    <div class="container">
+      <div class="review-ui-header reveal">
+        <div class="section-label">Memory management</div>
+        <h2 class="section-title">Review UI and memory graph.</h2>
+        <p class="section-sub" style="margin-top:12px">When you want to see everything at once: <code style="font-size:14px;color:var(--copper-mid)">cortex review-ui</code> opens a browser UI with your memory graph, finding quality scores, review queue, and backlog. Browse what your agents know, approve or reject queued memories, and see how findings connect across projects.</p>
+      </div>
+      <div class="review-ui-cards reveal">
+        <div class="rui-card">
+          <div class="rui-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="19.07" y1="4.93" x2="16.24" y2="7.76"/><line x1="7.76" y1="16.24" x2="4.93" y2="19.07"/></svg>
+          </div>
+          <div class="rui-card-title">Memory graph</div>
+          <p class="rui-card-desc">See how findings connect to entities across projects. Spot patterns, redundancy, and gaps.</p>
+        </div>
+        <div class="rui-card">
+          <div class="rui-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          </div>
+          <div class="rui-card-title">Review queue</div>
+          <p class="rui-card-desc">Approve or reject memories flagged for review. Keeps the store accurate without manual triage.</p>
+        </div>
+        <div class="rui-card">
+          <div class="rui-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </div>
+          <div class="rui-card-title">Quality scores</div>
+          <p class="rui-card-desc">Confidence decay, citation validity, and consolidation status per project. Know what's stale before it misleads.</p>
+        </div>
+      </div>
+      <div class="rui-cmd reveal">
+        <span class="rui-cmd-prompt">$</span>
+        <span class="rui-cmd-text">cortex review-ui</span>
+        <span class="rui-cmd-comment"># opens at localhost:3499</span>
       </div>
     </div>
   </section>

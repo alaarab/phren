@@ -89,61 +89,6 @@ window.addEventListener('scroll', () => {
   });
 })();
 
-// --- Rotating terminal command ---
-(function() {
-  const cmdEl = document.getElementById('terminal-cmd');
-  const promptEl = document.getElementById('terminal-prompt');
-  const labelEl = document.getElementById('terminal-label');
-  const dots = Array.from(document.querySelectorAll('.terminal-progress-dot'));
-  if (!cmdEl || !promptEl || !labelEl || dots.length === 0) return;
-
-  const steps = [
-    {
-      cmd: 'npx @alaarab/cortex init',
-      prefix: 'Run once:',
-      label: 'creates the memory layer',
-    },
-    {
-      cmd: 'cortex status',
-      prefix: 'Then:',
-      label: 'check hooks, sync, and project health',
-    },
-    {
-      cmd: 'cortex review-ui',
-      prefix: 'Review:',
-      label: 'backlog, findings, and queue in the browser',
-    },
-    {
-      cmd: 'context injected · findings saved · synced',
-      prefix: 'Daily:',
-      label: 'hooks handle the rest automatically',
-      output: true,
-    },
-  ];
-
-  let current = 0;
-
-  function advance() {
-    cmdEl.classList.add('fade-out');
-
-    setTimeout(() => {
-      current = (current + 1) % steps.length;
-      const step = steps[current];
-      cmdEl.textContent = step.cmd;
-      cmdEl.style.color = step.output ? 'var(--copper-mid)' : '';
-      promptEl.style.display = step.output ? 'none' : '';
-      cmdEl.classList.remove('fade-out');
-      cmdEl.classList.add('fade-in');
-      labelEl.innerHTML = `${step.prefix} <span id="step-num">${step.label}</span>`;
-
-      dots.forEach((d, i) => d.classList.toggle('active', i === current));
-
-      setTimeout(() => cmdEl.classList.remove('fade-in'), 300);
-    }, 280);
-  }
-
-  setInterval(advance, 3200);
-})();
 
 // --- Install tabs ---
 (function() {
