@@ -64,7 +64,7 @@
 \maketitle\vspace{-0.5em}
 
 \begin{abstract}
-\noindent Persistent memory is a first-order requirement for multi-session agent workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. The core argument is operational: memory quality must be optimized alongside auditability, governance, portability, and token predictability. Cortex requires no account, no API key, and no required hosted service in its default FTS5 path---\texttt{npx @alaarab/cortex init} bootstraps the local store. Retrieval runs against a local SQLite FTS5 index with no network hop, no token cost, and no rate limits. The main tradeoff is operational shape: managed alternatives reduce operator burden, while Cortex prioritizes portability, auditability, and ownership of the memory corpus. This report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, and separates \textit{architecture judgments} from \textit{measured performance}; sections without empirical data say so directly.
+\noindent Persistent memory is a first-order requirement for multi-session agent workflows. This report documents why Cortex chose a markdown-native, git-backed architecture with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. The core argument is operational: memory quality must be optimized alongside auditability, governance, portability, and token predictability. Cortex requires no account, no API key, and no required hosted service in its default FTS5 path; the store bootstraps locally and retrieval runs against a local SQLite FTS5 index with no network hop, no token cost, and no rate limits. The main tradeoff is operational shape: managed alternatives reduce operator burden, while Cortex prioritizes portability, auditability, and ownership of the memory corpus. This report compares Cortex to Supermemory, claude-mem, and GitHub Copilot Memory, and separates \textit{architecture judgments} from \textit{measured performance}; sections without empirical data say so directly.
 \end{abstract}
 
 \vspace{0.4em}
@@ -256,7 +256,7 @@ No comparable public retrieval-latency benchmark exists across all systems; cros
 \toprule
 \textbf{System} & \textbf{Best fit when...} & \textbf{Main tradeoff} \\
 \midrule
-Cortex 1.20.0 &
+Cortex &
 You want owner-operated memory, git auditability, explicit governance, stable token budgets, and a CLI/shell workflow that works across tools. &
 You accept eventual consistency at the git layer, more operator responsibility, and a more complex local setup story than a managed service. \\
 Supermemory &
@@ -355,7 +355,7 @@ A widened 16-query run on the same warm store averaged 14.71\,ms lexical latency
 
 \textbf{Residual retrieval uncertainty.} The published March 9 benchmark set no longer has misses, but that is still bounded evidence for one corpus and one query set. Broader paraphrase-heavy evaluation is still needed before making stronger semantic-completeness claims.
 
-\textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure. Initial setup is guided by \texttt{npx @alaarab/cortex init}; advanced policy configuration requires direct CLI commands.
+\textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure. Initial setup is guided, but advanced policy configuration still requires direct CLI commands.
 
 \textbf{Review UI is opt-in.} \texttt{cortex review-ui} is not started automatically; memory triage requires an explicit invocation. This is intentional---triage is a deliberate act, not an ambient background process.
 
@@ -366,7 +366,7 @@ The decision is less about ``who retrieves best on a single prompt'' and more ab
 
 Multi-agent support is increasingly non-optional. As workflows move from single-agent to team coordination, memory systems that assume serial sessions become a bottleneck. Cortex's git-backed architecture provides a workable shared-memory baseline, with the acknowledged caveat that heavy concurrent writes create contention that requires care.
 
-Managed alternatives are a reasonable choice for teams already fully committed to a specific platform where memory comes bundled and data custody is not a concern. Cortex is strongest when the priority is owner-operated memory: local bootstrap, markdown as source of truth, predictable token discipline, and auditability through git. In practice, hooks auto-pull, auto-commit, and schedule maintenance around the workflow; consolidation itself is still surfaced explicitly when it is time to clean up findings. In the default FTS5 path there are no API costs, no rate limits, and no required hosted service, but there is still real operator responsibility around git sync, local setup, and occasional contention.
+Managed alternatives are a reasonable choice for teams already fully committed to a specific platform where memory comes bundled and data custody is not a concern. Cortex is strongest when the priority is owner-operated memory: markdown as source of truth, predictable token discipline, and auditability through git. In practice, hooks auto-pull, auto-commit, and schedule maintenance around the workflow; consolidation itself is still surfaced explicitly when it is time to clean up findings. In the default FTS5 path there are no API costs, no rate limits, and no required hosted service, but there is still real operator responsibility around git sync, local setup, and occasional contention.
 
 \end{multicols}
 
