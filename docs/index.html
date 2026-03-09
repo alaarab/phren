@@ -258,11 +258,11 @@
         Claude Code · Copilot · Cursor · Codex · MCP
       </div>
 
-      <h1 class="hero-title">Persistent memory for AI agents.<br><em>Git-backed. You own the store.</em></h1>
+      <h1 class="hero-title">Long-term memory for AI agents.<br><em>You own the store.</em></h1>
 
       <p class="hero-sub">
         <span class="hero-sub-line">Cortex captures what matters.</span>
-        <span class="hero-sub-line">Git-backed. Private. No cloud.</span>
+        <span class="hero-sub-line">Private. Local. Git-backed.</span>
         <span class="hero-sub-line">Shared across tools, machines, and sessions.</span>
       </p>
 
@@ -315,27 +315,24 @@
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
-          <div class="step-title">Claude saves findings through MCP</div>
-          <p class="step-desc">As you work, Claude calls <code>add_finding</code>, <code>add_backlog_item</code>, and <code>search_knowledge</code> through MCP. Findings land in <code>~/.cortex/project/FINDINGS.md</code> automatically.</p>
-          <span class="step-code">add_finding · search_knowledge · add_backlog_item</span>
+          <div class="step-title">Findings, entities, and memory captured</div>
+          <p class="step-desc">Claude calls MCP tools as you work. Findings go to <code>FINDINGS.md</code>, entities link across projects, and the confidence system decides what stays relevant. The store gets smarter the longer you use it.</p>
         </div>
         <div class="step reveal reveal-delay-2">
           <div class="step-num">02</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           </div>
-          <div class="step-title">Git-backed and synced automatically</div>
+          <div class="step-title">Synced across machines automatically</div>
           <p class="step-desc">The Stop hook commits and pushes after every response. SessionStart pulls on open. Switch machines mid-task. Profiles control which projects each machine sees.</p>
-          <span class="step-code">Stop hook · SessionStart · git-backed sync</span>
         </div>
         <div class="step reveal reveal-delay-3">
           <div class="step-num">03</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
-          <div class="step-title">Shell and review UI when you want them</div>
+          <div class="step-title">Shell and UI when you need them</div>
           <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>cortex</code> opens the interactive shell. <code>cortex review-ui</code> opens the browser with your memory graph and review queue.</p>
-          <span class="step-code">cortex · cortex review-ui</span>
         </div>
       </div>
     </div>
@@ -402,7 +399,7 @@
       <div class="bento-header reveal">
         <div class="section-label">Why cortex</div>
         <h2 class="section-title">Private. Local.<br>Git-backed.</h2>
-        <p class="section-sub" style="margin-top:12px">No vendor lock-in, no cloud account. Everything lives in a private git repo you own. Profiles keep work and personal separate. What one session learns, the next one gets -- across machines and tools. Stale findings decay. Useful patterns stick.</p>
+        <p class="section-sub" style="margin-top:12px">No vendor lock-in, no cloud account. Everything lives in a private git repo you own. Profiles keep work and personal separate. What one session learns, the next one gets. Across machines and tools. Stale findings decay. Useful patterns stick.</p>
       </div>
       <div class="bento-grid">
         <!-- Card 1: Targeted retrieval -->
@@ -495,7 +492,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
           <div class="feature-card-title">Search what you actually need</div>
-          <p class="feature-card-desc">FTS5 search with synonym expansion finds relevant context fast. Only matching snippets get injected -- no bloated context windows.</p>
+          <p class="feature-card-desc">FTS5 search with synonym expansion finds relevant context fast. Only matching snippets get injected. No bloated context windows.</p>
           <div class="feature-card-link"><a href="#how">How it works</a></div>
         </div>
 
@@ -708,7 +705,7 @@
       <div class="skills-header reveal">
         <div class="section-label">Workflow</div>
         <h2 class="section-title">MCP tools handle the work.<br>Skills are optional shortcuts.</h2>
-        <p class="section-sub" style="margin-top:12px">Cortex exposes MCP tools organized by workflow: search and retrieve context, capture findings and backlog, review memory quality, and sync across machines. Skills are shortcuts for common multi-step jobs -- not required for daily use. Add your own in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
+        <p class="section-sub" style="margin-top:12px">Cortex exposes MCP tools organized by workflow: search and retrieve context, capture findings and backlog, review memory quality, and sync across machines. Skills are shortcuts for common multi-step jobs. Not required for daily use. Add your own in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
       </div>
 
       <div class="skills-grid">
