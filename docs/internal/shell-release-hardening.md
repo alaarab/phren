@@ -27,5 +27,5 @@
 
 ## Rollback Path
 - Pin previous release from npm if required.
-- Re-run `cortex link --all-tools` after rollback to restore expected hook/script references.
+- Re-run `npx @alaarab/cortex init` after rollback to restore expected hook/script references.
 - Keep markdown docs/backlog files unchanged; no migration lock-in.

@@ -33,6 +33,39 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
+# 4. Public onboarding docs should not advertise legacy enrollment flows
+PUBLIC_DOCS=("README.md" "docs/faq.md" "docs/llms-install.md" "docs/index.html")
+LEGACY_PATTERNS=("cortex link" "projects add" "--from-existing")
+for doc in "${PUBLIC_DOCS[@]}"; do
+  for pattern in "${LEGACY_PATTERNS[@]}"; do
+    if grep -n -- "$pattern" "$doc" >/tmp/cortex-doc-grep.txt; then
+      if grep -viE 'legacy|compatibility' /tmp/cortex-doc-grep.txt >/tmp/cortex-doc-grep-unmarked.txt; then
+        echo "FAIL: $doc mentions legacy onboarding flow without a legacy/compatibility marker: $pattern"
+        cat /tmp/cortex-doc-grep-unmarked.txt
+        ERRORS=$((ERRORS + 1))
+      fi
+    fi
+  done
+done
+if [ "$ERRORS" -eq 0 ]; then
+  echo "OK: Public onboarding docs only advertise the supported enrollment flow"
+fi
+
+# 5. Supporting docs for platform behavior and error policy should exist
+for required in "docs/platform-matrix.md" "docs/error-reporting.md"; do
+  if [ ! -f "$required" ]; then
+    echo "FAIL: Missing required documentation file: $required"
+    ERRORS=$((ERRORS + 1))
+  fi
+done
+
+# 6. Public docs should not point at renamed support docs
+if grep -R -nE 'platform-support\.md|error-policy\.md' README.md docs >/tmp/cortex-doc-renames.txt; then
+  echo "FAIL: Found stale references to renamed docs:"
+  cat /tmp/cortex-doc-renames.txt
+  ERRORS=$((ERRORS + 1))
+fi
+
 if [ "$ERRORS" -gt 0 ]; then
   echo ""
   echo "$ERRORS validation error(s) found"

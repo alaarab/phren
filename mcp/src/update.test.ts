@@ -133,10 +133,15 @@ describe("runCortexUpdate", () => {
     const result = await runCortexUpdate();
 
     expect(result.ok).toBe(true);
-    expect(result.message).toBe("Updated cortex via npm global install (@latest).");
+    expect(result.message).toBe("Updated cortex via npm global install (@latest) and verified the package is installed.");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "npm",
       ["install", "-g", "@alaarab/cortex@latest"],
+      expect.objectContaining({ encoding: "utf8" })
+    );
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "npm",
+      ["list", "-g", "@alaarab/cortex", "--depth=0"],
       expect.objectContaining({ encoding: "utf8" })
     );
   });

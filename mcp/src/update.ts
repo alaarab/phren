@@ -70,7 +70,8 @@ export async function runCortexUpdate(): Promise<UpdateResult> {
 
   try {
     run("npm", ["install", "-g", "@alaarab/cortex@latest"]);
-    return { ok: true, message: "Updated cortex via npm global install (@latest)." };
+    run("npm", ["list", "-g", "@alaarab/cortex", "--depth=0"]);
+    return { ok: true, message: "Updated cortex via npm global install (@latest) and verified the package is installed." };
   } catch (err: unknown) {
     const detail = errorMessage(err);
     return { ok: false, message: `Global update failed: ${detail}. Try manually: npm install -g @alaarab/cortex@latest` };

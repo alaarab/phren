@@ -20,7 +20,8 @@ import {
   migrateGovernanceFiles,
 } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
-import { ROOT, STARTER_DIR } from "./init-shared.js";
+import { ROOT, STARTER_DIR, VERSION } from "./init-shared.js";
+import { readInstallPreferences } from "./init-preferences.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -668,6 +669,18 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     ok: govOk,
     detail: govOk ? ".governance/ config directory exists" : ".governance/ config directory missing",
     fix: govOk ? undefined : "Run `npx @alaarab/cortex init` to create governance config",
+  });
+
+  const prefs = readInstallPreferences(cortexPath);
+  const installedVersion = prefs.installedVersion;
+  const versionOk = !govOk || installedVersion === VERSION;
+  checks.push({
+    name: "installed-version",
+    ok: versionOk,
+    detail: installedVersion
+      ? (versionOk ? `install metadata matches running version (${VERSION})` : `install metadata is ${installedVersion}, runtime is ${VERSION}`)
+      : "install metadata missing installedVersion",
+    fix: versionOk ? undefined : "Run `cortex update` or `npx @alaarab/cortex init` to refresh install metadata.",
   });
 
   let ftsOk = false;

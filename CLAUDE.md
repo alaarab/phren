@@ -11,7 +11,7 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 47 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 48 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findCortexPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
 | `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, memory queue, audit log |
@@ -19,7 +19,7 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 | `mcp/src/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
 | `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
 | `mcp/src/init.ts` | `npx @alaarab/cortex init`: configures MCP + hooks for all detected agents |
-| `mcp/src/link.ts` | `npx @alaarab/cortex link`: sync profile, symlinks, hooks, context |
+| `mcp/src/link.ts` | Legacy compatibility command for older installs; not the recommended onboarding path |
 | `mcp/src/data-access.ts` | Data layer: backlog CRUD, machine/profile listing, finding management |
 | `mcp/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
 | `mcp/src/status.ts` | `cortex status`: health, project, stats overview |
@@ -34,15 +34,15 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 ```bash
 cd ~/cortex
 npm run build      # compile TypeScript
-npm test           # run vitest tests (1330+ tests)
+npm test           # run the vitest suite
 npm publish        # publish to npm (needs OTP)
 ```
 
 ## Current Version
 
-v1.19.0
+v1.23.0
 
-## MCP Tools (47)
+## MCP Tools (48)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -122,9 +122,7 @@ cortex uninstall                       Remove cortex config and hooks
 cortex update                          Update to latest version
 
 cortex projects list                   List all projects
-cortex projects add <name>             Create a new project
 cortex projects remove <name>          Remove a project (confirmation required)
-cortex link [--machine <n>] [--profile <n>]  Sync profile, symlinks, hooks
 cortex mcp-mode [on|off|status]        Toggle MCP integration
 cortex hooks-mode [on|off|status]      Toggle hook execution
 
@@ -212,7 +210,7 @@ Legacy files at the root are auto-migrated on first access.
 - `@import shared/file.md` in indexed docs resolves to global/ dir, with cycle detection and depth cap
 - `reference/` subdirectories in projects are classified as reference type in FTS index (legacy `knowledge/` also accepted)
 - Backlog done sections stripped from FTS index to reduce noise
-- Init supports `--template` (python-project, monorepo, library, frontend) and `--from-existing <path>`
+- Init supports `--template` (python-project, monorepo, library, frontend); `--from-existing` is hidden legacy compatibility
 
 ## Environment Variables
 

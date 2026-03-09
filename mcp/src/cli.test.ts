@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import { grantAdmin, makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -19,22 +19,21 @@ function ensureCliBuilt(): void {
 }
 
 function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
-  try {
-    ensureCliBuilt();
-    const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
-      encoding: "utf8",
-      env: { ...process.env, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30000,
-    });
-    return { stdout, stderr: "", exitCode: 0 };
-  } catch (err: any) {
-    return {
-      stdout: err.stdout?.toString() || "",
-      stderr: err.stderr?.toString() || "",
-      exitCode: err.status ?? 1,
-    };
+  ensureCliBuilt();
+  const result = spawnSync(process.execPath, [CLI_PATH, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 30000,
+  });
+  if (result.error) {
+    throw result.error;
   }
+  return {
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+    exitCode: result.status ?? 1,
+  };
 }
 
 function setupCortexDir(): { cortexDir: string; cleanup: () => void } {
@@ -256,24 +255,15 @@ describe("CLI integration: projects add", () => {
 
   afterEach(() => cleanup());
 
-  it("canonicalizes uppercase names to lowercase on create", () => {
-    const { stdout, exitCode } = runCli(
+  it("fails with a deprecation error instead of mutating state", () => {
+    const { stderr, exitCode } = runCli(
       ["projects", "add", "Cortex"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain('Created project "cortex"');
-    expect(fs.existsSync(path.join(cortexDir, "cortex"))).toBe(true);
-  });
-
-  it("rejects creating a lowercase canonical project when a differently cased dir already exists", () => {
-    fs.mkdirSync(path.join(cortexDir, "Cortex"), { recursive: true });
-    const { stderr, exitCode } = runCli(
-      ["projects", "add", "cortex"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("already exists with different casing");
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("removed from the supported workflow");
+    expect(stderr).toContain("cortex add");
+    expect(fs.existsSync(path.join(cortexDir, "cortex"))).toBe(false);
   });
 });
 
@@ -1766,6 +1756,13 @@ describe("CLI integration: help and health", () => {
     const { exitCode } = runCli(["--health"]);
     expect(exitCode).toBe(0);
   });
+
+  it("link command prints a legacy compatibility warning", () => {
+    const { stderr, exitCode } = runCli(["link", "--mcp", "bogus"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("legacy compatibility");
+    expect(stderr).toContain("Prefer `npx @alaarab/cortex init`");
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2164,11 +2161,12 @@ describe("CLI integration: init --from-existing", () => {
       "# my-app\n\nA web application for managing tasks.\n\n## Commands\n\n```bash\nnpm run dev\nnpm test\n```\n"
     );
 
-    const { stdout, exitCode } = runCli(
+    const { stdout, stderr, exitCode } = runCli(
       ["init", "-y", "--from-existing", projectDir],
       { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
+    expect(stderr).toContain("legacy compatibility");
     expect(stdout).toContain("Bootstrapped project");
     expect(stdout).toContain("my-app");
 
@@ -2191,11 +2189,12 @@ describe("CLI integration: init --from-existing", () => {
       "# my-app\n\nProject with nested CLAUDE.md.\n"
     );
 
-    const { stdout, exitCode } = runCli(
+    const { stdout, stderr, exitCode } = runCli(
       ["init", "-y", "--from-existing", projectDir],
       { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
+    expect(stderr).toContain("legacy compatibility");
     expect(stdout).toContain("Bootstrapped project");
     expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
   }, CLI_INTEGRATION_TIMEOUT_MS);

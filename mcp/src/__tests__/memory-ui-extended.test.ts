@@ -171,6 +171,36 @@ describe.sequential("review-ui auth token protection", () => {
     expect(res.status).toBe(200);
     expect(res.body).toContain(authToken);
   });
+
+  it("GET /api/csrf-token returns 401 without auth token", async () => {
+    const res = await httpGet(port, "/api/csrf-token");
+    expect(res.status).toBe(401);
+    expect(res.body).toContain("Unauthorized");
+  });
+
+  it("GET /api/hooks returns 401 without auth token", async () => {
+    const res = await httpGet(port, "/api/hooks");
+    expect(res.status).toBe(401);
+    expect(res.body).toContain("Unauthorized");
+  });
+
+  it("GET /api/review-queue returns 401 without auth token", async () => {
+    const res = await httpGet(port, "/api/review-queue");
+    expect(res.status).toBe(401);
+    expect(res.body).toContain("Unauthorized");
+  });
+
+  it("GET /api/review-activity returns 401 without auth token", async () => {
+    const res = await httpGet(port, "/api/review-activity");
+    expect(res.status).toBe(401);
+    expect(res.body).toContain("Unauthorized");
+  });
+
+  it("GET /api/project-content returns 401 without auth token", async () => {
+    const res = await httpGet(port, "/api/project-content?project=demo&file=FINDINGS.md");
+    expect(res.status).toBe(401);
+    expect(res.body).toContain("Unauthorized");
+  });
 });
 
 describe.sequential("review-ui graph API", () => {
@@ -562,6 +592,7 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
   let server: http.Server | null = null;
   let port = 0;
   let authToken: string;
+  let csrfTokens: Map<string, number>;
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
@@ -570,7 +601,8 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
     process.env.CORTEX_ACTOR = "review-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "skill-auth-token";
-    server = createReviewUiServer(tmpRoot, { authToken });
+    csrfTokens = new Map<string, number>();
+    server = createReviewUiServer(tmpRoot, { authToken, csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -614,14 +646,29 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
 
   it("POST /api/skill-save succeeds with correct auth token", async () => {
     const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
     const res = await postForm(port, "/api/skill-save", {
       _auth: authToken,
+      _csrf: csrf,
       path: skillPath,
       content: "# Test skill",
     });
     expect(res.status).toBe(200);
     const data = JSON.parse(res.body);
     expect(data.ok).toBe(true);
+  });
+
+  it("POST /api/skill-save rejects missing CSRF when auth is correct", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    const res = await postForm(port, "/api/skill-save", {
+      _auth: authToken,
+      path: skillPath,
+      content: "# Test skill",
+    });
+    expect(res.status).toBe(403);
+    expect(JSON.parse(res.body).error).toContain("CSRF");
   });
 
   it("GET /api/skills returns 401 without auth token", async () => {
@@ -634,6 +681,34 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("GET /api/hooks requires auth", async () => {
+    const denied = await httpGet(port, "/api/hooks");
+    expect(denied.status).toBe(401);
+
+    const allowed = await httpGet(port, "/api/hooks?_auth=" + encodeURIComponent(authToken));
+    expect(allowed.status).toBe(200);
+  });
+
+  it("GET /api/skill-content rejects invalid paths even with auth", async () => {
+    const res = await httpGet(port, "/api/skill-content?_auth=" + encodeURIComponent(authToken) + "&path=" + encodeURIComponent("/tmp/nope.md"));
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toContain("Invalid path");
+  });
+
+  it("GET /api/skill-content returns file contents for allowed paths", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "existing-skill.md");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, "# Existing skill\n");
+    const res = await httpGet(
+      port,
+      "/api/skill-content?_auth=" + encodeURIComponent(authToken) + "&path=" + encodeURIComponent(skillPath)
+    );
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.content).toContain("Existing skill");
+  });
+
   it("POST /api/skill-save rejects symlink traversal for new files", async () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-skill-escape-"));
     const linkRoot = path.join(tmpRoot, "global", "skills", "escape");
@@ -642,7 +717,7 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
 
     const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
     expect(csrfRes.status).toBe(200);
-    const csrf = JSON.parse(csrfRes.body).csrfToken as string;
+    const csrf = JSON.parse(csrfRes.body).token as string;
     const escapedPath = path.join(linkRoot, "pwned.md");
 
     const res = await postForm(port, "/api/skill-save", {
@@ -657,9 +732,10 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
     expect(data.error).toContain("Invalid path");
     expect(fs.existsSync(path.join(outsideDir, "pwned.md"))).toBe(false);
   });
+
 });
 
-describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
+describe.sequential("review-ui project-content validation", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -668,12 +744,71 @@ describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-project-content-auth-"));
+    seedProject(tmpRoot);
+    process.env.CORTEX_ACTOR = "review-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "project-content-auth-token";
+    server = createReviewUiServer(tmpRoot, { authToken });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
+    else process.env.CORTEX_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("GET /api/project-content rejects non-whitelisted files", async () => {
+    const res = await httpGet(
+      port,
+      "/api/project-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("MEMORY_QUEUE.md")
+    );
+    expect(res.status).toBe(400);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("File not allowed");
+  });
+
+  it("GET /api/project-content returns allowed file contents", async () => {
+    const res = await httpGet(
+      port,
+      "/api/project-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("FINDINGS.md")
+    );
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.content).toContain("Use WAL mode for SQLite");
+  });
+});
+
+describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  let csrfTokens: Map<string, number>;
+  const priorActor = process.env.CORTEX_ACTOR;
+
+  beforeEach(async () => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hook-auth-"));
     seedProject(tmpRoot);
     process.env.CORTEX_ACTOR = "review-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "hook-auth-token";
-    server = createReviewUiServer(tmpRoot, { authToken });
+    csrfTokens = new Map<string, number>();
+    server = createReviewUiServer(tmpRoot, { authToken, csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -712,13 +847,26 @@ describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
   });
 
   it("POST /api/hook-toggle succeeds with correct auth token", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
     const res = await postForm(port, "/api/hook-toggle", {
       _auth: authToken,
+      _csrf: csrf,
       tool: "claude",
     });
     expect(res.status).toBe(200);
     const data = JSON.parse(res.body);
     expect(data.ok).toBe(true);
+  });
+
+  it("POST /api/hook-toggle rejects missing CSRF when auth is correct", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      _auth: authToken,
+      tool: "claude",
+    });
+    expect(res.status).toBe(403);
+    expect(JSON.parse(res.body).error).toContain("CSRF");
   });
 });
 
@@ -728,6 +876,7 @@ describe.sequential("review-ui JSON API auth for approve/reject/edit (Q13)", () 
   let server: http.Server | null = null;
   let port = 0;
   let authToken: string;
+  let csrfTokens: Map<string, number>;
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
@@ -736,7 +885,8 @@ describe.sequential("review-ui JSON API auth for approve/reject/edit (Q13)", () 
     process.env.CORTEX_ACTOR = "review-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "json-api-auth-token";
-    server = createReviewUiServer(tmpRoot, { authToken });
+    csrfTokens = new Map<string, number>();
+    server = createReviewUiServer(tmpRoot, { authToken, csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -782,13 +932,86 @@ describe.sequential("review-ui JSON API auth for approve/reject/edit (Q13)", () 
   });
 
   it("POST /api/approve succeeds with correct auth", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
     const res = await postForm(port, "/api/approve", {
       _auth: authToken,
+      _csrf: csrf,
       project: "demo",
       line: "- [2026-03-05] Keep this memory [confidence 0.90]",
     });
     expect(res.status).toBe(200);
     const data = JSON.parse(res.body);
     expect(data.ok).toBe(true);
+  });
+
+  it("POST /api/reject succeeds with correct auth", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+    const res = await postForm(port, "/api/reject", {
+      _auth: authToken,
+      _csrf: csrf,
+      project: "demo",
+      line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+  });
+
+  it("POST /api/edit succeeds with correct auth", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+    const res = await postForm(port, "/api/edit", {
+      _auth: authToken,
+      _csrf: csrf,
+      project: "demo",
+      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      new_text: "Updated workflow-safe memory",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+  });
+
+  it("POST /api/approve rejects missing CSRF when auth is correct", async () => {
+    const res = await postForm(port, "/api/approve", {
+      _auth: authToken,
+      project: "demo",
+      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+    });
+    expect(res.status).toBe(403);
+    expect(JSON.parse(res.body).error).toContain("CSRF");
+  });
+
+  it("POST /api/reject returns 400 for invalid project names", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+    const res = await postForm(port, "/api/reject", {
+      _auth: authToken,
+      _csrf: csrf,
+      project: "../escape",
+      line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toContain("Missing or invalid");
+  });
+
+  it("POST /api/edit returns 400 when project or line is missing", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+    const res = await postForm(port, "/api/edit", {
+      _auth: authToken,
+      _csrf: csrf,
+      project: "demo",
+      new_text: "Updated workflow-safe memory",
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toContain("Missing or invalid");
   });
 });

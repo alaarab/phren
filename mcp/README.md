@@ -2,7 +2,7 @@
 
 MCP server that indexes your personal cortex and exposes it to AI agents via full-text search.
 
-On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index. 40 tools let agents search, browse, manage backlogs, capture findings, and track entities across your projects.
+On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index. 48 tools let agents search, browse, manage backlogs, capture findings, and track entities across your projects.
 
 ## Install
 
@@ -21,9 +21,7 @@ claude mcp add cortex -- npx -y @alaarab/cortex ~/.cortex
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CORTEX_PATH` | `~/.cortex` | Path to your cortex instance |
-| `CORTEX_PROFILE` | *(none)* | Active profile name. Reads `profiles/<name>.yaml` to filter projects |
-
-If no profile is set, all top-level directories in the cortex are indexed.
+| `CORTEX_PROFILE` | *(none)* | Active profile name. When unset, cortex uses `machines.yaml` when available and otherwise falls back to an unscoped view |
 
 ## Tools
 
@@ -57,8 +55,8 @@ No parameters.
 ## How it works
 
 1. Reads `CORTEX_PATH` (or defaults to `~/.cortex`)
-2. If `CORTEX_PROFILE` is set, reads `profiles/<profile>.yaml` for the project list
-3. Otherwise indexes all top-level directories
+2. Resolves the active profile from `CORTEX_PROFILE`, or from `machines.yaml` when the env var is unset
+3. If no active profile can be resolved yet, falls back to an unscoped view of top-level project directories
 4. Walks each project directory, reads `.md` files, classifies them by filename
 5. Builds an in-memory SQLite FTS5 index with Porter stemming
 6. Serves tools over stdio using the MCP protocol

@@ -97,16 +97,17 @@ cd "$CORTEX_DIR" && git pull
 
 If this fails (not a git repo, no remote), tell the user. Don't silently skip.
 
-### 5. Link everything in the profile
+### 5. Refresh the machine with the supported flow
 
-For each project in the profile's `projects` list, run `npx @alaarab/cortex link` or replicate its logic:
+Run init against the pulled cortex repo so hooks, MCP registration, and machine/profile wiring are refreshed:
 
-- Symlink `$CORTEX_DIR/<project>/CLAUDE.md` to `~/<project>/CLAUDE.md`
-- Symlink `$CORTEX_DIR/<project>/skills/` contents to `~/<project>/.claude/skills/`
-- Symlink `$CORTEX_DIR/global/CLAUDE.md` to `~/.claude/CLAUDE.md`
-- Symlink `$CORTEX_DIR/global/skills/` contents to `~/.claude/skills/`
+```bash
+CORTEX_PATH="$CORTEX_DIR" npx @alaarab/cortex init -y
+```
 
-Create `.claude/skills/` directories if they don't exist. Don't overwrite real files without asking.
+If the user is in an untracked repo afterward, tell them to open a session there and let the agent ask, or run `cortex add` from that directory.
+
+Only mention `cortex link` if the user is explicitly repairing an older pre-init install.
 
 ### 6. Build the context file
 

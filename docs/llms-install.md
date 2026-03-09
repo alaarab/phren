@@ -11,7 +11,17 @@ npx @alaarab/cortex init --dry-run
 
 This creates `~/.cortex`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.
 
-To update an existing install:
+Compatibility note:
+- `cortex add` is the supported enrollment path for an existing repo.
+- Legacy compatibility paths: `cortex projects add`, `cortex link`, and `init --from-existing` remain available only for older flows.
+
+To update the installed package:
+
+```bash
+cortex update
+```
+
+To refresh shipped starter globals after upgrading:
 
 ```bash
 npx @alaarab/cortex init --apply-starter-update
