@@ -2418,11 +2418,13 @@ describe("migrateProjectNames", () => {
     const result = migrateProjectNames(cortex);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(fs.existsSync(path.join(cortex, "web-project-2"))).toBe(true);
-    expect(fs.existsSync(path.join(cortex, "WebProject2"))).toBe(false);
+    const cortexEntries = fs.readdirSync(cortex);
+    expect(cortexEntries).toContain("web-project-2");
+    expect(cortexEntries).not.toContain("WebProject2");
     expect(fs.readFileSync(path.join(cortex, "profiles", "personal.yaml"), "utf8")).toContain("web-project-2");
-    expect(fs.existsSync(path.join(memDir, "MEMORY-web-project-2.md"))).toBe(true);
-    expect(fs.existsSync(path.join(memDir, "MEMORY-WebProject2.md"))).toBe(false);
+    const memoryEntries = fs.readdirSync(memDir);
+    expect(memoryEntries).toContain("MEMORY-web-project-2.md");
+    expect(memoryEntries).not.toContain("MEMORY-WebProject2.md");
   });
 
   it("archives duplicate native memory files when lowercase target already exists", () => {
@@ -2436,8 +2438,9 @@ describe("migrateProjectNames", () => {
     const result = migrateProjectNames(cortex);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(fs.existsSync(path.join(memDir, "MEMORY-AlphaLens.md.case-migration.bak"))).toBe(true);
-    expect(fs.existsSync(path.join(memDir, "MEMORY-alphalens.md"))).toBe(true);
+    const memoryEntries = fs.readdirSync(memDir);
+    expect(memoryEntries).toContain("MEMORY-AlphaLens.md.case-migration.bak");
+    expect(memoryEntries).toContain("MEMORY-alphalens.md");
   });
 });
 
