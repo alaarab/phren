@@ -66,7 +66,7 @@ describe("rankResults", () => {
         "## 2025-06-01\n- Discord notifications exist for project reports"
       ),
       makeDocRow(
-        "livemcp",
+        "sampleops",
         "restart-ableton.md",
         "skill",
         "Restart Ableton when a monitoring session hangs"
@@ -86,7 +86,7 @@ describe("rankResults", () => {
 
     expect(ranked.some((row) => row.type === "backlog")).toBe(true);
     expect(ranked.findIndex((row) => row.type === "backlog")).toBeLessThan(
-      ranked.findIndex((row) => row.project === "livemcp")
+      ranked.findIndex((row) => row.project === "sampleops")
     );
   });
 });
