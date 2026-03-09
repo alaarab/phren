@@ -9,6 +9,10 @@ import { configureAllHooks } from "./hooks.js";
 import { configureClaude } from "./init.js";
 import { getToolCount } from "./tool-registry.js";
 
+function npmExec(): string {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
 describe.sequential("1.10.x release hardening gates", () => {
   let tmpRoot: string;
   let tmpCleanup: () => void;
@@ -50,13 +54,13 @@ describe.sequential("1.10.x release hardening gates", () => {
     const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
     const builtRegistry = path.join(root, "mcp", "dist", "tool-registry.js");
     if (!fs.existsSync(builtRegistry)) {
-      execFileSync("npm", ["run", "build"], {
+      execFileSync(npmExec(), ["run", "build"], {
         cwd: root,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       });
     }
-    const raw = execFileSync("npm", ["pack", "--json", "--dry-run"], {
+    const raw = execFileSync(npmExec(), ["pack", "--json", "--dry-run"], {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
