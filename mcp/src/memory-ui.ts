@@ -425,18 +425,27 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   <title>Cortex Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <style>
+    /*
+     * Typography scale — modular 1.25 ratio, base = 14px
+     * --text-xs   (caption):  ~11px  (base / 1.25^2, rounded)
+     * --text-sm   (small):     12px  (base / 1.25, rounded)
+     * --text-base (body):      14px
+     * --text-md   (h3):        18px  (base * 1.25, rounded)
+     * --text-lg   (h2):        22px  (base * 1.25^2, rounded)
+     * --text-xl   (h1):        28px  (base * 1.25^3, rounded)
+     */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --text-xs: 10.5px;
+      --text-xs: 11px;
       --text-sm: 12px;
-      --text-base: 13px;
-      --text-md: 16px;
-      --text-lg: 20px;
-      --text-xl: 25px;
+      --text-base: 14px;
+      --text-md: 18px;
+      --text-lg: 22px;
+      --text-xl: 28px;
       --bg: #f8f9fb;
       --surface: #ffffff;
-      --surface-raised: #ffffff;
+      --surface-raised: #fafbfc;
       --surface-sunken: #f1f3f6;
       --ink: #111827;
       --ink-secondary: #374151;
@@ -572,9 +581,9 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       background: var(--accent-dim);
       color: var(--accent);
       font-size: var(--text-xs);
-      padding: 1px 7px;
+      padding: 0 8px;
       border-radius: 10px;
-      margin-left: 6px;
+      margin-left: 8px;
       font-weight: 700;
       letter-spacing: .02em;
     }
@@ -586,7 +595,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
     /* ── Cards ───────────────────────────────────────────────── */
     .card {
-      background: var(--surface);
+      background: var(--surface-raised);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       box-shadow: var(--shadow-sm);
@@ -598,7 +607,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: var(--surface-sunken);
+      background: var(--surface-raised);
     }
     .card-header h2 {
       font-size: var(--text-sm);
@@ -616,7 +625,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       gap: 16px;
     }
     .project-card {
-      background: var(--surface);
+      background: var(--surface-raised);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 20px;
@@ -636,7 +645,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .project-card-name {
       font-size: var(--text-md);
       font-weight: 600;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -674,8 +683,8 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       gap: 16px;
       margin-bottom: 16px;
     }
-    .project-detail-header h2 { font-size: 20px; font-weight: 700; }
-    .project-detail-header .btn { font-size: 12px; }
+    .project-detail-header h2 { font-size: var(--text-lg); font-weight: 700; }
+    .project-detail-header .btn { font-size: var(--text-sm); }
     .project-detail-tabs {
       display: flex;
       gap: 0;
@@ -683,8 +692,8 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       margin-bottom: 0;
     }
     .project-detail-tab {
-      padding: 10px 20px;
-      font-size: 13px;
+      padding: 12px 20px;
+      font-size: var(--text-base);
       font-weight: 500;
       color: var(--muted);
       cursor: pointer;
@@ -707,7 +716,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       margin: 0;
       padding: 20px;
       font-family: var(--mono);
-      font-size: 12.5px;
+      font-size: var(--text-sm);
       line-height: 1.7;
       white-space: pre-wrap;
       word-break: break-word;
@@ -718,7 +727,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       padding: 60px 20px;
       text-align: center;
       color: var(--muted);
-      font-size: 14px;
+      font-size: var(--text-base);
     }
 
     /* ── Review Tab ──────────────────────────────────────────── */
@@ -730,7 +739,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       flex-wrap: wrap;
     }
     .review-filters select {
-      padding: 6px 28px 6px 10px;
+      padding: 8px 28px 8px 12px;
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       font-size: var(--text-sm);
@@ -750,7 +759,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .review-filters select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
     .review-cards { display: flex; flex-direction: column; gap: 12px; }
     .review-card {
-      background: var(--surface);
+      background: var(--surface-raised);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 0;
@@ -768,7 +777,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .review-card-header {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       margin-bottom: 12px;
       flex-wrap: wrap;
     }
@@ -781,7 +790,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .review-card-text code {
       background: var(--surface-sunken);
       border: 1px solid var(--border);
-      padding: 1px 5px;
+      padding: 0 4px;
       border-radius: 4px;
       font-size: var(--text-sm);
       font-family: var(--mono);
@@ -790,7 +799,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .review-card-text p:last-child { margin-bottom: 0; }
     .review-card-actions {
       display: flex;
-      gap: 6px;
+      gap: 8px;
       align-items: center;
       padding-top: 12px;
       border-top: 1px solid var(--border-light);
@@ -840,9 +849,9 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .review-help dd code {
       background: var(--surface-sunken);
       border: 1px solid var(--border);
-      padding: 1px 5px;
+      padding: 0 4px;
       border-radius: 4px;
-      font-size: 12px;
+      font-size: var(--text-sm);
       font-family: var(--mono);
     }
     .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
@@ -853,15 +862,15 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     /* ── Star button ─────────────────────────────────────────── */
     .star-btn {
       position: absolute;
-      top: 10px;
-      right: 10px;
+      top: 12px;
+      right: 12px;
       background: none;
       border: none;
-      font-size: 18px;
+      font-size: var(--text-md);
       cursor: pointer;
       color: var(--border);
       transition: color .15s;
-      padding: 2px 4px;
+      padding: 4px;
       line-height: 1;
     }
     .star-btn:hover { color: var(--warning); }
@@ -870,10 +879,10 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     /* ── Project search ──────────────────────────────────────── */
     .projects-search {
       width: 100%;
-      padding: 10px 14px;
+      padding: 12px 16px;
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      font-size: 14px;
+      font-size: var(--text-base);
       font-family: var(--font);
       margin-bottom: 16px;
       background: var(--surface);
@@ -884,7 +893,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
     /* ── GitHub link ──────────────────────────────────────────── */
     .github-link {
-      font-size: 12px;
+      font-size: var(--text-sm);
       color: var(--muted);
       text-decoration: none;
       display: inline-flex;
@@ -924,7 +933,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       border: 1px solid rgba(255,255,255,.15);
       border-radius: 6px;
       color: #e2e8f0;
-      font-size: 16px;
+      font-size: var(--text-md);
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -944,14 +953,14 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .graph-legend-item {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       color: #94a3b8;
-      font-size: 12px;
+      font-size: var(--text-sm);
       font-weight: 500;
     }
     .graph-legend-dot {
-      width: 10px;
-      height: 10px;
+      width: 12px;
+      height: 12px;
       border-radius: 50%;
       display: inline-block;
     }
@@ -961,7 +970,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       color: #e2e8f0;
       padding: 8px 12px;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: var(--text-sm);
       max-width: 300px;
       pointer-events: none;
       opacity: 0;
@@ -976,7 +985,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       top: 12px;
       left: 12px;
       display: flex;
-      gap: 6px;
+      gap: 8px;
     }
     .graph-filter-btn {
       padding: 4px 12px;
@@ -984,7 +993,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       border: 1px solid rgba(255,255,255,.12);
       border-radius: 20px;
       color: #94a3b8;
-      font-size: 11px;
+      font-size: var(--text-xs);
       font-weight: 500;
       cursor: pointer;
       transition: all .15s;
@@ -1014,7 +1023,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     }
     .split-group-label {
       padding: 8px 16px;
-      font-size: 11px;
+      font-size: var(--text-xs);
       text-transform: uppercase;
       letter-spacing: .06em;
       color: var(--muted);
@@ -1035,7 +1044,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       justify-content: space-between;
     }
     .split-item:hover { background: #f1f5f9; }
-    .split-item.selected { background: #ecfdf5; border-left: 3px solid var(--accent); padding-left: 13px; }
+    .split-item.selected { background: #ecfdf5; border-left: 3px solid var(--accent); padding-left: 12px; }
     .split-reader {
       display: flex;
       flex-direction: column;
@@ -1043,14 +1052,14 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .reader-toolbar {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       padding: 12px 16px;
       border-bottom: 1px solid var(--border);
       background: var(--surface-sunken);
     }
     .reader-title { font-weight: 650; font-size: var(--text-base); flex-shrink: 0; }
     .reader-path {
-      font-size: 11px;
+      font-size: var(--text-xs);
       color: var(--muted);
       flex: 1;
       overflow: hidden;
@@ -1068,7 +1077,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .reader-content pre {
       margin: 0;
       padding: 20px;
-      font-size: 12.5px;
+      font-size: var(--text-sm);
       line-height: 1.7;
       font-family: var(--mono);
       white-space: pre-wrap;
@@ -1079,7 +1088,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       width: 100%;
       min-height: 300px;
       padding: 20px;
-      font-size: 12.5px;
+      font-size: var(--text-sm);
       line-height: 1.7;
       font-family: var(--mono);
       border: none;
@@ -1090,24 +1099,24 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       padding: 60px 20px;
       text-align: center;
       color: var(--muted);
-      font-size: 14px;
+      font-size: var(--text-base);
     }
 
     /* Hook items */
     .hook-item {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       padding: 12px 16px;
       border-bottom: 1px solid var(--border-light);
       cursor: pointer;
       transition: background .1s;
     }
     .hook-item:hover { background: #f1f5f9; }
-    .hook-item.selected { background: #ecfdf5; border-left: 3px solid var(--accent); padding-left: 13px; }
+    .hook-item.selected { background: #ecfdf5; border-left: 3px solid var(--accent); padding-left: 12px; }
     .hook-name { flex: 1; font-size: var(--text-base); font-weight: 500; }
-    .hook-custom-event { font-size: 12px; font-weight: 600; color: var(--ink); }
-    .hook-custom-cmd { font-size: 11px; color: var(--muted); word-break: break-all; margin-top: 2px; }
+    .hook-custom-event { font-size: var(--text-sm); font-weight: 600; color: var(--ink); }
+    .hook-custom-cmd { font-size: var(--text-xs); color: var(--muted); word-break: break-all; margin-top: 4px; }
 
     /* ── Badges & Buttons ────────────────────────────────────── */
     .badge {
@@ -1133,7 +1142,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
+      gap: 8px;
       padding: 8px 16px;
       border-radius: var(--radius-sm);
       font-size: var(--text-sm);
@@ -1163,14 +1172,14 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       border-color: var(--border);
     }
     .btn-reject:hover { background: var(--danger-dim); color: var(--danger); border-color: var(--danger); }
-    .btn-sm { padding: 4px 12px; font-size: 11px; }
+    .btn-sm { padding: 4px 12px; font-size: var(--text-xs); }
 
     kbd {
       background: var(--surface-sunken);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 1px 6px;
-      font-size: 10px;
+      padding: 0 8px;
+      font-size: var(--text-xs);
       font-family: var(--mono);
       font-weight: 550;
       color: var(--muted);
@@ -1178,7 +1187,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     }
 
     .text-muted { color: var(--muted); }
-    .status-msg { font-size: 12px; padding: 3px 8px; border-radius: var(--radius-sm); }
+    .status-msg { font-size: var(--text-sm); padding: 4px 8px; border-radius: var(--radius-sm); }
     .status-msg.ok { background: #d1fae5; color: #065f46; }
     .status-msg.err { background: #fee2e2; color: #991b1b; }
 
@@ -1189,27 +1198,28 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       border-radius: 50%;
       display: inline-block;
       vertical-align: middle;
-      margin-right: 4px;
+      margin-right: 8px;
       flex-shrink: 0;
     }
     .status-led-ok {
-      background: var(--success);
-      box-shadow: 0 0 6px var(--success);
-      animation: ledPulse 2s ease-in-out infinite;
+      background: #22c55e;
+      color: #22c55e;
+      animation: ledPulse 2.5s infinite;
     }
     .status-led-warn {
-      background: var(--warning);
-      box-shadow: 0 0 6px var(--warning);
-      animation: ledPulse 1.2s ease-in-out infinite;
+      background: #f59e0b;
+      color: #f59e0b;
+      animation: ledPulse 1.2s infinite;
     }
     .status-led-err {
-      background: var(--danger);
-      box-shadow: 0 0 6px var(--danger);
-      animation: ledPulse 0.8s ease-in-out infinite;
+      background: #ef4444;
+      color: #ef4444;
+      animation: ledPulse 0.6s infinite;
     }
     @keyframes ledPulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: .5; }
+      0% { opacity: 1; box-shadow: 0 0 0 0 currentColor; }
+      70% { opacity: 0.8; box-shadow: 0 0 0 5px transparent; }
+      100% { opacity: 1; }
     }
 
     @media (max-width: 900px) {
@@ -1279,7 +1289,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       background: var(--surface-raised, #1a2233);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 10px 16px;
+      padding: 12px 16px;
       display: flex;
       align-items: center;
       gap: 12px;
@@ -1292,7 +1302,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       transform: translateX(-50%) translateY(0);
     }
     .batch-bar-count {
-      font-size: 13px;
+      font-size: var(--text-base);
       font-weight: 600;
       color: var(--ink);
       min-width: 80px;
@@ -1308,24 +1318,24 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       border-radius: var(--radius-sm);
       overflow: hidden;
       margin-bottom: 8px;
-      font-size: 12px;
+      font-size: var(--text-sm);
       font-family: var(--mono);
       line-height: 1.6;
     }
     .review-diff-pane {
       padding: 12px;
-      background: var(--surface);
+      background: var(--surface-sunken);
       white-space: pre-wrap;
       word-break: break-word;
       min-height: 60px;
     }
     .review-diff-pane-label {
-      font-size: 10px;
+      font-size: var(--text-xs);
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: .05em;
       color: var(--muted);
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       font-family: var(--font);
     }
     .diff-del { background: var(--danger-dim); color: var(--danger); text-decoration: line-through; }
@@ -1353,6 +1363,54 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .review-card-drag-handle:hover { color: var(--muted); }
     .review-card-drag-handle:active { cursor: grabbing; }
 
+
+    /* ── Similarity groups ────────────────────────────────────────── */
+    .review-group {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px;
+      margin-bottom: 12px;
+      background: color-mix(in srgb, var(--surface) 95%, var(--accent) 5%);
+    }
+    .review-group .review-card { margin-bottom: 8px; }
+    .review-group .review-card:last-child { margin-bottom: 0; }
+    .review-group-header {
+      font-size: var(--text-xs);
+      color: var(--muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 4px;
+    }
+    .review-group-toggle {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: var(--text-xs);
+      padding: 0 4px;
+    }
+    .review-group-toggle:hover { color: var(--ink-secondary); }
+    .review-group.collapsed .review-card:not(:first-child) { display: none; }
+
+    /* ── Select all ──────────────────────────────────────────────── */
+    .review-select-all {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: var(--text-sm);
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      margin-bottom: 8px;
+    }
+    .review-select-all input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+      accent-color: var(--accent);
+    }
     /* ── Toast ───────────────────────────────────────────────────── */
     .toast-container {
       position: fixed;
@@ -1375,7 +1433,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       color: var(--ink, #e8ecf4);
       border: 1px solid var(--border, #1e2a3e);
       border-radius: var(--radius);
-      font-size: 13px;
+      font-size: var(--text-base);
       font-weight: 500;
       box-shadow: 0 8px 32px rgba(0,0,0,.2);
       pointer-events: all;
@@ -1395,7 +1453,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       color: inherit;
       border-radius: var(--radius-sm);
       padding: 4px 12px;
-      font-size: 11px;
+      font-size: var(--text-xs);
       font-weight: 600;
       cursor: pointer;
       font-family: var(--font);
@@ -1418,9 +1476,9 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     }
     .cmdpal-overlay.open { display: flex; }
     .cmdpal-box {
-      background: var(--surface);
+      background: var(--surface-raised);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: 12px;
       width: 100%;
       max-width: 520px;
       box-shadow: 0 24px 80px rgba(0,0,0,.25);
@@ -1429,7 +1487,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .cmdpal-input {
       width: 100%;
       padding: 16px 20px;
-      font-size: 15px;
+      font-size: var(--text-md);
       font-family: var(--font);
       border: none;
       outline: none;
@@ -1443,23 +1501,32 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .cmdpal-item {
       padding: 12px 20px;
       cursor: pointer;
-      font-size: 13.5px;
+      font-size: var(--text-base);
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       transition: background .1s;
     }
     .cmdpal-item:hover, .cmdpal-item.selected { background: var(--accent-dim); }
     .cmdpal-item-name { font-weight: 550; color: var(--ink); }
-    .cmdpal-item-meta { font-size: 11px; color: var(--muted); margin-left: auto; font-weight: 500; }
-    .cmdpal-empty { padding: 32px 20px; text-align: center; color: var(--muted); font-size: 13px; }
+    .cmdpal-item-meta { font-size: var(--text-xs); color: var(--muted); margin-left: auto; font-weight: 500; }
+    .cmdpal-empty { padding: 32px 20px; text-align: center; color: var(--muted); font-size: var(--text-base); }
     @keyframes countPop {
       0% { transform: scale(1); }
       50% { transform: scale(1.3); }
       100% { transform: scale(1); }
     }
+    @keyframes countFlip {
+      0% { transform: scale(1) rotateX(0); }
+      40% { transform: scale(1.3) rotateX(90deg); }
+      60% { transform: scale(1.3) rotateX(-10deg); }
+      100% { transform: scale(1) rotateX(0); }
+    }
     .count-animating {
-      animation: countPop 0.3s ease;
+      animation: countPop 0.3s ease-out;
+    }
+    .count-flipping {
+      animation: countFlip 0.3s ease-out;
     }
   </style>
 </head>
@@ -1482,8 +1549,8 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     <button class="nav-item" onclick="switchTab('hooks')">Hooks</button>
   </nav>
   <span class="status-led status-led-ok" id="sync-led" title="Synced"></span>
-  <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" style="margin-left:auto;background:none;border:none;cursor:pointer;padding:6px 8px;border-radius:6px;color:var(--muted);font-size:18px;line-height:1;transition:color .15s" aria-label="Toggle dark mode">☀️</button>
-  <button onclick="openCmdPal()" title="Search projects (⌘K)" style="background:none;border:1px solid var(--border);cursor:pointer;padding:4px 10px;border-radius:6px;color:var(--muted);font-size:12px;font-family:var(--font);transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--ink)';this.style.borderColor='var(--muted)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">⌘K</button>
+  <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" style="margin-left:auto;background:none;border:none;cursor:pointer;padding:8px;border-radius:6px;color:var(--muted);font-size:var(--text-md);line-height:1;transition:color .15s" aria-label="Toggle dark mode">☀️</button>
+  <button onclick="openCmdPal()" title="Search projects (⌘K)" style="background:none;border:1px solid var(--border);cursor:pointer;padding:4px 12px;border-radius:6px;color:var(--muted);font-size:var(--text-sm);font-family:var(--font);transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--ink)';this.style.borderColor='var(--muted)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">⌘K</button>
 </div>
 
 <div class="main">
@@ -1501,7 +1568,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     <div class="card" style="margin-bottom:16px">
       <div class="card-header"><h2>Sync State</h2></div>
       <div class="card-body">
-        <div id="sync-state-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;font-size:13px">
+        <div id="sync-state-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;font-size:var(--text-base)">
           <div><strong>Auto-save</strong><div class="text-muted">${h(sync.autoSaveStatus || "n/a")}</div></div>
           <div><strong>Last pull</strong><div class="text-muted">${h(sync.lastPullStatus || "n/a")} ${h(sync.lastPullAt || "")}</div></div>
           <div><strong>Last push</strong><div class="text-muted">${h(sync.lastPushStatus || "n/a")} ${h(sync.lastPushAt || "")}</div></div>
@@ -1527,7 +1594,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       </dl>
     </details>
 
-    <p style="font-size:12.5px;color:var(--muted);margin-bottom:14px;letter-spacing:-0.01em">Memories flagged for review. Approve to keep, reject to discard.</p>
+    <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Memories flagged for review. Approve to keep, reject to discard.</p>
 
     <div class="review-filters" id="review-filters" style="display:none">
       <select id="review-filter-project" onchange="filterReviewCards()">
@@ -1539,15 +1606,20 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       <select id="review-filter-model" onchange="filterReviewCards()">
         <option value="">All models</option>
       </select>
-      <span id="review-filter-count" class="text-muted" style="font-size:12px;margin-left:8px"></span>
+      <span id="review-filter-count" class="text-muted" style="font-size:var(--text-sm);margin-left:8px"></span>
     </div>
 
-    <div id="review-kbd-hints" style="font-size:11px;color:var(--muted);margin-bottom:12px;display:none;gap:16px;flex-wrap:wrap">
+    <div id="review-kbd-hints" style="font-size:var(--text-xs);color:var(--muted);margin-bottom:12px;display:none;gap:16px;flex-wrap:wrap">
       <span><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
       <span><kbd>a</kbd> approve</span>
       <span><kbd>r</kbd> reject</span>
       <span><kbd>e</kbd> edit</span>
     </div>
+
+    <label class="review-select-all" id="review-select-all" style="display:none">
+      <input type="checkbox" onchange="toggleSelectAll(this.checked)" />
+      Select all
+    </label>
 
     <div class="review-cards" id="review-cards-list">
       <div class="review-cards-loading" style="text-align:center;padding:40px;color:var(--muted)">Loading...</div>
@@ -1635,6 +1707,28 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   var _editingSkill = false, _editingHook = false;
   var _selectedProject = null;
 
+  var _activeFetches = 0;
+  function setLed(state) {
+    var led = document.getElementById('sync-led');
+    if (!led) return;
+    led.className = 'status-led status-led-' + state;
+    led.title = state === 'ok' ? 'Synced' : state === 'warn' ? 'Working...' : 'Error';
+  }
+  function ledFetch(url, opts) {
+    _activeFetches++;
+    setLed('warn');
+    return fetch(url, opts).then(function(r) {
+      _activeFetches--;
+      if (_activeFetches <= 0) { _activeFetches = 0; setLed('ok'); }
+      return r;
+    }).catch(function(err) {
+      _activeFetches--;
+      if (_activeFetches <= 0) { _activeFetches = 0; setLed('err'); }
+      setTimeout(function() { if (_activeFetches <= 0) setLed('ok'); }, 3000);
+      throw err;
+    });
+  }
+
   // ── Tab switching ────────────────────────────────────────────
   window.switchTab = function(tab) {
     function doSwitch() {
@@ -1668,7 +1762,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   function renderProjectCards(data) {
     var grid = document.getElementById('projects-grid');
     if (!data.length) {
-      grid.innerHTML = '<div style="padding:60px;color:var(--muted);grid-column:1/-1;text-align:center"><svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="margin:0 auto 12px;display:block;opacity:.4"><rect x="12" y="16" width="40" height="32" rx="4" stroke="var(--border)" stroke-width="2"/><path d="M12 24h40" stroke="var(--border)" stroke-width="2"/><circle cx="18" cy="20" r="1.5" fill="var(--danger)"/><circle cx="23" cy="20" r="1.5" fill="var(--warning)"/><circle cx="28" cy="20" r="1.5" fill="var(--success)"/><path d="M24 34h16M28 40h8" stroke="var(--border)" stroke-width="2" stroke-linecap="round"/></svg><div style="font-weight:500;margin-bottom:4px">No projects yet</div><div style="font-size:12px">Run <code>npx @alaarab/cortex init</code> to create one.</div></div>';
+      grid.innerHTML = '<div style="padding:60px;color:var(--muted);grid-column:1/-1;text-align:center"><svg viewBox="0 0 80 80" width="80" height="80" fill="none" style="margin:0 auto 12px;display:block"><path d="M18 30h44v26a4 4 0 01-4 4H22a4 4 0 01-4-4V30z" stroke="var(--accent)" stroke-width="2" fill="var(--accent-dim)"/><path d="M18 30l6-10h16l6 10" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linejoin="round"/></svg><div style="font-weight:500;margin-bottom:4px">No projects yet</div><div style="font-size:var(--text-sm)">Run <code>npx @alaarab/cortex init</code> to create one.</div></div>';
       return;
     }
     var starred = getStarredProjects();
@@ -1727,7 +1821,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     var sectionBadge = '<span class="badge">' + esc(item.section) + '</span>';
     var machineBadge = item.machine ? '<span class="badge badge-machine" title="Machine: ' + esc(item.machine) + '">' + esc(item.machine) + '</span>' : '';
     var modelBadge = (item.model && item.model !== 'unknown') ? '<span class="badge badge-model" title="Model: ' + esc(item.model) + '">' + esc(item.model) + '</span>' : '';
-    var dateSpan = '<span class="text-muted" style="font-size:12px;margin-left:auto">' + esc(item.date) + '</span>';
+    var dateSpan = '<span class="text-muted" style="font-size:var(--text-sm);margin-left:auto">' + esc(item.date) + '</span>';
 
     var cardText = esc(item.text);
 
@@ -1844,16 +1938,46 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         }
       });
 
-      // Add new cards (animate in with stagger)
+      // Add new cards with similarity grouping (animate in with stagger)
       var newItems = data.filter(function(item) { return !_reviewCardKeys.has(cardKey(item)); });
-      var delayBase = 0;
-      newItems.forEach(function(item) {
-        var key = cardKey(item);
-        var card = renderReviewCard(item, delayBase);
-        list.appendChild(card);
-        _reviewCardKeys.add(key);
-        delayBase += 40;
-      });
+      if (newItems.length > 0) {
+        // Remove existing groups if full re-render
+        list.querySelectorAll('.review-group').forEach(function(g) { g.remove(); });
+
+        var groups = clusterCards(newItems);
+        var delayBase = 0;
+        groups.forEach(function(groupItems) {
+          if (groupItems.length > 1) {
+            // Multi-item group: wrap in a group container
+            var groupDiv = document.createElement('div');
+            groupDiv.className = 'review-group';
+            var header = document.createElement('div');
+            header.className = 'review-group-header';
+            header.innerHTML = '<span>Similar (' + groupItems.length + ' items)</span><button class="review-group-toggle" onclick="toggleGroup(this)">\u25BC</button>';
+            groupDiv.appendChild(header);
+            groupItems.forEach(function(item) {
+              var key = cardKey(item);
+              var card = renderReviewCard(item, delayBase);
+              groupDiv.appendChild(card);
+              _reviewCardKeys.add(key);
+              delayBase += 40;
+            });
+            list.appendChild(groupDiv);
+          } else {
+            // Singleton: render normally
+            var item = groupItems[0];
+            var key = cardKey(item);
+            var card = renderReviewCard(item, delayBase);
+            list.appendChild(card);
+            _reviewCardKeys.add(key);
+            delayBase += 40;
+          }
+        });
+      }
+
+      // Show/hide select-all checkbox
+      var selectAllEl = document.getElementById('review-select-all');
+      if (selectAllEl) selectAllEl.style.display = data.length > 0 ? 'flex' : 'none';
 
       // Empty state
       var totalVisible = list.querySelectorAll('.review-card:not(.removing)').length;
@@ -1863,7 +1987,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
           var empty = document.createElement('div');
           empty.className = 'review-cards-empty';
           empty.style.cssText = 'text-align:center;padding:40px;color:var(--muted)';
-          empty.innerHTML = '<svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="margin:0 auto 12px;display:block;opacity:.4"><circle cx="32" cy="32" r="28" stroke="var(--border)" stroke-width="2" stroke-dasharray="4 4"/><path d="M24 28l4 4 12-12" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 40h20" stroke="var(--border)" stroke-width="2" stroke-linecap="round"/><path d="M26 46h12" stroke="var(--border)" stroke-width="2" stroke-linecap="round"/></svg><div style="font-weight:500;margin-bottom:4px">All clear</div><div style="font-size:12px">No memories waiting for review.</div>';
+          empty.innerHTML = '<svg viewBox="0 0 80 80" width="80" height="80" fill="none" style="margin:0 auto 12px;display:block"><rect x="15" y="20" width="50" height="40" rx="4" stroke="var(--accent)" stroke-width="2" fill="var(--accent-dim)"/><polyline points="28,38 36,46 52,32" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg><div style="font-weight:500;margin-bottom:4px">All caught up</div><div style="font-size:var(--text-sm);color:var(--muted)">No memories waiting for review.</div>';
           list.appendChild(empty);
         }
       } else if (emptyEl) {
@@ -1886,10 +2010,11 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
             btn.appendChild(countSpan);
           }
         } else {
-          if (navBtn.textContent !== String(data.length)) {
-            navBtn.textContent = String(data.length);
+          var oldCount = parseInt(navBtn.textContent, 10) || 0;
+          if (oldCount !== data.length) {
+            animateCount(navBtn, oldCount, data.length);
             navBtn.classList.remove('count-animating');
-            void navBtn.offsetWidth; // force reflow
+            void navBtn.offsetWidth;
             navBtn.classList.add('count-animating');
           }
         }
@@ -2177,7 +2302,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     fetch(authUrl('/api/skills')).then(function(r) { return r.json(); }).then(function(data) {
       _skillsLoaded = true;
       var list = document.getElementById('skills-list');
-      if (!data.length) { list.innerHTML = '<div style="padding:40px 20px;color:var(--muted);text-align:center"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" style="margin:0 auto 8px;display:block;opacity:.4"><path d="M24 8l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6l2-6z" stroke="var(--border)" stroke-width="1.5"/><circle cx="24" cy="32" r="8" stroke="var(--border)" stroke-width="1.5" stroke-dasharray="3 3"/></svg><div style="font-weight:500;font-size:13px">No skills installed</div></div>'; return; }
+      if (!data.length) { list.innerHTML = '<div style="padding:40px 20px;color:var(--muted);text-align:center"><svg viewBox="0 0 80 80" width="80" height="80" fill="none" style="margin:0 auto 8px;display:block"><path d="M40 16l4 12h-8l4-12z" stroke="var(--accent)" stroke-width="2" fill="var(--accent-dim)" stroke-linejoin="round"/><path d="M40 28v20" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/><path d="M34 38h12" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/><path d="M36 48l4 12 4-12" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linejoin="round"/></svg><div style="font-weight:500;font-size:var(--text-base)">No skills installed</div></div>'; return; }
       var bySource = {};
       data.forEach(function(s) { (bySource[s.source] = bySource[s.source] || []).push(s); });
       var html = '';
@@ -2186,7 +2311,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         bySource[src].forEach(function(s) {
           html += '<div class="split-item" data-path="' + esc(s.path) + '" data-name="' + esc(s.name) + '" onclick="selectSkillFromEl(this)">' +
             '<span>' + esc(s.name) + '</span>' +
-            '<span class="text-muted" style="font-size:11px">' + esc(s.source) + '</span>' +
+            '<span class="text-muted" style="font-size:var(--text-xs)">' + esc(s.source) + '</span>' +
           '</div>';
         });
       });
@@ -2258,10 +2383,12 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   window.saveSkill = function() {
     var ta = document.getElementById('skill-textarea');
     if (!ta || !_currentSkillPath) return;
+    fetchCsrfToken(function(csrfToken) {
+    var csrfPart = csrfToken ? '&_csrf=' + encodeURIComponent(csrfToken) : '';
     fetch('/api/skill-save', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: authBody('path=' + encodeURIComponent(_currentSkillPath) + '&content=' + encodeURIComponent(ta.value))
+      body: authBody('path=' + encodeURIComponent(_currentSkillPath) + '&content=' + encodeURIComponent(ta.value)) + csrfPart
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) {
         _editingSkill = false;
@@ -2281,6 +2408,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       } else {
         setStatus('skill-status', data.error || 'Save failed', 'err');
       }
+    });
     });
   };
 
@@ -2304,6 +2432,11 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
             '<div class="hook-custom-cmd">' + esc(ch.command) + '</div>' +
           '</div>';
         });
+      }
+      // Show illustrated empty state if no hook configs exist on disk and no custom hooks
+      var anyExists = data.tools.some(function(t) { return t.exists; });
+      if (!anyExists && (!data.customHooks || !data.customHooks.length)) {
+        html += '<div style="padding:40px 20px;color:var(--muted);text-align:center"><svg viewBox="0 0 80 80" width="80" height="80" fill="none" style="margin:0 auto 8px;display:block"><rect x="20" y="28" width="16" height="24" rx="3" stroke="var(--accent)" stroke-width="2" fill="var(--accent-dim)"/><rect x="44" y="28" width="16" height="24" rx="3" stroke="var(--accent)" stroke-width="2" fill="var(--accent-dim)"/><path d="M36 36c4-6 4-6 8 0" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/><path d="M36 44c4-6 4-6 8 0" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg><div style="font-weight:500;font-size:var(--text-base)">No hooks configured</div></div>';
       }
       list.innerHTML = html;
     });
@@ -2390,10 +2523,12 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   window.saveHook = function() {
     var ta = document.getElementById('hook-textarea');
     if (!ta || !_currentHookPath) return;
+    fetchCsrfToken(function(csrfToken) {
+    var csrfPart = csrfToken ? '&_csrf=' + encodeURIComponent(csrfToken) : '';
     fetch('/api/skill-save', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: authBody('path=' + encodeURIComponent(_currentHookPath) + '&content=' + encodeURIComponent(ta.value))
+      body: authBody('path=' + encodeURIComponent(_currentHookPath) + '&content=' + encodeURIComponent(ta.value)) + csrfPart
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) {
         _editingHook = false;
@@ -2403,15 +2538,19 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         setStatus('hook-status', data.error || 'Save failed', 'err');
       }
     });
+    });
   };
 
   window.toggleHookTool = function(toolName) {
+    fetchCsrfToken(function(csrfToken) {
+    var csrfPart = csrfToken ? '&_csrf=' + encodeURIComponent(csrfToken) : '';
     fetch('/api/hook-toggle', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: authBody('tool=' + encodeURIComponent(toolName))
+      body: authBody('tool=' + encodeURIComponent(toolName)) + csrfPart
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) { _hooksLoaded = false; loadHooks(); }
+    });
     });
   };
 
@@ -2491,15 +2630,41 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       return { source: nodeMap[l.source], target: nodeMap[l.target] };
     }).filter(function(l) { return l.source && l.target; });
 
+    // Particle trail system: multiple particles per edge with alpha fade
+    var _edgeParticles = {};
+    for (var ep = 0; ep < links.length; ep++) {
+      var eid = links[ep].source.id + '::' + links[ep].target.id;
+      _edgeParticles[eid] = [];
+    }
+
     _graphAlpha = 1;
     _graphRunning = true;
     _graphZoom = 1;
     _graphPanX = 0;
     _graphPanY = 0;
 
+    function updateParticles() {
+      for (var pi = 0; pi < links.length; pi++) {
+        var eid = links[pi].source.id + '::' + links[pi].target.id;
+        var particles = _edgeParticles[eid];
+        if (!particles) { particles = []; _edgeParticles[eid] = particles; }
+        for (var qi = particles.length - 1; qi >= 0; qi--) {
+          particles[qi].pos += particles[qi].speed;
+          particles[qi].alpha -= 0.008;
+          if (particles[qi].pos > 1 || particles[qi].alpha <= 0) {
+            particles.splice(qi, 1);
+          }
+        }
+        if (Math.random() < 0.1 && particles.length < 5) {
+          particles.push({ pos: 0, alpha: 0.6 + Math.random() * 0.3, speed: 0.01 + Math.random() * 0.01 });
+        }
+      }
+    }
+
     function tick() {
       if (_graphAlpha < 0.001) {
         // Keep rendering for particle animation even after physics settle
+        updateParticles();
         renderGraph();
         requestAnimationFrame(tick);
         return;
@@ -2530,19 +2695,21 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         t.vx -= f2 * dx2/d2; t.vy -= f2 * dy2/d2;
       }
 
-      // Center gravity + damping + bounds
+      // Center gravity + spring easing + bounds
       for (var m = 0; m < _graphNodes.length; m++) {
         var n = _graphNodes[m];
         if (_graphDrag && _graphDrag.node === n) continue;
-        n.vx += (W/2 - n.x) * 0.0005 * _graphAlpha;
-        n.vy += (H/2 - n.y) * 0.0005 * _graphAlpha;
-        n.vx *= 0.82; n.vy *= 0.82;
+        // Spring easing: velocity += (target - position) * stiffness; velocity *= damping
+        n.vx += (W/2 - n.x) * 0.08 * _graphAlpha;
+        n.vy += (H/2 - n.y) * 0.08 * _graphAlpha;
+        n.vx *= 0.85; n.vy *= 0.85;
         n.x += n.vx; n.y += n.vy;
         // Soft bounds: allow nodes to go off-canvas (panning brings them back)
         n.x = Math.max(-W, Math.min(W*2, n.x));
         n.y = Math.max(-H, Math.min(H*2, n.y));
       }
 
+      updateParticles();
       renderGraph();
       requestAnimationFrame(tick);
     }
@@ -2567,18 +2734,23 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         ctx.stroke();
       }
 
-      // Animated particles on links
+      // Particle trails on edges
       _graphFrame++;
       for (var p = 0; p < links.length; p++) {
         var ls = links[p].source, lt = links[p].target;
         if (_graphFilter !== 'all' && ls.group !== _graphFilter && lt.group !== _graphFilter) continue;
-        var progress = ((_graphFrame * 0.005 + p * 0.1) % 1);
-        var px = ls.x + (lt.x - ls.x) * progress;
-        var py = ls.y + (lt.y - ls.y) * progress;
-        ctx.beginPath();
-        ctx.arc(px, py, 1.5, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(34,211,238,.4)';
-        ctx.fill();
+        var eid = ls.id + '::' + lt.id;
+        var particles = _edgeParticles[eid];
+        if (!particles) continue;
+        for (var qi = 0; qi < particles.length; qi++) {
+          var pt = particles[qi];
+          var px = ls.x + (lt.x - ls.x) * pt.pos;
+          var py = ls.y + (lt.y - ls.y) * pt.pos;
+          ctx.beginPath();
+          ctx.arc(px, py, 2, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(34,211,238,' + pt.alpha.toFixed(2) + ')';
+          ctx.fill();
+        }
       }
 
       // Nodes
@@ -2588,7 +2760,17 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         var r = RADII[n.group] || 8;
         var col = COLORS[n.group] || '#888';
 
-        // Glow halo
+        // Glow halo using shadowBlur
+        ctx.save();
+        ctx.shadowBlur = n.group === 'project' ? 20 : 15;
+        ctx.shadowColor = col;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.restore();
+
+        // Radial gradient halo
         ctx.beginPath();
         var glowR = r + (n.group === 'project' ? 10 : 5);
         var gradient = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, glowR);
@@ -2598,7 +2780,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         ctx.fillStyle = gradient;
         ctx.fill();
 
-        // Node circle
+        // Node circle (drawn on top, no shadow)
         ctx.beginPath();
         ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
         ctx.fillStyle = col;
@@ -2866,11 +3048,68 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     bar.classList.toggle('visible', checked.length > 0);
   }
 
+  window.toggleSelectAll = function(checked) {
+    document.querySelectorAll('.review-card').forEach(function(card) {
+      if (card.style.display === 'none') return;
+      var cb = card.querySelector('.review-card-check');
+      if (!cb) return;
+      if (checked) cb.classList.add('checked');
+      else cb.classList.remove('checked');
+    });
+    updateBatchBar();
+  };
+
   window.clearBatchSelection = function() {
     document.querySelectorAll('.review-card-check.checked').forEach(function(cb) {
       cb.classList.remove('checked');
     });
+    var selectAllCb = document.querySelector('#review-select-all input[type="checkbox"]');
+    if (selectAllCb) selectAllCb.checked = false;
     updateBatchBar();
+  };
+
+
+  // -- Similarity grouping --
+  function wordSet(text) {
+    return new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(function(w) { return w.length > 2; }));
+  }
+
+  function jaccardSimilarity(a, b) {
+    var intersection = 0;
+    a.forEach(function(w) { if (b.has(w)) intersection++; });
+    var union = new Set(Array.from(a).concat(Array.from(b))).size;
+    return union === 0 ? 0 : intersection / union;
+  }
+
+  function clusterCards(items) {
+    if (items.length <= 1) return [items];
+    var THRESHOLD = 0.25;
+    var wordSets = items.map(function(item) { return wordSet(item.text || ''); });
+    var assigned = new Array(items.length).fill(-1);
+    var groups = [];
+
+    for (var i = 0; i < items.length; i++) {
+      if (assigned[i] !== -1) continue;
+      var group = [i];
+      assigned[i] = groups.length;
+      for (var j = i + 1; j < items.length; j++) {
+        if (assigned[j] !== -1) continue;
+        if (jaccardSimilarity(wordSets[i], wordSets[j]) > THRESHOLD) {
+          group.push(j);
+          assigned[j] = groups.length;
+        }
+      }
+      groups.push(group);
+    }
+    return groups.map(function(indices) {
+      return indices.map(function(idx) { return items[idx]; });
+    });
+  }
+
+  window.toggleGroup = function(btn) {
+    var group = btn.closest('.review-group');
+    if (group) group.classList.toggle('collapsed');
+    btn.textContent = group && group.classList.contains('collapsed') ? '\u25B6' : '\u25BC';
   };
 
   window.batchAction = function(action) {
@@ -2887,7 +3126,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         var body = 'project=' + encodeURIComponent(project) + '&line=' + encodeURIComponent(line);
         if (_authToken) body += '&_auth=' + encodeURIComponent(_authToken);
         if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
-        fetch('/api/' + action, {
+        ledFetch('/api/' + action, {
           method: 'POST',
           headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: body
@@ -2930,7 +3169,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         var body = 'project=' + encodeURIComponent(project) + '&line=' + encodeURIComponent(line);
         if (_authToken) body += '&_auth=' + encodeURIComponent(_authToken);
         if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
-        fetch('/api/' + action, {
+        ledFetch('/api/' + action, {
           method: 'POST',
           headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: body
@@ -2969,7 +3208,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       var body = 'project=' + encodeURIComponent(project) + '&line=' + encodeURIComponent(line) + '&new_text=' + encodeURIComponent(newText);
       if (_authToken) body += '&_auth=' + encodeURIComponent(_authToken);
       if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
-      fetch('/api/edit', {
+      ledFetch('/api/edit', {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: body
@@ -2987,13 +3226,39 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     });
   };
 
+  function animateCount(el, from, to) {
+    if (from === to) return;
+    var diff = Math.abs(from - to);
+    if (diff <= 3) {
+      // Cycle through intermediate values at 80ms intervals
+      var step = from < to ? 1 : -1;
+      var current = from;
+      var interval = setInterval(function() {
+        current += step;
+        el.textContent = String(current);
+        if (current === to) clearInterval(interval);
+      }, 80);
+    } else {
+      // Quick scale-and-flip CSS animation
+      el.classList.remove('count-flipping');
+      void el.offsetWidth;
+      el.classList.add('count-flipping');
+      setTimeout(function() { el.textContent = String(to); }, 120);
+      setTimeout(function() { el.classList.remove('count-flipping'); }, 350);
+    }
+  }
+
   function updateReviewCount(delta) {
     var navBtn = document.querySelector('.nav-item[onclick*="review"] .count');
     if (!navBtn) return;
     var current = parseInt(navBtn.textContent, 10) || 0;
     var next = current + delta;
-    if (next <= 0) navBtn.remove();
-    else navBtn.textContent = String(next);
+    if (next <= 0) {
+      navBtn.classList.add('count-flipping');
+      setTimeout(function() { navBtn.remove(); }, 300);
+    } else {
+      animateCount(navBtn, current, next);
+    }
   }
 
   // ── Keyboard shortcuts ────────────────────────────────────────
@@ -3166,8 +3431,9 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
   return http.createServer((req, res) => {
     setCommonHeaders(res);
     const url = req.url || "/";
+    const pathname = url.includes("?") ? url.slice(0, url.indexOf("?")) : url;
 
-    if (req.method === "GET" && url === "/") {
+    if (req.method === "GET" && pathname === "/") {
       pruneExpiredCsrfTokens(csrfTokens);
       let csrfToken: string | undefined;
       if (csrfTokens) {
@@ -3180,8 +3446,23 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       return;
     }
 
-    // ── Auth guard for all /api/* routes (Q7) ───────────────────
-    if (url.startsWith("/api/")) {
+    // ── Auth guard for /api/* routes (Q7, Q13) ─────────────────
+    // GET routes: auth checked here via query string or Authorization header.
+    // POST routes: auth checked per-handler after body is read (body may
+    //   contain _auth in URL-encoded form data, which isn't available yet).
+    //
+    // Auth-protected routes:
+    //   GET  /api/projects, /api/change-token, /api/runtime-health,
+    //        /api/review-queue, /api/review-activity, /api/project-content,
+    //        /api/skills, /api/skill-content, /api/hooks, /api/graph,
+    //        /api/csrf-token
+    //   POST /api/skill-save       (auth + CSRF in handler)
+    //   POST /api/hook-toggle      (auth + CSRF in handler)
+    //   POST /api/approve          (auth + CSRF in handler)
+    //   POST /api/reject           (auth + CSRF in handler)
+    //   POST /api/edit             (auth + CSRF in handler)
+    //   POST /approve, /reject, /edit  (legacy form routes, auth + CSRF in handler)
+    if (pathname.startsWith("/api/") && req.method === "GET") {
       if (authToken) {
         const submitted = getSubmittedAuthToken(req, url);
         if (!authTokensMatch(submitted, authToken)) {
@@ -3193,26 +3474,26 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     // ── Project APIs ────────────────────────────────────────────
-    if (req.method === "GET" && url === "/api/projects") {
+    if (req.method === "GET" && pathname === "/api/projects") {
       const projects = collectProjectsForUI(cortexPath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(projects));
       return;
     }
 
-    if (req.method === "GET" && url === "/api/change-token") {
+    if (req.method === "GET" && pathname === "/api/change-token") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ token: computeCortexLiveStateToken(cortexPath) }));
       return;
     }
 
-    if (req.method === "GET" && url === "/api/runtime-health") {
+    if (req.method === "GET" && pathname === "/api/runtime-health") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(readSyncSnapshot(cortexPath)));
       return;
     }
 
-    if (req.method === "GET" && url === "/api/review-queue") {
+    if (req.method === "GET" && pathname === "/api/review-queue") {
       if (authToken) {
         const submitted = getSubmittedAuthToken(req, url);
         if (!authTokensMatch(submitted, authToken)) {
@@ -3235,7 +3516,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       return;
     }
 
-    if (req.method === "GET" && url === "/api/review-activity") {
+    if (req.method === "GET" && pathname === "/api/review-activity") {
       if (authToken) {
         const submitted = getSubmittedAuthToken(req, url);
         if (!authTokensMatch(submitted, authToken)) {
@@ -3252,7 +3533,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       return;
     }
 
-    if (req.method === "GET" && url.startsWith("/api/project-content")) {
+    if (req.method === "GET" && pathname.startsWith("/api/project-content")) {
       const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
       const project = String(qs.project || "");
       const file = String(qs.file || "");
@@ -3280,14 +3561,14 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     // ── Skills API ──────────────────────────────────────────────
-    if (req.method === "GET" && url === "/api/skills") {
+    if (req.method === "GET" && pathname === "/api/skills") {
       const skills = collectSkillsForUI(cortexPath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(skills));
       return;
     }
 
-    if (req.method === "GET" && url.startsWith("/api/skill-content")) {
+    if (req.method === "GET" && pathname.startsWith("/api/skill-content")) {
       const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
       const filePath = String(qs.path || "");
       if (!filePath || !isAllowedFilePath(filePath, cortexPath)) {
@@ -3306,7 +3587,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     // ── Hooks API ───────────────────────────────────────────────
-    if (req.method === "GET" && url === "/api/hooks") {
+    if (req.method === "GET" && pathname === "/api/hooks") {
       const data = getHooksData(cortexPath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(data));
@@ -3314,7 +3595,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     // ── Write APIs ──────────────────────────────────────────────
-    if (req.method === "POST" && url === "/api/skill-save") {
+    if (req.method === "POST" && pathname === "/api/skill-save") {
       const contentLength = parseInt(req.headers["content-length"] || "0", 10);
       if (contentLength > 1_048_576) {
         res.writeHead(413, { "content-type": "text/plain" });
@@ -3333,6 +3614,23 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       });
       req.on("end", () => {
         const parsed = querystring.parse(body);
+        if (authToken) {
+          const submitted = getSubmittedAuthToken(req, url, parsed);
+          if (!authTokensMatch(submitted, authToken)) {
+            res.writeHead(401, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+            return;
+          }
+        }
+        if (csrfTokens) {
+          pruneExpiredCsrfTokens(csrfTokens);
+          const submitted = String(parsed._csrf || "");
+          if (!submitted || !csrfTokens.delete(submitted)) {
+            res.writeHead(403, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Invalid or missing CSRF token" }));
+            return;
+          }
+        }
         const filePath = String(parsed.path || "");
         const content = String(parsed.content || "");
         if (!filePath || !isAllowedFilePath(filePath, cortexPath)) {
@@ -3353,7 +3651,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       return;
     }
 
-    if (req.method === "POST" && url === "/api/hook-toggle") {
+    if (req.method === "POST" && pathname === "/api/hook-toggle") {
       const contentLength = parseInt(req.headers["content-length"] || "0", 10);
       if (contentLength > 1_048_576) {
         res.writeHead(413, { "content-type": "text/plain" });
@@ -3372,6 +3670,23 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       });
       req.on("end", () => {
         const parsed = querystring.parse(body);
+        if (authToken) {
+          const submitted = getSubmittedAuthToken(req, url, parsed);
+          if (!authTokensMatch(submitted, authToken)) {
+            res.writeHead(401, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+            return;
+          }
+        }
+        if (csrfTokens) {
+          pruneExpiredCsrfTokens(csrfTokens);
+          const submitted = String(parsed._csrf || "");
+          if (!submitted || !csrfTokens.delete(submitted)) {
+            res.writeHead(403, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Invalid or missing CSRF token" }));
+            return;
+          }
+        }
         const tool = String(parsed.tool || "").toLowerCase();
         const validTools = ["claude", "copilot", "cursor", "codex"];
         if (!validTools.includes(tool)) {
@@ -3392,7 +3707,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     // ── Graph API ───────────────────────────────────────────────
-    if (req.method === "GET" && url.startsWith("/api/graph")) {
+    if (req.method === "GET" && pathname.startsWith("/api/graph")) {
       const graph = buildGraph(cortexPath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(graph));
@@ -3400,7 +3715,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     // ── CSRF token API ──────────────────────────────────────────
-    if (req.method === "GET" && url === "/api/csrf-token") {
+    if (req.method === "GET" && pathname === "/api/csrf-token") {
       if (authToken) {
         const submitted = getSubmittedAuthToken(req, url);
         if (!authTokensMatch(submitted, authToken)) {
@@ -3423,7 +3738,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     // ── JSON review actions ─────────────────────────────────────
-    if (req.method === "POST" && ["/api/approve", "/api/reject", "/api/edit"].includes(url)) {
+    if (req.method === "POST" && ["/api/approve", "/api/reject", "/api/edit"].includes(pathname)) {
       const contentLength = parseInt(req.headers["content-length"] || "0", 10);
       if (contentLength > 1_048_576) {
         res.writeHead(413, { "content-type": "text/plain" });
@@ -3465,9 +3780,9 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
           return;
         }
         let result: import("./shared.js").CortexResult<string> = { ok: false, error: "unknown action" };
-        if (url === "/api/approve") result = approveQueueItem(cortexPath, project, line);
-        else if (url === "/api/reject") result = rejectQueueItem(cortexPath, project, line);
-        else if (url === "/api/edit") result = editQueueItem(cortexPath, project, line, newText);
+        if (pathname === "/api/approve") result = approveQueueItem(cortexPath, project, line);
+        else if (pathname === "/api/reject") result = rejectQueueItem(cortexPath, project, line);
+        else if (pathname === "/api/edit") result = editQueueItem(cortexPath, project, line, newText);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
       });
@@ -3475,7 +3790,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     }
 
     // ── Review actions ──────────────────────────────────────────
-    if (req.method === "POST" && ["/approve", "/reject", "/edit"].includes(url)) {
+    if (req.method === "POST" && ["/approve", "/reject", "/edit"].includes(pathname)) {
       const contentLength = parseInt(req.headers["content-length"] || "0", 10);
       if (contentLength > 1_048_576) {
         res.writeHead(413, { "content-type": "text/plain" });
@@ -3530,11 +3845,11 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
         }
 
         let result: import("./shared.js").CortexResult<string> = { ok: false, error: "unknown action" };
-        if (url === "/approve") {
+        if (pathname === "/approve") {
           result = approveQueueItem(cortexPath, project, line);
-        } else if (url === "/reject") {
+        } else if (pathname === "/reject") {
           result = rejectQueueItem(cortexPath, project, line);
-        } else if (url === "/edit") {
+        } else if (pathname === "/edit") {
           result = editQueueItem(cortexPath, project, line, newText);
         }
 

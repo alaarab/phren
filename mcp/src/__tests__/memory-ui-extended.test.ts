@@ -473,3 +473,216 @@ describe.sequential("review-ui missing project/line validation", () => {
     expect(res.body).toContain("No memories waiting for review");
   });
 });
+
+describe.sequential("review-ui skill-save auth protection (Q13)", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  const priorActor = process.env.CORTEX_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-skill-auth-"));
+    seedProject(tmpRoot);
+    process.env.CORTEX_ACTOR = "review-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "skill-auth-token";
+    server = createReviewUiServer(tmpRoot, { authToken });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
+    else process.env.CORTEX_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("POST /api/skill-save returns 401 without auth token", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    const res = await postForm(port, "/api/skill-save", {
+      path: skillPath,
+      content: "# Test skill",
+    });
+    expect(res.status).toBe(401);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("Unauthorized");
+  });
+
+  it("POST /api/skill-save returns 401 with wrong auth token", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    const res = await postForm(port, "/api/skill-save", {
+      _auth: "wrong-token",
+      path: skillPath,
+      content: "# Test skill",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/skill-save succeeds with correct auth token", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    const res = await postForm(port, "/api/skill-save", {
+      _auth: authToken,
+      path: skillPath,
+      content: "# Test skill",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+  });
+
+  it("GET /api/skills returns 401 without auth token", async () => {
+    const res = await httpGet(port, "/api/skills");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/skills succeeds with auth token in query", async () => {
+    const res = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  const priorActor = process.env.CORTEX_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hook-auth-"));
+    seedProject(tmpRoot);
+    process.env.CORTEX_ACTOR = "review-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "hook-auth-token";
+    server = createReviewUiServer(tmpRoot, { authToken });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
+    else process.env.CORTEX_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("POST /api/hook-toggle returns 401 without auth token", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      tool: "claude",
+    });
+    expect(res.status).toBe(401);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("Unauthorized");
+  });
+
+  it("POST /api/hook-toggle returns 401 with wrong auth token", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      _auth: "wrong-token",
+      tool: "claude",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/hook-toggle succeeds with correct auth token", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      _auth: authToken,
+      tool: "claude",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+  });
+});
+
+describe.sequential("review-ui JSON API auth for approve/reject/edit (Q13)", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  const priorActor = process.env.CORTEX_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-json-api-auth-"));
+    seedProject(tmpRoot);
+    process.env.CORTEX_ACTOR = "review-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "json-api-auth-token";
+    server = createReviewUiServer(tmpRoot, { authToken });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
+    else process.env.CORTEX_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("POST /api/approve returns 401 without auth", async () => {
+    const res = await postForm(port, "/api/approve", {
+      project: "demo",
+      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/reject returns 401 without auth", async () => {
+    const res = await postForm(port, "/api/reject", {
+      project: "demo",
+      line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/edit returns 401 without auth", async () => {
+    const res = await postForm(port, "/api/edit", {
+      project: "demo",
+      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      new_text: "updated text",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/approve succeeds with correct auth", async () => {
+    const res = await postForm(port, "/api/approve", {
+      _auth: authToken,
+      project: "demo",
+      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+  });
+});

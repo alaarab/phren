@@ -100,23 +100,23 @@ window.addEventListener('scroll', () => {
   const steps = [
     {
       cmd: 'npx @alaarab/cortex init',
-      prefix: 'One time:',
-      label: 'set up the memory layer',
+      prefix: 'Run once:',
+      label: 'creates the memory layer',
     },
     {
       cmd: 'cortex status',
-      prefix: 'Check it:',
-      label: 'see hooks, sync, semantic, and agents',
+      prefix: 'Then:',
+      label: 'check hooks, sync, and project health',
     },
     {
       cmd: 'cortex review-ui',
-      prefix: 'Review it:',
-      label: 'watch backlog, findings, and queue update live',
+      prefix: 'Review:',
+      label: 'backlog, findings, and queue in the browser',
     },
     {
-      cmd: 'semantic ready · context injected · findings saved',
-      prefix: 'While you work:',
-      label: 'the hooks keep memory moving',
+      cmd: 'context injected · findings saved · synced',
+      prefix: 'Daily:',
+      label: 'hooks handle the rest automatically',
       output: true,
     },
   ];
@@ -264,18 +264,18 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     },
     {
       project: 'ogrid',
-      activeTab: 'Review Queue',
+      activeTab: 'Queue',
       rows: [
-        { kind: 'queue', badge: 'M1', text: 'Angular compiler fallback cleanup', meta: 'review' },
-        { kind: 'queue', badge: 'M2', text: 'Docs parity wording drift', meta: 'review' },
-        { kind: 'queue', badge: 'M3', text: 'Semantic setup hardening', meta: 'review' },
+        { kind: 'queue', badge: 'M1', text: 'Angular compiler fallback cleanup', meta: 'pending' },
+        { kind: 'queue', badge: 'M2', text: 'Docs parity wording drift', meta: 'pending' },
+        { kind: 'queue', badge: 'M3', text: 'Semantic setup hardening', meta: 'pending' },
       ],
       status: 'a approve · r reject · :projects to switch',
       nextCmd: ':projects',
     },
   ];
 
-  const TABS = ['Projects', 'Backlog', 'Findings', 'Review Queue', 'Skills', 'Health'];
+  const TABS = ['Projects', 'Backlog', 'Findings', 'Queue', 'Skills', 'Hooks', 'Health'];
   const CHAR_BASE = 34;
   const CHAR_JITTER = 22;
   const PRE_TYPE = 520;
