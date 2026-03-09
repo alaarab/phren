@@ -271,7 +271,6 @@ export function flushEntryScores(cortexPath: string): void {
   }
 }
 
-export const flushMemoryScores = flushEntryScores;
 
 export function entryScoreKey(project: string, filename: string, snippet: string): string {
   const short = snippet.replace(/\s+/g, " ").slice(0, 200);
@@ -297,7 +296,6 @@ export function recordInjection(cortexPath: string, key: string, sessionId?: str
   }
 }
 
-export const recordMemoryInjection = recordInjection;
 
 export function recordFeedback(
   cortexPath: string,
@@ -312,7 +310,6 @@ export function recordFeedback(
   appendAuditLog(cortexPath, "memory_feedback", `key=${key} feedback=${feedback}`);
 }
 
-export const recordMemoryFeedback = recordFeedback;
 
 // Module-level cache for the journal aggregation used by getQualityMultiplier.
 // Invalidated whenever flushEntryScores runs (at which point the journal is cleared).

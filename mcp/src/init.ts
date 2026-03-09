@@ -19,17 +19,11 @@ export {
   configureCodexMcp,
   logMcpTargetStatus,
   resetVSCodeProbeCache,
-  isCortexCommand,
-  removeMcpServerAtPath,
-  removeTomlMcpServer,
   patchJsonFile,
-  upsertMcpServer,
 } from "./init-config.js";
 
 export type { InstallPreferences } from "./init-preferences.js";
 export {
-  readInstallPreferences,
-  writeInstallPreferences,
   getMcpEnabledPreference,
   setMcpEnabledPreference,
   getHooksEnabledPreference,
@@ -41,11 +35,7 @@ export {
   ensureGovernanceFiles,
   migrateRootFiles,
   runPostInitVerify,
-  applyStarterTemplateUpdates,
   listTemplates,
-  applyTemplate,
-  bootstrapFromExisting,
-  updateMachinesYaml,
 } from "./init-setup.js";
 
 // Imports from helpers (used internally in this file)

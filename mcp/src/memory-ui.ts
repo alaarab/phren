@@ -3,7 +3,6 @@ import * as crypto from "crypto";
 import { timingSafeEqual } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import * as querystring from "querystring";
 import {
   CortexError,
@@ -416,7 +415,7 @@ function collectProjectsForUI(cortexPath: string): ProjectInfo[] {
 
 // ── Render ───────────────────────────────────────────────────────────────────
 
-function renderPage(cortexPath: string, csrfToken?: string, authToken?: string): string {
+function renderPage(cortexPath: string, authToken?: string): string {
   const sync = readSyncSnapshot(cortexPath) as {
     autoSaveStatus?: string;
     lastPullAt?: string;
@@ -3429,8 +3428,8 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 </html>`;
 }
 
-export function renderPageForTests(cortexPath: string, csrfToken?: string, authToken?: string): string {
-  return renderPage(cortexPath, csrfToken, authToken);
+export function renderPageForTests(cortexPath: string, _csrfToken?: string, authToken?: string): string {
+  return renderPage(cortexPath, authToken);
 }
 
 // ── Server ───────────────────────────────────────────────────────────────────
@@ -3459,7 +3458,7 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
         csrfToken = crypto.randomUUID();
         csrfTokens.set(csrfToken, Date.now());
       }
-      const html = renderPage(cortexPath, csrfToken, authToken);
+      const html = renderPage(cortexPath, authToken);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(html);
       return;

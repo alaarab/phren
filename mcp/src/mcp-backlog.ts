@@ -13,7 +13,6 @@ import {
   completeBacklogItem as completeBacklogItemStore,
   completeBacklogItems as completeBacklogItemsBatch,
   pinBacklogItem,
-  unpinBacklogItem,
   workNextBacklogItem,
   tidyBacklogDone,
   readBacklog,

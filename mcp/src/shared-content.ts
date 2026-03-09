@@ -5,10 +5,6 @@ export {
   type ConsolidationNeeded,
   type ConsolidationStatus,
   checkConsolidationNeeded,
-  getProjectConsolidationStatus,
-  CONSOLIDATION_ENTRY_THRESHOLD,
-  CONSOLIDATION_TIME_THRESHOLD_DAYS,
-  CONSOLIDATION_MIN_FOR_TIME_CHECK,
   validateFindingsFormat,
   stripBacklogDoneSection,
   validateBacklogFormat,
@@ -19,18 +15,11 @@ export {
 } from "./content-validate.js";
 
 export {
-  type FindingCitation,
-  type FindingTrustIssue,
-  type TrustFilterOptions,
-  clearCitationCaches,
-  parseCitationComment,
   filterTrustedFindings,
   filterTrustedFindingsDetailed,
 } from "./content-citation.js";
 
 export {
-  KNOWN_OBSERVATION_TAGS,
-  normalizeObservationTags,
   scanForSecrets,
   resolveCoref,
   isDuplicateFinding,

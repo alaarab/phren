@@ -468,7 +468,6 @@ export type TrustFilterResult = { rows: DocRow[]; queueItems: TrustFilterQueueIt
  * by the caller — retrieval itself should remain side-effect-free. */
 export function applyTrustFilter(
   rows: DocRow[],
-  cortexPathLocal: string,
   ttlDays: number,
   minConfidence: number,
   decay: Partial<RetentionPolicy["decay"]>
@@ -572,7 +571,7 @@ export function rankResults(
     if (canonicalRows) ranked = [...canonicalRows, ...ranked];
   }
 
-  const entityBoost = query ? getEntityBoostDocs(db, query, cortexPathLocal) : new Set<string>();
+  const entityBoost = query ? getEntityBoostDocs(db, query) : new Set<string>();
   const entityBoostPaths = new Set<string>();
   for (const doc of ranked) {
     // Use getDocSourceKey to build the full project/relFile key, matching what

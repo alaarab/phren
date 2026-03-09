@@ -13,7 +13,7 @@ import * as path from "path";
 const HYBRID_SEARCH_FLAG = "CORTEX_FEATURE_HYBRID_SEARCH";
 const COSINE_SIMILARITY_MIN = 0.15;
 const COSINE_MAX_CORPUS = 10000;
-export const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosine scoring
+const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosine scoring
 const COSINE_WINDOW_COUNT = 4;
 
 function splitPathSegments(filePath: string): string[] {

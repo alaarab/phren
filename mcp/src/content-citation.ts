@@ -117,11 +117,6 @@ function resolveCitationFile(citation: FindingCitation): string | null {
 const commitExistsCache = new Map<string, boolean>();
 const blameCache = new Map<string, string | false>();
 
-export function clearCitationCaches(): void {
-  commitExistsCache.clear();
-  blameCache.clear();
-}
-
 function commitExists(repoPath: string, commit: string): boolean {
   const key = `${repoPath}\0${commit}`;
   const cached = commitExistsCache.get(key);

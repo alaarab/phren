@@ -1,6 +1,4 @@
 import { parseMcpMode, runInit } from "./init.js";
-import * as os from "os";
-import * as path from "path";
 import { errorMessage } from "./utils.js";
 import { defaultCortexPath } from "./shared.js";
 
@@ -102,7 +100,7 @@ Examples:
   cortex status                          Quick health check
 `;
 
-export const CLI_COMMANDS = [
+const CLI_COMMANDS = [
   "search",
   "shell",
   "update",

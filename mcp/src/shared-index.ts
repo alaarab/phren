@@ -13,15 +13,15 @@ import {
 } from "./shared.js";
 import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripBacklogDoneSection } from "./shared-content.js";
-import { cosineFallback, invalidateDfCache } from "./shared-search-fallback.js";
+import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
-import { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities, logEntityMiss } from "./shared-entity-graph.js";
+import { extractAndLinkEntities, ensureGlobalEntitiesTable } from "./shared-entity-graph.js";
 import { bootstrapSqlJs } from "./shared-sqljs.js";
 
 // Re-export for backward compatibility
 export { porterStem } from "./shared-stemmer.js";
-export { cosineFallback, COSINE_CANDIDATE_CAP } from "./shared-search-fallback.js";
-export { extractAndLinkEntities, queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities, logEntityMiss } from "./shared-entity-graph.js";
+export { cosineFallback } from "./shared-search-fallback.js";
+export { queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities, logEntityMiss } from "./shared-entity-graph.js";
 
 export type SqlValue = string | number | null | Uint8Array;
 export type DbRow = SqlValue[];
@@ -420,10 +420,6 @@ function globAllFiles(cortexPath: string, profile?: string): { filePaths: string
 
   allAbsolutePaths.sort();
   return { filePaths: allAbsolutePaths, entries };
-}
-
-function collectAllFiles(cortexPath: string, profile?: string): FileEntry[] {
-  return globAllFiles(cortexPath, profile).entries;
 }
 
 export function listIndexedDocumentPaths(cortexPath: string, profile?: string): string[] {

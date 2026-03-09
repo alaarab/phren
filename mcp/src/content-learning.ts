@@ -388,9 +388,7 @@ export function addFindingToFile(
           .filter(line => !line.startsWith("- ") || !line.toLowerCase().includes(supersedesText.slice(0, 40).toLowerCase()))
           .join("\n")
       : (legacyHistory ? `${content}\n${legacyHistory}` : content);
-    const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
-
-    const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, citationInput, nowIso, inferredRepo, headCommit);
+  const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, citationInput, nowIso, inferredRepo, headCommit);
     if (prepared.status === "rejected") {
       return cortexErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
     }
@@ -525,8 +523,7 @@ export function addFindingsToFile(
         rejected.push({ text: learning, reason: lengthError });
         continue;
       }
-      const fullHistory = legacyHistory ? `${content}\n${legacyHistory}` : content;
-      const prepared = prepareFinding(learning, project, fullHistory, extraAnnotations, undefined, nowIso, inferredRepo, headCommit);
+      const prepared = prepareFinding(learning, project, legacyHistory ? `${content}\n${legacyHistory}` : content, extraAnnotations, undefined, nowIso, inferredRepo, headCommit);
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });
         continue;

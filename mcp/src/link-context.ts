@@ -33,7 +33,7 @@ function allKnownProjects(cortexPath: string): string[] {
 
 // ── Context file writing ────────────────────────────────────────────────────
 
-export function writeContextFile(managedContent: string) {
+function writeContextFile(managedContent: string) {
   const contextFile = contextFilePath();
   const wrapped = `<!-- cortex-managed -->\n${managedContent}\n<!-- /cortex-managed -->`;
   if (fs.existsSync(contextFile)) {
@@ -51,7 +51,7 @@ export function writeContextFile(managedContent: string) {
   fs.writeFileSync(contextFile, wrapped + "\n");
 }
 
-export function formatMcpStatus(status: string): string {
+function formatMcpStatus(status: string): string {
   if (status === "installed" || status === "already_configured") {
     return "MCP: active (search_knowledge, get_project_summary, list_projects)";
   }

@@ -66,7 +66,6 @@ function getScopedSkills(cortexPath: string, project: string | undefined, profil
   ];
 }
 
-type FindSkillResult = { path: string } | { error: string } | null;
 type ResolvedSkill = { path: string; format: "flat" | "folder"; root: string };
 
 function findSkill(cortexPath: string, profile: string, project: string | undefined, name: string): ResolvedSkill | { error: string } | null {

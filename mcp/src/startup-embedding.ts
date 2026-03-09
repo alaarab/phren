@@ -14,7 +14,7 @@ export interface EmbeddingWarmupDeps {
 export type EmbeddingCacheLike = Pick<EmbeddingCache, "load" | "get" | "set" | "flush">;
 
 /** Throttle delay between embedding requests in the background embed loop. */
-export const BACKGROUND_EMBED_THROTTLE_MS = 50;
+const BACKGROUND_EMBED_THROTTLE_MS = 50;
 
 async function loadWarmupDeps(): Promise<EmbeddingWarmupDeps> {
   const { checkOllamaAvailable, embedText, getEmbeddingModel, getOllamaUrl } = await import("./shared-ollama.js");

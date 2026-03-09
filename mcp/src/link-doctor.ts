@@ -29,7 +29,7 @@ import type { DoctorResult } from "./link.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
-export function isWrapperActive(tool: string): boolean {
+function isWrapperActive(tool: string): boolean {
   const wrapperPath = homePath(".local", "bin", tool);
   if (!fs.existsSync(wrapperPath)) return false;
   try {

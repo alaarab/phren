@@ -485,7 +485,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
   }
 }
 
-export function suggestCommand(input: string): string | undefined {
+function suggestCommand(input: string): string | undefined {
   const known = [
     "help", "projects", "backlog", "findings", "review queue", "machines", "health",
     "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
@@ -615,7 +615,7 @@ export function getListItems(
 
 // ── Activation (Enter key) ────────────────────────────────────────────────────
 
-export async function activateSelected(host: NavigationHost): Promise<void> {
+async function activateSelected(host: NavigationHost): Promise<void> {
   const cursor = host.currentCursor();
   const items = host.getListItems();
   const item = items[cursor];
@@ -656,7 +656,7 @@ export async function activateSelected(host: NavigationHost): Promise<void> {
 
 // ── View-specific action keys ─────────────────────────────────────────────────
 
-export async function doViewAction(host: NavigationHost, key: string): Promise<void> {
+async function doViewAction(host: NavigationHost, key: string): Promise<void> {
   const cursor = host.currentCursor();
   const items = host.getListItems();
   const item = items[cursor];
