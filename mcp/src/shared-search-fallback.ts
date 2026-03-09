@@ -16,6 +16,36 @@ const COSINE_MAX_CORPUS = 10000;
 export const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosine scoring
 const COSINE_WINDOW_COUNT = 4;
 
+function splitPathSegments(filePath: string): string[] {
+  return filePath.split(/[\\/]+/).filter(Boolean);
+}
+
+export function deriveVectorDocIdentity(
+  cortexPath: string,
+  fullPath: string
+): { project: string; filename: string; relFile: string } {
+  const normalizedCortexPath = cortexPath.replace(/[\\/]+/g, "/").replace(/\/+$/, "");
+  const normalizedFullPath = fullPath.replace(/[\\/]+/g, "/");
+  let rel = fullPath;
+  if (normalizedFullPath === normalizedCortexPath) {
+    rel = "";
+  } else if (normalizedFullPath.startsWith(`${normalizedCortexPath}/`)) {
+    rel = normalizedFullPath.slice(normalizedCortexPath.length + 1);
+  } else {
+    const relative = path.relative(cortexPath, fullPath);
+    if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+      rel = relative;
+    }
+  }
+
+  const relParts = splitPathSegments(rel);
+  return {
+    project: relParts[0] ?? "",
+    filename: splitPathSegments(fullPath).at(-1) ?? "",
+    relFile: relParts.slice(1).join("/"),
+  };
+}
+
 // Module-level cache for TF-IDF document frequencies.
 // Keyed by a fingerprint of the candidate doc IDs so that different candidate subsets and
 // incremental index mutations produce distinct cache entries rather than reusing stale counts.
@@ -318,19 +348,6 @@ export async function vectorFallback(
   if (!queryVec || queryVec.length === 0) return [];
 
   const model = getEmbeddingModel();
-  const normalizedCortexPath = cortexPath.replace(/[\\/]+/g, "/").replace(/\/+$/, "");
-  const normalizeRelativePath = (fullPath: string): string => {
-    const normalizedFullPath = fullPath.replace(/[\\/]+/g, "/");
-    if (normalizedFullPath === normalizedCortexPath) return "";
-    if (normalizedFullPath.startsWith(`${normalizedCortexPath}/`)) {
-      return normalizedFullPath.slice(normalizedCortexPath.length + 1);
-    }
-    const rel = path.relative(cortexPath, fullPath);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) return fullPath;
-    return rel;
-  };
-  const splitPathSegments = (filePath: string): string[] =>
-    filePath.split(/[\\/]+/).filter(Boolean);
   // Apply project scoping: when a project is detected, restrict vector results to that
   // project and the global project to prevent cross-project memory injection.
   const entries = cache.getAllEntries().filter(e => {
@@ -338,9 +355,7 @@ export async function vectorFallback(
     if (excludePaths.has(e.path)) return false;
     if (project) {
       // Allow global docs and docs from the active project
-      const rel = normalizeRelativePath(e.path);
-      const relParts = splitPathSegments(rel);
-      const entryProject = relParts[0] ?? "";
+      const entryProject = deriveVectorDocIdentity(cortexPath, e.path).project;
       if (entryProject !== project && entryProject !== "global") return false;
     }
     return true;
@@ -361,12 +376,7 @@ export async function vectorFallback(
     .slice(0, limit);
 
   return scored.map(e => {
-    const filename = splitPathSegments(e.path).at(-1) ?? "";
-    // Derive project and relative path from absolute path
-    const rel = normalizeRelativePath(e.path);
-    const relParts = splitPathSegments(rel);
-    const entryProject = relParts[0] ?? "";
-    const relFile = relParts.slice(1).join("/");
+    const { project: entryProject, filename, relFile } = deriveVectorDocIdentity(cortexPath, e.path);
     // Use the same path-aware classifyFile logic as the indexer so reference/skills/etc.
     // get their correct type instead of always falling back to "other".
     const type = classifyFile(filename, relFile);
