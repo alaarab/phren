@@ -5,6 +5,10 @@ import { fileURLToPath } from "url";
 import { errorMessage } from "./utils.js";
 import { PACKAGE_NAME, PACKAGE_SPEC } from "./package-metadata.js";
 
+function shellCommand(bin: "npm" | "npx"): string {
+  return process.platform === "win32" ? `${bin}.cmd` : bin;
+}
+
 function packageRootFromRuntime(): string {
   const current = fileURLToPath(import.meta.url);
   return path.resolve(path.dirname(current), "..", "..");
@@ -86,9 +90,9 @@ export async function runCortexUpdate(opts: RunCortexUpdateOptions = {}): Promis
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] runCortexUpdate gitStatus: ${errorMessage(err)}\n`);
       }
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
-      run("npm", ["install"], root);
+      run(shellCommand("npm"), ["install"], root);
       try {
-        run("npm", ["run", "build"], root);
+        run(shellCommand("npm"), ["run", "build"], root);
         run(process.execPath, [builtEntry, "--health"], root);
         const starterMessage = maybeRefreshStarter(root, builtEntry, Boolean(opts.refreshStarter));
         return { ok: true, message: `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.${starterMessage} Rebuilt and verified CLI health.` };
@@ -103,8 +107,8 @@ export async function runCortexUpdate(opts: RunCortexUpdateOptions = {}): Promis
   }
 
   try {
-    run("npm", ["install", "-g", `${PACKAGE_NAME}@latest`]);
-    run("npm", ["list", "-g", PACKAGE_NAME, "--depth=0"]);
+    run(shellCommand("npm"), ["install", "-g", `${PACKAGE_NAME}@latest`]);
+    run(shellCommand("npm"), ["list", "-g", PACKAGE_NAME, "--depth=0"]);
     const starterMessage = maybeRefreshStarter(root, builtEntry, Boolean(opts.refreshStarter));
     return { ok: true, message: `Updated cortex via npm global install (@latest) and verified the package is installed.${starterMessage}` };
   } catch (err: unknown) {

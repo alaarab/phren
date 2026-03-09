@@ -45,14 +45,15 @@ interface HookEntrypointCheckDeps {
 }
 
 function commandVersion(cmd: string, args: string[] = ["--version"]): string | null {
+  const effectiveCmd = process.platform === "win32" && (cmd === "npm" || cmd === "npx") ? `${cmd}.cmd` : cmd;
   try {
-    return execFileSync(cmd, args, {
+    return execFileSync(effectiveCmd, args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
   } catch (err: unknown) {
-    debugLog(`commandVersion ${cmd} failed: ${errorMessage(err)}`);
+    debugLog(`commandVersion ${effectiveCmd} failed: ${errorMessage(err)}`);
     return null;
   }
 }

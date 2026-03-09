@@ -13,8 +13,13 @@ function homeDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.HOME || env.USERPROFILE || os.homedir();
 }
 
+function joinPortable(base: string, ...parts: string[]): string {
+  const usePosix = base.startsWith("/") && !base.includes("\\");
+  return usePosix ? path.posix.join(base, ...parts) : path.join(base, ...parts);
+}
+
 function homePathForEnv(env: NodeJS.ProcessEnv, ...parts: string[]): string {
-  return path.join(homeDir(env), ...parts);
+  return joinPortable(homeDir(env), ...parts);
 }
 
 function defaultCortexPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -79,17 +84,17 @@ export function vscodeMcpCandidates(env: NodeJS.ProcessEnv = process.env): strin
   const home = homeDir(env);
   const userProfile = normalizeWindowsPathToWsl(env.USERPROFILE);
   const username = env.USERNAME;
-  const userProfileRoaming = userProfile ? path.join(userProfile, "AppData", "Roaming", "Code", "User") : undefined;
+  const userProfileRoaming = userProfile ? joinPortable(userProfile, "AppData", "Roaming", "Code", "User") : undefined;
   const guessedWindowsRoaming = !userProfile && username
-    ? path.join("/mnt/c", "Users", username, "AppData", "Roaming", "Code", "User")
+    ? path.posix.join("/mnt/c", "Users", username, "AppData", "Roaming", "Code", "User")
     : undefined;
   return uniqStrings([
     userProfileRoaming,
     guessedWindowsRoaming,
-    path.join(home, ".config", "Code", "User"),
-    path.join(home, ".vscode-server", "data", "User"),
-    path.join(home, "Library", "Application Support", "Code", "User"),
-    path.join(home, "AppData", "Roaming", "Code", "User"),
+    joinPortable(home, ".config", "Code", "User"),
+    joinPortable(home, ".vscode-server", "data", "User"),
+    joinPortable(home, "Library", "Application Support", "Code", "User"),
+    joinPortable(home, "AppData", "Roaming", "Code", "User"),
   ]);
 }
 
@@ -113,7 +118,7 @@ export function probeVsCodeConfig(commandExists: CommandExistsFn, env: NodeJS.Pr
       )
     );
   return {
-    targetDir: installed ? (existing || userProfileRoaming || path.join(home, ".config", "Code", "User")) : null,
+    targetDir: installed ? (existing || userProfileRoaming || joinPortable(home, ".config", "Code", "User")) : null,
     installed,
   };
 }
@@ -121,10 +126,10 @@ export function probeVsCodeConfig(commandExists: CommandExistsFn, env: NodeJS.Pr
 export function cursorMcpCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
   const home = homeDir(env);
   return [
-    path.join(home, ".cursor", "mcp.json"),
-    path.join(home, ".config", "Cursor", "User", "mcp.json"),
-    path.join(home, "Library", "Application Support", "Cursor", "User", "mcp.json"),
-    path.join(home, "AppData", "Roaming", "Cursor", "User", "mcp.json"),
+    joinPortable(home, ".cursor", "mcp.json"),
+    joinPortable(home, ".config", "Cursor", "User", "mcp.json"),
+    joinPortable(home, "Library", "Application Support", "Cursor", "User", "mcp.json"),
+    joinPortable(home, "AppData", "Roaming", "Cursor", "User", "mcp.json"),
   ];
 }
 
@@ -149,11 +154,11 @@ export function resolveCursorMcpConfig(commandExists: CommandExistsFn, env: Node
 export function copilotMcpCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
   const home = homeDir(env);
   return [
-    path.join(home, ".copilot", "mcp-config.json"),
-    path.join(home, ".github", "mcp.json"),
-    path.join(home, ".config", "github-copilot", "mcp.json"),
-    path.join(home, "Library", "Application Support", "github-copilot", "mcp.json"),
-    path.join(home, "AppData", "Roaming", "github-copilot", "mcp.json"),
+    joinPortable(home, ".copilot", "mcp-config.json"),
+    joinPortable(home, ".github", "mcp.json"),
+    joinPortable(home, ".config", "github-copilot", "mcp.json"),
+    joinPortable(home, "Library", "Application Support", "github-copilot", "mcp.json"),
+    joinPortable(home, "AppData", "Roaming", "github-copilot", "mcp.json"),
   ];
 }
 
@@ -181,8 +186,8 @@ export function resolveCopilotMcpConfig(commandExists: CommandExistsFn, env: Nod
 export function codexJsonCandidates(cortexPath: string, env: NodeJS.ProcessEnv = process.env): string[] {
   const home = homeDir(env);
   return [
-    path.join(home, ".codex", "config.json"),
-    path.join(home, ".codex", "mcp.json"),
+    joinPortable(home, ".codex", "config.json"),
+    joinPortable(home, ".codex", "mcp.json"),
     path.join(cortexPath, "codex.json"),
   ];
 }
@@ -199,7 +204,7 @@ export function resolveCodexMcpConfig(
   jsonCandidates: string[];
 } {
   const home = homeDir(env);
-  const tomlPath = path.join(home, ".codex", "config.toml");
+  const tomlPath = joinPortable(home, ".codex", "config.toml");
   const jsonCandidates = codexJsonCandidates(cortexPath, env);
   const existingJson = pickExistingFile(jsonCandidates);
   const installed =

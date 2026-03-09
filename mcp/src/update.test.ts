@@ -25,6 +25,10 @@ vi.mock("child_process", () => ({
 import { runCortexUpdate } from "./update.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
 
+function npmExec(): string {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
 describe("runCortexUpdate", () => {
   beforeEach(() => {
     mockExistsSync.mockReset();
@@ -45,8 +49,8 @@ describe("runCortexUpdate", () => {
     mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === "git" && args[0] === "status") return " M mcp/src/update.ts ";
       if (cmd === "git" && args[0] === "pull") return "Already up to date.";
-      if (cmd === "npm" && args[0] === "install") return "";
-      if (cmd === "npm" && args[0] === "run" && args[1] === "build") return "";
+      if (cmd === npmExec() && args[0] === "install") return "";
+      if (cmd === npmExec() && args[0] === "run" && args[1] === "build") return "";
       if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "--health") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
@@ -64,12 +68,12 @@ describe("runCortexUpdate", () => {
       expect.objectContaining({ encoding: "utf8" })
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(
-      "npm",
+      npmExec(),
       ["install"],
       expect.objectContaining({ encoding: "utf8" })
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(
-      "npm",
+      npmExec(),
       ["run", "build"],
       expect.objectContaining({ encoding: "utf8" })
     );
@@ -99,7 +103,7 @@ describe("runCortexUpdate", () => {
     expect(result.message).toBe("Local repo update failed: pull failed");
     expect(
       mockExecFileSync.mock.calls.some(
-        (call: unknown[]) => call[0] === "npm" && Array.isArray(call[1]) && call[1][0] === "install"
+        (call: unknown[]) => call[0] === npmExec() && Array.isArray(call[1]) && call[1][0] === "install"
       )
     ).toBe(false);
   });
@@ -114,8 +118,8 @@ describe("runCortexUpdate", () => {
     mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === "git" && args[0] === "status") return "";
       if (cmd === "git" && args[0] === "pull") return "Fast-forward";
-      if (cmd === "npm" && args[0] === "install") return "";
-      if (cmd === "npm" && args[0] === "run" && args[1] === "build") throw new Error("build failed");
+      if (cmd === npmExec() && args[0] === "install") return "";
+      if (cmd === npmExec() && args[0] === "run" && args[1] === "build") throw new Error("build failed");
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
@@ -139,12 +143,12 @@ describe("runCortexUpdate", () => {
     expect(result.message).toContain("Updated cortex via npm global install (@latest) and verified the package is installed.");
     expect(result.message).toContain("Run `cortex update --refresh-starter`");
     expect(mockExecFileSync).toHaveBeenCalledWith(
-      "npm",
+      npmExec(),
       ["install", "-g", "@alaarab/cortex@latest"],
       expect.objectContaining({ encoding: "utf8" })
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(
-      "npm",
+      npmExec(),
       ["list", "-g", "@alaarab/cortex", "--depth=0"],
       expect.objectContaining({ encoding: "utf8" })
     );
@@ -180,8 +184,8 @@ describe("runCortexUpdate", () => {
     mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === "git" && args[0] === "status") return "";
       if (cmd === "git" && args[0] === "pull") return "Fast-forward";
-      if (cmd === "npm" && args[0] === "install") return "";
-      if (cmd === "npm" && args[0] === "run" && args[1] === "build") return "";
+      if (cmd === npmExec() && args[0] === "install") return "";
+      if (cmd === npmExec() && args[0] === "run" && args[1] === "build") return "";
       if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "--health") return "";
       if (cmd === process.execPath && String(args[0]).endsWith("mcp/dist/index.js") && args[1] === "init") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
