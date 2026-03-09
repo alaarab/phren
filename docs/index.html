@@ -324,7 +324,7 @@
     <div class="container">
       <div class="trace-header reveal">
         <div class="section-label">Under the hood</div>
-        <h2 class="section-title">Three hooks. Every session.</h2>
+        <h2 class="section-title">Three hooks. Zero config.</h2>
       </div>
 
       <div class="trace reveal">
@@ -454,7 +454,7 @@
     <div class="container">
       <div class="demo-header reveal">
         <div class="section-label">Interactive Shell</div>
-        <h2 class="section-title">The interactive shell.</h2>
+        <h2 class="section-title">Interactive shell.</h2>
         <p class="section-sub" style="margin-top:12px">Select a project, browse backlog and findings, review the queue, and check sync health. Type <code style="font-size:14px;color:var(--copper-mid)">:</code> to open the command palette from any view.</p>
       </div>
       <div class="demo-terminal reveal">
@@ -718,15 +718,38 @@
       <h2 class="cta-title">Start building your Cortex.</h2>
       <p class="cta-tagline">Your agents will remember.</p>
       <svg class="cta-icon" width="72" height="72" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="cta-centerGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#F5C840"/>
+            <stop offset="45%" stop-color="#D4892E"/>
+            <stop offset="100%" stop-color="#8B4A12"/>
+          </radialGradient>
+          <radialGradient id="cta-nodeGrad">
+            <stop offset="0%" stop-color="#3A7BAE"/>
+            <stop offset="100%" stop-color="#1C4A6E"/>
+          </radialGradient>
+          <linearGradient id="cta-edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.7"/>
+            <stop offset="100%" stop-color="#1C3D5E" stop-opacity="0.25"/>
+          </linearGradient>
+        </defs>
         <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
         <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
-        <line x1="72" y1="22" x2="46" y2="26" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="46" y1="26" x2="26" y2="42" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="26" y1="42" x2="22" y2="64" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="22" y1="64" x2="26" y2="86" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="26" y1="86" x2="46" y2="102" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="46" y1="102" x2="72" y2="106" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <circle cx="64" cy="64" r="5" fill="#D4892E"/>
+        <line x1="72" y1="22" x2="46" y2="26" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+        <line x1="46" y1="26" x2="26" y2="42" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+        <line x1="26" y1="42" x2="22" y2="64" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+        <line x1="22" y1="64" x2="26" y2="86" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+        <line x1="26" y1="86" x2="46" y2="102" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+        <line x1="46" y1="102" x2="72" y2="106" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+        <circle cx="72" cy="22" r="3.5" fill="url(#cta-nodeGrad)"/>
+        <circle cx="46" cy="26" r="3" fill="url(#cta-nodeGrad)"/>
+        <circle cx="26" cy="42" r="3" fill="url(#cta-nodeGrad)"/>
+        <circle cx="22" cy="64" r="3.5" fill="url(#cta-nodeGrad)"/>
+        <circle cx="26" cy="86" r="3" fill="url(#cta-nodeGrad)"/>
+        <circle cx="46" cy="102" r="3" fill="url(#cta-nodeGrad)"/>
+        <circle cx="72" cy="106" r="3.5" fill="url(#cta-nodeGrad)"/>
+        <circle cx="64" cy="64" r="6.5" fill="url(#cta-centerGlow)"/>
+        <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
       </svg>
       <div class="cta-actions">
         <a href="#install" class="btn-primary">
@@ -748,15 +771,38 @@
   <footer class="footer-bar">
     <div class="footer-left">
       <svg width="18" height="18" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="ft-centerGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#F5C840"/>
+            <stop offset="45%" stop-color="#D4892E"/>
+            <stop offset="100%" stop-color="#8B4A12"/>
+          </radialGradient>
+          <radialGradient id="ft-nodeGrad">
+            <stop offset="0%" stop-color="#3A7BAE"/>
+            <stop offset="100%" stop-color="#1C4A6E"/>
+          </radialGradient>
+          <linearGradient id="ft-edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.7"/>
+            <stop offset="100%" stop-color="#1C3D5E" stop-opacity="0.25"/>
+          </linearGradient>
+        </defs>
         <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
         <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
-        <line x1="72" y1="22" x2="46" y2="26" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="46" y1="26" x2="26" y2="42" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="26" y1="42" x2="22" y2="64" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="22" y1="64" x2="26" y2="86" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="26" y1="86" x2="46" y2="102" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <line x1="46" y1="102" x2="72" y2="106" stroke="#2B5F8E" stroke-width="1.2" opacity="0.5"/>
-        <circle cx="64" cy="64" r="5" fill="#D4892E"/>
+        <line x1="72" y1="22" x2="46" y2="26" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
+        <line x1="46" y1="26" x2="26" y2="42" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
+        <line x1="26" y1="42" x2="22" y2="64" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
+        <line x1="22" y1="64" x2="26" y2="86" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
+        <line x1="26" y1="86" x2="46" y2="102" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
+        <line x1="46" y1="102" x2="72" y2="106" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
+        <circle cx="72" cy="22" r="3.5" fill="url(#ft-nodeGrad)"/>
+        <circle cx="46" cy="26" r="3" fill="url(#ft-nodeGrad)"/>
+        <circle cx="26" cy="42" r="3" fill="url(#ft-nodeGrad)"/>
+        <circle cx="22" cy="64" r="3.5" fill="url(#ft-nodeGrad)"/>
+        <circle cx="26" cy="86" r="3" fill="url(#ft-nodeGrad)"/>
+        <circle cx="46" cy="102" r="3" fill="url(#ft-nodeGrad)"/>
+        <circle cx="72" cy="106" r="3.5" fill="url(#ft-nodeGrad)"/>
+        <circle cx="64" cy="64" r="6.5" fill="url(#ft-centerGlow)"/>
+        <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
       </svg>
       cortex: persistent memory for AI agents
     </div>
