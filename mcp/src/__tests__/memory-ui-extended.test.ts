@@ -3,6 +3,7 @@ import { writeFile as write, makeTempDir, grantAdmin } from "../test-helpers.js"
 import * as fs from "fs";
 import * as path from "path";
 import * as http from "http";
+import * as os from "os";
 import * as querystring from "querystring";
 import { createReviewUiServer } from "../memory-ui.js";
 
@@ -159,8 +160,14 @@ describe.sequential("review-ui auth token protection", () => {
     expect(res.status).toBe(302);
   });
 
-  it("auth token is embedded in GET / page HTML", async () => {
+  it("GET / returns 401 without auth token", async () => {
     const res = await httpGet(port, "/");
+    expect(res.status).toBe(401);
+    expect(res.body).toContain("Unauthorized");
+  });
+
+  it("GET / requires auth and only embeds token after successful auth", async () => {
+    const res = await httpGet(port, "/?_auth=" + encodeURIComponent(authToken));
     expect(res.status).toBe(200);
     expect(res.body).toContain(authToken);
   });
@@ -364,7 +371,7 @@ describe.sequential("review-ui combined CSRF + auth", () => {
 
   it("requires both auth and CSRF for POST to succeed", async () => {
     // Get CSRF token
-    await httpGet(port, "/");
+    await httpGet(port, "/?_auth=" + encodeURIComponent(authToken));
     const token = [...csrfTokens.keys()][0];
 
     // Missing auth -> 401
@@ -387,7 +394,7 @@ describe.sequential("review-ui combined CSRF + auth", () => {
   });
 
   it("succeeds when both auth and CSRF are correct", async () => {
-    await httpGet(port, "/");
+    await httpGet(port, "/?_auth=" + encodeURIComponent(authToken));
     const token = [...csrfTokens.keys()][0];
     const res = await postForm(port, "/approve", {
       _auth: authToken,
@@ -550,6 +557,30 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
   it("GET /api/skills succeeds with auth token in query", async () => {
     const res = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
     expect(res.status).toBe(200);
+  });
+
+  it("POST /api/skill-save rejects symlink traversal for new files", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-skill-escape-"));
+    const linkRoot = path.join(tmpRoot, "global", "skills", "escape");
+    fs.mkdirSync(path.dirname(linkRoot), { recursive: true });
+    fs.symlinkSync(outsideDir, linkRoot, "dir");
+
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).csrfToken as string;
+    const escapedPath = path.join(linkRoot, "pwned.md");
+
+    const res = await postForm(port, "/api/skill-save", {
+      _auth: authToken,
+      _csrf: csrf,
+      path: escapedPath,
+      content: "# should not write",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("Invalid path");
+    expect(fs.existsSync(path.join(outsideDir, "pwned.md"))).toBe(false);
   });
 });
 

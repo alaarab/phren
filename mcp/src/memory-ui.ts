@@ -139,13 +139,24 @@ function isAllowedFilePath(filePath: string, cortexPath: string): boolean {
   if (!allowedRoots.some(root => resolved === root || resolved.startsWith(root + path.sep))) {
     return false;
   }
-  // Resolve symlinks to prevent escaping the allowed boundary (Q8)
+  // Resolve the nearest existing ancestor so symlinked parent dirs cannot
+  // redirect writes outside an allowed root when creating a new file.
+  let existingAncestor = resolved;
+  const pendingSegments: string[] = [];
+  while (!fs.existsSync(existingAncestor)) {
+    const parent = path.dirname(existingAncestor);
+    if (parent === existingAncestor) break;
+    pendingSegments.unshift(path.basename(existingAncestor));
+    existingAncestor = parent;
+  }
   let realResolved: string;
   try {
-    realResolved = fs.realpathSync(resolved);
+    const realAncestor = fs.realpathSync(existingAncestor);
+    realResolved = pendingSegments.length
+      ? path.resolve(realAncestor, ...pendingSegments)
+      : realAncestor;
   } catch {
-    // File doesn't exist yet (e.g. new skill); use the lexically resolved path
-    realResolved = resolved;
+    return false;
   }
   const allowedRealRoots = allowedRoots.map(r => {
     try { return fs.realpathSync(r); } catch { return r; }
@@ -3434,6 +3445,14 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     const pathname = url.includes("?") ? url.slice(0, url.indexOf("?")) : url;
 
     if (req.method === "GET" && pathname === "/") {
+      if (authToken) {
+        const submitted = getSubmittedAuthToken(req, url);
+        if (!authTokensMatch(submitted, authToken)) {
+          res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
+          res.end("Unauthorized");
+          return;
+        }
+      }
       pruneExpiredCsrfTokens(csrfTokens);
       let csrfToken: string | undefined;
       if (csrfTokens) {
@@ -3890,6 +3909,7 @@ export async function startReviewUi(cortexPath: string, port: number): Promise<v
   const authToken = crypto.randomUUID();
   const csrfTokens = new Map<string, number>();
   const server = createReviewUiServer(cortexPath, { authToken, csrfTokens });
+  const reviewUrl = `http://127.0.0.1:${port}/?_auth=${encodeURIComponent(authToken)}`;
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -3900,7 +3920,7 @@ export async function startReviewUi(cortexPath: string, port: number): Promise<v
   });
 
   process.stdout.write(`cortex review-ui running at http://127.0.0.1:${port}\n`);
-  process.stderr.write(`auth token: ${authToken}\n`);
+  process.stderr.write(`open: ${reviewUrl}\n`);
 
   await new Promise<void>((resolve) => {
     const shutdown = () => {

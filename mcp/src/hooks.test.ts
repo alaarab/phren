@@ -7,6 +7,7 @@ import { selectSnippets, approximateTokens } from "./cli-hooks-retrieval.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as http from "http";
 import { fileURLToPath } from "url";
 
 describe("hooks", () => {
@@ -631,6 +632,45 @@ describe("hooks", () => {
       const result = runCustomHooks(cortexPath, "post-search");
       expect(result.ran).toBe(0);
       expect(result.errors).toHaveLength(0);
+    });
+
+    it("runCustomHooks does not follow webhook redirects", async () => {
+      let loopbackHits = 0;
+      const targetServer = http.createServer((_, res) => {
+        loopbackHits += 1;
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("loopback-hit");
+      });
+      await new Promise<void>((resolve) => targetServer.listen(0, "127.0.0.1", () => resolve()));
+      const targetAddress = targetServer.address();
+      if (!targetAddress || typeof targetAddress === "string") throw new Error("failed to bind target server");
+
+      const redirectServer = http.createServer((_, res) => {
+        res.writeHead(302, { location: `http://127.0.0.1:${targetAddress.port}/` });
+        res.end();
+      });
+      await new Promise<void>((resolve) => redirectServer.listen(0, "127.0.0.1", () => resolve()));
+      const redirectAddress = redirectServer.address();
+      if (!redirectAddress || typeof redirectAddress === "string") throw new Error("failed to bind redirect server");
+
+      try {
+        fs.writeFileSync(
+          path.join(cortexPath, ".governance", "install-preferences.json"),
+          JSON.stringify({
+            customHooks: [
+              { event: "post-search", webhook: `http://127.0.0.1:${redirectAddress.port}/redirect` },
+            ],
+          })
+        );
+        const result = runCustomHooks(cortexPath, "post-search");
+        expect(result.ran).toBe(1);
+        expect(result.errors).toHaveLength(0);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(loopbackHits).toBe(0);
+      } finally {
+        await new Promise<void>((resolve) => redirectServer.close(() => resolve()));
+        await new Promise<void>((resolve) => targetServer.close(() => resolve()));
+      }
     });
   });
 
