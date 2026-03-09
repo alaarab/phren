@@ -300,6 +300,7 @@ interface ProjectInfo {
   hasReference: boolean;
   summaryText: string;
   githubUrl?: string;
+  sparkline: number[];
 }
 
 function extractGithubUrl(content: string): string | undefined {
@@ -347,6 +348,21 @@ function collectProjectsForUI(cortexPath: string): ProjectInfo[] {
       findingCount = (content.match(/^- \[/gm) || []).length;
     }
 
+    // Activity sparkline: 8-week buckets
+    const sparkline: number[] = new Array(8).fill(0);
+    if (fs.existsSync(findingsPath)) {
+      const now = Date.now();
+      const weekMs = 7 * 24 * 60 * 60 * 1000;
+      const sparkContent = fs.readFileSync(findingsPath, "utf8");
+      const dateRe = /(?:created[_:]?\s*"?|created_at[":]+\s*)(\d{4}-\d{2}-\d{2})/g;
+      let m;
+      while ((m = dateRe.exec(sparkContent)) !== null) {
+        const age = now - new Date(m[1]).getTime();
+        const weekIdx = Math.floor(age / weekMs);
+        if (weekIdx >= 0 && weekIdx < 8) sparkline[7 - weekIdx]++;
+      }
+    }
+
     let backlogCount = 0;
     if (fs.existsSync(backlogPath)) {
       const content = fs.readFileSync(backlogPath, "utf8");
@@ -380,6 +396,7 @@ function collectProjectsForUI(cortexPath: string): ProjectInfo[] {
       hasReference: fs.existsSync(refPath) && fs.statSync(refPath).isDirectory(),
       summaryText,
       githubUrl,
+      sparkline,
     });
   }
 
@@ -389,9 +406,6 @@ function collectProjectsForUI(cortexPath: string): ProjectInfo[] {
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function renderPage(cortexPath: string, csrfToken?: string, authToken?: string): string {
-  const projects = getProjectDirs(cortexPath).map((p) => path.basename(p)).filter((p) => p !== "global");
-  const usage = recentUsage(cortexPath);
-  const accepted = recentAccepted(cortexPath);
   const sync = readSyncSnapshot(cortexPath) as {
     autoSaveStatus?: string;
     lastPullAt?: string;
@@ -400,107 +414,94 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     lastPushStatus?: string;
     unsyncedCommits?: number;
   };
-  const rows: string[] = [];
-
-  const csrfField = csrfToken ? `<input type="hidden" name="_csrf" value="${h(csrfToken)}" />` : "";
-  const authField = authToken ? `<input type="hidden" name="_auth" value="${h(authToken)}" />` : "";
-  const hiddenFields = csrfField + authField;
-
-  const reviewMachines = new Set<string>();
-  const reviewModels = new Set<string>();
-  const reviewProjects = new Set<string>();
-
-  for (const project of projects) {
-    const queueResult = readReviewQueue(cortexPath, project);
-    const items = queueResult.ok ? queueResult.data : [];
-    if (!items.length) continue;
-    reviewProjects.add(project);
-    for (const item of items) {
-      if (item.machine) reviewMachines.add(item.machine);
-      if (item.model) reviewModels.add(item.model);
-      rows.push(`
-        <div class="review-card" data-project="${h(project)}" data-machine="${h(item.machine || "")}" data-model="${h(item.model || "")}">
-          <div class="review-card-header">
-            <span class="badge badge-project">${h(project)}</span>
-            <span class="badge">${h(item.section)}</span>${item.machine ? `
-            <span class="badge" style="background:#e0e7ff;color:#3730a3;font-size:11px" title="Captured on machine: ${h(item.machine)}">${h(item.machine)}</span>` : ""}${item.model && item.model !== "unknown" ? `
-            <span class="badge" style="background:#fef3c7;color:#92400e;font-size:11px" title="Model: ${h(item.model)}">${h(item.model)}</span>` : ""}
-            <span class="text-muted" style="font-size:12px;margin-left:auto">${h(item.date)}</span>
-          </div>
-          <div class="review-card-text">${h(item.text)}</div>
-          <div class="review-card-actions">
-            <form method="POST" action="/approve">
-              ${hiddenFields}
-              <input type="hidden" name="project" value="${h(project)}" />
-              <input type="hidden" name="line" value="${h(item.line)}" />
-              <button type="submit" class="btn btn-sm btn-approve">Approve</button>
-            </form>
-            <form method="POST" action="/reject">
-              ${hiddenFields}
-              <input type="hidden" name="project" value="${h(project)}" />
-              <input type="hidden" name="line" value="${h(item.line)}" />
-              <button type="submit" class="btn btn-sm btn-reject">Reject</button>
-            </form>
-            <button type="button" class="btn btn-sm" onclick="toggleReviewEdit(this)">Edit</button>
-          </div>
-          <div class="review-card-edit" style="display:none">
-            <form method="POST" action="/edit">
-              ${hiddenFields}
-              <input type="hidden" name="project" value="${h(project)}" />
-              <input type="hidden" name="line" value="${h(item.line)}" />
-              <textarea name="new_text" class="review-edit-textarea">${h(item.text)}</textarea>
-              <div style="display:flex;gap:8px;margin-top:8px">
-                <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                <button type="button" class="btn btn-sm" onclick="toggleReviewEdit(this)">Cancel</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      `);
-    }
-  }
-
-  const filterProjectOptions = [...reviewProjects].sort().map(p => `<option value="${h(p)}">${h(p)}</option>`).join("");
-  const filterMachineOptions = [...reviewMachines].sort().map(m => `<option value="${h(m)}">${h(m)}</option>`).join("");
-  const filterModelOptions = [...reviewModels].sort().map(m => `<option value="${h(m)}">${h(m)}</option>`).join("");
-  const hasFilters = reviewProjects.size > 0;
-
-  const acceptedItems = accepted.map((l) => `<li>${h(l)}</li>`).join("\n");
-  const usageItems = usage.map((l) => `<li>${h(l)}</li>`).join("\n");
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.bunny.net" />
+  <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
   <title>Cortex Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg: #f1f5f9;
+      --text-xs: 10.5px;
+      --text-sm: 12px;
+      --text-base: 13px;
+      --text-md: 16px;
+      --text-lg: 20px;
+      --text-xl: 25px;
+      --bg: #f8f9fb;
       --surface: #ffffff;
-      --ink: #0f172a;
-      --muted: #64748b;
-      --accent: #0d9488;
-      --accent-hover: #0f766e;
-      --border: #e2e8f0;
-      --border-light: #f1f5f9;
+      --surface-raised: #ffffff;
+      --surface-sunken: #f1f3f6;
+      --ink: #111827;
+      --ink-secondary: #374151;
+      --muted: #6b7280;
+      --accent: #06b6d4;
+      --accent-hover: #0891b2;
+      --accent-dim: rgba(6,182,212,.08);
+      --accent-glow: rgba(6,182,212,.15);
+      --border: #e5e7eb;
+      --border-light: #f3f4f6;
       --danger: #ef4444;
+      --danger-dim: rgba(239,68,68,.08);
       --warning: #f59e0b;
       --success: #10b981;
-      --purple: #7c3aed;
+      --success-dim: rgba(16,185,129,.08);
+      --purple: #8b5cf6;
+      --purple-dim: rgba(139,92,246,.08);
       --blue: #3b82f6;
       --red: #ef4444;
       --green: #10b981;
-      --radius: 8px;
-      --radius-sm: 4px;
-      --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
-      --shadow: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
-      --shadow-lg: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1);
-      --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --radius: 10px;
+      --radius-sm: 6px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.04), 0 1px 1px rgba(0,0,0,.02);
+      --shadow: 0 2px 8px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,.08), 0 2px 8px rgba(0,0,0,.04);
+      --font: "Inter", system-ui, -apple-system, sans-serif;
       --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
     }
+
+    [data-theme="dark"] {
+      --bg: #0b0f1a;
+      --surface: #131926;
+      --surface-raised: #1a2233;
+      --surface-sunken: #0a0e17;
+      --ink: #e8ecf4;
+      --ink-secondary: #b8c4d8;
+      --muted: #7889a4;
+      --accent: #22d3ee;
+      --accent-hover: #06b6d4;
+      --accent-dim: rgba(34,211,238,.06);
+      --accent-glow: rgba(34,211,238,.12);
+      --border: #1e2a3e;
+      --border-light: #151d2c;
+      --danger-dim: rgba(239,68,68,.1);
+      --success-dim: rgba(16,185,129,.1);
+      --purple-dim: rgba(139,92,246,.1);
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.4);
+      --shadow: 0 2px 8px rgba(0,0,0,.5), 0 0 1px rgba(0,0,0,.3);
+      --shadow-lg: 0 8px 32px rgba(0,0,0,.6), 0 0 1px rgba(0,0,0,.4);
+    }
+    [data-theme="dark"] .split-item.selected { background: rgba(34,211,238,.06); border-left-color: var(--accent); }
+    [data-theme="dark"] .split-item:hover { background: var(--surface-raised); }
+    [data-theme="dark"] .hook-item.selected { background: rgba(34,211,238,.06); border-left-color: var(--accent); }
+    [data-theme="dark"] .hook-item:hover { background: var(--surface-raised); }
+    [data-theme="dark"] .projects-search { background: var(--surface); color: var(--ink); }
+    [data-theme="dark"] .review-filters select { background: var(--surface); color: var(--ink); }
+    [data-theme="dark"] .review-edit-textarea { background: var(--surface-sunken); color: var(--ink); border-color: var(--border); }
+    [data-theme="dark"] .reader-content textarea { background: var(--surface-sunken); color: var(--ink); }
+    [data-theme="dark"] .graph-container { background: #060a12; }
+    [data-theme="dark"] .reader-toolbar { background: var(--surface-sunken); }
+    [data-theme="dark"] .card { border-color: var(--border); }
+    [data-theme="dark"] .badge-project { background: rgba(139,92,246,.15); color: #a78bfa; }
+    [data-theme="dark"] .badge { background: var(--surface-sunken); }
+    [data-theme="dark"] .review-card { border-color: var(--border); background: var(--surface-raised); }
+    [data-theme="dark"] .review-card:hover { border-color: var(--accent); }
 
     body {
       font-family: var(--font);
@@ -512,7 +513,9 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
     /* ── Header ─────────────────────────────────────────────── */
     .header {
-      background: var(--surface);
+      background: rgba(255,255,255,.82);
+      backdrop-filter: blur(16px) saturate(1.8);
+      -webkit-backdrop-filter: blur(16px) saturate(1.8);
       border-bottom: 1px solid var(--border);
       padding: 0 24px;
       display: flex;
@@ -522,22 +525,30 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       position: sticky;
       top: 0;
       z-index: 100;
-      box-shadow: var(--shadow-sm);
+    }
+    [data-theme="dark"] .header {
+      background: rgba(11,15,26,.82);
+      border-bottom-color: var(--border);
+      box-shadow: 0 1px 0 rgba(34,211,238,.06);
     }
     .header-brand {
-      font-size: 18px;
+      font-size: var(--text-md);
       font-weight: 700;
       color: var(--accent);
       display: flex;
       align-items: center;
       gap: 8px;
-      letter-spacing: -0.02em;
+      letter-spacing: -0.03em;
     }
-    .header-brand svg { width: 22px; height: 22px; }
+    .header-brand svg {
+      width: 20px;
+      height: 20px;
+      opacity: .8;
+    }
     .nav { display: flex; gap: 0; height: 100%; }
     .nav-item {
       padding: 0 16px;
-      font-size: 13px;
+      font-size: var(--text-base);
       font-weight: 500;
       color: var(--muted);
       cursor: pointer;
@@ -549,17 +560,23 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       border-bottom: 2px solid transparent;
       transition: color .15s, border-color .15s;
       font-family: var(--font);
+      letter-spacing: -0.01em;
     }
     .nav-item:hover { color: var(--ink); }
-    .nav-item.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .nav-item.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      font-weight: 600;
+    }
     .nav-item .count {
-      background: var(--bg);
-      color: var(--muted);
-      font-size: 11px;
-      padding: 1px 6px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-size: var(--text-xs);
+      padding: 1px 7px;
       border-radius: 10px;
       margin-left: 6px;
-      font-weight: 600;
+      font-weight: 700;
+      letter-spacing: .02em;
     }
 
     /* ── Main ────────────────────────────────────────────────── */
@@ -573,15 +590,23 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       border: 1px solid var(--border);
       border-radius: var(--radius);
       box-shadow: var(--shadow-sm);
+      overflow: hidden;
     }
     .card-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border-light);
       display: flex;
       align-items: center;
       justify-content: space-between;
+      background: var(--surface-sunken);
     }
-    .card-header h2 { font-size: 15px; font-weight: 600; }
+    .card-header h2 {
+      font-size: var(--text-sm);
+      font-weight: 650;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--muted);
+    }
     .card-body { padding: 20px; }
 
     /* ── Projects Tab ────────────────────────────────────────── */
@@ -601,15 +626,15 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     }
     .project-card:hover {
       box-shadow: var(--shadow-lg);
-      border-color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
       transform: translateY(-1px);
     }
     .project-card.selected {
       border-color: var(--accent);
-      box-shadow: 0 0 0 1px var(--accent), var(--shadow-lg);
+      box-shadow: 0 0 0 1px var(--accent), var(--shadow);
     }
     .project-card-name {
-      font-size: 16px;
+      font-size: var(--text-md);
       font-weight: 600;
       margin-bottom: 6px;
       display: flex;
@@ -617,7 +642,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       gap: 8px;
     }
     .project-card-summary {
-      font-size: 13px;
+      font-size: var(--text-base);
       color: var(--muted);
       line-height: 1.5;
       margin-bottom: 12px;
@@ -629,7 +654,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .project-card-stats {
       display: flex;
       gap: 16px;
-      font-size: 12px;
+      font-size: var(--text-sm);
       color: var(--muted);
     }
     .project-card-stat {
@@ -700,46 +725,75 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .review-filters {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       margin-bottom: 16px;
       flex-wrap: wrap;
     }
     .review-filters select {
-      padding: 6px 10px;
+      padding: 6px 28px 6px 10px;
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 13px;
+      border-radius: var(--radius-sm);
+      font-size: var(--text-sm);
       font-family: var(--font);
+      font-weight: 500;
       background: var(--surface);
+      color: var(--ink-secondary);
       outline: none;
       cursor: pointer;
       transition: border-color .15s;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236b7280' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
     }
-    .review-filters select:focus { border-color: var(--accent); }
+    .review-filters select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
     .review-cards { display: flex; flex-direction: column; gap: 12px; }
     .review-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 16px 20px;
+      padding: 0;
       box-shadow: var(--shadow-sm);
+      transition: border-color .2s, box-shadow .2s;
+      overflow: hidden;
+    }
+    .review-card:hover {
+      border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+      box-shadow: var(--shadow), 0 0 0 1px var(--accent-dim);
+    }
+    .review-card-inner {
+      padding: 16px 20px;
     }
     .review-card-header {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       margin-bottom: 12px;
+      flex-wrap: wrap;
     }
     .review-card-text {
-      font-size: 14px;
-      line-height: 1.6;
+      font-size: var(--text-base);
+      line-height: 1.65;
       margin-bottom: 12px;
-      color: var(--ink);
+      color: var(--ink-secondary);
     }
+    .review-card-text code {
+      background: var(--surface-sunken);
+      border: 1px solid var(--border);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: var(--text-sm);
+      font-family: var(--mono);
+    }
+    .review-card-text p { margin: 0 0 8px; }
+    .review-card-text p:last-child { margin-bottom: 0; }
     .review-card-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-light);
     }
     .review-card-edit {
       margin-top: 12px;
@@ -749,27 +803,52 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .review-edit-textarea {
       width: 100%;
       min-height: 80px;
-      padding: 10px 12px;
+      padding: 12px 16px;
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
-      font-size: 13px;
+      font-size: var(--text-base);
       font-family: var(--font);
-      line-height: 1.5;
+      line-height: 1.6;
       resize: vertical;
+      background: var(--surface-sunken);
+      color: var(--ink);
+      transition: border-color .15s;
+    }
+    .review-edit-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+    .review-help {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      overflow: hidden;
     }
     .review-help summary {
       cursor: pointer;
-      font-size: 13px;
-      font-weight: 500;
+      font-size: var(--text-sm);
+      font-weight: 600;
       color: var(--muted);
-      padding: 8px 0;
+      padding: 12px 16px;
+      letter-spacing: .02em;
+      text-transform: uppercase;
     }
-    .review-help dl { margin: 8px 0 0; font-size: 13px; }
-    .review-help dt { font-weight: 600; margin-top: 10px; color: var(--ink); }
-    .review-help dd { margin: 2px 0 0 16px; color: var(--muted); line-height: 1.5; }
-    .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
-    .card ul { margin: 0; padding-left: 18px; max-height: 220px; overflow: auto; font-size: 13px; }
-    .card li { padding: 2px 0; color: var(--muted); }
+    .review-help dl { margin: 0; padding: 0 16px 16px; font-size: var(--text-base); }
+    .review-help dt { font-weight: 600; margin-top: 12px; color: var(--ink-secondary); font-size: var(--text-base); }
+    .review-help dd { margin: 4px 0 0 0; color: var(--muted); line-height: 1.55; font-size: var(--text-base); }
+    .review-help dd code {
+      background: var(--surface-sunken);
+      border: 1px solid var(--border);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+    .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    .card ul { margin: 0; padding-left: 0; list-style: none; max-height: 220px; overflow: auto; font-size: var(--text-sm); }
+    .card li { padding: 8px 0; color: var(--muted); border-bottom: 1px solid var(--border-light); line-height: 1.5; font-size: var(--text-sm); }
+    .card li:last-child { border-bottom: none; }
 
     /* ── Star button ─────────────────────────────────────────── */
     .star-btn {
@@ -931,25 +1010,25 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     .split-sidebar {
       border-right: 1px solid var(--border);
       overflow-y: auto;
-      background: #fafbfc;
+      background: var(--surface-sunken);
     }
     .split-group-label {
-      padding: 10px 16px 6px;
+      padding: 8px 16px;
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: .06em;
       color: var(--muted);
       font-weight: 600;
-      background: #f3f4f6;
+      background: var(--surface-sunken);
       border-bottom: 1px solid var(--border);
       position: sticky;
       top: 0;
     }
     .split-item {
-      padding: 10px 16px;
+      padding: 12px 16px;
       cursor: pointer;
       border-bottom: 1px solid var(--border-light);
-      font-size: 13px;
+      font-size: var(--text-base);
       transition: background .1s;
       display: flex;
       align-items: center;
@@ -967,9 +1046,9 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       gap: 10px;
       padding: 12px 16px;
       border-bottom: 1px solid var(--border);
-      background: #fafbfc;
+      background: var(--surface-sunken);
     }
-    .reader-title { font-weight: 600; font-size: 14px; flex-shrink: 0; }
+    .reader-title { font-weight: 650; font-size: var(--text-base); flex-shrink: 0; }
     .reader-path {
       font-size: 11px;
       color: var(--muted);
@@ -1019,14 +1098,14 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 16px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--border-light);
       cursor: pointer;
       transition: background .1s;
     }
     .hook-item:hover { background: #f1f5f9; }
     .hook-item.selected { background: #ecfdf5; border-left: 3px solid var(--accent); padding-left: 13px; }
-    .hook-name { flex: 1; font-size: 13px; font-weight: 500; }
+    .hook-name { flex: 1; font-size: var(--text-base); font-weight: 500; }
     .hook-custom-event { font-size: 12px; font-weight: 600; color: var(--ink); }
     .hook-custom-cmd { font-size: 11px; color: var(--muted); word-break: break-all; margin-top: 2px; }
 
@@ -1035,43 +1114,103 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       display: inline-flex;
       align-items: center;
       padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
+      border-radius: 6px;
+      font-size: var(--text-xs);
       font-weight: 600;
-      background: var(--bg);
+      background: var(--surface-sunken);
       color: var(--muted);
+      letter-spacing: .02em;
+      text-transform: uppercase;
     }
-    .badge-project { background: #ede9fe; color: #6d28d9; }
-    .badge-on { background: #d1fae5; color: #065f46; }
-    .badge-off { background: #fee2e2; color: #991b1b; }
-    .badge-count { background: var(--accent); color: white; min-width: 20px; text-align: center; }
+    .badge-project { background: var(--purple-dim); color: var(--purple); }
+    .badge-on { background: var(--success-dim); color: var(--success); }
+    .badge-off { background: var(--danger-dim); color: var(--danger); }
+    .badge-count { background: var(--accent); color: white; min-width: 20px; text-align: center; border-radius: 10px; }
+    .badge-machine { background: var(--accent-dim); color: var(--accent); }
+    .badge-model { background: rgba(245,158,11,.1); color: #d97706; }
 
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 6px 14px;
+      gap: 6px;
+      padding: 8px 16px;
       border-radius: var(--radius-sm);
-      font-size: 13px;
-      font-weight: 500;
+      font-size: var(--text-sm);
+      font-weight: 550;
       font-family: var(--font);
       cursor: pointer;
-      transition: all .15s;
+      transition: all .15s ease;
       border: 1px solid var(--border);
       background: var(--surface);
-      color: var(--ink);
+      color: var(--ink-secondary);
+      letter-spacing: -0.01em;
     }
-    .btn:hover { background: var(--bg); }
-    .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+    .btn:hover { background: var(--surface-sunken); color: var(--ink); }
+    .btn:active { transform: scale(.97); }
+    .btn-primary { background: var(--accent); color: white; border-color: transparent; }
     .btn-primary:hover { background: var(--accent-hover); }
-    .btn-approve { background: var(--success); color: white; border-color: var(--success); }
-    .btn-reject { background: var(--danger); color: white; border-color: var(--danger); }
-    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-approve {
+      background: var(--success-dim);
+      color: var(--success);
+      border-color: transparent;
+      font-weight: 600;
+    }
+    .btn-approve:hover { background: var(--success); color: white; }
+    .btn-reject {
+      background: transparent;
+      color: var(--muted);
+      border-color: var(--border);
+    }
+    .btn-reject:hover { background: var(--danger-dim); color: var(--danger); border-color: var(--danger); }
+    .btn-sm { padding: 4px 12px; font-size: 11px; }
+
+    kbd {
+      background: var(--surface-sunken);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-family: var(--mono);
+      font-weight: 550;
+      color: var(--muted);
+      line-height: 1;
+    }
 
     .text-muted { color: var(--muted); }
     .status-msg { font-size: 12px; padding: 3px 8px; border-radius: var(--radius-sm); }
     .status-msg.ok { background: #d1fae5; color: #065f46; }
     .status-msg.err { background: #fee2e2; color: #991b1b; }
+
+    /* ── Status LED ──────────────────────────────────────────────── */
+    .status-led {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 4px;
+      flex-shrink: 0;
+    }
+    .status-led-ok {
+      background: var(--success);
+      box-shadow: 0 0 6px var(--success);
+      animation: ledPulse 2s ease-in-out infinite;
+    }
+    .status-led-warn {
+      background: var(--warning);
+      box-shadow: 0 0 6px var(--warning);
+      animation: ledPulse 1.2s ease-in-out infinite;
+    }
+    .status-led-err {
+      background: var(--danger);
+      box-shadow: 0 0 6px var(--danger);
+      animation: ledPulse 0.8s ease-in-out infinite;
+    }
+    @keyframes ledPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .5; }
+    }
 
     @media (max-width: 900px) {
       .projects-grid { grid-template-columns: 1fr; }
@@ -1079,6 +1218,248 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       .panes { grid-template-columns: 1fr; }
       .header { padding: 0 12px; gap: 12px; }
       .main { padding: 16px; }
+    }
+
+    ::view-transition-old(root), ::view-transition-new(root) {
+      animation-duration: 0.18s;
+    }
+
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .review-card {
+      animation: cardIn 0.3s cubic-bezier(.21,1.02,.73,1) backwards;
+    }
+    .review-card.removing {
+      animation: cardOut 0.25s ease forwards;
+      pointer-events: none;
+    }
+    @keyframes cardOut {
+      to { opacity: 0; transform: translateY(-6px) scale(.98); margin-top: -4px; padding: 0; }
+    }
+
+    /* ── Batch actions ───────────────────────────────────────────── */
+    .review-card-check {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      background: var(--surface);
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+    }
+    .review-card-check:hover { border-color: var(--accent); }
+    .review-card-check.checked {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .review-card-check.checked::after {
+      content: '';
+      width: 6px;
+      height: 10px;
+      border: solid white;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+      margin-top: -2px;
+    }
+    .review-card { position: relative; }
+    .batch-bar {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface-raised, #1a2233);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.2);
+      z-index: 500;
+      transition: transform .3s cubic-bezier(.21,1.02,.73,1);
+      pointer-events: all;
+    }
+    .batch-bar.visible {
+      transform: translateX(-50%) translateY(0);
+    }
+    .batch-bar-count {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      min-width: 80px;
+    }
+
+    /* ── Diff view ───────────────────────────────────────────────── */
+    .review-diff {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-family: var(--mono);
+      line-height: 1.6;
+    }
+    .review-diff-pane {
+      padding: 12px;
+      background: var(--surface);
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 60px;
+    }
+    .review-diff-pane-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-family: var(--font);
+    }
+    .diff-del { background: var(--danger-dim); color: var(--danger); text-decoration: line-through; }
+    .diff-ins { background: var(--success-dim); color: var(--success); }
+
+    /* ── Drag reorder ────────────────────────────────────────────── */
+    .review-card.dragging {
+      opacity: .5;
+      transform: scale(.98);
+      z-index: 10;
+    }
+    .review-card.drag-over {
+      border-top: 2px solid var(--accent);
+      margin-top: -1px;
+    }
+    .review-card-drag-handle {
+      width: 16px;
+      height: 16px;
+      cursor: grab;
+      color: var(--border);
+      transition: color .15s;
+      flex-shrink: 0;
+      margin-right: 4px;
+    }
+    .review-card-drag-handle:hover { color: var(--muted); }
+    .review-card-drag-handle:active { cursor: grabbing; }
+
+    /* ── Toast ───────────────────────────────────────────────────── */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .toast {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--surface-raised, #1a2233);
+      color: var(--ink, #e8ecf4);
+      border: 1px solid var(--border, #1e2a3e);
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 8px 32px rgba(0,0,0,.2);
+      pointer-events: all;
+      animation: toastIn 0.25s cubic-bezier(.21,1.02,.73,1);
+      max-width: 420px;
+      backdrop-filter: blur(12px);
+    }
+    .toast.ok { border-color: var(--success); background: var(--success-dim); color: var(--success); }
+    .toast.err { border-color: var(--danger); background: var(--danger-dim); color: var(--danger); }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(12px) scale(.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .toast-undo {
+      background: none;
+      border: 1px solid currentColor;
+      color: inherit;
+      border-radius: var(--radius-sm);
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: var(--font);
+      opacity: .8;
+      transition: opacity .15s;
+    }
+    .toast-undo:hover { opacity: 1; }
+
+    /* ── Command Palette ─────────────────────────────────────────── */
+    .cmdpal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.4);
+      backdrop-filter: blur(4px);
+      z-index: 900;
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 14vh;
+    }
+    .cmdpal-overlay.open { display: flex; }
+    .cmdpal-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 520px;
+      box-shadow: 0 24px 80px rgba(0,0,0,.25);
+      overflow: hidden;
+    }
+    .cmdpal-input {
+      width: 100%;
+      padding: 16px 20px;
+      font-size: 15px;
+      font-family: var(--font);
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--ink);
+      border-bottom: 1px solid var(--border);
+      font-weight: 450;
+    }
+    .cmdpal-input::placeholder { color: var(--muted); }
+    .cmdpal-results { max-height: 340px; overflow-y: auto; }
+    .cmdpal-item {
+      padding: 12px 20px;
+      cursor: pointer;
+      font-size: 13.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: background .1s;
+    }
+    .cmdpal-item:hover, .cmdpal-item.selected { background: var(--accent-dim); }
+    .cmdpal-item-name { font-weight: 550; color: var(--ink); }
+    .cmdpal-item-meta { font-size: 11px; color: var(--muted); margin-left: auto; font-weight: 500; }
+    .cmdpal-empty { padding: 32px 20px; text-align: center; color: var(--muted); font-size: 13px; }
+    @keyframes countPop {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.3); }
+      100% { transform: scale(1); }
+    }
+    .count-animating {
+      animation: countPop 0.3s ease;
     }
   </style>
 </head>
@@ -1095,11 +1476,14 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   </div>
   <nav class="nav">
     <button class="nav-item active" onclick="switchTab('projects')">Projects</button>
-    <button class="nav-item" onclick="switchTab('review')">Review${rows.length ? `<span class="count">${rows.length}</span>` : ""}</button>
+    <button class="nav-item" onclick="switchTab('review')">Review</button>
     <button class="nav-item" onclick="switchTab('graph')">Graph</button>
     <button class="nav-item" onclick="switchTab('skills')">Skills</button>
     <button class="nav-item" onclick="switchTab('hooks')">Hooks</button>
   </nav>
+  <span class="status-led status-led-ok" id="sync-led" title="Synced"></span>
+  <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" style="margin-left:auto;background:none;border:none;cursor:pointer;padding:6px 8px;border-radius:6px;color:var(--muted);font-size:18px;line-height:1;transition:color .15s" aria-label="Toggle dark mode">☀️</button>
+  <button onclick="openCmdPal()" title="Search projects (⌘K)" style="background:none;border:1px solid var(--border);cursor:pointer;padding:4px 10px;border-radius:6px;color:var(--muted);font-size:12px;font-family:var(--font);transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--ink)';this.style.borderColor='var(--muted)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">⌘K</button>
 </div>
 
 <div class="main">
@@ -1143,36 +1527,40 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       </dl>
     </details>
 
-    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Items here are memories flagged for review. Approve to keep, Reject to discard.</p>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:14px;letter-spacing:-0.01em">Memories flagged for review. Approve to keep, reject to discard.</p>
 
-    ${hasFilters ? `<div class="review-filters">
+    <div class="review-filters" id="review-filters" style="display:none">
       <select id="review-filter-project" onchange="filterReviewCards()">
         <option value="">All projects</option>
-        ${filterProjectOptions}
       </select>
       <select id="review-filter-machine" onchange="filterReviewCards()">
         <option value="">All machines</option>
-        ${filterMachineOptions}
       </select>
       <select id="review-filter-model" onchange="filterReviewCards()">
         <option value="">All models</option>
-        ${filterModelOptions}
       </select>
       <span id="review-filter-count" class="text-muted" style="font-size:12px;margin-left:8px"></span>
-    </div>` : ""}
+    </div>
 
-    <div class="review-cards">
-      ${rows.join("\n") || '<div style="text-align:center;padding:40px;color:var(--muted)">No items in the review queue.</div>'}
+    <div id="review-kbd-hints" style="font-size:11px;color:var(--muted);margin-bottom:12px;display:none;gap:16px;flex-wrap:wrap">
+      <span><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
+      <span><kbd>a</kbd> approve</span>
+      <span><kbd>r</kbd> reject</span>
+      <span><kbd>e</kbd> edit</span>
+    </div>
+
+    <div class="review-cards" id="review-cards-list">
+      <div class="review-cards-loading" style="text-align:center;padding:40px;color:var(--muted)">Loading...</div>
     </div>
 
     <div class="panes">
       <div class="card">
         <div class="card-header"><h2>Recently Accepted</h2></div>
-        <div class="card-body"><ul>${acceptedItems || "<li>None yet.</li>"}</ul></div>
+        <div class="card-body"><ul id="accepted-list"><li style="color:var(--muted)">Loading...</li></ul></div>
       </div>
       <div class="card">
         <div class="card-header"><h2>Recently Used</h2></div>
-        <div class="card-body"><ul>${usageItems || "<li>No usage events yet.</li>"}</ul></div>
+        <div class="card-body"><ul id="usage-list"><li style="color:var(--muted)">Loading...</li></ul></div>
       </div>
     </div>
   </div>
@@ -1222,6 +1610,22 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   </div>
 </div>
 
+<div class="batch-bar" id="batch-bar">
+  <span class="batch-bar-count" id="batch-count">0 selected</span>
+  <button class="btn btn-sm btn-approve" onclick="batchAction('approve')">Approve All</button>
+  <button class="btn btn-sm btn-reject" onclick="batchAction('reject')">Reject All</button>
+  <button class="btn btn-sm" onclick="clearBatchSelection()">Cancel</button>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<div class="cmdpal-overlay" id="cmdpal" onclick="closeCmdPal(event)">
+  <div class="cmdpal-box" onclick="event.stopPropagation()">
+    <input class="cmdpal-input" id="cmdpal-input" placeholder="Search projects..." oninput="cmdpalSearch(this.value)" onkeydown="cmdpalKey(event)" autocomplete="off" />
+    <div class="cmdpal-results" id="cmdpal-results"></div>
+  </div>
+</div>
+
 <script>
 (function() {
   // ── State ────────────────────────────────────────────────────
@@ -1233,16 +1637,24 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
   // ── Tab switching ────────────────────────────────────────────
   window.switchTab = function(tab) {
-    document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
-    document.querySelectorAll('.nav-item').forEach(function(el) { el.classList.remove('active'); });
-    var tabEl = document.getElementById('tab-' + tab);
-    if (tabEl) tabEl.classList.add('active');
-    var navBtn = document.querySelector('.nav-item[onclick*="' + tab + '"]');
-    if (navBtn) navBtn.classList.add('active');
-    if (tab === 'projects' && !document.querySelector('.project-card')) loadProjects();
-    if (tab === 'skills' && !_skillsLoaded) loadSkills();
-    if (tab === 'hooks' && !_hooksLoaded) loadHooks();
-    if (tab === 'graph' && !_graphLoaded) loadGraph();
+    function doSwitch() {
+      document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+      document.querySelectorAll('.nav-item').forEach(function(el) { el.classList.remove('active'); });
+      var tabEl = document.getElementById('tab-' + tab);
+      if (tabEl) tabEl.classList.add('active');
+      var navBtn = document.querySelector('.nav-item[onclick*="' + tab + '"]');
+      if (navBtn) navBtn.classList.add('active');
+      if (tab === 'projects' && !document.querySelector('.project-card')) loadProjects();
+      if (tab === 'review') { loadReviewCards(); loadReviewActivity(); }
+      if (tab === 'skills' && !_skillsLoaded) loadSkills();
+      if (tab === 'hooks' && !_hooksLoaded) loadHooks();
+      if (tab === 'graph' && !_graphLoaded) loadGraph();
+    }
+    if (document.startViewTransition) {
+      document.startViewTransition(doSwitch);
+    } else {
+      doSwitch();
+    }
   };
 
   // ── Projects ─────────────────────────────────────────────────
@@ -1256,7 +1668,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   function renderProjectCards(data) {
     var grid = document.getElementById('projects-grid');
     if (!data.length) {
-      grid.innerHTML = '<div style="padding:60px;color:var(--muted);grid-column:1/-1;text-align:center">No projects found. Run <code>npx @alaarab/cortex init</code> to create one.</div>';
+      grid.innerHTML = '<div style="padding:60px;color:var(--muted);grid-column:1/-1;text-align:center"><svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="margin:0 auto 12px;display:block;opacity:.4"><rect x="12" y="16" width="40" height="32" rx="4" stroke="var(--border)" stroke-width="2"/><path d="M12 24h40" stroke="var(--border)" stroke-width="2"/><circle cx="18" cy="20" r="1.5" fill="var(--danger)"/><circle cx="23" cy="20" r="1.5" fill="var(--warning)"/><circle cx="28" cy="20" r="1.5" fill="var(--success)"/><path d="M24 34h16M28 40h8" stroke="var(--border)" stroke-width="2" stroke-linecap="round"/></svg><div style="font-weight:500;margin-bottom:4px">No projects yet</div><div style="font-size:12px">Run <code>npx @alaarab/cortex init</code> to create one.</div></div>';
       return;
     }
     var starred = getStarredProjects();
@@ -1270,6 +1682,14 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     grid.innerHTML = sorted.map(function(p) {
       var isStarred = starred.indexOf(p.name) !== -1;
       var githubHtml = p.githubUrl ? '<a class="github-link" href="'+esc(p.githubUrl)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">GitHub</a>' : '';
+      var sparkHtml = '';
+      if (p.sparkline && p.sparkline.some(function(v) { return v > 0; })) {
+        var sp = p.sparkline;
+        var max = Math.max.apply(null, sp) || 1;
+        var w = 80, h = 20;
+        var pts = sp.map(function(v, i) { return (i * w / (sp.length - 1)).toFixed(1) + ',' + (h - (v / max) * (h - 2)).toFixed(1); }).join(' ');
+        sparkHtml = '<svg class="project-sparkline" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="margin-top:8px;display:block"><polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".7" /><polyline points="0,' + h + ' ' + pts + ' ' + w + ',' + h + '" fill="var(--accent-dim)" stroke="none" /></svg>';
+      }
       return '<div class="project-card" onclick="selectProject(\\''+esc(p.name)+'\\', this)" data-project="'+esc(p.name)+'" data-summary="'+esc(p.summaryText || '')+'">' +
         '<button class="star-btn'+(isStarred ? ' starred' : '')+'" onclick="event.stopPropagation();toggleStar(\\''+esc(p.name)+'\\')" title="Star project">&#9733;</button>' +
         '<div class="project-card-name">' + esc(p.name) + '</div>' +
@@ -1281,6 +1701,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
           (p.hasReference ? '<span class="project-card-stat">reference/</span>' : '') +
           githubHtml +
         '</div>' +
+        sparkHtml +
       '</div>';
     }).join('');
   }
@@ -1288,15 +1709,252 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   var _projectData = [];
 
   function loadProjects() {
-    fetch('/api/projects').then(function(r) { return r.json(); }).then(function(data) {
+    fetch(authUrl('/api/projects')).then(function(r) { return r.json(); }).then(function(data) {
       _projectData = data;
       renderProjectCards(data);
     });
   }
 
+  // ── Review queue (live) ───────────────────────────────────────
+  var _reviewData = [];
+  var _reviewCardKeys = new Set(); // tracks project+line keys currently in DOM
+
+  function cardKey(item) { return item.project + '\\x00' + item.line; }
+
+  function renderReviewCard(item, delayMs) {
+    var key = cardKey(item);
+    var projectBadge = '<span class="badge badge-project">' + esc(item.project) + '</span>';
+    var sectionBadge = '<span class="badge">' + esc(item.section) + '</span>';
+    var machineBadge = item.machine ? '<span class="badge badge-machine" title="Machine: ' + esc(item.machine) + '">' + esc(item.machine) + '</span>' : '';
+    var modelBadge = (item.model && item.model !== 'unknown') ? '<span class="badge badge-model" title="Model: ' + esc(item.model) + '">' + esc(item.model) + '</span>' : '';
+    var dateSpan = '<span class="text-muted" style="font-size:12px;margin-left:auto">' + esc(item.date) + '</span>';
+
+    var cardText = esc(item.text);
+
+    var div = document.createElement('div');
+    div.className = 'review-card';
+    div.setAttribute('data-key', key);
+    div.setAttribute('data-project', item.project);
+    div.setAttribute('data-machine', item.machine || '');
+    div.setAttribute('data-model', item.model || '');
+    div.style.animationDelay = delayMs + 'ms';
+    div.innerHTML =
+      '<div class="review-card-inner">' +
+        '<div class="review-card-header">' +
+          '<svg class="review-card-drag-handle" viewBox="0 0 16 16" fill="currentColor"><circle cx="5" cy="4" r="1.2"/><circle cx="11" cy="4" r="1.2"/><circle cx="5" cy="8" r="1.2"/><circle cx="11" cy="8" r="1.2"/><circle cx="5" cy="12" r="1.2"/><circle cx="11" cy="12" r="1.2"/></svg>' +
+          projectBadge + sectionBadge + machineBadge + modelBadge + dateSpan +
+        '</div>' +
+        '<div class="review-card-text">' + cardText + '</div>' +
+        '<div class="review-card-actions">' +
+          '<button type="button" class="btn btn-sm btn-approve" onclick="reviewAction(this,\\'approve\\',' + JSON.stringify(item.project) + ',' + JSON.stringify(item.line) + ')">Approve</button>' +
+          '<button type="button" class="btn btn-sm btn-reject" onclick="reviewAction(this,\\'reject\\',' + JSON.stringify(item.project) + ',' + JSON.stringify(item.line) + ')">Reject</button>' +
+          '<button type="button" class="btn btn-sm" onclick="toggleReviewEdit(this)">Edit</button>' +
+        '</div>' +
+        '<div class="review-card-edit" style="display:none">' +
+          '<form onsubmit="reviewEditSubmit(event,' + JSON.stringify(item.project) + ',' + JSON.stringify(item.line) + ')">' +
+            '<textarea name="new_text" class="review-edit-textarea">' + cardText + '</textarea>' +
+            '<div style="display:flex;gap:8px;margin-top:8px">' +
+              '<button type="submit" class="btn btn-sm btn-primary">Save</button>' +
+              '<button type="button" class="btn btn-sm" onclick="toggleReviewEdit(this)">Cancel</button>' +
+            '</div>' +
+          '</form>' +
+        '</div>' +
+      '</div>';
+
+    // Render markdown in the card text
+    var textEl = div.querySelector('.review-card-text');
+    if (textEl && typeof marked !== 'undefined') {
+      try { textEl.innerHTML = marked.parse(item.text); } catch(e) {}
+    }
+
+    // Add batch checkbox
+    var checkbox = document.createElement('div');
+    checkbox.className = 'review-card-check';
+    checkbox.onclick = function(e) {
+      e.stopPropagation();
+      this.classList.toggle('checked');
+      updateBatchBar();
+    };
+    div.querySelector('.review-card-inner').appendChild(checkbox);
+
+    // Drag reorder
+    div.setAttribute('draggable', 'true');
+    var handle = div.querySelector('.review-card-drag-handle');
+    if (handle) {
+      handle.addEventListener('mousedown', function() { div.setAttribute('draggable', 'true'); });
+    }
+    div.addEventListener('dragstart', function(e) {
+      div.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', key);
+    });
+    div.addEventListener('dragend', function() {
+      div.classList.remove('dragging');
+      document.querySelectorAll('.review-card.drag-over').forEach(function(c) { c.classList.remove('drag-over'); });
+    });
+    div.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      var dragging = document.querySelector('.review-card.dragging');
+      if (dragging && dragging !== div) {
+        div.classList.add('drag-over');
+      }
+    });
+    div.addEventListener('dragleave', function() {
+      div.classList.remove('drag-over');
+    });
+    div.addEventListener('drop', function(e) {
+      e.preventDefault();
+      div.classList.remove('drag-over');
+      var dragging = document.querySelector('.review-card.dragging');
+      if (dragging && dragging !== div) {
+        var list = div.parentNode;
+        var cards = Array.from(list.querySelectorAll('.review-card'));
+        var dragIdx = cards.indexOf(dragging);
+        var dropIdx = cards.indexOf(div);
+        if (dragIdx < dropIdx) {
+          list.insertBefore(dragging, div.nextSibling);
+        } else {
+          list.insertBefore(dragging, div);
+        }
+      }
+    });
+
+    return div;
+  }
+
+  function loadReviewCards() {
+    var url = '/api/review-queue' + (_authToken ? '?_auth=' + encodeURIComponent(_authToken) : '');
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+      _reviewData = data;
+      var list = document.getElementById('review-cards-list');
+      if (!list) return;
+
+      // Build set of incoming keys
+      var incomingKeys = new Set(data.map(cardKey));
+
+      // Remove cards no longer in queue (animate out)
+      var existing = list.querySelectorAll('.review-card[data-key]');
+      existing.forEach(function(card) {
+        var key = card.getAttribute('data-key');
+        if (!incomingKeys.has(key)) {
+          card.classList.add('removing');
+          setTimeout(function() { if (card.parentNode) card.parentNode.removeChild(card); }, 300);
+          _reviewCardKeys.delete(key);
+        }
+      });
+
+      // Add new cards (animate in with stagger)
+      var newItems = data.filter(function(item) { return !_reviewCardKeys.has(cardKey(item)); });
+      var delayBase = 0;
+      newItems.forEach(function(item) {
+        var key = cardKey(item);
+        var card = renderReviewCard(item, delayBase);
+        list.appendChild(card);
+        _reviewCardKeys.add(key);
+        delayBase += 40;
+      });
+
+      // Empty state
+      var totalVisible = list.querySelectorAll('.review-card:not(.removing)').length;
+      var emptyEl = list.querySelector('.review-cards-empty');
+      if (totalVisible === 0 && newItems.length === 0) {
+        if (!emptyEl) {
+          var empty = document.createElement('div');
+          empty.className = 'review-cards-empty';
+          empty.style.cssText = 'text-align:center;padding:40px;color:var(--muted)';
+          empty.innerHTML = '<svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="margin:0 auto 12px;display:block;opacity:.4"><circle cx="32" cy="32" r="28" stroke="var(--border)" stroke-width="2" stroke-dasharray="4 4"/><path d="M24 28l4 4 12-12" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 40h20" stroke="var(--border)" stroke-width="2" stroke-linecap="round"/><path d="M26 46h12" stroke="var(--border)" stroke-width="2" stroke-linecap="round"/></svg><div style="font-weight:500;margin-bottom:4px">All clear</div><div style="font-size:12px">No memories waiting for review.</div>';
+          list.appendChild(empty);
+        }
+      } else if (emptyEl) {
+        emptyEl.remove();
+      }
+
+      // Remove loading spinner
+      var loading = list.querySelector('.review-cards-loading');
+      if (loading) loading.remove();
+
+      // Update nav badge
+      var navBtn = document.querySelector('.nav-item[onclick*="review"] .count');
+      if (data.length > 0) {
+        if (!navBtn) {
+          var btn = document.querySelector('.nav-item[onclick*="review"]');
+          if (btn) {
+            var countSpan = document.createElement('span');
+            countSpan.className = 'count count-animating';
+            countSpan.textContent = String(data.length);
+            btn.appendChild(countSpan);
+          }
+        } else {
+          if (navBtn.textContent !== String(data.length)) {
+            navBtn.textContent = String(data.length);
+            navBtn.classList.remove('count-animating');
+            void navBtn.offsetWidth; // force reflow
+            navBtn.classList.add('count-animating');
+          }
+        }
+      } else {
+        if (navBtn) navBtn.remove();
+      }
+
+      // Update filters
+      var machines = new Set(), models = new Set(), projects = new Set();
+      data.forEach(function(item) {
+        projects.add(item.project);
+        if (item.machine) machines.add(item.machine);
+        if (item.model && item.model !== 'unknown') models.add(item.model);
+      });
+
+      var filterContainer = document.getElementById('review-filters');
+      if (filterContainer) {
+        filterContainer.style.display = data.length > 0 ? 'flex' : 'none';
+      }
+
+      function updateSelect(id, values, allLabel) {
+        var sel = document.getElementById(id);
+        if (!sel) return;
+        var current = sel.value;
+        sel.innerHTML = '<option value="">' + allLabel + '</option>';
+        Array.from(values).sort().forEach(function(v) {
+          var opt = document.createElement('option');
+          opt.value = v;
+          opt.textContent = v;
+          if (v === current) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      }
+      updateSelect('review-filter-project', projects, 'All projects');
+      updateSelect('review-filter-machine', machines, 'All machines');
+      updateSelect('review-filter-model', models, 'All models');
+
+      // Show/hide keyboard hints
+      var hints = document.getElementById('review-kbd-hints');
+      if (hints) hints.style.display = data.length > 0 ? 'flex' : 'none';
+
+      // Re-apply current filter
+      filterReviewCards();
+    }).catch(function() {
+      var list = document.getElementById('review-cards-list');
+      if (list) {
+        var loading = list.querySelector('.review-cards-loading');
+        if (loading) loading.textContent = 'Failed to load review queue.';
+      }
+    });
+  }
+
+  function loadReviewActivity() {
+    var url = '/api/review-activity' + (_authToken ? '?_auth=' + encodeURIComponent(_authToken) : '');
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+      var acceptedEl = document.getElementById('accepted-list');
+      var usageEl = document.getElementById('usage-list');
+      if (acceptedEl) acceptedEl.innerHTML = data.accepted && data.accepted.length ? data.accepted.map(function(l) { return '<li>' + esc(l) + '</li>'; }).join('') : '<li style="color:var(--muted)">None yet.</li>';
+      if (usageEl) usageEl.innerHTML = data.usage && data.usage.length ? data.usage.map(function(l) { return '<li>' + esc(l) + '</li>'; }).join('') : '<li style="color:var(--muted)">No usage events yet.</li>';
+    }).catch(function() {});
+  }
+
   function refreshLiveState() {
     loadProjects();
-    fetch('/api/runtime-health').then(function(r) { return r.json(); }).then(function(data) {
+    fetch(authUrl('/api/runtime-health')).then(function(r) { return r.json(); }).then(function(data) {
       var summary = document.getElementById('sync-state-summary');
       if (!summary) return;
       summary.innerHTML =
@@ -1304,6 +1962,23 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         '<div><strong>Last pull</strong><div class="text-muted">' + esc((data.lastPullStatus || 'n/a') + ' ' + (data.lastPullAt || '')) + '</div></div>' +
         '<div><strong>Last push</strong><div class="text-muted">' + esc((data.lastPushStatus || 'n/a') + ' ' + (data.lastPushAt || '')) + '</div></div>' +
         '<div><strong>Unsynced commits</strong><div class="text-muted">' + esc(String(data.unsyncedCommits || 0)) + '</div></div>';
+      // Update sync LED
+      var led = document.getElementById('sync-led');
+      if (led) {
+        var pushOk = !data.lastPushStatus || data.lastPushStatus === 'ok' || data.lastPushStatus === 'n/a';
+        var pullOk = !data.lastPullStatus || data.lastPullStatus === 'ok' || data.lastPullStatus === 'n/a';
+        var hasUnsynced = (data.unsyncedCommits || 0) > 0;
+        if (!pushOk || !pullOk) {
+          led.className = 'status-led status-led-err';
+          led.title = 'Sync error';
+        } else if (hasUnsynced) {
+          led.className = 'status-led status-led-warn';
+          led.title = hasUnsynced + ' unsynced commit' + (hasUnsynced > 1 ? 's' : '');
+        } else {
+          led.className = 'status-led status-led-ok';
+          led.title = 'Synced';
+        }
+      }
     });
     if (_selectedProject) {
       var activeTab = document.querySelector('.project-detail-tab.active');
@@ -1314,11 +1989,12 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     if (_skillsLoaded) loadSkills();
     if (_hooksLoaded) loadHooks();
     if (_graphLoaded && !_graphRunning) loadGraph();
-    window.filterReviewCards();
+    loadReviewCards();
+    loadReviewActivity();
   }
 
   function pollLiveUpdates() {
-    fetch('/api/change-token')
+    fetch(authUrl('/api/change-token'))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!data || !data.token) return;
@@ -1358,6 +2034,67 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     if (!editSection) return;
     var isVisible = editSection.style.display !== 'none';
     editSection.style.display = isVisible ? 'none' : 'block';
+
+    if (!isVisible) {
+      // Create diff view if not present
+      var existing = editSection.querySelector('.review-diff');
+      if (existing) existing.remove();
+
+      var ta = editSection.querySelector('textarea');
+      var originalText = card.querySelector('.review-card-text') ? card.querySelector('.review-card-text').textContent.trim() : '';
+
+      var diffContainer = document.createElement('div');
+      diffContainer.className = 'review-diff';
+      diffContainer.innerHTML =
+        '<div class="review-diff-pane"><div class="review-diff-pane-label">Original</div><div class="diff-original"></div></div>' +
+        '<div class="review-diff-pane"><div class="review-diff-pane-label">Edited</div><div class="diff-edited"></div></div>';
+
+      // Insert before the textarea
+      ta.parentNode.insertBefore(diffContainer, ta);
+
+      function updateDiff() {
+        var original = originalText;
+        var edited = ta.value;
+        var origEl = diffContainer.querySelector('.diff-original');
+        var editEl = diffContainer.querySelector('.diff-edited');
+
+        if (original === edited) {
+          origEl.textContent = original;
+          editEl.innerHTML = '<span style="color:var(--muted);font-style:italic">No changes</span>';
+          return;
+        }
+
+        // Simple word-level diff
+        var origWords = original.split(/(\\s+)/);
+        var editWords = edited.split(/(\\s+)/);
+        var origHtml = '', editHtml = '';
+
+        // Simple sequential comparison
+        var i = 0, j = 0;
+        while (i < origWords.length || j < editWords.length) {
+          if (i < origWords.length && j < editWords.length && origWords[i] === editWords[j]) {
+            origHtml += esc(origWords[i]);
+            editHtml += esc(editWords[j]);
+            i++; j++;
+          } else if (i < origWords.length && editWords.indexOf(origWords[i], j) === -1) {
+            origHtml += '<span class="diff-del">' + esc(origWords[i]) + '</span>';
+            i++;
+          } else if (j < editWords.length && origWords.indexOf(editWords[j], i) === -1) {
+            editHtml += '<span class="diff-ins">' + esc(editWords[j]) + '</span>';
+            j++;
+          } else {
+            // advance both
+            if (i < origWords.length) { origHtml += '<span class="diff-del">' + esc(origWords[i]) + '</span>'; i++; }
+            if (j < editWords.length) { editHtml += '<span class="diff-ins">' + esc(editWords[j]) + '</span>'; j++; }
+          }
+        }
+        origEl.innerHTML = origHtml;
+        editEl.innerHTML = editHtml;
+      }
+
+      updateDiff();
+      ta.addEventListener('input', updateDiff);
+    }
   };
 
   window.filterReviewCards = function() {
@@ -1409,7 +2146,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     if (btn) btn.classList.add('active');
     var container = document.getElementById('project-content');
     container.innerHTML = '<div class="project-detail-empty">Loading...</div>';
-    fetch('/api/project-content?project=' + encodeURIComponent(_selectedProject) + '&file=' + encodeURIComponent(file))
+    fetch(authUrl('/api/project-content?project=' + encodeURIComponent(_selectedProject) + '&file=' + encodeURIComponent(file)))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!data.ok) {
@@ -1421,16 +2158,26 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   };
 
   loadProjects();
+  loadReviewCards();
+  loadReviewActivity();
   var _lastChangeToken = '';
   pollLiveUpdates();
   window.setInterval(pollLiveUpdates, 2000);
 
+  // ── Auth helpers ─────────────────────────────────────────────
+  function authUrl(base) {
+    return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(_authToken);
+  }
+  function authBody(body) {
+    return body + (_authToken ? '&_auth=' + encodeURIComponent(_authToken) : '');
+  }
+
   // ── Skills ───────────────────────────────────────────────────
   function loadSkills() {
-    fetch('/api/skills').then(function(r) { return r.json(); }).then(function(data) {
+    fetch(authUrl('/api/skills')).then(function(r) { return r.json(); }).then(function(data) {
       _skillsLoaded = true;
       var list = document.getElementById('skills-list');
-      if (!data.length) { list.innerHTML = '<div style="padding:20px;color:var(--muted)">No skills found.</div>'; return; }
+      if (!data.length) { list.innerHTML = '<div style="padding:40px 20px;color:var(--muted);text-align:center"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" style="margin:0 auto 8px;display:block;opacity:.4"><path d="M24 8l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6l2-6z" stroke="var(--border)" stroke-width="1.5"/><circle cx="24" cy="32" r="8" stroke="var(--border)" stroke-width="1.5" stroke-dasharray="3 3"/></svg><div style="font-weight:500;font-size:13px">No skills installed</div></div>'; return; }
       var bySource = {};
       data.forEach(function(s) { (bySource[s.source] = bySource[s.source] || []).push(s); });
       var html = '';
@@ -1460,7 +2207,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     if (el) el.classList.add('selected');
     var reader = document.getElementById('skills-reader');
     reader.innerHTML = '<div class="reader-empty">Loading...</div>';
-    fetch('/api/skill-content?path=' + encodeURIComponent(filePath))
+    fetch(authUrl('/api/skill-content?path=' + encodeURIComponent(filePath)))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!data.ok) { reader.innerHTML = '<div class="reader-empty">' + esc(data.error || 'Error loading file') + '</div>'; return; }
@@ -1514,7 +2261,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     fetch('/api/skill-save', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: 'path=' + encodeURIComponent(_currentSkillPath) + '&content=' + encodeURIComponent(ta.value)
+      body: authBody('path=' + encodeURIComponent(_currentSkillPath) + '&content=' + encodeURIComponent(ta.value))
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) {
         _editingSkill = false;
@@ -1539,7 +2286,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
 
   // ── Hooks ────────────────────────────────────────────────────
   function loadHooks() {
-    fetch('/api/hooks').then(function(r) { return r.json(); }).then(function(data) {
+    fetch(authUrl('/api/hooks')).then(function(r) { return r.json(); }).then(function(data) {
       _hooksLoaded = true;
       var list = document.getElementById('hooks-list');
       var html = '<div class="split-group-label">Lifecycle Hooks</div>';
@@ -1594,7 +2341,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         '<button class="btn btn-sm btn-primary" data-tool="' + esc(toolName) + '" onclick="toggleHookToolFromEl(this)">Toggle</button>' +
       '</div>' +
       '<div class="reader-content"><div class="reader-empty">Loading...</div></div>';
-    fetch('/api/skill-content?path=' + encodeURIComponent(filePath))
+    fetch(authUrl('/api/skill-content?path=' + encodeURIComponent(filePath)))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         var content = reader.querySelector('.reader-content');
@@ -1646,7 +2393,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     fetch('/api/skill-save', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: 'path=' + encodeURIComponent(_currentHookPath) + '&content=' + encodeURIComponent(ta.value)
+      body: authBody('path=' + encodeURIComponent(_currentHookPath) + '&content=' + encodeURIComponent(ta.value))
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) {
         _editingHook = false;
@@ -1662,7 +2409,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     fetch('/api/hook-toggle', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: 'tool=' + encodeURIComponent(toolName)
+      body: authBody('tool=' + encodeURIComponent(toolName))
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (data.ok) { _hooksLoaded = false; loadHooks(); }
     });
@@ -1751,8 +2498,13 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
     _graphPanY = 0;
 
     function tick() {
-      if (_graphAlpha < 0.001) { _graphRunning = false; return; }
-      _graphAlpha *= 0.995;
+      if (_graphAlpha < 0.001) {
+        // Keep rendering for particle animation even after physics settle
+        renderGraph();
+        requestAnimationFrame(tick);
+        return;
+      }
+      _graphAlpha *= 0.997;
 
       // Repulsion
       for (var i = 0; i < _graphNodes.length; i++) {
@@ -1784,7 +2536,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         if (_graphDrag && _graphDrag.node === n) continue;
         n.vx += (W/2 - n.x) * 0.0005 * _graphAlpha;
         n.vy += (H/2 - n.y) * 0.0005 * _graphAlpha;
-        n.vx *= 0.85; n.vy *= 0.85;
+        n.vx *= 0.82; n.vy *= 0.82;
         n.x += n.vx; n.y += n.vy;
         // Soft bounds: allow nodes to go off-canvas (panning brings them back)
         n.x = Math.max(-W, Math.min(W*2, n.x));
@@ -1795,6 +2547,8 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       requestAnimationFrame(tick);
     }
 
+    var _graphFrame = 0;
+
     function renderGraph() {
       ctx.clearRect(0, 0, W, H);
       ctx.save();
@@ -1802,7 +2556,7 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
       ctx.scale(_graphZoom, _graphZoom);
 
       // Links
-      ctx.strokeStyle = 'rgba(148,163,184,0.15)';
+      ctx.strokeStyle = 'rgba(34,211,238,0.08)';
       ctx.lineWidth = 1;
       for (var k = 0; k < links.length; k++) {
         var s = links[k].source, t = links[k].target;
@@ -1813,6 +2567,20 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         ctx.stroke();
       }
 
+      // Animated particles on links
+      _graphFrame++;
+      for (var p = 0; p < links.length; p++) {
+        var ls = links[p].source, lt = links[p].target;
+        if (_graphFilter !== 'all' && ls.group !== _graphFilter && lt.group !== _graphFilter) continue;
+        var progress = ((_graphFrame * 0.005 + p * 0.1) % 1);
+        var px = ls.x + (lt.x - ls.x) * progress;
+        var py = ls.y + (lt.y - ls.y) * progress;
+        ctx.beginPath();
+        ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(34,211,238,.4)';
+        ctx.fill();
+      }
+
       // Nodes
       for (var i = 0; i < _graphNodes.length; i++) {
         var n = _graphNodes[i];
@@ -1820,20 +2588,23 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
         var r = RADII[n.group] || 8;
         var col = COLORS[n.group] || '#888';
 
-        // Glow for projects
-        if (n.group === 'project') {
-          ctx.beginPath();
-          ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2);
-          ctx.fillStyle = col + '22';
-          ctx.fill();
-        }
+        // Glow halo
+        ctx.beginPath();
+        var glowR = r + (n.group === 'project' ? 10 : 5);
+        var gradient = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, glowR);
+        gradient.addColorStop(0, col + '40');
+        gradient.addColorStop(1, col + '00');
+        ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
 
+        // Node circle
         ctx.beginPath();
         ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
         ctx.fillStyle = col;
         ctx.fill();
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = col + '60';
+        ctx.lineWidth = 1;
         ctx.stroke();
 
         // Labels
@@ -2000,7 +2771,383 @@ function renderPage(cortexPath: string, csrfToken?: string, authToken?: string):
   function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+
+  // ── Dark mode ────────────────────────────────────────────────
+  (function initTheme() {
+    var saved = localStorage.getItem('cortex-theme');
+    var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var theme = saved || (prefersDark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+    var btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
+  })();
+
+  window.toggleTheme = function() {
+    var current = document.documentElement.getAttribute('data-theme') || 'light';
+    var next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('cortex-theme', next);
+    var btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = next === 'dark' ? '🌙' : '☀️';
+  };
+
+  // ── Toast system ─────────────────────────────────────────────
+  function showToast(msg, type) {
+    var container = document.getElementById('toast-container');
+    if (!container) return;
+    var toast = document.createElement('div');
+    toast.className = 'toast' + (type ? ' ' + type : '');
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 3000);
+  }
+
+  var _pendingUndo = null;
+
+  function showUndoToast(action, onUndo, onCommit) {
+    var container = document.getElementById('toast-container');
+    if (!container) return;
+    var toast = document.createElement('div');
+    toast.className = 'toast';
+    var label = document.createElement('span');
+    label.textContent = action.charAt(0).toUpperCase() + action.slice(1) + 'd memory';
+    var undoBtn = document.createElement('button');
+    undoBtn.className = 'toast-undo';
+    undoBtn.textContent = 'Undo';
+    toast.appendChild(label);
+    toast.appendChild(undoBtn);
+    container.appendChild(toast);
+
+    var committed = false;
+    var timer = setTimeout(function() {
+      committed = true;
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+      onCommit();
+    }, 5000);
+
+    undoBtn.onclick = function() {
+      if (committed) return;
+      clearTimeout(timer);
+      committed = true;
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+      onUndo();
+    };
+
+    _pendingUndo = {
+      execute: function() {
+        if (committed) return;
+        clearTimeout(timer);
+        committed = true;
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+        onCommit();
+      }
+    };
+  }
+
+  // ── Review fetch actions ──────────────────────────────────────
+  function fetchCsrfToken(cb) {
+    var url = '/api/csrf-token' + (_authToken ? '?_auth=' + encodeURIComponent(_authToken) : '');
+    fetch(url).then(function(r) { return r.json(); }).then(function(d) { cb(d.token || null); }).catch(function() { cb(null); });
+  }
+
+  // ── Batch actions ─────────────────────────────────────────────
+  function getCheckedCards() {
+    return Array.from(document.querySelectorAll('.review-card-check.checked')).map(function(cb) {
+      return cb.closest('.review-card');
+    }).filter(Boolean);
+  }
+
+  function updateBatchBar() {
+    var checked = getCheckedCards();
+    var bar = document.getElementById('batch-bar');
+    var count = document.getElementById('batch-count');
+    if (!bar || !count) return;
+    count.textContent = checked.length + ' selected';
+    bar.classList.toggle('visible', checked.length > 0);
+  }
+
+  window.clearBatchSelection = function() {
+    document.querySelectorAll('.review-card-check.checked').forEach(function(cb) {
+      cb.classList.remove('checked');
+    });
+    updateBatchBar();
+  };
+
+  window.batchAction = function(action) {
+    var cards = getCheckedCards();
+    if (!cards.length) return;
+    var remaining = cards.length;
+    cards.forEach(function(card) {
+      var project = card.getAttribute('data-project');
+      var key = card.getAttribute('data-key');
+      var line = key ? key.split('\\x00')[1] : '';
+      if (!project || !line) return;
+      card.classList.add('removing');
+      fetchCsrfToken(function(csrfToken) {
+        var body = 'project=' + encodeURIComponent(project) + '&line=' + encodeURIComponent(line);
+        if (_authToken) body += '&_auth=' + encodeURIComponent(_authToken);
+        if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
+        fetch('/api/' + action, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: body
+        }).then(function(r) { return r.json(); }).then(function(d) {
+          remaining--;
+          if (d.ok) {
+            setTimeout(function() { if (card.parentNode) card.remove(); }, 300);
+          } else {
+            card.classList.remove('removing');
+          }
+          if (remaining <= 0) {
+            updateBatchBar();
+            setTimeout(loadReviewCards, 500);
+          }
+        }).catch(function() {
+          remaining--;
+          card.classList.remove('removing');
+          if (remaining <= 0) updateBatchBar();
+        });
+      });
+    });
+    showToast(action.charAt(0).toUpperCase() + action.slice(1) + 'd ' + cards.length + ' memories', 'ok');
+  };
+
+  function removeCard(card, action, project, line, text) {
+    card.classList.add('removing');
+    // Clear any pending undo for a different card
+    if (_pendingUndo) {
+      _pendingUndo.execute();
+      _pendingUndo = null;
+    }
+    showUndoToast(action, function undo() {
+      // Cancel: re-show the card
+      card.classList.remove('removing');
+      _pendingUndo = null;
+    }, function commit() {
+      // Execute: actually call the server
+      _pendingUndo = null;
+      fetchCsrfToken(function(csrfToken) {
+        var body = 'project=' + encodeURIComponent(project) + '&line=' + encodeURIComponent(line);
+        if (_authToken) body += '&_auth=' + encodeURIComponent(_authToken);
+        if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
+        fetch('/api/' + action, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: body
+        }).then(function(r) { return r.json(); }).then(function(d) {
+          if (d.ok) {
+            card.remove();
+            updateReviewCount(-1);
+            setTimeout(loadReviewCards, 500);
+          } else {
+            card.classList.remove('removing');
+            showToast('Error: ' + (d.error || 'Unknown error'), 'err');
+          }
+        }).catch(function() {
+          card.classList.remove('removing');
+          showToast('Network error', 'err');
+        });
+      });
+    });
+  }
+
+  window.reviewAction = function(btn, action, project, line) {
+    var card = btn.closest('.review-card');
+    if (!card) return;
+    var text = card.querySelector('.review-card-text') ? card.querySelector('.review-card-text').textContent : '';
+    removeCard(card, action, project, line, text);
+  };
+
+  window.reviewEditSubmit = function(e, project, line) {
+    e.preventDefault();
+    var form = e.target;
+    var ta = form.querySelector('textarea[name="new_text"]');
+    if (!ta) return;
+    var newText = ta.value;
+    var card = form.closest('.review-card');
+    fetchCsrfToken(function(csrfToken) {
+      var body = 'project=' + encodeURIComponent(project) + '&line=' + encodeURIComponent(line) + '&new_text=' + encodeURIComponent(newText);
+      if (_authToken) body += '&_auth=' + encodeURIComponent(_authToken);
+      if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
+      fetch('/api/edit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: body
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          var textEl = card ? card.querySelector('.review-card-text') : null;
+          if (textEl) textEl.innerHTML = typeof marked !== 'undefined' ? marked.parse(newText) : esc(newText);
+          var editSection = card ? card.querySelector('.review-card-edit') : null;
+          if (editSection) editSection.style.display = 'none';
+          showToast('Saved', 'ok');
+        } else {
+          showToast('Error: ' + (d.error || 'Unknown error'), 'err');
+        }
+      }).catch(function() { showToast('Network error', 'err'); });
+    });
+  };
+
+  function updateReviewCount(delta) {
+    var navBtn = document.querySelector('.nav-item[onclick*="review"] .count');
+    if (!navBtn) return;
+    var current = parseInt(navBtn.textContent, 10) || 0;
+    var next = current + delta;
+    if (next <= 0) navBtn.remove();
+    else navBtn.textContent = String(next);
+  }
+
+  // ── Keyboard shortcuts ────────────────────────────────────────
+  var _focusedCard = null;
+
+  function getVisibleCards() {
+    return Array.from(document.querySelectorAll('.review-card')).filter(function(c) { return c.style.display !== 'none'; });
+  }
+
+  function focusCard(card) {
+    if (_focusedCard) { _focusedCard.style.outline = ''; _focusedCard.style.outlineOffset = ''; }
+    _focusedCard = card;
+    if (card) {
+      card.style.outline = '2px solid var(--accent)';
+      card.style.outlineOffset = '2px';
+      card.style.borderRadius = 'var(--radius)';
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  document.addEventListener('keydown', function(e) {
+    // Ignore if typing in an input/textarea
+    var tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    var activeTab = document.querySelector('.tab-content.active');
+    var isReviewTab = activeTab && activeTab.id === 'tab-review';
+    var isProjectsTab = activeTab && activeTab.id === 'tab-projects';
+
+    // / → focus project search
+    if (e.key === '/' && isProjectsTab) {
+      e.preventDefault();
+      var search = document.getElementById('projects-search');
+      if (search) search.focus();
+      return;
+    }
+
+    if (!isReviewTab) return;
+
+    var cards = getVisibleCards();
+    if (!cards.length) return;
+
+    if (e.key === 'j' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      var idx = _focusedCard ? cards.indexOf(_focusedCard) : -1;
+      focusCard(cards[Math.min(idx + 1, cards.length - 1)]);
+    } else if (e.key === 'k' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      var idx2 = _focusedCard ? cards.indexOf(_focusedCard) : cards.length;
+      focusCard(cards[Math.max(idx2 - 1, 0)]);
+    } else if (e.key === 'a' && _focusedCard) {
+      var approveBtn = _focusedCard.querySelector('.btn-approve');
+      if (approveBtn) approveBtn.click();
+    } else if (e.key === 'r' && _focusedCard) {
+      var rejectBtn = _focusedCard.querySelector('.btn-reject');
+      if (rejectBtn) rejectBtn.click();
+    } else if (e.key === 'e' && _focusedCard) {
+      var editBtn = _focusedCard.querySelector('.review-card-actions .btn:not(.btn-approve):not(.btn-reject)');
+      if (editBtn) editBtn.click();
+    } else if (e.key === 'Escape') {
+      if (_focusedCard) {
+        var editSection = _focusedCard.querySelector('.review-card-edit');
+        if (editSection && editSection.style.display !== 'none') {
+          toggleReviewEdit(_focusedCard.querySelector('.review-card-actions .btn:not(.btn-approve):not(.btn-reject)'));
+        }
+      }
+    }
+  });
+
+  // ── Command palette ───────────────────────────────────────────
+  var _cmdpalSelected = -1;
+
+  window.openCmdPal = function() {
+    var overlay = document.getElementById('cmdpal');
+    if (!overlay) return;
+    overlay.classList.add('open');
+    var input = document.getElementById('cmdpal-input');
+    if (input) { input.value = ''; input.focus(); }
+    cmdpalSearch('');
+  };
+
+  window.closeCmdPal = function(e) {
+    if (e && e.target !== document.getElementById('cmdpal')) return;
+    var overlay = document.getElementById('cmdpal');
+    if (overlay) overlay.classList.remove('open');
+  };
+
+  window.cmdpalSearch = function(query) {
+    _cmdpalSelected = -1;
+    var results = document.getElementById('cmdpal-results');
+    if (!results) return;
+    var q = query.toLowerCase();
+    var matches = _projectData.filter(function(p) {
+      return !q || p.name.toLowerCase().indexOf(q) !== -1 || (p.summaryText || '').toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 8);
+    if (!matches.length) {
+      results.innerHTML = '<div class="cmdpal-empty">No projects found</div>';
+      return;
+    }
+    results.innerHTML = matches.map(function(p, i) {
+      return '<div class="cmdpal-item" data-name="' + esc(p.name) + '" onclick="cmdpalSelect(\\'' + esc(p.name) + '\\')">' +
+        '<span class="cmdpal-item-name">' + esc(p.name) + '</span>' +
+        '<span class="cmdpal-item-meta">' + p.findingCount + ' findings</span>' +
+      '</div>';
+    }).join('');
+  };
+
+  window.cmdpalKey = function(e) {
+    var items = document.querySelectorAll('.cmdpal-item');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _cmdpalSelected = Math.min(_cmdpalSelected + 1, items.length - 1);
+      items.forEach(function(el, i) { el.classList.toggle('selected', i === _cmdpalSelected); });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _cmdpalSelected = Math.max(_cmdpalSelected - 1, 0);
+      items.forEach(function(el, i) { el.classList.toggle('selected', i === _cmdpalSelected); });
+    } else if (e.key === 'Enter') {
+      if (_cmdpalSelected >= 0 && items[_cmdpalSelected]) {
+        var name = items[_cmdpalSelected].getAttribute('data-name');
+        if (name) cmdpalSelect(name);
+      }
+    } else if (e.key === 'Escape') {
+      document.getElementById('cmdpal').classList.remove('open');
+    }
+  };
+
+  window.cmdpalSelect = function(name) {
+    document.getElementById('cmdpal').classList.remove('open');
+    switchTab('projects');
+    setTimeout(function() {
+      var card = document.querySelector('.project-card[data-project="' + name + '"]');
+      if (card) card.click();
+      else {
+        var search = document.getElementById('projects-search');
+        if (search) { search.value = name; filterProjects(name); }
+      }
+    }, 200);
+  };
+
+  // Cmd+K / Ctrl+K to open
+  document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      var overlay = document.getElementById('cmdpal');
+      if (overlay && overlay.classList.contains('open')) {
+        overlay.classList.remove('open');
+      } else {
+        openCmdPal();
+      }
+    }
+  });
 })();
+
 </script>
 </body>
 </html>`;
@@ -2062,6 +3209,46 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
     if (req.method === "GET" && url === "/api/runtime-health") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(readSyncSnapshot(cortexPath)));
+      return;
+    }
+
+    if (req.method === "GET" && url === "/api/review-queue") {
+      if (authToken) {
+        const submitted = getSubmittedAuthToken(req, url);
+        if (!authTokensMatch(submitted, authToken)) {
+          res.writeHead(401, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+          return;
+        }
+      }
+      const projects = getProjectDirs(cortexPath).map((p) => path.basename(p)).filter((p) => p !== "global");
+      const items: Array<{ project: string; section: string; line: string; text: string; date: string; machine?: string; model?: string }> = [];
+      for (const project of projects) {
+        const queueResult = readReviewQueue(cortexPath, project);
+        const queueItems = queueResult.ok ? queueResult.data : [];
+        for (const item of queueItems) {
+          items.push({ project, section: item.section, line: item.line, text: item.text, date: item.date, machine: item.machine || undefined, model: item.model || undefined });
+        }
+      }
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(items));
+      return;
+    }
+
+    if (req.method === "GET" && url === "/api/review-activity") {
+      if (authToken) {
+        const submitted = getSubmittedAuthToken(req, url);
+        if (!authTokensMatch(submitted, authToken)) {
+          res.writeHead(401, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+          return;
+        }
+      }
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({
+        accepted: recentAccepted(cortexPath),
+        usage: recentUsage(cortexPath),
+      }));
       return;
     }
 
@@ -2209,6 +3396,81 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions)
       const graph = buildGraph(cortexPath);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(graph));
+      return;
+    }
+
+    // ── CSRF token API ──────────────────────────────────────────
+    if (req.method === "GET" && url === "/api/csrf-token") {
+      if (authToken) {
+        const submitted = getSubmittedAuthToken(req, url);
+        if (!authTokensMatch(submitted, authToken)) {
+          res.writeHead(401, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+          return;
+        }
+      }
+      if (!csrfTokens) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, token: null }));
+        return;
+      }
+      pruneExpiredCsrfTokens(csrfTokens);
+      const token = crypto.randomUUID();
+      csrfTokens.set(token, Date.now());
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: true, token }));
+      return;
+    }
+
+    // ── JSON review actions ─────────────────────────────────────
+    if (req.method === "POST" && ["/api/approve", "/api/reject", "/api/edit"].includes(url)) {
+      const contentLength = parseInt(req.headers["content-length"] || "0", 10);
+      if (contentLength > 1_048_576) {
+        res.writeHead(413, { "content-type": "text/plain" });
+        res.end("Request body too large");
+        return;
+      }
+      let body = "";
+      let received = 0;
+      req.on("data", (chunk) => {
+        received += chunk.length;
+        if (received > 1_048_576) { req.destroy(); return; }
+        body += String(chunk);
+      });
+      req.on("end", () => {
+        const parsed = querystring.parse(body);
+        if (authToken) {
+          const submitted = getSubmittedAuthToken(req, url, parsed);
+          if (!authTokensMatch(submitted, authToken)) {
+            res.writeHead(401, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+            return;
+          }
+        }
+        if (csrfTokens) {
+          pruneExpiredCsrfTokens(csrfTokens);
+          const submitted = String(parsed._csrf || "");
+          if (!submitted || !csrfTokens.delete(submitted)) {
+            res.writeHead(403, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Invalid or missing CSRF token" }));
+            return;
+          }
+        }
+        const project = String(parsed.project || "");
+        const line = String(parsed.line || "");
+        const newText = String(parsed.new_text || "");
+        if (!project || !line || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/line" }));
+          return;
+        }
+        let result: import("./shared.js").CortexResult<string> = { ok: false, error: "unknown action" };
+        if (url === "/api/approve") result = approveQueueItem(cortexPath, project, line);
+        else if (url === "/api/reject") result = rejectQueueItem(cortexPath, project, line);
+        else if (url === "/api/edit") result = editQueueItem(cortexPath, project, line, newText);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
+      });
       return;
     }
 

@@ -314,9 +314,15 @@ describe.sequential("review-ui HTML escaping", () => {
   it("HTML-escapes XSS payloads in queue items", async () => {
     const res = await httpGet(port, "/");
     expect(res.status).toBe(200);
-    // Raw <script> tags should be escaped
+    // Queue items are now rendered client-side: raw <script> tags must not appear in the initial HTML
     expect(res.body).not.toContain('<script>alert("xss")</script>');
-    expect(res.body).toContain("&lt;script&gt;");
+    // The /api/review-queue endpoint returns raw JSON (client-side esc() handles XSS on render)
+    const apiRes = await httpGet(port, "/api/review-queue");
+    expect(apiRes.status).toBe(200);
+    const items = JSON.parse(apiRes.body) as Array<{ text: string }>;
+    expect(items.length).toBeGreaterThan(0);
+    // JSON text field is raw (not HTML-escaped) — protection happens client-side
+    expect(items[0].text).toContain('<script>alert("xss")</script>');
   });
 });
 
@@ -464,6 +470,6 @@ describe.sequential("review-ui missing project/line validation", () => {
     fs.unlinkSync(path.join(tmpRoot, "demo", "MEMORY_QUEUE.md"));
     const res = await httpGet(port, "/");
     expect(res.status).toBe(200);
-    expect(res.body).toContain("No items in the review queue");
+    expect(res.body).toContain("No memories waiting for review");
   });
 });
