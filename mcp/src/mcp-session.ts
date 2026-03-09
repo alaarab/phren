@@ -21,24 +21,8 @@ interface SessionState {
 
 const STALE_SESSION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-/**
- * The session ID created by this process's most recent session_start call.
- *
- * NOTE: This is a module-global singleton and will be overwritten when a new
- * session_start is called.  When multiple clients share the same process, callers
- * should always pass an explicit sessionId to session_end / session_context rather
- * than relying on this fallback.  The sessionId is returned in the session_start
- * response data for this purpose.
- */
-let _currentProcessSessionId: string | undefined;
-
 /** Per-connection session map keyed by arbitrary connection ID (if provided). */
 const _sessionMap = new Map<string, string>();
-
-/** Get the current process's session ID (set by session_start). */
-export function getCurrentSessionId(): string | undefined {
-  return _currentProcessSessionId;
-}
 
 function sessionsDir(cortexPath: string): string {
   const dir = path.join(cortexPath, ".runtime", "sessions");
@@ -169,9 +153,9 @@ function findMostRecentSummaryWithProject(cortexPath: string): { summary: string
   return { summary: bestSummary, project: bestProject };
 }
 
-/** Resolve session file: use provided sessionId, then connectionId lookup, then _currentProcessSessionId, then fall back to most recent active session. */
+/** Resolve session file from an explicit sessionId or a previously-bound connectionId. */
 function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId?: string): { file: string; state: SessionState } | null {
-  const effectiveId = sessionId ?? (connectionId ? _sessionMap.get(connectionId) : undefined) ?? _currentProcessSessionId;
+  const effectiveId = sessionId ?? (connectionId ? _sessionMap.get(connectionId) : undefined);
   if (effectiveId) {
     const file = sessionFileForId(cortexPath, effectiveId);
     const state = readSessionStateFile(file);
@@ -180,7 +164,7 @@ function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId
     if (state.endedAt) return null;
     return { file, state };
   }
-  return findMostRecentSession(cortexPath);
+  return null;
 }
 
 /** Remove session files older than 24 hours. */
@@ -304,9 +288,6 @@ export function register(server: McpServer, ctx: McpContext): void {
     };
     const newFile = sessionFileForId(cortexPath, sessionId);
     writeSessionStateFile(newFile, next);
-    // Store in module-global for single-client compatibility; multi-client callers
-    // should use the returned sessionId explicitly on subsequent calls.
-    _currentProcessSessionId = sessionId;
     if (connectionId) _sessionMap.set(connectionId, sessionId);
 
     const parts: string[] = [];
@@ -362,13 +343,16 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   server.registerTool("session_end", {
     title: "◆ cortex · session end",
-    description: "Mark the end of a session and save a summary for the next session to pick up. Call this before ending a conversation to preserve context. Pass the sessionId returned by session_start to avoid cross-client collisions.",
+    description: "Mark the end of a session and save a summary for the next session to pick up. Call this before ending a conversation to preserve context. Pass the sessionId returned by session_start, or a stable connectionId bound at session_start.",
     inputSchema: z.object({
       summary: z.string().optional().describe("What was accomplished this session. Shown at the start of the next session."),
-      sessionId: z.string().optional().describe("Session ID to end (returned by session_start). Preferred over relying on the module-global fallback."),
+      sessionId: z.string().optional().describe("Session ID to end (returned by session_start)."),
       connectionId: z.string().optional().describe("Connection ID passed to session_start. Used to resolve the session when sessionId is not provided."),
     }),
   }, async ({ summary, sessionId, connectionId }) => {
+    if (!sessionId && !connectionId) {
+      return mcpResponse({ ok: false, error: "Pass sessionId or connectionId. Implicit process-global session fallback has been removed." });
+    }
     const resolved = resolveSessionFile(cortexPath, sessionId, connectionId);
     if (!resolved) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
 
@@ -387,10 +371,6 @@ export function register(server: McpServer, ctx: McpContext): void {
 
     if (!endedState) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
 
-    // Clear in-process session state so subsequent calls don't resolve the ended session.
-    if (state.sessionId === _currentProcessSessionId) {
-      _currentProcessSessionId = undefined;
-    }
     if (connectionId) {
       _sessionMap.delete(connectionId);
     }
@@ -425,14 +405,17 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   server.registerTool("session_context", {
     title: "◆ cortex · session context",
-    description: "Get the current session context -- active project, session duration, findings added, and prior session summary.",
+    description: "Get the current session context -- active project, session duration, findings added, and prior session summary. Pass the sessionId returned by session_start, or a stable connectionId bound at session_start.",
     inputSchema: z.object({
-      sessionId: z.string().optional().describe("Session ID to query (returned by session_start). Preferred over relying on the module-global fallback."),
+      sessionId: z.string().optional().describe("Session ID to query (returned by session_start)."),
       connectionId: z.string().optional().describe("Connection ID passed to session_start. Used to resolve the session when sessionId is not provided."),
     }),
   }, async ({ sessionId, connectionId }) => {
+    if (!sessionId && !connectionId) {
+      return mcpResponse({ ok: false, error: "Pass sessionId or connectionId. Implicit process-global session fallback has been removed." });
+    }
     const resolved = resolveSessionFile(cortexPath, sessionId, connectionId);
-    if (!resolved) return mcpResponse({ ok: true, message: "No active session. Call session_start to begin.", data: null });
+    if (!resolved) return mcpResponse({ ok: false, error: "No active session. Call session_start first.", data: null });
 
     const { state } = resolved;
     const durationMs = Date.now() - new Date(state.startedAt).getTime();

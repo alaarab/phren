@@ -130,8 +130,8 @@ describe("cosineFallback: edge cases", () => {
     const fakeDb: SqlJsDatabase = {
       run: () => {},
       exec: (sql: string) => {
-        if (sql.includes("COUNT(*)")) {
-          return [{ columns: ["COUNT(*)"], values: [[2]] }];
+        if (sql.includes("MIN(rowid), MAX(rowid), COUNT(*)")) {
+          return [{ columns: ["min", "max", "count"], values: [[1, 2, 2]] }];
         }
         if (sql.includes("SELECT rowid, project, filename, type, content, path FROM docs")) {
           return [{
@@ -150,5 +150,38 @@ describe("cosineFallback: edge cases", () => {
 
     const results = cosineFallback(fakeDb, "redis caching strategy", new Set(), 10);
     expect(results[0]?.filename).toBe("content-match.md");
+  });
+
+  it("uses deterministic rowid windows instead of ORDER BY RANDOM for large corpora", () => {
+    const sqlCalls: string[] = [];
+    const fakeDb: SqlJsDatabase = {
+      run: () => {},
+      exec: (sql: string, params?: unknown[]) => {
+        sqlCalls.push(sql);
+        if (sql.includes("MIN(rowid), MAX(rowid), COUNT(*)")) {
+          return [{ columns: ["min", "max", "count"], values: [[1, 1000, 1000]] }];
+        }
+        if (sql.includes("docs MATCH ?")) {
+          return [{ columns: ["rowid", "project", "filename", "type", "content", "path"], values: [] }];
+        }
+        if (sql.includes("rowid >= ?")) {
+          return [{
+            columns: ["rowid", "project", "filename", "type", "content", "path"],
+            values: [[Number(params?.[0] ?? 1), "proj", "FINDINGS.md", "findings", "redis caching strategy", "/tmp/proj/FINDINGS.md"]],
+          }];
+        }
+        if (sql.includes("rowid < ?")) {
+          return [];
+        }
+        return [];
+      },
+      export: () => new Uint8Array(),
+      close: () => {},
+    };
+
+    const results = cosineFallback(fakeDb, "redis caching strategy", new Set(), 10);
+    expect(results.length).toBeGreaterThan(0);
+    expect(sqlCalls.some((sql) => sql.includes("ORDER BY RANDOM"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("rowid >= ?"))).toBe(true);
   });
 });

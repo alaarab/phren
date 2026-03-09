@@ -74,8 +74,8 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `add_finding` | `project`, `finding`, `citation?: { file?, line?, repo?, commit? }` | Append an insight to FINDINGS.md with optional source citation. |
-| `add_findings` | `project`, `findings[]` | Bulk add multiple findings in one call. |
+| `add_finding` | `project`, `finding`, `citation?: { file?, line?, repo?, commit? }`, `sessionId?` | Append an insight to FINDINGS.md with optional source citation. Pass `sessionId` to update session metrics. |
+| `add_findings` | `project`, `findings[]`, `sessionId?` | Bulk add multiple findings in one call. Pass `sessionId` to update session metrics. |
 | `remove_finding` | `project`, `finding` | Remove a finding by text match. Use when an insight is wrong or outdated. |
 | `remove_findings` | `project`, `findings[]` | Bulk remove multiple findings in one call. |
 | `push_changes` | `message?` | Commit and push all cortex changes. Retries with rebase on push conflicts. |
@@ -109,9 +109,9 @@ Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrat
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `session_start` | `project?` | Mark session start. Returns prior summary, recent findings, and active backlog. |
-| `session_end` | `summary?` | Mark session end and save summary for next session. |
-| `session_context` | (none) | Get current session state: project, duration, findings added so far. |
+| `session_start` | `project?`, `connectionId?` | Mark session start. Returns prior summary, recent findings, active backlog, and a `sessionId`. |
+| `session_end` | `summary?`, `sessionId?`, `connectionId?` | Mark session end and save summary for next session. Pass `sessionId` or a previously bound `connectionId`. |
+| `session_context` | `sessionId?`, `connectionId?` | Get current session state. Pass `sessionId` or a previously bound `connectionId`. |
 
 Governance, policy, and maintenance tools are CLI-only. Use `cortex config` and `cortex maintain` commands.
 

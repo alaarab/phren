@@ -23,9 +23,9 @@ MCP Tools (47):
     update_backlog_item(project, item, updates) - change priority, context, or section
 
   Finding capture:
-    add_finding(project, finding, citation?, findingType?) - append finding with optional citation and type tag
+    add_finding(project, finding, citation?, findingType?, sessionId?) - append finding with optional citation and type tag
       findingType: "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug"
-    add_findings(project, findings[]) - bulk add multiple findings
+    add_findings(project, findings[], sessionId?) - bulk add multiple findings
     remove_finding(project, finding) - remove by matching text
     remove_findings(project, findings[]) - bulk remove multiple findings
     push_changes(message?) - commit and push all cortex changes
@@ -38,9 +38,9 @@ MCP Tools (47):
     cross_project_entities() - find entities shared across multiple projects
 
   Session management (for agents without hooks):
-    session_start(project?) - mark session start, retrieve prior session context
-    session_end(summary?) - mark session end, save summary for next session
-    session_context() - get current session state (project, duration, findings added)
+    session_start(project?, connectionId?) - mark session start, retrieve prior session context, return sessionId
+    session_end(summary?, sessionId?, connectionId?) - end a session by explicit identity and save summary
+    session_context(sessionId?, connectionId?) - get current session state by explicit identity
 
   Memory quality:
     pin_memory(project, memory) - write canonical/pinned memory that bypasses decay

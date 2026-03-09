@@ -138,6 +138,7 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 | `project` | string | yes | Project name. |
 | `finding` | string | yes | The insight, as a single bullet point. Be specific enough to act on without extra context. |
 | `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit? }`. |
+| `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
 
 ### `add_findings`
@@ -148,6 +149,7 @@ Record multiple insights to a project's FINDINGS.md in one call. FTS index rebui
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `findings` | string[] | yes | List of insights to record. |
+| `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include these writes. |
 
 ### `remove_finding`
 
@@ -282,6 +284,7 @@ Mark the start of a session. Returns the prior session summary, recent findings,
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Project name to scope the session to. |
+| `connectionId` | string | no | Optional stable client identifier. Bind once at `session_start`, then use it instead of passing `sessionId` every time. |
 
 ### `session_end`
 
@@ -290,12 +293,17 @@ Mark the end of a session and save a summary for the next session. Reports durat
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `summary` | string | no | Free-text summary of what was accomplished. |
+| `sessionId` | string | no | Session ID returned by `session_start`. Required unless you pass `connectionId`. |
+| `connectionId` | string | no | Stable client identifier previously passed to `session_start`. Required unless you pass `sessionId`. |
 
 ### `session_context`
 
 Get the current session state including project, duration, and findings added so far.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | string | no | Session ID returned by `session_start`. Required unless you pass `connectionId`. |
+| `connectionId` | string | no | Stable client identifier previously passed to `session_start`. Required unless you pass `sessionId`. |
 
 ---
 
