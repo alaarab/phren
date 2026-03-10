@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { runtimeFile } from "./shared.js";
+import { runtimeDir } from "./shared.js";
 
 interface TelemetryConfig {
   enabled: boolean;
@@ -27,22 +27,11 @@ const pendingCounts = new Map<string, number>();
 const FLUSH_THRESHOLD = 10;
 
 function telemetryPath(cortexPath: string): string {
-  return runtimeFile(cortexPath, "telemetry.json");
-}
-
-// Migrate legacy .governance/telemetry.json to .runtime/
-function migrateLegacy(cortexPath: string, newPath: string): void {
-  const legacyPath = path.join(cortexPath, ".governance", "telemetry.json");
-  if (fs.existsSync(legacyPath) && !fs.existsSync(newPath)) {
-    try { fs.renameSync(legacyPath, newPath); } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] telemetry migrate: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  }
+  return path.join(runtimeDir(cortexPath), "telemetry.json");
 }
 
 function loadFromDisk(cortexPath: string): TelemetryData {
   const file = telemetryPath(cortexPath);
-  migrateLegacy(cortexPath, file);
   const defaults: TelemetryData = {
     config: { enabled: false },
     stats: { toolCalls: {}, cliCommands: {}, errors: 0, sessions: 0, lastActive: "" },
@@ -83,6 +72,7 @@ function flushTelemetryForPath(cortexPath: string): void {
   if (!data || pending === 0) return;
   const file = telemetryPath(cortexPath);
   try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] telemetry flush: ${err instanceof Error ? err.message : String(err)}\n`);

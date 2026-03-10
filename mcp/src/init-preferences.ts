@@ -4,7 +4,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog } from "./shared.js";
+import { debugLog, installPreferencesFile } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import type { CustomHookEntry } from "./hooks.js";
 
@@ -19,7 +19,7 @@ export interface InstallPreferences {
 }
 
 function preferencesFile(cortexPath: string): string {
-  return path.join(cortexPath, ".governance", "install-preferences.json");
+  return installPreferencesFile(cortexPath);
 }
 
 export function readInstallPreferences(cortexPath: string): InstallPreferences {

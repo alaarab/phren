@@ -88,7 +88,7 @@ User says: "move my-project from personal to work"
 
 User says: "this machine is my work laptop"
 
-1. Get the current machine name: `cat ~/.cortex-machine` or `hostname`
+1. Get the current machine name: `cat ~/.cortex/.machine-id` or `hostname`
 2. Ask which profile to use (show available profiles from `~/.cortex/profiles/`)
 3. Add/update the line in `~/.cortex/machines.yaml`: `work-laptop: work`
 4. Commit the change

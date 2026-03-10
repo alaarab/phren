@@ -26,14 +26,14 @@ Examples:
 - stale marker cleanup
 - non-critical hook notice files
 - background context enrichment
-- optional migrations of legacy side files
+- optional cleanup of stale side files
 
 Behavior:
 - keep the primary operation running
 - write a debug log only when `CORTEX_DEBUG=1`
 - avoid claiming success for the skipped substep in user-facing output
 
-## 3. Explicitly silent compatibility cleanup
+## 3. Explicitly silent cleanup
 
 Use this only for harmless cleanup on shutdown or temp resources where surfacing the failure would add noise without actionable value.
 
@@ -55,6 +55,6 @@ Behavior:
 | Review UI auth / mutation routes | user-visible failure |
 | Hook/config opportunistic cleanup | debug-log only best-effort |
 | Telemetry / analytics | debug-log only best-effort |
-| Terminal restore / temp cleanup | explicitly silent compatibility cleanup |
+| Terminal restore / temp cleanup | explicitly silent cleanup |
 
 Critical rule: Cortex should not silently discard requested writes. If the user asked for a write and it did not happen, that must be surfaced as a failure.

@@ -46,7 +46,7 @@ export function forwardErr<T>(result: CortexResult<unknown>): CortexResult<T> {
 
 const ERROR_CODES = new Set(Object.values(CortexError));
 
-// Extract the error code from a legacy error string (e.g. "PROJECT_NOT_FOUND: ...").
+// Extract the error code from an error string (e.g. "PROJECT_NOT_FOUND: ...").
 // Returns the code if the string starts with a known CortexError, or undefined.
 export function parseCortexErrorCode(msg: string): CortexErrorCode | undefined {
   const prefix = msg.split(":")[0]?.trim();
@@ -78,7 +78,7 @@ export function withDefaults<T extends object>(data: Partial<T>, defaults: T): T
 export const FINDING_TYPES = ["decision", "pitfall", "pattern", "tradeoff", "architecture", "bug"] as const;
 export type FindingType = (typeof FINDING_TYPES)[number];
 
-/** Searchable finding tags (same set as FINDING_TYPES, kept as alias for backward compatibility) */
+/** Searchable finding tags (same set as FINDING_TYPES) */
 export const FINDING_TAGS = FINDING_TYPES;
 export type FindingTag = FindingType;
 

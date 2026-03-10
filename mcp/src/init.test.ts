@@ -14,7 +14,6 @@ import {
   getMcpEnabledPreference,
   isVersionNewer,
   listTemplates,
-  migrateRootFiles,
   parseMcpMode,
   resetVSCodeProbeCache,
   runInit,
@@ -116,9 +115,9 @@ describe.sequential("mcp mode configuration", () => {
   it("ships starter gitignore entries for local governance runtime state", () => {
     const starterGitignore = fs.readFileSync(path.join("starter", ".gitignore"), "utf8");
 
-    expect(starterGitignore).toContain(".governance/runtime-health.json");
-    expect(starterGitignore).toContain(".governance/memory-scores.json");
-    expect(starterGitignore).toContain(".governance/shell-state.json");
+    expect(starterGitignore).not.toContain(".governance/runtime-health.json");
+    expect(starterGitignore).not.toContain(".governance/memory-scores.json");
+    expect(starterGitignore).not.toContain(".governance/shell-state.json");
     expect(starterGitignore).toContain(".runtime/");
     expect(starterGitignore).toContain(".sessions/");
   });
@@ -200,7 +199,7 @@ describe.sequential("mcp mode configuration", () => {
       mcpPath,
       JSON.stringify(
         {
-          servers: {
+          mcpServers: {
             cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
           },
         },
@@ -212,13 +211,13 @@ describe.sequential("mcp mode configuration", () => {
     const offStatus = configureVSCode(cortexPath, { mcpEnabled: false });
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(offCfg.servers?.cortex).toBeUndefined();
+    expect(offCfg.mcpServers?.cortex).toBeUndefined();
 
     const onStatus = configureVSCode(cortexPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.servers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(onCfg.servers?.cortex?.args).toContain(cortexPath);
+    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
   });
 
   it("detects VS Code in USERPROFILE/AppData/Roaming path", () => {
@@ -230,8 +229,8 @@ describe.sequential("mcp mode configuration", () => {
     expect(onStatus).toBe("installed");
 
     const cfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(cfg.servers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(cfg.servers?.cortex?.args).toContain(cortexPath);
+    expect(cfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
+    expect(cfg.mcpServers?.cortex?.args).toContain(cortexPath);
   });
 
   it("toggles Cursor MCP config on and off", () => {
@@ -263,7 +262,7 @@ describe.sequential("mcp mode configuration", () => {
     expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
   });
 
-  it("toggles Copilot CLI MCP config on and off (legacy servers key migrated)", () => {
+  it("toggles Copilot CLI MCP config on and off with canonical mcpServers config", () => {
     const copilotDir = path.join(homeDir, ".github");
     fs.mkdirSync(copilotDir, { recursive: true });
     const mcpPath = path.join(copilotDir, "mcp.json");
@@ -271,7 +270,7 @@ describe.sequential("mcp mode configuration", () => {
       mcpPath,
       JSON.stringify(
         {
-          servers: {
+          mcpServers: {
             cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
           },
         },
@@ -283,13 +282,11 @@ describe.sequential("mcp mode configuration", () => {
     const offStatus = configureCopilotMcp(cortexPath, { mcpEnabled: false });
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(offCfg.servers?.cortex).toBeUndefined();
     expect(offCfg.mcpServers?.cortex).toBeUndefined();
 
     const onStatus = configureCopilotMcp(cortexPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    // upsertMcpServer migrates legacy "servers" key to "mcpServers"
     expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
     expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
   });
@@ -471,7 +468,7 @@ describe("ensureGovernanceFiles", () => {
     expect(fs.existsSync(path.join(govDir, "access-control.json"))).toBe(true);
     expect(fs.existsSync(path.join(govDir, "workflow-policy.json"))).toBe(true);
     expect(fs.existsSync(path.join(govDir, "index-policy.json"))).toBe(true);
-    expect(fs.existsSync(path.join(govDir, "runtime-health.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".runtime", "runtime-health.json"))).toBe(true);
   });
 
   it("writes valid JSON in each governance file", () => {
@@ -728,78 +725,6 @@ describe("collectNativeMemoryFiles", () => {
   });
 });
 
-describe("migrateRootFiles", () => {
-  it("moves legacy session markers to .sessions/", () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
-    const cortex = path.join(tmpDir, ".cortex");
-    fs.mkdirSync(cortex, { recursive: true });
-    fs.writeFileSync(path.join(cortex, ".noticed-abc123"), "");
-    fs.writeFileSync(path.join(cortex, ".extracted-abc123-proj"), "");
-
-    const moved = migrateRootFiles(cortex);
-
-    expect(moved.length).toBe(2);
-    expect(fs.existsSync(path.join(cortex, ".sessions", "noticed-abc123"))).toBe(true);
-    expect(fs.existsSync(path.join(cortex, ".sessions", "extracted-abc123-proj"))).toBe(true);
-    expect(fs.existsSync(path.join(cortex, ".noticed-abc123"))).toBe(false);
-    cleanup();
-  });
-
-  it("moves quality markers to .runtime/", () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
-    const cortex = path.join(tmpDir, ".cortex");
-    fs.mkdirSync(cortex, { recursive: true });
-    fs.writeFileSync(path.join(cortex, ".quality-2026-01-01"), "done");
-
-    const moved = migrateRootFiles(cortex);
-
-    expect(moved.some((m: string) => m.includes("quality"))).toBe(true);
-    expect(fs.existsSync(path.join(cortex, ".runtime", "quality-2026-01-01"))).toBe(true);
-    expect(fs.existsSync(path.join(cortex, ".quality-2026-01-01"))).toBe(false);
-    cleanup();
-  });
-
-  it("moves debug.log to .runtime/debug.log", () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
-    const cortex = path.join(tmpDir, ".cortex");
-    fs.mkdirSync(cortex, { recursive: true });
-    fs.writeFileSync(path.join(cortex, "debug.log"), "log content");
-
-    const moved = migrateRootFiles(cortex);
-
-    expect(moved.some((m: string) => m.includes("debug.log"))).toBe(true);
-    expect(fs.existsSync(path.join(cortex, ".runtime", "debug.log"))).toBe(true);
-    expect(fs.readFileSync(path.join(cortex, ".runtime", "debug.log"), "utf8")).toBe("log content");
-    expect(fs.existsSync(path.join(cortex, "debug.log"))).toBe(false);
-    cleanup();
-  });
-
-  it("moves link.sh to scripts/link.sh", () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
-    const cortex = path.join(tmpDir, ".cortex");
-    fs.mkdirSync(cortex, { recursive: true });
-    fs.writeFileSync(path.join(cortex, "link.sh"), "#!/bin/bash\necho hi");
-
-    const moved = migrateRootFiles(cortex);
-
-    expect(moved.some((m: string) => m.includes("link.sh"))).toBe(true);
-    expect(fs.existsSync(path.join(cortex, "scripts", "link.sh"))).toBe(true);
-    expect(fs.existsSync(path.join(cortex, "link.sh"))).toBe(false);
-    cleanup();
-  });
-
-  it("returns empty array when nothing to migrate", () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-migrate-test-");
-    const cortex = path.join(tmpDir, ".cortex");
-    fs.mkdirSync(cortex, { recursive: true });
-
-    const moved = migrateRootFiles(cortex);
-
-    expect(moved).toEqual([]);
-    cleanup();
-  });
-});
-
 describe("runPostInitVerify", () => {
   it("reports setup hardening checks for git, node, remote, and config writability", () => {
     const { path: tmpDir, cleanup } = makeTempDir("cortex-verify-test-");
@@ -813,6 +738,7 @@ describe("runPostInitVerify", () => {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
       fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
       fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
       fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
       fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
 
@@ -856,10 +782,11 @@ describe("runPostInitVerify", () => {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
       fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
       fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
       fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
       fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
       fs.writeFileSync(
-        path.join(cortex, ".governance", "install-preferences.json"),
+        path.join(cortex, ".runtime", "install-preferences.json"),
         JSON.stringify({ installedVersion: "0.0.1" }, null, 2)
       );
 
@@ -886,6 +813,7 @@ describe("runPostInitVerify", () => {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
       fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
       fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
       fs.writeFileSync(
         path.join(home, ".claude", "settings.json"),
         JSON.stringify({
@@ -898,7 +826,7 @@ describe("runPostInitVerify", () => {
       );
       fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
       fs.writeFileSync(
-        path.join(cortex, ".governance", "install-preferences.json"),
+        path.join(cortex, ".runtime", "install-preferences.json"),
         JSON.stringify({ mcpEnabled: false, hooksEnabled: true, installedVersion: VERSION }, null, 2)
       );
       fs.mkdirSync(path.join(cortex, "demo"), { recursive: true });

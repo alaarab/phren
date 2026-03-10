@@ -170,8 +170,8 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
   const exitPromise = new Promise<void>((resolve) => { done = resolve; });
 
   const restoreTerminal = () => {
-    // Shutdown cleanup is intentionally silent: at this stage terminal restoration
-    // is best-effort compatibility work, not a user-requested write path.
+    // Shutdown cleanup is intentionally silent: terminal restoration is best-effort
+    // cleanup, not a user-requested write path.
     try { process.stdin.setRawMode(false); } catch {}
     try { process.stdin.pause(); } catch {}
     try { process.stdout.write("\x1b[?1049l"); } catch {}

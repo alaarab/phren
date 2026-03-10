@@ -114,23 +114,6 @@ export function validateSkillsDir(skillsDir: string): SkillValidationResult[] {
   return results;
 }
 
-export function migrateSkillsToFolders(skillsDir: string): string[] {
-  if (!fs.existsSync(skillsDir)) return [];
-  const migrated: string[] = [];
-  for (const entry of fs.readdirSync(skillsDir)) {
-    if (!entry.endsWith(".md")) continue;
-    const filePath = path.join(skillsDir, entry);
-    if (!fs.statSync(filePath).isFile()) continue;
-    const name = entry.replace(/\.md$/, "");
-    const folderPath = path.join(skillsDir, name);
-    if (fs.existsSync(folderPath)) continue;
-    fs.mkdirSync(folderPath, { recursive: true });
-    fs.renameSync(filePath, path.join(folderPath, "SKILL.md"));
-    migrated.push(name);
-  }
-  return migrated;
-}
-
 export function readSkillManifestHooks(cortexPath: string): ManifestHooks | null {
   const manifestPath = path.join(cortexPath, "cortex.SKILL.md");
   if (!fs.existsSync(manifestPath)) return null;

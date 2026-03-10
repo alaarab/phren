@@ -8,7 +8,7 @@ export interface SkillEntry {
   name: string;
   source: string;
   scopeType: "global" | "project";
-  sourceKind: "canonical" | "legacy";
+  sourceKind: "canonical";
   format: "flat" | "folder";
   path: string;
   root: string;
@@ -24,7 +24,7 @@ export interface ResolvedSkill extends Pick<SkillEntry, "path" | "format" | "roo
   overrides: Array<{
     source: string;
     path: string;
-    sourceKind: "canonical" | "legacy";
+    sourceKind: "canonical";
   }>;
   mirrorTargets: string[];
 }
@@ -80,7 +80,7 @@ function collectSkills(
   root: string,
   sourceLabel: string,
   scopeType: "global" | "project",
-  sourceKind: "canonical" | "legacy",
+  sourceKind: "canonical",
   seen: Set<string>,
 ): SkillEntry[] {
   if (!fs.existsSync(root)) return [];
@@ -123,15 +123,11 @@ function getGlobalSkills(cortexPath: string): SkillEntry[] {
 function getProjectLocalSkills(cortexPath: string, project: string): SkillEntry[] {
   const seen = new Set<string>();
   const projectDir = path.join(cortexPath, project);
-  return [
-    ...collectSkills(cortexPath, path.join(projectDir, "skills"), project, "project", "canonical", seen),
-    ...collectSkills(cortexPath, path.join(projectDir, ".claude", "skills"), project, "project", "legacy", seen),
-  ];
+  return collectSkills(cortexPath, path.join(projectDir, "skills"), project, "project", "canonical", seen);
 }
 
 function skillPriority(skill: SkillEntry): number {
   if (skill.scopeType === "project" && skill.sourceKind === "canonical") return 400;
-  if (skill.scopeType === "project" && skill.sourceKind === "legacy") return 300;
   if (skill.scopeType === "global" && skill.sourceKind === "canonical") return 200;
   return 100;
 }

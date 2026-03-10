@@ -78,7 +78,7 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CORTEX_FEATURE_AUTO_EXTRACT` | enabled | Automatically extract memory candidates from git/GitHub signals once per session per project during hook-prompt. |
-| `CORTEX_FEATURE_DAILY_MAINTENANCE` | enabled | Schedule background maintenance (pruning, canonical lock enforcement, legacy migration) once per day during hook-session-start. |
+| `CORTEX_FEATURE_DAILY_MAINTENANCE` | enabled | Schedule background maintenance (pruning and canonical lock enforcement) once per day during hook-session-start. |
 | `CORTEX_FEATURE_AUTO_CAPTURE` | disabled | Set to `1` to extract insights from conversation transcripts at session end (Stop hook). Enabled during `cortex init` walkthrough. |
 | `CORTEX_FEATURE_SEMANTIC_DEDUP` | disabled | Set to `1` to enable LLM-based paraphrase dedup when adding findings. |
 | `CORTEX_FEATURE_SEMANTIC_CONFLICT` | disabled | Set to `1` to enable LLM-based contradiction detection when adding findings. |

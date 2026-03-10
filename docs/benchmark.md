@@ -118,7 +118,7 @@ The bundled runners now emit a `conditions` block in their JSON output. If you p
 
 ## March 9, 2026 Author-Local Retrieval Runs
 
-After the relaxed lexical rescue pass and the long-document overlap fix, the legacy apples-to-apples run against the author's `~/.cortex` corpus (139 indexed docs, 10 real queries, Node `v24.13.0`) produced:
+After the relaxed lexical rescue pass and the long-document overlap fix, the author-local run against the author's `~/.cortex` corpus (139 indexed docs, 10 real queries, Node `v24.13.0`) produced:
 
 - lexical path: `15.93ms` average total latency, `11.91ms` p50, `16.25ms` p95
 - gated semantic path: `12.90ms` average total latency, `11.59ms` p50, `16.52ms` p95

@@ -73,16 +73,10 @@ export function getDocSourceKey(doc: Pick<DocRow, "project" | "filename" | "path
   return buildSourceDocKey(doc.project, doc.path, cortexPath, doc.filename);
 }
 
-/**
- * Normalize a memory ID to canonical format: `mem:project/path/to/file.md`.
- * Handles URL-encoded slashes, missing `mem:` prefix, backslashes, and
- * legacy formats with colons after the filename (e.g. `mem:project/file:linenum`).
- */
+/** Normalize a memory ID to canonical format: `mem:project/path/to/file.md`. */
 export function normalizeMemoryId(rawId: string): string {
   let id = decodeURIComponent(rawId).replace(/\\/g, "/");
   if (!id.startsWith("mem:")) id = `mem:${id}`;
-  // Strip trailing :linenum if present (legacy format)
-  id = id.replace(/:(\d+)$/, "");
   return id;
 }
 

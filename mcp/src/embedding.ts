@@ -27,8 +27,6 @@ interface SqlJsStatic {
 let sqlJsLoader: () => Promise<SqlJsStatic> = bootstrapSqlJs as () => Promise<SqlJsStatic>;
 
 const EMBED_CACHE_DB = "embed-cache.db";
-const EMBED_CACHE_JSONL = "embed-cache.jsonl"; // legacy file for migration
-
 function getCacheDbPath(cortexPath: string): string {
   const dir = runtimeDir(cortexPath);
   fs.mkdirSync(dir, { recursive: true });
@@ -102,34 +100,6 @@ async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
       embedding BLOB NOT NULL,
       PRIMARY KEY (model, hash)
     )`);
-
-    // Migrate legacy JSONL cache if it exists
-    const legacyPath = path.join(runtimeDir(cortexPath), EMBED_CACHE_JSONL);
-    if (fs.existsSync(legacyPath)) {
-      try {
-        const lines = fs.readFileSync(legacyPath, "utf-8").split("\n").filter(Boolean);
-        if (lines.length > 0) {
-          db.run("BEGIN TRANSACTION");
-          for (const line of lines) {
-            const entry = JSON.parse(line) as { hash: string; model: string; embedding: number[] };
-            db.run(
-              "INSERT OR IGNORE INTO embeddings (model, hash, embedding) VALUES (?, ?, ?)",
-              [entry.model, entry.hash, encodeEmbedding(entry.embedding)]
-            );
-          }
-          db.run("COMMIT");
-          fs.writeFileSync(dbPath, Buffer.from(db.export()));
-          fs.unlinkSync(legacyPath);
-          debugLog(`embedding: migrated ${lines.length} entries from JSONL to SQLite`);
-        }
-      } catch (err) {
-        try { db.run("ROLLBACK"); } catch (e2: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding migrationRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
-        }
-        debugLog(`embedding: JSONL migration failed: ${errorMessage(err)}`);
-      }
-    }
-
     return db;
   } catch (err) {
     try { db?.close(); } catch (e2: unknown) {

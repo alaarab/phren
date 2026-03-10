@@ -77,7 +77,7 @@ describe("handleBackgroundSync recovery", () => {
     const summary = fs.readFileSync(path.join(repoA, "demo", "summary.md"), "utf8");
     expect(summary).toContain("local only");
 
-    const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".governance", "runtime-health.json"), "utf8"));
+    const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".runtime", "runtime-health.json"), "utf8"));
     expect(runtime.lastSync.lastPushStatus).toBe("saved-pushed");
     expect(runtime.lastSync.lastPullStatus).toBe("ok");
   }, RECOVERY_TEST_TIMEOUT_MS);

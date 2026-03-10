@@ -33,7 +33,7 @@ Ship an interactive `cortex` shell that makes backlog/findings/memory operations
 - Health actions:
   - `run fix`, `relink`, `rerun hooks`, `update`.
 - Session persistence:
-  - `.governance/shell-state.json` with safe migration.
+  - `.runtime/shell-state.json`.
 
 ## Architecture Contract
 - `mcp/src/shell.ts`: runtime loop, render pipeline, input dispatch.

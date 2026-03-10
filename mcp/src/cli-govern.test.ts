@@ -190,7 +190,7 @@ describe("handleBackgroundMaintenance", () => {
     const { handleBackgroundMaintenance } = await importGovern(cortex);
     await handleBackgroundMaintenance("proj");
     // Check runtime health was updated
-    const healthPath = path.join(cortex, ".governance", "runtime-health.json");
+    const healthPath = path.join(cortex, ".runtime", "runtime-health.json");
     expect(fs.existsSync(healthPath)).toBe(true);
     const health = JSON.parse(fs.readFileSync(healthPath, "utf8"));
     expect(health.lastGovernance).toBeDefined();
@@ -220,130 +220,5 @@ describe("handleBackgroundMaintenance", () => {
       const lockFiles = files.filter((f) => f.includes("quality-") && f.endsWith(".lock"));
       expect(lockFiles).toHaveLength(0);
     }
-  });
-});
-
-// ── handleMigrateFindings ────────────────────────────────────────────────────
-
-describe("handleMigrateFindings", () => {
-  it("exits with error when no project is given", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const { handleMigrateFindings } = await importGovern(cortex);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
-    try {
-      await handleMigrateFindings([]);
-    } catch (e: any) {
-      expect(e.message).toBe("process.exit");
-    }
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    exitSpy.mockRestore();
-  });
-
-  it("runs with --dry-run without modifying files", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "# Findings\n- found something\n" });
-    const { handleMigrateFindings } = await importGovern(cortex);
-    await handleMigrateFindings(["proj", "--dry-run"]);
-    // FINDINGS.md should not be created in dry-run
-    // (depends on migrateLegacyFindings behavior, but we verify no crash)
-  });
-});
-
-// ── handleMaintainMigrate ────────────────────────────────────────────────────
-
-describe("handleMaintainMigrate", () => {
-  it("runs governance migration in dry-run mode", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const { handleMaintainMigrate } = await importGovern(cortex);
-    // Should not throw
-    await handleMaintainMigrate(["governance", "--dry-run"]);
-  });
-
-  it("detects pending governance file migrations", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    // Write a governance file with schemaVersion 0 to trigger migration detection
-    const govDir = path.join(cortex, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "retention-policy.json"),
-      JSON.stringify({ schemaVersion: 0, ttlDays: 90 })
-    );
-    const { handleMaintainMigrate } = await importGovern(cortex);
-    // dry-run should mention pending migration
-    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    await handleMaintainMigrate(["governance", "--dry-run"]);
-    const output = consoleSpy.mock.calls.map((c) => c.join(" ")).join("\n");
-    expect(output).toContain("dry-run");
-    consoleSpy.mockRestore();
-  });
-
-  it("exits for unknown flags", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const { handleMaintainMigrate } = await importGovern(cortex);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
-    try {
-      await handleMaintainMigrate(["--bogus"]);
-    } catch (e: any) {
-      expect(e.message).toBe("process.exit");
-    }
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    exitSpy.mockRestore();
-  });
-
-  it("exits when no positional args given", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const { handleMaintainMigrate } = await importGovern(cortex);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
-    try {
-      await handleMaintainMigrate([]);
-    } catch (e: any) {
-      expect(e.message).toBe("process.exit");
-    }
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    exitSpy.mockRestore();
-  });
-
-  it("handles data migration with project arg", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "# Findings\n" });
-    const { handleMaintainMigrate } = await importGovern(cortex);
-    await handleMaintainMigrate(["data", "proj", "--dry-run"]);
-  });
-
-  it("handles 'all' migration kind with project", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "# Findings\n" });
-    const { handleMaintainMigrate } = await importGovern(cortex);
-    await handleMaintainMigrate(["all", "proj", "--dry-run"]);
-  });
-
-  it("handles project-names migration in dry-run mode", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "SamplePortal", { "FINDINGS.md": "# Findings\n" });
-    const { handleMaintainMigrate } = await importGovern(cortex);
-    await handleMaintainMigrate(["project-names", "--dry-run"]);
-  });
-
-  it("treats unknown positional as legacy data alias", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "myproj", { "FINDINGS.md": "# Findings\n" });
-    const { handleMaintainMigrate } = await importGovern(cortex);
-    await handleMaintainMigrate(["myproj", "--dry-run"]);
   });
 });

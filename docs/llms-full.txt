@@ -97,7 +97,6 @@ CLI Commands:
   cortex maintain prune [project]      - delete expired entries
   cortex maintain consolidate [project]- deduplicate FINDINGS.md
   cortex maintain extract [project]    - mine git and GitHub signals
-  cortex maintain migrate <project>    - promote legacy findings
 
   cortex mcp-mode on|off|status        - toggle MCP integration
   cortex hooks-mode on|off|status      - toggle hook execution

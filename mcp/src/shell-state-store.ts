@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { cortexErr, CortexError, cortexOk, type CortexResult } from "./shared.js";
+import { cortexErr, CortexError, cortexOk, type CortexResult, shellStateFile } from "./shared.js";
 import { getRuntimeHealth, withFileLock as withFileLockRaw } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
 
@@ -27,15 +27,11 @@ export interface ShellState {
   introSeenVersion?: string;
 }
 
-const SHELL_STATE_VERSION = 2;
+const SHELL_STATE_VERSION = 3;
 const VALID_VIEWS = new Set<ShellState["view"]>(["Projects", "Tasks", "Findings", "Review Queue", "Skills", "Hooks", "Machines/Profiles", "Health"]);
 
-function shellStatePath(cortexPath: string): string {
-  return path.join(cortexPath, ".governance", "shell-state.json");
-}
-
 export function loadShellState(cortexPath: string): ShellState {
-  const file = shellStatePath(cortexPath);
+  const file = shellStateFile(cortexPath);
   const fallback: ShellState = {
     version: SHELL_STATE_VERSION,
     view: "Projects",
@@ -47,14 +43,13 @@ export function loadShellState(cortexPath: string): ShellState {
   if (!fs.existsSync(file)) return fallback;
 
   try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ShellState> & { lastView?: string; view?: string };
-    const persistedView = raw.view || raw.lastView || fallback.view;
-    const migratedView = persistedView === "Backlog"
-      ? "Tasks"
-      : (VALID_VIEWS.has(persistedView as ShellState["view"]) ? persistedView as ShellState["view"] : fallback.view);
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ShellState>;
+    const persistedView = VALID_VIEWS.has(raw.view as ShellState["view"])
+      ? raw.view as ShellState["view"]
+      : fallback.view;
     return {
       version: SHELL_STATE_VERSION,
-      view: migratedView,
+      view: persistedView,
       project: raw.project,
       filter: raw.filter,
       page: Number.isFinite(raw.page) ? Number(raw.page) : fallback.page,
@@ -69,7 +64,7 @@ export function loadShellState(cortexPath: string): ShellState {
 }
 
 export function saveShellState(cortexPath: string, state: ShellState): void {
-  const file = shellStatePath(cortexPath);
+  const file = shellStateFile(cortexPath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   withSafeLock(file, () => {
     const out: ShellState = {
@@ -88,7 +83,7 @@ export function saveShellState(cortexPath: string, state: ShellState): void {
 }
 
 export function resetShellState(cortexPath: string): CortexResult<string> {
-  const file = shellStatePath(cortexPath);
+  const file = shellStateFile(cortexPath);
   return withSafeLock(file, () => {
     if (fs.existsSync(file)) fs.unlinkSync(file);
     return cortexOk("Shell state reset.");

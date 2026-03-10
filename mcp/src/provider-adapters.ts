@@ -5,7 +5,7 @@ import * as path from "path";
 export type HookToolName = "claude" | "copilot" | "cursor" | "codex";
 export const HOOK_TOOL_NAMES = ["claude", "copilot", "cursor", "codex"] as const;
 
-export type McpRootKey = "mcpServers" | "servers";
+export type McpRootKey = "mcpServers";
 
 type CommandExistsFn = (cmd: string) => boolean;
 

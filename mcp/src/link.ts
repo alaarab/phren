@@ -29,6 +29,7 @@ import {
   isRecord,
   homePath,
   hookConfigPath,
+  installPreferencesFile,
 } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import {
@@ -58,7 +59,6 @@ export {
   validateSkillFrontmatter,
   validateSkillsDir,
   readSkillManifestHooks,
-  migrateSkillsToFolders,
 } from "./link-skills.js";
 export type {
   ManifestHooks,
@@ -173,7 +173,7 @@ function readProjectConfig(cortexPath: string, project: string): ProjectConfig {
 function maybeOfferStarterTemplateUpdate(cortexPath: string) {
   const current = currentPackageVersion();
   if (!current) return;
-  const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
+  const prefsPath = installPreferencesFile(cortexPath);
   if (!fs.existsSync(prefsPath)) return;
   try {
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as { installedVersion?: string };

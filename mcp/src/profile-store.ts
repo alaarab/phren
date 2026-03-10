@@ -38,20 +38,6 @@ export interface ProjectCard {
   docs: string[];
 }
 
-function parseLegacyProfile(raw: string, file: string): ProfileInfo | null {
-  const nameMatch = raw.match(/^name:\s*(.+)\s*$/m);
-  const projects = raw
-    .split("\n")
-    .map((line) => line.match(/^\s*-\s+(.+?)\s*$/)?.[1] ?? null)
-    .filter((entry): entry is string => Boolean(entry));
-  if (!nameMatch || projects.length === 0) return null;
-  return {
-    name: nameMatch?.[1]?.trim() || file.replace(/\.yaml$/, ""),
-    file,
-    projects,
-  };
-}
-
 export function resolveActiveProfile(cortexPath: string, requestedProfile?: string): CortexResult<string | undefined> {
   if (requestedProfile) {
     const profiles = listProfiles(cortexPath);
@@ -149,27 +135,17 @@ export function listProfiles(cortexPath: string): CortexResult<ProfileInfo[]> {
     const full = path.join(profilesDir, file);
     try {
       const raw = fs.readFileSync(full, "utf8");
-      try {
-        const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
-        const data = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>)
-          : null;
-        const name = (typeof data?.name === "string" && data.name.trim())
-          ? data.name
-          : file.replace(/\.yaml$/, "");
-        const projects = Array.isArray(data?.projects)
-          ? (data.projects as unknown[]).map((project) => String(project)).filter(Boolean)
-          : [];
-        profiles.push({ name, file: full, projects });
-      } catch (err: unknown) {
-        const recovered = parseLegacyProfile(raw, full);
-        if (recovered) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] listProfiles recovered legacy profile: ${full} (${errorMessage(err)})\n`);
-          profiles.push(recovered);
-          continue;
-        }
-        throw err;
-      }
+      const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+      const data = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+      const name = (typeof data?.name === "string" && data.name.trim())
+        ? data.name
+        : file.replace(/\.yaml$/, "");
+      const projects = Array.isArray(data?.projects)
+        ? (data.projects as unknown[]).map((project) => String(project)).filter(Boolean)
+        : [];
+      profiles.push({ name, file: full, projects });
     } catch (err: unknown) {
       if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] listProfiles yamlParse: ${errorMessage(err)}\n`);
       return cortexErr(`profiles/${file}`, CortexError.MALFORMED_YAML);
@@ -239,7 +215,7 @@ function buildProjectCard(dir: string): ProjectCard {
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("#")) || "";
-  const docs = ["CLAUDE.md", "FINDINGS.md", "LEARNINGS.md", "summary.md", "backlog.md", "MEMORY_QUEUE.md"]
+  const docs = ["CLAUDE.md", "FINDINGS.md", "summary.md", "backlog.md", "MEMORY_QUEUE.md"]
     .filter((file) => fs.existsSync(path.join(dir, file)));
   return { name, summary, docs };
 }

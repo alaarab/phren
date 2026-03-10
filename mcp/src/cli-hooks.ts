@@ -288,7 +288,7 @@ export async function handleHookPrompt() {
             if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
           }
         }
-        // Also clean legacy markers from root
+        // Also clean stale markers from the cortex root
         for (const f of fs.readdirSync(getCortexPath())) {
           if (!f.startsWith(".noticed-") && !f.startsWith(".extracted-")) continue;
           const fp = `${getCortexPath()}/${f}`;
