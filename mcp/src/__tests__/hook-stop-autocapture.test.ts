@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { extractConversationInsights } from "../cli-hooks-session.js";
+import { extractConversationInsights, filterConversationInsightsForProactivity } from "../cli-hooks-session.js";
 import { addFindingToFile } from "../shared-content.js";
 
 describe("extractConversationInsights: keyword extraction", () => {
@@ -75,6 +75,29 @@ describe("extractConversationInsights: keyword extraction", () => {
   it("returns empty array for empty input", () => {
     const insights = extractConversationInsights("");
     expect(insights).toEqual([]);
+  });
+});
+
+describe("filterConversationInsightsForProactivity", () => {
+  const insights = [
+    "Always validate API payloads before decoding them",
+    "This is worth remembering before the next migration window",
+    "[decision] Use WAL mode for local concurrent reads",
+  ];
+
+  it("keeps all extracted insights at high", () => {
+    expect(filterConversationInsightsForProactivity(insights, "high")).toEqual(insights);
+  });
+
+  it("keeps only explicit signals at medium", () => {
+    expect(filterConversationInsightsForProactivity(insights, "medium")).toEqual([
+      "This is worth remembering before the next migration window",
+      "[decision] Use WAL mode for local concurrent reads",
+    ]);
+  });
+
+  it("drops all auto-captured insights at low", () => {
+    expect(filterConversationInsightsForProactivity(insights, "low")).toEqual([]);
   });
 });
 

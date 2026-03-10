@@ -6,6 +6,8 @@ import {
   getProactivityLevel,
   getProactivityLevelForBacklog,
   getProactivityLevelForFindings,
+  hasExplicitFindingSignal,
+  shouldAutoCaptureFindingsForLevel,
 } from "./shared.js";
 
 describe("proactivity config", () => {
@@ -97,5 +99,26 @@ describe("proactivity config", () => {
     expect(getProactivityLevel()).toBe("medium");
     expect(getProactivityLevelForFindings()).toBe("high");
     expect(getProactivityLevelForBacklog()).toBe("medium");
+  });
+
+  it("detects explicit finding signal phrases and tags", () => {
+    expect(hasExplicitFindingSignal("This is worth remembering for the next migration.")).toBe(true);
+    expect(hasExplicitFindingSignal('Please add finding: retry the socket once before reconnecting.')).toBe(true);
+    expect(hasExplicitFindingSignal("[decision] Use WAL mode for concurrent readers.")).toBe(true);
+    expect(hasExplicitFindingSignal("This line has no explicit capture signal.")).toBe(false);
+  });
+
+  it("keeps current auto-capture behavior at high", () => {
+    expect(shouldAutoCaptureFindingsForLevel("high", "A heuristic-only signal without explicit phrasing")).toBe(true);
+  });
+
+  it('requires explicit signals at medium', () => {
+    expect(shouldAutoCaptureFindingsForLevel("medium", "This is worth remembering when rotating credentials.")).toBe(true);
+    expect(shouldAutoCaptureFindingsForLevel("medium", "[pitfall] Close the connection before forking workers.")).toBe(true);
+    expect(shouldAutoCaptureFindingsForLevel("medium", "Heuristic signal only: must avoid the race.")).toBe(false);
+  });
+
+  it("disables findings auto-capture at low", () => {
+    expect(shouldAutoCaptureFindingsForLevel("low", 'Please add finding about the migration order.')).toBe(false);
   });
 });

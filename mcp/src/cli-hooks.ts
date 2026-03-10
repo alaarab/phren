@@ -27,6 +27,7 @@ import { isToolHookEnabled } from "./hooks.js";
 import { handleExtractMemories } from "./cli-extract.js";
 import { appendAuditLog } from "./shared.js";
 import { updateRuntimeHealth } from "./shared-governance.js";
+import { getProactivityLevelForFindings } from "./proactivity.js";
 import * as fs from "fs";
 
 // ── Re-exports from focused modules ─────────────────────────────────────────
@@ -70,7 +71,9 @@ export {
   handleHookContext,
   handleHookTool,
   trackSessionMetrics,
+  filterConversationInsightsForProactivity,
   extractToolFindings,
+  filterToolFindingsForProactivity,
   resolveSubprocessArgs,
 } from "./cli-hooks-session.js";
 
@@ -190,7 +193,7 @@ export async function handleHookPrompt() {
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 
-    if (isFeatureEnabled("CORTEX_FEATURE_AUTO_EXTRACT", true) && sessionId && detectedProject && cwd) {
+    if (isFeatureEnabled("CORTEX_FEATURE_AUTO_EXTRACT", true) && getProactivityLevelForFindings() !== "low" && sessionId && detectedProject && cwd) {
       const marker = sessionMarker(getCortexPath(), `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
