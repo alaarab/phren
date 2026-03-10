@@ -1,0 +1,778 @@
+{
+  "runDate": "2026-03-10T04:58:14.997Z",
+  "generator": "synthetic-markdown-memory-files/v1",
+  "conditions": {
+    "machine": "QL-PF5A48WS",
+    "platform": "linux",
+    "arch": "x64",
+    "nodeVersion": "v24.13.0",
+    "sizes": [
+      1000,
+      10000,
+      100000
+    ],
+    "queriesPerSize": 8,
+    "keepTemp": true,
+    "rootDir": "/home/alaarab/cortex/.benchmarks/runs/cortex-bench-fair",
+    "tokenBudget": 550,
+    "lineBudget": 6,
+    "charBudget": 520,
+    "hybridFeature": null,
+    "embeddingApiConfigured": false
+  },
+  "runs": [
+    {
+      "size": 1000,
+      "cortexPath": "/home/alaarab/cortex/.benchmarks/runs/cortex-bench-fair/cortex-sim-1000",
+      "corpusDocs": 1021,
+      "generatedFiles": 1000,
+      "queries": [
+        "needle-000000-payments-api-stale-lock-recovery",
+        "sim-000000 payments-api file-lock stale-lock-recovery",
+        "needle-000125-project-indexer-review-queue-triage",
+        "sim-000125 project-indexer review-filter review-queue-triage",
+        "needle-000250-payments-api-stale-lock-recovery",
+        "sim-000250 payments-api file-lock stale-lock-recovery",
+        "needle-000375-project-indexer-review-queue-triage",
+        "sim-000375 project-indexer review-filter review-queue-triage"
+      ],
+      "coldBuildMs": 371.18,
+      "warmBuildMs": 32.99,
+      "lexical": {
+        "totalMs": {
+          "avg": 6.28,
+          "p50": 4.79,
+          "p95": 10.63,
+          "min": 3.74,
+          "max": 11.72
+        },
+        "searchMs": {
+          "avg": 4.12,
+          "p50": 3.49,
+          "p95": 4.84,
+          "min": 2.88,
+          "max": 7.49
+        },
+        "usedTokens": {
+          "avg": 266.5,
+          "p50": 140,
+          "p95": 408,
+          "min": 134,
+          "max": 408
+        },
+        "hits": 8,
+        "exactTopHits": 8,
+        "misses": []
+      },
+      "hybridGated": {
+        "totalMs": {
+          "avg": 5.26,
+          "p50": 4.85,
+          "p95": 6.06,
+          "min": 4.09,
+          "max": 6.38
+        },
+        "searchMs": {
+          "avg": 4.07,
+          "p50": 3.9,
+          "p95": 4.81,
+          "min": 3.25,
+          "max": 4.84
+        },
+        "usedTokens": {
+          "avg": 266.5,
+          "p50": 140,
+          "p95": 408,
+          "min": 134,
+          "max": 408
+        },
+        "hits": 8,
+        "exactTopHits": 8,
+        "misses": []
+      },
+      "comparison": {
+        "exactTopHitDelta": 0
+      },
+      "runs": [
+        {
+          "mode": "lexical",
+          "query": "needle-000000-payments-api-stale-lock-recovery",
+          "searchMs": 7.49,
+          "totalMs": 10.63,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-000000-payments-api-stale-lock-recovery",
+          "searchMs": 4.84,
+          "totalMs": 5.95,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-000000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 4.84,
+          "totalMs": 11.72,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-000000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 4.77,
+          "totalMs": 6.06,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-000125-project-indexer-review-queue-triage",
+          "searchMs": 3.46,
+          "totalMs": 4.46,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 140,
+          "topDoc": "synthetic-bench/memory-000125.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-000125-project-indexer-review-queue-triage",
+          "searchMs": 3.7,
+          "totalMs": 4.58,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 140,
+          "topDoc": "synthetic-bench/memory-000125.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-000125 project-indexer review-filter review-queue-triage",
+          "searchMs": 4.08,
+          "totalMs": 5.46,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 408,
+          "topDoc": "synthetic-bench/memory-000125.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-000125 project-indexer review-filter review-queue-triage",
+          "searchMs": 4.81,
+          "totalMs": 6.38,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 408,
+          "topDoc": "synthetic-bench/memory-000125.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-000250-payments-api-stale-lock-recovery",
+          "searchMs": 3.53,
+          "totalMs": 4.45,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-000250.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-000250-payments-api-stale-lock-recovery",
+          "searchMs": 3.25,
+          "totalMs": 4.09,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-000250.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-000250 payments-api file-lock stale-lock-recovery",
+          "searchMs": 3.2,
+          "totalMs": 4.98,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-000250.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-000250 payments-api file-lock stale-lock-recovery",
+          "searchMs": 3.38,
+          "totalMs": 4.85,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-000250.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-000375-project-indexer-review-queue-triage",
+          "searchMs": 2.88,
+          "totalMs": 3.74,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 140,
+          "topDoc": "synthetic-bench/memory-000375.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-000375-project-indexer-review-queue-triage",
+          "searchMs": 3.9,
+          "totalMs": 4.8,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 140,
+          "topDoc": "synthetic-bench/memory-000375.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-000375 project-indexer review-filter review-queue-triage",
+          "searchMs": 3.49,
+          "totalMs": 4.79,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 408,
+          "topDoc": "synthetic-bench/memory-000375.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-000375 project-indexer review-filter review-queue-triage",
+          "searchMs": 3.92,
+          "totalMs": 5.35,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 408,
+          "topDoc": "synthetic-bench/memory-000375.md",
+          "exactTopHit": true
+        }
+      ]
+    },
+    {
+      "size": 10000,
+      "cortexPath": "/home/alaarab/cortex/.benchmarks/runs/cortex-bench-fair/cortex-sim-10000",
+      "corpusDocs": 10021,
+      "generatedFiles": 10000,
+      "queries": [
+        "needle-000000-payments-api-stale-lock-recovery",
+        "sim-000000 payments-api file-lock stale-lock-recovery",
+        "needle-001250-payments-api-stale-lock-recovery",
+        "sim-001250 payments-api file-lock stale-lock-recovery",
+        "needle-002500-payments-api-stale-lock-recovery",
+        "sim-002500 payments-api file-lock stale-lock-recovery",
+        "needle-003750-payments-api-stale-lock-recovery",
+        "sim-003750 payments-api file-lock stale-lock-recovery"
+      ],
+      "coldBuildMs": 1836.71,
+      "warmBuildMs": 258.5,
+      "lexical": {
+        "totalMs": {
+          "avg": 14.93,
+          "p50": 13.47,
+          "p95": 17.49,
+          "min": 11.43,
+          "max": 19.63
+        },
+        "searchMs": {
+          "avg": 9.52,
+          "p50": 8.5,
+          "p95": 10.51,
+          "min": 6.75,
+          "max": 14.63
+        },
+        "usedTokens": {
+          "avg": 259,
+          "p50": 134,
+          "p95": 384,
+          "min": 134,
+          "max": 384
+        },
+        "hits": 8,
+        "exactTopHits": 8,
+        "misses": []
+      },
+      "hybridGated": {
+        "totalMs": {
+          "avg": 13.88,
+          "p50": 12.92,
+          "p95": 15.66,
+          "min": 12.07,
+          "max": 15.82
+        },
+        "searchMs": {
+          "avg": 8.68,
+          "p50": 8.17,
+          "p95": 10.2,
+          "min": 7.09,
+          "max": 10.27
+        },
+        "usedTokens": {
+          "avg": 259,
+          "p50": 134,
+          "p95": 384,
+          "min": 134,
+          "max": 384
+        },
+        "hits": 8,
+        "exactTopHits": 8,
+        "misses": []
+      },
+      "comparison": {
+        "exactTopHitDelta": 0
+      },
+      "runs": [
+        {
+          "mode": "lexical",
+          "query": "needle-000000-payments-api-stale-lock-recovery",
+          "searchMs": 10.51,
+          "totalMs": 17.49,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-000000-payments-api-stale-lock-recovery",
+          "searchMs": 10.2,
+          "totalMs": 15.58,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-000000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 10.27,
+          "totalMs": 16.02,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-000000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 10.27,
+          "totalMs": 15.82,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-001250-payments-api-stale-lock-recovery",
+          "searchMs": 8.5,
+          "totalMs": 13.26,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-001250.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-001250-payments-api-stale-lock-recovery",
+          "searchMs": 9.11,
+          "totalMs": 14.24,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-001250.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-001250 payments-api file-lock stale-lock-recovery",
+          "searchMs": 14.63,
+          "totalMs": 19.63,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-001250.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-001250 payments-api file-lock stale-lock-recovery",
+          "searchMs": 7.6,
+          "totalMs": 12.61,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-001250.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-002500-payments-api-stale-lock-recovery",
+          "searchMs": 6.75,
+          "totalMs": 11.43,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-002500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-002500-payments-api-stale-lock-recovery",
+          "searchMs": 7.09,
+          "totalMs": 12.07,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-002500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-002500 payments-api file-lock stale-lock-recovery",
+          "searchMs": 8.43,
+          "totalMs": 13.47,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-002500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-002500 payments-api file-lock stale-lock-recovery",
+          "searchMs": 8.17,
+          "totalMs": 12.92,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-002500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-003750-payments-api-stale-lock-recovery",
+          "searchMs": 6.91,
+          "totalMs": 11.72,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-003750.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-003750-payments-api-stale-lock-recovery",
+          "searchMs": 7.13,
+          "totalMs": 12.14,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-003750.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-003750 payments-api file-lock stale-lock-recovery",
+          "searchMs": 10.15,
+          "totalMs": 16.45,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-003750.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-003750 payments-api file-lock stale-lock-recovery",
+          "searchMs": 9.87,
+          "totalMs": 15.66,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-003750.md",
+          "exactTopHit": true
+        }
+      ]
+    },
+    {
+      "size": 100000,
+      "cortexPath": "/home/alaarab/cortex/.benchmarks/runs/cortex-bench-fair/cortex-sim-100000",
+      "corpusDocs": 100021,
+      "generatedFiles": 100000,
+      "queries": [
+        "needle-000000-payments-api-stale-lock-recovery",
+        "sim-000000 payments-api file-lock stale-lock-recovery",
+        "needle-012500-payments-api-stale-lock-recovery",
+        "sim-012500 payments-api file-lock stale-lock-recovery",
+        "needle-025000-payments-api-stale-lock-recovery",
+        "sim-025000 payments-api file-lock stale-lock-recovery",
+        "needle-037500-payments-api-stale-lock-recovery",
+        "sim-037500 payments-api file-lock stale-lock-recovery"
+      ],
+      "coldBuildMs": 19941.56,
+      "warmBuildMs": 2127.3,
+      "lexical": {
+        "totalMs": {
+          "avg": 88.14,
+          "p50": 83.71,
+          "p95": 102.31,
+          "min": 73.47,
+          "max": 106.93
+        },
+        "searchMs": {
+          "avg": 48.88,
+          "p50": 44.65,
+          "p95": 58.49,
+          "min": 37.72,
+          "max": 63.14
+        },
+        "usedTokens": {
+          "avg": 259,
+          "p50": 134,
+          "p95": 384,
+          "min": 134,
+          "max": 384
+        },
+        "hits": 8,
+        "exactTopHits": 8,
+        "misses": []
+      },
+      "hybridGated": {
+        "totalMs": {
+          "avg": 85.9,
+          "p50": 82.32,
+          "p95": 91.45,
+          "min": 76.98,
+          "max": 106.87
+        },
+        "searchMs": {
+          "avg": 46.55,
+          "p50": 45.21,
+          "p95": 52.42,
+          "min": 40.2,
+          "max": 57.39
+        },
+        "usedTokens": {
+          "avg": 259,
+          "p50": 134,
+          "p95": 384,
+          "min": 134,
+          "max": 384
+        },
+        "hits": 8,
+        "exactTopHits": 8,
+        "misses": []
+      },
+      "comparison": {
+        "exactTopHitDelta": 0
+      },
+      "runs": [
+        {
+          "mode": "lexical",
+          "query": "needle-000000-payments-api-stale-lock-recovery",
+          "searchMs": 43.3,
+          "totalMs": 81.43,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-000000-payments-api-stale-lock-recovery",
+          "searchMs": 45.21,
+          "totalMs": 83.05,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-000000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 63.14,
+          "totalMs": 102.31,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-000000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 52.42,
+          "totalMs": 91.45,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-000000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-012500-payments-api-stale-lock-recovery",
+          "searchMs": 43.47,
+          "totalMs": 83.71,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-012500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-012500-payments-api-stale-lock-recovery",
+          "searchMs": 40.68,
+          "totalMs": 78.33,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-012500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-012500 payments-api file-lock stale-lock-recovery",
+          "searchMs": 58.49,
+          "totalMs": 106.93,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-012500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-012500 payments-api file-lock stale-lock-recovery",
+          "searchMs": 57.39,
+          "totalMs": 106.87,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-012500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-025000-payments-api-stale-lock-recovery",
+          "searchMs": 44.65,
+          "totalMs": 83.3,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-025000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-025000-payments-api-stale-lock-recovery",
+          "searchMs": 40.2,
+          "totalMs": 79.13,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-025000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-025000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 48.15,
+          "totalMs": 84.19,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-025000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-025000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 45.74,
+          "totalMs": 82.32,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-025000.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "needle-037500-payments-api-stale-lock-recovery",
+          "searchMs": 37.72,
+          "totalMs": 73.47,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-037500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "needle-037500-payments-api-stale-lock-recovery",
+          "searchMs": 40.87,
+          "totalMs": 76.98,
+          "resultCount": 1,
+          "selectedCount": 1,
+          "usedTokens": 134,
+          "topDoc": "synthetic-bench/memory-037500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "lexical",
+          "query": "sim-037500 payments-api file-lock stale-lock-recovery",
+          "searchMs": 52.11,
+          "totalMs": 89.8,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-037500.md",
+          "exactTopHit": true
+        },
+        {
+          "mode": "hybrid_gated",
+          "query": "sim-037500 payments-api file-lock stale-lock-recovery",
+          "searchMs": 49.92,
+          "totalMs": 89.09,
+          "resultCount": 8,
+          "selectedCount": 3,
+          "usedTokens": 384,
+          "topDoc": "synthetic-bench/memory-037500.md",
+          "exactTopHit": true
+        }
+      ]
+    }
+  ]
+}

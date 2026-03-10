@@ -55,8 +55,8 @@
 \definecolor{scoreLklo}{HTML}{CFEAD6}
 \definecolor{scoreDark}{HTML}{134E4A}
 
-\title{\vspace{-0.8em}Cortex: A Git-Backed Memory System for AI Agents\\[2pt]
-\large Architecture, Governance, Multi-Agent Coordination, and Comparative Assessment}
+\title{\vspace{-0.8em}Cortex: A Git-Backed Project Memory System\\[2pt]
+\large Architecture, Governance, Concurrent Use, and Comparative Assessment}
 \author{Ala Arab}
 \date{March 9, 2026}
 
@@ -66,7 +66,7 @@
 \maketitle\vspace{-1em}
 
 \begin{abstract}
-\noindent Persistent memory becomes operationally important once agent work spans sessions, tools, and collaborators. This paper examines Cortex as a markdown-native, git-backed memory system with hook-driven capture, trust-scored retrieval, and configurable governance. The contribution is a systems-design case study and operator-workflow argument rather than a claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas. In Cortex's default path, retrieval runs on a local SQLite FTS5 index with no network hop and no required hosted service. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory are architecture-level unless explicitly labeled as measured Cortex implementation notes.
+\noindent Persistent project memory becomes operationally important once work spans sessions, tools, and machines. This paper examines Cortex as a markdown-native, git-backed project memory system with hook-driven capture, trust-scored retrieval, and configurable governance. The contribution is a systems-design case study and operator-workflow argument rather than a claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas. In Cortex's default path, memory compounds as repo state while retrieval stays bounded through a local SQLite FTS5 index with no network hop and no required hosted service. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory are architecture-level unless explicitly labeled as measured Cortex implementation notes.
 \end{abstract}
 
 \vspace{0.1em}
@@ -156,7 +156,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \begin{multicols}{2}
 
 \subsection{Storage and Retrieval}
-Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. Markdown files remain the single source of truth; the index is a cached snapshot that hook and MCP entrypoints load and refresh incrementally. This yields strong inspectability (diffs, git history, plain-text grep) and low platform lock-in.
+Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. Markdown files remain the single source of truth; the index is a cached snapshot that hook and MCP entrypoints load and refresh incrementally. This lets project memory accumulate as ordinary repo state while keeping retrieval separate, selective, and cheap. It also yields strong inspectability (diffs, git history, plain-text grep) and low platform lock-in.
 
 Before injection, a trust filter scores each entry by age decay and citation validity (Section~\ref{sec:decay}), suppressing entries below a configurable confidence floor. Archived entries are stripped so consolidated history does not pollute active search. When semantic recovery is enabled, embeddings are cached locally and init can pre-warm coverage so the first real session is not starting from zero. Recovery queries use a persistent candidate index rather than re-embedding the corpus on every search.
 
@@ -173,7 +173,7 @@ The architectural point of hooks is that memory capture and retrieval stay insid
 \label{sec:context-opt}
 MCP tool responses consume context tokens, so retrieval quality is only half the problem; the other half is how much context the system spends to expose that memory. Cortex uses progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Backlogs support summary-only, paginated, and single-item fetch modes.
 
-This matters most in multi-tool coding sessions where search, backlog lookup, review notes, and shell output all compete for the same window. The design principle is simple: fetch the minimum that answers the question. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
+This matters most in multi-tool coding sessions where search, backlog lookup, review notes, and shell output all compete for the same window. The design goal is to let project memory compound over time without turning long-lived context into prompt bloat. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
 
 \subsection{Governance}
 \label{sec:governance}
@@ -234,8 +234,8 @@ These thresholds are operational defaults rather than scientific constants; they
 \subsection{Extensibility}
 Seven user-defined hook events cover save, search, finding, and index lifecycles \cite{cortex-hooks}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
 
-\section{Multi-Agent Coordination}
-Modern agent workflows frequently involve multiple agents running concurrently. Memory systems that assume a single serial session break under this pattern.
+\section{Concurrent and Cross-Machine Use}
+Modern workflows frequently involve multiple sessions, tools, or machines touching the same project. Memory systems that assume a single serial session break under this pattern.
 
 Cortex handles multi-agent use through four mechanisms. \textbf{Shared git-backed state}: all agents read and write the same \texttt{\textasciitilde/.cortex} directory. Concurrent reads are safe at the file system layer; MCP writes are serialized within a process by file locks with configurable timeouts and stale-lock detection. \textbf{Automatic conflict resolution}: the background sync worker uses \texttt{pull --rebase} and auto-merges safe markdown conflicts in \texttt{FINDINGS.md} and \texttt{backlog.md}; transient push failures are retried automatically, and unresolved conflicts are surfaced in \texttt{cortex status} and the review UI. \textbf{Skill-driven coordination}: skills in \texttt{global/skills/} define reusable agent behaviors injected per project. \textbf{Hook isolation}: each agent session gets its own execution context; the consolidation notice fires once per session via marker files.
 
@@ -259,7 +259,7 @@ The current paper can support two kinds of claims. First, architecture-level dif
 \subsection{Operational fit (non-empirical)}
 
 \begin{itemize}
-  \item \textbf{Cortex}: favors owner-run memory, git auditability, and stronger governance; tradeoff is more local setup and operator burden.
+  \item \textbf{Cortex}: favors repo-backed project memory, git auditability, and stronger governance; tradeoff is more local setup and operator burden.
   \item \textbf{Supermemory}: favors a hosted API-first workflow; tradeoff is less local inspectability and portability.
   \item \textbf{claude-mem}: favors a lighter local hook-driven setup; tradeoff is a smaller governance and operator-tooling surface.
   \item \textbf{Copilot Memory}: favors teams already standardized on GitHub/Copilot; tradeoff is tighter platform scope and less control over storage and workflow.
@@ -350,11 +350,11 @@ The interpretation is intentionally modest: on this corpus the lexical path was 
 \textbf{Operator burden.} Local-first operation shifts responsibility to the user or team: git hygiene, policy tuning, backup expectations, and occasional conflict repair do not disappear just because the system is local.
 
 \section{Conclusion}
-The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex treats memory as an owned system artifact rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session.
+The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex treats memory as repo-backed project state rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session.
 
 That architecture also makes concurrent agent use practical. File locks serialize in-process writes, the background sync worker rebases and auto-merges safe markdown changes, and the shared store remains eventually consistent for append-heavy workflows.
 
-Managed alternatives are reasonable when memory is expected to arrive bundled with a platform and data custody is not a priority. Cortex fits best when the priority is owner-operated memory: markdown as source of truth, predictable token discipline, git auditability, and enough governance to keep shared memory usable over time.
+Managed alternatives are reasonable when memory is expected to arrive bundled with a platform and data custody is not a priority. Cortex fits best when the priority is repo-backed project memory: markdown as source of truth, predictable token discipline, git auditability, and enough governance to keep shared memory usable over time.
 
 \end{multicols}
 

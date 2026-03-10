@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { Database } from "bun:sqlite";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -71,6 +72,8 @@ type Args = {
   runRoot: string;
   streamBackfill: boolean;
   streamChunkSize: number;
+  progressEvery: number;
+  skipSeed: boolean;
 };
 
 type QuerySpec = {
@@ -119,6 +122,8 @@ function parseArgs(argv: string[]): Args {
     runRoot: path.resolve(getArg("--root-dir") || fs.mkdtempSync(path.join(os.tmpdir(), "claude-mem-bench-"))),
     streamBackfill: args.includes("--stream-backfill"),
     streamChunkSize: Number(getArg("--stream-chunk-size") || 1000),
+    progressEvery: Number(getArg("--progress-every") || 10000),
+    skipSeed: args.includes("--skip-seed"),
   };
 }
 
@@ -260,6 +265,16 @@ async function seedProject(
   store.db.close();
 }
 
+function getProjectObservationCount(dbPath: string, project: string): number {
+  const db = new Database(dbPath);
+  try {
+    const row = db.prepare("SELECT COUNT(*) as count FROM observations WHERE project = ?").get(project) as { count?: number } | undefined;
+    return Number(row?.count || 0);
+  } finally {
+    db.close();
+  }
+}
+
 async function benchmarkProject(
   modules: Awaited<ReturnType<typeof loadClaudeMemModules>>,
   dbPath: string,
@@ -267,6 +282,7 @@ async function benchmarkProject(
   queries: QuerySpec[],
   streamBackfill: boolean,
   streamChunkSize: number,
+  progressEvery: number,
 ): Promise<{
   backfillMs: number;
   backfillMode: string;
@@ -293,7 +309,7 @@ async function benchmarkProject(
   const backfillStart = performance.now();
   const backfillMode = streamBackfill ? "streamed_sync" : "default_backfill";
   if (streamBackfill) {
-    await streamedBackfill(sessionStore, chromaSync, project, streamChunkSize);
+    await streamedBackfill(sessionStore, chromaSync, project, streamChunkSize, progressEvery);
   } else {
     await chromaSync.ensureBackfilled(project);
   }
@@ -355,9 +371,15 @@ async function streamedBackfill(
   chromaSync: any,
   project: string,
   chunkSize: number,
+  progressEvery: number,
 ): Promise<void> {
   await chromaSync.ensureCollectionExists?.();
+  const existing = await chromaSync.getExistingChromaIds?.(project);
+  const existingObsIds = new Set<number>(
+    Array.from(existing?.observations ?? []).filter((id) => Number.isInteger(id) && id > 0) as number[],
+  );
   let lastId = 0;
+  let processed = 0;
   for (;;) {
     const rows = sessionStore.db.prepare(`
       SELECT id, memory_session_id, project, text, type, title, subtitle, facts, narrative, concepts,
@@ -369,9 +391,23 @@ async function streamedBackfill(
     `).all(project, lastId, chunkSize) as any[];
     if (rows.length === 0) break;
 
-    const docs = rows.flatMap((row) => chromaSync.formatObservationDocs(row));
+    const pendingRows = rows.filter((row) => !existingObsIds.has(row.id));
+    if (pendingRows.length === 0) {
+      lastId = rows[rows.length - 1]?.id ?? lastId;
+      processed += rows.length;
+      if (processed % progressEvery === 0) {
+        console.log(`stream-backfill progress: project=${project} scanned=${processed} added=0`);
+      }
+      continue;
+    }
+
+    const docs = pendingRows.flatMap((row) => chromaSync.formatObservationDocs(row));
     await chromaSync.addDocuments(docs);
     lastId = rows[rows.length - 1]?.id ?? lastId;
+    processed += rows.length;
+    if (processed % progressEvery === 0) {
+      console.log(`stream-backfill progress: project=${project} scanned=${processed} added=${pendingRows.length}`);
+    }
   }
 }
 
@@ -395,17 +431,61 @@ async function main() {
   const modules = await loadClaudeMemModules(args.claudeMemRoot);
   const dbPath = path.join(dataDir, "claude-mem.db");
   const runs = [];
+  const finalOutputPath = args.outputPath
+    ? path.resolve(args.outputPath)
+    : path.join(process.cwd(), "docs", "benchmark-claude-mem-synthetic-results.json");
+
+  const writeSnapshot = () => {
+    const output = {
+      runDate: new Date().toISOString(),
+      generator: "claude-mem-synthetic-observations/v1",
+      conditions: {
+        platform: process.platform,
+        arch: process.arch,
+        bunVersion: Bun.version,
+        claudeMemRoot: args.claudeMemRoot,
+        uvxPath: args.uvxPath,
+        dataDir,
+        sizes: args.sizes,
+        queriesPerSize: args.queriesPerSize,
+        streamBackfill: args.streamBackfill,
+        streamChunkSize: args.streamChunkSize,
+        progressEvery: args.progressEvery,
+        keepTemp: args.keepTemp,
+        runRoot: args.keepTemp ? args.runRoot : null,
+      },
+      runs,
+    };
+    fs.writeFileSync(finalOutputPath, JSON.stringify(output, null, 2));
+  };
 
   for (const size of args.sizes) {
     const project = projectName(size);
     const queries = buildQuerySet(size, args.queriesPerSize);
-    console.log(`seeding claude-mem synthetic corpus: size=${size}`);
-    const seedStart = performance.now();
-    await seedProject(modules.SessionStore, dbPath, project, size);
-    const seedMs = Number((performance.now() - seedStart).toFixed(2));
+    let seedMs = 0;
+    if (args.skipSeed) {
+      const existing = getProjectObservationCount(dbPath, project);
+      if (existing !== size) {
+        throw new Error(`--skip-seed requested but project ${project} has ${existing} observations; expected ${size}`);
+      }
+      console.log(`skipping seed: size=${size} existing=${existing}`);
+    } else {
+      console.log(`seeding claude-mem synthetic corpus: size=${size}`);
+      const seedStart = performance.now();
+      await seedProject(modules.SessionStore, dbPath, project, size);
+      seedMs = Number((performance.now() - seedStart).toFixed(2));
+    }
 
     console.log(`benchmarking claude-mem search: size=${size}`);
-    const result = await benchmarkProject(modules, dbPath, project, queries);
+    const result = await benchmarkProject(
+      modules,
+      dbPath,
+      project,
+      queries,
+      args.streamBackfill,
+      args.streamChunkSize,
+      args.progressEvery,
+    );
     runs.push({
       size,
       project,
@@ -425,32 +505,9 @@ async function main() {
         `exactTopHits=${result.exactTopHits}/${queries.length}`,
       ].join(" "),
     );
+    writeSnapshot();
   }
-
-  const output = {
-    runDate: new Date().toISOString(),
-    generator: "claude-mem-synthetic-observations/v1",
-    conditions: {
-      platform: process.platform,
-      arch: process.arch,
-      bunVersion: Bun.version,
-      claudeMemRoot: args.claudeMemRoot,
-      uvxPath: args.uvxPath,
-      dataDir,
-      sizes: args.sizes,
-      queriesPerSize: args.queriesPerSize,
-      streamBackfill: args.streamBackfill,
-      streamChunkSize: args.streamChunkSize,
-      keepTemp: args.keepTemp,
-      runRoot: args.keepTemp ? args.runRoot : null,
-    },
-    runs,
-  };
-
-  const finalOutputPath = args.outputPath
-    ? path.resolve(args.outputPath)
-    : path.join(process.cwd(), "docs", "benchmark-claude-mem-synthetic-results.json");
-  fs.writeFileSync(finalOutputPath, JSON.stringify(output, null, 2));
+  writeSnapshot();
   console.log(`saved: ${finalOutputPath}`);
 
   if (!args.keepTemp) {

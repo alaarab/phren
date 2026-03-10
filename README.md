@@ -15,7 +15,7 @@
 
 <br>
 
-AI agents forget everything between sessions. Cortex is a shared memory in a git repo you own that changes that. Agents search it automatically, and you get one place to see what they've learned across every project and machine. The knowledge keeps evolving as you work.
+Project memory should not disappear between sessions or get stranded on one machine. Cortex keeps that memory in a git-backed store you control, so useful context can accumulate across projects and machines without turning every prompt into a dump of old notes. Agents search it automatically, retrieve only what fits the budget, and keep building on the same project state as you work.
 
 <br>
 </div>
@@ -75,19 +75,19 @@ MCP or hooks-only, either works. Same knowledge base either way.
 
 Cortex sits in the same broad agent-memory space as claude-mem, Supermemory, Mem0, GitHub Copilot Memory, and research systems such as MemoryBank and MemGPT. It does not claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas.
 
-The distinction is architectural: Cortex applies those patterns to an owner-operated memory store built from markdown + git, with explicit governance, review workflows, and shared use across agents, projects, and machines.
+The distinction is architectural: Cortex applies those patterns to a repo-backed project memory system built from markdown + git, with explicit governance, review workflows, and shared use across agents, projects, and machines.
 
 ---
 
 ## Why cortex
 
-**Targeted retrieval, not a config dump.** CLAUDE.md loads the whole file every time. Cortex searches what you actually wrote and injects only what matches -- about 550 tokens by default. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET`.
+**Compounding context, bounded retrieval.** Cortex lets project memory grow over time, but it does not inject the whole store. It searches what you actually wrote and keeps injection selective -- about 550 tokens by default -- so long-lived context does not turn into prompt bloat. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET`.
 
-**Knowledge self-cleans.** Findings decay over time. Patterns that keep coming up stay strong. Things that haven't mattered in months fall back. Your agents draw from what's actually useful right now, not everything ever recorded.
+**Stale context fades, recurring context stays.** Findings decay over time. Patterns that keep coming up stay strong. Things that have not mattered in months fall back, so retrieval reflects what is still useful instead of everything ever recorded.
 
-**Every machine, every agent, one store.** Claude Code, Codex, Cursor, all reading from the same knowledge base. What one agent figures out, every other agent gets through ordinary git sync cycles. Profiles keep work and personal separate.
+**Cross-machine continuity through git sync.** Claude Code, Codex, Cursor, all read from the same project memory. What one tool figures out becomes available on another machine through ordinary git sync cycles. Profiles keep work and personal separate.
 
-**Your data stays in a git repo you own.** No account, no vendor, no hosted service in the default path. Markdown in a repo you control. Read it, edit it, grep it, delete it.
+**Your project memory stays in a repo you control.** No account, no vendor, no hosted service in the default path. Markdown in a repo you control. Read it, edit it, grep it, delete it.
 
 ---
 
@@ -130,9 +130,9 @@ Two more things run in the background:
 </details>
 
 <details>
-<summary><strong>Sync across machines</strong></summary>
+<summary><strong>Memory across your machines</strong></summary>
 
-Your cortex is a git repo. Push it to a private remote, clone it anywhere.
+Your cortex repo carries your project memory. Push it to a private remote, clone it anywhere you work.
 
 ```bash
 cd ~/.cortex
@@ -175,9 +175,9 @@ npx @alaarab/cortex init --machine ci-runner --profile work
 </details>
 
 <details>
-<summary><strong>Multiple agents, shared knowledge</strong></summary>
+<summary><strong>Shared project memory</strong></summary>
 
-When you run multiple agents, they all read and write the same project store. An agent on Codex hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context after the next successful sync cycle. No coordination service or custom broker layer, just a shared git repo.
+When more than one tool or session touches the same project, they all read and write the same store. A Codex session hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context after the next successful sync cycle. No coordination service or custom broker layer, just a shared git repo.
 
 - **Parallel agents** share findings on push/pull cycles
 - **Sequential sessions** build on each other. Session 47 knows everything sessions 1 through 46 learned.

@@ -1,6 +1,6 @@
 # Cortex Architecture
 
-How data flows through the system, from user prompt to persistent memory.
+How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
 
 ## System Overview
 
@@ -73,6 +73,8 @@ In practice:
 2. Matching memories are filtered by governance rules before any context injection.
 3. During the turn, MCP tools can add or update memory/backlog files in `~/.cortex/<project>/`.
 4. `Stop` persists those file changes locally through git, then queues background sync work if a remote is configured.
+
+The loop is deliberately asymmetric: project memory can keep accumulating as repo state, while each prompt only pays for the small slice that survives retrieval and trust filtering.
 
 ## Hook Pipeline
 
@@ -216,6 +218,8 @@ All state lives in `~/.cortex/` as plain files, committed to git.
 ### Staged Hybrid Search
 
 Search is intentionally staged so cheap lexical paths win first and vector work only runs when it is likely to recover something new:
+
+This is what keeps a growing memory store usable: the corpus can keep compounding in files while injection stays bounded to a small ranked slice.
 
 ```
 Query

@@ -1,0 +1,109 @@
+{
+  "runDate": "2026-03-10T04:44:32.336Z",
+  "generator": "claude-mem-synthetic-observations/v1",
+  "conditions": {
+    "platform": "linux",
+    "arch": "x64",
+    "bunVersion": "1.3.10",
+    "claudeMemRoot": "/home/alaarab/cortex/.benchmarks/tools/claude-mem-src",
+    "uvxPath": "/home/alaarab/cortex/.benchmarks/tools/uv/uv-0.10.9.data/scripts/uvx",
+    "dataDir": "/home/alaarab/cortex/.benchmarks/runs/claude-bench-100k/home/.claude-mem",
+    "sizes": [
+      100000
+    ],
+    "queriesPerSize": 8,
+    "streamBackfill": true,
+    "streamChunkSize": 1000,
+    "progressEvery": 10000,
+    "keepTemp": true,
+    "runRoot": "/home/alaarab/cortex/.benchmarks/runs/claude-bench-100k"
+  },
+  "runs": [
+    {
+      "size": 100000,
+      "project": "synthetic-bench-100000",
+      "queries": [
+        "needle-000000-payments-api-stale-lock-recovery",
+        "sim-000000 payments-api file-lock stale-lock-recovery",
+        "needle-012500-payments-api-stale-lock-recovery",
+        "sim-012500 payments-api file-lock stale-lock-recovery",
+        "needle-025000-payments-api-stale-lock-recovery",
+        "sim-025000 payments-api file-lock stale-lock-recovery",
+        "needle-037500-payments-api-stale-lock-recovery",
+        "sim-037500 payments-api file-lock stale-lock-recovery"
+      ],
+      "seedMs": 0,
+      "backfillMs": 198871.2,
+      "backfillMode": "streamed_sync",
+      "coldQueryMs": 446.22,
+      "search": {
+        "avg": 414.13,
+        "p50": 401.84,
+        "p95": 436,
+        "min": 399.57,
+        "max": 440.92
+      },
+      "hits": 8,
+      "exactTopHits": 0,
+      "misses": [],
+      "runs": [
+        {
+          "query": "needle-000000-payments-api-stale-lock-recovery",
+          "searchMs": 401,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 008110",
+          "exactTopHit": false
+        },
+        {
+          "query": "sim-000000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 415.62,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 048010",
+          "exactTopHit": false
+        },
+        {
+          "query": "needle-012500-payments-api-stale-lock-recovery",
+          "searchMs": 417.13,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 015010",
+          "exactTopHit": false
+        },
+        {
+          "query": "sim-012500 payments-api file-lock stale-lock-recovery",
+          "searchMs": 400.99,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 015030",
+          "exactTopHit": false
+        },
+        {
+          "query": "needle-025000-payments-api-stale-lock-recovery",
+          "searchMs": 436,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 008110",
+          "exactTopHit": false
+        },
+        {
+          "query": "sim-025000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 401.84,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 048004",
+          "exactTopHit": false
+        },
+        {
+          "query": "needle-037500-payments-api-stale-lock-recovery",
+          "searchMs": 399.57,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 027110",
+          "exactTopHit": false
+        },
+        {
+          "query": "sim-037500 payments-api file-lock stale-lock-recovery",
+          "searchMs": 440.92,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 043004",
+          "exactTopHit": false
+        }
+      ]
+    }
+  ]
+}
