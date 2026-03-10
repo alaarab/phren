@@ -244,7 +244,7 @@ This is an eventually consistent shared-memory model optimized for append-heavy 
 \section{Comparative Assessment}
 \textit{Evidence window: representative public documentation reviewed through March 6, 2026.}
 
-This section is intentionally split between what is currently comparable and what is not. Public documentation and observed product surfaces support an architecture-level comparison, but they do not establish cross-vendor retrieval or latency results on their own. Measured behavior in this paper is therefore limited to Cortex implementation notes. The systems discussed here are representative reference points rather than an exhaustive survey. A direct benchmark program remains future work for systems that can be exercised on shared corpora under controlled conditions.
+This section separates what public evidence can support from what still needs direct measurement. Documentation and product surfaces support architecture-level comparison, but not cross-vendor retrieval or latency claims on their own. Measured results in this paper are therefore limited to Cortex implementation notes and shared-corpus local reruns called out explicitly. The systems below are reference points rather than an exhaustive survey.
 
 \subsection{Current comparison scope}
 \raggedright
@@ -254,11 +254,11 @@ This section is intentionally split between what is currently comparable and wha
   \item \textbf{Copilot Memory}: repository-scoped managed memory with policy controls and expiry semantics in GitHub Copilot \cite{gh-memory-docs,gh-changelog-jan2026,gh-changelog-mar2026}.
 \end{itemize}
 
-The current paper can support two kinds of claims. First, architecture-level differences such as ownership, governance, portability, and review workflow can be compared from public evidence. Second, direct measured retrieval claims are currently defensible only for Cortex, and potentially for other local systems once they are benchmarked on shared corpora. No public retrieval-latency benchmark spans all four systems in a directly comparable way, so cross-system speed claims still require direct measurement.
+Two claim types are currently defensible. Architecture-level differences such as ownership, governance, portability, and review workflow can be compared from public evidence. Direct retrieval or latency claims are defensible only for systems that have been run on shared corpora under controlled conditions. No public benchmark spans all four systems in that form.
 
 \subsection{Measured local comparison on a shared synthetic corpus}
 
-A fresh March 10, 2026 rerun exercised Cortex and claude-mem on the same identifier-heavy synthetic corpora at 1k, 10k, and 100k memories using persisted local stores and the same query shape \cite{cortex-bench,cortex-bench-claude,cortex-bench-compare}. The result is operational rather than universal: Cortex averaged 5.19/13.20/91.63\,ms lexical query latency with exact top-hit rates of 12/12 at each size, while claude-mem averaged 221.07/147.91/225.11\,ms with exact top-hit rates of 0/8. Even with \texttt{--skip-seed}, claude-mem still paid 25--4062\,ms of Chroma-side backfill/check work before the query path settled. This does not show that lexical retrieval is always superior to semantic retrieval. It shows that on a coding-style corpus with strong identifiers, Cortex's lexical-first path was cheaper, more stable, and more exact.
+A fresh March 10, 2026 rerun exercised Cortex and claude-mem on the same identifier-heavy synthetic corpora at 1k, 10k, and 100k memories using persisted local stores and the same query shape \cite{cortex-bench,cortex-bench-claude,cortex-bench-compare}. The result is operational rather than universal: Cortex averaged 5.19/13.20/91.63\,ms lexical query latency with exact top-hit rates of 12/12 at each size, while claude-mem averaged 221.07/147.91/225.11\,ms with exact top-hit rates of 0/8. Even with \texttt{--skip-seed}, claude-mem still paid 25--4062\,ms of Chroma-side backfill/check work before the query path settled. On this coding-style corpus with strong identifiers, Cortex's lexical-first path was cheaper, more stable, and more exact.
 
 \subsection{Operational fit (non-empirical)}
 
@@ -271,29 +271,22 @@ A fresh March 10, 2026 rerun exercised Cortex and claude-mem on the same identif
 
 \subsection{Operational Design Differences}
 
-The systems differ less in whether they can retrieve a relevant memory and more in how they behave operationally once memory is a shared, long-lived artifact.
+The systems differ less in whether they can retrieve a relevant memory and more in how they behave once memory becomes a shared, long-lived artifact.
 
 \raggedright
 \begin{itemize}
-  \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed API systems generally expose different audit primitives rather than equivalent git-native transparency.
+  \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed systems expose different audit primitives rather than equivalent git-native transparency.
   \item \textbf{Policy and access governance}: role-based access control, approval workflows, TTL and retention policy, and canonical locks are first-class features.
   \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection.
-  \item \textbf{CLI shell for human review}: \texttt{cortex shell} provides a model-free interface for reviewing, approving, and cleaning memories without starting an LLM session.
-  \item \textbf{Browser-based memory triage}: \texttt{cortex review-ui} launches a lightweight web UI for queue review by machine, model, and project. The materials examined did not surface an equivalent review tool.
+  \item \textbf{Human review surfaces}: \texttt{cortex shell} and \texttt{cortex review-ui} let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
 \end{itemize}
 
-Any memory system can add a vector index. Governance, auditability, and operational tooling require deliberate architectural choices that are harder to retrofit.
+Any memory system can add a vector index. Governance, auditability, and review tooling require deliberate architectural choices that are harder to retrofit.
 
 \section{FTS5 vs Semantic Search}
 \label{sec:fts5}
 
-Cortex is fundamentally anchored in SQLite FTS5 (BM25 ranking), with fallback layers in some paths. That choice is deliberate and has real consequences.
-
-\textbf{FTS5 advantages:} zero required hosted dependencies in the default path; deterministic and auditable results; low-latency lookup on typical corpus sizes; works offline with no retrieval-side token cost or rate limits.
-
-\textbf{FTS5 limitations:} vocabulary mismatch (``authentication'' won't surface ``login flow'' without synonym expansion); no semantic relatedness across paraphrased concepts; BM25 ranks by term frequency, not relevance.
-
-\textbf{The honest tradeoff:} semantic search retrieves better on paraphrase and synonym-heavy queries. FTS5 retrieves better when vocabulary is consistent, offline operation is required, or zero retrieval-side token cost matters. Cortex's claim is narrower: lexical-first is often the right default for owner-operated coding memory because it is cheap, inspectable, and predictable.
+Cortex is fundamentally anchored in SQLite FTS5 (BM25 ranking), with fallback layers in some paths. That choice is deliberate. In the default path, FTS5 gives Cortex zero required hosted dependencies, deterministic and auditable results, low-latency lookup on typical corpus sizes, and offline operation with no retrieval-side token cost. The tradeoff is familiar: vocabulary mismatch remains real, paraphrased concepts do not align automatically, and BM25 ranks by term frequency rather than meaning. Semantic search retrieves better on paraphrase-heavy queries. FTS5 retrieves better when vocabulary is consistent, offline operation is required, or zero retrieval-side token cost matters. Cortex's claim is narrower: lexical-first is often the right default for repo-backed coding memory because it is cheap, inspectable, and predictable.
 
 \subsection{Hybrid Retrieval: Current State}
 \label{sec:hybrid}
@@ -322,16 +315,9 @@ Rerank + snippets & $O(R \log R + S)$ & $R$ is a small capped candidate set and 
 
 \subsection{Measured Retrieval Notes}
 
-These numbers are implementation checks on one live cortex store, not a general ranking of memory systems. A single author-local benchmark on March 9, 2026 measured the current lexical-first and gated-hybrid paths against a warm Cortex store with 139 indexed documents, real workflow queries, and the default 550-token hook budget \cite{cortex-bench}. The result was narrow but useful:
-\begin{itemize}
-  \item lexical latency remained in the mid-teens of milliseconds, averaging 14.71--15.93\,ms across the March 9 query sets;
-  \item the gated hybrid path stayed in nearly the same range at 12.90--13.60\,ms because the lexical stages usually satisfied the query before vector recovery was needed;
-  \item injected payload remained stable at roughly 326--342 tokens on average;
-  \item both modes hit every query in the published March 9 sets;
-  \item persistent candidate pruning still reduced the cosine stage to roughly 6.3--8.6\% of the eligible corpus when vector recovery did fire.
-\end{itemize}
-The interpretation is intentionally modest: on this corpus the lexical path was strong enough that vector recovery was usually unnecessary, so the hybrid path inherited nearly the same speed profile. Synthetic large-corpus scaling runs are documented separately in the benchmark protocol; they are useful for index and latency scaling, but they answer a different question than this live-store measurement.
-The March 10 shared-corpus rerun against claude-mem reached the same practical conclusion from the other direction: on identifier-heavy coding queries, lexical-first retrieval stayed cheaper and more exact than the semantic-first alternative, even when the competitor's corpus had already been seeded.
+These numbers are implementation checks on one live cortex store, not a general ranking of memory systems. A single author-local benchmark on March 9, 2026 measured the current lexical-first and gated-hybrid paths against a warm Cortex store with 139 indexed documents, real workflow queries, and the default 550-token hook budget \cite{cortex-bench}. Lexical latency averaged 14.71--15.93\,ms; the gated hybrid path stayed in nearly the same range at 12.90--13.60\,ms because the lexical stages usually satisfied the query before vector recovery was needed; injected payload remained stable at roughly 326--342 tokens; both modes hit every published query; and persistent candidate pruning still reduced the cosine stage to roughly 6.3--8.6\% of the eligible corpus when vector recovery did fire.
+The interpretation is intentionally modest: on this corpus the lexical path was strong enough that vector recovery was usually unnecessary, so the hybrid path inherited nearly the same speed profile. Synthetic large-corpus scaling runs are documented separately because they answer a different question than this live-store measurement.
+The March 10 shared-corpus rerun against claude-mem reached the same practical conclusion from the other direction: on identifier-heavy coding queries, lexical-first retrieval stayed cheaper and more exact than the semantic-first alternative, even when the competing corpus had already been seeded.
 
 \section{Limitations}
 \label{sec:limitations}
@@ -355,15 +341,14 @@ The March 10 shared-corpus rerun against claude-mem reached the same practical c
 \textbf{Operator burden.} Local-first operation shifts responsibility to the user or team: git hygiene, policy tuning, backup expectations, and occasional conflict repair do not disappear just because the system is local.
 
 \section{Conclusion}
-The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex treats memory as repo-backed project state rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session.
-
-That architecture also makes concurrent agent use practical. File locks serialize in-process writes, the background sync worker rebases and auto-merges safe markdown changes, and the shared store remains eventually consistent for append-heavy workflows.
+The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex treats memory as repo-backed project state rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session. File locks serialize in-process writes, the background sync worker rebases and auto-merges safe markdown changes, and the shared store remains eventually consistent for append-heavy workflows.
 
 Managed alternatives are reasonable when memory is expected to arrive bundled with a platform and data custody is not a priority. Cortex fits best when the priority is repo-backed project memory: markdown as source of truth, predictable token discipline, git auditability, and enough governance to keep shared memory usable over time.
 
 \end{multicols}
 
 % ─── REFERENCES: two-column ──────────────────────────────────────────────────
+\newpage
 \vspace{0.1em}
 \begin{multicols}{2}
 \footnotesize
