@@ -17,6 +17,8 @@ interface GraphNode {
   fullLabel: string;
   group: "project" | "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug";
   refCount: number;
+  project: string;
+  tagged: boolean;
 }
 
 interface GraphLink {
@@ -145,11 +147,27 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
   for (const project of projects) {
     const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
     if (!fs.existsSync(findingsPath)) {
-      nodes.push({ id: project, label: project, fullLabel: project, group: "project", refCount: 0 });
+      nodes.push({
+        id: project,
+        label: project,
+        fullLabel: project,
+        group: "project",
+        refCount: 0,
+        project,
+        tagged: false,
+      });
       continue;
     }
 
-    nodes.push({ id: project, label: project, fullLabel: project, group: "project", refCount: 1 });
+    nodes.push({
+      id: project,
+      label: project,
+      fullLabel: project,
+      group: "project",
+      refCount: 1,
+      project,
+      tagged: false,
+    });
 
     const content = fs.readFileSync(findingsPath, "utf8");
     const lines = content.split("\n");
@@ -169,7 +187,15 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
         const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
         const nodeId = `${project}:${tag}:${nodes.length}`;
         taggedCount++;
-        nodes.push({ id: nodeId, label, fullLabel: text, group: typeMap[tag], refCount: taggedCount });
+        nodes.push({
+          id: nodeId,
+          label,
+          fullLabel: text,
+          group: typeMap[tag],
+          refCount: taggedCount,
+          project,
+          tagged: true,
+        });
         links.push({ source: project, target: nodeId });
         for (const other of projectSet) {
           if (other !== project && text.toLowerCase().includes(other.toLowerCase())) {
@@ -187,7 +213,15 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
       const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
       const nodeId = `${project}:finding:${nodes.length}`;
       untaggedAdded++;
-      nodes.push({ id: nodeId, label, fullLabel: text, group: "pattern", refCount: untaggedAdded });
+      nodes.push({
+        id: nodeId,
+        label,
+        fullLabel: text,
+        group: "pattern",
+        refCount: untaggedAdded,
+        project,
+        tagged: false,
+      });
       links.push({ source: project, target: nodeId });
     }
   }

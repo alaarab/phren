@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import * as crypto from "crypto";
 import * as readline from "readline";
 import * as yaml from "js-yaml";
@@ -22,6 +21,7 @@ import {
   type McpMode,
 } from "./init.js";
 import { configureAllHooks, detectInstalledTools } from "./hooks.js";
+import { getMachineName, persistMachineName } from "./machine-identity.js";
 import {
   debugLog,
   EXEC_TIMEOUT_MS,
@@ -110,33 +110,14 @@ interface ProjectConfig {
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-const LEGACY_MACHINE_FILE = homePath(".cortex-machine");
-const CORTEX_MACHINE_FILE = homePath(".cortex", ".machine-id");
-
-function machineFilePath(): string {
-  if (fs.existsSync(LEGACY_MACHINE_FILE)) return LEGACY_MACHINE_FILE;
-  if (fs.existsSync(CORTEX_MACHINE_FILE)) return CORTEX_MACHINE_FILE;
-  if (process.platform === "win32") return CORTEX_MACHINE_FILE;
-  return LEGACY_MACHINE_FILE;
-}
-
 function log(msg: string) { process.stdout.write(msg + "\n"); }
-
 function atomicWriteText(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(tmpPath, content);
   fs.renameSync(tmpPath, filePath);
 }
-
-export function getMachineName(): string {
-  const mf = machineFilePath();
-  if (fs.existsSync(mf)) return fs.readFileSync(mf, "utf8").trim();
-  if (process.env.WSL_DISTRO_NAME && process.env.COMPUTERNAME) {
-    return process.env.COMPUTERNAME.toLowerCase();
-  }
-  return os.hostname();
-}
+export { getMachineName } from "./machine-identity.js";
 
 export function lookupProfile(cortexPath: string, machine: string): string {
   const listed = listMachinesShared(cortexPath);
@@ -224,20 +205,9 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
   if (!profile) throw new Error("Profile name can't be empty.");
   if (!findProfileFile(cortexPath, profile)) throw new Error(`No profile named '${profile}' found.`);
 
-  const machineFile = machineFilePath();
-  fs.mkdirSync(path.dirname(machineFile), { recursive: true });
-  atomicWriteText(machineFile, machine);
   const mapResult = setMachineProfile(cortexPath, machine, profile);
   if (!mapResult.ok) throw new Error(mapResult.error);
-
-  try {
-    execFileSync("git", ["add", "machines.yaml"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
-    execFileSync("git", ["commit", "-m", `Register machine: ${machine} (${profile})`, "--allow-empty"], {
-      cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS,
-    });
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] registerMachine gitCommit: ${errorMessage(err)}\n`);
-  }
+  persistMachineName(machine);
 
   log(`\nRegistered ${machine} with profile ${profile}.`);
   return { machine, profile };
@@ -505,6 +475,7 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   }
 
   if (!profile) throw new Error(`Could not determine profile for machine '${machine}'.`);
+  persistMachineName(machine);
 
   // Step 2: Find profile file
   const profileFile = findProfileFile(cortexPath, profile);

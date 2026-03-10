@@ -1,10 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import * as os from "os";
 import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
 import { checkPermission, loadCanonicalLocks, saveCanonicalLocksUnlocked, hashContent, withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
+import { getMachineName } from "./machine-identity.js";
 import {
   type FindingCitation,
   type FindingSource,
@@ -146,7 +146,7 @@ function detectFindingTool(): string | undefined {
 function buildFindingSource(sessionId?: string): FindingSource {
   const actor = process.env.CORTEX_ACTOR?.trim() || undefined;
   const source: FindingSource = {
-    machine: os.hostname(),
+    machine: getMachineName(),
     actor,
     tool: detectFindingTool(),
     model: detectFindingModel(),

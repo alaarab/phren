@@ -317,6 +317,15 @@ ${REVIEW_UI_STYLES}
         <span class="graph-legend-item"><span class="graph-legend-dot" style="background:#10b981"></span> Pattern</span>
       </div>
     </div>
+    <div id="graph-detail-panel" class="card" style="margin-top:16px">
+      <div class="card-header">
+        <h2>Selected Bubble</h2>
+        <span id="graph-detail-meta" class="text-muted" style="font-size:var(--text-sm)">Click a bubble to inspect it.</span>
+      </div>
+      <div class="card-body" id="graph-detail-body" style="display:flex;flex-direction:column;gap:12px">
+        <p class="text-muted" style="margin:0">Use the graph filters, then click a project or finding bubble to pin its details here.</p>
+      </div>
+    </div>
   </div>
 
   <!-- ── Skills Tab ────────────────────────────────────────── -->

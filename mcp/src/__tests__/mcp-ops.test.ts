@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
+import { persistMachineName } from "../machine-identity.js";
 import { register } from "../mcp-ops.js";
 import type { McpContext } from "../mcp-types.js";
 
@@ -133,10 +134,16 @@ describe("mcp-ops: get_consolidation_status", () => {
 describe("mcp-ops: health_check", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
+  const origHome = process.env.HOME;
+  const origUserProfile = process.env.USERPROFILE;
 
   beforeEach(() => {
     tmp = makeTempDir("mcp-ops-health-");
     grantAdmin(tmp.path);
+    const homeDir = path.join(tmp.path, "home");
+    fs.mkdirSync(homeDir, { recursive: true });
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
     server = makeMockServer();
 
     const ctx: McpContext = {
@@ -152,6 +159,8 @@ describe("mcp-ops: health_check", () => {
 
   afterEach(() => {
     delete process.env.CORTEX_ACTOR;
+    process.env.HOME = origHome;
+    process.env.USERPROFILE = origUserProfile;
     tmp.cleanup();
   });
 
@@ -167,6 +176,7 @@ describe("mcp-ops: health_check", () => {
   });
 
   it("resolves active profile and machine at call time instead of stale ctx state", async () => {
+    persistMachineName("alias-box");
     fs.mkdirSync(path.join(tmp.path, "profiles"), { recursive: true });
     fs.writeFileSync(
       path.join(tmp.path, "profiles", "personal.yaml"),
@@ -176,7 +186,7 @@ describe("mcp-ops: health_check", () => {
       path.join(tmp.path, "profiles", "work.yaml"),
       "name: work\nprojects:\n  - global\n  - bravo\n  - charlie\n"
     );
-    fs.writeFileSync(path.join(tmp.path, "machines.yaml"), `${os.hostname()}: work\n`);
+    fs.writeFileSync(path.join(tmp.path, "machines.yaml"), `alias-box: work\n${os.hostname()}: personal\n`);
     for (const project of ["global", "alpha", "bravo", "charlie"]) {
       fs.mkdirSync(path.join(tmp.path, project), { recursive: true });
       fs.writeFileSync(path.join(tmp.path, project, "summary.md"), `# ${project}\n`);
@@ -185,7 +195,7 @@ describe("mcp-ops: health_check", () => {
     const res = parseResult(await server.call("health_check", {}));
     expect(res.ok).toBe(true);
     expect(res.data.profile).toBe("work");
-    expect(res.data.machine).toBe(os.hostname());
+    expect(res.data.machine).toBe("alias-box");
     expect(res.data.projectCount).toBe(3);
   });
 });

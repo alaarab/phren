@@ -420,4 +420,18 @@ describe("review-ui HTML rendering", () => {
       cleanup();
     }
   });
+
+  it("renders graph detail scaffolding and enhanced graph controls", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-graph-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain('id="graph-detail-panel"');
+      expect(body).toContain('id="graph-detail-body"');
+      expect(body).toContain("graphSourceFilterBy(this.value)");
+      expect(body).toContain("graphClearSelection()");
+    } finally {
+      cleanup();
+    }
+  });
 });

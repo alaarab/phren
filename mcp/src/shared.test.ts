@@ -351,19 +351,32 @@ describe("buildIndex and queryRows", () => {
 
   it("buildIndex returns empty index when profile YAML is malformed (fail-closed, Q18)", async () => {
     const cortex = makeCortex();
+    const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
+    const homeDir = path.join(cortex, "home");
+    fs.mkdirSync(homeDir, { recursive: true });
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
     fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
     fs.writeFileSync(path.join(cortex, "profiles", "broken.yaml"), "name: broken\nprojects: [\n");
     makeProject(cortex, "testproj", {
       "summary.md": "# testproj\n\nProfile parse fallback should still index this.\n",
     });
 
-    // Q18: when a profile is set but the file is malformed, getProjectDirs returns []
-    // and buildIndex produces an empty (but valid) FTS database — it does NOT widen
-    // to all projects, which would violate profile-based access control.
-    const db = await buildIndex(cortex, "broken");
-    const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["fallback"]);
-    expect(rows).toBeNull(); // empty DB — no documents indexed
-    db.close();
+    try {
+      // Q18: when a profile is set but the file is malformed, getProjectDirs returns []
+      // and buildIndex produces an empty (but valid) FTS database — it does NOT widen
+      // to all projects, which would violate profile-based access control.
+      const db = await buildIndex(cortex, "broken");
+      const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["fallback"]);
+      expect(rows).toBeNull(); // empty DB — no documents indexed
+      db.close();
+    } finally {
+      if (origHome === undefined) delete process.env.HOME;
+      else process.env.HOME = origHome;
+      if (origUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = origUserProfile;
+    }
   });
 });
 
@@ -716,6 +729,27 @@ describe("RBAC and canonical locks", () => {
       setupAccess({ admins: ["alice"] });
       expect(checkPermission(cortex, "read", "stranger")).toBeNull();
       expect(checkPermission(cortex, "write", "stranger")).toContain("Permission denied");
+    });
+
+    it("uses a local maintainer override when the actor is absent from the shared ACL", () => {
+      setupAccess({ admins: ["alice"] });
+      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+      fs.writeFileSync(
+        path.join(cortex, ".runtime", "access-control.local.json"),
+        JSON.stringify({ maintainers: ["stranger"] }, null, 2) + "\n",
+      );
+      expect(checkPermission(cortex, "write", "stranger")).toBeNull();
+      expect(checkPermission(cortex, "policy", "stranger")).toContain("Permission denied");
+    });
+
+    it("prefers the shared ACL when it explicitly lists the actor", () => {
+      setupAccess({ viewers: ["dave"] });
+      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+      fs.writeFileSync(
+        path.join(cortex, ".runtime", "access-control.local.json"),
+        JSON.stringify({ maintainers: ["dave"] }, null, 2) + "\n",
+      );
+      expect(checkPermission(cortex, "write", "dave")).toContain("Permission denied");
     });
 
     it("denial message includes actor name and role", () => {
@@ -1272,6 +1306,14 @@ describe("autoMergeConflicts", () => {
     execFileSync("git", ["-C", dir, "commit", "-m", message], { stdio: "ignore" });
   }
 
+  function currentBranch(dir: string): string {
+    const { execFileSync } = require("child_process");
+    return execFileSync("git", ["-C", dir, "branch", "--show-current"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  }
+
   beforeEach(() => {
     gitDir = initGitRepo();
   });
@@ -1291,6 +1333,7 @@ describe("autoMergeConflicts", () => {
 
     // Create base commit with a shared file
     commitFile(gitDir, "proj/FINDINGS.md", "# proj FINDINGS\n\n## 2025-01-01\n\n- Base entry\n", "base");
+    const primaryBranch = currentBranch(gitDir);
 
     // Create a branch with a different entry
     execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-a"], { stdio: "pipe" });
@@ -1301,8 +1344,8 @@ describe("autoMergeConflicts", () => {
     execFileSync("git", ["-C", gitDir, "add", "-f", "proj/FINDINGS.md"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "branch-a change"], { stdio: "ignore" });
 
-    // Go back to master and create a conflicting entry
-    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    // Go back to the primary branch and create a conflicting entry
+    execFileSync("git", ["-C", gitDir, "checkout", primaryBranch], { stdio: "pipe" });
     fs.writeFileSync(
       path.join(gitDir, "proj", "FINDINGS.md"),
       "# proj FINDINGS\n\n## 2025-01-01\n\n- Master entry\n"
@@ -1339,6 +1382,7 @@ describe("autoMergeConflicts", () => {
     const { execFileSync } = require("child_process");
 
     commitFile(gitDir, "proj/backlog.md", "# backlog\n\n## Active\n\n- Base task\n\n## Queue\n\n## Done\n", "base");
+    const primaryBranch = currentBranch(gitDir);
 
     execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-b"], { stdio: "pipe" });
     fs.writeFileSync(
@@ -1348,7 +1392,7 @@ describe("autoMergeConflicts", () => {
     execFileSync("git", ["-C", gitDir, "add", "-f", "proj/backlog.md"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "branch change"], { stdio: "ignore" });
 
-    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    execFileSync("git", ["-C", gitDir, "checkout", primaryBranch], { stdio: "pipe" });
     fs.writeFileSync(
       path.join(gitDir, "proj", "backlog.md"),
       "# backlog\n\n## Active\n\n- Master task\n\n## Queue\n\n## Done\n"
@@ -1383,13 +1427,14 @@ describe("autoMergeConflicts", () => {
     const { execFileSync } = require("child_process");
 
     commitFile(gitDir, "config.json", '{"key": "base"}', "base");
+    const primaryBranch = currentBranch(gitDir);
 
     execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-c"], { stdio: "pipe" });
     fs.writeFileSync(path.join(gitDir, "config.json"), '{"key": "branch"}');
     execFileSync("git", ["-C", gitDir, "add", "-f", "config.json"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "branch change"], { stdio: "ignore" });
 
-    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    execFileSync("git", ["-C", gitDir, "checkout", primaryBranch], { stdio: "pipe" });
     fs.writeFileSync(path.join(gitDir, "config.json"), '{"key": "master"}');
     execFileSync("git", ["-C", gitDir, "add", "-f", "config.json"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "master change"], { stdio: "ignore" });

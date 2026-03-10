@@ -303,10 +303,16 @@ describe("CLI integration: add project", () => {
   });
 
   it("uses the machine-mapped profile when CORTEX_PROFILE is unset", () => {
-    fs.writeFileSync(path.join(cortexDir, "machines.yaml"), `${os.hostname()}: work\n`);
+    const homeDir = path.join(path.dirname(cortexDir), "home");
+    const machineFile = process.platform === "win32"
+      ? path.join(homeDir, ".cortex", ".machine-id")
+      : path.join(homeDir, ".cortex-machine");
+    fs.mkdirSync(path.dirname(machineFile), { recursive: true });
+    fs.writeFileSync(machineFile, "work-box\n");
+    fs.writeFileSync(path.join(cortexDir, "machines.yaml"), "work-box: work\n");
     const { exitCode } = runCli(
       ["add", projectDir],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(fs.readFileSync(path.join(cortexDir, "profiles", "work.yaml"), "utf8")).toContain("- repo");
@@ -1645,6 +1651,18 @@ describe("CLI integration: init", () => {
       const content = fs.readFileSync(machinesPath, "utf8");
       expect(content).toContain("test-box");
     }
+  }, CLI_INTEGRATION_TIMEOUT_MS);
+
+  it("init with --machine persists the local machine alias", () => {
+    const { exitCode } = runCli(
+      ["init", "-y", "--machine", "test-box", "--mcp", "off"],
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+    );
+    expect(exitCode).toBe(0);
+    const machineFile = process.platform === "win32"
+      ? path.join(cliEnv.homeDir, ".cortex", ".machine-id")
+      : path.join(cliEnv.homeDir, ".cortex-machine");
+    expect(fs.readFileSync(machineFile, "utf8").trim()).toBe("test-box");
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init is idempotent (re-running does not fail)", () => {

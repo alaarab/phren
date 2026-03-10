@@ -441,12 +441,15 @@ describe("isVersionNewer", () => {
 describe("ensureGovernanceFiles", () => {
   let tmpDir: string;
   let tmpCleanup: () => void;
+  const origActor = process.env.CORTEX_ACTOR;
 
   beforeEach(() => {
     ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-gov-test-"));
   });
 
   afterEach(() => {
+    if (origActor === undefined) delete process.env.CORTEX_ACTOR;
+    else process.env.CORTEX_ACTOR = origActor;
     tmpCleanup();
   });
 
@@ -499,6 +502,30 @@ describe("ensureGovernanceFiles", () => {
 
     const after = JSON.parse(fs.readFileSync(policyPath, "utf8"));
     expect(after.ttlDays).toBe(999);
+  });
+
+  it("creates a local maintainer override when a cloned ACL excludes the current actor", () => {
+    process.env.CORTEX_ACTOR = "local-user";
+    const govDir = path.join(tmpDir, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(govDir, "access-control.json"),
+      JSON.stringify({
+        admins: ["remote-admin"],
+        maintainers: [],
+        contributors: [],
+        viewers: [],
+      }, null, 2) + "\n",
+    );
+
+    ensureGovernanceFiles(tmpDir);
+
+    const sharedAccess = JSON.parse(fs.readFileSync(path.join(govDir, "access-control.json"), "utf8"));
+    expect(sharedAccess.admins).toEqual(["remote-admin"]);
+    expect(sharedAccess.maintainers).toEqual([]);
+
+    const localAccess = JSON.parse(fs.readFileSync(path.join(tmpDir, ".runtime", "access-control.local.json"), "utf8"));
+    expect(localAccess.maintainers).toContain("local-user");
   });
 });
 

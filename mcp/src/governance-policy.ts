@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { appendAuditLog, debugLog, getProjectDirs, isRecord, withDefaults, cortexErr, CortexError, cortexOk, type CortexResult, resolveFindingsPath } from "./shared.js";
+import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeFile, withDefaults, cortexErr, CortexError, cortexOk, type CortexResult, resolveFindingsPath } from "./shared.js";
 import { withFileLock } from "./governance-locks.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
@@ -140,6 +140,8 @@ const DEFAULT_CANONICAL_LOCKS_FILE: VersionedEntriesFile<CanonicalLock> = {
   entries: {},
 };
 
+const LOCAL_ACCESS_FILE = "access-control.local.json";
+
 function governanceDir(cortexPath: string): string {
   return path.join(cortexPath, ".governance");
 }
@@ -154,6 +156,10 @@ type GovernanceSchema =
 
 function govFile(cortexPath: string, schema: GovernanceSchema): string {
   return path.join(governanceDir(cortexPath), GOVERNANCE_REGISTRY[schema].file);
+}
+
+function localAccessFile(cortexPath: string): string {
+  return runtimeFile(cortexPath, LOCAL_ACCESS_FILE);
 }
 
 function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
@@ -477,6 +483,70 @@ function actorName(): string {
   }
 }
 
+export function getCurrentActor(): string {
+  return actorName();
+}
+
+function roleFromAccessControl(acl: AccessControl, actor: string): MemoryRole | null {
+  if ((acl.admins || []).includes(actor)) return "admin";
+  if ((acl.maintainers || []).includes(actor)) return "maintainer";
+  if ((acl.contributors || []).includes(actor)) return "contributor";
+  if ((acl.viewers || []).includes(actor)) return "viewer";
+  return null;
+}
+
+function hasAnyAssignedRole(acl: AccessControl): boolean {
+  return [...(acl.admins || []), ...(acl.maintainers || []), ...(acl.contributors || []), ...(acl.viewers || [])].length > 0;
+}
+
+function getLocalAccessControl(cortexPath: string): AccessControl {
+  const parsed = readJsonFile<Record<string, unknown>>(localAccessFile(cortexPath), {});
+  if (!isRecord(parsed)) return { ...DEFAULT_ACCESS };
+  return normalizeAccessControl(parsed);
+}
+
+function writeLocalAccessControl(cortexPath: string, next: AccessControl): void {
+  const file = localAccessFile(cortexPath);
+  withFileLock(file, () => {
+    writeJsonFileUnlocked(file, next);
+  });
+}
+
+export function ensureLocalActorAccess(cortexPath: string, actor: string = actorName()): { updated: boolean; role?: MemoryRole; reason?: string } {
+  const normalizedActor = actor.trim();
+  if (!normalizedActor || normalizedActor === "unknown") {
+    return { updated: false, reason: "actor-unavailable" };
+  }
+
+  const aclPath = govFile(cortexPath, "access-control");
+  if (!fs.existsSync(aclPath)) return { updated: false, reason: "shared-acl-missing" };
+  if (!validateGovernanceJson(aclPath, "access-control")) {
+    return { updated: false, reason: "shared-acl-invalid" };
+  }
+
+  const sharedAcl = getAccessControl(cortexPath);
+  if (!hasAnyAssignedRole(sharedAcl)) return { updated: false, reason: "shared-acl-open" };
+  if (roleFromAccessControl(sharedAcl, normalizedActor)) {
+    return { updated: false, reason: "shared-role-present" };
+  }
+
+  const localAcl = getLocalAccessControl(cortexPath);
+  if (roleFromAccessControl(localAcl, normalizedActor)) {
+    return { updated: false, reason: "local-role-present" };
+  }
+
+  const next: AccessControl = {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    admins: [...(localAcl.admins || [])],
+    maintainers: Array.from(new Set([...(localAcl.maintainers || []), normalizedActor])).sort(),
+    contributors: [...(localAcl.contributors || [])],
+    viewers: [...(localAcl.viewers || [])],
+  };
+  writeLocalAccessControl(cortexPath, next);
+  appendAuditLog(cortexPath, "ensure_local_actor_access", JSON.stringify({ actor: normalizedActor, role: "maintainer", file: LOCAL_ACCESS_FILE }));
+  return { updated: true, role: "maintainer" };
+}
+
 export interface GovernanceMigrationOptions {
   dryRun?: boolean;
 }
@@ -604,12 +674,11 @@ function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRol
     return "viewer";
   }
   const acl = readJsonFile<AccessControl>(aclPath, DEFAULT_ACCESS);
-  const allRoles = [...(acl.admins || []), ...(acl.maintainers || []), ...(acl.contributors || []), ...(acl.viewers || [])];
-  if (allRoles.length === 0) return "admin"; // ACL file present but empty — open access
-  if ((acl.admins || []).includes(actor)) return "admin";
-  if ((acl.maintainers || []).includes(actor)) return "maintainer";
-  if ((acl.contributors || []).includes(actor)) return "contributor";
-  if ((acl.viewers || []).includes(actor)) return "viewer";
+  if (!hasAnyAssignedRole(acl)) return "admin"; // ACL file present but empty — open access
+  const sharedRole = roleFromAccessControl(acl, actor);
+  if (sharedRole) return sharedRole;
+  const localRole = roleFromAccessControl(getLocalAccessControl(cortexPath), actor);
+  if (localRole) return localRole;
   return "viewer";
 }
 

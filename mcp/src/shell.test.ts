@@ -188,6 +188,20 @@ describe("CortexShell", () => {
     });
   });
 
+  it("wraps shell chrome instead of overflowing on ultra-narrow screens", async () => {
+    await withTerminalSize(16, 16, async () => {
+      const shell = createShell(dir);
+      await shell.handleInput(":open demo");
+      await shell.handleInput("b");
+      const output = await shell.render();
+      expect(output).toContain("…");
+      expect(output.split("\n").length).toBeLessThanOrEqual(16);
+      for (const line of output.split("\n")) {
+        expect(stripAnsi(line).length).toBeLessThan(16);
+      }
+    });
+  });
+
   it("supports backlog mutations including work next and tidy", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");

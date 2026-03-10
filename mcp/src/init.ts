@@ -4,11 +4,11 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
 import { configureAllHooks } from "./hooks.js";
+import { getMachineName, persistMachineName } from "./machine-identity.js";
 import { debugLog, isRecord, hookConfigPath, homeDir, homePath } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import {
@@ -218,11 +218,11 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   const cloneAnswer = (await ask(`Clone URL (or Enter to skip): `)).trim();
   if (cloneAnswer) {
     rl.close();
-    return { machine: os.hostname(), profile: "personal", mcp: "on", hooks: "on", ollamaEnabled: false, autoCaptureEnabled: false, semanticDedupEnabled: false, semanticConflictEnabled: false, cloneUrl: cloneAnswer };
+    return { machine: getMachineName(), profile: "personal", mcp: "on", hooks: "on", ollamaEnabled: false, autoCaptureEnabled: false, semanticDedupEnabled: false, semanticConflictEnabled: false, cloneUrl: cloneAnswer };
   }
 
   log("");
-  const defaultMachine = os.hostname();
+  const defaultMachine = getMachineName();
   const machineAnswer = (await ask(`Machine name [${defaultMachine}]: `)).trim();
   const machine = machineAnswer || defaultMachine;
 
@@ -487,7 +487,7 @@ export async function runInit(opts: InitOptions = {}) {
     log(`No existing cortex install found at ${cortexPath}`);
     log(`Would create a new cortex install:\n`);
     log(`  Copy starter files to ${cortexPath} (or create minimal structure)`);
-    log(`  Update machines.yaml for machine "${opts.machine || os.hostname()}"`);
+    log(`  Update machines.yaml for machine "${opts.machine || getMachineName()}"`);
     log(`  Create/update config files`);
     log(`  MCP mode: ${mcpLabel}`);
     log(`  Hooks mode: ${hooksLabel}`);
@@ -757,11 +757,12 @@ export async function runInit(opts: InitOptions = {}) {
     }
   }
 
-  // Update machines.yaml with hostname (--machine overrides auto-detected hostname)
-  const effectiveMachine = opts.machine || os.hostname();
-  updateMachinesYaml(cortexPath, opts.machine, opts.profile);
+  // Persist the local machine alias and map it to the selected profile.
+  const effectiveMachine = opts.machine?.trim() || getMachineName();
+  persistMachineName(effectiveMachine);
+  updateMachinesYaml(cortexPath, effectiveMachine, opts.profile);
   ensureGovernanceFiles(cortexPath);
-  log(`  Updated machines.yaml with hostname "${effectiveMachine}"`);
+  log(`  Updated machines.yaml with machine "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
 
