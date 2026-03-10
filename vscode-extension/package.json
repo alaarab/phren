@@ -17,6 +17,7 @@
     "onCommand:cortex.getFindings",
     "onCommand:cortex.getTasks",
     "onCommand:cortex.addFinding",
+    "onCommand:cortex.setActiveProject",
     "onCommand:cortex.listProjects",
     "onCommand:cortex.getProjectSummary"
   ],
@@ -36,7 +37,11 @@
       },
       {
         "command": "cortex.addFinding",
-        "title": "Cortex: Add Finding"
+        "title": "Add to Cortex Findings"
+      },
+      {
+        "command": "cortex.setActiveProject",
+        "title": "Cortex: Set Active Project"
       },
       {
         "command": "cortex.listProjects",
@@ -47,6 +52,14 @@
         "title": "Cortex: Get Project Summary"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "cortex.addFinding",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {

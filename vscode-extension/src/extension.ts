@@ -1,19 +1,19 @@
 import * as vscode from "vscode";
 import { CortexClient } from "./cortexClient";
 import { CortexTreeProvider } from "./providers/CortexTreeProvider";
+import { CortexStatusBar } from "./statusBar";
 
-const COMMAND_IDS = [
+const SCAFFOLDED_COMMAND_IDS = [
   "cortex.searchKnowledge",
   "cortex.getFindings",
   "cortex.getTasks",
-  "cortex.addFinding",
   "cortex.listProjects",
   "cortex.getProjectSummary",
 ] as const;
 
 let client: CortexClient | undefined;
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const config = vscode.workspace.getConfiguration("cortex");
   const mcpServerPath = config.get<string>(
     "mcpServerPath",
@@ -21,18 +21,59 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   const storePath = config.get<string>("storePath", "/home/alaarab/.cortex");
 
-  client = new CortexClient({
+  const cortexClient = new CortexClient({
     mcpServerPath,
     storePath,
   });
+  client = cortexClient;
 
-  const treeDataProvider = new CortexTreeProvider(client);
+  const treeDataProvider = new CortexTreeProvider(cortexClient);
   const treeView = vscode.window.createTreeView("cortex.explorer", {
     treeDataProvider,
   });
-  context.subscriptions.push(treeDataProvider, treeView);
+  const statusBar = new CortexStatusBar(cortexClient);
 
-  for (const commandId of COMMAND_IDS) {
+  context.subscriptions.push(treeDataProvider, treeView, statusBar);
+
+  const setActiveProjectDisposable = vscode.commands.registerCommand("cortex.setActiveProject", async () => {
+    try {
+      await statusBar.promptForActiveProject();
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to load Cortex projects: ${toErrorMessage(error)}`);
+    }
+  });
+
+  const addFindingDisposable = vscode.commands.registerCommand("cortex.addFinding", async () => {
+    const activeProject = statusBar.getActiveProjectName();
+    if (!activeProject) {
+      await vscode.window.showWarningMessage("No active Cortex project selected.");
+      return;
+    }
+
+    const findingText = await vscode.window.showInputBox({ prompt: "Enter finding text" });
+    const trimmedFindingText = findingText?.trim();
+    if (!trimmedFindingText) {
+      return;
+    }
+
+    try {
+      await cortexClient.addFinding(activeProject, trimmedFindingText);
+      treeDataProvider.refresh();
+      await vscode.window.showInformationMessage(`Finding added to ${activeProject}`);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to add finding: ${toErrorMessage(error)}`);
+    }
+  });
+
+  context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable);
+
+  try {
+    await statusBar.initialize();
+  } catch (error) {
+    await vscode.window.showErrorMessage(`Failed to initialize active Cortex project: ${toErrorMessage(error)}`);
+  }
+
+  for (const commandId of SCAFFOLDED_COMMAND_IDS) {
     const disposable = vscode.commands.registerCommand(commandId, async () => {
       await vscode.window.showInformationMessage(`${commandId} is scaffolded but not implemented yet.`);
     });
@@ -47,4 +88,11 @@ export async function deactivate(): Promise<void> {
 
   await client.dispose();
   client = undefined;
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
