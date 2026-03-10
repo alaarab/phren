@@ -91,6 +91,10 @@ export class CortexClient {
     return this.callTool("search_knowledge", { query });
   }
 
+  async getMemoryDetail(id: string): Promise<unknown> {
+    return this.callTool("get_memory_detail", { id });
+  }
+
   async getFindings(project: string): Promise<unknown> {
     return this.callTool("get_findings", { project });
   }
