@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { EXEC_TIMEOUT_MS, cortexErr, cortexOk, type CortexResult, CortexError } from "./shared.js";
-import { errorMessage } from "./utils.js";
+import { errorMessage, resolveExecCommand } from "./utils.js";
 import type { BacklogItem } from "./data-backlog.js";
 
 const GITHUB_REPO_URL = /https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?:\/|\b|$)/;
@@ -61,7 +61,8 @@ export function createGithubIssueForBacklog(args: {
   body: string;
 }): CortexResult<{ repo: string; issueNumber?: number; url: string }> {
   try {
-    const stdout = execFileSync("gh", [
+    const ghExec = resolveExecCommand("gh");
+    const stdout = execFileSync(ghExec.command, [
       "issue",
       "create",
       "--repo",
@@ -73,6 +74,7 @@ export function createGithubIssueForBacklog(args: {
     ], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      shell: ghExec.shell,
       timeout: EXEC_TIMEOUT_MS,
     }).trim();
 

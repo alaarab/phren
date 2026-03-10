@@ -13,7 +13,7 @@ import {
 } from "./shared-governance.js";
 import { detectProject } from "./shared-index.js";
 import { commandExists } from "./hooks.js";
-import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage } from "./utils.js";
+import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, resolveExecCommand } from "./utils.js";
 import { appendFindingJournal, compactFindingJournals } from "./finding-journal.js";
 import { getProactivityLevelForBacklog, getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 import * as fs from "fs";
@@ -95,12 +95,14 @@ export async function runGhJson<T>(cwd: string, args: string[]): Promise<T | nul
   if (!commandExists("gh")) return null;
   const retries = clampInt(process.env.CORTEX_GH_RETRIES, 2, 0, 5);
   const timeoutMs = clampInt(process.env.CORTEX_GH_TIMEOUT_MS, 10000, 1000, 60000);
+  const ghExec = resolveExecCommand("gh");
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const out = execFileSync("gh", args, {
+      const out = execFileSync(ghExec.command, args, {
         cwd,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
+        shell: ghExec.shell,
         timeout: timeoutMs,
         maxBuffer: 4 * 1024 * 1024,
       }).trim();
