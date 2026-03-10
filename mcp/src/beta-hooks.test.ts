@@ -16,6 +16,7 @@ import {
   clearProjectGlobCache,
   clearCitationValidCache,
   extractToolFindings,
+  filterToolFindingsForProactivity,
 } from "./cli.js";
 
 // ── Task #5: rankResults no longer hard-filters ─────────────────────────────
@@ -281,5 +282,26 @@ describe("extractToolFindings", () => {
     const bug = candidates.find((c) => c.text.includes("[bug]"));
     expect(bug).toBeDefined();
     expect(bug!.confidence).toBe(0.85);
+  });
+});
+
+describe("filterToolFindingsForProactivity", () => {
+  const candidates = [
+    { text: "[decision] Use WAL mode for local reads", confidence: 0.85, explicit: true },
+    { text: "[bug] command 'npm test' failed: ENOENT", confidence: 0.55, explicit: false },
+  ];
+
+  it("keeps explicit and heuristic candidates at high", () => {
+    expect(filterToolFindingsForProactivity(candidates, "high")).toEqual(candidates);
+  });
+
+  it("keeps only explicit candidates at medium", () => {
+    expect(filterToolFindingsForProactivity(candidates, "medium")).toEqual([
+      { text: "[decision] Use WAL mode for local reads", confidence: 0.85, explicit: true },
+    ]);
+  });
+
+  it("drops all hook-tool candidates at low", () => {
+    expect(filterToolFindingsForProactivity(candidates, "low")).toEqual([]);
   });
 });

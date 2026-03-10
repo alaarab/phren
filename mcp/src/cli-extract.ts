@@ -15,6 +15,7 @@ import { detectProject } from "./shared-index.js";
 import { commandExists } from "./hooks.js";
 import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage } from "./utils.js";
 import { appendFindingJournal, compactFindingJournals } from "./finding-journal.js";
+import { getProactivityLevelForBacklog, getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -87,6 +88,7 @@ interface Candidate {
   score: number;
   commit?: string;
   file?: string;
+  sourceText?: string;
 }
 
 export async function runGhJson<T>(cwd: string, args: string[]): Promise<T | null> {
@@ -164,6 +166,7 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
       score: Math.min(0.98, score),
       commit: pr.mergeCommit?.oid,
       file: pr.files?.find((f) => f.path)?.path,
+      sourceText: [pr.title, pr.body || "", commentBlob].filter(Boolean).join("\n"),
     });
   }
 
@@ -184,6 +187,7 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
       text,
       score: 0.62,
       commit: run.headSha,
+      sourceText: title,
     });
   }
 
@@ -203,7 +207,7 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
       continue;
     }
     const text = `Issue #${issue.number}: ${issue.title}`;
-    candidates.push({ text, score: 0.58 });
+    candidates.push({ text, score: 0.58, sourceText: [issue.title, issue.body || ""].join("\n") });
   }
 
   try {
@@ -270,6 +274,17 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
     return;
   }
 
+  const findingsLevel = getProactivityLevelForFindings();
+  const backlogLevel = getProactivityLevelForBacklog();
+  if (backlogLevel !== "high") {
+    debugLog(`extract-memories backlog proactivity=${backlogLevel}`);
+  }
+  if (findingsLevel === "low") {
+    appendAuditLog(getCortexPath(), "extract_memories", `project=${project} skipped=proactivity_low`);
+    if (!silent) console.log(`Skipped memory extraction for ${project}: findings proactivity is low.`);
+    return;
+  }
+
   const days = Number.parseInt(process.env.CORTEX_MEMORY_EXTRACT_WINDOW_DAYS || "30", 10);
   const threshold = Number.parseFloat(process.env.CORTEX_MEMORY_AUTO_ACCEPT || String(getRetentionPolicy(getCortexPath()).autoAcceptThreshold));
   const records = parseGitLogRecords(repoRoot, Number.isNaN(days) ? 30 : days);
@@ -280,6 +295,7 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
   let accepted = 0;
   let queued = 0;
   for (const rec of records) {
+    if (!shouldAutoCaptureFindingsForLevel(findingsLevel, rec.subject, rec.body)) continue;
     const candidate = scoreFindingCandidate(rec.subject, rec.body);
     if (!candidate) continue;
     const line = `${candidate.text} (source commit ${rec.hash.slice(0, 8)})`;
@@ -297,6 +313,7 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
   }
 
   for (const c of ghCandidates) {
+    if (!shouldAutoCaptureFindingsForLevel(findingsLevel, c.sourceText ?? c.text)) continue;
     const line = `${c.text}${c.commit ? ` (source commit ${c.commit.slice(0, 8)})` : ""}`;
     if (c.text.startsWith("CI failure pattern:")) {
       const key = entryScoreKey(project, "FINDINGS.md", line);

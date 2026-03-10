@@ -44,6 +44,7 @@ import type { SelectedSnippet } from "./shared-retrieval.js";
 import { filterBacklogByPriority } from "./shared-retrieval.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { finalizeTaskSession } from "./task-lifecycle.js";
+import { getProactivityLevelForBacklog, getProactivityLevelForFindings, hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 
 function getRuntimeProfile(): string {
   return resolveRuntimeProfile(getCortexPath());
@@ -595,7 +596,7 @@ export function extractConversationInsights(text: string): string[] {
     if (trimmed.startsWith("```") || trimmed.startsWith("#") || trimmed.startsWith("//")) continue;
     if (trimmed.startsWith("$") || trimmed.startsWith(">")) continue;
 
-    if (INSIGHT_KEYWORD_RE.test(trimmed)) {
+    if (INSIGHT_KEYWORD_RE.test(trimmed) || hasExplicitFindingSignal(trimmed)) {
       // Normalize for dedup
       const normalized = trimmed.toLowerCase().replace(/\s+/g, " ");
       if (!seen.has(normalized)) {
@@ -607,6 +608,14 @@ export function extractConversationInsights(text: string): string[] {
 
   // Cap to prevent flooding
   return insights.slice(0, 5);
+}
+
+export function filterConversationInsightsForProactivity(
+  insights: string[],
+  level = getProactivityLevelForFindings()
+): string[] {
+  if (level === "high") return insights;
+  return insights.filter((insight) => shouldAutoCaptureFindingsForLevel(level, insight));
 }
 
 export async function handleHookStop() {
@@ -631,10 +640,15 @@ export async function handleHookStop() {
   // Needed for auto-capture transcript_path parsing.
   const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
   const taskSessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
+  const backlogLevel = getProactivityLevelForBacklog();
+  if (taskSessionId && backlogLevel !== "high") {
+    debugLog(`hook-stop backlog proactivity=${backlogLevel}`);
+  }
 
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
   // Gated behind CORTEX_FEATURE_AUTO_CAPTURE=1.
-  if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
+  const findingsLevel = getProactivityLevelForFindings();
+  if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false) && findingsLevel !== "low") {
     try {
       let captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
       if (!captureInput && stdinPayload?.transcript_path) {
@@ -668,7 +682,7 @@ export async function handleHookStop() {
         const cwd = process.cwd();
         const activeProject = detectProject(getCortexPath(), cwd, getRuntimeProfile());
         if (activeProject) {
-          const insights = extractConversationInsights(captureInput);
+          const insights = filterConversationInsightsForProactivity(extractConversationInsights(captureInput), findingsLevel);
           for (const insight of insights) {
             appendFindingJournal(getCortexPath(), activeProject, `[pattern] ${insight}`, {
               sessionId: `hook-stop-${Date.now()}`,
@@ -680,6 +694,8 @@ export async function handleHookStop() {
     } catch (err: unknown) {
       debugLog(`auto-capture failed: ${errorMessage(err)}`);
     }
+  } else if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
+    debugLog("auto-capture: skipped because findings proactivity is low");
   }
 
   const status = await runBestEffortGit(["status", "--porcelain"], getCortexPath());
@@ -1106,9 +1122,13 @@ export async function handleHookTool() {
       }
     }
 
-    if (activeProject) {
+    const findingsLevelForTool = getProactivityLevelForFindings();
+    if (activeProject && findingsLevelForTool !== "low") {
       try {
-        const candidates = extractToolFindings(toolName, input, responseStr);
+        const candidates = filterToolFindingsForProactivity(
+          extractToolFindings(toolName, input, responseStr),
+          findingsLevelForTool
+        );
         for (const { text, confidence } of candidates) {
           // Queue all candidates for review rather than auto-promoting to FINDINGS.md;
           // requires human review and provenance confirmation before promotion.
@@ -1137,6 +1157,8 @@ export async function handleHookTool() {
       } catch (err: unknown) {
         debugLog(`hook-tool: finding extraction failed: ${errorMessage(err)}`);
       }
+    } else if (activeProject) {
+      debugLog("hook-tool: skipped because findings proactivity is low");
     }
 
     const elapsed = Date.now() - start;
@@ -1153,9 +1175,19 @@ export async function handleHookTool() {
 interface LearningCandidate {
   text: string;
   confidence: number;
+  explicit?: boolean;
 }
 
 const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\]\s*(.+)/i;
+
+export function filterToolFindingsForProactivity(
+  candidates: Array<{ text: string; confidence: number; explicit?: boolean }>,
+  level = getProactivityLevelForFindings()
+): Array<{ text: string; confidence: number; explicit?: boolean }> {
+  if (level === "high") return candidates;
+  if (level === "low") return [];
+  return candidates.filter((candidate) => candidate.explicit === true);
+}
 
 export function extractToolFindings(
   toolName: string,
@@ -1169,7 +1201,7 @@ export function extractToolFindings(
     const tag = m[1].toLowerCase();
     const content = m[2].trim().slice(0, 200);
     if (content) {
-      candidates.push({ text: `[${tag}] ${content}`, confidence: 0.85 });
+      candidates.push({ text: `[${tag}] ${content}`, confidence: 0.85, explicit: true });
     }
   }
 
@@ -1183,6 +1215,7 @@ export function extractToolFindings(
         candidates.push({
           text: `[pitfall] ${filename}: ${firstLine.trim().slice(0, 150)}`,
           confidence: 0.45,
+          explicit: false,
         });
       }
     }
@@ -1194,6 +1227,7 @@ export function extractToolFindings(
         candidates.push({
           text: `[pitfall] ${filename}: error handling added near "${meaningfulLine.trim().slice(0, 100)}"`,
           confidence: 0.45,
+          explicit: false,
         });
       }
     }
@@ -1210,6 +1244,7 @@ export function extractToolFindings(
         candidates.push({
           text: `[bug] command '${cmd}' failed: ${firstErrorLine.trim().slice(0, 150)}`,
           confidence: 0.55,
+          explicit: false,
         });
       }
     }

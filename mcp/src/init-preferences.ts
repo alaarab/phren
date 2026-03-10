@@ -4,13 +4,16 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, installPreferencesFile } from "./shared.js";
+import { debugLog, installPreferencesFile } from "./cortex-paths.js";
 import { errorMessage } from "./utils.js";
 import type { CustomHookEntry } from "./hooks.js";
 
 export interface InstallPreferences {
   mcpEnabled?: boolean;
   hooksEnabled?: boolean;
+  proactivity?: "high" | "medium" | "low";
+  proactivityFindings?: "high" | "medium" | "low";
+  proactivityBacklog?: "high" | "medium" | "low";
   hookTools?: Record<string, boolean>;
   disabledSkills?: Record<string, boolean>;
   installedVersion?: string;
@@ -22,8 +25,11 @@ function preferencesFile(cortexPath: string): string {
   return installPreferencesFile(cortexPath);
 }
 
-export function readInstallPreferences(cortexPath: string): InstallPreferences {
-  const file = preferencesFile(cortexPath);
+export function governanceInstallPreferencesFile(cortexPath: string): string {
+  return path.join(cortexPath, ".governance", "install-preferences.json");
+}
+
+function readPreferencesFile(file: string): InstallPreferences {
   if (!fs.existsSync(file)) return {};
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as InstallPreferences;
@@ -34,9 +40,7 @@ export function readInstallPreferences(cortexPath: string): InstallPreferences {
   }
 }
 
-export function writeInstallPreferences(cortexPath: string, patch: Partial<InstallPreferences>) {
-  const file = preferencesFile(cortexPath);
-  const current = readInstallPreferences(cortexPath);
+function writePreferencesFile(file: string, current: InstallPreferences, patch: Partial<InstallPreferences>) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmpPath = `${file}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(
@@ -52,6 +56,22 @@ export function writeInstallPreferences(cortexPath: string, patch: Partial<Insta
     ) + "\n"
   );
   fs.renameSync(tmpPath, file);
+}
+
+export function readInstallPreferences(cortexPath: string): InstallPreferences {
+  return readPreferencesFile(preferencesFile(cortexPath));
+}
+
+export function readGovernanceInstallPreferences(cortexPath: string): InstallPreferences {
+  return readPreferencesFile(governanceInstallPreferencesFile(cortexPath));
+}
+
+export function writeInstallPreferences(cortexPath: string, patch: Partial<InstallPreferences>) {
+  writePreferencesFile(preferencesFile(cortexPath), readInstallPreferences(cortexPath), patch);
+}
+
+export function writeGovernanceInstallPreferences(cortexPath: string, patch: Partial<InstallPreferences>) {
+  writePreferencesFile(governanceInstallPreferencesFile(cortexPath), readGovernanceInstallPreferences(cortexPath), patch);
 }
 
 export function getMcpEnabledPreference(cortexPath: string): boolean {
