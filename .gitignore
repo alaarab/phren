@@ -9,3 +9,4 @@ coverage/
 AGENTS.md
 LEARNINGS.md
 docs/wp*.png
+.benchmarks/
