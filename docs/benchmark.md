@@ -219,12 +219,7 @@ To get the full LoCoMo dataset, download it from [snap-stanford/locomo](https://
 
 ### Results
 
-| Search Path | recall@1 | recall@3 | recall@5 | MRR | Date |
-|-------------|----------|----------|----------|-----|------|
-| FTS5        | TBD      | TBD      | TBD      | TBD | -    |
-| Hybrid      | TBD      | TBD      | TBD      | TBD | -    |
-
-Results are saved to `docs/benchmark-results.json` by default. That JSON should be treated as the source of truth for the run conditions.
+This repo does not check in a canonical benchmark result table. Benchmark outputs belong in `docs/benchmark-results.json` for a specific run, and that JSON should be treated as the source of truth for the run conditions.
 
 ## Interpreting Results
 

@@ -19,7 +19,7 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 | `mcp/src/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
 | `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
 | `mcp/src/init.ts` | `npx @alaarab/cortex init`: configures MCP + hooks for all detected agents |
-| `mcp/src/link.ts` | Legacy compatibility command for older installs; not the recommended onboarding path |
+| `mcp/src/link.ts` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
 | `mcp/src/data-access.ts` | Data layer: backlog CRUD, machine/profile listing, finding management |
 | `mcp/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
 | `mcp/src/status.ts` | `cortex status`: health, project, stats overview |
