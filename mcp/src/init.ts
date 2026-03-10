@@ -39,6 +39,14 @@ export {
   setHooksEnabledPreference,
 } from "./init-preferences.js";
 
+export {
+  PROACTIVITY_LEVELS,
+  type ProactivityLevel,
+  getProactivityLevel,
+  getProactivityLevelForFindings,
+  getProactivityLevelForBacklog,
+} from "./proactivity.js";
+
 export type { PostInitCheck } from "./init-setup.js";
 export {
   ensureGovernanceFiles,

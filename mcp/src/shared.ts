@@ -62,6 +62,14 @@ export {
   qualityMarkers,
 } from "./cortex-paths.js";
 
+export {
+  PROACTIVITY_LEVELS,
+  type ProactivityLevel,
+  getProactivityLevel,
+  getProactivityLevelForFindings,
+  getProactivityLevelForBacklog,
+} from "./proactivity.js";
+
 const RESERVED_PROJECT_DIR_NAMES = new Set(["profiles", "templates", "global"]);
 
 function isProjectDirEntry(entry: fs.Dirent): boolean {

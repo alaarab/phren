@@ -4,13 +4,14 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, installPreferencesFile } from "./shared.js";
+import { debugLog, installPreferencesFile } from "./cortex-paths.js";
 import { errorMessage } from "./utils.js";
 import type { CustomHookEntry } from "./hooks.js";
 
 export interface InstallPreferences {
   mcpEnabled?: boolean;
   hooksEnabled?: boolean;
+  proactivity?: "high" | "medium" | "low";
   hookTools?: Record<string, boolean>;
   disabledSkills?: Record<string, boolean>;
   installedVersion?: string;
