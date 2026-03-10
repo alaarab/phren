@@ -16,7 +16,9 @@ export {
   getProjectGlobBoost,
   clearProjectGlobCache,
   clearCitationValidCache,
+  filterConversationInsightsForProactivity,
   extractToolFindings,
+  filterToolFindingsForProactivity,
   type HookPromptInput,
   type SelectedSnippet,
 } from "./cli-hooks.js";

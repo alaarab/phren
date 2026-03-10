@@ -5,6 +5,7 @@ import { isValidProjectName, safeProjectPath } from "./utils.js";
 import { addFindingsToFile } from "./shared-content.js";
 import { checkOllamaAvailable, checkModelAvailable, generateText, getOllamaUrl, getExtractModel } from "./shared-ollama.js";
 import { debugLog } from "./shared.js";
+import { getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 import * as path from "path";
 
 const EXTRACT_PROMPT = `You are extracting non-obvious engineering insights from text.
@@ -66,6 +67,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
       if (text.length > 10000) {
         text = text.slice(0, 10000);
+      }
+
+      const findingsLevel = getProactivityLevelForFindings();
+      if (!dryRun && !shouldAutoCaptureFindingsForLevel(findingsLevel, text)) {
+        const error = findingsLevel === "low"
+          ? 'Findings auto-extraction is disabled when CORTEX_PROACTIVITY_FINDINGS is "low". Use add_finding for manual saves.'
+          : 'Findings auto-extraction at "medium" requires an explicit signal like "add finding" or "worth remembering".';
+        return mcpResponse({ ok: false, error });
       }
 
       const ollamaUrl = getOllamaUrl();

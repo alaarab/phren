@@ -9,6 +9,8 @@ export const PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
 export type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
 
 const DEFAULT_PROACTIVITY_LEVEL: ProactivityLevel = "high";
+const EXPLICIT_FINDING_SIGNAL_PATTERN = /\b(add finding|worth remembering)\b/i;
+const EXPLICIT_FINDING_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\]/i;
 
 function parseProactivityLevel(raw: string | undefined | null): ProactivityLevel | undefined {
   if (!raw) return undefined;
@@ -62,4 +64,20 @@ export function getProactivityLevelForFindings(): ProactivityLevel {
 export function getProactivityLevelForBacklog(): ProactivityLevel {
   bootstrapCortexDotEnv();
   return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY_BACKLOG, getProactivityLevel());
+}
+
+export function hasExplicitFindingSignal(...texts: Array<string | undefined | null>): boolean {
+  return texts.some((text) => {
+    if (!text) return false;
+    return EXPLICIT_FINDING_SIGNAL_PATTERN.test(text) || EXPLICIT_FINDING_TAG_PATTERN.test(text);
+  });
+}
+
+export function shouldAutoCaptureFindingsForLevel(
+  level: ProactivityLevel,
+  ...texts: Array<string | undefined | null>
+): boolean {
+  if (level === "high") return true;
+  if (level === "low") return false;
+  return hasExplicitFindingSignal(...texts);
 }
