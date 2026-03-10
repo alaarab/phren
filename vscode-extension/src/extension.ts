@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
 import { CortexClient } from "./cortexClient";
 import { CortexTreeProvider } from "./providers/CortexTreeProvider";
+import { showSearchQuickPick } from "./searchQuickPick";
 import { CortexStatusBar } from "./statusBar";
 
 const SCAFFOLDED_COMMAND_IDS = [
-  "cortex.searchKnowledge",
   "cortex.getFindings",
   "cortex.getTasks",
   "cortex.listProjects",
@@ -65,7 +65,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable);
+  const searchDisposable = vscode.commands.registerCommand("cortex.search", async () => {
+    try {
+      await showSearchQuickPick(cortexClient);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to search Cortex knowledge: ${toErrorMessage(error)}`);
+    }
+  });
+
+  context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable);
 
   try {
     await statusBar.initialize();

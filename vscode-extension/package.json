@@ -13,7 +13,7 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onView:cortex.explorer",
-    "onCommand:cortex.searchKnowledge",
+    "onCommand:cortex.search",
     "onCommand:cortex.getFindings",
     "onCommand:cortex.getTasks",
     "onCommand:cortex.addFinding",
@@ -24,7 +24,7 @@
   "contributes": {
     "commands": [
       {
-        "command": "cortex.searchKnowledge",
+        "command": "cortex.search",
         "title": "Cortex: Search Knowledge"
       },
       {
@@ -50,6 +50,13 @@
       {
         "command": "cortex.getProjectSummary",
         "title": "Cortex: Get Project Summary"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "cortex.search",
+        "key": "ctrl+shift+k",
+        "mac": "cmd+shift+k"
       }
     ],
     "menus": {
