@@ -1,26 +1,30 @@
 # Fair Synthetic Benchmark Comparison
 
-Run date: March 9, 2026 local time / March 10, 2026 UTC
+Run date: March 10, 2026 local time
 
-These numbers come from fresh reruns in this workspace using the same synthetic corpus pattern and `8` deterministic queries per size. The Cortex run was executed from [`scripts/bench-retrieval-synthetic.ts`](/home/alaarab/cortex/scripts/bench-retrieval-synthetic.ts). The claude-mem run was executed from [`scripts/bench-claude-mem-synthetic.ts`](/home/alaarab/cortex/scripts/bench-claude-mem-synthetic.ts).
+These numbers come from fresh reruns in this workspace using the same synthetic corpus pattern. The Cortex run was executed from [`scripts/bench-retrieval-synthetic.ts`](/home/alaarab/cortex/scripts/bench-retrieval-synthetic.ts). The claude-mem run was executed from [`scripts/bench-claude-mem-synthetic.ts`](/home/alaarab/cortex/scripts/bench-claude-mem-synthetic.ts) against already-seeded local stores with `--skip-seed`.
 
-Important caveat: these runs were not taken on an otherwise idle workstation. Absolute timings are inflated by host load. The useful signal is the relative shape across the two systems under the same rough machine conditions.
+Important caveats:
+
+- These runs were not taken on an otherwise idle workstation, so absolute timings are still host-sensitive.
+- The claude-mem rerun skipped SQLite reseeding, but it still incurred Chroma-side backfill/check work before the search path settled.
+- This is an identifier-heavy coding-style corpus, not a paraphrase-heavy semantic benchmark.
 
 | Size | Cortex lexical avg query | Cortex hybrid avg query | Cortex warm build | Cortex exact top hits | claude-mem avg query | claude-mem backfill | claude-mem exact top hits |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 6.28 ms | 5.26 ms | 32.99 ms | 8/8 | 579.29 ms | 58,407.22 ms | 2/8 |
-| 10,000 | 14.93 ms | 13.88 ms | 258.50 ms | 8/8 | 416.65 ms | 325,952.92 ms | 0/8 |
-| 100,000 | 88.14 ms | 85.90 ms | 2,127.30 ms | 8/8 | 414.13 ms | 198,871.20 ms | 0/8 |
+| 1,000 | 5.19 ms | 4.08 ms | 29.50 ms | 12/12 | 221.07 ms | 4,061.58 ms | 0/8 |
+| 10,000 | 13.20 ms | 13.29 ms | 243.94 ms | 12/12 | 147.91 ms | 25.11 ms | 0/8 |
+| 100,000 | 91.63 ms | 87.95 ms | 2,256.15 ms | 12/12 | 225.11 ms | 3,837.71 ms | 0/8 |
 
 Interpretation:
 
-- Cortex remained much faster on this identifier-heavy synthetic corpus, both for warm query latency and for one-time index materialization.
-- claude-mem kept all queries returning hits, but exact ranking was weak on these deterministic coding-style needles at every size and dropped to `0/8` at `10k` and `100k`.
-- claude-mem's dominant operational cost was vector backfill, not the final query step.
-- Cortex's hybrid-gated path stayed close to lexical because this corpus strongly favors exact lexical anchors.
+- Cortex remained much faster on this identifier-heavy synthetic corpus, and exact top-hit behavior stayed perfect across all three sizes.
+- claude-mem did not need corpus reseeding on the rerun, but it still paid non-trivial Chroma preparation cost before search, especially at `1k` and `100k`.
+- claude-mem kept returning results, but exact ranking stayed weak on these deterministic coding-style needles at every size.
+- Cortex's hybrid-gated path stayed close to lexical because the corpus strongly favors exact lexical anchors and lexical rescue usually resolves the query before any semantic fallback matters.
 
 Source files:
 
-- Cortex rerun: [`docs/benchmark-synthetic-results-fair.json`](/home/alaarab/cortex/docs/benchmark-synthetic-results-fair.json)
-- claude-mem rerun (`1k`, `10k`): [`docs/benchmark-claude-mem-synthetic-fair-small.json`](/home/alaarab/cortex/docs/benchmark-claude-mem-synthetic-fair-small.json)
-- claude-mem rerun (`100k`): [`docs/benchmark-claude-mem-synthetic-100000.json`](/home/alaarab/cortex/docs/benchmark-claude-mem-synthetic-100000.json)
+- Cortex rerun: [`docs/benchmark-synthetic-results-clean.json`](/home/alaarab/cortex/docs/benchmark-synthetic-results-clean.json)
+- claude-mem rerun (`1k`, `10k`): [`docs/benchmark-claude-mem-synthetic-clean-small.json`](/home/alaarab/cortex/docs/benchmark-claude-mem-synthetic-clean-small.json)
+- claude-mem rerun (`100k`): [`docs/benchmark-claude-mem-synthetic-clean-100000.json`](/home/alaarab/cortex/docs/benchmark-claude-mem-synthetic-clean-100000.json)
