@@ -2,40 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { makeTempDir, grantAdmin } from "./test-helpers.js";
-import { execFileSync } from "child_process";
+import { makeTempDir, grantAdmin, runCliExec } from "./test-helpers.js";
 
-const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
-const REPO_ROOT = path.resolve(__dirname, "../..");
-
-function ensureCliBuilt(): void {
-  if (fs.existsSync(CLI_PATH)) return;
-  execFileSync("npm", ["run", "build"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30000,
-  });
-}
-
-function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
-  try {
-    ensureCliBuilt();
-    const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
-      encoding: "utf8",
-      env: { ...process.env, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30000,
-    });
-    return { stdout, stderr: "", exitCode: 0 };
-  } catch (err: any) {
-    return {
-      stdout: err.stdout?.toString() || "",
-      stderr: err.stderr?.toString() || "",
-      exitCode: err.status ?? 1,
-    };
-  }
-}
+const runCli = runCliExec;
 
 function setupCortexDir(): { cortexDir: string; cleanup: () => void } {
   const tmp = makeTempDir("cortex-config-test-");

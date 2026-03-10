@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as http from "http";
 import * as path from "path";
-import { makeTempDir, grantAdmin } from "../test-helpers.js";
+import { makeTempDir, grantAdmin, suppressOutput } from "../test-helpers.js";
 import { runInit } from "../init.js";
 import { runPostInitVerify } from "../init-setup.js";
 import { runTopLevelCommand } from "../entrypoint.js";
@@ -118,7 +118,7 @@ describe.sequential("workflow integration", () => {
     }
 
     process.chdir(repoA);
-    await runInit({ yes: true, profile: "work" });
+    await suppressOutput(() => runInit({ yes: true, profile: "work" }));
 
     const verify = runPostInitVerify(cortexPath);
     expect(verify.checks.find((check) => check.name === "config")?.ok).toBe(true);
@@ -128,7 +128,7 @@ describe.sequential("workflow integration", () => {
     expect(verify.checks.find((check) => check.name === "fts-index")?.ok).toBe(true);
     expect(getUntrackedProjectNotice(cortexPath, repoA)).toBeNull();
 
-    await runTopLevelCommand(["add", repoB]);
+    await suppressOutput(() => runTopLevelCommand(["add", repoB]));
     expect(fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8")).toContain("- repo-b");
     expect(getUntrackedProjectNotice(cortexPath, repoB)).toBeNull();
     expect(getUntrackedProjectNotice(cortexPath, repoD)).toContain("Ask the user whether they want to add it to cortex.");
