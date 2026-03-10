@@ -211,19 +211,19 @@ function extractDistinctiveKeywords(line: string): string[] {
 }
 
 function formatDetail(issues: BacklogHygieneIssue[], roots: string[]): string {
-  if (roots.length === 0) return "skipped: no project repo/docs roots available for backlog hygiene scan";
+  if (roots.length === 0) return "skipped: no project repo/docs roots available for task hygiene scan";
   if (issues.length === 0) return `ok across ${roots.length} root${roots.length === 1 ? "" : "s"}`;
   const preview = issues
     .slice(0, 3)
     .map((issue) => `${issue.id} ${issue.reason === "anchors-missing" ? "missing anchors" : "missing keywords"} (${issue.evidence.join(", ")})`)
     .join("; ");
-  return `${issues.length} suspect item(s): ${preview}`;
+  return `${issues.length} suspect task(s): ${preview}`;
 }
 
 export function inspectBacklogHygiene(cortexPath: string, project: string, repoPath?: string | null): BacklogHygieneResult {
   const parsed = readBacklog(cortexPath, project);
   if (!parsed.ok) {
-    return { ok: true, detail: "skipped: backlog unavailable", issues: [] };
+    return { ok: true, detail: "skipped: tasks unavailable", issues: [] };
   }
 
   const roots = uniqueValues([

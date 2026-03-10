@@ -18,7 +18,7 @@ function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexRes
 
 export interface ShellState {
   version: number;
-  view: "Projects" | "Backlog" | "Findings" | "Review Queue" | "Skills" | "Hooks" | "Machines/Profiles" | "Health";
+  view: "Projects" | "Tasks" | "Findings" | "Review Queue" | "Skills" | "Hooks" | "Machines/Profiles" | "Health";
   project?: string;
   filter?: string;
   page?: number;
@@ -28,6 +28,7 @@ export interface ShellState {
 }
 
 const SHELL_STATE_VERSION = 2;
+const VALID_VIEWS = new Set<ShellState["view"]>(["Projects", "Tasks", "Findings", "Review Queue", "Skills", "Hooks", "Machines/Profiles", "Health"]);
 
 function shellStatePath(cortexPath: string): string {
   return path.join(cortexPath, ".governance", "shell-state.json");
@@ -46,8 +47,11 @@ export function loadShellState(cortexPath: string): ShellState {
   if (!fs.existsSync(file)) return fallback;
 
   try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ShellState> & { lastView?: ShellState["view"] };
-    const migratedView = raw.view || raw.lastView || fallback.view;
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ShellState> & { lastView?: string; view?: string };
+    const persistedView = raw.view || raw.lastView || fallback.view;
+    const migratedView = persistedView === "Backlog"
+      ? "Tasks"
+      : (VALID_VIEWS.has(persistedView as ShellState["view"]) ? persistedView as ShellState["view"] : fallback.view);
     return {
       version: SHELL_STATE_VERSION,
       view: migratedView,

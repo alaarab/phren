@@ -121,7 +121,7 @@ describe("corrupted file recovery", () => {
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(path.join(govDir, "shell-state.json"), '{"view":"Backlog"}');
     const state = loadShellState(tmpDir);
-    expect(state.view).toBe("Backlog");
+    expect(state.view).toBe("Tasks");
     expect(state.page).toBe(1);
     expect(state.perPage).toBe(40);
   });
@@ -247,7 +247,7 @@ describe("filesystem fault injection", () => {
   it("saveShellState creates governance directory if missing", () => {
     saveShellState(tmpDir, {
       version: 1,
-      view: "Backlog",
+      view: "Tasks",
       project: PROJECT,
       page: 1,
       perPage: 40,
@@ -255,7 +255,7 @@ describe("filesystem fault injection", () => {
     const govDir = path.join(tmpDir, ".governance");
     expect(fs.existsSync(govDir)).toBe(true);
     const loaded = loadShellState(tmpDir);
-    expect(loaded.view).toBe("Backlog");
+    expect(loaded.view).toBe("Tasks");
   });
 
   it("handles profiles directory with no yaml files", () => {
@@ -340,10 +340,10 @@ describe("custom hooks fault injection", () => {
 describe("rapid state transitions", () => {
   it("save then immediately load shell state round-trips", () => {
     for (let i = 0; i < 5; i++) {
-      const view = i % 2 === 0 ? "Backlog" : "Projects";
+      const view = i % 2 === 0 ? "Tasks" : "Projects";
       saveShellState(tmpDir, {
         version: 1,
-        view: view as "Backlog" | "Projects",
+        view: view as "Tasks" | "Projects",
         page: i + 1,
         perPage: 40,
       });

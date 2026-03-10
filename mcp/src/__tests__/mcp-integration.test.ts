@@ -122,14 +122,14 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     expect(matchingResults).toHaveLength(0);
   });
 
-  it("backlog round-trip: add -> get -> complete -> get", async () => {
-    const addRes = parseResult(await server.call("add_backlog_item", {
+  it("tasks round-trip: add -> get -> complete -> get", async () => {
+    const addRes = parseResult(await server.call("add_task", {
       project: "integ-proj",
       item: "Implement xylophone frequency calibration module",
     }));
     expect(addRes.ok).toBe(true);
 
-    const getRes1 = parseResult(await server.call("get_backlog", {
+    const getRes1 = parseResult(await server.call("get_tasks", {
       project: "integ-proj",
     }));
     expect(getRes1.ok).toBe(true);
@@ -137,13 +137,13 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     const found = queueItems.some((i: any) => (i.line || "").includes("xylophone"));
     expect(found).toBe(true);
 
-    const completeRes = parseResult(await server.call("complete_backlog_item", {
+    const completeRes = parseResult(await server.call("complete_task", {
       project: "integ-proj",
       item: "xylophone frequency",
     }));
     expect(completeRes.ok).toBe(true);
 
-    const getRes2 = parseResult(await server.call("get_backlog", {
+    const getRes2 = parseResult(await server.call("get_tasks", {
       project: "integ-proj",
       status: "all",
     }));
@@ -162,7 +162,7 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
   });
 });
 
-describe("MCP integration: backlog immediately searchable after add", () => {
+describe("MCP integration: tasks immediately searchable after add", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
   let db: SqlJsDatabase;
@@ -200,8 +200,8 @@ describe("MCP integration: backlog immediately searchable after add", () => {
     tmp.cleanup();
   });
 
-  it("add_backlog_item is visible to search_knowledge after index refresh", async () => {
-    const addRes = parseResult(await server.call("add_backlog_item", {
+  it("add_task is visible to search_knowledge after index refresh", async () => {
+    const addRes = parseResult(await server.call("add_task", {
       project: "search-proj",
       item: "Implement zymurgy fermentation tracking algorithm for brew optimization",
     }));

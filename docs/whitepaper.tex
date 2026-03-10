@@ -17,6 +17,7 @@
 \usepackage{float}
 \usepackage{caption}
 \usepackage{pgfplots}
+\usepackage{xurl}
 \pgfplotsset{compat=1.18}
 \usepackage{tikz}
 \usetikzlibrary{shapes.geometric,arrows.meta,positioning,fit,backgrounds,calc}
@@ -27,7 +28,7 @@
   linkcolor=blue!45!black,
   urlcolor=blue!45!black,
   citecolor=blue!45!black,
-  pdftitle={Long-Term Memory for AI Agents},
+  pdftitle={Cortex: A Git-Backed Memory System for AI Agents},
   pdfauthor={Ala Arab}
 }
 
@@ -38,6 +39,7 @@
 \Urlmuskip=0mu plus 1mu
 \linespread{0.98}
 \setlist{itemsep=2pt,topsep=2pt,leftmargin=1.2em}
+\captionsetup{justification=raggedright,singlelinecheck=false}
 \titlespacing*{\section}{0pt}{0.9ex plus .2ex minus .2ex}{0.5ex}
 \titlespacing*{\subsection}{0pt}{0.7ex plus .2ex minus .2ex}{0.4ex}
 \titlespacing*{\subsubsection}{0pt}{0.6ex plus .2ex minus .2ex}{0.3ex}
@@ -53,8 +55,8 @@
 \definecolor{scoreLklo}{HTML}{CFEAD6}
 \definecolor{scoreDark}{HTML}{134E4A}
 
-\title{\vspace{-0.8em}Long-Term Memory for AI Agents\\[2pt]
-\large Architecture, Governance, Multi-Agent Coordination, and Comparative Evaluation}
+\title{\vspace{-0.8em}Cortex: A Git-Backed Memory System for AI Agents\\[2pt]
+\large Architecture, Governance, Multi-Agent Coordination, and Comparative Assessment}
 \author{Ala Arab}
 \date{March 9, 2026}
 
@@ -64,32 +66,35 @@
 \maketitle\vspace{-1em}
 
 \begin{abstract}
-\noindent Persistent memory is a first-order requirement for multi-session agent workflows. This paper argues for Cortex's markdown-native, git-backed design with hook-driven lifecycle automation, trust-scored retrieval, and configurable governance. The point is operational rather than novel-research driven: memory quality must be balanced with auditability, portability, governance, and token predictability. In the default path, retrieval runs on a local SQLite FTS5 index with no network hop, token cost, or required hosted service. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory distinguish \textit{architecture judgments} from \textit{measured implementation notes}.
+\noindent Persistent memory becomes operationally important once agent work spans sessions, tools, and collaborators. This paper examines Cortex as a markdown-native, git-backed memory system with hook-driven capture, trust-scored retrieval, and configurable governance. The contribution is a systems-design case study and operator-workflow argument rather than a claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas. In Cortex's default path, retrieval runs on a local SQLite FTS5 index with no network hop and no required hosted service. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory are architecture-level unless explicitly labeled as measured Cortex implementation notes.
 \end{abstract}
 
 \vspace{0.1em}
 \section{Evaluation Frame}
 \label{sec:criteria}
-Agent memory systems are often compared on retrieval quality alone, but production usefulness also depends on governance, portability, and operator workflow. This paper uses eight dimensions:
+Agent memory systems are often compared on retrieval quality alone, even though production fit also depends on governance, portability, and operator workflow. This paper uses eight dimensions:
 \begin{multicols}{2}
+\raggedright
 \begin{enumerate}
   \item \textbf{Representation}: where memory lives and who owns it.
   \item \textbf{Capture path}: how memory is created (hooks/API/workers).
-  \item \textbf{Retrieval path}: ranking, trust scoring, and injection under budget.
+  \item \textbf{Retrieval path}: ranking, trust, and capped injection.
   \item \textbf{Governance}: forgetting, validation, review, and policy controls.
   \item \textbf{Economics}: token overhead + human maintenance burden.
   \item \textbf{Portability}: migration risk and lock-in profile.
-  \item \textbf{Multi-agent readiness}: concurrent sessions, shared state, coordination.
+  \item \textbf{Multi-agent readiness}: concurrent sessions and shared state.
   \item \textbf{Operability}: CLI, shell, direct management without the model in the loop.
 \end{enumerate}
 \end{multicols}
+
+Cortex should be read as a system in the same design space as prior memory work such as MemoryBank, MemGPT, claude-mem, Supermemory, Mem0, and Copilot Memory. The goal is not to claim invention of persistent memory itself, but to evaluate a particular combination of storage ownership, governance, and operator workflow.
 
 % ─── ARCHITECTURE: full-width intro + inline diagram, then two-column body ────
 \vspace{0.2em}
 \section{Cortex Architecture}
 \label{sec:arch}
 
-The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Memory is organized around six concepts: \textbf{projects} scope a working directory under \texttt{\textasciitilde/.cortex/<project>/}; \textbf{findings} are discrete insights in \texttt{FINDINGS.md}; \textbf{backlog} items are prioritized tasks; \textbf{canonical memories} are pinned facts that survive consolidation; \textbf{entities} link named objects across projects via a queryable graph; and \textbf{machines} declare profiles that control project visibility. All are plain markdown or YAML. The diagram below shows how the subsystems connect on every prompt cycle.
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Memory lives under \texttt{\textasciitilde/.cortex/<project>/} as plain markdown or YAML. The core records are \textbf{findings}, \textbf{backlog} items, \textbf{canonical memories}, and cross-project \textbf{entities}; \textbf{machine} profiles control which projects are visible in a given environment. The diagram below shows how those subsystems connect on a normal prompt cycle.
 
 \vspace{0.2em}
 \begin{center}
@@ -113,7 +118,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \node[box, below=0.45cm of fts] (trust) {Trust Filter\\[-2pt]{\scriptsize age decay, citation score}};
 \node[store, right=0.9cm of fts] (md) {Markdown Files\\[-2pt]{\scriptsize \textasciitilde/.cortex/<project>/}};
 \node[store, above=0.45cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
-\node[store, below=0.45cm of md]  (mcp) {MCP Tools (50)\\[-2pt]{\scriptsize findings, backlog, skills, hooks}};
+\node[store, below=0.45cm of md]  (mcp) {MCP Tools (51)\\[-2pt]{\scriptsize findings, backlog, skills, hooks}};
 \node[gov, right=0.9cm of md] (pol) {Policy Engine\\[-2pt]{\scriptsize .governance/*.json}};
 \node[gov, above=0.45cm of pol] (rbac) {Access Control\\[-2pt]{\scriptsize 4 roles, 6 actions}};
 \node[gov, below=0.45cm of pol] (aud) {Audit Log\\[-2pt]{\scriptsize audit.log}};
@@ -143,7 +148,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 }% end resizebox
 \end{center}
 \captionsetup{font=footnotesize}
-\captionof{figure}{Cortex data flow. Prompt cycle: keyword extraction \textrightarrow\ lexical retrieval \textrightarrow\ optional vector recovery \textrightarrow\ trust filter \textrightarrow\ context injection. SessionStart warms the FTS5 cache; writes commit locally and schedule background sync when a remote exists.}
+\captionof{figure}{Cortex data flow. Prompt cycle: keyword extraction \textrightarrow\ lexical retrieval \textrightarrow\ optional vector recovery \textrightarrow\ trust filter \textrightarrow\ context injection. SessionStart warms the FTS5 cache; writes are committed locally and a background sync is scheduled when a remote exists.}
 \label{fig:arch}
 
 % ─── BODY: two columns for dense technical content ───────────────────────────
@@ -227,7 +232,7 @@ These thresholds are operational defaults rather than scientific constants; they
 \label{fig:decay}
 
 \subsection{Extensibility}
-Seven user-defined hook events (\texttt{pre/post-save}, \texttt{post-search}, \texttt{pre/post-finding}, \texttt{pre/post-index}) support custom integrations \cite{cortex-hooks}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
+Seven user-defined hook events cover save, search, finding, and index lifecycles \cite{cortex-hooks}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
 
 \section{Multi-Agent Coordination}
 Modern agent workflows frequently involve multiple agents running concurrently. Memory systems that assume a single serial session break under this pattern.
@@ -237,65 +242,40 @@ Cortex handles multi-agent use through four mechanisms. \textbf{Shared git-backe
 This is an eventually consistent shared-memory model optimized for append-heavy agent workflows, not strong coordination in the distributed-systems sense.
 
 \section{Comparative Assessment}
-\textit{Evidence window: public documentation available as of March 6, 2026.}
+\textit{Evidence window: representative public documentation reviewed through March 6, 2026.}
 
-Comparisons in this section are drawn from public product documentation and observed product surfaces, not from a uniform head-to-head benchmark run. Measured behavior is labeled separately as Cortex implementation notes rather than cross-vendor proof.
+This section is intentionally split between what is currently comparable and what is not. Public documentation and observed product surfaces support an architecture-level comparison, but they do not establish cross-vendor retrieval or latency results on their own. Measured behavior in this paper is therefore limited to Cortex implementation notes. The systems discussed here are representative reference points rather than an exhaustive survey. A direct benchmark program remains future work for systems that can be exercised on shared corpora under controlled conditions.
 
-\subsection{System snapshots}
+\subsection{Current comparison scope}
+\raggedright
 \begin{itemize}
-  \item \textbf{Supermemory}: API-first managed memory, metadata/tag partitioning, graph-memory semantics, benchmark tooling \cite{sm-intro,sm-create,sm-filter,sm-graph,sm-bench}.
-  \item \textbf{claude-mem}: hook-driven local architecture with SQLite/FTS5 and optional semantic layer \cite{cm-overview,cm-hooks,cm-db,cm-search}.
-  \item \textbf{Copilot Memory}: repository-scoped managed memory with policy controls and expiry semantics, active rollout in 2026 \cite{gh-memory-docs,gh-changelog-jan2026,gh-changelog-mar2026}.
+  \item \textbf{Supermemory}: hosted API-first memory with metadata partitioning, graph-memory semantics, and benchmark tooling \cite{sm-intro,sm-create,sm-filter,sm-graph,sm-bench}.
+  \item \textbf{claude-mem}: local hook-driven memory with SQLite/FTS5 plus an optional semantic layer \cite{cm-overview,cm-hooks,cm-db,cm-search}.
+  \item \textbf{Copilot Memory}: repository-scoped managed memory with policy controls and expiry semantics in GitHub Copilot \cite{gh-memory-docs,gh-changelog-jan2026,gh-changelog-mar2026}.
 \end{itemize}
 
-No comparable public retrieval-latency benchmark exists across all systems; cross-system speed claims must be measured directly.
+The current paper can support two kinds of claims. First, architecture-level differences such as ownership, governance, portability, and review workflow can be compared from public evidence. Second, direct measured retrieval claims are currently defensible only for Cortex, and potentially for other local systems once they are benchmarked on shared corpora. No public retrieval-latency benchmark spans all four systems in a directly comparable way, so cross-system speed claims still require direct measurement.
 
-\end{multicols}
+\subsection{Operational fit (non-empirical)}
 
-% ─── BEST-FIT MATRIX: full-width table breaks out of two-column ───────────────
-\vspace{0.2em}
-\subsection{Best-fit matrix (architecture-level, non-empirical)}
-
-\begin{table}[H]
-\centering
-\scriptsize
-\setlength{\tabcolsep}{5pt}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabularx}{\textwidth}{>{\bfseries}l X X}
-\toprule
-\textbf{System} & \textbf{Best fit when...} & \textbf{Main tradeoff} \\
-\midrule
-Cortex &
-You want owner-operated memory, git auditability, explicit governance, stable token budgets, and a CLI/shell workflow that works across tools. &
-You accept eventual consistency at the git layer, more operator responsibility, and a more complex local setup story than a managed service. \\
-Supermemory &
-You want a managed API-first memory layer with hosted infrastructure and do not mind platform dependence. &
-Less transparent storage and governance, higher lock-in, and weaker local inspectability than a markdown-native store. \\
-claude-mem &
-You want a local hook-driven memory system with a lighter-weight architecture centered on agent workflow augmentation. &
-Smaller governance and operator tooling surface, and less emphasis on auditability and policy controls. \\
-Copilot Memory &
-You are already standardized on GitHub/Copilot and want repository-scoped memory integrated into that platform. &
-Tighter platform scope, lower portability, and less control over storage and operational workflow than an owner-run repo. \\
-\bottomrule
-\end{tabularx}
-\caption{Best-fit framing rather than a winner-ranking. Operator judgment summary, not a substitute for empirical benchmarks.}
-\label{tab:bestfit}
-\end{table}
-
-% ─── RESUME TWO COLUMNS ──────────────────────────────────────────────────────
-\begin{multicols}{2}
+\begin{itemize}
+  \item \textbf{Cortex}: favors owner-run memory, git auditability, and stronger governance; tradeoff is more local setup and operator burden.
+  \item \textbf{Supermemory}: favors a hosted API-first workflow; tradeoff is less local inspectability and portability.
+  \item \textbf{claude-mem}: favors a lighter local hook-driven setup; tradeoff is a smaller governance and operator-tooling surface.
+  \item \textbf{Copilot Memory}: favors teams already standardized on GitHub/Copilot; tradeoff is tighter platform scope and less control over storage and workflow.
+\end{itemize}
 
 \subsection{Operational Design Differences}
 
 The systems differ less in whether they can retrieve a relevant memory and more in how they behave operationally once memory is a shared, long-lived artifact.
 
+\raggedright
 \begin{itemize}
-  \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed API systems rarely offer equivalent transparency.
+  \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed API systems generally expose different audit primitives rather than equivalent git-native transparency.
   \item \textbf{Policy and access governance}: role-based access control, approval workflows, TTL and retention policy, and canonical locks are first-class features.
   \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection.
   \item \textbf{CLI shell for human review}: \texttt{cortex shell} provides a model-free interface for reviewing, approving, and cleaning memories without starting an LLM session.
-  \item \textbf{Browser-based memory triage}: \texttt{cortex review-ui} launches a lightweight web UI for reviewing the memory queue, filtering by machine, model, and project. No equivalent review surface was identified in the materials examined.
+  \item \textbf{Browser-based memory triage}: \texttt{cortex review-ui} launches a lightweight web UI for queue review by machine, model, and project. The materials examined did not surface an equivalent review tool.
 \end{itemize}
 
 Any memory system can add a vector index. Governance, auditability, and operational tooling require deliberate architectural choices that are harder to retrofit.
@@ -322,7 +302,7 @@ The staged design matters because each retrieval tier has a different cost profi
 
 \begin{table}[h]
 \centering
-\begin{tabularx}{\columnwidth}{>{\raggedright\arraybackslash}p{2.2cm} >{\raggedright\arraybackslash}p{2.4cm} X}
+\begin{tabularx}{\columnwidth}{>{\raggedright\arraybackslash}p{2.2cm} >{\raggedright\arraybackslash}p{2.4cm} >{\raggedright\arraybackslash}X}
 \toprule
 Stage & Cost shape & Notes \\
 \midrule
@@ -333,21 +313,20 @@ Vector recovery & $O(E_q + C \cdot d)$ after candidate pruning & $E_q$ is query-
 Rerank + snippets & $O(R \log R + S)$ & $R$ is a small capped candidate set and $S$ is the bounded snippet-selection budget. \\
 \bottomrule
 \end{tabularx}
-\caption{Retrieval stage complexity. The common path stays cheap because expensive fallbacks are only invoked after weaker lexical signals.}
+\caption{Retrieval stage complexity. The common path stays cheap because expensive fallbacks are gated behind weak lexical signals.}
 \end{table}
 
 \subsection{Measured Retrieval Notes}
 
-These numbers are implementation checks on one live cortex store, not a general ranking of memory systems. An author-local run on March 9, 2026 used 10 real queries against a live cortex store with 139 indexed documents and the default 550-token hook budget \cite{cortex-bench}. Under those conditions:
+These numbers are implementation checks on one live cortex store, not a general ranking of memory systems. A single author-local benchmark on March 9, 2026 measured the current lexical-first and gated-hybrid paths against a warm Cortex store with 139 indexed documents, real workflow queries, and the default 550-token hook budget \cite{cortex-bench}. The result was narrow but useful:
 \begin{itemize}
-  \item the lexical path averaged 15.93\,ms total latency (p50 11.91\,ms, p95 16.25\,ms);
-  \item the gated semantic path averaged 12.90\,ms total latency (p50 11.59\,ms, p95 16.52\,ms);
-  \item average injected payload was 341.8 tokens in both modes;
-  \item both modes hit all 10 queries, and the two previously published miss cases were resolved by the lexical fixes;
-  \item the persistent vector index reduced the average cosine-scoring candidate set to 8.7 candidates out of 139 eligible documents (6.3\% of the corpus).
+  \item lexical latency remained in the mid-teens of milliseconds, averaging 14.71--15.93\,ms across the March 9 query sets;
+  \item the gated hybrid path stayed in nearly the same range at 12.90--13.60\,ms because the lexical stages usually satisfied the query before vector recovery was needed;
+  \item injected payload remained stable at roughly 326--342 tokens on average;
+  \item both modes hit every query in the published March 9 sets;
+  \item persistent candidate pruning still reduced the cosine stage to roughly 6.3--8.6\% of the eligible corpus when vector recovery did fire.
 \end{itemize}
-
-A widened 16-query run on the same warm store averaged 14.71\,ms lexical latency and 13.60\,ms gated-semantic latency, with both modes again hitting every query and producing no semantic-only recoveries. On this corpus the lexical path is now good enough that the vector gate usually stays closed, so the hybrid path inherits the same speed profile. The vector index still matters for worst-case scaling because it shrinks the cosine stage to 8.6\% of the eligible corpus on the widened run, but when semantic recovery does fire the dominant cost is still query embedding, not cosine math.
+The interpretation is intentionally modest: on this corpus the lexical path was strong enough that vector recovery was usually unnecessary, so the hybrid path inherited nearly the same speed profile. Synthetic large-corpus scaling runs are documented separately in the benchmark protocol; they are useful for index and latency scaling, but they answer a different question than this live-store measurement.
 
 \section{Limitations}
 \label{sec:limitations}
@@ -371,11 +350,11 @@ A widened 16-query run on the same warm store averaged 14.71\,ms lexical latency
 \textbf{Operator burden.} Local-first operation shifts responsibility to the user or team: git hygiene, policy tuning, backup expectations, and occasional conflict repair do not disappear just because the system is local.
 
 \section{Conclusion}
-The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex pushes toward production readiness: trust filtering reduces noise in injected context, the governance engine gives teams real policy control, and the interactive shell makes daily memory management possible without starting an LLM session.
+The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex treats memory as an owned system artifact rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session.
 
-Multi-agent support is increasingly non-optional. As workflows move from single-agent to team coordination, memory systems that assume serial sessions become a bottleneck. Cortex's git-backed architecture provides a practical shared-memory model: file locks serialize in-process writes, the background sync worker rebases and auto-merges concurrent changes, and the system is eventually consistent for an append-heavy memory store.
+That architecture also makes concurrent agent use practical. File locks serialize in-process writes, the background sync worker rebases and auto-merges safe markdown changes, and the shared store remains eventually consistent for append-heavy workflows.
 
-Managed alternatives are a reasonable choice for teams already fully committed to a specific platform where memory comes bundled and data custody is not a concern. Cortex is strongest when the priority is owner-operated memory: markdown as source of truth, predictable token discipline, and auditability through git. In the default FTS5 path there are no API costs, no rate limits, and no required hosted service. It is a stronger fit for teams that value inspectability, local control, and governed memory workflows than for teams that primarily want turnkey hosted convenience.
+Managed alternatives are reasonable when memory is expected to arrive bundled with a platform and data custody is not a priority. Cortex fits best when the priority is owner-operated memory: markdown as source of truth, predictable token discipline, git auditability, and enough governance to keep shared memory usable over time.
 
 \end{multicols}
 
@@ -387,6 +366,7 @@ Managed alternatives are a reasonable choice for teams already fully committed t
 \setlength{\parsep}{0pt}
 \setlength{\parskip}{0pt}
 \setlength{\topsep}{0pt}
+\raggedright
 \sloppy
 \begin{thebibliography}{99}
 \setlength{\itemsep}{0pt}

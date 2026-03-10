@@ -94,7 +94,7 @@ function parseBacklogItems(backlogPath: string): ParsedBacklogItem[] {
 
 function resolveBacklogItemMatch(items: ParsedBacklogItem[], match: string): BacklogReferenceResolution {
   const needle = match.trim().toLowerCase();
-  if (!needle) return { error: "backlog_item must not be empty." };
+  if (!needle) return { error: "task reference must not be empty." };
 
   const bidNeedle = needle.replace(/^bid:/, "");
   if (/^[a-f0-9]{8}$/.test(bidNeedle)) {
@@ -107,23 +107,23 @@ function resolveBacklogItemMatch(items: ParsedBacklogItem[], match: string): Bac
 
   const exact = items.filter((item) => item.line.trim().toLowerCase() === needle);
   if (exact.length === 1) {
-    if (!exact[0].stableId) return { error: `Backlog item "${match}" does not have a stable ID yet.` };
+    if (!exact[0].stableId) return { error: `Task "${match}" does not have a stable ID yet.` };
     return { stableId: exact[0].stableId };
   }
   if (exact.length > 1) {
-    return { error: `backlog_item "${match}" is ambiguous (${exact.length} exact matches). Use item ID or stable ID.` };
+    return { error: `Task "${match}" is ambiguous (${exact.length} exact matches). Use item ID or stable ID.` };
   }
 
   const partial = items.filter((item) => item.line.toLowerCase().includes(needle));
   if (partial.length === 1) {
-    if (!partial[0].stableId) return { error: `Backlog item "${match}" does not have a stable ID yet.` };
+    if (!partial[0].stableId) return { error: `Task "${match}" does not have a stable ID yet.` };
     return { stableId: partial[0].stableId };
   }
   if (partial.length > 1) {
-    return { error: `backlog_item "${match}" is ambiguous (${partial.length} partial matches). Use item ID or stable ID.` };
+    return { error: `Task "${match}" is ambiguous (${partial.length} partial matches). Use item ID or stable ID.` };
   }
 
-  return { error: `No backlog item matching "${match}" in project backlog.` };
+  return { error: `No task matching "${match}" in project tasks.` };
 }
 
 export function resolveFindingBacklogReference(

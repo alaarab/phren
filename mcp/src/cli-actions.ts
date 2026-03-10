@@ -3,6 +3,7 @@ import { runtimeFile, getCortexPath } from "./shared.js";
 import {
   recordFeedback,
   flushEntryScores,
+  getWorkflowPolicy,
 } from "./shared-governance.js";
 import { upsertCanonical } from "./shared-content.js";
 import { errorMessage } from "./utils.js";
@@ -74,6 +75,7 @@ export async function handleDoctor(args: string[]) {
   console.log(`cortex doctor: ${result.ok ? "ok" : "issues found"}`);
   if (result.machine) console.log(`machine: ${result.machine}`);
   if (result.profile) console.log(`profile: ${result.profile}`);
+  console.log(`tasks: ${getWorkflowPolicy(getCortexPath()).taskMode} mode`);
   for (const check of result.checks) {
     console.log(`- ${check.ok ? "ok" : "fail"} ${check.name}: ${check.detail}`);
   }

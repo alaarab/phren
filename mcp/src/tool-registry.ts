@@ -12,7 +12,7 @@ export interface ToolMetadata {
 
 const CATEGORY_BY_MODULE: Record<string, string> = {
   "mcp-search": "Search and browse",
-  "mcp-backlog": "Backlog management",
+  "mcp-backlog": "Task management",
   "mcp-finding": "Finding capture",
   "mcp-memory": "Memory quality",
   "mcp-data": "Data management",

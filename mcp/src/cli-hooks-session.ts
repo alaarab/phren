@@ -42,6 +42,7 @@ import {
 import type { SelectedSnippet } from "./shared-retrieval.js";
 import { filterBacklogByPriority } from "./shared-retrieval.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { finalizeTaskSession } from "./task-lifecycle.js";
 
 function getRuntimeProfile(): string {
   return resolveRuntimeProfile(getCortexPath());
@@ -627,7 +628,8 @@ export async function handleHookStop() {
 
   // Read stdin early — it's a stream and can only be consumed once.
   // Needed for auto-capture transcript_path parsing.
-  const stdinPayload = readStdinJson<{ transcript_path?: string }>();
+  const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
+  const taskSessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
 
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
   // Gated behind CORTEX_FEATURE_AUTO_CAPTURE=1.
@@ -681,6 +683,12 @@ export async function handleHookStop() {
 
   const status = await runBestEffortGit(["status", "--porcelain"], getCortexPath());
   if (!status.ok) {
+    finalizeTaskSession({
+      cortexPath: getCortexPath(),
+      sessionId: taskSessionId,
+      status: "error",
+      detail: status.error || "git status failed",
+    });
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "error", detail: status.error || "git status failed" },
@@ -744,6 +752,12 @@ export async function handleHookStop() {
   }
   const commit = add.ok ? await runBestEffortGit(["commit", "-m", commitMsg], getCortexPath()) : { ok: false, error: add.error };
   if (!add.ok || !commit.ok) {
+    finalizeTaskSession({
+      cortexPath: getCortexPath(),
+      sessionId: taskSessionId,
+      status: "error",
+      detail: add.error || commit.error || "git add/commit failed",
+    });
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
       lastAutoSave: {
@@ -763,6 +777,12 @@ export async function handleHookStop() {
 
   const remotes = await runBestEffortGit(["remote"], getCortexPath());
   if (!remotes.ok || !remotes.output) {
+    finalizeTaskSession({
+      cortexPath: getCortexPath(),
+      sessionId: taskSessionId,
+      status: "saved-local",
+      detail: "commit created; no remote configured",
+    });
     const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
@@ -782,6 +802,12 @@ export async function handleHookStop() {
   const syncDetail = scheduled
     ? "commit saved; background sync scheduled"
     : "commit saved; background sync already running";
+  finalizeTaskSession({
+    cortexPath: getCortexPath(),
+    sessionId: taskSessionId,
+    status: "saved-local",
+    detail: syncDetail,
+  });
   updateRuntimeHealth(getCortexPath(), {
     lastStopAt: now,
     lastAutoSave: { at: now, status: "saved-local", detail: syncDetail },
@@ -941,7 +967,7 @@ export async function handleHookContext() {
       const filtered = filterBacklogByPriority(activeItems);
       const trimmed = filtered.slice(0, 5);
       if (trimmed.length > 0) {
-        parts.push("## Active backlog");
+        parts.push("## Active tasks");
         parts.push(trimmed.join("\n"));
         parts.push("");
       }

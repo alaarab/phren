@@ -742,14 +742,14 @@ describe("machines, profiles, and shell state", () => {
   it("save/load/reset shell state round trips", () => {
     saveShellState(tmpDir, {
       version: 1,
-      view: "Backlog",
+      view: "Tasks",
       project: PROJECT,
       filter: "auth",
       page: 2,
       perPage: 25,
     });
     const loaded = loadShellState(tmpDir);
-    expect(loaded.view).toBe("Backlog");
+    expect(loaded.view).toBe("Tasks");
     expect(loaded.project).toBe(PROJECT);
     expect(loaded.filter).toBe("auth");
     expect(loaded.page).toBe(2);

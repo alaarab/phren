@@ -72,6 +72,12 @@ npx tsx mcp/src/__tests__/benchmark/harness.ts
 # Run the live retrieval latency/token benchmark
 npm run bench:retrieval -- --cortex-path ~/.cortex
 
+# Run the synthetic large-corpus retrieval benchmark
+npm run bench:retrieval:synthetic -- --sizes 1000,10000
+
+# Push to much larger synthetic corpora without touching ~/.cortex
+npm run bench:retrieval:synthetic -- --sizes 10000,100000 --queries-per-size 16
+
 # Or via vitest
 npm test -- --testPathPattern benchmark
 ```
@@ -89,6 +95,12 @@ The retrieval runner writes JSON with:
 - semantic-only and lexical-only hit deltas
 - persistent vector-index candidate counts
 - per-query top-document summaries
+
+The synthetic retrieval runner writes JSON with:
+- cold and warm index-build time per corpus size
+- lexical and hybrid retrieval latency per synthetic corpus size
+- exact top-hit counts for deterministic generated queries
+- generated corpus sizes without touching your real `~/.cortex`
 
 ## Published Conditions Template
 
@@ -131,6 +143,52 @@ Interpretation:
 - the strengthened lexical path is now good enough on this corpus that the vector gate usually stays closed, so hybrid and lexical timings converge
 - the vector index still changes worst-case scaling by shrinking the cosine stage to a small candidate set, but on a 139-doc corpus the cosine math is only about `0.06-0.07ms`; the expensive semantic step is still query embedding when it happens
 - these numbers are evidence for this corpus and this query set, not proof that semantic recovery is obsolete everywhere
+
+## Synthetic Large-Corpus Retrieval Runs
+
+The live-store benchmark is useful for real workflow behavior, but it does not answer scaling questions cleanly because every personal cortex store has different shape and hygiene. For scaling work, use the synthetic benchmark:
+
+- it creates a temporary cortex root under your temp directory
+- it models each synthetic memory as its own markdown file so indexed document count scales with simulated memory count
+- it measures both cold index build time and warm retrieval time
+- it never reads or writes your real `~/.cortex` unless you explicitly point it there
+
+Recommended sizes:
+
+- `1000`: sanity check and local dev loop
+- `10000`: meaningful medium-scale corpus
+- `100000`: stress test for retrieval/index scaling; expect a much slower setup
+
+### March 10, 2026 Synthetic Scaling Run
+
+Checked-in source of truth: `docs/benchmark-synthetic-results.json`
+
+Conditions:
+
+- machine: `QL-PF5A48WS`
+- Node: `v24.13.0`
+- generator: `synthetic-markdown-memory-files/v1`
+- query count: `8` deterministic exact-hit queries per corpus size
+- corpus model: one synthetic memory per markdown file
+
+Results:
+
+- `1,000` memories: cold build `419.13ms`, warm build `42.49ms`, lexical retrieval `7.35ms` avg, hybrid retrieval `5.99ms` avg, exact top hits `8/8`
+- `10,000` memories: cold build `2273.66ms`, warm build `265.25ms`, lexical retrieval `17.55ms` avg, hybrid retrieval `17.74ms` avg, exact top hits `8/8`
+- `100,000` memories: cold build `25284.19ms`, warm build `2777.79ms`, lexical retrieval `113.09ms` avg, hybrid retrieval `110.18ms` avg, exact top hits `8/8`
+
+Interpretation:
+
+- warm retrieval remains comfortably sub-20ms through `10k` synthetic memories
+- at `100k`, warm retrieval is still near `110-113ms`, which is noticeable but still practical for a local benchmark path
+- warm rebuild time grows materially with corpus size, so synthetic scaling reinforces that index-build cost, not just search latency, should be published with results
+
+When publishing synthetic results, include:
+
+- the synthetic generator version from the JSON output
+- corpus size and query count
+- whether hybrid search and embeddings were enabled
+- cold vs warm index timings
 
 ## Results Table
 

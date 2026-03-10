@@ -44,6 +44,7 @@ export interface WorkflowPolicy {
   requireMaintainerApproval: boolean;
   lowConfidenceThreshold: number;
   riskySections: Array<"Review" | "Stale" | "Conflicts">;
+  taskMode: "off" | "manual" | "suggest" | "auto";
 }
 
 export interface IndexPolicy {
@@ -112,6 +113,7 @@ const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   requireMaintainerApproval: true,
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
+  taskMode: "manual",
 };
 
 const DEFAULT_INDEX_POLICY: IndexPolicy = {
@@ -215,7 +217,8 @@ const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unkn
     hasValidSchemaVersion(data)
     && (!("requireMaintainerApproval" in data) || typeof data.requireMaintainerApproval === "boolean")
     && (!("lowConfidenceThreshold" in data) || isFiniteNumber(data.lowConfidenceThreshold))
-    && (!("riskySections" in data) || isStringArray(data.riskySections)),
+    && (!("riskySections" in data) || isStringArray(data.riskySections))
+    && (!("taskMode" in data) || ["off", "manual", "suggest", "auto"].includes(String(data.taskMode))),
   "index-policy": (data) =>
     hasValidSchemaVersion(data)
     && ["includeGlobs", "excludeGlobs"].every((key) => !(key in data) || isStringArray(data[key]))
@@ -388,6 +391,9 @@ function normalizeRetentionPolicy(data: Record<string, unknown>): RetentionPolic
 
 function normalizeWorkflowPolicy(data: Record<string, unknown>): WorkflowPolicy {
   const validSections = new Set(["Review", "Stale", "Conflicts"]);
+  const taskMode = ["off", "manual", "suggest", "auto"].includes(String(data.taskMode))
+    ? String(data.taskMode) as WorkflowPolicy["taskMode"]
+    : DEFAULT_WORKFLOW_POLICY.taskMode;
   const riskySections = Array.isArray(data.riskySections)
     ? data.riskySections.filter((section): section is "Review" | "Stale" | "Conflicts" => validSections.has(String(section)))
     : [];
@@ -396,6 +402,7 @@ function normalizeWorkflowPolicy(data: Record<string, unknown>): WorkflowPolicy 
     requireMaintainerApproval: pickBoolean(data.requireMaintainerApproval, DEFAULT_WORKFLOW_POLICY.requireMaintainerApproval),
     lowConfidenceThreshold: pickNumber(data.lowConfidenceThreshold, DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold),
     riskySections: riskySections.length ? riskySections : [...DEFAULT_WORKFLOW_POLICY.riskySections],
+    taskMode,
   };
 }
 
@@ -668,6 +675,9 @@ export function getWorkflowPolicy(cortexPath: string): WorkflowPolicy {
   const validSections = new Set(["Review", "Stale", "Conflicts"]);
   merged.riskySections = merged.riskySections.filter((section) => validSections.has(section));
   if (!merged.riskySections.length) merged.riskySections = DEFAULT_WORKFLOW_POLICY.riskySections;
+  if (!["off", "manual", "suggest", "auto"].includes(merged.taskMode)) {
+    merged.taskMode = DEFAULT_WORKFLOW_POLICY.taskMode;
+  }
   return merged;
 }
 
@@ -678,11 +688,15 @@ export function updateWorkflowPolicy(cortexPath: string, patch: Partial<Workflow
   const riskySections = Array.isArray(patch.riskySections)
     ? patch.riskySections.filter((section): section is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(section)))
     : current.riskySections;
+  const taskMode = patch.taskMode && ["off", "manual", "suggest", "auto"].includes(String(patch.taskMode))
+    ? patch.taskMode
+    : current.taskMode;
   const next: WorkflowPolicy = {
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     requireMaintainerApproval: patch.requireMaintainerApproval ?? current.requireMaintainerApproval,
     lowConfidenceThreshold: patch.lowConfidenceThreshold ?? current.lowConfidenceThreshold,
     riskySections: riskySections.length ? riskySections : current.riskySections,
+    taskMode,
   };
   writeJsonFile(govFile(cortexPath, "workflow-policy"), next);
   appendAuditLog(cortexPath, "update_workflow_policy", JSON.stringify(next));

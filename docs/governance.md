@@ -1,6 +1,6 @@
 # Cortex Governance
 
-> The complete memory governance stack — RBAC, audit trail, trust decay, citation validation, approval workflows — fully local, zero vendor cost.
+> A local memory governance stack: RBAC, audit trail, trust decay, citation validation, and approval workflows.
 
 ## Why AI memory governance matters
 
@@ -28,7 +28,7 @@ git revert <commit-sha>
 git log -p -S "authentication" ~/.cortex/myproject/FINDINGS.md
 ```
 
-Managed API memory systems (Mem0, Zep, Supermemory) have no equivalent. Zep logs API calls for 7 days on their $475/month tier. Cortex logs every write forever, in a format every developer already knows.
+Managed API memory systems such as Mem0, Zep, and Supermemory expose different audit surfaces than a git-native history. Cortex records memory changes as ordinary commits, which makes review, rollback, and inspection work through standard developer tools.
 
 ### Trust decay and confidence scoring
 
@@ -93,12 +93,12 @@ A human can inspect every finding, see its confidence score, view its git histor
 
 | Feature | Cortex | Mem0 | Zep | Copilot Memory |
 |---------|--------|------|-----|----------------|
-| Audit trail | Git commits (forever) | None | 7-day API logs ($475/mo) | None |
-| Trust decay | Graduated curve | None | Temporal graph | 28-day hard delete |
-| Citation validation | File:line + penalty | None | None | File:line, no penalty |
+| Audit trail | Git commits (forever) | Service-specific logs/documentation | 7-day API logs ($475/mo) | Platform-managed history |
+| Trust decay | Graduated curve | Not surfaced in reviewed materials | Temporal graph | 28-day hard delete |
+| Citation validation | File:line + penalty | Not surfaced in reviewed materials | Not surfaced in reviewed materials | File:line, no penalty |
 | RBAC | 4 roles, built-in | Enterprise only | Enterprise only | GitHub permissions |
-| Approval workflows | Built-in | None | None | None |
-| Human review UI | CLI shell (offline) | Cloud dashboard | None | None |
+| Approval workflows | Built-in | Not surfaced in reviewed materials | Not surfaced in reviewed materials | Not surfaced in reviewed materials |
+| Human review UI | CLI shell (offline) | Cloud dashboard | Not surfaced in reviewed materials | Not surfaced in reviewed materials |
 | Data location | Your git repo | Cloud or Docker | Cloud only | GitHub cloud |
 | Cost for governance | $0 | $249+/mo | $475+/mo | Copilot subscription |
 

@@ -308,12 +308,12 @@ function findItemByMatch(
   if (partial.length > 1) {
     return { error: `${CortexError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${partial.length} partial matches). Use item ID.`, errorCode: CortexError.AMBIGUOUS_MATCH };
   }
-  return { error: `${CortexError.NOT_FOUND}: Item not found — no backlog item matching "${match}".`, errorCode: CortexError.NOT_FOUND };
+  return { error: `${CortexError.NOT_FOUND}: Item not found — no task matching "${match}".`, errorCode: CortexError.NOT_FOUND };
 }
 
 function backlogItemNotFound(project: string, match: string): CortexResult<never> {
   return cortexErr(
-    `Item not found: no backlog item matching "${match}" in project "${project}". Check the item text or use its ID (shown in the backlog view).`,
+    `Item not found: no task matching "${match}" in project "${project}". Check the item text or use its ID (shown in the tasks view).`,
     CortexError.NOT_FOUND
   );
 }
@@ -338,7 +338,7 @@ export function readBacklog(cortexPath: string, project: string): CortexResult<B
   if (!fs.existsSync(backlogPath)) {
     return cortexOk({
       project,
-      title: `# ${project} backlog`,
+      title: `# ${project} tasks`,
       path: backlogPath,
       issues: [],
       items: { Active: [], Queue: [], Done: [] },
@@ -392,7 +392,7 @@ export function addBacklogItem(cortexPath: string, project: string, item: string
       priority: normalizePriority(line),
     });
     writeBacklogDoc(parsed.data);
-    return cortexOk(`Added to ${project} backlog: ${line}`);
+    return cortexOk(`Added task in ${project}: ${line}`);
   });
 }
 
@@ -480,7 +480,7 @@ export function updateBacklogItem(
   cortexPath: string,
   project: string,
   match: string,
-  updates: { priority?: string; context?: string; section?: string; github_issue?: number | string; github_url?: string; unlink_github?: boolean }
+  updates: { priority?: string; context?: string; replace_context?: boolean; section?: string; github_issue?: number | string; github_url?: string; unlink_github?: boolean }
 ): CortexResult<string> {
   const bPath = backlogFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
@@ -507,8 +507,8 @@ export function updateBacklogItem(
     }
 
     if (updates.context) {
-      if (item.context) item.context = `${item.context}; ${updates.context}`;
-      else item.context = updates.context;
+      if (updates.replace_context || !item.context) item.context = updates.context;
+      else item.context = `${item.context}; ${updates.context}`;
       changes.push("context updated");
     }
 
@@ -607,7 +607,7 @@ export function workNextBacklogItem(cortexPath: string, project: string): Cortex
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
     if (!parsed.data.items.Queue.length) {
-      return cortexErr(`No queued items in "${project}". Add items with :add or the add_backlog_item tool.`, CortexError.NOT_FOUND);
+      return cortexErr(`No queued tasks in "${project}". Add items with :add or the add_task tool.`, CortexError.NOT_FOUND);
     }
 
     const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
@@ -651,7 +651,7 @@ export function tidyBacklogDone(cortexPath: string, project: string, keep: numbe
     const stamp = new Date().toISOString();
     const lines = archived.map((item) => `- [x] ${item.line}${item.context ? `\n  Context: ${item.context}` : ""}`);
     const block = `## ${stamp}\n\n${lines.join("\n")}\n\n`;
-    const prior = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, "utf8") : `# ${project} backlog archive\n\n`;
+    const prior = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, "utf8") : `# ${project} task archive\n\n`;
     fs.writeFileSync(archiveFile, prior + block);
 
     writeBacklogDoc(parsed.data);
