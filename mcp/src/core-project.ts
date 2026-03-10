@@ -2,13 +2,15 @@ import * as path from "path";
 import { cortexErr, cortexOk, type CortexResult } from "./shared.js";
 import { bootstrapFromExisting } from "./init-setup.js";
 import { resolveActiveProfile } from "./profile-store.js";
+import type { ProjectOwnershipMode } from "./project-config.js";
 
 export interface AddedProjectData {
   project: string;
   path: string;
   profile: string | null;
+  ownership: ProjectOwnershipMode;
   files: {
-    claude: string;
+    claude: string | null;
     summary: string;
     findings: string;
     backlog: string;
@@ -19,6 +21,7 @@ export function addProjectFromPath(
   cortexPath: string,
   targetPath: string | undefined,
   requestedProfile?: string,
+  ownership?: ProjectOwnershipMode,
 ): CortexResult<AddedProjectData> {
   if (!targetPath) {
     return cortexErr("Path is required. Pass the current project directory explicitly to avoid adding the wrong working directory.");
@@ -29,17 +32,18 @@ export function addProjectFromPath(
 
   const resolvedPath = path.resolve(targetPath);
   const selectedProfile = activeProfile.data;
-  const projectName = bootstrapFromExisting(cortexPath, resolvedPath, selectedProfile);
+  const added = bootstrapFromExisting(cortexPath, resolvedPath, { profile: selectedProfile, ownership });
 
   return cortexOk({
-    project: projectName,
+    project: added.project,
     path: resolvedPath,
     profile: selectedProfile ?? null,
+    ownership: added.ownership,
     files: {
-      claude: path.join(cortexPath, projectName, "CLAUDE.md"),
-      summary: path.join(cortexPath, projectName, "summary.md"),
-      findings: path.join(cortexPath, projectName, "FINDINGS.md"),
-      backlog: path.join(cortexPath, projectName, "backlog.md"),
+      claude: added.claudePath,
+      summary: path.join(cortexPath, added.project, "summary.md"),
+      findings: path.join(cortexPath, added.project, "FINDINGS.md"),
+      backlog: path.join(cortexPath, added.project, "backlog.md"),
     },
   });
 }

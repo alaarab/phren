@@ -76,6 +76,15 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
   }
 
   async getChildren(element?: CortexNode): Promise<CortexNode[]> {
+    try {
+      return await this.getChildrenInner(element);
+    } catch (error) {
+      console.error(`[cortex-tree] getChildren crash:`, error, `element:`, JSON.stringify(element));
+      return [{ kind: "message", label: `Error: ${error instanceof Error ? error.message : String(error)}`, iconId: "warning" }];
+    }
+  }
+
+  private async getChildrenInner(element?: CortexNode): Promise<CortexNode[]> {
     if (!element) {
       return this.getProjectNodes();
     }
@@ -102,6 +111,20 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
   }
 
   getTreeItem(element: CortexNode): vscode.TreeItem {
+    try {
+      return this.getTreeItemInner(element);
+    } catch (error) {
+      console.error(`[cortex-tree] getTreeItem crash:`, error, `element:`, JSON.stringify(element));
+      const item = new vscode.TreeItem(`(error: ${error instanceof Error ? error.message : String(error)})`, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = themeIcon("warning");
+      return item;
+    }
+  }
+
+  private getTreeItemInner(element: CortexNode): vscode.TreeItem {
+    if (!element || !element.kind) {
+      return new vscode.TreeItem("(unknown)", vscode.TreeItemCollapsibleState.None);
+    }
     switch (element.kind) {
       case "project": {
         const item = new vscode.TreeItem(element.projectName, vscode.TreeItemCollapsibleState.Collapsed);
@@ -111,10 +134,11 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         return item;
       }
       case "category": {
-        const categoryLabel = element.category[0].toUpperCase() + element.category.slice(1);
+        const cat = element.category ?? "unknown";
+        const categoryLabel = cat.charAt(0).toUpperCase() + cat.slice(1);
         const item = new vscode.TreeItem(categoryLabel, vscode.TreeItemCollapsibleState.Collapsed);
-        item.iconPath = themeIcon(categoryIconId(element.category));
-        item.id = `cortex.category.${element.projectName}.${element.category}`;
+        item.iconPath = themeIcon(categoryIconId(cat as CortexCategory));
+        item.id = `cortex.category.${element.projectName}.${cat}`;
         return item;
       }
       case "finding": {
@@ -333,5 +357,7 @@ function themeIcon(id: string): vscode.ThemeIcon {
   if (id === "file") {
     return vscode.ThemeIcon.File;
   }
-  return { id } as unknown as vscode.ThemeIcon;
+  // ThemeIcon constructor may be private in some type def versions, but it exists at runtime
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new (vscode.ThemeIcon as any)(id) as vscode.ThemeIcon;
 }

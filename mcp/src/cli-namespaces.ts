@@ -13,6 +13,7 @@ import { readInstallPreferences, writeInstallPreferences, type InstallPreference
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
+import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode, writeProjectConfig } from "./project-config.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
@@ -486,6 +487,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
     if (subcommand === "--help" || subcommand === "-h") {
       console.log("Usage:");
       console.log("  cortex projects list               List all projects");
+      console.log("  cortex projects configure <name>   Update per-project enrollment settings");
       console.log("  cortex projects remove <name>      Remove a project (asks for confirmation)");
       return;
     }
@@ -507,8 +509,37 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
     return handleProjectsRemove(name, profile);
   }
 
+  if (subcommand === "configure") {
+    const name = args[1];
+    if (!name) {
+      console.error(`Usage: cortex projects configure <name> --ownership=${PROJECT_OWNERSHIP_MODES.join("|")}`);
+      process.exit(1);
+    }
+    if (!isValidProjectName(name)) {
+      console.error(`Invalid project name: "${name}".`);
+      process.exit(1);
+    }
+    if (!fs.existsSync(path.join(getCortexPath(), name))) {
+      console.error(`Project "${name}" not found.`);
+      process.exit(1);
+    }
+    const ownershipArg = args.find((arg) => arg.startsWith("--ownership="))?.slice("--ownership=".length);
+    if (!ownershipArg) {
+      console.error(`Usage: cortex projects configure <name> --ownership=${PROJECT_OWNERSHIP_MODES.join("|")}`);
+      process.exit(1);
+    }
+    const ownership = parseProjectOwnershipMode(ownershipArg);
+    if (!ownership) {
+      console.error(`Usage: cortex projects configure <name> --ownership=${PROJECT_OWNERSHIP_MODES.join("|")}`);
+      process.exit(1);
+    }
+    writeProjectConfig(getCortexPath(), name, { ownership });
+    console.log(`Updated ${name}: ownership=${ownership}`);
+    return;
+  }
+
   console.error(`Unknown subcommand: ${subcommand}`);
-  console.error("Usage: cortex projects [list|remove]");
+  console.error("Usage: cortex projects [list|configure|remove]");
   process.exit(1);
 }
 

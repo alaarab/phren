@@ -26,6 +26,10 @@ function governancePrefsPath(): string {
   return path.join(cortexDir, ".governance", "install-preferences.json");
 }
 
+function installPrefsPath(): string {
+  return path.join(cortexDir, ".runtime", "install-preferences.json");
+}
+
 async function importCliConfig() {
   vi.resetModules();
   return await import("./cli-config.js");
@@ -140,5 +144,45 @@ describe("handleConfig proactivity", () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(output.errors).toContain("Usage: cortex config proactivity.findings [high|medium|low]");
     expect(fs.existsSync(governancePrefsPath())).toBe(false);
+  });
+});
+
+describe("handleConfig project ownership", () => {
+  beforeEach(() => {
+    const tmp = makeTempDir("cortex-config-project-ownership-");
+    tmpCleanup = tmp.cleanup;
+    cortexDir = path.join(tmp.path, ".cortex");
+    homeDir = path.join(tmp.path, "home");
+    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(homeDir, { recursive: true });
+
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    process.env.CORTEX_PATH = cortexDir;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    restoreEnv("HOME");
+    restoreEnv("USERPROFILE");
+    restoreEnv("CORTEX_PATH");
+    tmpCleanup?.();
+  });
+
+  it("shows and updates the default ownership mode", async () => {
+    const { handleConfig } = await importCliConfig();
+    const output = captureConsole();
+
+    await handleConfig(["project-ownership"]);
+    await handleConfig(["project-ownership", "detached"]);
+
+    const initial = JSON.parse(output.logs[0]);
+    const updated = JSON.parse(output.logs[1]);
+    expect(initial.effective.projectOwnershipDefault).toBe("cortex-managed");
+    expect(updated.configured.projectOwnershipDefault).toBe("detached");
+    expect(updated.effective.projectOwnershipDefault).toBe("detached");
+
+    const stored = JSON.parse(fs.readFileSync(installPrefsPath(), "utf8"));
+    expect(stored.projectOwnershipDefault).toBe("detached");
   });
 });

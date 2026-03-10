@@ -38,6 +38,12 @@ export {
   getHooksEnabledPreference,
   setHooksEnabledPreference,
 } from "./init-preferences.js";
+export {
+  PROJECT_OWNERSHIP_MODES,
+  type ProjectOwnershipMode,
+  parseProjectOwnershipMode,
+  getProjectOwnershipDefault,
+} from "./project-config.js";
 
 export {
   PROACTIVITY_LEVELS,
@@ -78,6 +84,7 @@ import {
   setMcpEnabledPreference,
   setHooksEnabledPreference,
   writeInstallPreferences,
+  writeGovernanceInstallPreferences,
   readInstallPreferences,
 } from "./init-preferences.js";
 
@@ -94,6 +101,14 @@ import {
 } from "./init-setup.js";
 
 import { DEFAULT_CORTEX_PATH, STARTER_DIR, VERSION, log, confirmPrompt } from "./init-shared.js";
+import {
+  PROJECT_OWNERSHIP_MODES,
+  type ProjectOwnershipMode,
+  parseProjectOwnershipMode,
+  getProjectOwnershipDefault,
+} from "./project-config.js";
+import { PROACTIVITY_LEVELS, type ProactivityLevel } from "./proactivity.js";
+import { getWorkflowPolicy, updateWorkflowPolicy } from "./shared-governance.js";
 
 export type McpMode = "on" | "off";
 
@@ -152,6 +167,10 @@ export interface InitOptions {
   profile?: string;
   mcp?: McpMode;
   hooks?: McpMode;
+  projectOwnershipDefault?: ProjectOwnershipMode;
+  findingsProactivity?: ProactivityLevel;
+  backlogProactivity?: ProactivityLevel;
+  taskMode?: "off" | "manual" | "suggest" | "auto";
   applyStarterUpdate?: boolean;
   dryRun?: boolean;
   yes?: boolean;
@@ -170,6 +189,10 @@ export interface InitOptions {
   _walkthroughSemanticConflict?: boolean;
   /** Set by walkthrough when user provides a git clone URL for existing cortex */
   _walkthroughCloneUrl?: string;
+  /** Set by walkthrough when the user wants the current repo enrolled immediately */
+  _walkthroughBootstrapCurrentProject?: boolean;
+  /** Set by walkthrough for the ownership mode selected for the current repo */
+  _walkthroughBootstrapOwnership?: ProjectOwnershipMode;
 }
 
 function normalizedBootstrapProjectName(projectPath: string): string {
@@ -205,8 +228,42 @@ function getPendingBootstrapTarget(cortexPath: string, opts: InitOptions): { pat
   return { path: cwdProject, mode: "detected" };
 }
 
+function parseTaskMode(raw: string | undefined | null): "off" | "manual" | "suggest" | "auto" | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  return ["off", "manual", "suggest", "auto"].includes(normalized)
+    ? normalized as "off" | "manual" | "suggest" | "auto"
+    : undefined;
+}
+
+function parseProactivityAnswer(raw: string | undefined | null, fallback: ProactivityLevel): ProactivityLevel {
+  const normalized = raw?.trim().toLowerCase();
+  if (normalized && PROACTIVITY_LEVELS.includes(normalized as ProactivityLevel)) {
+    return normalized as ProactivityLevel;
+  }
+  return fallback;
+}
+
 // Interactive walkthrough for first-time init
-async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp: McpMode; hooks: McpMode; ollamaEnabled: boolean; autoCaptureEnabled: boolean; semanticDedupEnabled: boolean; semanticConflictEnabled: boolean; githubUsername?: string; githubRepo?: string; cloneUrl?: string }> {
+async function runWalkthrough(cortexPath: string): Promise<{
+  machine: string;
+  profile: string;
+  mcp: McpMode;
+  hooks: McpMode;
+  projectOwnershipDefault: ProjectOwnershipMode;
+  findingsProactivity: ProactivityLevel;
+  backlogProactivity: ProactivityLevel;
+  taskMode: "off" | "manual" | "suggest" | "auto";
+  bootstrapCurrentProject: boolean;
+  bootstrapOwnership?: ProjectOwnershipMode;
+  ollamaEnabled: boolean;
+  autoCaptureEnabled: boolean;
+  semanticDedupEnabled: boolean;
+  semanticConflictEnabled: boolean;
+  githubUsername?: string;
+  githubRepo?: string;
+  cloneUrl?: string;
+}> {
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string): Promise<string> => new Promise(r => rl.question(q, r));
@@ -220,7 +277,22 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   const cloneAnswer = (await ask(`Clone URL (or Enter to skip): `)).trim();
   if (cloneAnswer) {
     rl.close();
-    return { machine: getMachineName(), profile: "personal", mcp: "on", hooks: "on", ollamaEnabled: false, autoCaptureEnabled: false, semanticDedupEnabled: false, semanticConflictEnabled: false, cloneUrl: cloneAnswer };
+    return {
+      machine: getMachineName(),
+      profile: "personal",
+      mcp: "on",
+      hooks: "on",
+      projectOwnershipDefault: "cortex-managed",
+      findingsProactivity: "high",
+      backlogProactivity: "medium",
+      taskMode: "manual",
+      bootstrapCurrentProject: false,
+      ollamaEnabled: false,
+      autoCaptureEnabled: false,
+      semanticDedupEnabled: false,
+      semanticConflictEnabled: false,
+      cloneUrl: cloneAnswer,
+    };
   }
 
   log("");
@@ -230,6 +302,15 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
 
   const profileAnswer = (await ask(`Profile name [personal]: `)).trim();
   const profile = profileAnswer || "personal";
+
+  log("\n─── Project Ownership ──────────────────────────────────────────────────");
+  log("Choose who owns repo-facing instruction files for projects you add.");
+  log("  cortex-managed: Cortex may mirror CLAUDE.md / AGENTS.md into the repo");
+  log("  detached: Cortex keeps its own docs but does not write into the repo");
+  log("  repo-managed: keep the repo's existing CLAUDE/AGENTS files as canonical");
+  log("  Change later: cortex config project-ownership <mode>");
+  const ownershipAnswer = (await ask(`Default project ownership [cortex-managed/detached/repo-managed] (detached): `)).trim();
+  const projectOwnershipDefault = parseProjectOwnershipMode(ownershipAnswer) ?? "detached";
 
   log("\n─── MCP ────────────────────────────────────────────────────────────────");
   log("MCP mode registers cortex as a tool server so your AI agent can call it");
@@ -300,6 +381,32 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   log("  - Can be toggled: set CORTEX_FEATURE_AUTO_CAPTURE=0 to disable");
   const autoCaptureAnswer = (await ask(`Enable auto-capture? [Y/n]: `)).trim().toLowerCase();
   const autoCaptureEnabled = !(autoCaptureAnswer === "n" || autoCaptureAnswer === "no");
+  let findingsProactivity: ProactivityLevel = "high";
+  if (autoCaptureEnabled) {
+    log("  Findings capture level controls how eager cortex is to save lessons automatically.");
+    log("  Change later: cortex config proactivity.findings <high|medium|low>");
+    const findingsAnswer = (await ask(`Findings capture level [high/medium/low] (high): `)).trim();
+    findingsProactivity = parseProactivityAnswer(findingsAnswer, "high");
+  } else {
+    findingsProactivity = "low";
+  }
+
+  log("\n─── Task Management ────────────────────────────────────────────────────");
+  log("Choose how far cortex should go when it sees actionable work in your prompts.");
+  log("  off: never touch backlog automatically");
+  log("  manual: backlog stays fully manual");
+  log("  suggest: propose tasks, but do not write them");
+  log("  auto: write/update active tasks when intent is clear");
+  log("  Change later: cortex config workflow set --taskMode=<mode>");
+  const taskModeAnswer = (await ask(`Task mode [off/manual/suggest/auto] (manual): `)).trim();
+  const taskMode = parseTaskMode(taskModeAnswer) ?? "manual";
+  let backlogProactivity: ProactivityLevel = "medium";
+  if (taskMode === "auto") {
+    log("  Backlog proactivity controls how much evidence cortex needs before auto-writing tasks.");
+    log("  Change later: cortex config proactivity.backlog <high|medium|low>");
+    const backlogAnswer = (await ask(`Backlog proactivity [high/medium/low] (medium): `)).trim();
+    backlogProactivity = parseProactivityAnswer(backlogAnswer, "medium");
+  }
 
   // Only offer semantic dedup/conflict when an LLM endpoint is explicitly configured.
   // These features call /chat/completions, not an embedding endpoint, so we gate on
@@ -346,10 +453,42 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
     githubRepo = repoAnswer || "my-cortex";
   }
 
+  let bootstrapCurrentProject = false;
+  let bootstrapOwnership: ProjectOwnershipMode | undefined;
+  const detectedProject = detectProjectDir(process.cwd(), cortexPath);
+  if (detectedProject) {
+    log("\n─── Current Project ───────────────────────────────────────────────────");
+    log(`Current directory looks like a project: ${detectedProject}`);
+    log("You can skip this now and add it later with `cortex add` or by saying yes when cortex asks in-session.");
+    const bootstrapAnswer = (await ask(`Add this project to cortex now? [Y/n]: `)).trim().toLowerCase();
+    bootstrapCurrentProject = !(bootstrapAnswer === "n" || bootstrapAnswer === "no");
+    if (bootstrapCurrentProject) {
+      const bootstrapOwnershipAnswer = (await ask(`Ownership for this project [cortex-managed/detached/repo-managed] (${projectOwnershipDefault}): `)).trim();
+      bootstrapOwnership = parseProjectOwnershipMode(bootstrapOwnershipAnswer) ?? projectOwnershipDefault;
+    }
+  }
+
   rl.close();
 
   log("");
-  return { machine, profile, mcp, hooks, ollamaEnabled, autoCaptureEnabled, semanticDedupEnabled, semanticConflictEnabled, githubUsername, githubRepo };
+  return {
+    machine,
+    profile,
+    mcp,
+    hooks,
+    projectOwnershipDefault,
+    findingsProactivity,
+    backlogProactivity,
+    taskMode,
+    bootstrapCurrentProject,
+    bootstrapOwnership,
+    ollamaEnabled,
+    autoCaptureEnabled,
+    semanticDedupEnabled,
+    semanticConflictEnabled,
+    githubUsername,
+    githubRepo,
+  };
 }
 
 export async function warmSemanticSearch(cortexPath: string, profile?: string): Promise<string> {
@@ -396,6 +535,24 @@ export async function warmSemanticSearch(cortexPath: string, profile?: string): 
   }
 }
 
+function applyOnboardingPreferences(cortexPath: string, opts: InitOptions): void {
+  if (opts.projectOwnershipDefault) {
+    writeInstallPreferences(cortexPath, { projectOwnershipDefault: opts.projectOwnershipDefault });
+  }
+  const governancePatch: {
+    proactivityFindings?: ProactivityLevel;
+    proactivityBacklog?: ProactivityLevel;
+  } = {};
+  if (opts.findingsProactivity) governancePatch.proactivityFindings = opts.findingsProactivity;
+  if (opts.backlogProactivity) governancePatch.proactivityBacklog = opts.backlogProactivity;
+  if (Object.keys(governancePatch).length > 0) {
+    writeGovernanceInstallPreferences(cortexPath, governancePatch);
+  }
+  if (opts.taskMode) {
+    updateWorkflowPolicy(cortexPath, { taskMode: opts.taskMode });
+  }
+}
+
 export async function runInit(opts: InitOptions = {}) {
   const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
   const dryRun = Boolean(opts.dryRun);
@@ -411,11 +568,15 @@ export async function runInit(opts: InitOptions = {}) {
 
   // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
   if (!hasExistingInstall && !dryRun && !opts.yes && process.stdin.isTTY && process.stdout.isTTY) {
-    const answers = await runWalkthrough();
+    const answers = await runWalkthrough(cortexPath);
     opts.machine = opts.machine || answers.machine;
     opts.profile = opts.profile || answers.profile;
     opts.mcp = opts.mcp || answers.mcp;
     opts.hooks = opts.hooks || answers.hooks;
+    opts.projectOwnershipDefault = opts.projectOwnershipDefault || answers.projectOwnershipDefault;
+    opts.findingsProactivity = opts.findingsProactivity || answers.findingsProactivity;
+    opts.backlogProactivity = opts.backlogProactivity || answers.backlogProactivity;
+    opts.taskMode = opts.taskMode || answers.taskMode;
     if (answers.cloneUrl) {
       opts._walkthroughCloneUrl = answers.cloneUrl;
     }
@@ -438,6 +599,8 @@ export async function runInit(opts: InitOptions = {}) {
     if (answers.semanticConflictEnabled) {
       opts._walkthroughSemanticConflict = true;
     }
+    opts._walkthroughBootstrapCurrentProject = answers.bootstrapCurrentProject;
+    opts._walkthroughBootstrapOwnership = answers.bootstrapOwnership;
   }
 
   // If the walkthrough provided a clone URL, clone it and treat as existing install
@@ -459,9 +622,42 @@ export async function runInit(opts: InitOptions = {}) {
 
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
   const hooksEnabled = opts.hooks ? opts.hooks === "on" : getHooksEnabledPreference(cortexPath);
+  const ownershipDefault = opts.projectOwnershipDefault ?? getProjectOwnershipDefault(cortexPath);
   const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
   const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
   const pendingBootstrap = getPendingBootstrapTarget(cortexPath, opts);
+  let shouldBootstrapCurrentProject = opts._walkthroughBootstrapCurrentProject === true;
+  let bootstrapOwnership = opts._walkthroughBootstrapOwnership ?? ownershipDefault;
+
+  if (pendingBootstrap && !dryRun) {
+    const walkthroughAlreadyHandled = opts._walkthroughBootstrapCurrentProject !== undefined;
+    if (walkthroughAlreadyHandled) {
+      shouldBootstrapCurrentProject = opts._walkthroughBootstrapCurrentProject === true;
+      bootstrapOwnership = opts._walkthroughBootstrapOwnership ?? ownershipDefault;
+    } else if (opts.yes || !process.stdin.isTTY || !process.stdout.isTTY) {
+      shouldBootstrapCurrentProject = true;
+      bootstrapOwnership = ownershipDefault;
+    } else {
+      log("\n─── Current Project ───────────────────────────────────────────────────");
+      log(`Current directory looks like a project: ${pendingBootstrap.path}`);
+      log("You can skip this now and add it later with `cortex add`, or say yes when cortex asks in-session.");
+      const shouldAdd = await confirmPrompt("Add this project to cortex now?");
+      shouldBootstrapCurrentProject = shouldAdd;
+      if (!shouldAdd) {
+        log(`  Skipped. Later: cd ${pendingBootstrap.path} && cortex add`);
+      } else {
+        const readline = await import("readline");
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise<string>((resolve) =>
+          rl.question(`Ownership for this project [cortex-managed/detached/repo-managed] (${ownershipDefault}): `, (input) => {
+            rl.close();
+            resolve(input.trim());
+          })
+        );
+        bootstrapOwnership = parseProjectOwnershipMode(answer) ?? ownershipDefault;
+      }
+    }
+  }
 
   if (dryRun) {
     log("\nInit dry run. No files will be written.\n");
@@ -476,7 +672,7 @@ export async function runInit(opts: InitOptions = {}) {
         log(`  Reconfigure lifecycle hooks for detected tools`);
       }
       if (pendingBootstrap?.mode === "detected") {
-        log(`  Would auto-bootstrap current project directory (${pendingBootstrap.path})`);
+        log(`  Would offer to add current project directory (${pendingBootstrap.path})`);
       }
       if (opts.applyStarterUpdate) {
         log(`  Apply starter template updates to global/CLAUDE.md and global skills`);
@@ -498,7 +694,7 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  Configure lifecycle hooks for detected tools`);
     }
     if (pendingBootstrap?.mode === "detected") {
-      log(`  Would auto-bootstrap current project directory (${pendingBootstrap.path})`);
+      log(`  Would offer to add current project directory (${pendingBootstrap.path})`);
     }
     log(`  Write install preferences and run post-init verification checks`);
     log(`\nDry run complete.\n`);
@@ -507,10 +703,13 @@ export async function runInit(opts: InitOptions = {}) {
 
   if (hasExistingInstall) {
       ensureGovernanceFiles(cortexPath);
+      applyOnboardingPreferences(cortexPath, opts);
       log(`\ncortex already exists at ${cortexPath}`);
       log(`Updating configuration...\n`);
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
+      log(`  Default project ownership: ${ownershipDefault}`);
+      log(`  Task mode: ${getWorkflowPolicy(cortexPath).taskMode}`);
 
       // Confirmation prompt before writing config
       if (!opts.yes) {
@@ -596,17 +795,15 @@ export async function runInit(opts: InitOptions = {}) {
         log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
       }
 
-      // Auto-detect: if CWD looks like a project, bootstrap it automatically.
-      const cwdProject = detectProjectDir(process.cwd(), cortexPath);
-      if (cwdProject) {
-        const projectName = normalizedBootstrapProjectName(cwdProject);
-        if (!isProjectTracked(cortexPath, projectName)) {
-          try {
-            const created = bootstrapFromExisting(cortexPath, cwdProject, opts.profile);
-            log(`\nDetected project in current directory — bootstrapped "${created}"`);
-          } catch (e: unknown) {
-            debugLog(`Auto-bootstrap from CWD failed: ${e instanceof Error ? e.message : String(e)}`);
-          }
+      if (pendingBootstrap && shouldBootstrapCurrentProject) {
+        try {
+          const created = bootstrapFromExisting(cortexPath, pendingBootstrap.path, {
+            profile: opts.profile,
+            ownership: bootstrapOwnership,
+          });
+          log(`\nAdded current project "${created.project}" (${created.ownership})`);
+        } catch (e: unknown) {
+          debugLog(`Bootstrap from CWD failed: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
@@ -614,8 +811,9 @@ export async function runInit(opts: InitOptions = {}) {
       log(`\nNext steps:`);
       log(`  1. Start a new Claude session in your project directory — cortex injects context automatically`);
       log(`  2. Run \`cortex doctor\` to verify everything is wired correctly`);
-      log(`  3. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
-      log(`  4. After working across projects, run /cortex-consolidate to find cross-project patterns`);
+      log(`  3. Change defaults anytime: \`cortex config project-ownership\`, \`cortex config workflow\`, \`cortex config proactivity.findings\`, \`cortex config proactivity.backlog\``);
+      log(`  4. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
+      log(`  5. After working across projects, run /cortex-consolidate to find cross-project patterns`);
       log(``);
       return;
   }
@@ -729,15 +927,18 @@ export async function runInit(opts: InitOptions = {}) {
     );
   }
 
-  // If CWD is a project dir, bootstrap it now (replaces the old my-first-project flow)
-  if (cwdProjectPath) {
+  // If CWD is a project dir, bootstrap it now when onboarding or defaults allow it.
+  if (cwdProjectPath && shouldBootstrapCurrentProject) {
     try {
-      const created = bootstrapFromExisting(cortexPath, cwdProjectPath, opts.profile);
-      log(`  Detected project in current directory — bootstrapped "${created}"`);
+      const created = bootstrapFromExisting(cortexPath, cwdProjectPath, {
+        profile: opts.profile,
+        ownership: bootstrapOwnership,
+      });
+      log(`  Added current project "${created.project}" (${created.ownership})`);
     } catch (e: unknown) {
-      // Fresh-install auto-bootstrap is best-effort. If it fails, the install
+      // Fresh-install bootstrap is best-effort. If it fails, the install
       // still succeeded and the user can add the project explicitly later.
-      debugLog(`Auto-bootstrap from CWD during fresh install failed: ${e instanceof Error ? e.message : String(e)}`);
+      debugLog(`Bootstrap from CWD during fresh install failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -746,9 +947,12 @@ export async function runInit(opts: InitOptions = {}) {
   persistMachineName(effectiveMachine);
   updateMachinesYaml(cortexPath, effectiveMachine, opts.profile);
   ensureGovernanceFiles(cortexPath);
+  applyOnboardingPreferences(cortexPath, opts);
   log(`  Updated machines.yaml with machine "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
+  log(`  Default project ownership: ${ownershipDefault}`);
+  log(`  Task mode: ${getWorkflowPolicy(cortexPath).taskMode}`);
 
   // Confirmation prompt before writing agent config
   if (!opts.yes) {
@@ -897,6 +1101,7 @@ export async function runInit(opts: InitOptions = {}) {
   let step = 1;
   log(`  ${step++}. Start a new Claude session in your project directory — cortex injects context automatically`);
   log(`  ${step++}. Run \`cortex doctor\` to verify everything is wired correctly`);
+  log(`  ${step++}. Change defaults anytime: \`cortex config project-ownership\`, \`cortex config workflow\`, \`cortex config proactivity.findings\`, \`cortex config proactivity.backlog\``);
 
   const gh = opts._walkthroughGithub;
   if (gh) {

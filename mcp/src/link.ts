@@ -42,6 +42,11 @@ import { syncScopeSkillsToDir } from "./skill-files.js";
 import { renderSkillInstructionsSection } from "./skill-registry.js";
 import { findProjectDir } from "./project-locator.js";
 import {
+  getProjectOwnershipMode,
+  readProjectConfig,
+  type ProjectMcpServerEntry,
+} from "./project-config.js";
+import {
   writeContextDefault,
   writeContextDebugging,
   writeContextPlanning,
@@ -88,22 +93,6 @@ export interface DoctorResult {
   machine?: string;
   profile?: string;
   checks: Array<{ name: string; ok: boolean; detail: string }>;
-}
-
-interface McpServerEntry {
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
-}
-
-interface ProjectConfig {
-  skills?: boolean;
-  hooks?: {
-    UserPromptSubmit?: boolean;
-    Stop?: boolean;
-    SessionStart?: boolean;
-  };
-  mcpServers?: Record<string, McpServerEntry>;
 }
 
 // ── Helpers (exported for link-doctor) ──────────────────────────────────────
@@ -155,18 +144,6 @@ function currentPackageVersion(): string | null {
   } catch (err: unknown) {
     debugLog(`currentPackageVersion: failed to read package.json: ${errorMessage(err)}`);
     return null;
-  }
-}
-
-function readProjectConfig(cortexPath: string, project: string): ProjectConfig {
-  const configPath = path.join(cortexPath, project, "cortex.project.yaml");
-  if (!fs.existsSync(configPath)) return {};
-  try {
-    const parsed = yaml.load(fs.readFileSync(configPath, "utf8"), { schema: yaml.CORE_SCHEMA });
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProjectConfig : {};
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readProjectConfig: ${errorMessage(err)}\n`);
-    return {};
   }
 }
 
@@ -334,8 +311,28 @@ function linkGlobal(cortexPath: string, tools: Set<string>) {
 }
 
 function linkProject(cortexPath: string, project: string, tools: Set<string>) {
+  const config = readProjectConfig(cortexPath, project);
+  const ownership = getProjectOwnershipMode(cortexPath, project, config);
   const target = findProjectDir(project);
-  if (!target) { log(`  skip ${project} (not found on disk)`); return; }
+  if (!target && ownership === "cortex-managed") {
+    log(`  skip ${project} (not found on disk)`);
+    if (isRecord(config.mcpServers)) {
+      linkProjectMcpServers(project, config.mcpServers as Record<string, ProjectMcpServerEntry>);
+    }
+    return;
+  }
+  if (ownership !== "cortex-managed") {
+    if (target) {
+      log(`  ${project} -> ${target} (${ownership}, repo mirrors disabled)`);
+    } else {
+      log(`  ${project} (${ownership}, repo mirrors disabled)`);
+    }
+    if (isRecord(config.mcpServers)) {
+      linkProjectMcpServers(project, config.mcpServers as Record<string, ProjectMcpServerEntry>);
+    }
+    return;
+  }
+  if (!target) return;
   log(`  ${project} -> ${target}`);
 
   for (const f of ["CLAUDE.md", "REFERENCE.md", "FINDINGS.md"]) {
@@ -373,7 +370,6 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   }
 
   // Project-level skills
-  const config = readProjectConfig(cortexPath, project);
   const targetSkills = path.join(target, ".claude", "skills");
   const skillManifest = config.skills !== false
     ? syncScopeSkillsToDir(cortexPath, project, targetSkills)
@@ -400,7 +396,7 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
  * Keys are namespaced as "cortex__<project>__<name>" so we can identify
  * and clean them up without touching user-managed servers.
  */
-function linkProjectMcpServers(project: string, servers: Record<string, McpServerEntry>): void {
+function linkProjectMcpServers(project: string, servers: Record<string, ProjectMcpServerEntry>): void {
   const settingsPath = hookConfigPath("claude");
   if (!fs.existsSync(settingsPath) && Object.keys(servers).length === 0) return;
   try {

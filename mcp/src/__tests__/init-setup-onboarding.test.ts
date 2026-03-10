@@ -38,8 +38,8 @@ describe("init setup onboarding helpers", () => {
   });
 
   it("adds the exact project to the selected profile without substring collisions", () => {
-    const projectName = bootstrapFromExisting(cortexPath, projectRoot, "work");
-    expect(projectName).toBe("app");
+    const projectResult = bootstrapFromExisting(cortexPath, projectRoot, "work");
+    expect(projectResult.project).toBe("app");
 
     const personal = fs.readFileSync(path.join(cortexPath, "profiles", "personal.yaml"), "utf8");
     const work = fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8");
@@ -50,9 +50,9 @@ describe("init setup onboarding helpers", () => {
   });
 
   it("falls back to the machine-mapped profile when none is provided", () => {
-    const projectName = bootstrapFromExisting(cortexPath, projectRoot);
+    const projectResult = bootstrapFromExisting(cortexPath, projectRoot);
 
-    expect(projectName).toBe("app");
+    expect(projectResult.project).toBe("app");
     expect(fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8")).toMatch(/\n\s*-\s+app\n/);
     expect(fs.readFileSync(path.join(cortexPath, "profiles", "personal.yaml"), "utf8")).not.toMatch(/\n\s*-\s+app\n/);
   });
@@ -77,5 +77,15 @@ describe("init setup onboarding helpers", () => {
 
     expect(fs.readFileSync(claudePath, "utf8")).toContain("Curated cortex CLAUDE.");
     expect(fs.readFileSync(claudePath, "utf8")).not.toContain("App project.");
+  });
+
+  it("supports repo-managed ownership without creating a competing cortex CLAUDE.md", () => {
+    const result = bootstrapFromExisting(cortexPath, projectRoot, { profile: "work", ownership: "repo-managed" });
+
+    expect(result.project).toBe("app");
+    expect(result.ownership).toBe("repo-managed");
+    expect(result.claudePath).toBe(path.join(projectRoot, "CLAUDE.md"));
+    expect(fs.existsSync(path.join(cortexPath, "app", "CLAUDE.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(cortexPath, "app", "cortex.project.yaml"), "utf8")).toContain("ownership: repo-managed");
   });
 });

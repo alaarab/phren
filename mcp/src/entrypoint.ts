@@ -4,6 +4,12 @@ import { parseMcpMode, runInit } from "./init.js";
 import { errorMessage } from "./utils.js";
 import { defaultCortexPath } from "./shared.js";
 import { addProjectFromPath } from "./core-project.js";
+import {
+  PROJECT_OWNERSHIP_MODES,
+  getProjectOwnershipDefault,
+  parseProjectOwnershipMode,
+  type ProjectOwnershipMode,
+} from "./project-config.js";
 
 
 const HELP_TEXT = `cortex - Long-term memory for Claude Code
@@ -11,9 +17,9 @@ const HELP_TEXT = `cortex - Long-term memory for Claude Code
 Usage:
   cortex                                 Open interactive shell
   cortex quickstart                      Quick setup: init + project scaffold
-  cortex add [path]                      Add current directory (or path) as a cortex project
+  cortex add [path] [--ownership <mode>] Add current directory (or path) as a cortex project
   cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--dry-run] [-y]
-                                         Set up cortex and auto-bootstrap the current project directory
+                                         Set up cortex and offer to add the current project directory
   cortex projects list                   List all tracked projects
   cortex projects remove <name>          Remove a project (asks for confirmation)
   cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
@@ -45,6 +51,7 @@ Configuration:
   cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds
   cortex config access [get|set ...]     Role-based permissions
   cortex config index [get|set ...]      Indexer include/exclude globs
+  cortex config project-ownership [mode] Default ownership for future project enrollments
   cortex config machines                 Registered machines
   cortex config profiles                 Profiles and projects
 
@@ -95,6 +102,7 @@ Examples:
   cortex add-finding my-app "Redis connections need explicit close in finally blocks"
   cortex doctor --fix                    Fix common config issues
   cortex config policy set --ttlDays=90  Change memory retention to 90 days
+  cortex config project-ownership detached
   cortex maintain govern my-app          Queue stale memories for review
   cortex status                          Quick health check
 `;
@@ -149,6 +157,60 @@ async function finish(exitCode?: number): Promise<true> {
   return true;
 }
 
+function getOptionValue(args: string[], name: string): string | undefined {
+  const exactIdx = args.indexOf(name);
+  if (exactIdx !== -1) return args[exactIdx + 1];
+  const prefixed = args.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : undefined;
+}
+
+function getPositionalArgs(args: string[], optionNamesWithValues: string[]): string[] {
+  const positions: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (optionNamesWithValues.includes(arg)) {
+      i += 1;
+      continue;
+    }
+    if (optionNamesWithValues.some((name) => arg.startsWith(`${name}=`))) {
+      continue;
+    }
+    if (!arg.startsWith("--")) positions.push(arg);
+  }
+  return positions;
+}
+
+function parseTaskModeFlag(raw: string | undefined): "off" | "manual" | "suggest" | "auto" | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  return ["off", "manual", "suggest", "auto"].includes(normalized)
+    ? normalized as "off" | "manual" | "suggest" | "auto"
+    : undefined;
+}
+
+function parseProactivityFlag(raw: string | undefined): "high" | "medium" | "low" | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  return ["high", "medium", "low"].includes(normalized)
+    ? normalized as "high" | "medium" | "low"
+    : undefined;
+}
+
+async function promptProjectOwnership(cortexPath: string, fallback: ProjectOwnershipMode): Promise<ProjectOwnershipMode> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return fallback;
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(
+      `Project ownership [${PROJECT_OWNERSHIP_MODES.join("/")}] (${fallback}): `,
+      (input) => {
+        rl.close();
+        resolve(parseProjectOwnershipMode(input.trim()) ?? fallback);
+      }
+    );
+  });
+}
+
 export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   const argvCommand = argv[0];
 
@@ -158,21 +220,30 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "add") {
-    const targetPath = argv[1] || process.cwd();
+    const positional = getPositionalArgs(argv.slice(1), ["--ownership"]);
+    const targetPath = positional[0] || process.cwd();
+    const ownershipArg = getOptionValue(argv.slice(1), "--ownership");
     const cortexPath = defaultCortexPath();
     const profile = process.env.CORTEX_PROFILE || undefined;
     if (!fs.existsSync(cortexPath) || !fs.existsSync(path.join(cortexPath, ".governance"))) {
       console.log("cortex is not set up yet. Run: npx @alaarab/cortex init");
       return finish(1);
     }
+    const ownership = ownershipArg
+      ? parseProjectOwnershipMode(ownershipArg)
+      : await promptProjectOwnership(cortexPath, getProjectOwnershipDefault(cortexPath));
+    if (ownershipArg && !ownership) {
+      console.error(`Invalid --ownership value "${ownershipArg}". Use one of: ${PROJECT_OWNERSHIP_MODES.join(", ")}`);
+      return finish(1);
+    }
     try {
-      const added = addProjectFromPath(cortexPath, path.resolve(targetPath), profile);
+      const added = addProjectFromPath(cortexPath, path.resolve(targetPath), profile, ownership);
       if (!added.ok) {
         console.error(added.error);
         return finish(1);
       }
-      console.log(`Added project "${added.data.project}"`);
-      console.log(`  ${added.data.files.claude}`);
+      console.log(`Added project "${added.data.project}" (${added.data.ownership})`);
+      if (added.data.files.claude) console.log(`  ${added.data.files.claude}`);
       console.log(`  ${added.data.files.findings}`);
       console.log(`  ${added.data.files.backlog}`);
       console.log(`  ${added.data.files.summary}`);
@@ -189,15 +260,43 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const profileIdx = initArgs.indexOf("--profile");
     const mcpIdx = initArgs.indexOf("--mcp");
     const templateIdx = initArgs.indexOf("--template");
+    const ownershipMode = parseProjectOwnershipMode(getOptionValue(initArgs, "--project-ownership"));
+    const taskMode = parseTaskModeFlag(getOptionValue(initArgs, "--task-mode"));
+    const findingsProactivity = parseProactivityFlag(getOptionValue(initArgs, "--findings-proactivity"));
+    const backlogProactivity = parseProactivityFlag(getOptionValue(initArgs, "--backlog-proactivity"));
     const mcpMode = mcpIdx !== -1 ? parseMcpMode(initArgs[mcpIdx + 1]) : undefined;
     if (mcpIdx !== -1 && !mcpMode) {
       console.error(`Invalid --mcp value "${initArgs[mcpIdx + 1] || ""}". Use "on" or "off".`);
+      return finish(1);
+    }
+    const ownershipArg = getOptionValue(initArgs, "--project-ownership");
+    if (ownershipArg && !ownershipMode) {
+      console.error(`Invalid --project-ownership value "${ownershipArg}". Use one of: ${PROJECT_OWNERSHIP_MODES.join(", ")}`);
+      return finish(1);
+    }
+    const taskModeArg = getOptionValue(initArgs, "--task-mode");
+    if (taskModeArg && !taskMode) {
+      console.error(`Invalid --task-mode value "${taskModeArg}". Use one of: off, manual, suggest, auto.`);
+      return finish(1);
+    }
+    const findingsArg = getOptionValue(initArgs, "--findings-proactivity");
+    if (findingsArg && !findingsProactivity) {
+      console.error(`Invalid --findings-proactivity value "${findingsArg}". Use one of: high, medium, low.`);
+      return finish(1);
+    }
+    const backlogArg = getOptionValue(initArgs, "--backlog-proactivity");
+    if (backlogArg && !backlogProactivity) {
+      console.error(`Invalid --backlog-proactivity value "${backlogArg}". Use one of: high, medium, low.`);
       return finish(1);
     }
     await runInit({
       machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
       profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
       mcp: mcpMode,
+      projectOwnershipDefault: ownershipMode,
+      taskMode,
+      findingsProactivity,
+      backlogProactivity,
       template: templateIdx !== -1 ? initArgs[templateIdx + 1] : undefined,
       applyStarterUpdate: initArgs.includes("--apply-starter-update"),
       dryRun: initArgs.includes("--dry-run"),

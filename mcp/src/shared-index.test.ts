@@ -38,6 +38,7 @@ beforeEach(() => {
   delete process.env.CORTEX_PATH;
   delete process.env.CORTEX_PROFILE;
   delete process.env.CORTEX_DEBUG;
+  delete process.env.PROJECTS_DIR;
 });
 
 afterEach(() => {
@@ -45,6 +46,7 @@ afterEach(() => {
   delete process.env.CORTEX_PROFILE;
   delete process.env.CORTEX_DEBUG;
   delete process.env.CORTEX_ACTOR;
+  delete process.env.PROJECTS_DIR;
   if (tmpCleanup) {
     tmpCleanup();
     tmpCleanup = undefined;
@@ -379,6 +381,32 @@ describe("buildIndex", () => {
     const db = await buildIndex(cortex);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["imported"]);
     expect(rows).not.toBeNull();
+    db.close();
+  });
+
+  it("indexes repo-owned CLAUDE.md for repo-managed projects instead of the cortex copy", async () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const projectsDir = path.join(cortex, "..", "repos");
+    process.env.PROJECTS_DIR = projectsDir;
+    fs.mkdirSync(path.join(projectsDir, "proj"), { recursive: true });
+    writeFile(path.join(projectsDir, "proj", "CLAUDE.md"), "# Repo Instructions\nrepoownedtoken");
+
+    makeProject(cortex, "proj", {
+      "CLAUDE.md": "# Cortex Instructions\ncortexcopytoken",
+      "FINDINGS.md": "- searchable finding",
+      "cortex.project.yaml": "ownership: repo-managed\n",
+    });
+
+    const db = await buildIndex(cortex);
+    const repoRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["repoownedtoken"]);
+    const cortexRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["cortexcopytoken"]);
+    const claudeDoc = queryDocBySourceKey(db, cortex, "proj/CLAUDE.md");
+
+    expect(repoRows).not.toBeNull();
+    expect(cortexRows).toBeNull();
+    expect(claudeDoc?.content).toContain("repoownedtoken");
+    expect(claudeDoc?.content).not.toContain("cortexcopytoken");
     db.close();
   });
 

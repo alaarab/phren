@@ -11,6 +11,7 @@ import type { CustomHookEntry } from "./hooks.js";
 export interface InstallPreferences {
   mcpEnabled?: boolean;
   hooksEnabled?: boolean;
+  projectOwnershipDefault?: "cortex-managed" | "detached" | "repo-managed";
   proactivity?: "high" | "medium" | "low";
   proactivityFindings?: "high" | "medium" | "low";
   proactivityBacklog?: "high" | "medium" | "low";

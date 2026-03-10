@@ -131,7 +131,8 @@ describe.sequential("workflow integration", () => {
     await suppressOutput(() => runTopLevelCommand(["add", repoB]));
     expect(fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8")).toContain("- repo-b");
     expect(getUntrackedProjectNotice(cortexPath, repoB)).toBeNull();
-    expect(getUntrackedProjectNotice(cortexPath, repoD)).toContain("Ask the user whether they want to add it to cortex.");
+    expect(getUntrackedProjectNotice(cortexPath, repoD)).toContain("Ask the user whether they want to add it to cortex now.");
+    expect(getUntrackedProjectNotice(cortexPath, repoD)).toContain("ownership=\"cortex-managed\"|\"detached\"|\"repo-managed\"");
 
     process.env.CORTEX_ACTOR = "workflow-admin";
     grantAdmin(cortexPath);

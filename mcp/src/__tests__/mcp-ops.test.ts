@@ -237,8 +237,21 @@ describe("mcp-ops: add_project", () => {
     const res = parseResult(await server.call("add_project", { path: repoDir }));
     expect(res.ok).toBe(true);
     expect(res.data.project).toBe("repo");
+    expect(res.data.ownership).toBe("cortex-managed");
     expect(fs.readFileSync(path.join(tmp.path, "profiles", "work.yaml"), "utf8")).toContain("- repo");
     expect(fs.readFileSync(path.join(tmp.path, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
+  });
+
+  it("accepts an explicit ownership mode", async () => {
+    const externalRepo = path.join(tmp.path, "workspace", "repo-managed");
+    fs.mkdirSync(path.join(externalRepo, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(externalRepo, "CLAUDE.md"), "# repo\n");
+
+    const res = parseResult(await server.call("add_project", { path: externalRepo, ownership: "repo-managed" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.ownership).toBe("repo-managed");
+    expect(fs.existsSync(path.join(tmp.path, "repo-managed", "CLAUDE.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(tmp.path, "repo-managed", "cortex.project.yaml"), "utf8")).toContain("ownership: repo-managed");
   });
 
   it("requires an explicit path", async () => {

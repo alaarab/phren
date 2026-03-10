@@ -44,7 +44,6 @@ export interface CortexClientOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
-const HEADER_SEPARATOR = "\r\n\r\n";
 
 export class CortexClient {
   private readonly options: CortexClientOptions;
@@ -183,13 +182,12 @@ export class CortexClient {
       return;
     }
 
-    const payload = JSON.stringify({
+    const message = JSON.stringify({
       jsonrpc: "2.0",
       method,
       ...(params ? { params } : {}),
     });
-    const message = `Content-Length: ${Buffer.byteLength(payload, "utf8")}${HEADER_SEPARATOR}${payload}`;
-    this.process.stdin.write(message, "utf8");
+    this.process.stdin.write(message + "\n", "utf8");
   }
 
   private async sendRequest<T>(method: string, params: Record<string, unknown>): Promise<T> {
@@ -198,13 +196,12 @@ export class CortexClient {
     }
 
     const id = this.nextId++;
-    const payload = JSON.stringify({
+    const message = JSON.stringify({
       jsonrpc: "2.0",
       id,
       method,
       params,
     });
-    const message = `Content-Length: ${Buffer.byteLength(payload, "utf8")}${HEADER_SEPARATOR}${payload}`;
 
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -218,7 +215,7 @@ export class CortexClient {
         timeout,
       });
 
-      this.process.stdin.write(message, "utf8", (error) => {
+      this.process.stdin.write(message + "\n", "utf8", (error) => {
         if (!error) {
           return;
         }
@@ -241,34 +238,23 @@ export class CortexClient {
     this.buffer = Buffer.concat([this.buffer, chunk]);
 
     while (true) {
-      const headerEnd = this.buffer.indexOf(HEADER_SEPARATOR);
-      if (headerEnd === -1) {
+      const newlineIndex = this.buffer.indexOf(0x0a); // \n
+      if (newlineIndex === -1) {
         return;
       }
 
-      const headerText = this.buffer.subarray(0, headerEnd).toString("utf8");
-      const contentLengthMatch = /Content-Length:\s*(\d+)/i.exec(headerText);
-      if (!contentLengthMatch) {
-        this.buffer = this.buffer.subarray(headerEnd + HEADER_SEPARATOR.length);
+      const line = this.buffer.subarray(0, newlineIndex).toString("utf8").replace(/\r$/, "");
+      this.buffer = this.buffer.subarray(newlineIndex + 1);
+
+      if (line.length === 0) {
         continue;
       }
 
-      const contentLength = Number.parseInt(contentLengthMatch[1], 10);
-      const bodyStart = headerEnd + HEADER_SEPARATOR.length;
-      const bodyEnd = bodyStart + contentLength;
-
-      if (this.buffer.length < bodyEnd) {
-        return;
-      }
-
-      const bodyText = this.buffer.subarray(bodyStart, bodyEnd).toString("utf8");
-      this.buffer = this.buffer.subarray(bodyEnd);
-
       try {
-        const message = JSON.parse(bodyText) as JsonRpcResponse<unknown>;
+        const message = JSON.parse(line) as JsonRpcResponse<unknown>;
         this.handleMessage(message);
       } catch (error) {
-        console.error(`[cortex-mcp] Failed to parse JSON-RPC payload: ${String(error)}`);
+        console.error(`[cortex-mcp] Failed to parse JSON-RPC line: ${String(error)}`);
       }
     }
   }

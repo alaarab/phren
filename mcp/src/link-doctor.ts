@@ -30,6 +30,7 @@ import {
 } from "./link.js";
 import { claudeProjectKey } from "./link-context.js";
 import type { DoctorResult } from "./link.js";
+import { getProjectOwnershipMode, readProjectConfig } from "./project-config.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
@@ -277,7 +278,17 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
 
   for (const project of projects) {
     if (project === "global") continue;
+    const config = readProjectConfig(cortexPath, project);
+    const ownership = getProjectOwnershipMode(cortexPath, project, config);
     const target = findProjectDir(project);
+    if (ownership !== "cortex-managed") {
+      checks.push({
+        name: `ownership:${project}`,
+        ok: true,
+        detail: `repo mirrors disabled (${ownership})`,
+      });
+      continue;
+    }
     if (!target) {
       checks.push({ name: `project-path:${project}`, ok: false, detail: "project directory not found on disk" });
       continue;

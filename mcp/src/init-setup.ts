@@ -23,6 +23,13 @@ import {
 import { errorMessage } from "./utils.js";
 import { ROOT, STARTER_DIR, VERSION, resolveEntryScript } from "./init-shared.js";
 import { readInstallPreferences } from "./init-preferences.js";
+import {
+  getProjectOwnershipDefault,
+  parseProjectOwnershipMode,
+  readProjectConfig,
+  writeProjectConfig,
+  type ProjectOwnershipMode,
+} from "./project-config.js";
 
 function atomicWriteText(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -36,6 +43,17 @@ export interface PostInitCheck {
   ok: boolean;
   detail: string;
   fix?: string;
+}
+
+export interface BootstrapProjectOptions {
+  profile?: string;
+  ownership?: ProjectOwnershipMode;
+}
+
+export interface BootstrapProjectResult {
+  project: string;
+  ownership: ProjectOwnershipMode;
+  claudePath: string | null;
 }
 
 function isExpectedVerifyFailure(cortexPath: string, check: Pick<PostInitCheck, "name" | "ok">): boolean {
@@ -311,7 +329,12 @@ export function applyTemplate(projectDir: string, templateName: string, projectN
 /** Bootstrap a cortex project from an existing project directory with CLAUDE.md.
  * @param profile - if provided, only this profile YAML is updated (avoids leaking project to unrelated profiles).
  */
-export function bootstrapFromExisting(cortexPath: string, projectPath: string, profile?: string): string {
+export function bootstrapFromExisting(
+  cortexPath: string,
+  projectPath: string,
+  opts: string | BootstrapProjectOptions = {}
+): BootstrapProjectResult {
+  const profile = typeof opts === "string" ? opts : opts.profile;
   const resolvedPath = path.resolve(projectPath);
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(`Path does not exist: ${resolvedPath}`);
@@ -339,19 +362,25 @@ export function bootstrapFromExisting(cortexPath: string, projectPath: string, p
   }
   const projDir = path.join(cortexPath, projectName);
   fs.mkdirSync(projDir, { recursive: true });
+  const existingConfig = readProjectConfig(cortexPath, projectName);
+  const ownership = typeof opts === "string"
+    ? (parseProjectOwnershipMode(existingConfig.ownership) ?? getProjectOwnershipDefault(cortexPath))
+    : (opts.ownership ?? parseProjectOwnershipMode(existingConfig.ownership) ?? getProjectOwnershipDefault(cortexPath));
 
   const claudePath = path.join(projDir, "CLAUDE.md");
-  if (claudeContent) {
-    if (!fs.existsSync(claudePath)) {
-      atomicWriteText(claudePath, claudeContent);
-    }
-  } else {
-    // No CLAUDE.md found — create a starter one
-    if (!fs.existsSync(claudePath)) {
-      atomicWriteText(
-        claudePath,
-        `# ${projectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
-      );
+  if (ownership !== "repo-managed") {
+    if (claudeContent) {
+      if (!fs.existsSync(claudePath)) {
+        atomicWriteText(claudePath, claudeContent);
+      }
+    } else {
+      // No CLAUDE.md found — create a starter one
+      if (!fs.existsSync(claudePath)) {
+        atomicWriteText(
+          claudePath,
+          `# ${projectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
+        );
+      }
     }
   }
 
@@ -407,7 +436,15 @@ export function bootstrapFromExisting(cortexPath: string, projectPath: string, p
     throw new Error(activeProfile.error);
   }
 
-  return projectName;
+  writeProjectConfig(cortexPath, projectName, { ownership });
+
+  return {
+    project: projectName,
+    ownership,
+    claudePath: ownership === "repo-managed"
+      ? (claudeMdPath ?? null)
+      : (fs.existsSync(claudePath) ? claudePath : null),
+  };
 }
 
 export function updateMachinesYaml(cortexPath: string, machine?: string, profile?: string) {

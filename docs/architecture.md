@@ -74,7 +74,7 @@ In practice:
 3. During the turn, MCP tools can add or update memory/task files in `~/.cortex/<project>/`.
 4. `Stop` persists those file changes locally through git, then queues background sync work if a remote is configured.
 
-The loop is deliberately asymmetric: project memory can keep accumulating as repo state, while each prompt only pays for the small slice that survives retrieval and trust filtering.
+The loop is deliberately asymmetric: project memory can keep accumulating as repo state, while each prompt only pays for the small slice that survives retrieval and trust filtering. Because that retrieval stays local in the default path, the same design also avoids a hosted round trip and keeps the hot path responsive.
 
 ## Hook Pipeline
 

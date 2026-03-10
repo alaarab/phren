@@ -13,18 +13,24 @@ const SCAFFOLDED_COMMAND_IDS = [
 ] as const;
 
 let client: CortexClient | undefined;
+let outputChannel: vscode.OutputChannel;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  outputChannel = vscode.window.createOutputChannel("Cortex");
+  context.subscriptions.push(outputChannel);
+  outputChannel.appendLine("Cortex extension activating...");
   const config = vscode.workspace.getConfiguration("cortex");
   const mcpServerPath = config.get<string>(
     "mcpServerPath",
     "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/@alaarab/cortex/mcp/dist/index.js",
   );
   const storePath = config.get<string>("storePath", "/home/alaarab/.cortex");
+  const nodePath = config.get<string>("nodePath", "node");
 
   const cortexClient = new CortexClient({
     mcpServerPath,
     storePath,
+    nodePath,
   });
   client = cortexClient;
 
@@ -102,7 +108,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   try {
     await statusBar.initialize();
+    outputChannel.appendLine("Status bar initialized successfully");
   } catch (error) {
+    outputChannel.appendLine(`Status bar init failed: ${toErrorMessage(error)}`);
     await vscode.window.showErrorMessage(`Failed to initialize active Cortex project: ${toErrorMessage(error)}`);
   }
 
