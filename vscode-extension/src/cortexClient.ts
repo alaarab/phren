@@ -209,7 +209,7 @@ export class CortexClient {
       }, this.timeoutMs);
 
       this.pending.set(id, {
-        resolve,
+        resolve: resolve as (value: unknown) => void,
         reject,
         timeout,
       });

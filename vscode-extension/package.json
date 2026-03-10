@@ -12,6 +12,7 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
+    "onView:cortex.explorer",
     "onCommand:cortex.searchKnowledge",
     "onCommand:cortex.getFindings",
     "onCommand:cortex.getTasks",
@@ -46,6 +47,23 @@
         "title": "Cortex: Get Project Summary"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cortex",
+          "title": "Cortex",
+          "icon": "media/cortex.svg"
+        }
+      ]
+    },
+    "views": {
+      "cortex": [
+        {
+          "id": "cortex.explorer",
+          "name": "Explorer"
+        }
+      ]
+    },
     "configuration": {
       "title": "Cortex",
       "properties": {

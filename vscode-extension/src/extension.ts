@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { CortexClient } from "./cortexClient";
+import { CortexTreeProvider } from "./providers/CortexTreeProvider";
 
 const COMMAND_IDS = [
   "cortex.searchKnowledge",
@@ -24,6 +25,12 @@ export function activate(context: vscode.ExtensionContext): void {
     mcpServerPath,
     storePath,
   });
+
+  const treeDataProvider = new CortexTreeProvider(client);
+  const treeView = vscode.window.createTreeView("cortex.explorer", {
+    treeDataProvider,
+  });
+  context.subscriptions.push(treeDataProvider, treeView);
 
   for (const commandId of COMMAND_IDS) {
     const disposable = vscode.commands.registerCommand(commandId, async () => {
