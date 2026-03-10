@@ -6,6 +6,12 @@ Whitepaper deliverables are now intentionally minimal:
 - `docs/whitepaper.pdf` (compiled report)
 - Docs-site PDF link: `https://alaarab.github.io/cortex/whitepaper.pdf`
 
+To rebuild the PDF locally, use `tectonic` rather than `pdflatex`:
+
+```bash
+tectonic docs/whitepaper.tex --outdir docs
+```
+
 ## Other docs in this folder
 
 - `docs/architecture.md`: Data flow diagrams for hooks, MCP server, FTS5 index, and memory governance.

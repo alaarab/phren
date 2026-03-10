@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-03-10
+
+### Changed
+- Whitepaper release workflow now documents `tectonic` as the canonical PDF build path, and the compiled whitepaper was regenerated from the current LaTeX source.
+- Whitepaper framing was tightened to read as an architectural and operational paper rather than a novelty-claim research paper: stronger progressive-disclosure rationale, clearer comparison methodology caveats, and more explicit operational tradeoffs.
+- The retrieval-complexity table in the whitepaper was resized to fit the two-column layout cleanly without horizontal overflow.
+
 ## [1.20.0] - 2026-03-09
 
 ### Changed
@@ -579,7 +586,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, backlog, pipeline, release, creative
 - `@alaarab/cortex` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.25.0...HEAD
+[1.25.0]: https://github.com/alaarab/cortex/compare/v1.20.0...v1.25.0
 [1.16.0]: https://github.com/alaarab/cortex/compare/v1.15.6...v1.16.0
 [1.15.6]: https://github.com/alaarab/cortex/compare/v1.15.5...v1.15.6
 [1.15.5]: https://github.com/alaarab/cortex/compare/v1.13.6...v1.15.5

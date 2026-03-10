@@ -8,7 +8,7 @@
       "name": "cortex",
       "source": "./",
       "description": "Long-term memory for AI coding agents. Project context, learnings, task queues, memory governance. Works with Claude Code, Copilot CLI, Cursor, and Codex.",
-      "version": "1.10.2",
+      "version": "1.25.0",
       "author": {
         "name": "Ala Arab"
       },
