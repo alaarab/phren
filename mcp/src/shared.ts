@@ -240,7 +240,12 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
         try {
           const stat = fs.statSync(lockPath);
           if (Date.now() - stat.mtimeMs > staleMs) {
-            fs.unlinkSync(lockPath);
+            try {
+              fs.unlinkSync(lockPath);
+            } catch {
+              // Another process may have claimed or removed the stale lock between
+              // statSync and unlinkSync — safe to ignore and continue waiting.
+            }
             continue;
           }
         } catch (statErr: unknown) {

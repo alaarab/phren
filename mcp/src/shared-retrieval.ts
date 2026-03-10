@@ -108,17 +108,24 @@ export function branchMatchBoost(content: string, branch: string | undefined): n
   return Math.min(3, score);
 }
 
+let _lowValueRegex: RegExp | null = null;
+let _lowValuePatternKey = "";
+function getLowValuePattern(): RegExp {
+  const key = process.env.CORTEX_LOW_VALUE_PATTERNS || "";
+  if (_lowValueRegex && _lowValuePatternKey === key) return _lowValueRegex;
+  const defaults = ["fixed stuff", "updated things", "misc", "temp", "wip", "todo", "placeholder", "cleanup"];
+  const configured = key.split(",").map((s) => s.trim()).filter(Boolean);
+  const fragments = configured.length ? configured : defaults;
+  _lowValueRegex = new RegExp(`(${fragments.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "i");
+  _lowValuePatternKey = key;
+  return _lowValueRegex;
+}
+
 function lowValuePenalty(content: string, docType: string): number {
   if (docType !== "findings") return 0;
   const bullets = content.split("\n").filter((l) => l.startsWith("- "));
   if (bullets.length === 0) return 0;
-  const defaults = ["fixed stuff", "updated things", "misc", "temp", "wip", "todo", "placeholder", "cleanup"];
-  const configured = (process.env.CORTEX_LOW_VALUE_PATTERNS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const fragments = configured.length ? configured : defaults;
-  const pattern = new RegExp(`(${fragments.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "i");
+  const pattern = getLowValuePattern();
   const low = bullets.filter((b) => pattern.test(b) || b.length < 16).length;
   return low >= Math.ceil(bullets.length * LOW_VALUE_BULLET_FRACTION) ? 2 : 0;
 }
@@ -815,8 +822,9 @@ export function rankResults(
     return (a.doc.path || `${a.doc.project}/${a.doc.filename}`).localeCompare(b.doc.path || `${b.doc.project}/${b.doc.filename}`);
   });
 
+  const shouldFilterBacklog = intent !== "build" && !opts?.skipBacklogFilter && opts?.filterType !== "backlog";
   const rescuedBacklogPaths = new Set<string>();
-  if (intent !== "build" && !opts?.skipBacklogFilter && opts?.filterType !== "backlog" && queryTokens.length > 0) {
+  if (shouldFilterBacklog && queryTokens.length > 0) {
     const bestBacklog = scored.find((entry) => entry.doc.type === "backlog");
     if (bestBacklog && bestBacklog.queryOverlap >= BACKLOG_RESCUE_MIN_OVERLAP) {
       const bestNonBacklog = scored.find((entry) => entry.doc.type !== "backlog");
@@ -833,7 +841,7 @@ export function rankResults(
 
   ranked = ranked.slice(0, 8);
 
-  if (intent !== "build" && !opts?.skipBacklogFilter && opts?.filterType !== "backlog") {
+  if (shouldFilterBacklog) {
     ranked = ranked.filter((r) => {
       if (r.type !== "backlog") return true;
       const key = r.path || `${r.project}/${r.filename}`;
