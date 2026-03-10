@@ -18,12 +18,14 @@ import {
   parseMcpMode,
   resetVSCodeProbeCache,
   runInit,
+  getVerifyOutcomeNote,
   runPostInitVerify,
   setHooksEnabledPreference,
   setMcpEnabledPreference,
   warmSemanticSearch,
 } from "./init.js";
 import { applyStarterTemplateUpdates, getHookEntrypointCheck } from "./init-setup.js";
+import { VERSION } from "./init-shared.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 
 describe.sequential("mcp mode configuration", () => {
@@ -818,6 +820,47 @@ describe("runPostInitVerify", () => {
       const versionCheck = result.checks.find((check) => check.name === "installed-version");
       expect(versionCheck?.ok).toBe(false);
       expect(versionCheck?.detail).toContain("runtime");
+    } finally {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origProfile;
+      cleanup();
+    }
+  });
+
+  it("explains hooks-only or local-only verify failures without hiding them", () => {
+    const { path: tmpDir, cleanup } = makeTempDir("cortex-verify-mode-note-");
+    const home = path.join(tmpDir, "home");
+    const cortex = path.join(tmpDir, "cortex");
+    const origHome = process.env.HOME;
+    const origProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
+      fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
+      fs.writeFileSync(
+        path.join(home, ".claude", "settings.json"),
+        JSON.stringify({
+          hooks: {
+            UserPromptSubmit: [{ hooks: [{ command: "hook-prompt" }] }],
+            Stop: [{ hooks: [{ command: "hook-stop" }] }],
+            SessionStart: [{ hooks: [{ command: "hook-session-start" }] }],
+          },
+        }, null, 2)
+      );
+      fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
+      fs.writeFileSync(
+        path.join(cortex, ".governance", "install-preferences.json"),
+        JSON.stringify({ mcpEnabled: false, hooksEnabled: true, installedVersion: VERSION }, null, 2)
+      );
+      fs.mkdirSync(path.join(cortex, "demo"), { recursive: true });
+
+      const result = runPostInitVerify(cortex);
+      const mcpCheck = result.checks.find((check) => check.name === "mcp-config");
+      expect(mcpCheck?.ok).toBe(false);
+      expect(mcpCheck?.detail).toContain("expected while MCP mode is OFF");
+      expect(getVerifyOutcomeNote(cortex, result.checks)).toContain("local-only / hooks-only mode");
     } finally {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origProfile;

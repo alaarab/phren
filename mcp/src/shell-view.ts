@@ -14,17 +14,20 @@ import {
   ShellState,
 } from "./data-access.js";
 import {
-  RESET,
   style,
   badge,
   separator,
   stripAnsi,
-  padToWidth,
   truncateLine,
+  renderWidth,
   lineViewport,
   shellHelpText,
   gradient,
 } from "./shell-render.js";
+import {
+  formatSelectableLine,
+  viewportWithStatus,
+} from "./shell-view-list.js";
 import {
   SUB_VIEWS,
   TAB_ICONS,
@@ -54,7 +57,7 @@ export interface ViewContext {
 // ── Tab bar ────────────────────────────────────────────────────────────────
 
 function renderTabBar(state: ShellState): string {
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
 
   if (state.view === "Health") {
     const label = `${TAB_ICONS.Health} Health`;
@@ -85,7 +88,7 @@ function renderTabBar(state: ShellState): string {
 // ── Bottom bar ─────────────────────────────────────────────────────────────
 
 function renderBottomBar(state: ShellState, navMode: "navigate" | "input", inputCtx: string, inputBuf: string): string {
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
   const sep = separator(cols);
   const dot = style.dim("  ·  ");
   const k = (s: string) => style.boldCyan(s);
@@ -218,7 +221,7 @@ function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntr
 }
 
 function renderProjectsView(ctx: ViewContext, cursor: number, height: number): string[] {
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
   const cards = collectProjectDashboardEntries(ctx);
   const filtered = ctx.state.filter
     ? cards.filter((c) =>
@@ -252,8 +255,8 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
     let summaryRow = `        ${style.dim(card.summary || "No summary yet.")}`;
 
     if (isSelected) {
-      nameRow = `\x1b[7m${padToWidth(nameRow, cols)}${RESET}`;
-      summaryRow = `\x1b[7m${padToWidth(summaryRow, cols)}${RESET}`;
+      nameRow = formatSelectableLine(nameRow, cols, true);
+      summaryRow = formatSelectableLine(summaryRow, cols, true);
     }
 
     allLines.push(nameRow);
@@ -262,16 +265,17 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
   }
 
   const usableHeight = Math.max(1, listHeight - (allLines.length > listHeight ? 1 : 0));
-  const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
+  const vp = viewportWithStatus(
+    allLines,
+    cursorFirstLine,
+    cursorLastLine,
+    usableHeight,
+    ctx.currentScroll(),
+    cursor,
+    filtered.length,
+  );
   ctx.setScroll(vp.scrollStart);
-  const lines = vp.lines;
-
-  if (allLines.length > usableHeight) {
-    const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-    lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
-  }
-
-  return [...dashboardLines, ...lines];
+  return [...dashboardLines, ...vp.lines];
 }
 
 // ── Backlog helpers ────────────────────────────────────────────────────────
@@ -323,7 +327,7 @@ function parseSubsections(backlogPath: string, project: string, cache: Subsectio
 // ── Backlog view ───────────────────────────────────────────────────────────
 
 function renderBacklogView(ctx: ViewContext, cursor: number, height: number, subsectionsCache: SubsectionsCache | null): { lines: string[]; subsectionsCache: SubsectionsCache | null } {
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
   const project = ctx.state.project;
   if (!project) {
     return { lines: [style.dim("  No project selected — navigate to Projects (← →) and press ↵")], subsectionsCache };
@@ -395,36 +399,37 @@ function renderBacklogView(ctx: ViewContext, cursor: number, height: number, sub
     const lineText = isDone ? style.dim(item.line) : item.line;
 
     let row = `    ${idStr} ${check} ${lineText}${pinTag}${prioTag}`;
-    if (isSelected && !isDone) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
-    else row = truncateLine(row, cols);
+    row = isSelected && !isDone
+      ? formatSelectableLine(row, cols, true)
+      : truncateLine(row, cols);
     allLines.push(row);
 
     if (item.context) {
       const ctxLine = `       ${style.dimItalic("→ " + item.context)}`;
-      allLines.push(isSelected && !isDone ? `\x1b[7m${padToWidth(ctxLine, cols)}${RESET}` : truncateLine(ctxLine, cols));
+      allLines.push(isSelected && !isDone ? formatSelectableLine(ctxLine, cols, true) : truncateLine(ctxLine, cols));
     }
 
     if (isSelected) cursorLastLine = allLines.length - 1;
   }
 
   const usableHeight = Math.max(1, height - warnings.length - (allLines.length > height ? 1 : 0));
-  const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
+  const vp = viewportWithStatus(
+    allLines,
+    cursorFirstLine,
+    cursorLastLine,
+    usableHeight,
+    ctx.currentScroll(),
+    cursor,
+    active.length + queue.length,
+  );
   ctx.setScroll(vp.scrollStart);
-  const lines: string[] = [...warnings, ...vp.lines];
-
-  if (allLines.length > usableHeight) {
-    const navigable = active.length + queue.length;
-    const pct = navigable <= 1 ? 100 : Math.round((cursor / Math.max(navigable - 1, 1)) * 100);
-    lines.push(style.dim(`  ━━━${cursor + 1}/${navigable}  ${pct}%`));
-  }
-
-  return { lines, subsectionsCache: newCache };
+  return { lines: [...warnings, ...vp.lines], subsectionsCache: newCache };
 }
 
 // ── Findings view ──────────────────────────────────────────────────────────
 
 function renderFindingsView(ctx: ViewContext, cursor: number, height: number): string[] {
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
 
@@ -456,27 +461,28 @@ function renderFindingsView(ctx: ViewContext, cursor: number, height: number): s
     const dateStr = style.dim(`[${item.date}]`);
 
     let row = `  ${idStr}  ${dateStr}  ${item.text}`;
-    if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
-    else row = truncateLine(row, cols);
+    row = formatSelectableLine(row, cols, isSelected);
     allLines.push(row);
 
     if (item.citation) {
       const cite = `              ${style.italic(style.blue("↗ " + item.citation))}`;
-      allLines.push(isSelected ? `\x1b[7m${padToWidth(cite, cols)}${RESET}` : truncateLine(cite, cols));
+      allLines.push(formatSelectableLine(cite, cols, isSelected));
     }
 
     if (isSelected) cursorLastLine = allLines.length - 1;
   }
 
   const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
-  const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
+  const vp = viewportWithStatus(
+    allLines,
+    cursorFirstLine,
+    cursorLastLine,
+    usableHeight,
+    ctx.currentScroll(),
+    cursor,
+    filtered.length,
+  );
   ctx.setScroll(vp.scrollStart);
-
-  if (allLines.length > usableHeight) {
-    const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-    vp.lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
-  }
-
   return vp.lines;
 }
 
@@ -492,7 +498,7 @@ function queueSectionBadge(section: string): string {
 }
 
 function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: number): string[] {
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
 
@@ -534,8 +540,8 @@ function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: number)
     let textRow = `      ${item.text}`;
 
     if (isSelected) {
-      metaRow = `\x1b[7m${padToWidth(metaRow, cols)}${RESET}`;
-      textRow = `\x1b[7m${padToWidth(textRow, cols)}${RESET}`;
+      metaRow = formatSelectableLine(metaRow, cols, true);
+      textRow = formatSelectableLine(textRow, cols, true);
     } else {
       metaRow = truncateLine(metaRow, cols);
       textRow = truncateLine(textRow, cols);
@@ -548,14 +554,16 @@ function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: number)
   }
 
   const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
-  const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
+  const vp = viewportWithStatus(
+    allLines,
+    cursorFirstLine,
+    cursorLastLine,
+    usableHeight,
+    ctx.currentScroll(),
+    cursor,
+    filtered.length,
+  );
   ctx.setScroll(vp.scrollStart);
-
-  if (allLines.length > usableHeight) {
-    const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-    vp.lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
-  }
-
   return vp.lines;
 }
 
@@ -596,7 +604,7 @@ function readSkillBody(skillPath: string): string[] {
 }
 
 function renderSkillsView(ctx: ViewContext, cursor: number, height: number): string[] {
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
 
@@ -622,8 +630,7 @@ function renderSkillsView(ctx: ViewContext, cursor: number, height: number): str
     const linkTag = isSymlink ? style.dim(" →") : "";
     const status = s.enabled ? style.boldGreen("enabled ") : style.dim("disabled");
     let row = `  ${style.dim((i + 1).toString().padEnd(3))} ${status} ${style.bold(s.name)}${linkTag}`;
-    if (isSelected) row = `\x1b[7m${padToWidth(row, cols)}${RESET}`;
-    else row = truncateLine(row, cols);
+    row = formatSelectableLine(row, cols, isSelected);
     allLines.push(row);
 
     // Show inline content preview for the selected skill
@@ -642,14 +649,16 @@ function renderSkillsView(ctx: ViewContext, cursor: number, height: number): str
   }
 
   const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
-  const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
+  const vp = viewportWithStatus(
+    allLines,
+    cursorFirstLine,
+    cursorLastLine,
+    usableHeight,
+    ctx.currentScroll(),
+    cursor,
+    filtered.length,
+  );
   ctx.setScroll(vp.scrollStart);
-
-  if (allLines.length > usableHeight) {
-    const pct = filtered.length <= 1 ? 100 : Math.round((cursor / (filtered.length - 1)) * 100);
-    vp.lines.push(style.dim(`  ━━━${cursor + 1}/${filtered.length}  ${pct}%`));
-  }
-
   return vp.lines;
 }
 
@@ -674,7 +683,7 @@ export function getHookEntries(cortexPath: string): HookEntry[] {
 }
 
 function renderHooksView(ctx: ViewContext, cursor: number, height: number): string[] {
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
   const entries = getHookEntries(ctx.cortexPath);
   const allEnabled = entries.every((e) => e.enabled);
   const allLines: string[] = [];
@@ -691,8 +700,8 @@ function renderHooksView(ctx: ViewContext, cursor: number, height: number): stri
     let descRow = `                    ${style.dim(e.description)}`;
 
     if (isSelected) {
-      nameRow = `\x1b[7m${padToWidth(nameRow, cols)}${RESET}`;
-      descRow = `\x1b[7m${padToWidth(descRow, cols)}${RESET}`;
+      nameRow = formatSelectableLine(nameRow, cols, true);
+      descRow = formatSelectableLine(descRow, cols, true);
     } else {
       nameRow = truncateLine(nameRow, cols);
       descRow = truncateLine(descRow, cols);
@@ -707,9 +716,16 @@ function renderHooksView(ctx: ViewContext, cursor: number, height: number): stri
   allLines.push(style.dim(`  hooks: ${allEnabled ? style.boldGreen("ON") : style.boldRed("OFF")}  ·  ${style.dim("a = enable all  ·  d = disable all")}`));
 
   const usableHeight = Math.max(1, height - (allLines.length > height ? 1 : 0));
-  const vp = lineViewport(allLines, cursorFirstLine, cursorLastLine, usableHeight, ctx.currentScroll());
+  const vp = viewportWithStatus(
+    allLines,
+    cursorFirstLine,
+    cursorLastLine,
+    usableHeight,
+    ctx.currentScroll(),
+    cursor,
+    entries.length,
+  );
   ctx.setScroll(vp.scrollStart);
-
   return vp.lines;
 }
 
@@ -795,9 +811,9 @@ function renderHealthView(
   const lineCount = allLines.length;
   if (allLines.length <= height) return { lines: allLines, lineCount };
 
-  const cols = process.stdout.columns || 80;
+  const cols = renderWidth();
   const clampedCursor = Math.max(0, Math.min(cursor, allLines.length - 1));
-  allLines[clampedCursor] = `\x1b[7m${padToWidth(allLines[clampedCursor], cols)}${RESET}`;
+  allLines[clampedCursor] = formatSelectableLine(allLines[clampedCursor], cols, true);
   const vp = lineViewport(allLines, clampedCursor, clampedCursor, height - 1, currentScroll);
   setScroll(vp.scrollStart);
   const pct = allLines.length <= 1 ? 100 : Math.round((clampedCursor / (allLines.length - 1)) * 100);
@@ -877,11 +893,12 @@ export async function renderShell(
 
   const msgLine = `  ${style.dimItalic(stripAnsi(message).trimStart() ? message : "")}`;
 
+  const cols = renderWidth();
   const parts = [header, tabBar, ...displayed, msgLine, bottomBar];
   return parts.map(line => {
     if (line.includes("\n")) {
-      return line.split("\n").map(sub => sub + "\x1b[K").join("\n");
+      return line.split("\n").map(sub => truncateLine(sub, cols) + "\x1b[K").join("\n");
     }
-    return line + "\x1b[K";
+    return truncateLine(line, cols) + "\x1b[K";
   }).join("\n");
 }

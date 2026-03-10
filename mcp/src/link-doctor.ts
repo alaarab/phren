@@ -18,6 +18,7 @@ import { detectInstalledTools } from "./hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./link-skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./link-checksums.js";
 import { buildSkillManifest } from "./skill-registry.js";
+import { inspectBacklogHygiene } from "./backlog-hygiene.js";
 import {
   getMachineName,
   lookupProfile,
@@ -548,6 +549,14 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
           name: `data:backlog:${projectName}`,
           ok: issues.length === 0,
           detail: issues.length ? issues.join("; ") : "valid",
+        });
+
+        const repoPath = findProjectDir(projectName);
+        const hygiene = inspectBacklogHygiene(cortexPath, projectName, repoPath);
+        checks.push({
+          name: `data:backlog-hygiene:${projectName}`,
+          ok: hygiene.ok,
+          detail: hygiene.detail,
         });
       }
 

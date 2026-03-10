@@ -130,6 +130,7 @@ const CLI_COMMANDS = [
   "backlog",
   "quickstart",
   "background-maintenance",
+  "background-sync",
   "projects",
   "extract-memories",
   "govern-memories",
@@ -230,7 +231,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "verify") {
-    const { runPostInitVerify } = await import("./init.js");
+    const { runPostInitVerify, getVerifyOutcomeNote } = await import("./init.js");
     const cortexPath = defaultCortexPath();
     const result = runPostInitVerify(cortexPath);
     console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
@@ -241,6 +242,8 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       }
     }
     if (!result.ok) {
+      const note = getVerifyOutcomeNote(cortexPath, result.checks);
+      if (note) console.log(`\nNote: ${note}`);
       console.log(`\nRun \`npx @alaarab/cortex init\` to fix setup issues.`);
     }
     return finish(result.ok ? 0 : 1);

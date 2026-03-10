@@ -5,7 +5,7 @@ import * as path from "path";
 import { CortexShell } from "./shell.js";
 import { readBacklog, readFindings, readReviewQueue, loadShellState } from "./data-access.js";
 import { writeFile as write, makeTempDir } from "./test-helpers.js";
-import { shellStartupFrames } from "./shell-render.js";
+import { shellStartupFrames, stripAnsi } from "./shell-render.js";
 
 interface TempContext {
   root: string;
@@ -173,6 +173,18 @@ describe("CortexShell", () => {
       expect(output).toContain("◉ Projects");
       expect(output).toContain("demo");
       expect(output.split("\n").length).toBeLessThanOrEqual(14);
+    });
+  });
+
+  it("keeps every rendered line under terminal width on very narrow screens", async () => {
+    await withTerminalSize(14, 20, async () => {
+      const shell = createShell(dir);
+      await shell.handleInput(":open demo");
+      await shell.handleInput("b");
+      const output = await shell.render();
+      for (const line of output.split("\n")) {
+        expect(stripAnsi(line).length).toBeLessThan(20);
+      }
     });
   });
 

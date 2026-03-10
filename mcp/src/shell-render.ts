@@ -30,14 +30,16 @@ export function badge(label: string, colorFn: (s: string) => string): string {
 }
 
 export function separator(width = 50): string {
-  return style.dim("━".repeat(width));
+  return style.dim("━".repeat(Math.max(1, width)));
 }
 
 export function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
+  return s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
 export function padToWidth(s: string, width: number): string {
+  if (width <= 0) return "";
+  if (width === 1) return truncateLine(s, width);
   const visible = stripAnsi(s);
   if (visible.length > width) return visible.slice(0, width - 1) + "…";
   return s + " ".repeat(width - visible.length);
@@ -49,9 +51,17 @@ export function padToWidth(s: string, width: number): string {
 // trailing reset is appended to guard against any residual SGR state from earlier
 // output on the same terminal line.
 export function truncateLine(s: string, cols: number): string {
+  if (cols <= 0) return "";
+  if (cols === 1) return "…" + "\x1b[0m";
   const visible = stripAnsi(s);
   if (visible.length <= cols) return s;
   return visible.slice(0, cols - 1) + "…" + "\x1b[0m";
+}
+
+// Reserve one column to avoid terminal autowrap when a line exactly fills the width.
+// Many terminals wrap on the last visible column, which corrupts full-screen redraws.
+export function renderWidth(columns = process.stdout.columns || 80): number {
+  return Math.max(1, columns - 1);
 }
 
 // ── Cortex theme ────────────────────────────────────────────────────────────

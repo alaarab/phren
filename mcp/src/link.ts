@@ -27,7 +27,6 @@ import {
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
   isRecord,
-  homeDir,
   homePath,
   hookConfigPath,
 } from "./shared.js";

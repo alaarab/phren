@@ -583,6 +583,7 @@ describe("link", () => {
     let cortexPath: string;
     const origHome = process.env.HOME;
     const origUserProfile = process.env.USERPROFILE;
+    const origProjectsDir = process.env.PROJECTS_DIR;
 
     let tmpCleanup: () => void;
 
@@ -603,6 +604,7 @@ describe("link", () => {
     afterEach(() => {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origUserProfile;
+      process.env.PROJECTS_DIR = origProjectsDir;
       tmpCleanup();
     });
 
@@ -689,6 +691,40 @@ describe("link", () => {
       const backlogCheck = result.checks.find(c => c.name === "data:backlog:doc-proj");
       expect(backlogCheck).toBeDefined();
       expect(backlogCheck!.ok).toBe(true);
+    });
+
+    it("checkData flags backlog items whose specific terms do not match repo/docs", async () => {
+      const profilesDir = path.join(cortexPath, "profiles");
+      const projectsRoot = path.join(tmpRoot, "projects");
+      process.env.PROJECTS_DIR = projectsRoot;
+      fs.mkdirSync(projectsRoot, { recursive: true });
+      fs.mkdirSync(profilesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(profilesDir, "test.yaml"),
+        yaml.dump({ name: "test", description: "Test", projects: ["doc-proj"] })
+      );
+      fs.writeFileSync(
+        path.join(cortexPath, "machines.yaml"),
+        `${os.hostname()}: test\n`
+      );
+
+      const projDir = path.join(cortexPath, "doc-proj");
+      fs.mkdirSync(projDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projDir, "backlog.md"),
+        "# doc-proj Backlog\n\n## Active\n\n- Refactor `shell-view.ts` selection rendering\n\n## Queue\n\n- Improve chart interface with bubble details and device type filters\n\n## Done\n\n"
+      );
+
+      const repoDir = path.join(projectsRoot, "doc-proj");
+      fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+      fs.writeFileSync(path.join(repoDir, "src", "shell-view.ts"), "export const shellView = true;\n");
+
+      const result = await runDoctor(cortexPath, false, true);
+      const hygieneCheck = result.checks.find(c => c.name === "data:backlog-hygiene:doc-proj");
+      expect(hygieneCheck).toBeDefined();
+      expect(hygieneCheck!.ok).toBe(false);
+      expect(hygieneCheck!.detail).toContain("suspect item");
+      expect(hygieneCheck!.detail).toContain("Q1");
     });
 
     it("checkData validates findings format", async () => {
