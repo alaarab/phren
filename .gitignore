@@ -10,3 +10,5 @@ AGENTS.md
 LEARNINGS.md
 docs/wp*.png
 .benchmarks/
+.claude/
+/FINDINGS.md

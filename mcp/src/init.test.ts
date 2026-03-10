@@ -479,6 +479,16 @@ describe("ensureGovernanceFiles", () => {
     expect(Array.isArray(indexPol.includeGlobs)).toBe(true);
   });
 
+  it("seeds access control with an open ACL by default", () => {
+    ensureGovernanceFiles(tmpDir);
+
+    const access = JSON.parse(fs.readFileSync(path.join(tmpDir, ".governance", "access-control.json"), "utf8"));
+    expect(access.admins).toEqual([]);
+    expect(access.maintainers).toEqual([]);
+    expect(access.contributors).toEqual([]);
+    expect(access.viewers).toEqual([]);
+  });
+
   it("does not overwrite existing governance files", () => {
     const govDir = path.join(tmpDir, ".governance");
     fs.mkdirSync(govDir, { recursive: true });

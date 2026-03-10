@@ -347,12 +347,11 @@ export function ensureGovernanceFiles(cortexPath: string) {
     );
   }
   if (!fs.existsSync(access)) {
-    const user = process.env.USER || process.env.USERNAME || "owner";
     atomicWriteText(
       access,
       JSON.stringify({
         schemaVersion: sv,
-        admins: [user],
+        admins: [],
         maintainers: [],
         contributors: [],
         viewers: [],

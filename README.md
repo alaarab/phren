@@ -125,7 +125,7 @@ Two more things run in the background:
 | `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
 | `backlog.md` | Task queue that persists across sessions |
 | `MEMORY_QUEUE.md` | Items waiting for your review |
-| `skills/` | Project-local Cortex skill source files; the resolved agent-facing mirror is generated into `.claude/skills/` |
+| `skills/` | Project-local Cortex skill source files; the resolved agent-facing mirror is generated into `.claude/skills/` as local state and should not be committed from app repos |
 
 </details>
 
@@ -144,6 +144,8 @@ git push -u origin main
 On a new machine: run `npx @alaarab/cortex init` and paste your repo URL when the walkthrough asks if you have an existing cortex repo.
 
 `SessionStart` pulls on open. The Stop hook commits locally after each response and queues a best-effort push when a remote exists. This is eventual consistency -- git gives you portability and auditability, not real-time sync.
+
+Shared state lives in your cortex repo. Generated local state does not. The `.claude/` mirrors created inside app repos, tool-specific instruction files such as `.github/copilot-instructions.md`, and the local machine alias file (`~/.cortex/.machine-id` or legacy `~/.cortex-machine`) are machine-local artifacts and should not be treated as canonical project memory.
 
 `machines.yaml` maps each hostname to a profile:
 
@@ -165,6 +167,12 @@ projects:
 ```
 
 Profiles decide which projects are active on each machine. `cortex init` is the normal refresh path: it registers the current machine/profile mapping, rewires supported agents, and bootstraps the current repo when needed.
+
+If you want stable names across laptops, desktops, and CI, set the machine name explicitly at onboarding instead of relying on the raw OS hostname:
+
+```bash
+npx @alaarab/cortex init --machine work-laptop --profile work
+```
 
 For CI or unattended setup:
 
