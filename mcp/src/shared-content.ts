@@ -1,5 +1,4 @@
 // Barrel re-export. Internal code imports from the specific modules directly.
-// External consumers and legacy imports use this file.
 
 export {
   type ConsolidationNeeded,
@@ -34,7 +33,6 @@ export {
 } from "./content-archive.js";
 
 export {
-  migrateLegacyFindings,
   upsertCanonical,
   addFindingToFile,
   addFindingsToFile,

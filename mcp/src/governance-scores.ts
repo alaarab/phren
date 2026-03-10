@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { appendAuditLog, debugLog, isRecord } from "./shared.js";
+import { appendAuditLog, debugLog, isRecord, memoryScoresFile, memoryUsageLogFile, runtimeFile } from "./shared.js";
 import { withFileLock } from "./governance-locks.js";
 import { errorMessage } from "./utils.js";
 
@@ -30,18 +30,12 @@ const DEFAULT_MEMORY_SCORES_FILE: VersionedEntriesFile<EntryScore> = {
   entries: {},
 };
 
-function governanceFile(cortexPath: string, fileName: string): string {
-  return path.join(cortexPath, ".governance", fileName);
-}
-
 function usageLogFile(cortexPath: string): string {
-  return governanceFile(cortexPath, "memory-usage.log");
+  return memoryUsageLogFile(cortexPath);
 }
 
 function scoresJournalFile(cortexPath: string): string {
-  const dir = path.join(cortexPath, ".runtime");
-  fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, "scores.jsonl");
+  return runtimeFile(cortexPath, "scores.jsonl");
 }
 
 function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
@@ -97,7 +91,7 @@ function normalizeVersionedEntries<T>(data: Record<string, unknown>, guard: (val
 }
 
 function readScoresFile(cortexPath: string): Record<string, EntryScore> {
-  const file = governanceFile(cortexPath, "memory-scores.json");
+  const file = memoryScoresFile(cortexPath);
   try {
     if (!fs.existsSync(file)) return { ...DEFAULT_MEMORY_SCORES_FILE.entries };
     if (!validateScoresJson(file)) {
@@ -113,7 +107,7 @@ function readScoresFile(cortexPath: string): Record<string, EntryScore> {
 }
 
 function writeScoresFile(cortexPath: string, scores: Record<string, EntryScore>): void {
-  const file = governanceFile(cortexPath, "memory-scores.json");
+  const file = memoryScoresFile(cortexPath);
   withFileLock(file, () => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmpPath = path.join(path.dirname(file), `.tmp-${crypto.randomUUID()}`);
@@ -229,7 +223,7 @@ function ensureScoreEntry(scores: Record<string, EntryScore>, key: string): Entr
 }
 
 function loadEntryScores(cortexPath: string): Record<string, EntryScore> {
-  const file = governanceFile(cortexPath, "memory-scores.json");
+  const file = memoryScoresFile(cortexPath);
   if (scoresCache && scoresCachePath === file) return scoresCache;
   scoresCache = readScoresFile(cortexPath);
   scoresCachePath = file;
@@ -239,7 +233,7 @@ function loadEntryScores(cortexPath: string): Record<string, EntryScore> {
 
 function saveEntryScores(cortexPath: string, scores: Record<string, EntryScore>): void {
   scoresCache = scores;
-  scoresCachePath = governanceFile(cortexPath, "memory-scores.json");
+  scoresCachePath = memoryScoresFile(cortexPath);
   scoresDirty = true;
 }
 
@@ -265,7 +259,7 @@ export function flushEntryScores(cortexPath: string): void {
     saveEntryScores(cortexPath, scores);
   }
 
-  if (scoresDirty && scoresCache && scoresCachePath === governanceFile(cortexPath, "memory-scores.json")) {
+  if (scoresDirty && scoresCache && scoresCachePath === memoryScoresFile(cortexPath)) {
     writeScoresFile(cortexPath, scoresCache);
     scoresDirty = false;
   }

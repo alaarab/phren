@@ -77,7 +77,7 @@ Controls the embedding provider for semantic search fallback. When FTS5 returns 
 - `OPENAI_API_KEY`: Required when `CORTEX_EMBEDDING_PROVIDER=api`. Your OpenAI API key.
 - `CORTEX_EMBEDDING_MODEL`: The embedding model to use (default: `text-embedding-3-small`). Supports any model available via the OpenAI embeddings endpoint.
 
-Embedding results are cached to `.runtime/embed-cache.jsonl` keyed by SHA-256 hash of the input text. This avoids redundant API calls for repeated queries.
+Embedding results are cached in `.runtime/embed-cache.db` keyed by SHA-256 hash of the input text. This avoids redundant API calls for repeated queries.
 
 ```bash
 export CORTEX_EMBEDDING_PROVIDER=api

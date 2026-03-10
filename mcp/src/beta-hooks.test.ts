@@ -123,28 +123,21 @@ describe("getProjectGlobBoost", () => {
 // ── Task #7: Citation validation ────────────────────────────────────────────
 
 describe("parseCitations", () => {
-  it("parses <!-- source: file:line --> format with legacy marker", () => {
-    const citations = parseCitations("Some text <!-- source: /foo/bar.ts:42 --> more text");
-    expect(citations).toEqual([{ file: "/foo/bar.ts", line: 42, legacy: true }]);
-  });
-
-  it("parses [file:path:line] format with legacy marker", () => {
-    const citations = parseCitations("Check [file:/src/utils.ts:10] for details");
-    expect(citations).toEqual([{ file: "/src/utils.ts", line: 10, legacy: true }]);
-  });
-
   it("returns empty for no citations", () => {
     expect(parseCitations("No citations here")).toEqual([]);
   });
 
   it("parses multiple citations", () => {
-    const text = "See <!-- source: a.ts:1 --> and [file:b.ts:2]";
+    const text = [
+      'See <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/a.ts","line":1} -->',
+      'and <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/b.ts","line":2} -->',
+    ].join(" ");
     const citations = parseCitations(text);
     expect(citations).toHaveLength(2);
-    expect(citations.every(c => c.legacy)).toBe(true);
+    expect(citations.every(c => c.citation)).toBe(true);
   });
 
-  it("parses cortex citation comments without legacy marker", () => {
+  it("parses cortex citation comments", () => {
     const citations = parseCitations('Insight <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/demo.ts","line":3} -->');
     expect(citations).toEqual([
       {
@@ -155,15 +148,6 @@ describe("parseCitations", () => {
         },
       },
     ]);
-    expect(citations[0].legacy).toBeUndefined();
-  });
-
-  it("marks legacy <!-- source: ... --> citation with deprecation marker", () => {
-    const citations = parseCitations("insight <!-- source: /tmp/test.ts:5 -->");
-    expect(citations).toHaveLength(1);
-    expect(citations[0].legacy).toBe(true);
-    expect(citations[0].file).toBe("/tmp/test.ts");
-    expect(citations[0].line).toBe(5);
   });
 });
 
@@ -180,16 +164,14 @@ describe("validateCitation", () => {
     try { fs.unlinkSync(tmpFile); } catch { /* ok */ }
   });
 
-  it("returns true for valid file and line", () => {
-    expect(validateCitation({ file: tmpFile, line: 2 })).toBe(true);
-  });
-
-  it("returns false for non-existent file", () => {
-    expect(validateCitation({ file: "/nonexistent/file.ts", line: 1 })).toBe(false);
-  });
-
-  it("returns false for line beyond file length", () => {
-    expect(validateCitation({ file: tmpFile, line: 999 })).toBe(false);
+  it("returns true for valid canonical citations", () => {
+    expect(validateCitation({
+      citation: {
+        created_at: "2026-03-01T00:00:00.000Z",
+        file: tmpFile,
+        line: 2,
+      },
+    })).toBe(true);
   });
 
   it("returns false for cortex citations pointing to missing files", () => {
@@ -217,18 +199,6 @@ describe("annotateStale", () => {
 
   it("returns snippet unchanged when no citations", () => {
     expect(annotateStale("plain text")).toBe("plain text");
-  });
-
-  it("appends [citation stale] when file does not exist", () => {
-    const result = annotateStale("insight <!-- source: /no/such/file.ts:1 -->");
-    expect(result).toContain("[citation stale]");
-  });
-
-  it("appends [legacy format] when valid legacy citation is used", () => {
-    const snippet = `insight <!-- source: ${tmpFile}:1 -->`;
-    const result = annotateStale(snippet);
-    expect(result).not.toContain("[citation stale]");
-    expect(result).toContain("[legacy format]");
   });
 
   it("marks cortex citation comments stale when validation fails", () => {

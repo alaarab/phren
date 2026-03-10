@@ -3,7 +3,7 @@ import * as path from "path";
 import { createHmac, randomUUID } from "crypto";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
-import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, homePath, type CortexErrorCode } from "./shared.js";
+import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, homePath, installPreferencesFile, type CortexErrorCode } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
@@ -268,7 +268,7 @@ export interface HookToolPreferences {
 
 function readHookPreferences(cortexPath: string): { enabled: boolean; toolPrefs: HookToolPreferences } {
   try {
-    const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
+    const prefsPath = installPreferencesFile(cortexPath);
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
     const enabled = prefs.hooksEnabled !== false;
     const toolPrefs: HookToolPreferences = prefs.hookTools && typeof prefs.hookTools === "object"
@@ -337,7 +337,7 @@ const HOOK_ERROR_LOG_MAX_LINES = 1000;
 
 export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
   try {
-    const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
+    const prefsPath = installPreferencesFile(cortexPath);
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
     if (!Array.isArray(prefs.customHooks)) return [];
     return prefs.customHooks.filter(

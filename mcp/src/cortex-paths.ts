@@ -55,6 +55,34 @@ export function runtimeFile(cortexPath: string, name: string): string {
   return path.join(dir, name);
 }
 
+export function installPreferencesFile(cortexPath: string): string {
+  return path.join(runtimeDir(cortexPath), "install-preferences.json");
+}
+
+export function runtimeHealthFile(cortexPath: string): string {
+  return path.join(runtimeDir(cortexPath), "runtime-health.json");
+}
+
+export function canonicalLocksFile(cortexPath: string): string {
+  return path.join(runtimeDir(cortexPath), "canonical-locks.json");
+}
+
+export function shellStateFile(cortexPath: string): string {
+  return path.join(runtimeDir(cortexPath), "shell-state.json");
+}
+
+export function sessionMetricsFile(cortexPath: string): string {
+  return path.join(runtimeDir(cortexPath), "session-metrics.json");
+}
+
+export function memoryScoresFile(cortexPath: string): string {
+  return path.join(runtimeDir(cortexPath), "memory-scores.json");
+}
+
+export function memoryUsageLogFile(cortexPath: string): string {
+  return path.join(runtimeDir(cortexPath), "memory-usage.log");
+}
+
 export function sessionMarker(cortexPath: string, name: string): string {
   const dir = sessionsDir(cortexPath);
   fs.mkdirSync(dir, { recursive: true });
@@ -83,15 +111,10 @@ export function appendIndexEvent(cortexPath: string, event: Record<string, unkno
   }
 }
 
-/**
- * Resolve the findings file for a project directory, falling back to LEARNINGS.md
- * if FINDINGS.md doesn't exist. Returns undefined if neither exists.
- */
+/** Resolve the canonical findings file for a project directory. */
 export function resolveFindingsPath(projectDir: string): string | undefined {
   const findingsPath = path.join(projectDir, "FINDINGS.md");
   if (fs.existsSync(findingsPath)) return findingsPath;
-  const legacyPath = path.join(projectDir, "LEARNINGS.md");
-  if (fs.existsSync(legacyPath)) return legacyPath;
   return undefined;
 }
 
@@ -305,10 +328,10 @@ export function computeCortexLiveStateToken(cortexPath: string): string {
   pushDirTokens(parts, path.join(cortexPath, "profiles"));
   pushDirTokens(parts, path.join(cortexPath, "global", "skills"));
   pushFileToken(parts, path.join(cortexPath, ".governance", "access-control.json"));
-  pushFileToken(parts, path.join(cortexPath, ".governance", "runtime-health.json"));
+  pushFileToken(parts, runtimeHealthFile(cortexPath));
   pushFileToken(parts, runtimeFile(cortexPath, "audit.log"));
-  pushFileToken(parts, path.join(cortexPath, ".governance", "memory-usage.log"));
-  pushFileToken(parts, path.join(cortexPath, ".runtime", "install-preferences.json"));
+  pushFileToken(parts, memoryUsageLogFile(cortexPath));
+  pushFileToken(parts, installPreferencesFile(cortexPath));
 
   pushDirTokens(parts, homePath(".github", "hooks"));
   pushFileToken(parts, homePath(".cursor", "hooks.json"));

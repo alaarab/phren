@@ -248,13 +248,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
         const targetId = Number(entityResult[0].values[0][0]);
 
-        // 2. Find source doc — look for FINDINGS.md (or legacy LEARNINGS.md) containing the finding text
-        let docCheck = queryRows(db, "SELECT content FROM docs WHERE project = ? AND filename = 'FINDINGS.md' LIMIT 1", [project]);
+        // 2. Find source doc in the canonical findings document
+        const docCheck = queryRows(db, "SELECT content FROM docs WHERE project = ? AND filename = 'FINDINGS.md' LIMIT 1", [project]);
         let sourceDoc = `${project}/FINDINGS.md`;
-        if (!docCheck || docCheck.length === 0) {
-          docCheck = queryRows(db, "SELECT content FROM docs WHERE project = ? AND filename = 'LEARNINGS.md' LIMIT 1", [project]);
-          sourceDoc = `${project}/LEARNINGS.md`;
-        }
         if (!docCheck || docCheck.length === 0) {
           return mcpResponse({ ok: false, error: `No FINDINGS.md found for project "${project}".` });
         }

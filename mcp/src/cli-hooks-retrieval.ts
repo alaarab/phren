@@ -1,2 +1,2 @@
-// cli-hooks-retrieval.ts — compatibility wrapper around the shared retrieval core.
+// cli-hooks-retrieval.ts — re-export surface for the shared retrieval core.
 export * from "./shared-retrieval.js";

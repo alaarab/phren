@@ -132,7 +132,7 @@ All palette commands start with `:`. You can also type them without the colon pr
 
 ## State Persistence
 
-The shell saves its state (selected project, filter, page, rows per page, intro mode, and last-seen intro version) to `.governance/shell-state.json`. This means your context and intro preference are preserved between shell sessions. Use `:reset` to clear saved state.
+The shell saves its state (selected project, filter, page, rows per page, intro mode, and last-seen intro version) to `.runtime/shell-state.json`. This means your context and intro preference are preserved between shell sessions. Use `:reset` to clear saved state.
 
 ## Filtering
 

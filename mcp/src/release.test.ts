@@ -124,7 +124,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     }
   });
 
-  it("upgrades legacy Claude hook config to lifecycle commands", () => {
+  it("rewrites existing Claude cortex hooks to the canonical lifecycle commands", () => {
     const claudeDir = path.join(homeDir, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });
     const settingsPath = path.join(claudeDir, "settings.json");
@@ -135,8 +135,8 @@ describe.sequential("1.10.x release hardening gates", () => {
         {
           hooks: {
             UserPromptSubmit: [{ matcher: "", hooks: [{ type: "command", command: "npx @alaarab/cortex hook-prompt" }] }],
-            Stop: [{ matcher: "", hooks: [{ type: "command", command: "cd ~/.cortex && git add -A && git commit -m 'auto-save cortex'" }] }],
-            SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "cd ~/.cortex && npx @alaarab/cortex doctor --fix" }] }],
+            Stop: [{ matcher: "", hooks: [{ type: "command", command: "npx @alaarab/cortex hook-stop" }] }],
+            SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "npx @alaarab/cortex hook-session-start" }] }],
           },
         },
         null,

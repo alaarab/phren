@@ -40,11 +40,6 @@ const handledTopLevelCommand = await runTopLevelCommand(process.argv.slice(2));
 const cortexArg = handledTopLevelCommand ? undefined : process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
 const cortexPath = handledTopLevelCommand ? "" : findCortexPathWithArg(cortexArg);
 
-const TOOL_NAME_ALIASES: Record<string, string> = {
-  // Backwards compat: old clients calling search_cortex still resolve
-  search_cortex: "search_knowledge",
-};
-
 const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
 
 function cleanStaleLocks(cortexPath: string): void {
@@ -152,7 +147,7 @@ async function main() {
   type RegisterToolConfig = RegisterToolArgs[1];
   type RegisterToolHandler = (...args: unknown[]) => unknown;
   server.registerTool = function (name: RegisterToolName, config: RegisterToolConfig, handler: RegisterToolHandler) {
-    const registeredName = TOOL_NAME_ALIASES[name] ?? name;
+    const registeredName = name;
     const wrapped = async (...args: unknown[]) => {
       if (!indexReady || !db) {
         return {
@@ -170,9 +165,6 @@ async function main() {
       }
       return handler(...args);
     };
-    if (registeredName !== name) {
-      debugLog(`Remapped MCP tool "${name}" to canonical name "${registeredName}"`);
-    }
     return origRegisterTool(registeredName, config, wrapped as RegisterToolArgs[2]);
   } as typeof server.registerTool;
 

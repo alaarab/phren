@@ -4,7 +4,6 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { homePath } from "./shared.js";
 
-const LEGACY_MACHINE_FILE = homePath(".cortex-machine");
 const CORTEX_MACHINE_FILE = homePath(".cortex", ".machine-id");
 
 function atomicWriteText(filePath: string, content: string): void {
@@ -15,10 +14,7 @@ function atomicWriteText(filePath: string, content: string): void {
 }
 
 export function machineFilePath(): string {
-  if (fs.existsSync(LEGACY_MACHINE_FILE)) return LEGACY_MACHINE_FILE;
-  if (fs.existsSync(CORTEX_MACHINE_FILE)) return CORTEX_MACHINE_FILE;
-  if (process.platform === "win32") return CORTEX_MACHINE_FILE;
-  return LEGACY_MACHINE_FILE;
+  return CORTEX_MACHINE_FILE;
 }
 
 export function defaultMachineName(): string {

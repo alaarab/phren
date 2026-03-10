@@ -9,6 +9,8 @@ import {
   homeDir,
   homePath,
   hookConfigPath,
+  runtimeHealthFile,
+  canonicalLocksFile,
 } from "./shared.js";
 import { validateGovernanceJson } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
@@ -321,8 +323,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     const stopHooks = JSON.stringify(hooks.Stop || []);
     const startHooks = JSON.stringify(hooks.SessionStart || []);
     hookOk = promptHooks.includes("hook-prompt");
-    const stopHookOk = stopHooks.includes("hook-stop") || stopHooks.includes("auto-save");
-    const startHookOk = startHooks.includes("hook-session-start") || startHooks.includes("doctor --fix");
+    const stopHookOk = stopHooks.includes("hook-stop");
+    const startHookOk = startHooks.includes("hook-session-start");
     lifecycleOk = stopHookOk && startHookOk;
   } catch (err: unknown) {
     debugLog(`doctor: failed to read Claude settings for hook check: ${errorMessage(err)}`);
@@ -342,7 +344,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       : "missing lifecycle hooks (expected hook-session-start and hook-stop)",
   });
 
-  const runtimeHealthPath = path.join(cortexPath, ".governance", "runtime-health.json");
+  const runtimeHealthPath = runtimeHealthFile(cortexPath);
   let runtime: Record<string, unknown> | null = null;
   if (fs.existsSync(runtimeHealthPath)) {
     try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch (err: unknown) {
@@ -353,7 +355,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   checks.push({
     name: "runtime-health-file",
     ok: Boolean(runtime),
-    detail: runtime ? runtimeHealthPath : "missing or unreadable .governance/runtime-health.json",
+    detail: runtime ? runtimeHealthPath : "missing or unreadable .runtime/runtime-health.json",
   });
   const lastAutoSave = runtime?.["lastAutoSave"];
   const autoSaveObj = isRecord(lastAutoSave) ? lastAutoSave : null;
@@ -441,53 +443,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     });
   }
 
-  // Detect unmigrated LEARNINGS.md files and knowledge/ directories
-  const projectDirs = fs.readdirSync(cortexPath).filter(d => !d.startsWith('.') && fs.statSync(path.join(cortexPath, d)).isDirectory());
-  for (const proj of projectDirs) {
-    const oldLearnings = path.join(cortexPath, proj, 'LEARNINGS.md');
-    if (fs.existsSync(oldLearnings)) {
-      checks.push({ name: `migrate:${proj}/LEARNINGS.md`, ok: false, detail: `${proj}/LEARNINGS.md → run --fix to migrate to FINDINGS.md` });
-    }
-    const oldKnowledge = path.join(cortexPath, proj, 'knowledge');
-    if (fs.existsSync(oldKnowledge)) {
-      checks.push({ name: `migrate:${proj}/knowledge`, ok: false, detail: `${proj}/knowledge/ → run --fix to migrate to reference/` });
-    }
-  }
-
   if (fix && profile && profileFile) {
-    // Migrate LEARNINGS.md → FINDINGS.md
-    for (const proj of projectDirs) {
-      const oldFile = path.join(cortexPath, proj, 'LEARNINGS.md');
-      const newFile = path.join(cortexPath, proj, 'FINDINGS.md');
-      if (fs.existsSync(oldFile) && !fs.existsSync(newFile)) {
-        fs.renameSync(oldFile, newFile);
-        console.log(`Migrated ${proj}/LEARNINGS.md → FINDINGS.md`);
-      }
-      // Migrate knowledge/ → reference/
-      const oldDir = path.join(cortexPath, proj, 'knowledge');
-      const newDir = path.join(cortexPath, proj, 'reference');
-      if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
-        fs.renameSync(oldDir, newDir);
-        console.log(`Migrated ${proj}/knowledge/ → reference/`);
-      }
-    }
-    // Migrate governance files
-    const govDir = path.join(cortexPath, '.governance');
-    if (fs.existsSync(govDir)) {
-      const govRenames: [string, string][] = [
-        ['memory-policy.json', 'retention-policy.json'],
-        ['memory-workflow-policy.json', 'workflow-policy.json'],
-      ];
-      for (const [old, next] of govRenames) {
-        const oldPath = path.join(govDir, old);
-        const newPath = path.join(govDir, next);
-        if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
-          fs.renameSync(oldPath, newPath);
-          console.log(`Migrated .governance/${old} → ${next}`);
-        }
-      }
-    }
-
     await runLink(cortexPath, { machine, profile });
     checks.push({ name: "self-heal", ok: true, detail: "relinked hooks, symlinks, context, memory pointers" });
   } else if (fix) {
@@ -517,13 +473,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   }
 
   if (checkData) {
-    const governanceChecks: Array<{ file: string; schema: "access-control" | "retention-policy" | "workflow-policy" | "index-policy" | "runtime-health" | "canonical-locks" }> = [
+    const governanceChecks: Array<{ file: string; schema: "access-control" | "retention-policy" | "workflow-policy" | "index-policy" }> = [
       { file: "access-control.json", schema: "access-control" },
       { file: "retention-policy.json", schema: "retention-policy" },
       { file: "workflow-policy.json", schema: "workflow-policy" },
       { file: "index-policy.json", schema: "index-policy" },
-      { file: "runtime-health.json", schema: "runtime-health" },
-      { file: "canonical-locks.json", schema: "canonical-locks" },
     ];
 
     for (const item of governanceChecks) {
@@ -534,6 +488,19 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
         name: `data:governance:${item.file}`,
         ok: exists && valid,
         detail: !exists ? "missing governance file" : valid ? "valid" : "invalid JSON/schema",
+      });
+    }
+
+    const runtimeChecks = [
+      { filePath: runtimeHealthFile(cortexPath), name: "data:runtime:runtime-health.json" },
+      { filePath: canonicalLocksFile(cortexPath), name: "data:runtime:canonical-locks.json" },
+    ];
+    for (const item of runtimeChecks) {
+      const exists = fs.existsSync(item.filePath);
+      checks.push({
+        name: item.name,
+        ok: exists,
+        detail: exists ? "present" : "missing runtime file",
       });
     }
 

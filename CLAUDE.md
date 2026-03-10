@@ -147,7 +147,6 @@ cortex config profiles                 Profiles and projects
 cortex maintain govern [project]       Queue stale memories for review
 cortex maintain prune [project]        Delete expired entries
 cortex maintain consolidate [project]  Deduplicate FINDINGS.md
-cortex maintain migrate <project>      Promote legacy findings
 cortex maintain extract [project]      Mine git/GitHub signals
 ```
 
@@ -194,11 +193,10 @@ Ephemeral files live in subdirectories to keep the cortex root clean:
 |-----------|----------|
 | `.runtime/` | audit.log, debug.log, telemetry.json, search-history.jsonl, quality markers, lock files |
 | `.sessions/` | noticed-{session}, extracted-{session} markers |
-| `.governance/` | policy JSON, access control, runtime health |
+| `.governance/` | shared policy JSON and access control |
 | `<project>/reference/` | Deep reference docs indexed as `reference` type |
 
 Use `runtimeFile(cortexPath, name)` and `sessionMarker(cortexPath, name)` helpers from shared.ts.
-Legacy files at the root are auto-migrated on first access.
 
 ## Key Patterns
 
@@ -210,9 +208,9 @@ Legacy files at the root are auto-migrated on first access.
 - Hook detection uses path segments not substring to avoid false positives
 - Stop hook fires after every response including subagents, so consolidation never runs from Stop
 - `@import shared/file.md` in indexed docs resolves to global/ dir, with cycle detection and depth cap
-- `reference/` subdirectories in projects are classified as reference type in FTS index (legacy `knowledge/` also accepted)
+- `reference/` subdirectories in projects are classified as reference type in FTS index
 - Backlog done sections stripped from FTS index to reduce noise
-- Init supports `--template` (python-project, monorepo, library, frontend); `--from-existing` still works but prefer `cortex add <path>`
+- Init supports `--template` (python-project, monorepo, library, frontend)
 
 ## Environment Variables
 

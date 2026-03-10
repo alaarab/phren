@@ -8,8 +8,7 @@ import { isFeatureEnabled, safeProjectPath } from "./utils.js";
 
 const MAX_CACHE_ENTRIES = 500;
 
-// Disk format: any of the three timestamp fields may be present (legacy compat).
-type RawCacheEntry<T> = { result: T; ts?: number; timestamp?: number; cachedAt?: number };
+type RawCacheEntry<T> = { result: T; ts?: number };
 
 // In-memory format: ts is always normalized by loadCache.
 type TimestampedCacheEntry<T> = { result: T; ts: number };
@@ -20,10 +19,7 @@ function loadCache<T>(cachePath: string): Record<string, TimestampedCacheEntry<T
   const now = Date.now();
   const normalized: Record<string, TimestampedCacheEntry<T>> = {};
   for (const [key, entry] of Object.entries(raw)) {
-    const ts = (typeof entry.ts === "number" ? entry.ts
-      : typeof entry.timestamp === "number" ? entry.timestamp
-      : typeof entry.cachedAt === "number" ? entry.cachedAt
-      : now);
+    const ts = typeof entry.ts === "number" ? entry.ts : now;
     normalized[key] = { result: entry.result, ts };
   }
   return normalized;

@@ -11,6 +11,7 @@ import {
   findProjectNameCaseInsensitive,
   hookConfigPath,
   EXEC_TIMEOUT_QUICK_MS,
+  runtimeHealthFile,
 } from "./shared.js";
 import { addProjectToProfile, listProfiles, resolveActiveProfile, setMachineProfile } from "./profile-store.js";
 import { getMachineName } from "./machine-identity.js";
@@ -18,7 +19,6 @@ import { execFileSync } from "child_process";
 import {
   GOVERNANCE_SCHEMA_VERSION,
   ensureLocalActorAccess,
-  migrateGovernanceFiles,
 } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
 import { ROOT, STARTER_DIR, VERSION, resolveEntryScript } from "./init-shared.js";
@@ -198,133 +198,6 @@ export function applyStarterTemplateUpdates(cortexPath: string): string[] {
   return updates;
 }
 
-/**
- * Migrate legacy files from the cortex root into proper subdirectories.
- * Called on every init/update to keep the root clean.
- */
-export function migrateRootFiles(cortexPath: string): string[] {
-  const moved: string[] = [];
-
-  // Move session markers (.noticed-*, .extracted-*) to .sessions/
-  try {
-    for (const f of fs.readdirSync(cortexPath)) {
-      if (f.startsWith(".noticed-") || f.startsWith(".extracted-")) {
-        const sessDir = path.join(cortexPath, ".sessions");
-        fs.mkdirSync(sessDir, { recursive: true });
-        const src = path.join(cortexPath, f);
-        const dest = path.join(sessDir, f.slice(1));
-        try {
-          fs.renameSync(src, dest);
-          moved.push(`${f} -> .sessions/${f.slice(1)}`);
-        } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles sessionMarker: ${err instanceof Error ? err.message : String(err)}\n`);
-        }
-      }
-    }
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles sessionScan: ${err instanceof Error ? err.message : String(err)}\n`);
-  }
-
-  // Move quality markers (.quality-*) to .runtime/
-  try {
-    for (const f of fs.readdirSync(cortexPath)) {
-      if (f.startsWith(".quality-")) {
-        const rtDir = path.join(cortexPath, ".runtime");
-        fs.mkdirSync(rtDir, { recursive: true });
-        const src = path.join(cortexPath, f);
-        const dest = path.join(rtDir, f.slice(1));
-        try {
-          fs.renameSync(src, dest);
-          moved.push(`${f} -> .runtime/${f.slice(1)}`);
-        } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles qualityMarker: ${err instanceof Error ? err.message : String(err)}\n`);
-        }
-      }
-    }
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles qualityScan: ${err instanceof Error ? err.message : String(err)}\n`);
-  }
-
-  // Move debug.log to .runtime/debug.log
-  const debugLogFile = path.join(cortexPath, "debug.log");
-  if (fs.existsSync(debugLogFile)) {
-    const rtDir = path.join(cortexPath, ".runtime");
-    fs.mkdirSync(rtDir, { recursive: true });
-    const dest = path.join(rtDir, "debug.log");
-    try {
-      if (fs.existsSync(dest)) {
-        fs.appendFileSync(dest, fs.readFileSync(debugLogFile, "utf8"));
-        fs.unlinkSync(debugLogFile);
-      } else {
-        fs.renameSync(debugLogFile, dest);
-      }
-      moved.push("debug.log -> .runtime/debug.log");
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles debugLog: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  }
-
-  // Move .cortex-audit.log to .runtime/audit.log
-  const auditLog = path.join(cortexPath, ".cortex-audit.log");
-  if (fs.existsSync(auditLog)) {
-    const rtDir = path.join(cortexPath, ".runtime");
-    fs.mkdirSync(rtDir, { recursive: true });
-    const dest = path.join(rtDir, "audit.log");
-    try {
-      if (fs.existsSync(dest)) {
-        fs.appendFileSync(dest, fs.readFileSync(auditLog, "utf8"));
-        fs.unlinkSync(auditLog);
-      } else {
-        fs.renameSync(auditLog, dest);
-      }
-      moved.push(".cortex-audit.log -> .runtime/audit.log");
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles auditLog: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  }
-
-  // Move link.sh to scripts/link.sh
-  const linkSh = path.join(cortexPath, "link.sh");
-  if (fs.existsSync(linkSh)) {
-    const scriptsDir = path.join(cortexPath, "scripts");
-    fs.mkdirSync(scriptsDir, { recursive: true });
-    const dest = path.join(scriptsDir, "link.sh");
-    if (!fs.existsSync(dest)) {
-      try {
-        fs.renameSync(linkSh, dest);
-        moved.push("link.sh -> scripts/link.sh");
-      } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles linkSh: ${err instanceof Error ? err.message : String(err)}\n`);
-      }
-    }
-  }
-
-  // Move root-level SKILL.md files to global/skills/
-  try {
-    for (const f of fs.readdirSync(cortexPath)) {
-      if (f.endsWith(".SKILL.md") || (f.endsWith(".md") && f.toLowerCase().includes("skill") && !f.startsWith("."))) {
-        const skillsDir = path.join(cortexPath, "global", "skills");
-        fs.mkdirSync(skillsDir, { recursive: true });
-        const src = path.join(cortexPath, f);
-        const skillName = f.replace(/\.SKILL\.md$/, "").replace(/\.md$/, "");
-        const dest = path.join(skillsDir, `${skillName}.md`);
-        if (!fs.existsSync(dest)) {
-          try {
-            fs.renameSync(src, dest);
-            moved.push(`${f} -> global/skills/${skillName}.md`);
-          } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles skillFile: ${err instanceof Error ? err.message : String(err)}\n`);
-          }
-        }
-      }
-    }
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateRootFiles skillScan: ${err instanceof Error ? err.message : String(err)}\n`);
-  }
-
-  return moved;
-}
-
 export function ensureGovernanceFiles(cortexPath: string) {
   const govDir = path.join(cortexPath, ".governance");
   fs.mkdirSync(govDir, { recursive: true });
@@ -333,7 +206,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
   const access = path.join(govDir, "access-control.json");
   const workflow = path.join(govDir, "workflow-policy.json");
   const indexPolicy = path.join(govDir, "index-policy.json");
-  const runtimeHealth = path.join(govDir, "runtime-health.json");
+  const runtimeHealth = runtimeHealthFile(cortexPath);
 
   if (!fs.existsSync(policy)) {
     atomicWriteText(
@@ -383,8 +256,6 @@ export function ensureGovernanceFiles(cortexPath: string) {
       }, null, 2) + "\n"
     );
   }
-
-  migrateGovernanceFiles(cortexPath);
   ensureLocalActorAccess(cortexPath);
 
   if (!fs.existsSync(runtimeHealth)) {
@@ -646,11 +517,11 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
   let hooksOk = false;
   try {
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    mcpOk = Boolean(cfg.mcpServers?.cortex || cfg.servers?.cortex);
+    mcpOk = Boolean(cfg.mcpServers?.cortex);
     const hooks = cfg.hooks || {};
     const hasPrompt = JSON.stringify(hooks.UserPromptSubmit || []).includes("hook-prompt");
-    const hasStop = JSON.stringify(hooks.Stop || []).includes("hook-stop") || JSON.stringify(hooks.Stop || []).includes("auto-save");
-    const hasStart = JSON.stringify(hooks.SessionStart || []).includes("hook-session-start") || JSON.stringify(hooks.SessionStart || []).includes("doctor --fix");
+    const hasStop = JSON.stringify(hooks.Stop || []).includes("hook-stop");
+    const hasStart = JSON.stringify(hooks.SessionStart || []).includes("hook-session-start");
     hooksOk = hasPrompt && hasStop && hasStart;
   } catch (err: unknown) {
     debugLog(`doctor: settings.json missing or unreadable: ${errorMessage(err)}`);

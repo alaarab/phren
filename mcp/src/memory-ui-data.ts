@@ -3,6 +3,8 @@ import * as path from "path";
 import {
   getProjectDirs,
   runtimeDir,
+  runtimeHealthFile,
+  memoryUsageLogFile,
   homePath,
 } from "./shared.js";
 import { errorMessage } from "./utils.js";
@@ -45,7 +47,7 @@ function extractGithubUrl(content: string): string | undefined {
 
 export function readSyncSnapshot(cortexPath: string) {
   try {
-    const runtimeHealth = path.join(cortexPath, ".governance", "runtime-health.json");
+    const runtimeHealth = runtimeHealthFile(cortexPath);
     if (!fs.existsSync(runtimeHealth)) return {};
     const parsed = JSON.parse(fs.readFileSync(runtimeHealth, "utf8")) as {
       lastAutoSave?: { status?: string; detail?: string };
@@ -242,16 +244,14 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
 }
 
 export function recentUsage(cortexPath: string): string[] {
-  const usage = path.join(cortexPath, ".governance", "memory-usage.log");
+  const usage = memoryUsageLogFile(cortexPath);
   if (!fs.existsSync(usage)) return [];
   const lines = fs.readFileSync(usage, "utf8").trim().split("\n").filter(Boolean);
   return lines.slice(-40).reverse();
 }
 
 export function recentAccepted(cortexPath: string): string[] {
-  const newAudit = path.join(runtimeDir(cortexPath), "audit.log");
-  const legacyAudit = path.join(cortexPath, ".cortex-audit.log");
-  const audit = fs.existsSync(newAudit) ? newAudit : legacyAudit;
+  const audit = path.join(runtimeDir(cortexPath), "audit.log");
   if (!fs.existsSync(audit)) return [];
   const lines = fs.readFileSync(audit, "utf8").split("\n").filter((line) => line.includes("approve_memory"));
   return lines.slice(-40).reverse();

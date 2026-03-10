@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { resolveFindingsPath, debugLog, tryUnlink } from "./shared.js";
+import { resolveFindingsPath, debugLog } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
@@ -191,7 +191,7 @@ function cleanupStaleSessions(cortexPath: string): number {
         ? Date.now() - new Date(state.startedAt).getTime()
         : Date.now() - fs.statSync(fullPath).mtimeMs;
       if (ageMs > STALE_SESSION_MS) {
-        tryUnlink(fullPath);
+        fs.unlinkSync(fullPath);
         cleaned++;
       }
     } catch (err: unknown) {
@@ -199,36 +199,6 @@ function cleanupStaleSessions(cortexPath: string): number {
     }
   }
   return cleaned;
-}
-
-/** Migrate legacy global session-state.json to per-session file if it exists. */
-function migrateLegacySession(cortexPath: string): SessionState | null {
-  const legacyFile = path.join(cortexPath, ".runtime", "session-state.json");
-  if (!fs.existsSync(legacyFile)) return null;
-  try {
-    const raw = fs.readFileSync(legacyFile, "utf-8");
-    const state = JSON.parse(raw) as SessionState;
-    if (state.sessionId) {
-      const newFile = sessionFileForId(cortexPath, state.sessionId);
-      // Use wx flag so only the first concurrent caller creates the target file
-      try {
-        const tempFile = `${newFile}.${process.pid}.${Date.now()}.tmp`;
-        fs.writeFileSync(tempFile, JSON.stringify(state, null, 2));
-        fs.renameSync(tempFile, newFile);
-      } catch (e: unknown) {
-        // If file already exists from another concurrent migration, that's fine
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      }
-    }
-    tryUnlink(legacyFile);
-    return state;
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateLegacySession: ${err instanceof Error ? err.message : String(err)}\n`);
-    try { fs.unlinkSync(legacyFile); } catch (e2: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] migrateLegacySession unlink: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
-    }
-    return null;
-  }
 }
 
 /** Increment the findingsAdded counter for a session. Falls back to the most relevant active session for the project. */
@@ -265,9 +235,6 @@ export function register(server: McpServer, ctx: McpContext): void {
       connectionId: z.string().optional().describe("Optional stable identifier for this client connection. When provided, session_end/session_context can resolve the session without an explicit sessionId."),
     }),
   }, async ({ project, connectionId }) => {
-    // Migrate legacy global session file if present
-    migrateLegacySession(cortexPath);
-
     // Clean up stale sessions (>24h)
     cleanupStaleSessions(cortexPath);
 

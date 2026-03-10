@@ -52,13 +52,7 @@ Maintenance:
   cortex maintain govern [project]       Queue stale/low-value memories for review
   cortex maintain prune [project]        Delete expired entries
   cortex maintain consolidate [project]  Deduplicate FINDINGS.md
-  cortex maintain migrate project-names [--dry-run]
-                                         Canonicalize mixed-case project dirs and native memory files
-  cortex maintain migrate <project> [--pin] [--dry-run]
-                                         Promote legacy findings into FINDINGS/CANONICAL
   cortex maintain extract [project]      Mine git/GitHub signals
-  cortex migrate-findings <project> [--pin] [--dry-run]
-                                         Legacy alias for maintain migrate
 
 Setup:
   cortex mcp-mode [on|off|status]        Toggle MCP integration
@@ -136,7 +130,6 @@ const CLI_COMMANDS = [
   "govern-memories",
   "prune-memories",
   "consolidate-memories",
-  "migrate-findings",
   "index-policy",
   "policy",
   "workflow",
@@ -196,21 +189,16 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const profileIdx = initArgs.indexOf("--profile");
     const mcpIdx = initArgs.indexOf("--mcp");
     const templateIdx = initArgs.indexOf("--template");
-    const fromExistingIdx = initArgs.indexOf("--from-existing");
     const mcpMode = mcpIdx !== -1 ? parseMcpMode(initArgs[mcpIdx + 1]) : undefined;
     if (mcpIdx !== -1 && !mcpMode) {
       console.error(`Invalid --mcp value "${initArgs[mcpIdx + 1] || ""}". Use "on" or "off".`);
       return finish(1);
-    }
-    if (fromExistingIdx !== -1) {
-      console.error("Note: prefer `cortex add <path>` after init.");
     }
     await runInit({
       machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
       profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
       mcp: mcpMode,
       template: templateIdx !== -1 ? initArgs[templateIdx + 1] : undefined,
-      fromExisting: fromExistingIdx !== -1 ? initArgs[fromExistingIdx + 1] : undefined,
       applyStarterUpdate: initArgs.includes("--apply-starter-update"),
       dryRun: initArgs.includes("--dry-run"),
       yes: initArgs.includes("--yes") || initArgs.includes("-y"),

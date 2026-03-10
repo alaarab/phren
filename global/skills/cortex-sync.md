@@ -53,15 +53,15 @@ If the directory doesn't exist, tell the user:
 ### 2. Figure out which machine this is
 
 ```bash
-cat ~/.cortex-machine 2>/dev/null || hostname
+cat ~/.cortex/.machine-id 2>/dev/null || hostname
 ```
 
-If `~/.cortex-machine` doesn't exist, ask the user to pick a name:
+If `~/.cortex/.machine-id` doesn't exist, ask the user to pick a name:
 > "I need a machine name to look up your profile. What should I call this machine? (e.g. 'work-laptop', 'home-desktop')"
 
 Then save it:
 ```bash
-echo "work-laptop" > ~/.cortex-machine
+mkdir -p ~/.cortex && echo "work-laptop" > ~/.cortex/.machine-id
 ```
 
 ### 3. Look up the profile
@@ -230,7 +230,7 @@ First time on a new machine:
 git clone <your-repo-url> ~/.cortex
 
 # 2. Name this machine
-echo "my-machine-name" > ~/.cortex-machine
+mkdir -p ~/.cortex && echo "my-machine-name" > ~/.cortex/.machine-id
 
 # 3. Map it to a profile in machines.yaml
 #    Add a line: my-machine-name: work

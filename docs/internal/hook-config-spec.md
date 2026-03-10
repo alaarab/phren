@@ -191,7 +191,7 @@ For tools that lack native hook support (Copilot, Cursor, Codex), cortex install
 
 **Passthrough cases:** `-h`, `--help`, `help`, `-V`, `--version`, `version`, `completion` bypass hooks and exec directly to the real binary.
 
-**Installation gating:** Wrappers are only installed when `hooksEnabled !== false` in `.governance/install-preferences.json`.
+**Installation gating:** Wrappers are only installed when `hooksEnabled !== false` in `.runtime/install-preferences.json`.
 
 ## Lifecycle Command Format
 
@@ -224,7 +224,7 @@ npx -y @alaarab/cortex@<version> <subcommand>
 
 ## Install Preferences
 
-**File:** `<cortexPath>/.governance/install-preferences.json`
+**File:** `<cortexPath>/.runtime/install-preferences.json`
 
 ```jsonc
 {

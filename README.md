@@ -145,7 +145,7 @@ On a new machine: run `npx @alaarab/cortex init` and paste your repo URL when th
 
 `SessionStart` pulls on open. The Stop hook commits locally after each response and queues a best-effort push when a remote exists. This is eventual consistency -- git gives you portability and auditability, not real-time sync.
 
-Shared state lives in your cortex repo. Generated local state does not. The `.claude/` mirrors created inside app repos, tool-specific instruction files such as `.github/copilot-instructions.md`, and the local machine alias file (`~/.cortex/.machine-id` or legacy `~/.cortex-machine`) are machine-local artifacts and should not be treated as canonical project memory.
+Shared state lives in your cortex repo. Generated local state does not. The `.claude/` mirrors created inside app repos, tool-specific instruction files such as `.github/copilot-instructions.md`, and the local machine alias file (`~/.cortex/.machine-id`) are machine-local artifacts and should not be treated as canonical project memory.
 
 `machines.yaml` maps each hostname to a profile:
 
@@ -253,9 +253,7 @@ For a brand-new scaffold inside Claude:
 /cortex-init my-project
 ```
 
-Legacy compatibility note:
 - `cortex add` is the supported path for existing repos.
-- `cortex projects add`, `cortex link`, and `init --from-existing` are quarantined legacy paths. They only run when `CORTEX_ENABLE_LEGACY_ENROLLMENT=1` is set for one-off recovery.
 - Platform support and release expectations are documented in [docs/platform-matrix.md](docs/platform-matrix.md).
 - Best-effort vs fail-closed behavior is documented in [docs/error-reporting.md](docs/error-reporting.md).
 - Package/update behavior is documented in [docs/versioning.md](docs/versioning.md).

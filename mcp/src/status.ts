@@ -107,9 +107,8 @@ export async function runStatus() {
       const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as unknown;
       const settings = isRecord(parsed) ? parsed : {};
       const mcpServers = isRecord(settings.mcpServers) ? settings.mcpServers : undefined;
-      const servers = isRecord(settings.servers) ? settings.servers : undefined;
       const hooks = isRecord(settings.hooks) ? settings.hooks : undefined;
-      mcpConfigured = Boolean(mcpServers?.cortex || servers?.cortex);
+      mcpConfigured = Boolean(mcpServers?.cortex);
       const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
       hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
     } catch (err: unknown) {
@@ -234,7 +233,7 @@ export async function runStatus() {
 
   for (const dir of projectDirs) {
     const projName = path.basename(dir);
-    totalFindings += countBullets(path.join(cortexPath, projName, "FINDINGS.md")) || countBullets(path.join(cortexPath, projName, "LEARNINGS.md"));
+    totalFindings += countBullets(path.join(cortexPath, projName, "FINDINGS.md"));
     totalBacklog += countBullets(path.join(cortexPath, projName, "backlog.md"));
     totalQueue += countQueueItems(cortexPath, projName);
   }

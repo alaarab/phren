@@ -101,7 +101,7 @@ describe("buildHookOutput", () => {
 
   beforeEach(() => {
     ({ path: cortexDir, cleanup: cortexCleanup } = makeTempDir("cortex-hookout-"));
-    write(path.join(cortexDir, ".governance", "memory-scores.json"), "{}");
+    write(path.join(cortexDir, ".runtime", "memory-scores.json"), "{}");
   });
 
   afterEach(() => {
@@ -283,7 +283,7 @@ describe("trackSessionMetrics", () => {
 
   beforeEach(() => {
     ({ path: cortexDir, cleanup: cortexCleanup } = makeTempDir("cortex-metrics-"));
-    write(path.join(cortexDir, ".governance", "memory-scores.json"), "{}");
+    write(path.join(cortexDir, ".runtime", "memory-scores.json"), "{}");
   });
 
   afterEach(() => {
@@ -298,7 +298,7 @@ describe("trackSessionMetrics", () => {
     }];
     trackSessionMetrics(cortexDir, "session-1", selected);
 
-    const metricsFile = path.join(cortexDir, ".governance", "session-metrics.json");
+    const metricsFile = path.join(cortexDir, ".runtime", "session-metrics.json");
     expect(fs.existsSync(metricsFile)).toBe(true);
 
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
@@ -317,14 +317,14 @@ describe("trackSessionMetrics", () => {
     trackSessionMetrics(cortexDir, "session-2", selected);
     trackSessionMetrics(cortexDir, "session-2", selected);
 
-    const metricsFile = path.join(cortexDir, ".governance", "session-metrics.json");
+    const metricsFile = path.join(cortexDir, ".runtime", "session-metrics.json");
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
     expect(metrics["session-2"].prompts).toBe(3);
     expect(metrics["session-2"].keys["proj:f.md:abc"]).toBe(3);
   });
 
   it("prunes sessions older than 30 days", () => {
-    const metricsFile = path.join(cortexDir, ".governance", "session-metrics.json");
+    const metricsFile = path.join(cortexDir, ".runtime", "session-metrics.json");
     const oldDate = new Date(Date.now() - 40 * 86400000).toISOString();
     write(metricsFile, JSON.stringify({
       "old-session": { prompts: 5, keys: {}, lastChangedCount: 0, lastKeys: [], lastSeen: oldDate },
