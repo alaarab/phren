@@ -1,7 +1,7 @@
 {
   "name": "cortex-vscode",
   "displayName": "Cortex VS Code",
-  "description": "VS Code extension scaffold for interacting with the Cortex MCP server.",
+  "description": "VS Code extension for browsing and searching Cortex projects from the editor.",
   "version": "0.0.1",
   "publisher": "alaarab",
   "engines": {
@@ -14,6 +14,8 @@
   "activationEvents": [
     "onView:cortex.explorer",
     "onCommand:cortex.search",
+    "onCommand:cortex.showGraph",
+    "onCommand:cortex.refresh",
     "onCommand:cortex.getFindings",
     "onCommand:cortex.getTasks",
     "onCommand:cortex.addFinding",
@@ -25,7 +27,27 @@
     "commands": [
       {
         "command": "cortex.search",
-        "title": "Cortex: Search Knowledge"
+        "title": "Cortex: Search Knowledge",
+        "icon": {
+          "light": "media/cortex.svg",
+          "dark": "media/cortex.svg"
+        }
+      },
+      {
+        "command": "cortex.showGraph",
+        "title": "Cortex: Show Entity Graph",
+        "icon": {
+          "light": "media/cortex.svg",
+          "dark": "media/cortex.svg"
+        }
+      },
+      {
+        "command": "cortex.refresh",
+        "title": "Cortex: Refresh",
+        "icon": {
+          "light": "media/cortex.svg",
+          "dark": "media/cortex.svg"
+        }
       },
       {
         "command": "cortex.getFindings",
@@ -37,11 +59,19 @@
       },
       {
         "command": "cortex.addFinding",
-        "title": "Add to Cortex Findings"
+        "title": "Cortex: Add Finding",
+        "icon": {
+          "light": "media/cortex.svg",
+          "dark": "media/cortex.svg"
+        }
       },
       {
         "command": "cortex.setActiveProject",
-        "title": "Cortex: Set Active Project"
+        "title": "Cortex: Set Active Project",
+        "icon": {
+          "light": "media/cortex.svg",
+          "dark": "media/cortex.svg"
+        }
       },
       {
         "command": "cortex.listProjects",
@@ -95,7 +125,7 @@
         "cortex.storePath": {
           "type": "string",
           "default": "/home/alaarab/.cortex",
-          "description": "Path to the local cortex store directory passed to the MCP server."
+          "description": "Path to cortex store directory"
         }
       }
     }

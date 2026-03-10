@@ -3,6 +3,7 @@ import { CortexClient } from "./cortexClient";
 import { CortexTreeProvider } from "./providers/CortexTreeProvider";
 import { showSearchQuickPick } from "./searchQuickPick";
 import { CortexStatusBar } from "./statusBar";
+import { showGraphWebview } from "./graphWebview";
 
 const SCAFFOLDED_COMMAND_IDS = [
   "cortex.getFindings",
@@ -73,7 +74,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable);
+  const showGraphDisposable = vscode.commands.registerCommand("cortex.showGraph", async () => {
+    try {
+      await showGraphWebview(cortexClient, context);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to show Cortex graph: ${toErrorMessage(error)}`);
+    }
+  });
+
+  const refreshDisposable = vscode.commands.registerCommand("cortex.refresh", async () => {
+    treeDataProvider.refresh();
+
+    try {
+      await statusBar.initialize();
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to refresh Cortex extension state: ${toErrorMessage(error)}`);
+    }
+  });
+
+  context.subscriptions.push(
+    setActiveProjectDisposable,
+    addFindingDisposable,
+    searchDisposable,
+    showGraphDisposable,
+    refreshDisposable,
+  );
 
   try {
     await statusBar.initialize();
