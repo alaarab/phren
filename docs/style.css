@@ -687,6 +687,77 @@ section {
   color: var(--text);
 }
 
+.code-block-install {
+  flex-direction: column;
+  gap: 16px;
+  align-items: stretch;
+  padding: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(245,200,64,0.08), transparent 32%),
+    radial-gradient(circle at left center, rgba(58,123,174,0.08), transparent 38%),
+    var(--bg);
+}
+
+.install-command-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.install-command-note {
+  border-top: 1px solid rgba(255,255,255,0.05);
+  padding-top: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.install-path-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.install-path-card {
+  min-height: 148px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+.install-path-card-primary {
+  border-color: rgba(58,123,174,0.28);
+  background:
+    linear-gradient(180deg, rgba(58,123,174,0.12), rgba(58,123,174,0.03)),
+    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+}
+
+.install-path-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--copper);
+  margin-bottom: 10px;
+}
+
+.install-path-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.install-path-copy {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
 .code-prompt { color: var(--indigo); opacity: 0.6; margin-right: 8px; }
 
 .copy-btn {
@@ -1231,16 +1302,69 @@ section {
   border-top: 1px solid var(--border);
   text-align: center;
   padding: 60px 32px 80px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(58,123,174,0.08), transparent 34%),
+    radial-gradient(circle at 50% 100%, rgba(245,200,64,0.08), transparent 36%);
 }
 
 .cta-content {
-  max-width: 560px;
+  max-width: 980px;
   margin: 0 auto;
 }
 
+.cta-panel {
+  position: relative;
+  overflow: hidden;
+  padding: 36px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(19,21,15,0.96), rgba(10,11,9,0.94)),
+    radial-gradient(circle at top right, rgba(58,123,174,0.12), transparent 28%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 30px 80px rgba(0,0,0,0.35);
+}
+
+.cta-panel::before {
+  content: '';
+  position: absolute;
+  inset: auto -40px -120px auto;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  border: 1px solid rgba(58,123,174,0.08);
+  opacity: 0.9;
+}
+
+.cta-panel::after {
+  content: '';
+  position: absolute;
+  top: -120px;
+  left: -70px;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  border: 1px solid rgba(245,200,64,0.08);
+}
+
+.cta-brand {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  text-align: left;
+  z-index: 1;
+}
+
+.cta-brand-copy .section-label {
+  margin-bottom: 12px;
+}
+
 .cta-icon {
-  margin-top: 24px;
-  margin-bottom: 32px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 32px rgba(245,200,64,0.16)) drop-shadow(0 0 10px rgba(58,123,174,0.12));
 }
 
 .cta-title {
@@ -1254,12 +1378,37 @@ section {
 
 .cta-tagline {
   font-size: clamp(16px, 2vw, 20px);
-  color: var(--text-dim);
-  font-style: italic;
+  color: var(--text-muted);
+  max-width: 520px;
   margin-bottom: 0;
 }
 
+.cta-meta {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 24px 0 28px;
+  justify-content: center;
+}
+
+.cta-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+
 .cta-actions {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1323,6 +1472,12 @@ section {
   color: var(--text-dim);
   font-size: 13px;
   letter-spacing: -0.01em;
+}
+
+.footer-wordmark {
+  color: var(--text);
+  font-weight: 650;
+  letter-spacing: -0.02em;
 }
 
 .footer-right {
@@ -1400,12 +1555,33 @@ section {
     text-align: center;
   }
 
+  .install-command-row,
+  .cta-brand {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .install-path-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cta-panel {
+    padding: 28px 20px;
+  }
+
+  .cta-icon {
+    width: 78px;
+    height: 78px;
+  }
+
   .nav-links .nav-link { display: none; }
 }
 
 @media (max-width: 480px) {
   .hero-actions { flex-direction: column; width: 100%; }
   .btn-primary, .btn-ghost { width: 100%; justify-content: center; }
+  .copy-btn { width: 100%; }
+  .install-command-row { align-items: stretch; }
 }
 
 /* Token bar visual */

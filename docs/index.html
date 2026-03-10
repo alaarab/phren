@@ -277,21 +277,30 @@
         <div class="install-tabs-container">
           <div class="install-tab-panel active">
             <div class="install-step-body">
-              <div class="code-block" style="flex-direction:column;gap:10px;align-items:flex-start">
-                <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+              <div class="code-block code-block-install">
+                <div class="install-command-row">
                   <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
                   <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
                 </div>
-                <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;font-size:12px;color:var(--text-dim)">
-                  Creates <code style="color:var(--indigo)">~/.cortex</code> with starter templates, registers your machine, configures MCP, wires up hooks, and bootstraps the current repo when needed.
+                <div class="install-command-note">
+                  Creates <code style="color:var(--indigo)">~/.cortex</code>, registers the machine, configures MCP, wires up hooks, and bootstraps the repo you are standing in.
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;width:100%;font-size:12px;color:var(--text-dim)">
-                  <div><strong>First time</strong><br><code>npx @alaarab/cortex init</code></div>
-                  <div><strong>Add a project</strong><br>Open a session there and let the agent ask, or run <code>cortex add</code></div>
-                  <div><strong>New machine</strong><br><code>npx @alaarab/cortex init</code> and paste your repo URL</div>
-                </div>
-                <div style="margin-top:10px;font-size:12px;color:var(--text-dim)">
-                  Add an existing repo with <code>cortex add</code>. Platform support details live in <a href="platform-matrix.md">platform-matrix.md</a>, failure-mode policy lives in <a href="error-reporting.md">error-reporting.md</a>, and package/update behavior lives in <a href="versioning.md">versioning.md</a>.
+                <div class="install-path-grid">
+                  <div class="install-path-card install-path-card-primary">
+                    <div class="install-path-kicker">Fresh setup</div>
+                    <div class="install-path-title">Run it once. Cortex does the rest.</div>
+                    <p class="install-path-copy">Starter templates, git-backed memory, MCP wiring, and hooks land in one pass.</p>
+                  </div>
+                  <div class="install-path-card">
+                    <div class="install-path-kicker">Existing repo</div>
+                    <div class="install-path-title">Open the repo and initialize in place.</div>
+                    <p class="install-path-copy">The current project gets detected and bootstrapped without sending you into a docs maze.</p>
+                  </div>
+                  <div class="install-path-card">
+                    <div class="install-path-kicker">New machine</div>
+                    <div class="install-path-title">Reconnect your memory layer fast.</div>
+                    <p class="install-path-copy">Run the same command, paste your remote, and pull the whole store onto the new box.</p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -698,7 +707,7 @@
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Drop skills like <code style="font-size:11px;color:var(--text-muted)">/humanize</code>, <code style="font-size:11px;color:var(--text-muted)">/pipeline</code>, <code style="font-size:11px;color:var(--text-muted)">/release</code> in <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex init</code> wires them up on the next refresh. Starter templates have examples.</div>
+          <div class="skill-desc">Drop your own skills into <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex init</code> wires them up on the next refresh. Starter templates include examples without prescribing your workflow.</div>
         </div>
       </div>
     </div>
@@ -707,96 +716,104 @@
   <!-- CTA FOOTER -->
   <section class="cta-section">
     <div class="cta-content reveal">
-      <h2 class="cta-title">Start building your Cortex.</h2>
-      <p class="cta-tagline">Your agents will remember.</p>
-      <svg class="cta-icon" width="72" height="72" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <radialGradient id="cta-centerGlow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#F5C840"/>
-            <stop offset="45%" stop-color="#D4892E"/>
-            <stop offset="100%" stop-color="#8B4A12"/>
-          </radialGradient>
-          <radialGradient id="cta-nodeGrad">
-            <stop offset="0%" stop-color="#3A7BAE"/>
-            <stop offset="100%" stop-color="#1C4A6E"/>
-          </radialGradient>
-          <linearGradient id="cta-edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.7"/>
-            <stop offset="100%" stop-color="#1C3D5E" stop-opacity="0.25"/>
-          </linearGradient>
-        </defs>
-        <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
-        <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
-        <line x1="72" y1="22" x2="46" y2="26" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
-        <line x1="46" y1="26" x2="26" y2="42" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
-        <line x1="26" y1="42" x2="22" y2="64" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
-        <line x1="22" y1="64" x2="26" y2="86" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
-        <line x1="26" y1="86" x2="46" y2="102" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
-        <line x1="46" y1="102" x2="72" y2="106" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
-        <circle cx="72" cy="22" r="3.5" fill="url(#cta-nodeGrad)"/>
-        <circle cx="46" cy="26" r="3" fill="url(#cta-nodeGrad)"/>
-        <circle cx="26" cy="42" r="3" fill="url(#cta-nodeGrad)"/>
-        <circle cx="22" cy="64" r="3.5" fill="url(#cta-nodeGrad)"/>
-        <circle cx="26" cy="86" r="3" fill="url(#cta-nodeGrad)"/>
-        <circle cx="46" cy="102" r="3" fill="url(#cta-nodeGrad)"/>
-        <circle cx="72" cy="106" r="3.5" fill="url(#cta-nodeGrad)"/>
-        <circle cx="64" cy="64" r="6.5" fill="url(#cta-centerGlow)"/>
-        <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
-      </svg>
-      <div class="cta-actions">
-        <a href="#install" class="btn-primary">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Get started
-        </a>
-        <a href="https://github.com/alaarab/cortex" class="btn-ghost" target="_blank" rel="noopener">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          View on GitHub
-        </a>
-        <a href="https://www.npmjs.com/package/@alaarab/cortex" class="npm-badge" target="_blank" rel="noopener">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M0 0v24h24V0H0zm13 20.727H7.273V3.273H13v13.636h3.636V3.273H20.727v17.454H13z"/></svg>
-          @alaarab/cortex
-        </a>
+      <div class="cta-panel">
+        <div class="cta-brand">
+          <div class="cta-brand-copy">
+            <div class="section-label">Memory layer</div>
+            <h2 class="cta-title">Start building your Cortex.</h2>
+            <p class="cta-tagline">One private repo. Shared context everywhere your agents work.</p>
+          </div>
+          <svg class="cta-icon" width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <radialGradient id="cta-centerGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#F5C840"/>
+                <stop offset="45%" stop-color="#D4892E"/>
+                <stop offset="100%" stop-color="#8B4A12"/>
+              </radialGradient>
+              <radialGradient id="cta-nodeGrad">
+                <stop offset="0%" stop-color="#3A7BAE"/>
+                <stop offset="100%" stop-color="#1C4A6E"/>
+              </radialGradient>
+              <linearGradient id="cta-edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.7"/>
+                <stop offset="100%" stop-color="#1C3D5E" stop-opacity="0.25"/>
+              </linearGradient>
+            </defs>
+            <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
+            <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
+            <line x1="72" y1="22" x2="46" y2="26" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+            <line x1="46" y1="26" x2="26" y2="42" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+            <line x1="26" y1="42" x2="22" y2="64" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+            <line x1="22" y1="64" x2="26" y2="86" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+            <line x1="26" y1="86" x2="46" y2="102" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+            <line x1="46" y1="102" x2="72" y2="106" stroke="url(#cta-edgeGrad)" stroke-width="1.2"/>
+            <line x1="62" y1="34" x2="44" y2="38" stroke="#1C3D5E" stroke-width="0.8" stroke-opacity="0.45"/>
+            <line x1="44" y1="38" x2="34" y2="50" stroke="#1C3D5E" stroke-width="0.8" stroke-opacity="0.45"/>
+            <line x1="34" y1="50" x2="32" y2="64" stroke="#1C3D5E" stroke-width="0.8" stroke-opacity="0.45"/>
+            <line x1="32" y1="64" x2="34" y2="78" stroke="#1C3D5E" stroke-width="0.8" stroke-opacity="0.45"/>
+            <line x1="34" y1="78" x2="44" y2="90" stroke="#1C3D5E" stroke-width="0.8" stroke-opacity="0.45"/>
+            <line x1="44" y1="90" x2="62" y2="94" stroke="#1C3D5E" stroke-width="0.8" stroke-opacity="0.45"/>
+            <line x1="72" y1="22" x2="62" y2="34" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
+            <line x1="46" y1="26" x2="44" y2="38" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
+            <line x1="26" y1="42" x2="34" y2="50" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
+            <line x1="22" y1="64" x2="32" y2="64" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
+            <line x1="26" y1="86" x2="34" y2="78" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
+            <line x1="46" y1="102" x2="44" y2="90" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
+            <line x1="72" y1="106" x2="62" y2="94" stroke="#1C3D5E" stroke-width="0.6" stroke-opacity="0.35"/>
+            <line x1="62" y1="34" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
+            <line x1="44" y1="38" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
+            <line x1="34" y1="50" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
+            <line x1="32" y1="64" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
+            <line x1="34" y1="78" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
+            <line x1="44" y1="90" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
+            <line x1="62" y1="94" x2="64" y2="64" stroke="#8B5A1A" stroke-width="0.7" stroke-opacity="0.3"/>
+            <circle cx="72" cy="22" r="3.5" fill="url(#cta-nodeGrad)"/>
+            <circle cx="46" cy="26" r="3" fill="url(#cta-nodeGrad)"/>
+            <circle cx="26" cy="42" r="3" fill="url(#cta-nodeGrad)"/>
+            <circle cx="22" cy="64" r="3.5" fill="url(#cta-nodeGrad)"/>
+            <circle cx="26" cy="86" r="3" fill="url(#cta-nodeGrad)"/>
+            <circle cx="46" cy="102" r="3" fill="url(#cta-nodeGrad)"/>
+            <circle cx="72" cy="106" r="3.5" fill="url(#cta-nodeGrad)"/>
+            <circle cx="62" cy="34" r="2.2" fill="#1E4A6E" opacity="0.8"/>
+            <circle cx="44" cy="38" r="2" fill="#1E4A6E" opacity="0.7"/>
+            <circle cx="34" cy="50" r="2" fill="#1E4A6E" opacity="0.7"/>
+            <circle cx="32" cy="64" r="2.2" fill="#1E4A6E" opacity="0.8"/>
+            <circle cx="34" cy="78" r="2" fill="#1E4A6E" opacity="0.7"/>
+            <circle cx="44" cy="90" r="2" fill="#1E4A6E" opacity="0.7"/>
+            <circle cx="62" cy="94" r="2.2" fill="#1E4A6E" opacity="0.8"/>
+            <circle cx="64" cy="64" r="10" fill="#8B4A12" opacity="0.10"/>
+            <circle cx="64" cy="64" r="6.5" fill="url(#cta-centerGlow)"/>
+            <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
+          </svg>
+        </div>
+        <div class="cta-meta">
+          <span>Private git repo</span>
+          <span>MCP wired automatically</span>
+          <span>Hooks stay in sync across machines</span>
+        </div>
+        <div class="cta-actions">
+          <a href="#install" class="btn-primary">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Get started
+          </a>
+          <a href="https://github.com/alaarab/cortex" class="btn-ghost" target="_blank" rel="noopener">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            View on GitHub
+          </a>
+          <a href="https://www.npmjs.com/package/@alaarab/cortex" class="npm-badge" target="_blank" rel="noopener">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M0 0v24h24V0H0zm13 20.727H7.273V3.273H13v13.636h3.636V3.273H20.727v17.454H13z"/></svg>
+            @alaarab/cortex
+          </a>
+        </div>
       </div>
     </div>
   </section>
 
   <footer class="footer-bar">
     <div class="footer-left">
-      <svg width="18" height="18" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <radialGradient id="ft-centerGlow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="#F5C840"/>
-            <stop offset="45%" stop-color="#D4892E"/>
-            <stop offset="100%" stop-color="#8B4A12"/>
-          </radialGradient>
-          <radialGradient id="ft-nodeGrad">
-            <stop offset="0%" stop-color="#3A7BAE"/>
-            <stop offset="100%" stop-color="#1C4A6E"/>
-          </radialGradient>
-          <linearGradient id="ft-edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.7"/>
-            <stop offset="100%" stop-color="#1C3D5E" stop-opacity="0.25"/>
-          </linearGradient>
-        </defs>
-        <circle cx="64" cy="64" r="62" fill="#0A0B09"/>
-        <circle cx="64" cy="64" r="62" stroke="#1C2018" stroke-width="1"/>
-        <line x1="72" y1="22" x2="46" y2="26" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
-        <line x1="46" y1="26" x2="26" y2="42" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
-        <line x1="26" y1="42" x2="22" y2="64" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
-        <line x1="22" y1="64" x2="26" y2="86" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
-        <line x1="26" y1="86" x2="46" y2="102" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
-        <line x1="46" y1="102" x2="72" y2="106" stroke="url(#ft-edgeGrad)" stroke-width="1.2"/>
-        <circle cx="72" cy="22" r="3.5" fill="url(#ft-nodeGrad)"/>
-        <circle cx="46" cy="26" r="3" fill="url(#ft-nodeGrad)"/>
-        <circle cx="26" cy="42" r="3" fill="url(#ft-nodeGrad)"/>
-        <circle cx="22" cy="64" r="3.5" fill="url(#ft-nodeGrad)"/>
-        <circle cx="26" cy="86" r="3" fill="url(#ft-nodeGrad)"/>
-        <circle cx="46" cy="102" r="3" fill="url(#ft-nodeGrad)"/>
-        <circle cx="72" cy="106" r="3.5" fill="url(#ft-nodeGrad)"/>
-        <circle cx="64" cy="64" r="6.5" fill="url(#ft-centerGlow)"/>
-        <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
-      </svg>
-      cortex: long-term memory for AI agents
+      <span class="footer-wordmark">cortex</span>
+      <span class="dot-sep">•</span>
+      <span>Long-term memory for AI agents</span>
     </div>
     <div class="footer-right">
       <a href="https://github.com/alaarab/cortex" target="_blank" rel="noopener">github.com/alaarab/cortex</a>
