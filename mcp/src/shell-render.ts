@@ -37,6 +37,10 @@ export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
+export function visibleWidth(s: string): number {
+  return stripAnsi(s).length;
+}
+
 export function padToWidth(s: string, width: number): string {
   if (width <= 0) return "";
   if (width === 1) return truncateLine(s, width);
@@ -62,6 +66,61 @@ export function truncateLine(s: string, cols: number): string {
 // Many terminals wrap on the last visible column, which corrupts full-screen redraws.
 export function renderWidth(columns = process.stdout.columns || 80): number {
   return Math.max(1, columns - 1);
+}
+
+interface WrapSegmentsOptions {
+  indent?: string;
+  maxLines?: number;
+  separator?: string;
+}
+
+export function wrapSegments(
+  segments: string[],
+  cols: number,
+  opts: WrapSegmentsOptions = {},
+): string {
+  const indent = opts.indent ?? "  ";
+  const maxLines = Math.max(1, opts.maxLines ?? Number.POSITIVE_INFINITY);
+  const separator = opts.separator ?? " ";
+  const indentWidth = visibleWidth(indent);
+  const available = Math.max(1, cols - indentWidth);
+
+  const lines: string[] = [];
+  let current = indent;
+  let currentWidth = indentWidth;
+
+  const pushEllipsis = () => {
+    const extraSep = currentWidth > indentWidth ? separator : "";
+    lines.push(truncateLine(current + extraSep + "…", cols));
+  };
+
+  for (const raw of segments) {
+    if (!raw) continue;
+    const segment = truncateLine(raw, available);
+    const segmentWidth = visibleWidth(segment);
+    const separatorWidth = currentWidth > indentWidth ? visibleWidth(separator) : 0;
+
+    if (currentWidth > indentWidth && currentWidth + separatorWidth + segmentWidth > cols) {
+      if (lines.length + 1 >= maxLines) {
+        pushEllipsis();
+        return lines.join("\n");
+      }
+      lines.push(current);
+      current = indent + segment;
+      currentWidth = indentWidth + segmentWidth;
+      continue;
+    }
+
+    if (currentWidth > indentWidth) {
+      current += separator;
+      currentWidth += separatorWidth;
+    }
+    current += segment;
+    currentWidth += segmentWidth;
+  }
+
+  lines.push(current);
+  return lines.slice(0, maxLines).join("\n");
 }
 
 // ── Cortex theme ────────────────────────────────────────────────────────────

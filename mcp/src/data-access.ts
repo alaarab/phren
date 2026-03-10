@@ -114,8 +114,7 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
   if (!ensured.ok) return forwardErr(ensured);
 
   const findingsPath = path.join(ensured.data, 'FINDINGS.md');
-  const legacyPath = path.join(ensured.data, 'LEARNINGS.md');
-  const file = fs.existsSync(findingsPath) ? findingsPath : fs.existsSync(legacyPath) ? legacyPath : findingsPath;
+  const file = findingsPath;
   if (!fs.existsSync(file)) return cortexOk([]);
 
   const lines = fs.readFileSync(file, "utf8").split("\n");
@@ -191,8 +190,7 @@ export function removeFinding(cortexPath: string, project: string, match: string
   if (!ensured.ok) return forwardErr(ensured);
 
   const findingsPath = path.join(ensured.data, 'FINDINGS.md');
-  const legacyPath = path.join(ensured.data, 'LEARNINGS.md');
-  const filePath = fs.existsSync(findingsPath) ? findingsPath : fs.existsSync(legacyPath) ? legacyPath : findingsPath;
+  const filePath = findingsPath;
   if (!fs.existsSync(filePath)) return cortexErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :find add.`, CortexError.FILE_NOT_FOUND);
 
   return withSafeLock(filePath, () => {
@@ -248,11 +246,6 @@ function parseQueueLine(line: string): { date?: string; text: string; confidence
   const source = parseSourceComment(line);
   let machine = source?.machine;
   let model = source?.model;
-  if (!source) {
-    // Backward compat: legacy <!-- machine: hostname --> format
-    const legacyMachine = line.match(/<!--\s*machine:\s*([^>]+?)\s*-->/);
-    machine = legacyMachine?.[1]?.trim();
-  }
   // Strip the confidence marker from the canonical text so it doesn't pollute FINDINGS.md
   const text = rawText.replace(/\s*\[confidence\s+[01](?:\.\d+)?\]/gi, "").trim();
   return {

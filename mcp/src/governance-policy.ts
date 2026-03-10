@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { appendAuditLog, debugLog, getProjectDirs, isRecord, withDefaults, cortexErr, CortexError, cortexOk, type CortexResult, resolveFindingsPath } from "./shared.js";
+import { appendAuditLog, canonicalLocksFile, debugLog, getProjectDirs, isRecord, runtimeFile, runtimeHealthFile, withDefaults, cortexErr, CortexError, cortexOk, type CortexResult, resolveFindingsPath } from "./shared.js";
 import { withFileLock } from "./governance-locks.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
@@ -140,6 +140,8 @@ const DEFAULT_CANONICAL_LOCKS_FILE: VersionedEntriesFile<CanonicalLock> = {
   entries: {},
 };
 
+const LOCAL_ACCESS_FILE = "access-control.local.json";
+
 function governanceDir(cortexPath: string): string {
   return path.join(cortexPath, ".governance");
 }
@@ -148,12 +150,14 @@ type GovernanceSchema =
   | "access-control"
   | "retention-policy"
   | "workflow-policy"
-  | "index-policy"
-  | "runtime-health"
-  | "canonical-locks";
+  | "index-policy";
 
 function govFile(cortexPath: string, schema: GovernanceSchema): string {
   return path.join(governanceDir(cortexPath), GOVERNANCE_REGISTRY[schema].file);
+}
+
+function localAccessFile(cortexPath: string): string {
+  return runtimeFile(cortexPath, LOCAL_ACCESS_FILE);
 }
 
 function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
@@ -223,33 +227,6 @@ const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unkn
     hasValidSchemaVersion(data)
     && ["includeGlobs", "excludeGlobs"].every((key) => !(key in data) || isStringArray(data[key]))
     && (!("includeHidden" in data) || typeof data.includeHidden === "boolean"),
-  "runtime-health": (data) =>
-    hasValidSchemaVersion(data)
-    && (!("lastSessionStartAt" in data) || typeof data.lastSessionStartAt === "string")
-    && (!("lastPromptAt" in data) || typeof data.lastPromptAt === "string")
-    && (!("lastStopAt" in data) || typeof data.lastStopAt === "string")
-    && (!("lastAutoSave" in data) || (isRecord(data.lastAutoSave)
-      && typeof data.lastAutoSave.at === "string"
-      && ["clean", "saved-local", "saved-pushed", "error"].includes(String(data.lastAutoSave.status))
-      && (!("detail" in data.lastAutoSave) || typeof data.lastAutoSave.detail === "string")))
-    && (!("lastGovernance" in data) || (isRecord(data.lastGovernance)
-      && typeof data.lastGovernance.at === "string"
-      && ["ok", "error"].includes(String(data.lastGovernance.status))
-      && typeof data.lastGovernance.detail === "string"))
-    && (!("lastSync" in data) || (isRecord(data.lastSync)
-      && (!("lastPullAt" in data.lastSync) || typeof data.lastSync.lastPullAt === "string")
-      && (!("lastPullStatus" in data.lastSync) || ["ok", "error"].includes(String(data.lastSync.lastPullStatus)))
-      && (!("lastPullDetail" in data.lastSync) || typeof data.lastSync.lastPullDetail === "string")
-      && (!("lastSuccessfulPullAt" in data.lastSync) || typeof data.lastSync.lastSuccessfulPullAt === "string")
-      && (!("lastPushAt" in data.lastSync) || typeof data.lastSync.lastPushAt === "string")
-      && (!("lastPushStatus" in data.lastSync) || ["saved-local", "saved-pushed", "error"].includes(String(data.lastSync.lastPushStatus)))
-      && (!("lastPushDetail" in data.lastSync) || typeof data.lastSync.lastPushDetail === "string")
-      && (!("unsyncedCommits" in data.lastSync) || isFiniteNumber(data.lastSync.unsyncedCommits)))),
-  "canonical-locks": (data) => {
-    if (isVersionedEntries(data) && !hasValidSchemaVersion(data)) return false;
-    if (isVersionedEntries(data) && !isRecord(data.entries)) return false;
-    return Object.values(entriesObject(data)).every((entry) => isCanonicalLock(entry));
-  },
 };
 
 interface GovernanceRegistryEntry {
@@ -284,18 +261,6 @@ const GOVERNANCE_REGISTRY: Record<GovernanceSchema, GovernanceRegistryEntry> = {
     defaults: () => ({ ...DEFAULT_INDEX_POLICY }),
     normalize: (data) => normalizeIndexPolicy(data) as unknown as Record<string, unknown>,
   },
-  "runtime-health": {
-    file: "runtime-health.json",
-    validate: GOVERNANCE_VALIDATORS["runtime-health"],
-    defaults: () => ({ ...DEFAULT_RUNTIME_HEALTH }),
-    normalize: (data) => normalizeRuntimeHealth(data) as unknown as Record<string, unknown>,
-  },
-  "canonical-locks": {
-    file: "canonical-locks.json",
-    validate: GOVERNANCE_VALIDATORS["canonical-locks"],
-    defaults: () => ({ ...DEFAULT_CANONICAL_LOCKS_FILE }),
-    normalize: (data) => normalizeVersionedEntries(data, isCanonicalLock) as unknown as Record<string, unknown>,
-  },
 };
 
 const GOVERNANCE_FILE_SCHEMAS: Record<string, GovernanceSchema> = Object.fromEntries(
@@ -322,10 +287,7 @@ export function validateGovernanceJson(filePath: string, schema: GovernanceSchem
   }
 }
 
-function extractGovernanceVersion(schema: GovernanceSchema, data: Record<string, unknown>): number {
-  if (schema === "canonical-locks") {
-    return isVersionedEntries(data) && typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
-  }
+function extractGovernanceVersion(_schema: GovernanceSchema, data: Record<string, unknown>): number {
   return typeof data.schemaVersion === "number" ? data.schemaVersion : 0;
 }
 
@@ -477,121 +439,68 @@ function actorName(): string {
   }
 }
 
-export interface GovernanceMigrationOptions {
-  dryRun?: boolean;
+export function getCurrentActor(): string {
+  return actorName();
 }
 
-export interface GovernanceMigrationResult {
-  file: string;
-  schema: GovernanceSchema;
-  action: "missing" | "up-to-date" | "migrated" | "invalid-fallback" | "skipped-newer-version" | "error";
-  fromVersion: number | null;
-  toVersion: number;
-  changed: boolean;
-  detail?: string;
+function roleFromAccessControl(acl: AccessControl, actor: string): MemoryRole | null {
+  if ((acl.admins || []).includes(actor)) return "admin";
+  if ((acl.maintainers || []).includes(actor)) return "maintainer";
+  if ((acl.contributors || []).includes(actor)) return "contributor";
+  if ((acl.viewers || []).includes(actor)) return "viewer";
+  return null;
 }
 
-export interface GovernanceMigrationReport {
-  schemaVersion: number;
-  dryRun: boolean;
-  migratedFiles: string[];
-  results: GovernanceMigrationResult[];
+function hasAnyAssignedRole(acl: AccessControl): boolean {
+  return [...(acl.admins || []), ...(acl.maintainers || []), ...(acl.contributors || []), ...(acl.viewers || [])].length > 0;
 }
 
-export function migrateGovernance(cortexPath: string, options: GovernanceMigrationOptions = {}): GovernanceMigrationReport {
-  const dryRun = !!options.dryRun;
-  const report: GovernanceMigrationReport = {
-    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-    dryRun,
-    migratedFiles: [],
-    results: [],
-  };
-  const govDir = governanceDir(cortexPath);
+function getLocalAccessControl(cortexPath: string): AccessControl {
+  const parsed = readJsonFile<Record<string, unknown>>(localAccessFile(cortexPath), {});
+  if (!isRecord(parsed)) return { ...DEFAULT_ACCESS };
+  return normalizeAccessControl(parsed);
+}
 
-  for (const [fileName, schema] of Object.entries(GOVERNANCE_FILE_SCHEMAS)) {
-    const filePath = path.join(govDir, fileName);
-    if (!fs.existsSync(filePath)) {
-      report.results.push({
-        file: fileName,
-        schema,
-        action: "missing",
-        fromVersion: null,
-        toVersion: GOVERNANCE_SCHEMA_VERSION,
-        changed: false,
-      });
-      continue;
-    }
+function writeLocalAccessControl(cortexPath: string, next: AccessControl): void {
+  const file = localAccessFile(cortexPath);
+  withFileLock(file, () => {
+    writeJsonFileUnlocked(file, next);
+  });
+}
 
-    try {
-      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      const registryEntry = GOVERNANCE_REGISTRY[schema];
-      if (!isRecord(parsed)) {
-        if (!dryRun) writeJsonFile(filePath, registryEntry.defaults());
-        report.results.push({
-          file: fileName,
-          schema,
-          action: "invalid-fallback",
-          fromVersion: null,
-          toVersion: GOVERNANCE_SCHEMA_VERSION,
-          changed: true,
-          detail: "file is not a JSON object",
-        });
-        report.migratedFiles.push(fileName);
-        continue;
-      }
-
-      const fromVersion = extractGovernanceVersion(schema, parsed);
-      if (fromVersion > GOVERNANCE_SCHEMA_VERSION) {
-        report.results.push({
-          file: fileName,
-          schema,
-          action: "skipped-newer-version",
-          fromVersion,
-          toVersion: fromVersion,
-          changed: false,
-          detail: `file schemaVersion ${fromVersion} is newer than supported ${GOVERNANCE_SCHEMA_VERSION}`,
-        });
-        continue;
-      }
-
-      const valid = registryEntry.validate(parsed);
-      const next = valid ? registryEntry.normalize(parsed) : registryEntry.defaults();
-      const changed = JSON.stringify(parsed) !== JSON.stringify(next);
-      const action = valid ? (changed ? "migrated" : "up-to-date") : "invalid-fallback";
-
-      if (changed) {
-        if (!dryRun) writeJsonFile(filePath, next);
-        report.migratedFiles.push(fileName);
-      }
-
-      report.results.push({
-        file: fileName,
-        schema,
-        action,
-        fromVersion,
-        toVersion: GOVERNANCE_SCHEMA_VERSION,
-        changed,
-        detail: valid ? undefined : "failed schema validation; defaulted to safe shape",
-      });
-    } catch (err: unknown) {
-      report.results.push({
-        file: fileName,
-        schema,
-        action: "error",
-        fromVersion: null,
-        toVersion: GOVERNANCE_SCHEMA_VERSION,
-        changed: false,
-        detail: errorMessage(err),
-      });
-      debugLog(`migrateGovernance: failed to process ${fileName}: ${errorMessage(err)}`);
-    }
+export function ensureLocalActorAccess(cortexPath: string, actor: string = actorName()): { updated: boolean; role?: MemoryRole; reason?: string } {
+  const normalizedActor = actor.trim();
+  if (!normalizedActor || normalizedActor === "unknown") {
+    return { updated: false, reason: "actor-unavailable" };
   }
 
-  return report;
-}
+  const aclPath = govFile(cortexPath, "access-control");
+  if (!fs.existsSync(aclPath)) return { updated: false, reason: "shared-acl-missing" };
+  if (!validateGovernanceJson(aclPath, "access-control")) {
+    return { updated: false, reason: "shared-acl-invalid" };
+  }
 
-export function migrateGovernanceFiles(cortexPath: string): string[] {
-  return migrateGovernance(cortexPath).migratedFiles;
+  const sharedAcl = getAccessControl(cortexPath);
+  if (!hasAnyAssignedRole(sharedAcl)) return { updated: false, reason: "shared-acl-open" };
+  if (roleFromAccessControl(sharedAcl, normalizedActor)) {
+    return { updated: false, reason: "shared-role-present" };
+  }
+
+  const localAcl = getLocalAccessControl(cortexPath);
+  if (roleFromAccessControl(localAcl, normalizedActor)) {
+    return { updated: false, reason: "local-role-present" };
+  }
+
+  const next: AccessControl = {
+    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
+    admins: [...(localAcl.admins || [])],
+    maintainers: Array.from(new Set([...(localAcl.maintainers || []), normalizedActor])).sort(),
+    contributors: [...(localAcl.contributors || [])],
+    viewers: [...(localAcl.viewers || [])],
+  };
+  writeLocalAccessControl(cortexPath, next);
+  appendAuditLog(cortexPath, "ensure_local_actor_access", JSON.stringify({ actor: normalizedActor, role: "maintainer", file: LOCAL_ACCESS_FILE }));
+  return { updated: true, role: "maintainer" };
 }
 
 function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRole {
@@ -604,12 +513,11 @@ function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRol
     return "viewer";
   }
   const acl = readJsonFile<AccessControl>(aclPath, DEFAULT_ACCESS);
-  const allRoles = [...(acl.admins || []), ...(acl.maintainers || []), ...(acl.contributors || []), ...(acl.viewers || [])];
-  if (allRoles.length === 0) return "admin"; // ACL file present but empty — open access
-  if ((acl.admins || []).includes(actor)) return "admin";
-  if ((acl.maintainers || []).includes(actor)) return "maintainer";
-  if ((acl.contributors || []).includes(actor)) return "contributor";
-  if ((acl.viewers || []).includes(actor)) return "viewer";
+  if (!hasAnyAssignedRole(acl)) return "admin"; // ACL file present but empty — open access
+  const sharedRole = roleFromAccessControl(acl, actor);
+  if (sharedRole) return sharedRole;
+  const localRole = roleFromAccessControl(getLocalAccessControl(cortexPath), actor);
+  if (localRole) return localRole;
   return "viewer";
 }
 
@@ -733,13 +641,13 @@ export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy
 }
 
 export function getRuntimeHealth(cortexPath: string): RuntimeHealth {
-  const parsed = readJsonFile<Record<string, unknown>>(govFile(cortexPath, "runtime-health"), {});
+  const parsed = readJsonFile<Record<string, unknown>>(runtimeHealthFile(cortexPath), {});
   if (!isRecord(parsed)) return { ...DEFAULT_RUNTIME_HEALTH };
   return normalizeRuntimeHealth(parsed);
 }
 
 export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHealth>): RuntimeHealth {
-  const file = govFile(cortexPath, "runtime-health");
+  const file = runtimeHealthFile(cortexPath);
   return withFileLock(file, () => {
     const parsed = readJsonFile<Record<string, unknown>>(file, {});
     const current = isRecord(parsed) ? normalizeRuntimeHealth(parsed) : { ...DEFAULT_RUNTIME_HEALTH };
@@ -757,13 +665,13 @@ export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHe
 }
 
 export function loadCanonicalLocks(cortexPath: string): Record<string, CanonicalLock> {
-  const parsed = readJsonFile<Record<string, unknown>>(govFile(cortexPath, "canonical-locks"), {});
+  const parsed = readJsonFile<Record<string, unknown>>(canonicalLocksFile(cortexPath), {});
   if (!isRecord(parsed)) return {};
   return normalizeVersionedEntries(parsed, isCanonicalLock).entries;
 }
 
 function saveCanonicalLocks(cortexPath: string, locks: Record<string, CanonicalLock>) {
-  writeJsonFile(govFile(cortexPath, "canonical-locks"), {
+  writeJsonFile(canonicalLocksFile(cortexPath), {
     schemaVersion: GOVERNANCE_SCHEMA_VERSION,
     entries: locks,
   } satisfies VersionedEntriesFile<CanonicalLock>);
@@ -771,7 +679,7 @@ function saveCanonicalLocks(cortexPath: string, locks: Record<string, CanonicalL
 
 /** Save canonical locks without acquiring a file lock (caller must hold the lock). */
 export function saveCanonicalLocksUnlocked(cortexPath: string, locks: Record<string, CanonicalLock>) {
-  writeJsonFileUnlocked(govFile(cortexPath, "canonical-locks"), {
+  writeJsonFileUnlocked(canonicalLocksFile(cortexPath), {
     schemaVersion: GOVERNANCE_SCHEMA_VERSION,
     entries: locks,
   } satisfies VersionedEntriesFile<CanonicalLock>);

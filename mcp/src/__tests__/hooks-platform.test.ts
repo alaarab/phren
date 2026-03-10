@@ -3,6 +3,7 @@ import {
   commandExists,
   detectInstalledTools,
   buildLifecycleCommands,
+  buildSharedLifecycleCommands,
   configureAllHooks,
   readCustomHooks,
   runCustomHooks,
@@ -38,6 +39,12 @@ describe("hooks platform compatibility", () => {
     process.env.PATH = origPath;
     tmpCleanup();
   });
+
+  function writeInstallPrefs(content: string): void {
+    const runtimeDir = path.join(cortexPath, ".runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    fs.writeFileSync(path.join(runtimeDir, "install-preferences.json"), content);
+  }
 
   function setupFakeBinaries(tools: string[] = ["copilot", "cursor", "codex"]) {
     const fakeBin = path.join(tmpRoot, "bin");
@@ -114,6 +121,10 @@ describe("hooks platform compatibility", () => {
       configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
       const codexFile = path.join(cortexPath, "codex.json");
       expect(fs.existsSync(codexFile)).toBe(true);
+      const codex = JSON.parse(fs.readFileSync(codexFile, "utf8"));
+      const sharedLifecycle = buildSharedLifecycleCommands();
+      expect(codex.hooks.SessionStart[0].command).toBe(sharedLifecycle.sessionStart);
+      expect(codex.hooks.SessionStart[0].command).not.toContain(cortexPath);
       // Should NOT be in home directory
       expect(fs.existsSync(path.join(homeDir, "codex.json"))).toBe(false);
     });
@@ -128,17 +139,12 @@ describe("hooks platform compatibility", () => {
 
   describe("custom hooks edge cases", () => {
     it("readCustomHooks handles malformed JSON gracefully", () => {
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(path.join(govDir, "install-preferences.json"), "{ invalid json }}}");
+      writeInstallPrefs("{ invalid json }}}");
       expect(readCustomHooks(cortexPath)).toEqual([]);
     });
 
     it("readCustomHooks filters hooks with whitespace-only commands", () => {
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
+      writeInstallPrefs(
         JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "   " },
@@ -157,10 +163,7 @@ describe("hooks platform compatibility", () => {
         "pre-finding", "post-finding",
         "pre-index", "post-index",
       ];
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
+      writeInstallPrefs(
         JSON.stringify({
           customHooks: validEvents.map((event) => ({ event, command: "echo test" })),
         })
@@ -172,10 +175,7 @@ describe("hooks platform compatibility", () => {
     it("runCustomHooks sets CORTEX_PATH and CORTEX_HOOK_EVENT env vars", () => {
       if (process.platform === "win32") return; // echo $VAR is POSIX sh syntax; cmd.exe treats $VAR as literal
       const envFile = path.join(cortexPath, "env-vars.txt");
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
+      writeInstallPrefs(
         JSON.stringify({
           customHooks: [
             { event: "pre-index", command: `echo "$CORTEX_PATH|$CORTEX_HOOK_EVENT" > "${envFile}"` },
@@ -190,10 +190,7 @@ describe("hooks platform compatibility", () => {
 
     it("runCustomHooks respects custom timeout", () => {
       if (process.platform === "win32") return; // sleep is POSIX
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
+      writeInstallPrefs(
         JSON.stringify({
           customHooks: [
             // Very short timeout should cause a timeout error
@@ -213,10 +210,7 @@ describe("hooks platform compatibility", () => {
     it("runCustomHooks runs multiple matching hooks in sequence", () => {
       if (process.platform === "win32") return; // shell >> append redirect unreliable in cmd.exe via Node stdio:ignore
       const outputFile = path.join(cortexPath, "multi-hook.txt");
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
+      writeInstallPrefs(
         JSON.stringify({
           customHooks: [
             { event: "post-finding", command: `echo "first" >> "${outputFile}"` },
@@ -245,12 +239,7 @@ describe("hooks platform compatibility", () => {
 
     it("empty hookTools object defaults all tools to hooksEnabled value", () => {
       setupFakeBinaries(["copilot", "cursor"]);
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: true, hookTools: {} })
-      );
+      writeInstallPrefs(JSON.stringify({ hooksEnabled: true, hookTools: {} }));
       configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor"]) });
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(true);
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "cursor"))).toBe(true);
@@ -258,12 +247,7 @@ describe("hooks platform compatibility", () => {
 
     it("handles non-object hookTools gracefully", () => {
       setupFakeBinaries(["codex"]);
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: true, hookTools: "not-an-object" })
-      );
+      writeInstallPrefs(JSON.stringify({ hooksEnabled: true, hookTools: "not-an-object" }));
       // Should not throw, just default to enabled
       configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "codex"))).toBe(true);

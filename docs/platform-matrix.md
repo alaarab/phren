@@ -16,7 +16,6 @@ This is the current support and validation matrix for Cortex runtime surfaces.
 |---|---|---|---|
 | `cortex init` | expected | expected | expected |
 | `cortex add` | expected | expected | expected |
-| `cortex link` legacy path | expected | expected | expected |
 | MCP registration/config writes | expected | expected | expected |
 | Hook config writing | expected | expected | expected |
 | Wrapper fallback install | expected | expected | expected with platform-specific command wrappers |

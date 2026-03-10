@@ -10,6 +10,16 @@ function git(cwd: string, args: string[], encoding: "utf8" | null = null): strin
   return execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: encoding ?? undefined as any }).toString();
 }
 
+function currentBranch(repo: string): string {
+  return git(repo, ["branch", "--show-current"], "utf8").trim();
+}
+
+function checkoutRemoteBranch(repo: string, branch: string) {
+  execFileSync("git", ["fetch", "origin", branch], { cwd: repo, stdio: "ignore" });
+  execFileSync("git", ["checkout", "-B", branch, `origin/${branch}`], { cwd: repo, stdio: "ignore" });
+  execFileSync("git", ["branch", "--set-upstream-to", `origin/${branch}`, branch], { cwd: repo, stdio: "ignore" });
+}
+
 function configureRepo(repo: string) {
   execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repo, stdio: "ignore" });
   execFileSync("git", ["config", "user.name", "test"], { cwd: repo, stdio: "ignore" });
@@ -45,9 +55,10 @@ describe("handleBackgroundSync recovery", () => {
     fs.writeFileSync(path.join(repoA, "demo", "backlog.md"), "# backlog\n\n## Active\n\n- Base task\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
-    execFileSync("git", ["push", "-u", "origin", "master"], { cwd: repoA, stdio: "ignore" });
+    const primaryBranch = currentBranch(repoA);
+    execFileSync("git", ["push", "-u", "origin", primaryBranch], { cwd: repoA, stdio: "ignore" });
 
-    execFileSync("git", ["pull", "--quiet"], { cwd: repoB, stdio: "ignore" });
+    checkoutRemoteBranch(repoB, primaryBranch);
 
     fs.writeFileSync(path.join(repoA, "demo", "backlog.md"), "# backlog\n\n## Active\n\n- Base task\n- Remote task\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
@@ -66,7 +77,7 @@ describe("handleBackgroundSync recovery", () => {
     const summary = fs.readFileSync(path.join(repoA, "demo", "summary.md"), "utf8");
     expect(summary).toContain("local only");
 
-    const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".governance", "runtime-health.json"), "utf8"));
+    const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".runtime", "runtime-health.json"), "utf8"));
     expect(runtime.lastSync.lastPushStatus).toBe("saved-pushed");
     expect(runtime.lastSync.lastPullStatus).toBe("ok");
   }, RECOVERY_TEST_TIMEOUT_MS);
@@ -84,7 +95,7 @@ describe("handleBackgroundSync recovery", () => {
     fs.writeFileSync(path.join(repo, "demo", "summary.md"), "# summary\n\nbase\n");
     execFileSync("git", ["add", "."], { cwd: repo, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "base"], { cwd: repo, stdio: "ignore" });
-    execFileSync("git", ["push", "-u", "origin", "master"], { cwd: repo, stdio: "ignore" });
+    execFileSync("git", ["push", "-u", "origin", currentBranch(repo)], { cwd: repo, stdio: "ignore" });
 
     fs.rmSync(remote, { recursive: true, force: true });
 
@@ -117,8 +128,9 @@ describe("handleBackgroundSync recovery", () => {
     fs.writeFileSync(path.join(repoA, "demo", "summary.md"), "# summary\n\nshared line\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
-    execFileSync("git", ["push", "-u", "origin", "master"], { cwd: repoA, stdio: "ignore" });
-    execFileSync("git", ["pull", "--quiet"], { cwd: repoB, stdio: "ignore" });
+    const primaryBranch = currentBranch(repoA);
+    execFileSync("git", ["push", "-u", "origin", primaryBranch], { cwd: repoA, stdio: "ignore" });
+    checkoutRemoteBranch(repoB, primaryBranch);
 
     fs.writeFileSync(path.join(repoA, "demo", "summary.md"), "# summary\n\nremote change\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
@@ -157,8 +169,9 @@ describe("handleBackgroundSync recovery", () => {
     fs.writeFileSync(path.join(repoA, "demo", "backlog.md"), "# demo backlog\n\n## Active\n\n- [ ] Base task\n\n## Queue\n\n## Done\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
-    execFileSync("git", ["push", "-u", "origin", "master"], { cwd: repoA, stdio: "ignore" });
-    execFileSync("git", ["pull", "--quiet"], { cwd: repoB, stdio: "ignore" });
+    const primaryBranch = currentBranch(repoA);
+    execFileSync("git", ["push", "-u", "origin", primaryBranch], { cwd: repoA, stdio: "ignore" });
+    checkoutRemoteBranch(repoB, primaryBranch);
 
     fs.writeFileSync(path.join(repoA, "demo", "backlog.md"), "# demo backlog\n\n## Active\n\n- [ ] Base task\n- [ ] Remote task\n\n## Queue\n\n## Done\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });

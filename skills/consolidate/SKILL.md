@@ -41,7 +41,7 @@ If it doesn't exist, tell the user:
 Try the profile-aware path first, fall back to scanning all directories:
 
 ```bash
-MACHINE=$(cat ~/.cortex-machine 2>/dev/null || hostname)
+MACHINE=$(cat ~/.cortex/.machine-id 2>/dev/null || hostname)
 # look up profile in machines.yaml to get the project list
 
 # fallback: scan all project directories

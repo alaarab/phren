@@ -23,7 +23,6 @@ import {
   type SqlJsDatabase,
 } from "./index-query.js";
 
-// Re-export for backward compatibility
 export { porterStem } from "./shared-stemmer.js";
 export { cosineFallback } from "./shared-search-fallback.js";
 export { queryEntityLinks, getEntityBoostDocs, ensureGlobalEntitiesTable, queryCrossProjectEntities, logEntityMiss } from "./shared-entity-graph.js";
@@ -96,7 +95,6 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "claude.md": "claude",
   "summary.md": "summary",
   "findings.md": "findings",
-  "learnings.md": "findings",
   "reference.md": "reference",
   "backlog.md": "backlog",
   "changelog.md": "changelog",
@@ -107,7 +105,6 @@ const FILE_TYPE_MAP: Record<string, string> = {
 export function classifyFile(filename: string, relPath: string): string {
   // Directory takes priority over filename-based classification
   if (relPath.includes("reference/") || relPath.includes("reference\\")) return "reference";
-  if (relPath.includes("knowledge/") || relPath.includes("knowledge\\")) return "reference";
   if (relPath.includes("skills/") || relPath.includes("skills\\")) return "skill";
   const mapped = FILE_TYPE_MAP[filename.toLowerCase()];
   if (mapped) return mapped;
@@ -382,11 +379,8 @@ function globAllFiles(cortexPath: string, profile?: string): { filePaths: string
       for (const rel of matched) mdFilesSet.add(rel);
     }
     const relFiles = [...mdFilesSet].sort();
-    // Q1: if both LEARNINGS.md (legacy) and FINDINGS.md (canonical) exist, skip LEARNINGS.md
-    const hasFindingsMd = relFiles.some(f => path.basename(f).toLowerCase() === "findings.md");
     for (const relFile of relFiles) {
       const filename = path.basename(relFile);
-      if (hasFindingsMd && filename.toLowerCase() === "learnings.md") continue;
       const fullPath = path.join(dir, relFile);
       const type = classifyFile(filename, relFile);
       entries.push({ fullPath, project: projectName, filename, type, relFile });

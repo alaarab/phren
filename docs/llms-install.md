@@ -11,9 +11,8 @@ npx @alaarab/cortex init --dry-run
 
 This creates `~/.cortex`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.
 
-Compatibility note:
+Project setup note:
 - `cortex add` is the supported enrollment path for an existing repo.
-- `cortex projects add`, `cortex link`, and `init --from-existing` are quarantined behind `CORTEX_ENABLE_LEGACY_ENROLLMENT=1` for one-off legacy recovery.
 
 To update the installed package:
 
@@ -35,31 +34,9 @@ To remove everything:
 npx @alaarab/cortex uninstall
 ```
 
-## Migration and Safety
+## Maintenance Safety
 
-Use migration commands when upgrading old governance/data layouts:
-
-```bash
-# preview governance schema migrations (no writes)
-cortex maintain migrate governance --dry-run
-
-# apply governance schema migrations
-cortex maintain migrate governance
-
-# preview legacy findings migration for one project
-cortex maintain migrate data <project> --dry-run
-
-# migrate legacy findings and pin high-signal entries as canonical
-cortex maintain migrate data <project> --pin
-
-# run both governance + data migration paths
-cortex maintain migrate all <project> --dry-run
-
-# equivalent alias for data migration
-cortex migrate-findings <project> --dry-run
-```
-
-Destructive maintenance commands (`prune`, `consolidate`, and non-dry-run migrations) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, cortex creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
+Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, cortex creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
 ## MCP Tools (51)
 

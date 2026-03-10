@@ -191,11 +191,11 @@ For tools that lack native hook support (Copilot, Cursor, Codex), cortex install
 
 **Passthrough cases:** `-h`, `--help`, `help`, `-V`, `--version`, `version`, `completion` bypass hooks and exec directly to the real binary.
 
-**Installation gating:** Wrappers are only installed when `hooksEnabled !== false` in `.governance/install-preferences.json`.
+**Installation gating:** Wrappers are only installed when `hooksEnabled !== false` in `.runtime/install-preferences.json`.
 
 ## Lifecycle Command Format
 
-All lifecycle commands follow the same pattern:
+Local per-machine hook configs use the local entry script when available:
 
 ```
 CORTEX_PATH="<escaped-path>" node "<entry-script>" <subcommand>
@@ -204,7 +204,15 @@ CORTEX_PATH="<escaped-path>" node "<entry-script>" <subcommand>
 Or the npx fallback when the local entry script is not found:
 
 ```
-CORTEX_PATH="<escaped-path>" npx @alaarab/cortex <subcommand>
+CORTEX_PATH="<escaped-path>" npx -y @alaarab/cortex@<version> <subcommand>
+```
+
+Shared synced artifacts that may move across machines, such as `codex.json` and
+`cortex.SKILL.md`, use portable versioned npx commands without embedding local
+absolute paths:
+
+```
+npx -y @alaarab/cortex@<version> <subcommand>
 ```
 
 **Subcommands:**
@@ -212,11 +220,11 @@ CORTEX_PATH="<escaped-path>" npx @alaarab/cortex <subcommand>
 - `hook-prompt`: keyword extraction, cortex search, context injection
 - `hook-stop`: git add, commit, push
 
-**Path escaping:** Backslashes are doubled (`\\` to `\\\\`), double quotes are escaped (`"` to `\"`).
+**Path escaping:** Local machine configs escape backslashes (`\\` to `\\\\`) and double quotes (`"` to `\"`).
 
 ## Install Preferences
 
-**File:** `<cortexPath>/.governance/install-preferences.json`
+**File:** `<cortexPath>/.runtime/install-preferences.json`
 
 ```jsonc
 {

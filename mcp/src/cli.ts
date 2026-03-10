@@ -35,7 +35,6 @@ import {
   handleGovernMemories,
   handlePruneMemories,
   handleConsolidateMemories,
-  handleMigrateFindings,
   handleMaintain,
   handleBackgroundMaintenance,
 } from "./cli-govern.js";
@@ -114,8 +113,6 @@ export async function runCliCommand(command: string, args: string[]) {
       return handlePruneMemories(args);
     case "consolidate-memories":
       return handleConsolidateMemories(args);
-    case "migrate-findings":
-      return handleMigrateFindings(args);
     case "index-policy":
       return handleIndexPolicy(args);
     case "policy":

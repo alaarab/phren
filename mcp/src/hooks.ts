@@ -3,7 +3,7 @@ import * as path from "path";
 import { createHmac, randomUUID } from "crypto";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
-import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, homePath, type CortexErrorCode } from "./shared.js";
+import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, homePath, installPreferencesFile, type CortexErrorCode } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
@@ -83,6 +83,16 @@ export interface LifecycleCommands {
   hookTool: string;
 }
 
+function buildPackageLifecycleCommands(): LifecycleCommands {
+  const packageSpec = cortexPackageSpec();
+  return {
+    sessionStart: `npx -y ${packageSpec} hook-session-start`,
+    userPromptSubmit: `npx -y ${packageSpec} hook-prompt`,
+    stop: `npx -y ${packageSpec} hook-stop`,
+    hookTool: `npx -y ${packageSpec} hook-tool`,
+  };
+}
+
 export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
   const entry = resolveCliEntryScript();
   const isWindows = process.platform === "win32";
@@ -121,6 +131,10 @@ export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
     stop: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-stop`,
     hookTool: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-tool`,
   };
+}
+
+export function buildSharedLifecycleCommands(): LifecycleCommands {
+  return buildPackageLifecycleCommands();
 }
 
 function installSessionWrapper(tool: string, cortexPath: string): boolean {
@@ -254,7 +268,7 @@ export interface HookToolPreferences {
 
 function readHookPreferences(cortexPath: string): { enabled: boolean; toolPrefs: HookToolPreferences } {
   try {
-    const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
+    const prefsPath = installPreferencesFile(cortexPath);
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
     const enabled = prefs.hooksEnabled !== false;
     const toolPrefs: HookToolPreferences = prefs.hookTools && typeof prefs.hookTools === "object"
@@ -323,7 +337,7 @@ const HOOK_ERROR_LOG_MAX_LINES = 1000;
 
 export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
   try {
-    const prefsPath = path.join(cortexPath, ".governance", "install-preferences.json");
+    const prefsPath = installPreferencesFile(cortexPath);
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
     if (!Array.isArray(prefs.customHooks)) return [];
     return prefs.customHooks.filter(
@@ -491,6 +505,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
   if (detected.has("codex")) {
     const codexFile = hookConfigPath("codex", cortexPath);
     try {
+      const lifecycle = buildSharedLifecycleCommands();
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] configureAllHooks codexRead: ${errorMessage(err)}\n`);
@@ -498,9 +513,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       const config: CodexHookConfig = {
         ...existing,
         hooks: {
-          SessionStart: [{ type: "command", command: pullCmd }],
-          UserPromptSubmit: [{ type: "command", command: promptCmd }],
-          Stop: [{ type: "command", command: stopCmd }],
+          SessionStart: [{ type: "command", command: lifecycle.sessionStart }],
+          UserPromptSubmit: [{ type: "command", command: lifecycle.userPromptSubmit }],
+          Stop: [{ type: "command", command: lifecycle.stop }],
         },
       };
       if (!validateCodexConfig(config)) throw new Error("invalid codex hook config shape");

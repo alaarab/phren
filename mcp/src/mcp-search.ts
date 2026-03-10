@@ -69,7 +69,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ id: rawId }) => {
-      // Normalize ID: decode URL encoding, fix backslashes, strip legacy :linenum suffix
+      // Normalize ID: decode URL encoding and normalize path separators
       const id = normalizeMemoryId(rawId);
       const match = id.match(/^mem:([^/]+)\/(.+)$/);
       if (!match) {

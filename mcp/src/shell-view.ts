@@ -20,6 +20,7 @@ import {
   stripAnsi,
   truncateLine,
   renderWidth,
+  wrapSegments,
   lineViewport,
   shellHelpText,
   gradient,
@@ -71,7 +72,7 @@ function renderTabBar(state: ShellState): string {
   }
 
   const projectTag = state.project
-    ? `${style.cyan(state.project)} ${style.dim("›")} `
+    ? `${style.cyan(state.project)} ${style.dim("›")}`
     : "";
   const tabs = SUB_VIEWS.map((v) => {
     const icon = TAB_ICONS[v] || "";
@@ -81,7 +82,12 @@ function renderTabBar(state: ShellState): string {
       : ` ${style.dim(label)} `;
   });
 
-  const tabLine = `  ${projectTag}${tabs.join(style.dim("│"))}`;
+  const segments = projectTag ? [projectTag, ...tabs] : tabs;
+  const tabLine = wrapSegments(segments, cols, {
+    indent: "  ",
+    maxLines: 2,
+    separator: style.dim("│"),
+  });
   return `${tabLine}\n${separator(cols)}`;
 }
 
@@ -127,7 +133,11 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
   const tail = [`${k("h")} ${d("health")}`, `${k("/")} ${d("filter")}`, `${k(":")} ${d("cmd")}`, `${k("?")} ${d("help")}`, `${k("q")} ${d("quit")}`];
 
   const hints = [...nav, ...extra, ...tail];
-  return `${sep}\n  ${hints.join(dot)}`;
+  return `${sep}\n${wrapSegments(hints, cols, {
+    indent: "  ",
+    maxLines: 3,
+    separator: dot,
+  })}`;
 }
 
 // ── Content height ─────────────────────────────────────────────────────────

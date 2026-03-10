@@ -6,7 +6,8 @@ ERRORS=0
 
 # 1. Check tool count in docs matches actual registrations in mcp-*.ts files
 REGISTERED=$(grep -r 'server\.registerTool(' mcp/src/mcp-*.ts | wc -l | tr -d ' ')
-DOCUMENTED=$(grep -oP 'MCP Tools \(\K[0-9]+' docs/llms-install.md || echo "0")
+DOCUMENTED=$(perl -ne 'print "$1\n" if /MCP Tools \((\d+)\)/' docs/llms-install.md | head -n 1)
+DOCUMENTED=${DOCUMENTED:-0}
 
 if [ "$REGISTERED" != "$DOCUMENTED" ]; then
   echo "FAIL: docs/llms-install.md says $DOCUMENTED MCP tools, but mcp-*.ts files have $REGISTERED registrations"
@@ -32,22 +33,20 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# 4. Public onboarding docs should not advertise legacy enrollment flows
+# 4. Public onboarding docs should not advertise removed enrollment flows
 PUBLIC_DOCS=("README.md" "docs/faq.md" "docs/llms-install.md" "docs/index.html")
-LEGACY_PATTERNS=("cortex link" "projects add" "--from-existing")
+REMOVED_PATTERNS=("cortex link" "projects add" "--from-existing")
 for doc in "${PUBLIC_DOCS[@]}"; do
-  for pattern in "${LEGACY_PATTERNS[@]}"; do
+  for pattern in "${REMOVED_PATTERNS[@]}"; do
     if grep -n -- "$pattern" "$doc" >/tmp/cortex-doc-grep.txt; then
-      if grep -viE 'legacy|compatibility' /tmp/cortex-doc-grep.txt >/tmp/cortex-doc-grep-unmarked.txt; then
-        echo "FAIL: $doc mentions legacy onboarding flow without a legacy/compatibility marker: $pattern"
-        cat /tmp/cortex-doc-grep-unmarked.txt
-        ERRORS=$((ERRORS + 1))
-      fi
+      echo "FAIL: $doc still mentions removed onboarding flow: $pattern"
+      cat /tmp/cortex-doc-grep.txt
+      ERRORS=$((ERRORS + 1))
     fi
   done
 done
 if [ "$ERRORS" -eq 0 ]; then
-  echo "OK: Public onboarding docs only advertise the supported enrollment flow"
+  echo "OK: Public onboarding docs only advertise supported enrollment flows"
 fi
 
 # 5. Supporting docs for platform behavior and error policy should exist

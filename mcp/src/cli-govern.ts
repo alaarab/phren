@@ -3,21 +3,17 @@ import {
   qualityMarkers,
   getProjectDirs,
   getCortexPath,
-  migrateProjectNames,
 } from "./shared.js";
 import {
   appendReviewQueue,
   getRetentionPolicy,
   consolidateProjectFindings,
-  migrateGovernanceFiles,
   updateRuntimeHealth,
-  GOVERNANCE_SCHEMA_VERSION,
   pruneDeadMemories,
   enforceCanonicalLocks,
 } from "./shared-governance.js";
 import {
   filterTrustedFindingsDetailed,
-  migrateLegacyFindings,
 } from "./shared-content.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -271,183 +267,6 @@ export async function handleConsolidateMemories(args: string[] = []) {
   console.log(`Updated backups (${backups.length}): ${backups.join(", ")}`);
 }
 
-export async function handleMigrateFindings(args: string[]) {
-  const project = args.find((arg) => !arg.startsWith("-"));
-  if (!project) {
-    console.error("Usage: cortex migrate-findings <project> [--pin] [--dry-run]");
-    process.exit(1);
-  }
-  const pinCanonical = args.includes("--pin");
-  const dryRun = args.includes("--dry-run");
-  const result = migrateLegacyFindings(getCortexPath(), project, { pinCanonical, dryRun });
-  console.log(result.ok ? result.data : result.error);
-}
-
-// ── Maintain migrate ─────────────────────────────────────────────────────────
-
-type MaintainMigrationKind = "governance" | "data" | "all" | "project-names";
-
-interface ParsedMaintainMigrationArgs {
-  kind: MaintainMigrationKind;
-  project?: string;
-  pinCanonical: boolean;
-  dryRun: boolean;
-}
-
-function printMaintainMigrationUsage() {
-  console.error("Usage:");
-  console.error("  cortex maintain migrate governance [--dry-run]");
-  console.error("  cortex maintain migrate project-names [--dry-run]");
-  console.error("  cortex maintain migrate data <project> [--pin] [--dry-run]");
-  console.error("  cortex maintain migrate all <project> [--pin] [--dry-run]");
-  console.error("  cortex maintain migrate <project> [--pin] [--dry-run]  # legacy data alias");
-}
-
-function parseMaintainMigrationArgs(args: string[]): ParsedMaintainMigrationArgs {
-  let pinCanonical = false;
-  let dryRun = false;
-  const positional: string[] = [];
-  for (const arg of args) {
-    if (arg === "--pin") {
-      pinCanonical = true;
-      continue;
-    }
-    if (arg === "--dry-run") {
-      dryRun = true;
-      continue;
-    }
-    if (arg.startsWith("-")) {
-      console.error(`Unknown migrate flag: ${arg}`);
-      printMaintainMigrationUsage();
-      process.exit(1);
-    }
-    positional.push(arg);
-  }
-
-  if (!positional.length) {
-    printMaintainMigrationUsage();
-    process.exit(1);
-  }
-
-  const mode = positional[0].toLowerCase();
-  if (mode === "governance") {
-    if (pinCanonical) {
-      console.error("--pin is only valid for data/all migrations.");
-      process.exit(1);
-    }
-    if (positional.length !== 1) {
-      printMaintainMigrationUsage();
-      process.exit(1);
-    }
-    return { kind: "governance", pinCanonical, dryRun };
-  }
-
-  if (mode === "project-names") {
-    if (pinCanonical) {
-      console.error("--pin is only valid for data/all migrations.");
-      process.exit(1);
-    }
-    if (positional.length !== 1) {
-      printMaintainMigrationUsage();
-      process.exit(1);
-    }
-    return { kind: "project-names", pinCanonical, dryRun };
-  }
-
-  if (mode === "data" || mode === "all") {
-    const project = positional[1];
-    if (!project || positional.length !== 2) {
-      printMaintainMigrationUsage();
-      process.exit(1);
-    }
-    return { kind: mode, project, pinCanonical, dryRun };
-  }
-
-  if (positional.length !== 1) {
-    printMaintainMigrationUsage();
-    process.exit(1);
-  }
-  return { kind: "data", project: positional[0], pinCanonical, dryRun };
-}
-
-function describeGovernanceMigrationPlan(): Array<{ file: string; from: number; to: number }> {
-  const govDir = path.join(getCortexPath(), ".governance");
-  if (!fs.existsSync(govDir)) return [];
-  const files = [
-    "memory-policy.json",
-    "access-control.json",
-    "memory-workflow-policy.json",
-    "index-policy.json",
-  ];
-  const pending: Array<{ file: string; from: number; to: number }> = [];
-  for (const file of files) {
-    const fullPath = path.join(govDir, file);
-    if (!fs.existsSync(fullPath)) continue;
-    try {
-      const raw = fs.readFileSync(fullPath, "utf8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const fileVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 0;
-      if (fileVersion < GOVERNANCE_SCHEMA_VERSION) {
-        pending.push({ file, from: fileVersion, to: GOVERNANCE_SCHEMA_VERSION });
-      }
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli-govern describeGovernanceMigrationPlan fileParse: ${errorMessage(err)}\n`);
-    }
-  }
-  return pending;
-}
-
-function runGovernanceMigration(dryRun: boolean): string {
-  if (dryRun) {
-    const pending = describeGovernanceMigrationPlan();
-    if (!pending.length) return "[dry-run] Governance files are already up to date.";
-    const details = pending.map((entry) => `${entry.file} (${entry.from} -> ${entry.to})`).join(", ");
-    return `[dry-run] Would migrate ${pending.length} governance file(s): ${details}`;
-  }
-  const migrated = migrateGovernanceFiles(getCortexPath());
-  if (!migrated.length) return "Governance files are already up to date.";
-  return `Migrated ${migrated.length} governance file(s): ${migrated.join(", ")}`;
-}
-
-export async function handleMaintainMigrate(args: string[]) {
-  const parsed = parseMaintainMigrationArgs(args);
-  const lines: string[] = [];
-
-  if (parsed.kind === "project-names") {
-    const result = migrateProjectNames(getCortexPath(), parsed.dryRun);
-    if (!result.ok) {
-      console.log(`Project name migration: ${result.error}`);
-      return;
-    }
-    const report = result.data;
-    if (!report.renamedProjects.length && !report.updatedProfiles.length && !report.renamedNativeMemories.length && !report.archivedNativeMemories.length) {
-      lines.push(`${parsed.dryRun ? "[dry-run] " : ""}Project name migration: already canonical.`);
-      console.log(lines.join("\n"));
-      return;
-    }
-    const verb = parsed.dryRun ? "[dry-run] Would migrate" : "Migrated";
-    lines.push(`Project name migration: ${verb} ${report.renamedProjects.length} project dir(s), updated ${report.updatedProfiles.length} profile file(s), renamed ${report.renamedNativeMemories.length} native memory file(s), archived ${report.archivedNativeMemories.length} conflicting/duplicate native memory file(s).`);
-    if (report.renamedProjects.length) lines.push(`Projects: ${report.renamedProjects.map((entry) => `${entry.from} -> ${entry.to}`).join(", ")}`);
-    if (report.updatedProfiles.length) lines.push(`Profiles: ${report.updatedProfiles.map((entry) => entry.profile).join(", ")}`);
-    if (report.archivedNativeMemories.length) lines.push(`Archived native memories: ${report.archivedNativeMemories.map((entry) => path.basename(entry.archivedAs)).join(", ")}`);
-    console.log(lines.join("\n"));
-    return;
-  }
-
-  if (parsed.kind === "governance" || parsed.kind === "all") {
-    lines.push(`Governance migration: ${runGovernanceMigration(parsed.dryRun)}`);
-  }
-  if (parsed.kind === "data" || parsed.kind === "all") {
-    const result = migrateLegacyFindings(getCortexPath(), parsed.project!, {
-      pinCanonical: parsed.pinCanonical,
-      dryRun: parsed.dryRun,
-    });
-    lines.push(`Data migration (${parsed.project}): ${result.ok ? result.data : result.error}`);
-  }
-
-  console.log(lines.join("\n"));
-}
-
 // ── Maintain router ──────────────────────────────────────────────────────────
 
 export async function handleMaintain(args: string[]) {
@@ -463,8 +282,6 @@ export async function handleMaintain(args: string[]) {
       return handlePruneMemories(rest);
     case "consolidate":
       return handleConsolidateMemories(rest);
-    case "migrate":
-      return handleMaintainMigrate(rest);
     case "extract":
       return handleExtractMemories(rest[0]);
     case "restore":
@@ -481,14 +298,6 @@ Subcommands:
   cortex maintain consolidate [project] [--dry-run]
                                          Deduplicate FINDINGS.md bullets. Run after a burst of work
                                          when findings feel repetitive, or monthly to keep things clean.
-  cortex maintain migrate governance [--dry-run]
-                                         Upgrade governance policy file schemas
-  cortex maintain migrate project-names [--dry-run]
-                                         Rename mixed-case project dirs and native memory files to canonical lowercase
-  cortex maintain migrate data <project> [--pin] [--dry-run]
-  cortex maintain migrate all <project> [--pin] [--dry-run]
-  cortex maintain migrate <project> [--pin] [--dry-run]  (legacy alias)
-                                         Promote legacy findings into FINDINGS/CANONICAL
   cortex maintain extract [project]      Mine git/GitHub signals into memory candidates
   cortex maintain restore [project]      List and restore from .bak files`);
       if (sub) {

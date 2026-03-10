@@ -5,7 +5,7 @@ import * as path from "path";
 import * as os from "os";
 import * as yaml from "js-yaml";
 import { isVersionNewer } from "./init.js";
-import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, migrateSkillsToFolders, updateFileChecksums, verifyFileChecksums } from "./link.js";
+import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, updateFileChecksums, verifyFileChecksums } from "./link.js";
 
 describe("link", () => {
   describe("isVersionNewer", () => {
@@ -121,7 +121,7 @@ describe("link", () => {
 
       // Create project with skills
       const cortexProject = path.join(cortexPath, "skill-project");
-      const skillsSrc = path.join(cortexProject, ".claude", "skills");
+      const skillsSrc = path.join(cortexProject, "skills");
       fs.mkdirSync(skillsSrc, { recursive: true });
       fs.writeFileSync(path.join(skillsSrc, "deploy.md"), "# Deploy skill");
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
@@ -141,7 +141,7 @@ describe("link", () => {
       process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
 
       const cortexProject = path.join(cortexPath, "subfolder-project");
-      const skillsSrc = path.join(cortexProject, ".claude", "skills", "my-skill");
+      const skillsSrc = path.join(cortexProject, "skills", "my-skill");
       fs.mkdirSync(skillsSrc, { recursive: true });
       fs.writeFileSync(path.join(skillsSrc, "SKILL.md"), "# My Skill");
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
@@ -535,6 +535,9 @@ describe("link", () => {
       const content = fs.readFileSync(skillFile, "utf8");
       expect(content).toContain("cortex");
       expect(content).toContain("hooks:");
+      expect(content).toContain("npx -y @alaarab/cortex@");
+      expect(content).not.toContain(tmpRoot);
+      expect(content).not.toContain(".npm/_npx");
     });
 
     it("mirrors resolved global plus project skills and generates AGENTS.md", async () => {
@@ -912,41 +915,6 @@ hooks:
       } finally {
         tmp.cleanup();
       }
-    });
-  });
-
-  describe("migrateSkillsToFolders", () => {
-    it("moves flat .md files into name/SKILL.md folders", () => {
-      const tmp = makeTempDir("skills-migrate-");
-      try {
-        fs.writeFileSync(path.join(tmp.path, "swarm.md"), "---\nname: swarm\ndescription: test\n---\nbody");
-        fs.writeFileSync(path.join(tmp.path, "creative.md"), "---\nname: creative\ndescription: test\n---\nbody");
-        const migrated = migrateSkillsToFolders(tmp.path);
-        expect(migrated.sort()).toEqual(["creative", "swarm"]);
-        expect(fs.existsSync(path.join(tmp.path, "swarm", "SKILL.md"))).toBe(true);
-        expect(fs.existsSync(path.join(tmp.path, "creative", "SKILL.md"))).toBe(true);
-        expect(fs.existsSync(path.join(tmp.path, "swarm.md"))).toBe(false);
-      } finally {
-        tmp.cleanup();
-      }
-    });
-
-    it("skips files that already have a matching folder", () => {
-      const tmp = makeTempDir("skills-migrate-");
-      try {
-        fs.writeFileSync(path.join(tmp.path, "swarm.md"), "flat content");
-        fs.mkdirSync(path.join(tmp.path, "swarm"));
-        fs.writeFileSync(path.join(tmp.path, "swarm", "SKILL.md"), "folder content");
-        const migrated = migrateSkillsToFolders(tmp.path);
-        expect(migrated).toEqual([]);
-        expect(fs.readFileSync(path.join(tmp.path, "swarm.md"), "utf8")).toBe("flat content");
-      } finally {
-        tmp.cleanup();
-      }
-    });
-
-    it("returns empty array for nonexistent directory", () => {
-      expect(migrateSkillsToFolders("/tmp/nonexistent-skills-dir-xyz")).toEqual([]);
     });
   });
 

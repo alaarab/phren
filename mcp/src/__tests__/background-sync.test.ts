@@ -25,7 +25,7 @@ describe("handleBackgroundSync", () => {
     const { handleBackgroundSync } = await import("../cli-hooks-session.js");
     await handleBackgroundSync();
 
-    const runtimePath = path.join(tmp.path, ".governance", "runtime-health.json");
+    const runtimePath = path.join(tmp.path, ".runtime", "runtime-health.json");
     expect(fs.existsSync(runtimePath)).toBe(true);
     const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8"));
     expect(runtime.lastSync.lastPushStatus).toBe("saved-local");

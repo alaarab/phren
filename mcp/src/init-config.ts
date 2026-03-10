@@ -25,7 +25,7 @@ import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init-prefe
 import { resolveEntryScript, VERSION } from "./init-shared.js";
 
 export type McpConfigStatus = "installed" | "already_configured" | "disabled" | "already_disabled";
-export type McpRootKey = "mcpServers" | "servers";
+export type McpRootKey = "mcpServers";
 export type ToolStatus = McpConfigStatus | "no_settings" | "no_vscode" | "no_cursor" | "no_copilot" | "no_codex";
 
 interface HookEntry {
@@ -38,7 +38,6 @@ type HookMap = Partial<Record<HookEventName, HookEntry[]>> & Record<string, unkn
 type JsonObject = Record<string, unknown> & {
   hooks?: HookMap;
   mcpServers?: Record<string, unknown>;
-  servers?: Record<string, unknown>;
 };
 
 function log(msg: string) {
@@ -105,15 +104,8 @@ function upsertMcpServer(
   cortexPath: string
 ): McpConfigStatus {
   const mcpServers = getObjectProp(data, "mcpServers");
-  const servers = getObjectProp(data, "servers");
-  const hadMcp = Boolean(mcpServers?.cortex || servers?.cortex);
+  const hadMcp = Boolean(mcpServers?.cortex);
   if (mcpEnabled) {
-    const staleKey: McpRootKey = preferredRoot === "mcpServers" ? "servers" : "mcpServers";
-    const staleRoot = getObjectProp(data, staleKey);
-    if (staleRoot?.cortex) {
-      delete staleRoot.cortex;
-      if (Object.keys(staleRoot).length === 0) delete data[staleKey];
-    }
     let preferredRootValue = getObjectProp(data, preferredRoot);
     if (!preferredRootValue) {
       preferredRootValue = {};
@@ -124,7 +116,6 @@ function upsertMcpServer(
   }
 
   if (mcpServers?.cortex) delete mcpServers.cortex;
-  if (servers?.cortex) delete servers.cortex;
   return hadMcp ? "disabled" : "already_disabled";
 }
 
@@ -207,10 +198,6 @@ export function removeMcpServerAtPath(filePath: string): boolean {
       delete data.mcpServers.cortex;
       removed = true;
     }
-    if (data.servers?.cortex) {
-      delete data.servers.cortex;
-      removed = true;
-    }
   });
   return removed;
 }
@@ -257,7 +244,6 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
         : eventName === "Stop" ? "hook-stop"
         : eventName === "PostToolUse" ? "hook-tool"
         : "hook-session-start";
-      const legacyMarker = eventName === "Stop" ? "auto-save" : eventName === "SessionStart" ? "doctor --fix" : "hook-prompt";
       // Find the HookEntry containing a cortex hook command
       const existingEntryIdx = eventHooks.findIndex(
         (h: HookEntry) => h?.hooks?.some(
@@ -265,7 +251,6 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
             typeof hook?.command === "string" &&
             (
               hook.command.includes(marker) ||
-              hook.command.includes(legacyMarker) ||
               isCortexCommand(hook.command)
             )
         )
@@ -278,7 +263,6 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
             typeof hook?.command === "string" &&
             (
               hook.command.includes(marker) ||
-              hook.command.includes(legacyMarker) ||
               isCortexCommand(hook.command)
             )
         );
@@ -350,7 +334,7 @@ export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean
   const probe = probeVSCodePath();
   if (!probe.installed || !probe.targetDir) return "no_vscode";
   const mcpFile = path.join(probe.targetDir, "mcp.json");
-  return configureMcpAtPath(mcpFile, mcpEnabled, "servers", cortexPath);
+  return configureMcpAtPath(mcpFile, mcpEnabled, "mcpServers", cortexPath);
 }
 
 export function configureCursorMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {

@@ -3,6 +3,8 @@ import * as path from "path";
 import {
   getProjectDirs,
   runtimeDir,
+  runtimeHealthFile,
+  memoryUsageLogFile,
   homePath,
 } from "./shared.js";
 import { errorMessage } from "./utils.js";
@@ -17,6 +19,8 @@ interface GraphNode {
   fullLabel: string;
   group: "project" | "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug";
   refCount: number;
+  project: string;
+  tagged: boolean;
 }
 
 interface GraphLink {
@@ -43,7 +47,7 @@ function extractGithubUrl(content: string): string | undefined {
 
 export function readSyncSnapshot(cortexPath: string) {
   try {
-    const runtimeHealth = path.join(cortexPath, ".governance", "runtime-health.json");
+    const runtimeHealth = runtimeHealthFile(cortexPath);
     if (!fs.existsSync(runtimeHealth)) return {};
     const parsed = JSON.parse(fs.readFileSync(runtimeHealth, "utf8")) as {
       lastAutoSave?: { status?: string; detail?: string };
@@ -145,11 +149,27 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
   for (const project of projects) {
     const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
     if (!fs.existsSync(findingsPath)) {
-      nodes.push({ id: project, label: project, fullLabel: project, group: "project", refCount: 0 });
+      nodes.push({
+        id: project,
+        label: project,
+        fullLabel: project,
+        group: "project",
+        refCount: 0,
+        project,
+        tagged: false,
+      });
       continue;
     }
 
-    nodes.push({ id: project, label: project, fullLabel: project, group: "project", refCount: 1 });
+    nodes.push({
+      id: project,
+      label: project,
+      fullLabel: project,
+      group: "project",
+      refCount: 1,
+      project,
+      tagged: false,
+    });
 
     const content = fs.readFileSync(findingsPath, "utf8");
     const lines = content.split("\n");
@@ -169,7 +189,15 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
         const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
         const nodeId = `${project}:${tag}:${nodes.length}`;
         taggedCount++;
-        nodes.push({ id: nodeId, label, fullLabel: text, group: typeMap[tag], refCount: taggedCount });
+        nodes.push({
+          id: nodeId,
+          label,
+          fullLabel: text,
+          group: typeMap[tag],
+          refCount: taggedCount,
+          project,
+          tagged: true,
+        });
         links.push({ source: project, target: nodeId });
         for (const other of projectSet) {
           if (other !== project && text.toLowerCase().includes(other.toLowerCase())) {
@@ -187,7 +215,15 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
       const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
       const nodeId = `${project}:finding:${nodes.length}`;
       untaggedAdded++;
-      nodes.push({ id: nodeId, label, fullLabel: text, group: "pattern", refCount: untaggedAdded });
+      nodes.push({
+        id: nodeId,
+        label,
+        fullLabel: text,
+        group: "pattern",
+        refCount: untaggedAdded,
+        project,
+        tagged: false,
+      });
       links.push({ source: project, target: nodeId });
     }
   }
@@ -208,16 +244,14 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
 }
 
 export function recentUsage(cortexPath: string): string[] {
-  const usage = path.join(cortexPath, ".governance", "memory-usage.log");
+  const usage = memoryUsageLogFile(cortexPath);
   if (!fs.existsSync(usage)) return [];
   const lines = fs.readFileSync(usage, "utf8").trim().split("\n").filter(Boolean);
   return lines.slice(-40).reverse();
 }
 
 export function recentAccepted(cortexPath: string): string[] {
-  const newAudit = path.join(runtimeDir(cortexPath), "audit.log");
-  const legacyAudit = path.join(cortexPath, ".cortex-audit.log");
-  const audit = fs.existsSync(newAudit) ? newAudit : legacyAudit;
+  const audit = path.join(runtimeDir(cortexPath), "audit.log");
   if (!fs.existsSync(audit)) return [];
   const lines = fs.readFileSync(audit, "utf8").split("\n").filter((line) => line.includes("approve_memory"));
   return lines.slice(-40).reverse();

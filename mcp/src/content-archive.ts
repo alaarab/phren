@@ -48,8 +48,7 @@ function classifyTopic(bullet: string): string {
 /**
  * Count active (non-archived) finding entries in FINDINGS.md content.
  * Entries inside archive blocks are considered archived.
- * Supports both new structured markers (<!-- cortex:archive:start/end -->)
- * and legacy <details>...</details> format for backwards compatibility.
+ * Supports structured archive markers and HTML details blocks.
  */
 export function countActiveFindings(content: string): number {
   let inArchive = false;

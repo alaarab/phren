@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { commandExists, detectInstalledTools, buildLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks } from "./hooks.js";
+import { commandExists, detectInstalledTools, buildLifecycleCommands, buildSharedLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks } from "./hooks.js";
 import { makeTempDir } from "./test-helpers.js";
 import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import { CortexError, type CortexErrorCode } from "./shared.js";
@@ -9,6 +9,12 @@ import * as path from "path";
 import * as os from "os";
 import * as http from "http";
 import { fileURLToPath } from "url";
+
+function writeInstallPrefs(cortexPath: string, content: string): void {
+  const runtimeDir = path.join(cortexPath, ".runtime");
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(path.join(runtimeDir, "install-preferences.json"), content);
+}
 
 describe("hooks", () => {
   describe("commandExists", () => {
@@ -71,6 +77,19 @@ describe("hooks", () => {
     it("escapes paths with special characters", () => {
       const cmds = buildLifecycleCommands('/tmp/my "cortex" path');
       expect(cmds.sessionStart).toContain('\\"cortex\\"');
+    });
+  });
+
+  describe("buildSharedLifecycleCommands", () => {
+    it("uses versioned npx commands without embedding local cortex paths", () => {
+      const cmds = buildSharedLifecycleCommands();
+      expect(cmds.sessionStart).toContain("npx -y @alaarab/cortex@");
+      expect(cmds.sessionStart).toContain("hook-session-start");
+      expect(cmds.userPromptSubmit).toContain("hook-prompt");
+      expect(cmds.stop).toContain("hook-stop");
+      expect(cmds.hookTool).toContain("hook-tool");
+      expect(cmds.sessionStart).not.toContain("CORTEX_PATH=");
+      expect(cmds.sessionStart).not.toContain(".npm/_npx");
     });
   });
 
@@ -219,12 +238,7 @@ describe("hooks", () => {
       setupFakeBinaries();
 
       // Write preferences with hooks disabled
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: false })
-      );
+      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: false }));
 
       configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
@@ -243,12 +257,7 @@ describe("hooks", () => {
     it("per-tool hookTools disables wrapper for specific tool only", () => {
       setupFakeBinaries();
 
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: true, hookTools: { copilot: true, cursor: false, codex: true } })
-      );
+      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: true, hookTools: { copilot: true, cursor: false, codex: true } }));
 
       configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
@@ -266,12 +275,7 @@ describe("hooks", () => {
     it("hookTools defaults to hooksEnabled when key is missing", () => {
       setupFakeBinaries();
 
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: true, hookTools: { cursor: false } })
-      );
+      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: true, hookTools: { cursor: false } }));
 
       configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor"]) });
 
@@ -284,12 +288,7 @@ describe("hooks", () => {
     it("hookTools ignored when hooksEnabled is false", () => {
       setupFakeBinaries();
 
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: false, hookTools: { copilot: true, cursor: true, codex: true } })
-      );
+      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: false, hookTools: { copilot: true, cursor: true, codex: true } }));
 
       configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
@@ -303,12 +302,7 @@ describe("hooks", () => {
       setupFakeBinaries();
 
       // Write preferences with hooks enabled
-      const govDir = path.join(cortexPath, ".governance");
-      fs.mkdirSync(govDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(govDir, "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: true })
-      );
+      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: true }));
 
       configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
 
@@ -482,15 +476,13 @@ describe("hooks", () => {
       fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
       fs.mkdirSync(path.join(homeDir, ".local", "share", "gh", "extensions", "gh-copilot"), { recursive: true });
       fs.mkdirSync(path.join(cortexPath, ".governance"), { recursive: true });
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: false })
-      );
+      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: false }));
 
       const configured = configureAllHooks(cortexPath);
       expect(configured).toEqual(["Copilot CLI", "Codex"]);
 
       const lifecycle = buildLifecycleCommands(cortexPath);
+      const sharedLifecycle = buildSharedLifecycleCommands();
       const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "cortex.json"), "utf8"));
       expect(copilot.hooks.sessionStart[0].bash).toBe(lifecycle.sessionStart);
       expect(copilot.hooks.userPromptSubmitted[0].bash).toBe(lifecycle.userPromptSubmit);
@@ -499,9 +491,11 @@ describe("hooks", () => {
       expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(false);
 
       const codex = JSON.parse(fs.readFileSync(path.join(cortexPath, "codex.json"), "utf8"));
-      expect(codex.hooks.SessionStart[0].command).toBe(lifecycle.sessionStart);
-      expect(codex.hooks.UserPromptSubmit[0].command).toBe(lifecycle.userPromptSubmit);
-      expect(codex.hooks.Stop[0].command).toBe(lifecycle.stop);
+      expect(codex.hooks.SessionStart[0].command).toBe(sharedLifecycle.sessionStart);
+      expect(codex.hooks.UserPromptSubmit[0].command).toBe(sharedLifecycle.userPromptSubmit);
+      expect(codex.hooks.Stop[0].command).toBe(sharedLifecycle.stop);
+      expect(codex.hooks.SessionStart[0].command).not.toContain(cortexPath);
+      expect(codex.hooks.SessionStart[0].command).not.toContain(".npm/_npx");
 
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(false);
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "cursor"))).toBe(false);
@@ -519,7 +513,7 @@ describe("hooks", () => {
     beforeEach(() => {
       ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-custom-hooks-test-"));
       cortexPath = path.join(tmpRoot, "cortex");
-      fs.mkdirSync(path.join(cortexPath, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(cortexPath, ".runtime"), { recursive: true });
     });
 
     afterEach(() => {
@@ -532,23 +526,17 @@ describe("hooks", () => {
     });
 
     it("readCustomHooks returns empty array when customHooks is not set", () => {
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({ hooksEnabled: true })
-      );
+      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: true }));
       expect(readCustomHooks(cortexPath)).toEqual([]);
     });
 
     it("readCustomHooks parses valid custom hooks", () => {
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({
+      writeInstallPrefs(cortexPath, JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "echo saving" },
             { event: "post-search", command: "echo searched", timeout: 3000 },
           ],
-        })
-      );
+        }));
       const hooks = readCustomHooks(cortexPath);
       expect(hooks).toHaveLength(2);
       expect(hooks[0].event).toBe("pre-save");
@@ -557,32 +545,26 @@ describe("hooks", () => {
     });
 
     it("readCustomHooks filters out invalid events", () => {
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({
+      writeInstallPrefs(cortexPath, JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "echo ok" },
             { event: "invalid-event", command: "echo bad" },
             { event: "post-search", command: "" },
             { command: "echo no-event" },
           ],
-        })
-      );
+        }));
       const hooks = readCustomHooks(cortexPath);
       expect(hooks).toHaveLength(1);
       expect(hooks[0].event).toBe("pre-save");
     });
 
     it("runCustomHooks runs matching hooks and returns count", () => {
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({
+      writeInstallPrefs(cortexPath, JSON.stringify({
           customHooks: [
             { event: "post-finding", command: "touch post-finding-ran" },
             { event: "pre-save", command: "echo not-this-one" },
           ],
-        })
-      );
+        }));
       const result = runCustomHooks(cortexPath, "post-finding");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(0);
@@ -592,27 +574,21 @@ describe("hooks", () => {
     it("runCustomHooks passes environment variables", () => {
       if (process.platform === "win32") return; // echo $VAR is POSIX sh syntax; cmd.exe does not expand $VAR
       const envFile = path.join(cortexPath, "env-check.txt");
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({
+      writeInstallPrefs(cortexPath, JSON.stringify({
           customHooks: [
             { event: "post-search", command: `echo $CORTEX_QUERY > "${envFile}"` },
           ],
-        })
-      );
+        }));
       runCustomHooks(cortexPath, "post-search", { CORTEX_QUERY: "test-query" });
       expect(fs.readFileSync(envFile, "utf8").trim()).toBe("test-query");
     });
 
     it("runCustomHooks captures errors from failing commands", () => {
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({
+      writeInstallPrefs(cortexPath, JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "exit 1" },
           ],
-        })
-      );
+        }));
       const result = runCustomHooks(cortexPath, "pre-save");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(1);
@@ -621,14 +597,11 @@ describe("hooks", () => {
     });
 
     it("runCustomHooks returns 0 when no hooks match the event", () => {
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({
+      writeInstallPrefs(cortexPath, JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "echo something" },
           ],
-        })
-      );
+        }));
       const result = runCustomHooks(cortexPath, "post-search");
       expect(result.ran).toBe(0);
       expect(result.errors).toHaveLength(0);
@@ -654,14 +627,11 @@ describe("hooks", () => {
       if (!redirectAddress || typeof redirectAddress === "string") throw new Error("failed to bind redirect server");
 
       try {
-        fs.writeFileSync(
-          path.join(cortexPath, ".governance", "install-preferences.json"),
-          JSON.stringify({
+        writeInstallPrefs(cortexPath, JSON.stringify({
             customHooks: [
               { event: "post-search", webhook: `http://127.0.0.1:${redirectAddress.port}/redirect` },
             ],
-          })
-        );
+          }));
         const result = runCustomHooks(cortexPath, "post-search");
         expect(result.ran).toBe(1);
         expect(result.errors).toHaveLength(0);
@@ -682,7 +652,7 @@ describe("hooks", () => {
     beforeEach(() => {
       ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hooks-error-structure-test-"));
       cortexPath = path.join(tmpRoot, "cortex");
-      fs.mkdirSync(path.join(cortexPath, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(cortexPath, ".runtime"), { recursive: true });
     });
 
     afterEach(() => {
@@ -690,14 +660,11 @@ describe("hooks", () => {
     });
 
     it("returns HookError[] with code and message properties, not plain strings", () => {
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({
+      writeInstallPrefs(cortexPath, JSON.stringify({
           customHooks: [
             { event: "pre-index", command: "exit 42" },
           ],
-        })
-      );
+        }));
       const result = runCustomHooks(cortexPath, "pre-index");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(1);
@@ -713,14 +680,11 @@ describe("hooks", () => {
     });
 
     it("successful hooks produce no errors", () => {
-      fs.writeFileSync(
-        path.join(cortexPath, ".governance", "install-preferences.json"),
-        JSON.stringify({
+      writeInstallPrefs(cortexPath, JSON.stringify({
           customHooks: [
             { event: "post-save", command: "true" },
           ],
-        })
-      );
+        }));
       const result = runCustomHooks(cortexPath, "post-save");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(0);
@@ -734,14 +698,11 @@ describe("hooks", () => {
         process.env.CORTEX_DEBUG = "1";
         process.env.CORTEX_PATH = cortexPath;
 
-        fs.writeFileSync(
-          path.join(cortexPath, ".governance", "install-preferences.json"),
-          JSON.stringify({
+        writeInstallPrefs(cortexPath, JSON.stringify({
             customHooks: [
               { event: "pre-finding", command: "exit 99" },
             ],
-          })
-        );
+          }));
 
         runCustomHooks(cortexPath, "pre-finding");
 

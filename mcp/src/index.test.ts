@@ -17,7 +17,6 @@ import {
   mergeBacklog,
   filterTrustedFindings,
   addFindingToFile,
-  migrateLegacyFindings,
   extractConflictVersions,
 } from "./shared-content.js";
 import { grantAdmin, makeTempDir } from "./test-helpers.js";
@@ -61,24 +60,6 @@ function runCli(args: string[], env: Record<string, string> = {}): { stdout: str
       exitCode: err.status ?? 1,
     };
   }
-}
-
-function setupCortexDirWithLegacyFindings(): { cortexDir: string; cleanup: () => void } {
-  const tmp = makeTempDir("cortex-index-routing-test-");
-  const cortexDir = path.join(tmp.path, ".cortex");
-  const projectDir = path.join(cortexDir, "test-proj");
-
-  fs.mkdirSync(projectDir, { recursive: true });
-  grantAdmin(cortexDir, "cli-test");
-  fs.writeFileSync(
-    path.join(projectDir, "LEARNINGS.md"),
-    "# Learnings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
-  );
-
-  return {
-    cortexDir,
-    cleanup: tmp.cleanup,
-  };
 }
 
 describe("sanitizeFts5Query", () => {
@@ -392,109 +373,6 @@ describe("index policy", () => {
   });
 });
 
-describe("legacy findings migration", () => {
-  const originalActor = process.env.CORTEX_ACTOR;
-
-  afterEach(() => {
-    process.env.CORTEX_ACTOR = originalActor;
-  });
-
-  it("migrates legacy findings bullets into FINDINGS and optionally canonical", () => {
-    const tmp = makeTempDir("cortex-migrate-findings-");
-    const project = "proj";
-    const projectDir = path.join(tmp.path, project);
-    fs.mkdirSync(projectDir, { recursive: true });
-    grantAdmin(tmp.path, "migrate-admin");
-
-    fs.writeFileSync(
-      path.join(projectDir, "LEARNINGS.md"),
-      "# Learnings\n\n- Must pin this rule\n- Normal migration item\n"
-    );
-
-    const dryRun = migrateLegacyFindings(tmp.path, project, { dryRun: true });
-    expect(dryRun.ok).toBe(true);
-    if (dryRun.ok) expect(dryRun.data).toContain("migratable");
-
-    const result = migrateLegacyFindings(tmp.path, project, { pinCanonical: true });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Migrated");
-
-    const findingsPath = path.join(projectDir, "FINDINGS.md");
-    const canonicalPath = path.join(projectDir, "CANONICAL_MEMORIES.md");
-    expect(fs.existsSync(findingsPath)).toBe(true);
-    expect(fs.readFileSync(findingsPath, "utf8")).toContain("migrated from LEARNINGS.md");
-    expect(fs.existsSync(canonicalPath)).toBe(true);
-    expect(fs.readFileSync(canonicalPath, "utf8")).toContain("Must pin this rule");
-
-    tmp.cleanup();
-  });
-});
-
-describe("index entry routing: maintain migrate", () => {
-  let cortexDir: string;
-  let cleanup: () => void;
-
-  beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDirWithLegacyFindings());
-  });
-
-  afterEach(() => {
-    cleanup();
-    process.env.CORTEX_ACTOR = undefined;
-  });
-
-  it("routes maintain migrate governance and reports dry-run output shape", () => {
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "governance", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Governance migration:");
-    expect(stdout).toContain("[dry-run]");
-  });
-
-  it("routes maintain migrate data form and preserves data output prefix", () => {
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "data", "test-proj", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Data migration (test-proj):");
-    expect(stdout).toContain("migratable findings");
-  });
-
-  it("routes maintain migrate all and emits both governance and data outputs", () => {
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "all", "test-proj", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Governance migration:");
-    expect(stdout).toContain("Data migration (test-proj):");
-  });
-
-  it("routes legacy maintain migrate <project> alias to data migration", () => {
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "test-proj", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Data migration (test-proj):");
-    expect(stdout).toContain("migratable findings");
-  });
-
-  it("routes legacy migrate-findings command and keeps findings summary output", () => {
-    const { stdout, exitCode } = runCli(
-      ["migrate-findings", "test-proj", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Found");
-    expect(stdout).toContain("migratable findings");
-    expect(stdout).not.toContain("Data migration (test-proj):");
-  });
-});
-
 describe("validateFindingsFormat", () => {
   it("returns no issues for valid content", () => {
     const content = "# My Project FINDINGS\n\n## 2024-01-15\n\n- Learned something\n";
@@ -679,7 +557,7 @@ describe("mergeBacklog", () => {
 });
 
 describe("filterTrustedFindings", () => {
-  it("keeps recent legacy bullets and valid cited bullets", () => {
+  it("keeps recent uncited bullets and valid cited bullets", () => {
     const tmp = makeTempDir("cortex-cite-valid-");
     const file = path.join(tmp.path, "source.ts");
     fs.writeFileSync(file, "line1\nline2\nline3\n");

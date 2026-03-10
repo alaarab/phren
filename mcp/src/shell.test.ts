@@ -69,7 +69,7 @@ function seedCortex(root: string): TempContext {
     ].join("\n")
   );
 
-  write(path.join(root, ".governance", "runtime-health.json"), JSON.stringify({
+  write(path.join(root, ".runtime", "runtime-health.json"), JSON.stringify({
     lastPromptAt: "2026-03-05T10:00:00.000Z",
     lastAutoSave: { at: "2026-03-05T10:01:00.000Z", status: "saved-pushed" },
     lastGovernance: { at: "2026-03-05T10:02:00.000Z", status: "ok", detail: "ok" },
@@ -188,6 +188,20 @@ describe("CortexShell", () => {
     });
   });
 
+  it("wraps shell chrome instead of overflowing on ultra-narrow screens", async () => {
+    await withTerminalSize(16, 16, async () => {
+      const shell = createShell(dir);
+      await shell.handleInput(":open demo");
+      await shell.handleInput("b");
+      const output = await shell.render();
+      expect(output).toContain("…");
+      expect(output.split("\n").length).toBeLessThanOrEqual(16);
+      for (const line of output.split("\n")) {
+        expect(stripAnsi(line).length).toBeLessThan(16);
+      }
+    });
+  });
+
   it("supports backlog mutations including work next and tidy", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
@@ -263,9 +277,9 @@ describe("CortexShell", () => {
     expect(output).toContain("Updated cortex");
   });
 
-  it("migrates old shell-state format without crashing (stale-state regression)", async () => {
-    const statePath = path.join(dir, ".governance", "shell-state.json");
-    write(statePath, JSON.stringify({ lastView: "Backlog", project: "demo", page: 2 }, null, 2));
+  it("falls back to the default shell view when persisted state is invalid", async () => {
+    const statePath = path.join(dir, ".runtime", "shell-state.json");
+    write(statePath, JSON.stringify({ view: "Backlog", project: "demo", page: 2 }, null, 2));
 
     const shell = createShell(dir);
     const output = await shell.render();
@@ -341,7 +355,7 @@ describe("CortexShell", () => {
   });
 
   it("toggles skill enabled state without deleting the file", async () => {
-    write(path.join(dir, "demo", ".claude", "skills", "helper.md"), "---\nname: helper\ndescription: test\n---\nbody\n");
+    write(path.join(dir, "demo", "skills", "helper.md"), "---\nname: helper\ndescription: test\n---\nbody\n");
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
     await shell.handleInput("s");
@@ -349,7 +363,7 @@ describe("CortexShell", () => {
 
     let output = await shell.render();
     expect(output).toContain("Disabled helper");
-    expect(fs.existsSync(path.join(dir, "demo", ".claude", "skills", "helper.md"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "demo", "skills", "helper.md"))).toBe(true);
 
     await shell.handleRawKey("t");
     output = await shell.render();

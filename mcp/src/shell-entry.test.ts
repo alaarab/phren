@@ -152,7 +152,7 @@ describe("resolveStartupIntroPlan", () => {
   it("uses a short final-frame dwell after the version has already been seen", () => {
     const tmp = makeTempDir("shell-intro-plan-");
     try {
-      writeFile(path.join(tmp.path, ".governance", "shell-state.json"), JSON.stringify({
+      writeFile(path.join(tmp.path, ".runtime", "shell-state.json"), JSON.stringify({
         version: 2,
         view: "Projects",
         introMode: "once-per-version",
@@ -170,7 +170,7 @@ describe("resolveStartupIntroPlan", () => {
   it("skips the intro entirely when disabled", () => {
     const tmp = makeTempDir("shell-intro-plan-");
     try {
-      writeFile(path.join(tmp.path, ".governance", "shell-state.json"), JSON.stringify({
+      writeFile(path.join(tmp.path, ".runtime", "shell-state.json"), JSON.stringify({
         version: 2,
         view: "Projects",
         introMode: "off",

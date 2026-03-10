@@ -13,7 +13,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MACHINE_FILE="$HOME/.cortex-machine"
+MACHINE_FILE="$HOME/.cortex/.machine-id"
 CONTEXT_FILE="$HOME/.cortex-context.md"
 
 # Allow overriding machines.yaml location for personal (non-framework) use

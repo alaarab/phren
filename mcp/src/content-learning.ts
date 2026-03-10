@@ -1,10 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import * as os from "os";
 import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
 import { checkPermission, loadCanonicalLocks, saveCanonicalLocksUnlocked, hashContent, withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
+import { getMachineName } from "./machine-identity.js";
 import {
   type FindingCitation,
   type FindingSource,
@@ -25,32 +25,6 @@ import {
 
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;
-
-// Read legacy history files (LEARNINGS.md, etc.) as supplementary dedup/conflict context.
-// Never written to — used only as a read-only baseline when FINDINGS.md is being created or updated.
-function readLegacyHistoryContent(resolvedDir: string): string {
-  const available = new Set(fs.readdirSync(resolvedDir).map(f => f.toLowerCase()));
-  const parts: string[] = [];
-  for (const name of LEGACY_FINDINGS_CANDIDATES) {
-    if (available.has(name.toLowerCase())) {
-      try { parts.push(fs.readFileSync(path.join(resolvedDir, name), "utf8")); } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readLegacyHistoryContent fileRead: ${errorMessage(err)}\n`);
-      }
-    }
-  }
-  return parts.join("\n");
-}
-
-const LEGACY_FINDINGS_CANDIDATES = [
-  "LEARNINGS.md",
-  "learnings.md",
-  "LESSONS.md",
-  "lessons.md",
-  "POSTMORTEM.md",
-  "postmortem.md",
-  "RETRO.md",
-  "retro.md",
-];
 
 function normalizeMigratedBullet(raw: string): string {
   const cleaned = raw
@@ -74,7 +48,6 @@ interface PreparedFinding {
 }
 
 interface AddFindingOptions {
-  skipLegacyDedup?: boolean;
   extraAnnotations?: string[];
   sessionId?: string;
 }
@@ -146,7 +119,7 @@ function detectFindingTool(): string | undefined {
 function buildFindingSource(sessionId?: string): FindingSource {
   const actor = process.env.CORTEX_ACTOR?.trim() || undefined;
   const source: FindingSource = {
-    machine: os.hostname(),
+    machine: getMachineName(),
     actor,
     tool: detectFindingTool(),
     model: detectFindingModel(),
@@ -265,93 +238,6 @@ function insertFindingIntoContent(content: string, today: string, bullet: string
   return content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n${citationComment}\n`;
 }
 
-export function migrateLegacyFindings(
-  cortexPath: string,
-  project: string,
-  opts: { pinCanonical?: boolean; dryRun?: boolean } = {}
-): CortexResult<string> {
-  const denial = checkPermission(cortexPath, "write");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
-
-  const available = new Map(
-    fs.readdirSync(resolvedDir).map((name) => [name.toLowerCase(), name] as const)
-  );
-  const files = LEGACY_FINDINGS_CANDIDATES
-    .map((name) => available.get(name.toLowerCase()))
-    .filter((name): name is string => Boolean(name));
-  if (!files.length) return cortexErr(`No legacy findings docs found for "${project}".`, CortexError.FILE_NOT_FOUND);
-
-  const seen = new Set<string>();
-  const extracted: Array<{ text: string; file: string; line: number }> = [];
-
-  for (const file of files) {
-    const fullPath = path.join(resolvedDir, file);
-    const lines = fs.readFileSync(fullPath, "utf8").split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (!line.match(/^\s*(?:[-*]\s+|\d+\.\s+)/)) continue;
-      const bullet = normalizeMigratedBullet(line);
-      if (!bullet) continue;
-      const key = bullet.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      extracted.push({ text: bullet, file, line: i + 1 });
-    }
-  }
-
-  if (!extracted.length) {
-    return cortexOk(`Legacy findings docs found for "${project}", but no actionable bullet entries were detected.`);
-  }
-
-  if (opts.dryRun) {
-    return cortexOk(`Found ${extracted.length} migratable findings in ${files.length} file(s) for "${project}".`);
-  }
-
-  let migrated = 0;
-  let skipped = 0;
-  const errors: string[] = [];
-  let pinned = 0;
-  for (const entry of extracted) {
-    const learning = `${entry.text} (migrated from ${entry.file})`;
-    try {
-      const result = addFindingToFile(cortexPath, project, learning, {
-        repo: resolvedDir,
-        file: path.join(resolvedDir, entry.file),
-        line: entry.line,
-      }, { skipLegacyDedup: true });
-      if (!result.ok) {
-        errors.push(result.error ?? `Failed to migrate "${entry.text}"`);
-        continue;
-      }
-      if (result.data.startsWith("Skipped duplicate")) {
-        skipped++;
-        continue;
-      }
-      migrated++;
-    } catch (err) {
-      errors.push(errorMessage(err));
-      continue;
-    }
-
-    if (opts.pinCanonical && shouldPinCanonical(entry.text)) {
-      upsertCanonical(cortexPath, project, entry.text);
-      pinned++;
-    }
-  }
-
-  appendAuditLog(
-    cortexPath,
-    "migrate_findings",
-    `project=${project} files=${files.length} migrated=${migrated} skipped=${skipped} pinned=${pinned} errors=${errors.length}`
-  );
-  const skippedMsg = skipped > 0 ? `; skipped ${skipped} duplicate findings` : "";
-  const errorsMsg = errors.length > 0 ? `; ${errors.length} migration error(s)` : "";
-  return cortexOk(`Migrated ${migrated} findings for "${project}" from ${files.length} legacy file(s)${skippedMsg}${opts.pinCanonical ? `; pinned ${pinned} canonical memories` : ""}${errorsMsg}.`);
-}
-
 export function upsertCanonical(cortexPath: string, project: string, memory: string): CortexResult<string> {
   const denial = checkPermission(cortexPath, "pin");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
@@ -386,7 +272,7 @@ export function upsertCanonical(cortexPath: string, project: string, memory: str
     // concurrent upserts for different projects from overwriting each other's entries.
     // We call loadCanonicalLocks (unlocked read) + saveCanonicalLocksUnlocked inside
     // withFileLock to avoid deadlocking with saveCanonicalLocks' internal lock.
-    const canonicalLocksPath = path.join(cortexPath, ".governance", "canonical-locks.json");
+    const canonicalLocksPath = path.join(cortexPath, ".runtime", "canonical-locks.json");
     withFileLock(canonicalLocksPath, () => {
       const locks = loadCanonicalLocks(cortexPath);
       const lockKey = `${project}/CANONICAL_MEMORIES.md`;
@@ -466,17 +352,15 @@ export function addFindingToFile(
     }
 
     const content = fs.readFileSync(learningsPath, "utf8");
-    const legacyHistory = opts?.skipLegacyDedup ? "" : readLegacyHistoryContent(resolvedDir);
     // When superseding, strip the old finding from history so dedup doesn't block the intentionally similar replacement.
     // Skip the strip if new finding is identical to the superseded one (self-supersession should still be blocked by dedup).
     const isSelfSupersession = supersedesText &&
       learning.trim().toLowerCase().slice(0, 60) === supersedesText.trim().toLowerCase().slice(0, 60);
     const historyForDedup = (supersedesText && !isSelfSupersession)
-      ? (legacyHistory ? `${content}\n${legacyHistory}` : content)
-          .split("\n")
+      ? content.split("\n")
           .filter(line => !line.startsWith("- ") || !line.toLowerCase().includes(supersedesText.slice(0, 40).toLowerCase()))
           .join("\n")
-      : (legacyHistory ? `${content}\n${legacyHistory}` : content);
+      : content;
     const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit);
     if (prepared.status === "rejected") {
       return cortexErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
@@ -606,7 +490,6 @@ export function addFindingsToFile(
     }
 
     let content = fs.readFileSync(learningsPath, "utf8");
-    const legacyHistory = readLegacyHistoryContent(resolvedDir);
     const issues = validateFindingsFormat(content);
     if (issues.length > 0) debugLog(`FINDINGS.md format warnings for "${project}": ${issues.join("; ")}`);
 
@@ -620,7 +503,7 @@ export function addFindingsToFile(
       const prepared = prepareFinding(
         learning,
         project,
-        legacyHistory ? `${content}\n${legacyHistory}` : content,
+        content,
         extraAnnotations,
         resolvedCitationInput,
         source,

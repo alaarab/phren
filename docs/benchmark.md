@@ -118,7 +118,7 @@ The bundled runners now emit a `conditions` block in their JSON output. If you p
 
 ## March 9, 2026 Author-Local Retrieval Runs
 
-After the relaxed lexical rescue pass and the long-document overlap fix, the legacy apples-to-apples run against the author's `~/.cortex` corpus (139 indexed docs, 10 real queries, Node `v24.13.0`) produced:
+After the relaxed lexical rescue pass and the long-document overlap fix, the author-local run against the author's `~/.cortex` corpus (139 indexed docs, 10 real queries, Node `v24.13.0`) produced:
 
 - lexical path: `15.93ms` average total latency, `11.91ms` p50, `16.25ms` p95
 - gated semantic path: `12.90ms` average total latency, `11.59ms` p50, `16.52ms` p95
@@ -219,12 +219,7 @@ To get the full LoCoMo dataset, download it from [snap-stanford/locomo](https://
 
 ### Results
 
-| Search Path | recall@1 | recall@3 | recall@5 | MRR | Date |
-|-------------|----------|----------|----------|-----|------|
-| FTS5        | TBD      | TBD      | TBD      | TBD | -    |
-| Hybrid      | TBD      | TBD      | TBD      | TBD | -    |
-
-Results are saved to `docs/benchmark-results.json` by default. That JSON should be treated as the source of truth for the run conditions.
+This repo does not check in a canonical benchmark result table. Benchmark outputs belong in `docs/benchmark-results.json` for a specific run, and that JSON should be treated as the source of truth for the run conditions.
 
 ## Interpreting Results
 

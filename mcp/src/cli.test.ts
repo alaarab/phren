@@ -171,9 +171,9 @@ describe("CLI integration: status", () => {
 
   beforeEach(() => {
     ({ cortexDir, cleanup } = setupCortexDir());
-    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(cortexDir, ".runtime"), { recursive: true });
     fs.writeFileSync(
-      path.join(cortexDir, ".governance", "runtime-health.json"),
+      path.join(cortexDir, ".runtime", "runtime-health.json"),
       JSON.stringify({
         schemaVersion: 1,
         lastAutoSave: { at: "2026-03-08T00:00:00.000Z", status: "saved-local" },
@@ -303,10 +303,14 @@ describe("CLI integration: add project", () => {
   });
 
   it("uses the machine-mapped profile when CORTEX_PROFILE is unset", () => {
-    fs.writeFileSync(path.join(cortexDir, "machines.yaml"), `${os.hostname()}: work\n`);
+    const homeDir = path.join(path.dirname(cortexDir), "home");
+    const machineFile = path.join(homeDir, ".cortex", ".machine-id");
+    fs.mkdirSync(path.dirname(machineFile), { recursive: true });
+    fs.writeFileSync(machineFile, "work-box\n");
+    fs.writeFileSync(path.join(cortexDir, "machines.yaml"), "work-box: work\n");
     const { exitCode } = runCli(
       ["add", projectDir],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(fs.readFileSync(path.join(cortexDir, "profiles", "work.yaml"), "utf8")).toContain("- repo");
@@ -393,51 +397,6 @@ describe("CLI integration: pin", () => {
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage");
-  });
-});
-
-describe("CLI integration: maintain migrate", () => {
-  let cortexDir: string;
-  let cleanup: () => void;
-
-  beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projectDir = path.join(cortexDir, "test-proj");
-    fs.mkdirSync(projectDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(projectDir, "LEARNINGS.md"),
-      "# Learnings\n\n- Use explicit timezone handling\n- Retry transient failures\n"
-    );
-  });
-
-  afterEach(() => cleanup());
-
-  it("supports governance migration dry-run with readable output", () => {
-    const accessPath = path.join(cortexDir, ".governance", "access-control.json");
-    const before = JSON.parse(fs.readFileSync(accessPath, "utf8")) as Record<string, unknown>;
-    expect(before.schemaVersion).toBeUndefined();
-
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "governance", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Governance migration:");
-    expect(stdout).toContain("[dry-run]");
-
-    const after = JSON.parse(fs.readFileSync(accessPath, "utf8")) as Record<string, unknown>;
-    expect(after.schemaVersion).toBeUndefined();
-  });
-
-  it("supports explicit data migration command path", () => {
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "data", "test-proj", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Data migration (test-proj):");
-    expect(stdout).toContain("Found");
-    expect(stdout).toContain("migratable findings");
   });
 });
 
@@ -933,42 +892,6 @@ describe("CLI integration: maintain subcommands", () => {
     expect(after).toBe(before);
   });
 
-  it("maintain migrate governance applies schema migration", () => {
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "governance"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Governance migration:");
-  });
-
-  it("maintain migrate all runs both governance and data", () => {
-    const projDir = path.join(cortexDir, "migrate-proj");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- Legacy finding one\n");
-
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "all", "migrate-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Governance migration:");
-    expect(stdout).toContain("Data migration (migrate-proj):");
-  });
-
-  it("maintain migrate legacy alias (just project name)", () => {
-    const projDir = path.join(cortexDir, "legacy-proj");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- Legacy finding\n");
-
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "legacy-proj", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Data migration");
-  });
-
   it("maintain prune with unknown flag exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["maintain", "prune", "--unknown"],
@@ -991,19 +914,6 @@ describe("CLI integration: maintain subcommands", () => {
     expect(stdout).toContain("Consolidated");
   });
 
-  it("maintain migrate governance --dry-run does not modify files", () => {
-    const accessPath = path.join(cortexDir, ".governance", "access-control.json");
-    const before = fs.readFileSync(accessPath, "utf8");
-
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "governance", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("[dry-run]");
-    const after = fs.readFileSync(accessPath, "utf8");
-    expect(after).toBe(before);
-  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1131,7 +1041,7 @@ describe("CLI integration: skill-list", () => {
   });
 
   it("removes folder-format project skills without leaving broken folders behind", () => {
-    const skillDir = path.join(cortexDir, "demo", ".claude", "skills", "ss");
+    const skillDir = path.join(cortexDir, "demo", "skills", "ss");
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# ss\ncontent");
 
@@ -1347,72 +1257,6 @@ describe("CLI integration: pin edge cases", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// NEW TESTS: migrate-findings standalone
-// ────────────────────────────────────────────────────────────────────────────
-
-describe("CLI integration: migrate-findings", () => {
-  let cortexDir: string;
-  let cleanup: () => void;
-
-  beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-  });
-
-  afterEach(() => cleanup());
-
-  it("exits with error when no project specified", () => {
-    const { stderr, exitCode } = runCli(
-      ["migrate-findings"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Usage:");
-  });
-
-  it("migrates LEARNINGS.md into FINDINGS.md", () => {
-    const projDir = path.join(cortexDir, "mig-proj");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- Use explicit timezone handling\n- Retry transient failures\n");
-
-    const { stdout, exitCode } = runCli(
-      ["migrate-findings", "mig-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Migrated");
-  });
-
-  it("--dry-run does not write files", () => {
-    const projDir = path.join(cortexDir, "mig-proj2");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- A finding\n");
-
-    const { stdout, exitCode } = runCli(
-      ["migrate-findings", "mig-proj2", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Found");
-    expect(fs.existsSync(path.join(projDir, "FINDINGS.md"))).toBe(false);
-  });
-
-  it("--pin flag runs without error", () => {
-    const projDir = path.join(cortexDir, "mig-proj3");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, "LEARNINGS.md"), "# Learnings\n\n- Important pattern\n");
-
-    const { stdout, exitCode } = runCli(
-      ["migrate-findings", "mig-proj3", "--pin"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Migrated");
-    // FINDINGS.md should be created from the findings
-    expect(fs.existsSync(path.join(projDir, "FINDINGS.md"))).toBe(true);
-  });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
 // NEW TESTS: doctor edge cases
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -1535,68 +1379,6 @@ describe("CLI integration: inspect-index and debug-injection", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// NEW TESTS: maintain migrate argument parsing
-// ────────────────────────────────────────────────────────────────────────────
-
-describe("CLI integration: maintain migrate argument edge cases", () => {
-  let cortexDir: string;
-  let cleanup: () => void;
-
-  beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-  });
-
-  afterEach(() => cleanup());
-
-  it("migrate with no args prints usage", () => {
-    const { stderr, exitCode } = runCli(
-      ["maintain", "migrate"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Usage:");
-  });
-
-  it("migrate governance with --pin exits with error", () => {
-    const { stderr, exitCode } = runCli(
-      ["maintain", "migrate", "governance", "--pin"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("--pin is only valid for data/all migrations");
-  });
-
-  it("migrate data without project prints usage", () => {
-    const { stderr, exitCode } = runCli(
-      ["maintain", "migrate", "data"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Usage:");
-  });
-
-  it("migrate with unknown flag exits with error", () => {
-    const { stderr, exitCode } = runCli(
-      ["maintain", "migrate", "governance", "--unknown"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Unknown migrate flag");
-  });
-
-  it("migrate project-names dry-run reports pending project rename", () => {
-    fs.mkdirSync(path.join(cortexDir, "SamplePortal"), { recursive: true });
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "project-names", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Project name migration");
-    expect(stdout).toContain("SamplePortal -> sampleportal");
-  });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
 // CLI integration: init (subprocess-based, #96)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -1645,6 +1427,16 @@ describe("CLI integration: init", () => {
       const content = fs.readFileSync(machinesPath, "utf8");
       expect(content).toContain("test-box");
     }
+  }, CLI_INTEGRATION_TIMEOUT_MS);
+
+  it("init with --machine persists the local machine alias", () => {
+    const { exitCode } = runCli(
+      ["init", "-y", "--machine", "test-box", "--mcp", "off"],
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+    );
+    expect(exitCode).toBe(0);
+    const machineFile = path.join(cliEnv.homeDir, ".cortex", ".machine-id");
+    expect(fs.readFileSync(machineFile, "utf8").trim()).toBe("test-box");
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init is idempotent (re-running does not fail)", () => {
@@ -1776,7 +1568,7 @@ describe("CLI integration: help and health", () => {
     expect(stdout).toContain("cortex");
   });
 
-  it("projects help hides the legacy add flow", () => {
+  it("projects help only shows the supported add flow", () => {
     const { stdout, exitCode } = runCli(["projects", "--help"]);
     expect(exitCode).toBe(0);
     expect(stdout).toContain("cortex projects list");
@@ -1836,19 +1628,6 @@ describe("CLI integration: temp HOME subprocess stability", () => {
     expect(output).toContain("hook-entrypoint");
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
-  it("maintain migrate governance --dry-run keeps readable output with a temp HOME", () => {
-    runCli(
-      ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
-    );
-    const { stdout, exitCode } = runCli(
-      ["maintain", "migrate", "governance", "--dry-run"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Governance migration:");
-    expect(stdout).toContain("[dry-run]");
-  }, CLI_INTEGRATION_TIMEOUT_MS);
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2104,7 +1883,7 @@ describe("CLI integration: uninstall", () => {
     fs.mkdirSync(vscodeDir, { recursive: true });
     fs.writeFileSync(
       path.join(vscodeDir, "mcp.json"),
-      JSON.stringify({ servers: { cortex: { command: "npx", args: ["-y", "@alaarab/cortex"] } } }, null, 2)
+      JSON.stringify({ mcpServers: { cortex: { command: "npx", args: ["-y", "@alaarab/cortex"] } } }, null, 2)
     );
 
     const { stdout, exitCode } = runCli(
@@ -2115,7 +1894,7 @@ describe("CLI integration: uninstall", () => {
     expect(stdout).toContain("Removed cortex from VS Code");
 
     const after = JSON.parse(fs.readFileSync(path.join(vscodeDir, "mcp.json"), "utf8"));
-    expect(after.servers?.cortex).toBeUndefined();
+    expect(after.mcpServers?.cortex).toBeUndefined();
   });
 
   it("removes cortex from Cursor MCP config", () => {
@@ -2216,133 +1995,4 @@ describe("CLI integration: search history", () => {
     expect(entry.project).toBe("hist-proj");
     expect(entry.type).toBe("findings");
   });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// CLI integration: init --from-existing
-// ────────────────────────────────────────────────────────────────────────────
-
-describe("CLI integration: init --from-existing", () => {
-  let cortexDir: string;
-  let homeDir: string;
-  let projectDir: string;
-  let cleanup: () => void;
-
-  beforeEach(() => {
-    const tmp = makeTempDir("cortex-from-existing-test-");
-    cortexDir = path.join(tmp.path, ".cortex");
-    homeDir = path.join(tmp.path, "home");
-    projectDir = path.join(tmp.path, "my-app");
-    fs.mkdirSync(cortexDir, { recursive: true });
-    fs.mkdirSync(homeDir, { recursive: true });
-    fs.mkdirSync(projectDir, { recursive: true });
-    cleanup = tmp.cleanup;
-  });
-
-  afterEach(() => cleanup());
-
-  it("bootstraps a project from a directory with CLAUDE.md", () => {
-    fs.writeFileSync(
-      path.join(projectDir, "CLAUDE.md"),
-      "# my-app\n\nA web application for managing tasks.\n\n## Commands\n\n```bash\nnpm run dev\nnpm test\n```\n"
-    );
-
-    const { stdout, stderr, exitCode } = runCli(
-      ["init", "-y", "--from-existing", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stderr).toContain("prefer `cortex add <path>`");
-    expect(stdout).toContain("Bootstrapped project");
-    expect(stdout).toContain("my-app");
-
-    // Verify project files were created
-    expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexDir, "my-app", "FINDINGS.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexDir, "my-app", "backlog.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexDir, "my-app", "summary.md"))).toBe(true);
-
-    // Verify CLAUDE.md content was copied
-    const claude = fs.readFileSync(path.join(cortexDir, "my-app", "CLAUDE.md"), "utf8");
-    expect(claude).toContain("web application for managing tasks");
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("finds CLAUDE.md in .claude/ subdirectory", () => {
-    const claudeDir = path.join(projectDir, ".claude");
-    fs.mkdirSync(claudeDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(claudeDir, "CLAUDE.md"),
-      "# my-app\n\nProject with nested CLAUDE.md.\n"
-    );
-
-    const { stdout, stderr, exitCode } = runCli(
-      ["init", "-y", "--from-existing", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stderr).toContain("prefer `cortex add <path>`");
-    expect(stdout).toContain("Bootstrapped project");
-    expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("bootstraps project even without CLAUDE.md (creates starter)", () => {
-    const { stdout, exitCode } = runCli(
-      ["init", "-y", "--from-existing", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Bootstrapped project");
-    const projName = path.basename(projectDir).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-    expect(fs.existsSync(path.join(cortexDir, projName, "CLAUDE.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexDir, projName, "FINDINGS.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexDir, projName, "backlog.md"))).toBe(true);
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("reports error when path does not exist", () => {
-    const { stdout, exitCode } = runCli(
-      ["init", "-y", "--from-existing", "/tmp/nonexistent-path-xyz"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Could not bootstrap");
-    expect(stdout).toContain("does not exist");
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("works on existing cortex install (update path)", () => {
-    // First, init normally
-    runCli(
-      ["init", "-y"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
-    );
-
-    // Create a project dir with CLAUDE.md
-    fs.writeFileSync(
-      path.join(projectDir, "CLAUDE.md"),
-      "# my-app\n\nBootstrapped on update.\n"
-    );
-
-    // Run init again with --from-existing
-    const { stdout, exitCode } = runCli(
-      ["init", "-y", "--from-existing", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Bootstrapped project");
-    expect(fs.existsSync(path.join(cortexDir, "my-app", "CLAUDE.md"))).toBe(true);
-  }, CLI_INTEGRATION_TIMEOUT_MS);
-
-  it("rejects case-insensitive project collisions", () => {
-    const sourceDir = path.join(path.dirname(projectDir), "cortex");
-    fs.mkdirSync(sourceDir, { recursive: true });
-    fs.writeFileSync(path.join(sourceDir, "CLAUDE.md"), "# cortex\n\nCollision test.\n");
-    fs.mkdirSync(path.join(cortexDir, "Cortex"), { recursive: true });
-
-    const { stdout, exitCode } = runCli(
-      ["init", "-y", "--from-existing", sourceDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("Could not bootstrap");
-    expect(stdout).toContain("already exists with different casing");
-  }, CLI_INTEGRATION_TIMEOUT_MS);
 });

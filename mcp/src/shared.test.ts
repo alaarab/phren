@@ -13,7 +13,6 @@ import {
   ensureCortexPath,
   normalizeProjectNameForCreate,
   parseCortexErrorCode,
-  migrateProjectNames,
   expandHomePath,
   homePath,
   hookConfigPath,
@@ -26,7 +25,6 @@ import {
   checkPermission,
   getAccessControl,
   updateAccessControl,
-  migrateGovernance,
   validateGovernanceJson,
   getRetentionPolicy,
   updateRetentionPolicy,
@@ -60,7 +58,6 @@ import {
   validateFindingsFormat,
   validateBacklogFormat,
   stripBacklogDoneSection,
-  migrateLegacyFindings,
   isDuplicateFinding,
   extractConflictVersions,
 } from "./shared-content.js";
@@ -223,63 +220,19 @@ describe("path resolution helpers", () => {
   });
 });
 
-describe("governance validation and migrations", () => {
-  it("validates runtime-health schema", () => {
+describe("governance validation", () => {
+  it("validates shared governance schemas", () => {
     const cortex = makeCortex();
     const govDir = path.join(cortex, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
 
-    const runtimeHealth = path.join(govDir, "runtime-health.json");
-    fs.writeFileSync(runtimeHealth, JSON.stringify({ lastAutoSave: { at: 123, status: "clean" } }, null, 2));
-    expect(validateGovernanceJson(runtimeHealth, "runtime-health")).toBe(false);
+    const accessControl = path.join(govDir, "access-control.json");
+    fs.writeFileSync(accessControl, JSON.stringify({ admins: ["root"], maintainers: [], contributors: [], viewers: [] }, null, 2));
+    expect(validateGovernanceJson(accessControl, "access-control")).toBe(true);
 
-    // canonical-locks with valid entries should pass
-    const locks = path.join(govDir, "canonical-locks.json");
-    fs.writeFileSync(locks, JSON.stringify({ "proj/CANONICAL_MEMORIES.md": { hash: "h", snapshot: "s", updatedAt: new Date().toISOString() } }, null, 2));
-    expect(validateGovernanceJson(locks, "canonical-locks")).toBe(true);
-  });
-
-  it("supports dry-run governance migration reporting", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    // Use canonical-locks.json (a valid GovernanceSchema type) in flat legacy format
-    fs.writeFileSync(
-      path.join(govDir, "canonical-locks.json"),
-      JSON.stringify({ "proj/CANONICAL_MEMORIES.md": { hash: "h", snapshot: "s", updatedAt: new Date().toISOString() } }, null, 2)
-    );
-
-    const report = migrateGovernance(cortex, { dryRun: true });
-    const locksResult = report.results.find((r) => r.file === "canonical-locks.json");
-    expect(report.dryRun).toBe(true);
-    expect(locksResult?.changed).toBe(true);
-    expect(locksResult?.action).toBe("migrated");
-
-    // dry-run should not write the file, so it stays in legacy format
-    const raw = JSON.parse(fs.readFileSync(path.join(govDir, "canonical-locks.json"), "utf8"));
-    expect(raw.entries).toBeUndefined();
-  });
-
-  it("migrates legacy governance files to versioned formats", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "canonical-locks.json"),
-      JSON.stringify({ "proj/CANONICAL_MEMORIES.md": { hash: "h", snapshot: "s", updatedAt: new Date().toISOString() } }, null, 2)
-    );
-    fs.writeFileSync(
-      path.join(govDir, "index-policy.json"),
-      JSON.stringify({ includeGlobs: "bad-shape" }, null, 2)
-    );
-
-    const report = migrateGovernance(cortex);
-    expect(report.migratedFiles).toContain("canonical-locks.json");
-    expect(report.results.find((r) => r.file === "index-policy.json")?.action).toBe("invalid-fallback");
-
-    const locksRaw = JSON.parse(fs.readFileSync(path.join(govDir, "canonical-locks.json"), "utf8"));
-    expect(locksRaw.schemaVersion).toBe(1);
-    expect(locksRaw.entries["proj/CANONICAL_MEMORIES.md"]).toBeDefined();
+    const indexPolicy = path.join(govDir, "index-policy.json");
+    fs.writeFileSync(indexPolicy, JSON.stringify({ includeGlobs: "bad-shape" }, null, 2));
+    expect(validateGovernanceJson(indexPolicy, "index-policy")).toBe(false);
   });
 });
 
@@ -351,19 +304,32 @@ describe("buildIndex and queryRows", () => {
 
   it("buildIndex returns empty index when profile YAML is malformed (fail-closed, Q18)", async () => {
     const cortex = makeCortex();
+    const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
+    const homeDir = path.join(cortex, "home");
+    fs.mkdirSync(homeDir, { recursive: true });
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
     fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
     fs.writeFileSync(path.join(cortex, "profiles", "broken.yaml"), "name: broken\nprojects: [\n");
     makeProject(cortex, "testproj", {
       "summary.md": "# testproj\n\nProfile parse fallback should still index this.\n",
     });
 
-    // Q18: when a profile is set but the file is malformed, getProjectDirs returns []
-    // and buildIndex produces an empty (but valid) FTS database — it does NOT widen
-    // to all projects, which would violate profile-based access control.
-    const db = await buildIndex(cortex, "broken");
-    const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["fallback"]);
-    expect(rows).toBeNull(); // empty DB — no documents indexed
-    db.close();
+    try {
+      // Q18: when a profile is set but the file is malformed, getProjectDirs returns []
+      // and buildIndex produces an empty (but valid) FTS database — it does NOT widen
+      // to all projects, which would violate profile-based access control.
+      const db = await buildIndex(cortex, "broken");
+      const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["fallback"]);
+      expect(rows).toBeNull(); // empty DB — no documents indexed
+      db.close();
+    } finally {
+      if (origHome === undefined) delete process.env.HOME;
+      else process.env.HOME = origHome;
+      if (origUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = origUserProfile;
+    }
   });
 });
 
@@ -718,6 +684,27 @@ describe("RBAC and canonical locks", () => {
       expect(checkPermission(cortex, "write", "stranger")).toContain("Permission denied");
     });
 
+    it("uses a local maintainer override when the actor is absent from the shared ACL", () => {
+      setupAccess({ admins: ["alice"] });
+      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+      fs.writeFileSync(
+        path.join(cortex, ".runtime", "access-control.local.json"),
+        JSON.stringify({ maintainers: ["stranger"] }, null, 2) + "\n",
+      );
+      expect(checkPermission(cortex, "write", "stranger")).toBeNull();
+      expect(checkPermission(cortex, "policy", "stranger")).toContain("Permission denied");
+    });
+
+    it("prefers the shared ACL when it explicitly lists the actor", () => {
+      setupAccess({ viewers: ["dave"] });
+      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+      fs.writeFileSync(
+        path.join(cortex, ".runtime", "access-control.local.json"),
+        JSON.stringify({ maintainers: ["dave"] }, null, 2) + "\n",
+      );
+      expect(checkPermission(cortex, "write", "dave")).toContain("Permission denied");
+    });
+
     it("denial message includes actor name and role", () => {
       setupAccess({ viewers: ["eve"] });
       const denial = checkPermission(cortex, "write", "eve");
@@ -818,7 +805,7 @@ describe("RBAC and canonical locks", () => {
 
       // Lock file should exist
       const lockData = readVersionedEntries<{ hash: string }>(
-        path.join(cortex, ".governance", "canonical-locks.json")
+        path.join(cortex, ".runtime", "canonical-locks.json")
       );
       expect(lockData["pinproj/CANONICAL_MEMORIES.md"]).toBeDefined();
       expect(lockData["pinproj/CANONICAL_MEMORIES.md"].hash).toBeTruthy();
@@ -941,7 +928,7 @@ describe("recordInjection", () => {
     recordInjection(cortex, key, "session-1");
     flushEntryScores(cortex);
 
-    const scoresPath = path.join(cortex, ".governance", "memory-scores.json");
+    const scoresPath = path.join(cortex, ".runtime", "memory-scores.json");
     expect(fs.existsSync(scoresPath)).toBe(true);
     const scores = readVersionedEntries<any>(scoresPath);
     expect(scores[key]).toBeDefined();
@@ -960,7 +947,7 @@ describe("recordInjection", () => {
 
     recordInjection(cortex, key, "sess-42");
 
-    const logPath = path.join(cortex, ".governance", "memory-usage.log");
+    const logPath = path.join(cortex, ".runtime", "memory-usage.log");
     expect(fs.existsSync(logPath)).toBe(true);
     const logContent = fs.readFileSync(logPath, "utf8");
     expect(logContent).toContain("inject");
@@ -982,7 +969,7 @@ describe("recordFeedback", () => {
     flushEntryScores(cortex);
 
     const scores = readVersionedEntries<any>(
-      path.join(cortex, ".governance", "memory-scores.json")
+      path.join(cortex, ".runtime", "memory-scores.json")
     );
     expect(scores[key].helpful).toBe(1);
     expect(scores[key].repromptPenalty).toBe(0);
@@ -998,7 +985,7 @@ describe("recordFeedback", () => {
     flushEntryScores(cortex);
 
     const scores = readVersionedEntries<any>(
-      path.join(cortex, ".governance", "memory-scores.json")
+      path.join(cortex, ".runtime", "memory-scores.json")
     );
     expect(scores[key].repromptPenalty).toBe(1);
   });
@@ -1013,7 +1000,7 @@ describe("recordFeedback", () => {
     flushEntryScores(cortex);
 
     const scores = readVersionedEntries<any>(
-      path.join(cortex, ".governance", "memory-scores.json")
+      path.join(cortex, ".runtime", "memory-scores.json")
     );
     expect(scores[key].regressionPenalty).toBe(1);
   });
@@ -1272,6 +1259,14 @@ describe("autoMergeConflicts", () => {
     execFileSync("git", ["-C", dir, "commit", "-m", message], { stdio: "ignore" });
   }
 
+  function currentBranch(dir: string): string {
+    const { execFileSync } = require("child_process");
+    return execFileSync("git", ["-C", dir, "branch", "--show-current"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  }
+
   beforeEach(() => {
     gitDir = initGitRepo();
   });
@@ -1291,6 +1286,7 @@ describe("autoMergeConflicts", () => {
 
     // Create base commit with a shared file
     commitFile(gitDir, "proj/FINDINGS.md", "# proj FINDINGS\n\n## 2025-01-01\n\n- Base entry\n", "base");
+    const primaryBranch = currentBranch(gitDir);
 
     // Create a branch with a different entry
     execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-a"], { stdio: "pipe" });
@@ -1301,8 +1297,8 @@ describe("autoMergeConflicts", () => {
     execFileSync("git", ["-C", gitDir, "add", "-f", "proj/FINDINGS.md"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "branch-a change"], { stdio: "ignore" });
 
-    // Go back to master and create a conflicting entry
-    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    // Go back to the primary branch and create a conflicting entry
+    execFileSync("git", ["-C", gitDir, "checkout", primaryBranch], { stdio: "pipe" });
     fs.writeFileSync(
       path.join(gitDir, "proj", "FINDINGS.md"),
       "# proj FINDINGS\n\n## 2025-01-01\n\n- Master entry\n"
@@ -1339,6 +1335,7 @@ describe("autoMergeConflicts", () => {
     const { execFileSync } = require("child_process");
 
     commitFile(gitDir, "proj/backlog.md", "# backlog\n\n## Active\n\n- Base task\n\n## Queue\n\n## Done\n", "base");
+    const primaryBranch = currentBranch(gitDir);
 
     execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-b"], { stdio: "pipe" });
     fs.writeFileSync(
@@ -1348,7 +1345,7 @@ describe("autoMergeConflicts", () => {
     execFileSync("git", ["-C", gitDir, "add", "-f", "proj/backlog.md"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "branch change"], { stdio: "ignore" });
 
-    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    execFileSync("git", ["-C", gitDir, "checkout", primaryBranch], { stdio: "pipe" });
     fs.writeFileSync(
       path.join(gitDir, "proj", "backlog.md"),
       "# backlog\n\n## Active\n\n- Master task\n\n## Queue\n\n## Done\n"
@@ -1383,13 +1380,14 @@ describe("autoMergeConflicts", () => {
     const { execFileSync } = require("child_process");
 
     commitFile(gitDir, "config.json", '{"key": "base"}', "base");
+    const primaryBranch = currentBranch(gitDir);
 
     execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-c"], { stdio: "pipe" });
     fs.writeFileSync(path.join(gitDir, "config.json"), '{"key": "branch"}');
     execFileSync("git", ["-C", gitDir, "add", "-f", "config.json"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "branch change"], { stdio: "ignore" });
 
-    execFileSync("git", ["-C", gitDir, "checkout", "master"], { stdio: "pipe" });
+    execFileSync("git", ["-C", gitDir, "checkout", primaryBranch], { stdio: "pipe" });
     fs.writeFileSync(path.join(gitDir, "config.json"), '{"key": "master"}');
     execFileSync("git", ["-C", gitDir, "add", "-f", "config.json"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "master change"], { stdio: "ignore" });
@@ -1749,78 +1747,6 @@ describe("getRuntimeHealth and updateRuntimeHealth", () => {
   });
 });
 
-// --- migrateLegacyFindings ---
-
-describe("migrateLegacyFindings", () => {
-  it("migrates bullet entries from LEARNINGS.md to FINDINGS.md", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "legacyproj", {
-      "LEARNINGS.md": "# Learnings\n\n- Use explicit timezone handling\n- Retry transient failures\n",
-    });
-    const result = migrateLegacyFindings(cortex, "legacyproj");
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Migrated 2 findings");
-    const findings = fs.readFileSync(path.join(cortex, "legacyproj", "FINDINGS.md"), "utf8");
-    expect(findings).toContain("timezone handling");
-    expect(findings).toContain("transient failures");
-  });
-
-  it("dry-run returns count without writing", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "dryproj", {
-      "LEARNINGS.md": "# Learnings\n\n- Finding one\n",
-    });
-    const result = migrateLegacyFindings(cortex, "dryproj", { dryRun: true });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Found 1 migratable");
-    expect(fs.existsSync(path.join(cortex, "dryproj", "FINDINGS.md"))).toBe(false);
-  });
-
-  it("deduplicates findings across files", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "dedupfindings", {
-      "LEARNINGS.md": "# Learnings\n\n- Same insight\n",
-      "LESSONS.md": "# Lessons\n\n- Same insight\n",
-    });
-    const result = migrateLegacyFindings(cortex, "dedupfindings");
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Migrated 1 findings");
-  });
-
-  it("returns message when no findings docs exist", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "nofind", { "summary.md": "# nofind\n" });
-    const result = migrateLegacyFindings(cortex, "nofind");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("No legacy findings");
-  });
-
-  it("rejects invalid project name", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const result = migrateLegacyFindings(cortex, "../bad");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("Invalid project name");
-  });
-
-  it("pins canonical memories with pinCanonical option", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "pinfindings", {
-      "LEARNINGS.md": "# Learnings\n\n- Must always validate input\n- Some optional thing\n",
-    });
-    const result = migrateLegacyFindings(cortex, "pinfindings", { pinCanonical: true });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("pinned 1");
-    const canonical = fs.readFileSync(path.join(cortex, "pinfindings", "CANONICAL_MEMORIES.md"), "utf8");
-    expect(canonical).toContain("validate input");
-  });
-});
-
 // --- appendReviewQueue ---
 
 describe("appendReviewQueue", () => {
@@ -2108,54 +2034,6 @@ describe("filterTrustedFindingsDetailed (extended)", () => {
   });
 });
 
-// --- migrateGovernance (extended) ---
-
-describe("migrateGovernance (extended)", () => {
-  it("reports missing files without error", () => {
-    const cortex = makeCortex();
-    const report = migrateGovernance(cortex);
-    expect(report.results.every(r => r.action === "missing")).toBe(true);
-    expect(report.migratedFiles.length).toBe(0);
-  });
-
-  it("skips files with newer schema version", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "access-control.json"),
-      JSON.stringify({ schemaVersion: 999, admins: [] }, null, 2) + "\n"
-    );
-    const report = migrateGovernance(cortex);
-    const acResult = report.results.find(r => r.file === "access-control.json");
-    expect(acResult?.action).toBe("skipped-newer-version");
-  });
-
-  it("reports up-to-date files without changes", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "access-control.json"),
-      JSON.stringify({ schemaVersion: 1, admins: [], maintainers: [], contributors: [], viewers: [] }, null, 2) + "\n"
-    );
-    const report = migrateGovernance(cortex);
-    const acResult = report.results.find(r => r.file === "access-control.json");
-    expect(acResult?.action).toBe("up-to-date");
-    expect(acResult?.changed).toBe(false);
-  });
-
-  it("handles corrupted JSON files gracefully", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(path.join(govDir, "access-control.json"), "not json{{{");
-    const report = migrateGovernance(cortex);
-    const acResult = report.results.find(r => r.file === "access-control.json");
-    expect(acResult?.action).toBe("error");
-  });
-});
-
 // --- validateGovernanceJson (extended) ---
 
 describe("validateGovernanceJson (extended)", () => {
@@ -2191,23 +2069,6 @@ describe("validateGovernanceJson (extended)", () => {
     expect(validateGovernanceJson(f, "index-policy")).toBe(false);
   });
 
-  it("validates canonical-locks", () => {
-    const cortex = makeCortex();
-    const f = path.join(cortex, "test.json");
-    fs.writeFileSync(f, JSON.stringify({
-      entries: { "k": { hash: "h", snapshot: "s", updatedAt: "2025-01-01" } },
-    }));
-    expect(validateGovernanceJson(f, "canonical-locks")).toBe(true);
-  });
-
-  it("rejects canonical-locks with bad entries", () => {
-    const cortex = makeCortex();
-    const f = path.join(cortex, "test.json");
-    fs.writeFileSync(f, JSON.stringify({
-      entries: { "k": { hash: 123 } },
-    }));
-    expect(validateGovernanceJson(f, "canonical-locks")).toBe(false);
-  });
 });
 
 // --- flushEntryScores ---
@@ -2220,7 +2081,7 @@ describe("flushEntryScores", () => {
     recordInjection(cortex, key);
     // Scores are already on disk from recordInjection, but flushEntryScores re-writes
     flushEntryScores(cortex);
-    const scoresPath = path.join(cortex, ".governance", "memory-scores.json");
+    const scoresPath = path.join(cortex, ".runtime", "memory-scores.json");
     const raw = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
     expect(raw.entries[key]).toBeDefined();
   });
@@ -2426,63 +2287,6 @@ describe("collectNativeMemoryFiles", () => {
   });
 });
 
-describe("migrateProjectNames", () => {
-  let tmpRoot: string;
-  let cleanupRoot: () => void;
-  const origHome = process.env.HOME;
-
-  beforeEach(() => {
-    ({ path: tmpRoot, cleanup: cleanupRoot } = makeTempDir("cortex-project-migrate-"));
-    process.env.HOME = tmpRoot;
-  });
-
-  afterEach(() => {
-    process.env.HOME = origHome;
-    cleanupRoot();
-  });
-
-  it("renames mixed-case project dirs, updates profiles, and renames native memory files", () => {
-    const cortex = path.join(tmpRoot, ".cortex");
-    fs.mkdirSync(path.join(cortex, "SamplePortal"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
-    fs.writeFileSync(path.join(cortex, "profiles", "personal.yaml"), "projects:\n  - SamplePortal\n");
-    const memDir = path.join(tmpRoot, ".claude", "projects", "workspace", "memory");
-    fs.mkdirSync(memDir, { recursive: true });
-    fs.writeFileSync(path.join(memDir, "MEMORY-SamplePortal.md"), "# notes");
-
-    const result = migrateProjectNames(cortex);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const cortexEntries = fs.readdirSync(cortex);
-    expect(cortexEntries).toContain("sampleportal");
-    expect(cortexEntries).not.toContain("SamplePortal");
-    expect(fs.readFileSync(path.join(cortex, "profiles", "personal.yaml"), "utf8")).toContain("sampleportal");
-    const memoryEntries = fs.readdirSync(memDir);
-    expect(memoryEntries).toContain("MEMORY-sampleportal.md");
-    expect(memoryEntries).not.toContain("MEMORY-SamplePortal.md");
-  });
-
-  it("archives duplicate native memory files when lowercase target already exists", () => {
-    const cortex = path.join(tmpRoot, ".cortex");
-    fs.mkdirSync(path.join(cortex, "SampleAtlas"), { recursive: true });
-    const memDir = path.join(tmpRoot, ".claude", "projects", "workspace", "memory");
-    fs.mkdirSync(memDir, { recursive: true });
-    fs.writeFileSync(path.join(memDir, "MEMORY-SampleAtlas.md"), "# same");
-    fs.writeFileSync(path.join(memDir, "MEMORY-sampleatlas.md"), "# same");
-    const distinctCaseVariants = fs.readdirSync(memDir).length === 2;
-
-    const result = migrateProjectNames(cortex);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const memoryEntries = fs.readdirSync(memDir);
-    expect(memoryEntries).toContain("MEMORY-sampleatlas.md");
-    if (distinctCaseVariants) {
-      expect(memoryEntries).toContain("MEMORY-SampleAtlas.md.case-migration.bak");
-    } else {
-      expect(memoryEntries).not.toContain("MEMORY-SampleAtlas.md.case-migration.bak");
-    }
-  });
-});
 
 describe("resolveImports", () => {
   let cortexDir: string;

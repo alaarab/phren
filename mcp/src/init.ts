@@ -4,11 +4,11 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
 import { configureAllHooks } from "./hooks.js";
+import { getMachineName, persistMachineName } from "./machine-identity.js";
 import { debugLog, isRecord, hookConfigPath, homeDir, homePath } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import {
@@ -42,7 +42,6 @@ export {
 export type { PostInitCheck } from "./init-setup.js";
 export {
   ensureGovernanceFiles,
-  migrateRootFiles,
   runPostInitVerify,
   getVerifyOutcomeNote,
   listTemplates,
@@ -76,7 +75,6 @@ import {
 
 import {
   ensureGovernanceFiles,
-  migrateRootFiles,
   runPostInitVerify,
   applyStarterTemplateUpdates,
   listTemplates,
@@ -149,7 +147,6 @@ export interface InitOptions {
   applyStarterUpdate?: boolean;
   dryRun?: boolean;
   yes?: boolean;
-  fromExisting?: string;
   template?: string;
   /** Set by walkthrough to pass project name to init logic */
   _walkthroughProject?: string;
@@ -193,9 +190,6 @@ function updateStarterProfiles(cortexPath: string, mutate: (projects: string[]) 
 }
 
 function getPendingBootstrapTarget(cortexPath: string, opts: InitOptions): { path: string; mode: "explicit" | "detected" } | null {
-  if (opts.fromExisting) {
-    return { path: path.resolve(opts.fromExisting), mode: "explicit" };
-  }
   const cwdProject = detectProjectDir(process.cwd(), cortexPath);
   if (!cwdProject) return null;
   const projectName = normalizedBootstrapProjectName(cwdProject);
@@ -218,11 +212,11 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
   const cloneAnswer = (await ask(`Clone URL (or Enter to skip): `)).trim();
   if (cloneAnswer) {
     rl.close();
-    return { machine: os.hostname(), profile: "personal", mcp: "on", hooks: "on", ollamaEnabled: false, autoCaptureEnabled: false, semanticDedupEnabled: false, semanticConflictEnabled: false, cloneUrl: cloneAnswer };
+    return { machine: getMachineName(), profile: "personal", mcp: "on", hooks: "on", ollamaEnabled: false, autoCaptureEnabled: false, semanticDedupEnabled: false, semanticConflictEnabled: false, cloneUrl: cloneAnswer };
   }
 
   log("");
-  const defaultMachine = os.hostname();
+  const defaultMachine = getMachineName();
   const machineAnswer = (await ask(`Machine name [${defaultMachine}]: `)).trim();
   const machine = machineAnswer || defaultMachine;
 
@@ -471,9 +465,7 @@ export async function runInit(opts: InitOptions = {}) {
       if (hooksEnabled) {
         log(`  Reconfigure lifecycle hooks for detected tools`);
       }
-      if (pendingBootstrap?.mode === "explicit") {
-        log(`  Would bootstrap project from ${pendingBootstrap.path}`);
-      } else if (pendingBootstrap?.mode === "detected") {
+      if (pendingBootstrap?.mode === "detected") {
         log(`  Would auto-bootstrap current project directory (${pendingBootstrap.path})`);
       }
       if (opts.applyStarterUpdate) {
@@ -487,7 +479,7 @@ export async function runInit(opts: InitOptions = {}) {
     log(`No existing cortex install found at ${cortexPath}`);
     log(`Would create a new cortex install:\n`);
     log(`  Copy starter files to ${cortexPath} (or create minimal structure)`);
-    log(`  Update machines.yaml for machine "${opts.machine || os.hostname()}"`);
+    log(`  Update machines.yaml for machine "${opts.machine || getMachineName()}"`);
     log(`  Create/update config files`);
     log(`  MCP mode: ${mcpLabel}`);
     log(`  Hooks mode: ${hooksLabel}`);
@@ -495,9 +487,7 @@ export async function runInit(opts: InitOptions = {}) {
     if (hooksEnabled) {
       log(`  Configure lifecycle hooks for detected tools`);
     }
-    if (pendingBootstrap?.mode === "explicit") {
-      log(`  Would bootstrap project from ${pendingBootstrap.path}`);
-    } else if (pendingBootstrap?.mode === "detected") {
+    if (pendingBootstrap?.mode === "detected") {
       log(`  Would auto-bootstrap current project directory (${pendingBootstrap.path})`);
     }
     log(`  Write install preferences and run post-init verification checks`);
@@ -507,12 +497,8 @@ export async function runInit(opts: InitOptions = {}) {
 
   if (hasExistingInstall) {
       ensureGovernanceFiles(cortexPath);
-      const migrated = migrateRootFiles(cortexPath);
       log(`\ncortex already exists at ${cortexPath}`);
       log(`Updating configuration...\n`);
-      if (migrated.length) {
-        log(`  Cleaned up root directory (${migrated.length} file${migrated.length === 1 ? "" : "s"} moved)`);
-      }
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
 
@@ -600,28 +586,16 @@ export async function runInit(opts: InitOptions = {}) {
         log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
       }
 
-      if (opts.fromExisting) {
-        try {
-          const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting, opts.profile);
-          log(`\nBootstrapped project "${projectName}" from ${opts.fromExisting}`);
-        } catch (e: unknown) {
-          log(`\nCould not bootstrap from existing: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      } else {
-        // Auto-detect: if CWD looks like a project, bootstrap it automatically
-        const cwdProject = detectProjectDir(process.cwd(), cortexPath);
-        if (cwdProject) {
-          const projectName = normalizedBootstrapProjectName(cwdProject);
-          if (!isProjectTracked(cortexPath, projectName)) {
-            try {
-              const created = bootstrapFromExisting(cortexPath, cwdProject, opts.profile);
-              log(`\nDetected project in current directory — bootstrapped "${created}"`);
-            } catch (e: unknown) {
-              // Auto-bootstrap here is opportunistic. Keep init running and surface
-              // details only in debug mode rather than turning a successful install
-              // into a hard failure.
-              debugLog(`Auto-bootstrap from CWD failed: ${e instanceof Error ? e.message : String(e)}`);
-            }
+      // Auto-detect: if CWD looks like a project, bootstrap it automatically.
+      const cwdProject = detectProjectDir(process.cwd(), cortexPath);
+      if (cwdProject) {
+        const projectName = normalizedBootstrapProjectName(cwdProject);
+        if (!isProjectTracked(cortexPath, projectName)) {
+          try {
+            const created = bootstrapFromExisting(cortexPath, cwdProject, opts.profile);
+            log(`\nDetected project in current directory — bootstrapped "${created}"`);
+          } catch (e: unknown) {
+            debugLog(`Auto-bootstrap from CWD failed: ${e instanceof Error ? e.message : String(e)}`);
           }
         }
       }
@@ -757,11 +731,12 @@ export async function runInit(opts: InitOptions = {}) {
     }
   }
 
-  // Update machines.yaml with hostname (--machine overrides auto-detected hostname)
-  const effectiveMachine = opts.machine || os.hostname();
-  updateMachinesYaml(cortexPath, opts.machine, opts.profile);
+  // Persist the local machine alias and map it to the selected profile.
+  const effectiveMachine = opts.machine?.trim() || getMachineName();
+  persistMachineName(effectiveMachine);
+  updateMachinesYaml(cortexPath, effectiveMachine, opts.profile);
   ensureGovernanceFiles(cortexPath);
-  log(`  Updated machines.yaml with hostname "${effectiveMachine}"`);
+  log(`  Updated machines.yaml with machine "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
 
@@ -944,21 +919,6 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  ${step++}. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
   log(`  ${step++}. After working across projects, run /cortex-consolidate to find cross-project patterns`);
   log(`\n  Read ${cortexPath}/README.md for a guided tour of each file.`);
-
-  // --from-existing flag: bootstrap a specific path (CWD auto-detect already
-  // happened earlier in the fresh-install flow, so we only handle the explicit flag here)
-  if (opts.fromExisting) {
-    try {
-      const projectName = bootstrapFromExisting(cortexPath, opts.fromExisting, opts.profile);
-      log(`\nBootstrapped project "${projectName}" from ${opts.fromExisting}`);
-      log(`  ${cortexPath}/${projectName}/CLAUDE.md`);
-      log(`  ${cortexPath}/${projectName}/FINDINGS.md`);
-      log(`  ${cortexPath}/${projectName}/backlog.md`);
-      log(`  ${cortexPath}/${projectName}/summary.md`);
-    } catch (e: unknown) {
-      log(`\nCould not bootstrap from existing: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
 
   log(``);
 }

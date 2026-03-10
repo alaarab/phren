@@ -43,24 +43,9 @@ describe("telemetry", () => {
   it("stores telemetry in .runtime/ not .governance/", () => {
     setTelemetryEnabled(tmpDir, true);
     const runtimePath = path.join(tmpDir, ".runtime", "telemetry.json");
-    const legacyPath = path.join(tmpDir, ".governance", "telemetry.json");
+    const oldPath = path.join(tmpDir, ".governance", "telemetry.json");
     expect(fs.existsSync(runtimePath)).toBe(true);
-    expect(fs.existsSync(legacyPath)).toBe(false);
-  });
-
-  it("migrates legacy .governance/telemetry.json to .runtime/", () => {
-    const legacyDir = path.join(tmpDir, ".governance");
-    fs.mkdirSync(legacyDir, { recursive: true });
-    const legacyData = {
-      config: { enabled: true, enabledAt: "2025-01-01T00:00:00.000Z" },
-      stats: { toolCalls: { search_cortex: 5 }, cliCommands: {}, errors: 0, sessions: 2, lastActive: "" },
-    };
-    fs.writeFileSync(path.join(legacyDir, "telemetry.json"), JSON.stringify(legacyData));
-
-    expect(isTelemetryEnabled(tmpDir)).toBe(true);
-    const summary = getTelemetrySummary(tmpDir);
-    expect(summary).toContain("search_cortex: 5");
-    expect(summary).toContain("Sessions: 2");
+    expect(fs.existsSync(oldPath)).toBe(false);
   });
 
   it("records enabledAt timestamp on first enable", () => {

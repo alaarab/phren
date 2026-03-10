@@ -39,6 +39,13 @@ export {
   tryUnlink,
   sessionsDir,
   runtimeFile,
+  installPreferencesFile,
+  runtimeHealthFile,
+  canonicalLocksFile,
+  shellStateFile,
+  sessionMetricsFile,
+  memoryScoresFile,
+  memoryUsageLogFile,
   sessionMarker,
   debugLog,
   appendIndexEvent,
@@ -55,13 +62,6 @@ export {
   qualityMarkers,
 } from "./cortex-paths.js";
 
-export interface ProjectNameMigrationReport {
-  renamedProjects: Array<{ from: string; to: string }>;
-  updatedProfiles: Array<{ profile: string; replacements: Array<{ from: string; to: string }> }>;
-  renamedNativeMemories: Array<{ from: string; to: string }>;
-  archivedNativeMemories: Array<{ from: string; archivedAs: string; reason: string }>;
-}
-
 const RESERVED_PROJECT_DIR_NAMES = new Set(["profiles", "templates", "global"]);
 
 function isProjectDirEntry(entry: fs.Dirent): boolean {
@@ -75,148 +75,8 @@ function isCanonicalProjectDirName(name: string): boolean {
   return name === name.toLowerCase() && isValidProjectName(name);
 }
 
-function readYamlObject(filePath: string): Record<string, unknown> | null {
-  try {
-    const parsed = yaml.load(fs.readFileSync(filePath, "utf8"), { schema: yaml.CORE_SCHEMA });
-    return isRecord(parsed) ? parsed : null;
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readYamlObject ${filePath}: ${errorMessage(err)}\n`);
-    return null;
-  }
-}
-
-export function migrateProjectNames(cortexPath: string, dryRun: boolean = false): CortexResult<ProjectNameMigrationReport> {
-  const report: ProjectNameMigrationReport = {
-    renamedProjects: [],
-    updatedProfiles: [],
-    renamedNativeMemories: [],
-    archivedNativeMemories: [],
-  };
-
-  const entries = fs.readdirSync(cortexPath, { withFileTypes: true }).filter(isProjectDirEntry);
-  const projectRenames = new Map<string, string>();
-  const occupiedNames = new Set(entries.map((entry) => entry.name.toLowerCase()));
-
-  for (const entry of entries) {
-    if (isCanonicalProjectDirName(entry.name)) continue;
-    const target = normalizeProjectNameForCreate(entry.name);
-    if (!isValidProjectName(target)) {
-      return cortexErr(`Cannot migrate project "${entry.name}" to invalid canonical name "${target}".`, CortexError.INVALID_PROJECT_NAME);
-    }
-    if (entry.name.toLowerCase() !== target || occupiedNames.has(target) && target !== entry.name.toLowerCase()) {
-      return cortexErr(`Cannot migrate project "${entry.name}" because canonical target "${target}" already exists.`, CortexError.AMBIGUOUS_MATCH);
-    }
-    projectRenames.set(entry.name, target);
-  }
-
-  const isSameFilesystemEntry = (fromPath: string, toPath: string): boolean => {
-    try {
-      const fromStat = fs.statSync(fromPath);
-      const toStat = fs.statSync(toPath);
-      return fromStat.dev === toStat.dev && fromStat.ino === toStat.ino;
-    } catch {
-      return false;
-    }
-  };
-
-  const renamePathPreservingCase = (fromPath: string, toPath: string): void => {
-    if (fromPath === toPath) return;
-    if (isSameFilesystemEntry(fromPath, toPath)) {
-      const ext = path.extname(toPath);
-      const base = path.basename(toPath, ext);
-      const tempPath = path.join(
-        path.dirname(fromPath),
-        `.cortex-case-rename-${base}-${process.pid}-${Date.now()}${ext}.tmp`,
-      );
-      fs.renameSync(fromPath, tempPath);
-      fs.renameSync(tempPath, toPath);
-      return;
-    }
-    fs.renameSync(fromPath, toPath);
-  };
-
-  for (const [from, to] of projectRenames.entries()) {
-    report.renamedProjects.push({ from, to });
-    if (!dryRun) renamePathPreservingCase(path.join(cortexPath, from), path.join(cortexPath, to));
-  }
-
-  const profilesDir = path.join(cortexPath, "profiles");
-  if (fs.existsSync(profilesDir)) {
-    for (const file of fs.readdirSync(profilesDir)) {
-      if (!file.endsWith(".yaml") && !file.endsWith(".yml")) continue;
-      const fullPath = path.join(profilesDir, file);
-      const parsed = readYamlObject(fullPath);
-      if (!parsed) continue;
-      const projects = Array.isArray(parsed.projects) ? parsed.projects.map((value) => String(value)) : null;
-      if (!projects) continue;
-      const replacements: Array<{ from: string; to: string }> = [];
-      const nextProjects = projects.map((name) => {
-        const replacement = projectRenames.get(name);
-        if (!replacement) return name;
-        replacements.push({ from: name, to: replacement });
-        return replacement;
-      });
-      if (!replacements.length) continue;
-      report.updatedProfiles.push({ profile: file, replacements });
-      if (!dryRun) {
-        const updated = { ...parsed, projects: Array.from(new Set(nextProjects)) };
-        fs.writeFileSync(fullPath, yaml.dump(updated, { lineWidth: 120, noRefs: true }));
-      }
-    }
-  }
-
-  for (const memory of collectNativeMemoryFiles()) {
-    const targetProject = projectRenames.get(memory.project);
-    if (!targetProject) continue;
-    const targetPath = path.join(path.dirname(memory.fullPath), `MEMORY-${targetProject}.md`);
-    if (memory.fullPath === targetPath) continue;
-    if (fs.existsSync(targetPath)) {
-      if (isSameFilesystemEntry(memory.fullPath, targetPath)) {
-        report.renamedNativeMemories.push({ from: memory.fullPath, to: targetPath });
-        if (!dryRun) renamePathPreservingCase(memory.fullPath, targetPath);
-        continue;
-      }
-      const sourceContent = fs.readFileSync(memory.fullPath, "utf8");
-      const targetContent = fs.readFileSync(targetPath, "utf8");
-      if (sourceContent === targetContent) {
-        const archivedAs = `${memory.fullPath}.case-migration.bak`;
-        report.archivedNativeMemories.push({
-          from: memory.fullPath,
-          archivedAs,
-          reason: "duplicate-content",
-        });
-        if (!dryRun) fs.renameSync(memory.fullPath, archivedAs);
-        continue;
-      }
-      const archivedAs = `${memory.fullPath}.case-conflict.bak`;
-      report.archivedNativeMemories.push({
-        from: memory.fullPath,
-        archivedAs,
-        reason: "target-exists-with-different-content",
-      });
-      if (!dryRun) fs.renameSync(memory.fullPath, archivedAs);
-      continue;
-    }
-    report.renamedNativeMemories.push({ from: memory.fullPath, to: targetPath });
-    if (!dryRun) fs.renameSync(memory.fullPath, targetPath);
-  }
-
-  return cortexOk(report);
-}
-
 export function appendAuditLog(cortexPath: string, event: string, details: string): void {
-  // Migrate: check old location, use new .runtime/ path
-  const legacyPath = path.join(cortexPath, ".cortex-audit.log");
-  const newPath = runtimeFile(cortexPath, "audit.log");
-  // One-time migration: move old audit log to new location
-  if (fs.existsSync(legacyPath) && !fs.existsSync(newPath)) {
-    try {
-      fs.renameSync(legacyPath, newPath);
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog migrate: ${errorMessage(err)}\n`);
-    }
-  }
-  const logPath = newPath;
+  const logPath = runtimeFile(cortexPath, "audit.log");
   const line = `[${new Date().toISOString()}] ${event} ${details}\n`;
   const lockPath = logPath + ".lock";
   const maxWait = 5000;

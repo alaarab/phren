@@ -267,6 +267,18 @@ describe.sequential("review-ui graph API", () => {
     expect(groups.has("pattern")).toBe(true);
   });
 
+  it("graph nodes expose source metadata for richer filtering", async () => {
+    const res = await httpGet(port, "/api/graph");
+    const data = JSON.parse(res.body);
+    const demoProject = data.nodes.find((n: any) => n.id === "demo");
+    const demoFinding = data.nodes.find((n: any) => n.id !== "demo" && n.project === "demo");
+    expect(demoProject?.project).toBe("demo");
+    expect(demoProject?.tagged).toBe(false);
+    expect(demoFinding?.project).toBe("demo");
+    expect(typeof demoFinding?.tagged).toBe("boolean");
+    expect(typeof demoFinding?.fullLabel).toBe("string");
+  });
+
   it("graph links connect project to its findings", async () => {
     const res = await httpGet(port, "/api/graph");
     const data = JSON.parse(res.body);
@@ -293,6 +305,9 @@ describe.sequential("review-ui graph API", () => {
     const decisionNodes = data.nodes.filter((n: any) => n.group === "decision");
     for (const node of decisionNodes) {
       expect(node.label.length).toBeLessThanOrEqual(60);
+      expect(node.fullLabel.length).toBeGreaterThanOrEqual(node.label.length);
+      expect(node.project).toBe("demo");
+      expect(node.tagged).toBe(true);
     }
   });
 

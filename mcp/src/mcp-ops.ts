@@ -2,7 +2,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { runtimeFile, getProjectDirs } from "./shared.js";
 import { findFtsCacheForPath } from "./shared-index.js";
@@ -10,6 +9,7 @@ import { isValidProjectName } from "./utils.js";
 import { approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.js";
 import { addProjectFromPath } from "./core-project.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { getMachineName } from "./machine-identity.js";
 
 import type { CortexResult } from "./shared.js";
 import type { McpToolResult } from "./mcp-types.js";
@@ -182,7 +182,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       // Profile/machine info
       const machineName = (() => {
         try {
-          return os.hostname();
+          return getMachineName();
         } catch (err: unknown) {
           if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck machineName: ${err instanceof Error ? err.message : String(err)}\n`);
         }

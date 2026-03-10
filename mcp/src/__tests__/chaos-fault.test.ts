@@ -108,7 +108,7 @@ describe("corrupted file recovery", () => {
   });
 
   it("handles corrupted shell state JSON gracefully", () => {
-    const govDir = path.join(tmpDir, ".governance");
+    const govDir = path.join(tmpDir, ".runtime");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(path.join(govDir, "shell-state.json"), "{ corrupted json }}}");
     const state = loadShellState(tmpDir);
@@ -117,11 +117,11 @@ describe("corrupted file recovery", () => {
   });
 
   it("handles shell state with missing fields", () => {
-    const govDir = path.join(tmpDir, ".governance");
+    const govDir = path.join(tmpDir, ".runtime");
     fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(path.join(govDir, "shell-state.json"), '{"view":"Backlog"}');
+    fs.writeFileSync(path.join(govDir, "shell-state.json"), '{"view":"Unknown"}');
     const state = loadShellState(tmpDir);
-    expect(state.view).toBe("Tasks");
+    expect(state.view).toBe("Projects");
     expect(state.page).toBe(1);
     expect(state.perPage).toBe(40);
   });
@@ -238,13 +238,13 @@ describe("filesystem fault injection", () => {
   });
 
   it("handles missing governance directory for shell state", () => {
-    // No .governance directory exists
+    // No runtime directory exists
     const state = loadShellState(tmpDir);
     expect(state.view).toBe("Projects");
     expect(state.page).toBe(1);
   });
 
-  it("saveShellState creates governance directory if missing", () => {
+  it("saveShellState creates runtime directory if missing", () => {
     saveShellState(tmpDir, {
       version: 1,
       view: "Tasks",
@@ -252,8 +252,8 @@ describe("filesystem fault injection", () => {
       page: 1,
       perPage: 40,
     });
-    const govDir = path.join(tmpDir, ".governance");
-    expect(fs.existsSync(govDir)).toBe(true);
+    const runtimeDir = path.join(tmpDir, ".runtime");
+    expect(fs.existsSync(runtimeDir)).toBe(true);
     const loaded = loadShellState(tmpDir);
     expect(loaded.view).toBe("Tasks");
   });
@@ -284,10 +284,10 @@ describe("filesystem fault injection", () => {
 
 describe("custom hooks fault injection", () => {
   it("runCustomHooks handles nonexistent command gracefully", () => {
-    const govDir = path.join(tmpDir, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
+    const runtimeDir = path.join(tmpDir, ".runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
     fs.writeFileSync(
-      path.join(govDir, "install-preferences.json"),
+      path.join(runtimeDir, "install-preferences.json"),
       JSON.stringify({
         customHooks: [
           { event: "pre-save", command: "/nonexistent/binary/xyz" },
@@ -300,10 +300,10 @@ describe("custom hooks fault injection", () => {
   });
 
   it("runCustomHooks handles command that writes to stderr", () => {
-    const govDir = path.join(tmpDir, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
+    const runtimeDir = path.join(tmpDir, ".runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
     fs.writeFileSync(
-      path.join(govDir, "install-preferences.json"),
+      path.join(runtimeDir, "install-preferences.json"),
       JSON.stringify({
         customHooks: [
           { event: "post-finding", command: "echo 'warning' >&2" },
@@ -318,10 +318,10 @@ describe("custom hooks fault injection", () => {
   });
 
   it("readCustomHooks handles null entries in array", () => {
-    const govDir = path.join(tmpDir, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
+    const runtimeDir = path.join(tmpDir, ".runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
     fs.writeFileSync(
-      path.join(govDir, "install-preferences.json"),
+      path.join(runtimeDir, "install-preferences.json"),
       JSON.stringify({
         customHooks: [
           null,

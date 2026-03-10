@@ -2,6 +2,7 @@ import {
   debugLog,
   appendAuditLog,
   runtimeFile,
+  sessionMetricsFile,
   qualityMarkers,
   sessionMarker,
   EXEC_TIMEOUT_MS,
@@ -139,7 +140,7 @@ interface SessionMetric {
 }
 
 function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMetric> {
-  const file = path.join(cortexPathLocal, ".governance", "session-metrics.json");
+  const file = sessionMetricsFile(cortexPathLocal);
   if (!fs.existsSync(file)) return {};
   try {
     return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, SessionMetric>;
@@ -150,7 +151,7 @@ function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMet
 }
 
 function writeSessionMetrics(cortexPathLocal: string, data: Record<string, SessionMetric>) {
-  const file = path.join(cortexPathLocal, ".governance", "session-metrics.json");
+  const file = sessionMetricsFile(cortexPathLocal);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
 }
@@ -159,7 +160,7 @@ function updateSessionMetrics(
   cortexPathLocal: string,
   updater: (data: Record<string, SessionMetric>) => void
 ): void {
-  const file = path.join(cortexPathLocal, ".governance", "session-metrics.json");
+  const file = sessionMetricsFile(cortexPathLocal);
   withFileLock(file, () => {
     const metrics = parseSessionMetrics(cortexPathLocal);
     updater(metrics);
