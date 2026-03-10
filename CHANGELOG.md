@@ -12,6 +12,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `cortex init` now frames Ollama-backed semantic retrieval as a best fit for paraphrase-heavy or weak-lexical queries, with opt-in prompts that default to off.
 - README and environment docs now recommend leaving semantic retrieval disabled when searches are mostly identifiers, filenames, commands, project names, or exact phrases.
 
+### Fixed
+- Release hardening tests now skip the recursive `npm pack --dry-run` gate during `npm publish`, which keeps the scripted publish path stable while retaining the check in normal test runs.
+
 ## [1.25.0] - 2026-03-10
 
 ### Changed

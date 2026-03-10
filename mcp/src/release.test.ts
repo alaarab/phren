@@ -13,6 +13,10 @@ function npmExec(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
+function publishInProgress(): boolean {
+  return process.env.npm_command === "publish" || process.env.npm_lifecycle_event === "prepublishOnly";
+}
+
 describe.sequential("1.10.x release hardening gates", () => {
   let tmpRoot: string;
   let tmpCleanup: () => void;
@@ -50,7 +54,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     expect(metadataTs).toContain("package.json");
   });
 
-  it("ships a dry-run npm pack with built entrypoints and without source ts files", () => {
+  it.skipIf(publishInProgress())("ships a dry-run npm pack with built entrypoints and without source ts files", () => {
     const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
     const builtRegistry = path.join(root, "mcp", "dist", "tool-registry.js");
     if (!fs.existsSync(builtRegistry)) {
