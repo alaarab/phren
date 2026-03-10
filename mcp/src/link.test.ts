@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import * as yaml from "js-yaml";
 import { isVersionNewer } from "./init.js";
+import { getMachineName } from "./machine-identity.js";
 import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, updateFileChecksums, verifyFileChecksums } from "./link.js";
 
 describe("link", () => {
@@ -270,6 +270,27 @@ describe("link", () => {
 
       expect(fs.lstatSync(destClaude).isSymbolicLink()).toBe(true);
       expect(fs.readFileSync(destClaude, "utf8")).toBe("# Same content");
+    });
+
+    it("skips repo mirrors for detached projects", async () => {
+      setupProfile(["detached-project"]);
+
+      const projectDir = path.join(tmpRoot, "projects", "detached-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      process.env.PROJECTS_DIR = path.join(tmpRoot, "projects");
+
+      const cortexProject = path.join(cortexPath, "detached-project");
+      fs.mkdirSync(path.join(cortexProject, "skills"), { recursive: true });
+      fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Cortex CLAUDE");
+      fs.writeFileSync(path.join(cortexProject, "FINDINGS.md"), "# Findings");
+      fs.writeFileSync(path.join(cortexProject, "cortex.project.yaml"), "ownership: detached\n");
+      fs.writeFileSync(path.join(cortexProject, "skills", "deploy.md"), "# Deploy");
+
+      await runLink(cortexPath, { machine: "test-machine", profile: "test" });
+
+      expect(fs.existsSync(path.join(projectDir, "CLAUDE.md"))).toBe(false);
+      expect(fs.existsSync(path.join(projectDir, "FINDINGS.md"))).toBe(false);
+      expect(fs.existsSync(path.join(projectDir, ".claude", "skills", "deploy.md"))).toBe(false);
     });
 
     it("linkProject creates REFERENCE.md and FINDINGS.md symlinks", async () => {
@@ -645,6 +666,28 @@ describe("link", () => {
       expect(runtimeCheck).toBeDefined();
     });
 
+    it("does not require project symlinks for detached projects", async () => {
+      const profilesDir = path.join(cortexPath, "profiles");
+      fs.mkdirSync(profilesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(profilesDir, "test.yaml"),
+        yaml.dump({ name: "test", description: "Test", projects: ["detached-proj"] })
+      );
+      fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${getMachineName()}: test\n`);
+
+      const projDir = path.join(cortexPath, "detached-proj");
+      fs.mkdirSync(projDir, { recursive: true });
+      fs.writeFileSync(path.join(projDir, "CLAUDE.md"), "# Detached\n");
+      fs.writeFileSync(path.join(projDir, "cortex.project.yaml"), "ownership: detached\n");
+
+      const result = await runDoctor(cortexPath);
+      const ownershipCheck = result.checks.find(c => c.name === "ownership:detached-proj");
+      const symlinkCheck = result.checks.find(c => c.name === "symlink:detached-proj/CLAUDE.md");
+      expect(ownershipCheck?.ok).toBe(true);
+      expect(ownershipCheck?.detail).toContain("detached");
+      expect(symlinkCheck).toBeUndefined();
+    });
+
     it("checkData flag adds governance file validation", async () => {
       const result = await runDoctor(cortexPath, false, true);
       const govChecks = result.checks.filter(c => c.name.startsWith("data:governance:"));
@@ -680,7 +723,7 @@ describe("link", () => {
       );
       fs.writeFileSync(
         path.join(cortexPath, "machines.yaml"),
-        `${os.hostname()}: test\n`
+        `${getMachineName()}: test\n`
       );
 
       const projDir = path.join(cortexPath, "doc-proj");
@@ -708,7 +751,7 @@ describe("link", () => {
       );
       fs.writeFileSync(
         path.join(cortexPath, "machines.yaml"),
-        `${os.hostname()}: test\n`
+        `${getMachineName()}: test\n`
       );
 
       const projDir = path.join(cortexPath, "doc-proj");
@@ -739,7 +782,7 @@ describe("link", () => {
       );
       fs.writeFileSync(
         path.join(cortexPath, "machines.yaml"),
-        `${os.hostname()}: test\n`
+        `${getMachineName()}: test\n`
       );
 
       const projDir = path.join(cortexPath, "learn-proj");

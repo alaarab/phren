@@ -21,6 +21,7 @@ describe("addProjectFromPath", () => {
 
       expect(result.data.project).toBe("repo");
       expect(result.data.profile).toBe("work");
+      expect(result.data.ownership).toBe("cortex-managed");
       expect(result.data.files.claude).toBe(path.join(cortexPath, "repo", "CLAUDE.md"));
       expect(fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8")).toContain("- repo");
       expect(fs.readFileSync(path.join(cortexPath, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
@@ -35,6 +36,28 @@ describe("addProjectFromPath", () => {
       const result = addProjectFromPath(path.join(tmp.path, ".cortex"), undefined, "work");
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain("Path is required");
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("supports repo-managed ownership", () => {
+    const tmp = makeTempDir("core-project-repo-managed-");
+    try {
+      const cortexPath = path.join(tmp.path, ".cortex");
+      const repoPath = path.join(tmp.path, "repo");
+      fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
+      fs.writeFileSync(path.join(cortexPath, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
+      fs.mkdirSync(path.join(repoPath, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "CLAUDE.md"), "# Repo\n");
+
+      const result = addProjectFromPath(cortexPath, repoPath, "work", "repo-managed");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.data.ownership).toBe("repo-managed");
+      expect(result.data.files.claude).toBe(path.join(repoPath, "CLAUDE.md"));
+      expect(fs.existsSync(path.join(cortexPath, "repo", "CLAUDE.md"))).toBe(false);
     } finally {
       tmp.cleanup();
     }

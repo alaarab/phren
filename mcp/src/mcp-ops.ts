@@ -8,6 +8,7 @@ import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
 import { approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.js";
 import { addProjectFromPath } from "./core-project.js";
+import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "./project-config.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { getMachineName } from "./machine-identity.js";
 
@@ -24,7 +25,7 @@ function cortexResultToMcp(result: CortexResult<string>): McpToolResult {
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, profile, updateFileInIndex, withWriteQueue } = ctx;
+  const { cortexPath, profile, withWriteQueue, updateFileInIndex } = ctx;
 
   // ── get_consolidation_status ───────────────────────────────────────────────
 
@@ -38,25 +39,29 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         path: z.string().describe("Project path to import. Pass the current repo path explicitly."),
         profile: z.string().optional().describe("Profile to update. Defaults to the active profile."),
+        ownership: z.enum(PROJECT_OWNERSHIP_MODES).optional()
+          .describe("How Cortex should treat repo-facing instruction files: cortex-managed, detached, or repo-managed."),
       }),
     },
-    async ({ path: targetPath, profile: requestedProfile }) => {
+    async ({ path: targetPath, profile: requestedProfile, ownership }) => {
       return withWriteQueue(async () => {
         try {
-          const added = addProjectFromPath(cortexPath, targetPath, requestedProfile || profile || undefined);
+          const added = addProjectFromPath(
+            cortexPath,
+            targetPath,
+            requestedProfile || profile || undefined,
+            parseProjectOwnershipMode(ownership) ?? undefined
+          );
           if (!added.ok) {
             return mcpResponse({
               ok: false,
               error: added.error,
             });
           }
-          updateFileInIndex(added.data.files.claude);
-          updateFileInIndex(added.data.files.summary);
-          updateFileInIndex(added.data.files.findings);
-          updateFileInIndex(added.data.files.backlog);
+          await ctx.rebuildIndex();
           return mcpResponse({
             ok: true,
-            message: `Added project "${added.data.project}" from ${added.data.path}.`,
+            message: `Added project "${added.data.project}" (${added.data.ownership}) from ${added.data.path}.`,
             data: added.data,
           });
         } catch (err: unknown) {

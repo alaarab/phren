@@ -71,7 +71,7 @@ describe.sequential("mcp mode configuration", () => {
     delete process.env.CORTEX_PATH;
   });
 
-  it("dry-run reports auto-bootstrap when run inside an untracked repo", async () => {
+  it("dry-run reports project enrollment when run inside an untracked repo", async () => {
     const dryRunPath = path.join(tmpRoot, "dry-run-bootstrap-cortex");
     const projectDir = path.join(tmpRoot, "tracked-repo");
     const origCwd = process.cwd();
@@ -90,7 +90,7 @@ describe.sequential("mcp mode configuration", () => {
     }
 
     const output = chunks.join("");
-    expect(output).toContain("Would auto-bootstrap current project directory");
+    expect(output).toContain("Would offer to add current project directory");
     expect(output).toContain(projectDir);
     delete process.env.CORTEX_PATH;
   });
@@ -602,6 +602,47 @@ describe("runInit walkthrough integration", () => {
     // But _walkthroughProject is only read when !hasExistingInstall, and yes=true means walkthrough is skipped
     // So we test the rename path directly by checking the init sets up correctly
     expect(fs.existsSync(cortexPath)).toBe(true);
+  });
+
+  it("persists onboarding defaults for ownership, proactivity, and task mode", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-onboarding-defaults");
+    process.env.CORTEX_PATH = cortexPath;
+
+    await suppressOutput(() => runInit({
+      yes: true,
+      projectOwnershipDefault: "detached",
+      findingsProactivity: "medium",
+      backlogProactivity: "low",
+      taskMode: "suggest",
+    }));
+
+    const installPrefs = JSON.parse(fs.readFileSync(path.join(cortexPath, ".runtime", "install-preferences.json"), "utf8"));
+    const governancePrefs = JSON.parse(fs.readFileSync(path.join(cortexPath, ".governance", "install-preferences.json"), "utf8"));
+    const workflowPolicy = JSON.parse(fs.readFileSync(path.join(cortexPath, ".governance", "workflow-policy.json"), "utf8"));
+
+    expect(installPrefs.projectOwnershipDefault).toBe("detached");
+    expect(governancePrefs.proactivityFindings).toBe("medium");
+    expect(governancePrefs.proactivityBacklog).toBe("low");
+    expect(workflowPolicy.taskMode).toBe("suggest");
+  });
+
+  it("honors a declined current-project enrollment from onboarding", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-skip-bootstrap");
+    const repoDir = path.join(tmpRoot, "tracked-repo");
+    const origCwd = process.cwd();
+    process.env.CORTEX_PATH = cortexPath;
+    fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
+    process.chdir(repoDir);
+    try {
+      await suppressOutput(() => runInit({
+        yes: true,
+        _walkthroughBootstrapCurrentProject: false,
+      }));
+    } finally {
+      process.chdir(origCwd);
+    }
+
+    expect(fs.existsSync(path.join(cortexPath, "tracked-repo"))).toBe(false);
   });
 });
 

@@ -28,8 +28,8 @@ describe("hook session start onboarding notice", () => {
 
   it("returns an ask-first notice for untracked repos", () => {
     const notice = getUntrackedProjectNotice(cortexPath, repoDir);
-    expect(notice).toContain("Ask the user whether they want to add it to cortex.");
-    expect(notice).toContain("`add_project` MCP tool with path=");
+    expect(notice).toContain("Ask the user whether they want to add it to cortex now.");
+    expect(notice).toContain("ownership=\"cortex-managed\"|\"detached\"|\"repo-managed\"");
     expect(notice).toContain("run `cortex add`");
   });
 
@@ -44,7 +44,7 @@ describe("hook session start onboarding notice", () => {
     fs.mkdirSync(path.join(cortexPath, "repo"), { recursive: true });
 
     const notice = getUntrackedProjectNotice(cortexPath, repoDir);
-    expect(notice).toContain("Ask the user whether they want to add it to cortex.");
+    expect(notice).toContain("Ask the user whether they want to add it to cortex now.");
   });
 
   it("detects the repo root when the session starts in a subdirectory", () => {
@@ -52,6 +52,6 @@ describe("hook session start onboarding notice", () => {
     fs.mkdirSync(nestedDir, { recursive: true });
 
     const notice = getUntrackedProjectNotice(cortexPath, nestedDir);
-    expect(notice).toContain("Ask the user whether they want to add it to cortex.");
+    expect(notice).toContain("Ask the user whether they want to add it to cortex now.");
   });
 });

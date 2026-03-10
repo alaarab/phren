@@ -17,6 +17,8 @@ import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
 import { extractAndLinkEntities, ensureGlobalEntitiesTable } from "./shared-entity-graph.js";
 import { bootstrapSqlJs } from "./shared-sqljs.js";
+import { findProjectDir } from "./project-locator.js";
+import { getProjectOwnershipMode, readProjectConfig } from "./project-config.js";
 import {
   buildSourceDocKey,
   queryDocRows,
@@ -217,6 +219,9 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
     const projectDirs = getProjectDirs(cortexPath, profile);
     const files: string[] = [];
     for (const dir of projectDirs) {
+      const projectName = path.basename(dir);
+      const config = readProjectConfig(cortexPath, projectName);
+      const ownership = getProjectOwnershipMode(cortexPath, projectName, config);
       try {
         const matched = new Set<string>();
         for (const pattern of policy.includeGlobs) {
@@ -224,7 +229,15 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
           const mdFiles = globSync(pattern, { cwd: dir, nodir: true, dot, ignore: policy.excludeGlobs });
           for (const f of mdFiles) matched.add(f);
         }
-        for (const f of matched) files.push(path.join(dir, f));
+        for (const f of matched) {
+          if (ownership === "repo-managed" && path.basename(f).toLowerCase() === "claude.md") continue;
+          files.push(path.join(dir, f));
+        }
+        if (ownership === "repo-managed") {
+          for (const entry of getRepoManagedInstructionEntries(projectName)) {
+            files.push(entry.fullPath);
+          }
+        }
       } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash globDir: ${err instanceof Error ? err.message : String(err)}\n`);
       }
@@ -359,6 +372,26 @@ function getEntrySourceDocKey(entry: FileEntry, cortexPath: string): string {
   return buildSourceDocKey(entry.project, entry.fullPath, cortexPath, entry.filename);
 }
 
+function getRepoManagedInstructionEntries(project: string): FileEntry[] {
+  const repoDir = findProjectDir(project);
+  if (!repoDir) return [];
+  const candidates = ["CLAUDE.md", path.join(".claude", "CLAUDE.md")];
+  const entries: FileEntry[] = [];
+  for (const relFile of candidates) {
+    const fullPath = path.join(repoDir, relFile);
+    if (!fs.existsSync(fullPath)) continue;
+    const filename = path.basename(relFile);
+    entries.push({
+      fullPath,
+      project,
+      filename,
+      type: classifyFile(filename, relFile),
+      relFile,
+    });
+  }
+  return entries;
+}
+
 function globAllFiles(cortexPath: string, profile?: string): { filePaths: string[]; entries: FileEntry[] } {
   const projectDirs = getProjectDirs(cortexPath, profile);
   const indexPolicy = getIndexPolicy(cortexPath);
@@ -367,6 +400,8 @@ function globAllFiles(cortexPath: string, profile?: string): { filePaths: string
 
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
+    const config = readProjectConfig(cortexPath, projectName);
+    const ownership = getProjectOwnershipMode(cortexPath, projectName, config);
     const mdFilesSet = new Set<string>();
     for (const pattern of indexPolicy.includeGlobs) {
       const dot = indexPolicy.includeHidden || pattern.startsWith(".") || pattern.includes("/.");
@@ -381,10 +416,17 @@ function globAllFiles(cortexPath: string, profile?: string): { filePaths: string
     const relFiles = [...mdFilesSet].sort();
     for (const relFile of relFiles) {
       const filename = path.basename(relFile);
+      if (ownership === "repo-managed" && filename.toLowerCase() === "claude.md") continue;
       const fullPath = path.join(dir, relFile);
       const type = classifyFile(filename, relFile);
       entries.push({ fullPath, project: projectName, filename, type, relFile });
       allAbsolutePaths.push(fullPath);
+    }
+    if (ownership === "repo-managed") {
+      for (const entry of getRepoManagedInstructionEntries(projectName)) {
+        entries.push(entry);
+        allAbsolutePaths.push(entry.fullPath);
+      }
     }
   }
 

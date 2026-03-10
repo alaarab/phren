@@ -68,7 +68,7 @@ export CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1
 
 Controls the embedding provider for semantic search fallback. When FTS5 returns fewer than 3 results and this variable is set, cortex will compute embeddings for the query and corpus documents to find semantically similar matches.
 
-**When to leave this disabled:** if you mostly search by exact identifiers, filenames, commands, project names, or other lexical code-work terms. The lexical path is usually the main path in that workflow.
+**When to leave this disabled:** if you mostly search by exact identifiers, filenames, commands, project names, or other lexical code-work terms. The lexical path is usually the main path in that workflow, and it is also the faster path in the current measured code-memory benchmarks.
 
 **When it is worth enabling:** if your retrieval misses are mostly paraphrase-heavy, fuzzy, or concept-level queries that share weak lexical overlap with the stored memories.
 

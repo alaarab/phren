@@ -66,7 +66,7 @@
 \maketitle\vspace{-1em}
 
 \begin{abstract}
-\noindent Persistent project memory becomes operationally important once work spans sessions, tools, and machines. This paper examines Cortex as a markdown-native, git-backed project memory system with hook-driven capture, trust-scored retrieval, and configurable governance. The contribution is a systems-design case study and operator-workflow argument rather than a claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas. In Cortex's default path, memory compounds as repo state while retrieval stays bounded through a local SQLite FTS5 index with no network hop and no required hosted service. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory are architecture-level unless explicitly labeled as measured Cortex implementation notes.
+\noindent Persistent project memory becomes operationally important once work spans sessions, tools, and machines. This paper examines Cortex as a markdown-native, git-backed project memory system with hook-driven capture, trust-scored retrieval, and configurable governance. The contribution is a systems-design case study and operator-workflow argument rather than a claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas. In Cortex's default path, memory compounds as repo state while retrieval stays bounded through a local SQLite FTS5 index with no network hop, no required hosted service, and a more predictable latency profile for everyday code-memory lookup. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory are architecture-level unless explicitly labeled as measured Cortex implementation notes.
 \end{abstract}
 
 \vspace{0.1em}
@@ -156,7 +156,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \begin{multicols}{2}
 
 \subsection{Storage and Retrieval}
-Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. Markdown files remain the single source of truth; the index is a cached snapshot that hook and MCP entrypoints load and refresh incrementally. This lets project memory accumulate as ordinary repo state while keeping retrieval separate, selective, and cheap. It also yields strong inspectability (diffs, git history, plain-text grep) and low platform lock-in.
+Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. Markdown files remain the single source of truth; the index is a cached snapshot that hook and MCP entrypoints load and refresh incrementally. This lets project memory accumulate as ordinary repo state while keeping retrieval separate, selective, and cheap. It also removes the hosted round trip from the default path, which helps keep exact-ish coding-memory lookups responsive. The result is strong inspectability (diffs, git history, plain-text grep) with low platform lock-in.
 
 Before injection, a trust filter scores each entry by age decay and citation validity (Section~\ref{sec:decay}), suppressing entries below a configurable confidence floor. Archived entries are stripped so consolidated history does not pollute active search. When semantic recovery is enabled, embeddings are cached locally and init can pre-warm coverage so the first real session is not starting from zero. Recovery queries use a persistent candidate index rather than re-embedding the corpus on every search.
 
@@ -173,7 +173,7 @@ The architectural point of hooks is that memory capture and retrieval stay insid
 \label{sec:context-opt}
 MCP tool responses consume context tokens, so retrieval quality is only half the problem; the other half is how much context the system spends to expose that memory. Cortex uses progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Backlogs support summary-only, paginated, and single-item fetch modes.
 
-This matters most in multi-tool coding sessions where search, task lookup, review notes, and shell output all compete for the same window. The design goal is to let project memory compound over time without turning long-lived context into prompt bloat. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
+This matters most in multi-tool coding sessions where search, task lookup, review notes, and shell output all compete for the same window. The design goal is to let project memory compound over time without turning long-lived context into prompt bloat. The same bounded path also keeps retrieval work small enough to stay responsive in daily use. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
 
 \subsection{Governance}
 \label{sec:governance}
@@ -254,7 +254,7 @@ This section separates what public evidence can support from what still needs di
   \item \textbf{Copilot Memory}: repository-scoped managed memory with policy controls and expiry semantics in GitHub Copilot \cite{gh-memory-docs,gh-changelog-jan2026,gh-changelog-mar2026}.
 \end{itemize}
 
-Two claim types are currently defensible. Architecture-level differences such as ownership, governance, portability, and review workflow can be compared from public evidence. Direct retrieval or latency claims are defensible only for systems that have been run on shared corpora under controlled conditions. No public benchmark spans all four systems in that form.
+Two claim types are currently defensible. Architecture-level differences such as ownership, governance, portability, and review workflow can be compared from public evidence. Direct retrieval or latency claims are defensible only for systems that have been run on shared corpora under controlled conditions. No public benchmark spans all four systems in that form. Managed API systems may offer broader centralized capabilities, but local retrieval paths can hold a real latency advantage when the query is exact-ish and the corpus already lives on disk.
 
 \subsection{Measured local comparison on a shared synthetic corpus}
 
@@ -317,7 +317,7 @@ Rerank + snippets & $O(R \log R + S)$ & $R$ is a small capped candidate set and 
 
 These numbers are implementation checks on one live cortex store, not a general ranking of memory systems. A single author-local benchmark on March 9, 2026 measured the current lexical-first and gated-hybrid paths against a warm Cortex store with 139 indexed documents, real workflow queries, and the default 550-token hook budget \cite{cortex-bench}. Lexical latency averaged 14.71--15.93\,ms; the gated hybrid path stayed in nearly the same range at 12.90--13.60\,ms because the lexical stages usually satisfied the query before vector recovery was needed; injected payload remained stable at roughly 326--342 tokens; both modes hit every published query; and persistent candidate pruning still reduced the cosine stage to roughly 6.3--8.6\% of the eligible corpus when vector recovery did fire.
 The interpretation is intentionally modest: on this corpus the lexical path was strong enough that vector recovery was usually unnecessary, so the hybrid path inherited nearly the same speed profile. Synthetic large-corpus scaling runs are documented separately because they answer a different question than this live-store measurement.
-The March 10 shared-corpus rerun against claude-mem reached the same practical conclusion from the other direction: on identifier-heavy coding queries, lexical-first retrieval stayed cheaper and more exact than the semantic-first alternative, even when the competing corpus had already been seeded.
+The March 10 shared-corpus rerun against claude-mem reached the same practical conclusion from the other direction: on identifier-heavy coding queries, lexical-first retrieval stayed cheaper and more exact than the semantic-first alternative, even when the competing corpus had already been seeded. Taken together, the measured results support a narrow latency claim: local lexical-first retrieval is a real speed advantage for this style of code-memory workload.
 
 \section{Limitations}
 \label{sec:limitations}

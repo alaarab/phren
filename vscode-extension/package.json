@@ -122,6 +122,11 @@
           "default": "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/@alaarab/cortex/mcp/dist/index.js",
           "description": "Absolute path to the cortex MCP server entrypoint JavaScript file."
         },
+        "cortex.nodePath": {
+          "type": "string",
+          "default": "node",
+          "description": "Path to the Node.js binary used to run the cortex MCP server. Set this if VS Code can't find node on PATH (e.g. /home/alaarab/.nvm/versions/node/v24.13.0/bin/node)."
+        },
         "cortex.storePath": {
           "type": "string",
           "default": "/home/alaarab/.cortex",

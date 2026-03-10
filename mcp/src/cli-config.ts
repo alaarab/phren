@@ -1,4 +1,5 @@
 import { getCortexPath } from "./shared.js";
+import { installPreferencesFile } from "./cortex-paths.js";
 import {
   getIndexPolicy,
   updateIndexPolicy,
@@ -13,7 +14,9 @@ import { listMachines as listMachinesStore, listProfiles as listProfilesStore } 
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "./telemetry.js";
 import {
   governanceInstallPreferencesFile,
+  readInstallPreferences,
   readGovernanceInstallPreferences,
+  writeInstallPreferences,
   writeGovernanceInstallPreferences,
 } from "./init-preferences.js";
 import {
@@ -23,6 +26,11 @@ import {
   getProactivityLevelForFindings,
   type ProactivityLevel,
 } from "./proactivity.js";
+import {
+  PROJECT_OWNERSHIP_MODES,
+  getProjectOwnershipDefault,
+  parseProjectOwnershipMode,
+} from "./project-config.js";
 // ── Config router ────────────────────────────────────────────────────────────
 
 export async function handleConfig(args: string[]) {
@@ -47,6 +55,8 @@ export async function handleConfig(args: string[]) {
     case "proactivity.findings":
     case "proactivity.backlog":
       return handleConfigProactivity(sub, rest);
+    case "project-ownership":
+      return handleConfigProjectOwnership(rest);
     default:
       console.log(`cortex config - manage settings and policies
 
@@ -60,6 +70,8 @@ Subcommands:
                                         Findings-specific auto-capture level override
   cortex config proactivity.backlog [level]
                                         Backlog-specific auto-capture level override
+  cortex config project-ownership [mode]
+                                        Default ownership for future project enrollments
   cortex config machines                 Registered machines and profiles
   cortex config profiles                 All profiles and their projects
   cortex config telemetry [on|off|reset] Local usage stats (opt-in, no external reporting)`);
@@ -132,6 +144,43 @@ function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findin
   }
 
   console.log(JSON.stringify(proactivityConfigSnapshot(cortexPath), null, 2));
+}
+
+function projectOwnershipConfigSnapshot(cortexPath: string) {
+  const prefs = readInstallPreferences(cortexPath);
+  return {
+    path: installPreferencesFile(cortexPath),
+    configured: {
+      projectOwnershipDefault: prefs.projectOwnershipDefault ?? null,
+    },
+    effective: {
+      projectOwnershipDefault: getProjectOwnershipDefault(cortexPath),
+    },
+  };
+}
+
+function handleConfigProjectOwnership(args: string[]) {
+  const cortexPath = getCortexPath();
+  const value = args[0];
+
+  if (value === undefined) {
+    console.log(JSON.stringify(projectOwnershipConfigSnapshot(cortexPath), null, 2));
+    return;
+  }
+
+  if (args.length !== 1) {
+    console.error(`Usage: cortex config project-ownership [${PROJECT_OWNERSHIP_MODES.join("|")}]`);
+    process.exit(1);
+  }
+
+  const ownership = parseProjectOwnershipMode(value);
+  if (!ownership) {
+    console.error(`Usage: cortex config project-ownership [${PROJECT_OWNERSHIP_MODES.join("|")}]`);
+    process.exit(1);
+  }
+
+  writeInstallPreferences(cortexPath, { projectOwnershipDefault: ownership });
+  console.log(JSON.stringify(projectOwnershipConfigSnapshot(cortexPath), null, 2));
 }
 
 // ── Index policy ─────────────────────────────────────────────────────────────

@@ -96,8 +96,10 @@ export function getUntrackedProjectNotice(cortexPath: string, cwd: string): stri
   return [
     "<cortex-notice>",
     "This project directory is not tracked by cortex.",
-    "Ask the user whether they want to add it to cortex.",
-    `If they say yes, use the \`add_project\` MCP tool with path="${projectDir}" or run \`cortex add\` from that directory.`,
+    "Ask the user whether they want to add it to cortex now.",
+    "If they say no, tell them they can always run `cortex add` later from this directory.",
+    "If they say yes, also ask whether Cortex should manage repo instruction files or leave their existing repo-owned CLAUDE/AGENTS files alone.",
+    `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="cortex-managed"|"detached"|"repo-managed", or run \`cortex add\` from that directory.`,
     "</cortex-notice>",
     "",
   ].join("\n");

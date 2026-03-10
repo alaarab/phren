@@ -15,7 +15,7 @@
 
 <br>
 
-Project memory should not disappear between sessions or get stranded on one machine. Cortex keeps that memory in a git-backed store you control, so useful context can accumulate across projects and machines without turning every prompt into a dump of old notes. Agents search it automatically, retrieve only what fits the budget, and keep building on the same project state as you work.
+Project memory should not disappear between sessions or get stranded on one machine. Cortex keeps that memory in a git-backed store you control, so useful context can accumulate across projects and machines without turning every prompt into a dump of old notes. Because retrieval stays local in the default path, that same design also keeps lookups fast and predictable for day-to-day code work. Agents search it automatically, retrieve only what fits the budget, and keep building on the same project state as you work.
 
 <br>
 </div>
@@ -41,7 +41,9 @@ This one command bootstraps Cortex locally. It:
 - Registers MCP for detected tools (Claude Code, VS Code, Copilot CLI, Cursor, Codex)
 - Sets up hooks for automatic context injection and auto-save
 - Registers your machine
-- Auto-bootstraps the current repo when you run it inside a git project or a folder with `CLAUDE.md`
+- Offers to add the current repo when you run it inside a git project or a folder with `CLAUDE.md`
+- Asks who should own repo-facing instruction files: `cortex-managed`, `detached`, or `repo-managed`
+- Asks how task handling should work: `off`, `manual`, `suggest`, or `auto`
 
 After init, you'll see something like:
 
@@ -83,9 +85,11 @@ The distinction is architectural: Cortex applies those patterns to a repo-backed
 
 **Compounding context, bounded retrieval.** Cortex lets project memory grow over time, but it does not inject the whole store. It searches what you actually wrote and keeps injection selective -- about 550 tokens by default -- so long-lived context does not turn into prompt bloat. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET`.
 
+**Local retrieval keeps the hot path fast.** In the default path, search runs against a local SQLite index instead of a hosted memory API. That cuts out the network hop and helps keep exact-ish code-memory queries responsive.
+
 **Stale context fades, recurring context stays.** Findings decay over time. Patterns that keep coming up stay strong. Things that have not mattered in months fall back, so retrieval reflects what is still useful instead of everything ever recorded.
 
-**Cross-machine continuity through git sync.** Claude Code, Codex, Cursor, all read from the same project memory. What one tool figures out becomes available on another machine through ordinary git sync cycles. Profiles keep work and personal separate.
+**Cross-machine continuity through git sync.** Claude Code, Codex, Cursor, all read from the same project memory. What one tool figures out becomes available on another machine through ordinary git sync cycles, without making every retrieval depend on a remote memory service. Profiles keep work and personal separate.
 
 **Your project memory stays in a repo you control.** No account, no vendor, no hosted service in the default path. Markdown in a repo you control. Read it, edit it, grep it, delete it.
 
@@ -166,7 +170,7 @@ projects:
   - side-project
 ```
 
-Profiles decide which projects are active on each machine. `cortex init` is the normal refresh path: it registers the current machine/profile mapping, rewires supported agents, and bootstraps the current repo when needed.
+Profiles decide which projects are active on each machine. `cortex init` is the normal refresh path: it registers the current machine/profile mapping, rewires supported agents, and offers to add the current repo when needed.
 
 If you want stable names across laptops, desktops, and CI, set the machine name explicitly at onboarding instead of relying on the raw OS hostname:
 
@@ -242,10 +246,10 @@ From a project directory:
 
 ```bash
 cd ~/code/my-project
-cortex add
+cortex add --ownership repo-managed
 ```
 
-Or just open a session in the project directory. Cortex tells the agent to ask whether you want to add it, then the agent can call `add_project` or run `cortex add`.
+Or just open a session in the project directory. Cortex tells the agent to ask whether you want to add it, and if yes whether Cortex should manage repo-facing `CLAUDE.md` / `AGENTS.md` files or leave repo-owned files alone. If you say no, the agent should point you to `cortex add` for later.
 
 For a brand-new scaffold inside Claude:
 
@@ -254,6 +258,9 @@ For a brand-new scaffold inside Claude:
 ```
 
 - `cortex add` is the supported path for existing repos.
+- Change the default add behavior later with `cortex config project-ownership <mode>`.
+- Change task automation later with `cortex config workflow set --taskMode=<off|manual|suggest|auto>`.
+- Tune capture levels later with `cortex config proactivity.findings <high|medium|low>` and `cortex config proactivity.backlog <high|medium|low>`.
 - Platform support and release expectations are documented in [docs/platform-matrix.md](docs/platform-matrix.md).
 - Best-effort vs fail-closed behavior is documented in [docs/error-reporting.md](docs/error-reporting.md).
 - Package/update behavior is documented in [docs/versioning.md](docs/versioning.md).
@@ -439,12 +446,17 @@ cortex review-ui [--port=3499]           # lightweight review UI in the browser
 cortex update [--refresh-starter]        # update package; optionally refresh starter globals too
 cortex uninstall                         # remove cortex config and hooks
 
-cortex add [path]                           # add current directory (or path) as a project
+cortex add [path] [--ownership <mode>]     # add current directory (or path) as a project
 cortex projects list                        # list all projects
+cortex projects configure <name> --ownership=<mode>  # change a project's ownership mode
 cortex projects remove <name>               # remove a project (confirmation required)
 
 cortex mcp-mode [on|off|status]          # toggle MCP integration
 cortex hooks-mode [on|off|status]        # toggle hook execution
+cortex config project-ownership [mode]   # default ownership for future project enrollments
+cortex config workflow set --taskMode=manual  # set task handling mode
+cortex config proactivity.findings [level]    # findings auto-capture aggressiveness
+cortex config proactivity.backlog [level]     # backlog auto-capture aggressiveness
 
 cortex skills list                       # list all installed skills
 cortex skills add <project> <path>       # add a skill to a project
