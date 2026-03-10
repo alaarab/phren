@@ -49,17 +49,17 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `list_projects` | (none) | Lists all projects in the active profile with doc badges and brief descriptions. |
 | `get_findings` | `project`, `limit?` | Read recent findings without a search query. |
 
-### Backlog Management
+### Task Management (`backlog` tools)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_backlog` | `project?`, `id?`, `item?` | Read the backlog for one project, or all projects if omitted. Fetch a single item by ID or text. |
-| `add_backlog_item` | `project`, `item` | Append a task to a project's backlog Queue section. |
-| `complete_backlog_item` | `project`, `item` | Move a backlog item to Done by text match. |
+| `get_backlog` | `project?`, `id?`, `item?` | Read the task list for one project, or all projects if omitted. Fetch a single item by ID or text. |
+| `add_backlog_item` | `project`, `item` | Append a task to a project's Queue section in `backlog.md`. |
+| `complete_backlog_item` | `project`, `item` | Move a task to Done by text match. |
 | `complete_backlog_items` | `project`, `items[]` | Bulk complete multiple items in one call. |
 | `update_backlog_item` | `project`, `item`, `updates` | Update an item's priority, context, section, or linked GitHub issue. |
-| `link_backlog_item_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a backlog item. |
-| `promote_backlog_item_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a backlog item and write the link back. |
+| `link_backlog_item_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a task item. |
+| `promote_backlog_item_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a task item and write the link back. |
 
 ### Finding Capture
 
@@ -83,7 +83,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `add_project` | `path`, `profile?` | Bootstrap a repo or working directory into cortex and add it to the active profile. |
-| `export_project` | `project` | Export a project's data (findings, backlog, summary) as portable JSON. |
+| `export_project` | `project` | Export a project's data (findings, tasks, summary) as portable JSON. |
 | `import_project` | `data` | Import project data from a previously exported JSON payload. |
 | `manage_project` | `project`, `action` | Archive or unarchive a project. |
 
@@ -101,7 +101,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `session_start` | `project?`, `connectionId?` | Mark session start. Returns prior summary, recent findings, active backlog, and a `sessionId`. |
+| `session_start` | `project?`, `connectionId?` | Mark session start. Returns prior summary, recent findings, active tasks, and a `sessionId`. |
 | `session_end` | `summary?`, `sessionId?`, `connectionId?` | Mark session end and save summary for next session. Pass `sessionId` or a previously bound `connectionId`. |
 | `session_context` | `sessionId?`, `connectionId?` | Get current session state. Pass `sessionId` or a previously bound `connectionId`. |
 

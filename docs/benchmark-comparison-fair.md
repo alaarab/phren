@@ -28,3 +28,31 @@ Source files:
 - Cortex rerun: [`docs/benchmark-synthetic-results-clean.json`](/home/alaarab/cortex/docs/benchmark-synthetic-results-clean.json)
 - claude-mem rerun (`1k`, `10k`): [`docs/benchmark-claude-mem-synthetic-clean-small.json`](/home/alaarab/cortex/docs/benchmark-claude-mem-synthetic-clean-small.json)
 - claude-mem rerun (`100k`): [`docs/benchmark-claude-mem-synthetic-clean-100000.json`](/home/alaarab/cortex/docs/benchmark-claude-mem-synthetic-clean-100000.json)
+
+Reproduction notes:
+
+- Persisted benchmark toolchain lives under `.benchmarks/tools/`.
+- Persisted claude-mem stores live under `.benchmarks/runs/claude-bench-small` and `.benchmarks/runs/claude-bench-100k`.
+- Clean claude-mem reruns should reuse those stores and skip SQLite reseeding:
+
+```bash
+/home/alaarab/cortex/.benchmarks/tools/bun/bun-linux-x64-baseline-profile/bun-profile \
+  scripts/bench-claude-mem-synthetic.ts \
+  --claude-mem-root /home/alaarab/cortex/.benchmarks/tools/claude-mem-src \
+  --uvx-path /home/alaarab/cortex/.benchmarks/tools/uv/uv-0.10.9.data/scripts/uvx \
+  --root-dir /home/alaarab/cortex/.benchmarks/runs/claude-bench-small \
+  --sizes 1000,10000 \
+  --skip-seed
+```
+
+```bash
+/home/alaarab/cortex/.benchmarks/tools/bun/bun-linux-x64-baseline-profile/bun-profile \
+  scripts/bench-claude-mem-synthetic.ts \
+  --claude-mem-root /home/alaarab/cortex/.benchmarks/tools/claude-mem-src \
+  --uvx-path /home/alaarab/cortex/.benchmarks/tools/uv/uv-0.10.9.data/scripts/uvx \
+  --root-dir /home/alaarab/cortex/.benchmarks/runs/claude-bench-100k \
+  --sizes 100000 \
+  --skip-seed
+```
+
+- `--skip-seed` avoids rebuilding the SQLite corpus, but claude-mem still performs Chroma-side backfill/check work before the query path settles, so `backfillMs` is expected to remain non-zero.

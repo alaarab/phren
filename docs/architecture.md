@@ -57,7 +57,7 @@ This is the core runtime loop from one prompt to the next:
         |
         v
 [4] Persistence Path
-    MCP tool writes (findings/backlog/memories)
+    MCP tool writes (findings/tasks/memories)
     + Stop hook git add/commit/background sync
     -> updated markdown + governance config become source of truth
         |
@@ -71,7 +71,7 @@ This is the core runtime loop from one prompt to the next:
 In practice:
 1. A user prompt triggers `UserPromptSubmit`, which runs fast retrieval against the cached FTS5 index.
 2. Matching memories are filtered by governance rules before any context injection.
-3. During the turn, MCP tools can add or update memory/backlog files in `~/.cortex/<project>/`.
+3. During the turn, MCP tools can add or update memory/task files in `~/.cortex/<project>/`.
 4. `Stop` persists those file changes locally through git, then queues background sync work if a remote is configured.
 
 The loop is deliberately asymmetric: project memory can keep accumulating as repo state, while each prompt only pays for the small slice that survives retrieval and trust filtering.
@@ -150,7 +150,7 @@ Claude Code <--stdio--> cortex-mcp
                           |
           +---------------+---------------+
           |               |               |
-     Search/Browse   Backlog CRUD       Finding Capture
+     Search/Browse   Task CRUD          Finding Capture
      - search_knowledge - get_backlog   - add_finding(s)
      - get_project_summary      - add_item     - remove_finding(s)
      - list_projects    - complete(s)  - push_changes
@@ -249,7 +249,7 @@ Query
         -> final ranked results
 ```
 
-Search and hook injection now share the same relaxed-lexical rescue, backlog-aware reranking, and vector gating policy even though the cheap middle fallback differs by entrypoint. On the author-local March 9, 2026 benchmark set, those lexical fixes were strong enough that the vector stage usually never ran, so lexical and hybrid timings converged while both modes hit every published query. On small corpora the vector index still matters for asymptotic behavior and candidate pruning, but the dominant semantic cost remains query embedding whenever the gate does open.
+Search and hook injection now share the same relaxed-lexical rescue, task-aware reranking, and vector gating policy even though the cheap middle fallback differs by entrypoint. On the author-local March 9, 2026 benchmark set, those lexical fixes were strong enough that the vector stage usually never ran, so lexical and hybrid timings converged while both modes hit every published query. On small corpora the vector index still matters for asymptotic behavior and candidate pruning, but the dominant semantic cost remains query embedding whenever the gate does open.
 
 ### FTS5 Index
 
@@ -269,7 +269,7 @@ Query:
 
 MCP tool responses consume context tokens. Cortex provides progressive disclosure patterns to minimize overhead. See [Context Optimization](context-optimization.md) for the full guide.
 
-**Backlog progressive disclosure:**
+**Task progressive disclosure (`backlog` tools):**
 
 ```
 Tier 1: get_backlog(summary:true)        ~200 tokens   planning/status
@@ -285,7 +285,7 @@ Tier 3: get_backlog(id:"bid:a3f9c2e1")   ~100 tokens   single item execution
              agent calls get_memory_detail(id) to expand
 ```
 
-**Stable identifiers:** Backlog items embed `<!-- bid:XXXXXXXX -->` content-addressed hashes that survive reordering and completions. Use these instead of positional IDs (A1, Q3) for cross-session or multi-agent references.
+**Stable identifiers:** Task items embed `<!-- bid:XXXXXXXX -->` content-addressed hashes that survive reordering and completions. Use these instead of positional IDs (A1, Q3) for cross-session or multi-agent references.
 
 ## Memory Governance
 

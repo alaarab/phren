@@ -99,7 +99,7 @@ Three things happen every session without you doing anything:
 
 **After each response** -- changes get committed locally. If a remote is configured, Cortex queues a background sync worker to push safely. If nothing changed, the hook skips.
 
-**When context resets** -- a hook re-injects your project summary, recent findings, and active backlog so the agent picks up where it left off.
+**When context resets** -- a hook re-injects your project summary, recent findings, and active tasks so the agent picks up where it left off.
 
 Two more things run in the background:
 
@@ -123,7 +123,7 @@ Two more things run in the background:
 | `REFERENCE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
 | `FINDINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
 | `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
-| `backlog.md` | Task queue that persists across sessions |
+| `backlog.md` | Task list that persists across sessions |
 | `MEMORY_QUEUE.md` | Items waiting for your review |
 | `skills/` | Project-local Cortex skill source files; the resolved agent-facing mirror is generated into `.claude/skills/` as local state and should not be committed from app repos |
 
@@ -190,7 +190,7 @@ When more than one tool or session touches the same project, they all read and w
 - **Parallel agents** share findings on push/pull cycles
 - **Sequential sessions** build on each other. Session 47 knows everything sessions 1 through 46 learned.
 - **Cross-project patterns** surface when the same insight shows up in two or more projects
-- **Backlog items** persist across agents and sessions. One agent adds a task, another finishes it.
+- **Tasks** persist across agents and sessions. One agent adds a task, another finishes it.
 
 Because it's all markdown in git, you have a full record of what your agents learned, when, and which session produced each insight.
 
@@ -257,7 +257,7 @@ For a brand-new scaffold inside Claude:
 - Platform support and release expectations are documented in [docs/platform-matrix.md](docs/platform-matrix.md).
 - Best-effort vs fail-closed behavior is documented in [docs/error-reporting.md](docs/error-reporting.md).
 - Package/update behavior is documented in [docs/versioning.md](docs/versioning.md).
-- Backlog items stay local by default. GitHub issue linkage is optional, and promotion is one-way unless you explicitly act on the linked issue.
+- Task items stay local by default. GitHub issue linkage is optional, and promotion is one-way unless you explicitly act on the linked issue.
 
 </details>
 
@@ -270,7 +270,7 @@ Four skills for the things that can't be automatic:
 |-------|-------------|
 | `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. |
 | `/cortex-init` | Scaffold a brand-new project entry. Use this when the project does not exist yet; use `cortex add` for an existing repo. |
-| `/cortex-discover` | Health audit. Missing files, stale content, stuck backlog items. |
+| `/cortex-discover` | Health audit. Missing files, stale content, stuck tasks. |
 | `/cortex-consolidate` | Read findings across all projects and surface patterns that repeat. |
 
 **When to run these manually:**
@@ -322,7 +322,7 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 | `get_consolidation_status` | Check if findings need consolidation. |
 | `health_check` | Run doctor checks and return results. |
 
-### Backlog management
+### Task management
 
 | Tool | What it does |
 |------|-------------|
@@ -332,8 +332,8 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 | `complete_backlog_item` | Match by text, move to Done. |
 | `complete_backlog_items` | Bulk complete multiple items in one call. |
 | `update_backlog_item` | Change priority, context, section, or linked GitHub issue. |
-| `link_backlog_item_issue` | Link or unlink an existing GitHub issue on a backlog item. |
-| `promote_backlog_item_to_issue` | Create a GitHub issue from a backlog item and write the link back. |
+| `link_backlog_item_issue` | Link or unlink an existing GitHub issue on a task item. |
+| `promote_backlog_item_to_issue` | Create a GitHub issue from a task item and write the link back. |
 
 ### Finding capture
 
@@ -375,7 +375,7 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 
 | Tool | What it does |
 |------|-------------|
-| `session_start` | Start a session. Returns prior summary, recent findings, active backlog, and a `sessionId`. |
+| `session_start` | Start a session. Returns prior summary, recent findings, active tasks, and a `sessionId`. |
 | `session_end` | End a session by `sessionId` or bound `connectionId`, and save summary for next time. |
 | `session_context` | Read current session state by `sessionId` or bound `connectionId`. |
 
@@ -391,7 +391,7 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 | Key | View |
 |-----|------|
 | `p` | Projects |
-| `b` | Backlog |
+| `b` | Tasks |
 | `l` | Findings |
 | `m` | Review Queue |
 | `s` | Skills |
@@ -403,7 +403,7 @@ Governance, policy, and maintenance tools are CLI-only (see `cortex config` and 
 
 ### Palette commands
 
-**Backlog:** `:add`, `:complete`, `:move`, `:reprioritize`, `:context`, `:work next`, `:tidy`
+**Tasks:** `:add`, `:complete`, `:move`, `:reprioritize`, `:context`, `:work next`, `:tidy`
 
 **Findings:** `:find add`, `:find remove`
 
@@ -431,7 +431,7 @@ cortex                                   # interactive shell (TTY default)
 cortex search "rate limiting"            # FTS5 search with synonym expansion
 cortex add-finding <project> "..."       # append a finding from the terminal
 cortex pin <project> "..."               # promote canonical memory
-cortex backlog [project]                 # cross-project backlog view
+cortex backlog [project]                 # cross-project task view
 cortex status                            # health, active project, stats
 cortex doctor [--fix]                    # health checks + optional self-heal
 cortex verify                            # check init completed correctly
@@ -550,7 +550,7 @@ Check `.governance/access-control.json` and your `CORTEX_ACTOR` identity. Cortex
 
 **Merge conflicts after pulling on a new machine**
 
-Run `cortex` and type `:conflicts`. Cortex auto-merges most cases (backlog items, findings). If a manual merge is needed, conflict markers show in the files.
+Run `cortex` and type `:conflicts`. Cortex auto-merges most cases (task items, findings). If a manual merge is needed, conflict markers show in the files.
 
 </details>
 

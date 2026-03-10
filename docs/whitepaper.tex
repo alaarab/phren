@@ -94,7 +94,7 @@ Cortex should be read as a system in the same design space as prior memory work 
 \section{Cortex Architecture}
 \label{sec:arch}
 
-The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Memory lives under \texttt{\textasciitilde/.cortex/<project>/} as plain markdown or YAML. The core records are \textbf{findings}, \textbf{backlog} items, \textbf{canonical memories}, and cross-project \textbf{entities}; \textbf{machine} profiles control which projects are visible in a given environment. The diagram below shows how those subsystems connect on a normal prompt cycle.
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Memory lives under \texttt{\textasciitilde/.cortex/<project>/} as plain markdown or YAML. The core records are \textbf{findings}, \textbf{task} items, \textbf{canonical memories}, and cross-project \textbf{entities}; \textbf{machine} profiles control which projects are visible in a given environment. The diagram below shows how those subsystems connect on a normal prompt cycle.
 
 \vspace{0.2em}
 \begin{center}
@@ -118,7 +118,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \node[box, below=0.45cm of fts] (trust) {Trust Filter\\[-2pt]{\scriptsize age decay, citation score}};
 \node[store, right=0.9cm of fts] (md) {Markdown Files\\[-2pt]{\scriptsize \textasciitilde/.cortex/<project>/}};
 \node[store, above=0.45cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
-\node[store, below=0.45cm of md]  (mcp) {MCP Tools (51)\\[-2pt]{\scriptsize findings, backlog, skills, hooks}};
+\node[store, below=0.45cm of md]  (mcp) {MCP Tools (51)\\[-2pt]{\scriptsize findings, tasks, skills, hooks}};
 \node[gov, right=0.9cm of md] (pol) {Policy Engine\\[-2pt]{\scriptsize .governance/*.json}};
 \node[gov, above=0.45cm of pol] (rbac) {Access Control\\[-2pt]{\scriptsize 4 roles, 6 actions}};
 \node[gov, below=0.45cm of pol] (aud) {Audit Log\\[-2pt]{\scriptsize audit.log}};
@@ -173,7 +173,7 @@ The architectural point of hooks is that memory capture and retrieval stay insid
 \label{sec:context-opt}
 MCP tool responses consume context tokens, so retrieval quality is only half the problem; the other half is how much context the system spends to expose that memory. Cortex uses progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Backlogs support summary-only, paginated, and single-item fetch modes.
 
-This matters most in multi-tool coding sessions where search, backlog lookup, review notes, and shell output all compete for the same window. The design goal is to let project memory compound over time without turning long-lived context into prompt bloat. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
+This matters most in multi-tool coding sessions where search, task lookup, review notes, and shell output all compete for the same window. The design goal is to let project memory compound over time without turning long-lived context into prompt bloat. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
 
 \subsection{Governance}
 \label{sec:governance}
@@ -237,7 +237,7 @@ Seven user-defined hook events cover save, search, finding, and index lifecycles
 \section{Concurrent and Cross-Machine Use}
 Modern workflows frequently involve multiple sessions, tools, or machines touching the same project. Memory systems that assume a single serial session break under this pattern.
 
-Cortex handles multi-agent use through four mechanisms. \textbf{Shared git-backed state}: all agents read and write the same \texttt{\textasciitilde/.cortex} directory. Concurrent reads are safe at the file system layer; MCP writes are serialized within a process by file locks with configurable timeouts and stale-lock detection. \textbf{Automatic conflict resolution}: the background sync worker uses \texttt{pull --rebase} and auto-merges safe markdown conflicts in \texttt{FINDINGS.md} and \texttt{backlog.md}; transient push failures are retried automatically, and unresolved conflicts are surfaced in \texttt{cortex status} and the review UI. \textbf{Skill-driven coordination}: skills in \texttt{global/skills/} define reusable agent behaviors injected per project. \textbf{Hook isolation}: each agent session gets its own execution context; the consolidation notice fires once per session via marker files.
+Cortex handles multi-agent use through four mechanisms. \textbf{Shared git-backed state}: all agents read and write the same \texttt{\textasciitilde/.cortex} directory. Concurrent reads are safe at the file system layer; MCP writes are serialized within a process by file locks with configurable timeouts and stale-lock detection. \textbf{Automatic conflict resolution}: the background sync worker uses \texttt{pull --rebase} and auto-merges safe markdown conflicts in \texttt{FINDINGS.md} and the task file (\texttt{backlog.md}); transient push failures are retried automatically, and unresolved conflicts are surfaced in \texttt{cortex status} and the review UI. \textbf{Skill-driven coordination}: skills in \texttt{global/skills/} define reusable agent behaviors injected per project. \textbf{Hook isolation}: each agent session gets its own execution context; the consolidation notice fires once per session via marker files.
 
 This is an eventually consistent shared-memory model optimized for append-heavy agent workflows, not strong coordination in the distributed-systems sense.
 
