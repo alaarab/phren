@@ -8,6 +8,7 @@ import {
   type BacklogItem,
 } from "./data-access.js";
 import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./backlog-github.js";
+import { getProactivityLevelForBacklog, shouldAutoCaptureBacklogForLevel, type ProactivityLevel } from "./proactivity.js";
 import { getWorkflowPolicy } from "./shared-governance.js";
 import { debugLog, sessionMarker } from "./shared.js";
 import { errorMessage } from "./utils.js";
@@ -31,6 +32,7 @@ export interface TaskPromptLifecycleResult {
 }
 
 const ACTION_PREFIX_RE = /^(?:please\s+|can you\s+|could you\s+|would you\s+|i want you to\s+|i want to\s+|let(?:'|’)s\s+|lets\s+|help me\s+)/i;
+const EXPLICIT_BACKLOG_PREFIX_RE = /^(?:add(?:\s+(?:this|that|it))?\s+(?:to\s+(?:the\s+)?)?(?:backlog|todo(?:\s+list)?|task(?:\s+list)?)|add\s+(?:a\s+)?task|put(?:\s+(?:this|that|it))?\s+(?:in|on)\s+(?:the\s+)?(?:backlog|todo(?:\s+list)?|task(?:\s+list)?))\s*(?::|-|,)?\s*/i;
 const NON_ACTIONABLE_RE = /\b(brainstorm|idea|ideas|maybe|what if|should we|could we|would it make sense|question|explain|why is|how does)\b/i;
 const ACTIONABLE_RE = /\b(add|build|change|complete|continue|create|delete|fix|implement|improve|investigate|make|move|refactor|remove|rename|repair|ship|start|update|wire)\b/i;
 const CONTINUE_RE = /\b(continue|keep going|finish|resume|pick up|work on that|that task)\b/i;
@@ -123,7 +125,9 @@ function normalizeTaskSummary(prompt: string): string {
     .replace(/\s+/g, " ")
     .trim();
   const stripped = withoutGithub.replace(ACTION_PREFIX_RE, "").trim();
-  const firstClause = stripped.split(/[\n.!?]/)[0]?.trim() || stripped;
+  const withoutBacklogPrefix = stripped.replace(EXPLICIT_BACKLOG_PREFIX_RE, "").trim();
+  const taskSource = withoutBacklogPrefix || stripped;
+  const firstClause = taskSource.split(/[\n.!?]/)[0]?.trim() || taskSource;
   const cleaned = firstClause
     .replace(/^to\s+/i, "")
     .replace(/\s+/g, " ")
@@ -231,12 +235,18 @@ export function handleTaskPromptLifecycle(args: {
   project: string | null;
   sessionId?: string;
   intent: string;
+  backlogLevel?: ProactivityLevel;
 }): TaskPromptLifecycleResult {
   const mode = getTaskMode(args.cortexPath);
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
     return { mode, noticeLines: [] };
   }
   if (!isActionablePrompt(args.prompt, args.intent)) {
+    return { mode, noticeLines: [] };
+  }
+  const backlogLevel = args.backlogLevel ?? getProactivityLevelForBacklog();
+  if (mode === "auto" && !shouldAutoCaptureBacklogForLevel(backlogLevel, args.prompt)) {
+    debugLog(`task lifecycle skipped ${args.project}: backlog proactivity=${backlogLevel}`);
     return { mode, noticeLines: [] };
   }
 

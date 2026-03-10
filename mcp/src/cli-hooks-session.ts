@@ -44,7 +44,7 @@ import type { SelectedSnippet } from "./shared-retrieval.js";
 import { filterBacklogByPriority } from "./shared-retrieval.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { finalizeTaskSession } from "./task-lifecycle.js";
-import { getProactivityLevelForFindings, hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
+import { getProactivityLevelForBacklog, getProactivityLevelForFindings, hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 
 function getRuntimeProfile(): string {
   return resolveRuntimeProfile(getCortexPath());
@@ -640,6 +640,10 @@ export async function handleHookStop() {
   // Needed for auto-capture transcript_path parsing.
   const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
   const taskSessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
+  const backlogLevel = getProactivityLevelForBacklog();
+  if (taskSessionId && backlogLevel !== "high") {
+    debugLog(`hook-stop backlog proactivity=${backlogLevel}`);
+  }
 
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
   // Gated behind CORTEX_FEATURE_AUTO_CAPTURE=1.
