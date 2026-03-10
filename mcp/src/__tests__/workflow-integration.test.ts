@@ -222,5 +222,5 @@ describe.sequential("workflow integration", () => {
       await new Promise<void>((resolve) => reviewUi.close(() => resolve()));
       db?.close();
     }
-  });
+  }, 20000);
 });

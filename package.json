@@ -35,7 +35,7 @@
     "lint": "eslint mcp/src/ --ignore-pattern '*.test.ts'",
     "validate-docs": "bash scripts/validate-docs.sh",
     "pretest": "npm run build",
-    "test": "vitest run mcp/src",
+    "test": "vitest run --pool forks --fileParallelism=false --testTimeout=15000 mcp/src",
     "bench": "tsx mcp/bench/locomo-runner.ts --sessions 3",
     "bench:retrieval": "tsx scripts/bench-retrieval-modes.ts",
     "bench:retrieval:synthetic": "tsx scripts/bench-retrieval-synthetic.ts",

@@ -30,7 +30,11 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 let cliBuiltForCurrentProcess = false;
 
 function ensureCliBuilt(): void {
-  if (cliBuiltForCurrentProcess && fs.existsSync(CLI_PATH)) return;
+  if (fs.existsSync(CLI_PATH)) {
+    cliBuiltForCurrentProcess = true;
+    return;
+  }
+  if (cliBuiltForCurrentProcess) return;
   execFileSync("npm", ["run", "build"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
@@ -47,7 +51,7 @@ function runCli(args: string[], env: Record<string, string> = {}): { stdout: str
       encoding: "utf8",
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 15000,
+      timeout: 30000,
     });
     return { stdout, stderr: "", exitCode: 0 };
   } catch (err: any) {

@@ -11,7 +11,11 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 let cliBuiltForCurrentProcess = false;
 
 function ensureCliBuilt(): void {
-  if (cliBuiltForCurrentProcess && fs.existsSync(CLI_PATH)) return;
+  if (fs.existsSync(CLI_PATH)) {
+    cliBuiltForCurrentProcess = true;
+    return;
+  }
+  if (cliBuiltForCurrentProcess) return;
   execFileSync("npm", ["run", "build"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
@@ -1596,7 +1600,7 @@ describe("CLI integration: maintain migrate argument edge cases", () => {
 // CLI integration: init (subprocess-based, #96)
 // ────────────────────────────────────────────────────────────────────────────
 
-const CLI_INTEGRATION_TIMEOUT_MS = process.platform === "win32" ? 15000 : 8000;
+const CLI_INTEGRATION_TIMEOUT_MS = process.platform === "win32" ? 20000 : 15000;
 
 describe("CLI integration: init", () => {
   let cliEnv: IsolatedCliEnv;

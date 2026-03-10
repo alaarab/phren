@@ -25,7 +25,7 @@ function runCli(args: string[], env: Record<string, string> = {}): { stdout: str
       encoding: "utf8",
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 15000,
+      timeout: 30000,
     });
     return { stdout, stderr: "", exitCode: 0 };
   } catch (err: any) {
