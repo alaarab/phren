@@ -244,6 +244,8 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
 
   log("\n─── Semantic search (optional) ─────────────────────────────────────────");
   log("Cortex can use a local embedding model for semantic (fuzzy) search via Ollama.");
+  log("  Best fit: paraphrase-heavy or weak-lexical queries.");
+  log("  Skip it if you mostly search by filenames, symbols, commands, or exact phrases.");
   log("  - Model: nomic-embed-text (274 MB, one-time download)");
   log("  - Ollama runs locally, no cloud, no cost");
   log("  - Falls back to FTS5 keyword search if disabled or unavailable");
@@ -257,12 +259,12 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
         const modelReady = await checkModelAvailable();
         if (modelReady) {
           log("  Ollama detected with nomic-embed-text ready.");
-          const ans = (await ask(`Enable semantic search? [Y/n]: `)).trim().toLowerCase();
-          ollamaEnabled = !(ans === "n" || ans === "no");
+          const ans = (await ask(`Enable semantic search for fuzzy/paraphrase recovery? [y/N]: `)).trim().toLowerCase();
+          ollamaEnabled = ans === "y" || ans === "yes";
         } else {
           log("  Ollama detected, but nomic-embed-text is not pulled yet.");
-          const ans = (await ask(`Enable semantic search? (will pull nomic-embed-text) [Y/n]: `)).trim().toLowerCase();
-          ollamaEnabled = !(ans === "n" || ans === "no");
+          const ans = (await ask(`Enable semantic search for fuzzy/paraphrase recovery? (will pull nomic-embed-text) [y/N]: `)).trim().toLowerCase();
+          ollamaEnabled = ans === "y" || ans === "yes";
           if (ollamaEnabled) {
             log("  Run after init: ollama pull nomic-embed-text");
           }

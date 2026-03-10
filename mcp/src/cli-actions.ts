@@ -118,7 +118,7 @@ export async function handleDoctor(args: string[]) {
     const { listIndexedDocumentPaths } = await import("./shared-index.js");
     const ollamaUrl = getOllamaUrl();
     if (!ollamaUrl) {
-      console.log("- ok  semantic-search: disabled (set CORTEX_OLLAMA_URL=http://localhost:11434 to enable)");
+      console.log("- ok  semantic-search: disabled (optional; enable for fuzzy/paraphrase-heavy retrieval)");
     } else {
       const available = await checkOllamaAvailable();
       if (!available) {
@@ -161,7 +161,7 @@ export async function handleStatus() {
     const { listIndexedDocumentPaths } = await import("./shared-index.js");
     const ollamaUrl = getOllamaUrl();
     if (!ollamaUrl) {
-      console.log("semantic-search: disabled");
+      console.log("semantic-search: disabled (optional)");
       return;
     }
     const available = await checkOllamaAvailable();

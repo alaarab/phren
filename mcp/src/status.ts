@@ -138,7 +138,7 @@ export async function runStatus() {
     const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
     const ollamaUrl = getOllamaUrl();
     if (!ollamaUrl) {
-      console.log(`  ${BOLD}Semantic:${RESET} ${DIM}disabled${RESET}`);
+      console.log(`  ${BOLD}Semantic:${RESET} ${DIM}disabled (optional)${RESET}`);
     } else {
       const available = await checkOllamaAvailable();
       if (!available) {

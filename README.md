@@ -201,7 +201,7 @@ Because it's all markdown in git, you have a full record of what your agents lea
 
 **Core mode (default).** Markdown is the source of truth. Git handles sync and audit history. Retrieval runs through a local SQLite FTS5 index. This is the simplest and most portable setup: no required hosted service, predictable token budgets, and a repo you can inspect with normal tools.
 
-**Optional semantic mode.** Cortex can also use Ollama or an embeddings API for gated semantic recovery when lexical retrieval is sparse or weak. After the relaxed lexical rescue pass, that vector stage often stays dormant on exact and near-lexical queries, so the steady-state path is still mostly local markdown + git + FTS5. Semantic mode exists for harder paraphrase recovery, not as a blanket speed claim.
+**Optional semantic mode.** Cortex can also use Ollama or an embeddings API for gated semantic recovery when lexical retrieval is sparse or weak. This is mainly for paraphrase-heavy or fuzzy queries. If you mostly search by filenames, symbols, commands, project names, or exact phrases, the lexical path is usually the important one and semantic mode may stay mostly dormant. Semantic mode exists for harder recovery cases, not as a blanket speed claim.
 
 </details>
 

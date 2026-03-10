@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-03-10
+
+### Changed
+- Semantic-search messaging now treats disabled mode as a healthy optional state in CLI status/doctor output instead of something users should feel pressured to enable.
+- `cortex init` now frames Ollama-backed semantic retrieval as a best fit for paraphrase-heavy or weak-lexical queries, with opt-in prompts that default to off.
+- README and environment docs now recommend leaving semantic retrieval disabled when searches are mostly identifiers, filenames, commands, project names, or exact phrases.
+
 ## [1.25.0] - 2026-03-10
 
 ### Changed

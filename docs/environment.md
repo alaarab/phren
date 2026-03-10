@@ -56,6 +56,8 @@ These control the `gh` CLI calls used by `extract-memories` to pull signals from
 
 These control the vector embedding tier used in hybrid search and hook retrieval.
 
+Use this tier when you expect paraphrase-heavy or fuzzy retrieval. Leave it disabled if your searches are mostly exact identifiers, filenames, commands, or project names.
+
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `CORTEX_EMBEDDING_API_URL` | string | (none) | OpenAI-compatible `/embeddings` endpoint (e.g. `https://api.openai.com/v1`). When set, used for both hook retrieval and MCP search. Takes priority over Ollama. |

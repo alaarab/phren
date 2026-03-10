@@ -68,6 +68,10 @@ export CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1
 
 Controls the embedding provider for semantic search fallback. When FTS5 returns fewer than 3 results and this variable is set, cortex will compute embeddings for the query and corpus documents to find semantically similar matches.
 
+**When to leave this disabled:** if you mostly search by exact identifiers, filenames, commands, project names, or other lexical code-work terms. The lexical path is usually the main path in that workflow.
+
+**When it is worth enabling:** if your retrieval misses are mostly paraphrase-heavy, fuzzy, or concept-level queries that share weak lexical overlap with the stored memories.
+
 **Values:**
 - **unset** (default): No embedding fallback. Only FTS5 and TF-IDF cosine are used.
 - **`api`**: Use OpenAI-compatible embeddings API. Requires `OPENAI_API_KEY` to be set.
