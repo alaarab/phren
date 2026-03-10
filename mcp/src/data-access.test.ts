@@ -28,33 +28,16 @@ import {
   removeFinding,
 } from "./data-access.js";
 import { CortexError } from "./shared.js";
-import { grantAdmin, makeTempDir, resultMsg } from "./test-helpers.js";
+import { grantAdmin, makeTempDir, resultMsg, spawnTsxWorker, REPO_ROOT } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { spawn } from "child_process";
 
 let tmpDir: string;
 let projectDir: string;
 const PROJECT = "testproject";
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
-function runDataAccessWorker(code: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, ["--import", "tsx", "-e", code], {
-      cwd: REPO_ROOT,
-      env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("close", (codeNum) => {
-      resolve({ exitCode: codeNum ?? 1, stdout, stderr });
-    });
-  });
-}
+const runDataAccessWorker = spawnTsxWorker;
 
 let tmpCleanup: () => void;
 

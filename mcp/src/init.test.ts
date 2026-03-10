@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { makeTempDir } from "./test-helpers.js";
+import { makeTempDir, suppressOutput } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -565,7 +565,7 @@ describe("runInit walkthrough integration", () => {
   it("--yes skips walkthrough and uses defaults", async () => {
     const cortexPath = path.join(tmpRoot, "cortex-yes");
     process.env.CORTEX_PATH = cortexPath;
-    await runInit({ yes: true });
+    await suppressOutput(() => runInit({ yes: true }));
     expect(fs.existsSync(cortexPath)).toBe(true);
     // Should have governance files created
     expect(fs.existsSync(path.join(cortexPath, ".governance", "retention-policy.json"))).toBe(true);
@@ -596,7 +596,7 @@ describe("runInit walkthrough integration", () => {
     // yes skips interactive but we manually set the walkthrough project
     // We need to bypass the walkthrough check, so set yes=false but make stdin non-TTY
     opts.yes = true;
-    await runInit(opts);
+    await suppressOutput(() => runInit(opts));
 
     // The default project "my-first-project" should not exist if starter has it
     // But _walkthroughProject is only read when !hasExistingInstall, and yes=true means walkthrough is skipped
@@ -863,7 +863,7 @@ describe("project templates", () => {
     resetVSCodeProbeCache();
 
     try {
-      await runInit({ yes: true, template: "python-project" });
+      await suppressOutput(() => runInit({ yes: true, template: "python-project" }));
       const cortexDir = path.join(tmpDir, "cortex");
       const claudeMd = fs.readFileSync(path.join(cortexDir, "my-first-project", "CLAUDE.md"), "utf8");
       expect(claudeMd).toContain("Python project");
