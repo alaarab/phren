@@ -44,6 +44,7 @@ export {
   ensureGovernanceFiles,
   migrateRootFiles,
   runPostInitVerify,
+  getVerifyOutcomeNote,
   listTemplates,
   detectProjectDir,
   isProjectTracked,

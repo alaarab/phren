@@ -6,7 +6,6 @@ import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
-import { fileURLToPath } from "url";
 import {
   debugLog,
   findProjectNameCaseInsensitive,
@@ -20,10 +19,8 @@ import {
   migrateGovernanceFiles,
 } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
-import { ROOT, STARTER_DIR, VERSION } from "./init-shared.js";
+import { ROOT, STARTER_DIR, VERSION, resolveEntryScript } from "./init-shared.js";
 import { readInstallPreferences } from "./init-preferences.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function atomicWriteText(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -37,6 +34,26 @@ export interface PostInitCheck {
   ok: boolean;
   detail: string;
   fix?: string;
+}
+
+function isExpectedVerifyFailure(cortexPath: string, check: Pick<PostInitCheck, "name" | "ok">): boolean {
+  if (check.ok) return false;
+  if (check.name === "git-remote") return true;
+  const prefs = readInstallPreferences(cortexPath);
+  if (check.name === "mcp-config" && prefs.mcpEnabled === false) return true;
+  if (check.name === "hooks-registered" && prefs.hooksEnabled === false) return true;
+  return false;
+}
+
+export function getVerifyOutcomeNote(cortexPath: string, checks: PostInitCheck[]): string | null {
+  const failures = checks.filter((check) => !check.ok);
+  if (failures.length === 0) return null;
+  const expectedFailures = failures.filter((check) => isExpectedVerifyFailure(cortexPath, check));
+  if (expectedFailures.length === 0) return null;
+  if (expectedFailures.length === failures.length) {
+    return "Setup looks usable in local-only / hooks-only mode; remaining issues are optional sync or MCP checks.";
+  }
+  return "Some reported issues are optional for your chosen install mode; review git-remote / MCP failures separately from hard failures.";
 }
 
 interface HookEntrypointCheckDeps {
@@ -62,7 +79,7 @@ function commandVersion(cmd: string, args: string[] = ["--version"]): string | n
 export function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): PostInitCheck {
   const pathExists = deps.pathExists ?? fs.existsSync;
   const versionReader = deps.versionReader ?? commandVersion;
-  const distIndex = path.join(__dirname, "index.js");
+  const distIndex = resolveEntryScript();
   const localEntrypointOk = pathExists(distIndex);
   const hookEntrypointOk = localEntrypointOk || Boolean(versionReader("npx", ["--version"]));
   const detail = localEntrypointOk
@@ -601,6 +618,7 @@ export function isProjectTracked(cortexPath: string, projectName: string, profil
 
 export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: PostInitCheck[] } {
   const checks: PostInitCheck[] = [];
+  const prefs = readInstallPreferences(cortexPath);
   const gitVersion = commandVersion("git");
   const nodeVersion = commandVersion("node");
   checks.push({
@@ -617,11 +635,14 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
   });
 
   const gitRemote = gitRemoteStatus(cortexPath);
+  const gitRemoteDetail = gitRemote.ok
+    ? gitRemote.detail
+    : `${gitRemote.detail} (optional unless you want cross-machine sync)`;
   checks.push({
     name: "git-remote",
     ok: gitRemote.ok,
-    detail: gitRemote.detail,
-    fix: gitRemote.ok ? undefined : "Initialize a repo and add an origin remote for cross-machine sync.",
+    detail: gitRemoteDetail,
+    fix: gitRemote.ok ? undefined : "Optional: initialize a repo and add an origin remote for cross-machine sync.",
   });
 
   const settingsPath = hookConfigPath("claude");
@@ -648,14 +669,30 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
   checks.push({
     name: "mcp-config",
     ok: mcpOk,
-    detail: mcpOk ? "MCP server registered in Claude settings" : "MCP server not found in ~/.claude/settings.json",
-    fix: mcpOk ? undefined : "Run `npx @alaarab/cortex init` to register the MCP server",
+    detail: mcpOk
+      ? "MCP server registered in Claude settings"
+      : prefs.mcpEnabled === false
+        ? "MCP server not found in ~/.claude/settings.json (expected while MCP mode is OFF)"
+        : "MCP server not found in ~/.claude/settings.json",
+    fix: mcpOk
+      ? undefined
+      : prefs.mcpEnabled === false
+        ? "Optional: run `cortex mcp-mode on` or `npx @alaarab/cortex init` if you want MCP enabled."
+        : "Run `npx @alaarab/cortex init` to register the MCP server",
   });
   checks.push({
     name: "hooks-registered",
     ok: hooksOk,
-    detail: hooksOk ? "All lifecycle hooks registered" : "One or more hooks missing from ~/.claude/settings.json",
-    fix: hooksOk ? undefined : "Run `npx @alaarab/cortex init` to install or refresh hooks",
+    detail: hooksOk
+      ? "All lifecycle hooks registered"
+      : prefs.hooksEnabled === false
+        ? "One or more hooks missing from ~/.claude/settings.json (expected while hooks mode is OFF)"
+        : "One or more hooks missing from ~/.claude/settings.json",
+    fix: hooksOk
+      ? undefined
+      : prefs.hooksEnabled === false
+        ? "Optional: run `cortex hooks-mode on` or `npx @alaarab/cortex init` if you want hooks enabled."
+        : "Run `npx @alaarab/cortex init` to install or refresh hooks",
   });
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
@@ -676,8 +713,8 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     fix: govOk ? undefined : "Run `npx @alaarab/cortex init` to create governance config",
   });
 
-  const prefs = readInstallPreferences(cortexPath);
-  const installedVersion = prefs.installedVersion;
+  const installedPrefs = readInstallPreferences(cortexPath);
+  const installedVersion = installedPrefs.installedVersion;
   const versionOk = !govOk || installedVersion === VERSION;
   checks.push({
     name: "installed-version",

@@ -21,6 +21,37 @@ export function makeTempDir(prefix: string): { path: string; cleanup: () => void
   };
 }
 
+export interface IsolatedCliEnv {
+  rootDir: string;
+  cortexDir: string;
+  homeDir: string;
+  cleanup: () => void;
+  env: (extra?: Record<string, string>) => Record<string, string>;
+}
+
+/**
+ * Create an isolated HOME + CORTEX_PATH pair for CLI subprocess tests.
+ */
+export function setupIsolatedCliEnv(prefix: string): IsolatedCliEnv {
+  const tmp = makeTempDir(prefix);
+  const cortexDir = path.join(tmp.path, ".cortex");
+  const homeDir = path.join(tmp.path, "home");
+  fs.mkdirSync(homeDir, { recursive: true });
+
+  return {
+    rootDir: tmp.path,
+    cortexDir,
+    homeDir,
+    cleanup: tmp.cleanup,
+    env: (extra: Record<string, string> = {}) => ({
+      CORTEX_PATH: cortexDir,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      ...extra,
+    }),
+  };
+}
+
 /**
  * Write governance access-control.json granting admin to the given actor,
  * and set CORTEX_ACTOR in process.env. Returns the actor name.

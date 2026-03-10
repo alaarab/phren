@@ -27,15 +27,17 @@ import * as os from "os";
 
 const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
 const REPO_ROOT = path.resolve(__dirname, "../..");
+let cliBuiltForCurrentProcess = false;
 
 function ensureCliBuilt(): void {
-  if (fs.existsSync(CLI_PATH)) return;
+  if (cliBuiltForCurrentProcess && fs.existsSync(CLI_PATH)) return;
   execFileSync("npm", ["run", "build"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 30000,
   });
+  cliBuiltForCurrentProcess = true;
 }
 
 function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {

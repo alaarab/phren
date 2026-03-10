@@ -1,21 +1,24 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "child_process";
-import { grantAdmin, makeTempDir } from "./test-helpers.js";
+import { grantAdmin, makeTempDir, setupIsolatedCliEnv, type IsolatedCliEnv } from "./test-helpers.js";
+import { getMachineName } from "./link.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
 const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
 const REPO_ROOT = path.resolve(__dirname, "../..");
+let cliBuiltForCurrentProcess = false;
 
 function ensureCliBuilt(): void {
-  if (fs.existsSync(CLI_PATH)) return;
+  if (cliBuiltForCurrentProcess && fs.existsSync(CLI_PATH)) return;
   execFileSync("npm", ["run", "build"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 30000,
   });
+  cliBuiltForCurrentProcess = true;
 }
 
 function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
@@ -1413,12 +1416,20 @@ describe("CLI integration: migrate-findings", () => {
 describe("CLI integration: doctor edge cases", () => {
   let cortexDir: string;
   let cleanup: () => void;
+  let projectsDir: string;
+  const origProjectsDir = process.env.PROJECTS_DIR;
 
   beforeEach(() => {
     ({ cortexDir, cleanup } = setupCortexDir());
+    projectsDir = path.join(path.dirname(cortexDir), "projects");
+    fs.mkdirSync(projectsDir, { recursive: true });
+    process.env.PROJECTS_DIR = projectsDir;
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    process.env.PROJECTS_DIR = origProjectsDir;
+    cleanup();
+  });
 
   it("--check-data validates governance files", () => {
     const { stdout, stderr } = runCli(
@@ -1446,6 +1457,32 @@ describe("CLI integration: doctor edge cases", () => {
     );
     const output = stdout + stderr;
     expect(output).toContain("machine-registered");
+  });
+
+  it("--check-data reports suspect backlog hygiene items", () => {
+    const profilesDir = path.join(cortexDir, "profiles");
+    fs.mkdirSync(profilesDir, { recursive: true });
+    fs.writeFileSync(path.join(profilesDir, "test.yaml"), "name: test\ndescription: Test\nprojects:\n  - doc-proj\n");
+    fs.writeFileSync(path.join(cortexDir, "machines.yaml"), `${getMachineName()}: test\n`);
+
+    const projDir = path.join(cortexDir, "doc-proj");
+    fs.mkdirSync(projDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projDir, "backlog.md"),
+      "# doc-proj Backlog\n\n## Active\n\n## Queue\n\n- Improve chart interface with bubble details and device type filters\n\n## Done\n"
+    );
+
+    const repoDir = path.join(projectsDir, "doc-proj");
+    fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "src", "shell-view.ts"), "export const shellView = true;\n");
+
+    const { stdout, stderr } = runCli(
+      ["doctor", "--check-data"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+    const output = stdout + stderr;
+    expect(output).toContain("data:backlog-hygiene:doc-proj");
+    expect(output).toContain("suspect item");
   });
 });
 
@@ -1563,16 +1600,12 @@ describe("CLI integration: maintain migrate argument edge cases", () => {
 const CLI_INTEGRATION_TIMEOUT_MS = process.platform === "win32" ? 15000 : 8000;
 
 describe("CLI integration: init", () => {
-  let cortexDir: string;
-  let homeDir: string;
+  let cliEnv: IsolatedCliEnv;
   let cleanup: () => void;
 
   beforeEach(() => {
-    const tmp = makeTempDir("cortex-init-cli-test-");
-    cortexDir = path.join(tmp.path, ".cortex");
-    homeDir = path.join(tmp.path, "home");
-    fs.mkdirSync(homeDir, { recursive: true });
-    cleanup = tmp.cleanup;
+    cliEnv = setupIsolatedCliEnv("cortex-init-cli-test-");
+    cleanup = cliEnv.cleanup;
   });
 
   afterEach(() => cleanup());
@@ -1580,31 +1613,31 @@ describe("CLI integration: init", () => {
   it("init --dry-run does not create files", () => {
     const { stdout, exitCode } = runCli(
       ["init", "--dry-run", "-y"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      cliEnv.env()
     );
     expect(exitCode).toBe(0);
     expect(stdout.toLowerCase()).toContain("dry run");
-    expect(fs.existsSync(cortexDir)).toBe(false);
+    expect(fs.existsSync(cliEnv.cortexDir)).toBe(false);
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init -y creates cortex directory and governance files", () => {
     const { stdout, exitCode } = runCli(
       ["init", "-y", "--mcp", "off"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
     );
     expect(exitCode).toBe(0);
-    expect(fs.existsSync(cortexDir)).toBe(true);
-    const govDir = path.join(cortexDir, ".governance");
+    expect(fs.existsSync(cliEnv.cortexDir)).toBe(true);
+    const govDir = path.join(cliEnv.cortexDir, ".governance");
     expect(fs.existsSync(govDir)).toBe(true);
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init with --machine sets machine name", () => {
     const { exitCode } = runCli(
       ["init", "-y", "--machine", "test-box", "--mcp", "off"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
     );
     expect(exitCode).toBe(0);
-    const machinesPath = path.join(cortexDir, "machines.yaml");
+    const machinesPath = path.join(cliEnv.cortexDir, "machines.yaml");
     if (fs.existsSync(machinesPath)) {
       const content = fs.readFileSync(machinesPath, "utf8");
       expect(content).toContain("test-box");
@@ -1614,11 +1647,11 @@ describe("CLI integration: init", () => {
   it("init is idempotent (re-running does not fail)", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
     );
     const { exitCode } = runCli(
       ["init", "-y", "--mcp", "off"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
     );
     expect(exitCode).toBe(0);
   }, CLI_INTEGRATION_TIMEOUT_MS);
@@ -1626,7 +1659,7 @@ describe("CLI integration: init", () => {
   it("init --mcp with invalid value exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["init", "--mcp", "banana"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      cliEnv.env()
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Invalid --mcp value");
@@ -1635,11 +1668,11 @@ describe("CLI integration: init", () => {
   it("init --dry-run on existing install describes update plan", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
     );
     const { stdout, exitCode } = runCli(
       ["init", "--dry-run", "-y"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      cliEnv.env()
     );
     expect(exitCode).toBe(0);
     expect(stdout.toLowerCase()).toContain("dry run");
@@ -1652,16 +1685,12 @@ describe("CLI integration: init", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: verify", () => {
-  let cortexDir: string;
-  let homeDir: string;
+  let cliEnv: IsolatedCliEnv;
   let cleanup: () => void;
 
   beforeEach(() => {
-    const tmp = makeTempDir("cortex-verify-cli-test-");
-    cortexDir = path.join(tmp.path, ".cortex");
-    homeDir = path.join(tmp.path, "home");
-    fs.mkdirSync(homeDir, { recursive: true });
-    cleanup = tmp.cleanup;
+    cliEnv = setupIsolatedCliEnv("cortex-verify-cli-test-");
+    cleanup = cliEnv.cleanup;
   });
 
   afterEach(() => cleanup());
@@ -1669,11 +1698,11 @@ describe("CLI integration: verify", () => {
   it("verify on fresh init reports checks", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
     );
     const { stdout, stderr } = runCli(
       ["verify"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      cliEnv.env()
     );
     const output = stdout + stderr;
     expect(output).toContain("cortex verify:");
@@ -1681,10 +1710,10 @@ describe("CLI integration: verify", () => {
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify on empty directory reports issues", () => {
-    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(cliEnv.cortexDir, { recursive: true });
     const { stdout, stderr } = runCli(
       ["verify"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      cliEnv.env()
     );
     const output = stdout + stderr;
     expect(output).toContain("cortex verify:");
@@ -1693,11 +1722,11 @@ describe("CLI integration: verify", () => {
   it("verify checks fts-index and hook-entrypoint", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
     );
     const { stdout, stderr } = runCli(
       ["verify"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      cliEnv.env()
     );
     const output = stdout + stderr;
     expect(output).toContain("fts-index");
@@ -1705,10 +1734,10 @@ describe("CLI integration: verify", () => {
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify shows fix suggestions for failures", () => {
-    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(cliEnv.cortexDir, { recursive: true });
     const { stdout, stderr } = runCli(
       ["verify"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      cliEnv.env()
     );
     const output = stdout + stderr;
     expect(output).toContain("issues found");
@@ -1762,6 +1791,61 @@ describe("CLI integration: help and health", () => {
     expect(exitCode).toBe(1);
     expect(stderr).toContain("has been removed");
   });
+});
+
+describe("CLI integration: temp HOME subprocess stability", () => {
+  let cliEnv: IsolatedCliEnv;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    cliEnv = setupIsolatedCliEnv("cortex-temp-home-cli-test-");
+    cleanup = cliEnv.cleanup;
+  });
+
+  afterEach(() => cleanup());
+
+  it("help prints usage information with a temp HOME", () => {
+    const { stdout, exitCode } = runCli(
+      ["help"],
+      cliEnv.env()
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("cortex");
+    expect(stdout).toContain("search");
+    expect(stdout).toContain("doctor");
+  }, CLI_INTEGRATION_TIMEOUT_MS);
+
+  it("verify reports hook and index checks after init with a temp HOME", () => {
+    runCli(
+      ["init", "-y", "--mcp", "off"],
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+    );
+    const { stdout, stderr, exitCode } = runCli(
+      ["verify"],
+      cliEnv.env()
+    );
+    const output = stdout + stderr;
+    expect(exitCode).toBe(1);
+    expect(output).toContain("cortex verify:");
+    expect(output).toContain("local-only / hooks-only mode");
+    expect(output).toContain("installed-version");
+    expect(output).toContain("fts-index");
+    expect(output).toContain("hook-entrypoint");
+  }, CLI_INTEGRATION_TIMEOUT_MS);
+
+  it("maintain migrate governance --dry-run keeps readable output with a temp HOME", () => {
+    runCli(
+      ["init", "-y", "--mcp", "off"],
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+    );
+    const { stdout, exitCode } = runCli(
+      ["maintain", "migrate", "governance", "--dry-run"],
+      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Governance migration:");
+    expect(stdout).toContain("[dry-run]");
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 });
 
 // ────────────────────────────────────────────────────────────────────────────
