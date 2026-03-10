@@ -3,6 +3,7 @@ import {
   commandExists,
   detectInstalledTools,
   buildLifecycleCommands,
+  buildSharedLifecycleCommands,
   configureAllHooks,
   readCustomHooks,
   runCustomHooks,
@@ -114,6 +115,10 @@ describe("hooks platform compatibility", () => {
       configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
       const codexFile = path.join(cortexPath, "codex.json");
       expect(fs.existsSync(codexFile)).toBe(true);
+      const codex = JSON.parse(fs.readFileSync(codexFile, "utf8"));
+      const sharedLifecycle = buildSharedLifecycleCommands();
+      expect(codex.hooks.SessionStart[0].command).toBe(sharedLifecycle.sessionStart);
+      expect(codex.hooks.SessionStart[0].command).not.toContain(cortexPath);
       // Should NOT be in home directory
       expect(fs.existsSync(path.join(homeDir, "codex.json"))).toBe(false);
     });

@@ -3,7 +3,7 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
-import { buildLifecycleCommands } from "./hooks.js";
+import { buildSharedLifecycleCommands } from "./hooks.js";
 import { VERSION } from "./package-metadata.js";
 import { getToolCount, renderToolCatalogMarkdown } from "./tool-registry.js";
 import { isSkillEnabled } from "./skill-state.js";
@@ -214,7 +214,7 @@ export function linkSkillsDir(
 }
 
 export function writeSkillMd(cortexPath: string) {
-  const lifecycle = buildLifecycleCommands(cortexPath);
+  const lifecycle = buildSharedLifecycleCommands();
   const sessionStartCmd = lifecycle.sessionStart.replace(/"/g, '\\"');
   const promptCmd = lifecycle.userPromptSubmit.replace(/"/g, '\\"');
   const stopCmd = lifecycle.stop.replace(/"/g, '\\"');
