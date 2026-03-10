@@ -104,7 +104,9 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
               fs.unlinkSync(lockPath);
             } catch {
               // Another process may have claimed or removed the stale lock between
-              // statSync and unlinkSync — safe to ignore and continue waiting.
+              // statSync and unlinkSync. Sleep before retrying to avoid a spin loop.
+              Atomics.wait(waiter, 0, 0, pollMs);
+              waited += pollMs;
             }
             continue;
           }
