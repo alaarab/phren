@@ -1,0 +1,76 @@
+{
+  "name": "cortex-vscode",
+  "displayName": "Cortex VS Code",
+  "description": "VS Code extension scaffold for interacting with the Cortex MCP server.",
+  "version": "0.0.1",
+  "publisher": "alaarab",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:cortex.searchKnowledge",
+    "onCommand:cortex.getFindings",
+    "onCommand:cortex.getTasks",
+    "onCommand:cortex.addFinding",
+    "onCommand:cortex.listProjects",
+    "onCommand:cortex.getProjectSummary"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "cortex.searchKnowledge",
+        "title": "Cortex: Search Knowledge"
+      },
+      {
+        "command": "cortex.getFindings",
+        "title": "Cortex: Get Findings"
+      },
+      {
+        "command": "cortex.getTasks",
+        "title": "Cortex: Get Tasks"
+      },
+      {
+        "command": "cortex.addFinding",
+        "title": "Cortex: Add Finding"
+      },
+      {
+        "command": "cortex.listProjects",
+        "title": "Cortex: List Projects"
+      },
+      {
+        "command": "cortex.getProjectSummary",
+        "title": "Cortex: Get Project Summary"
+      }
+    ],
+    "configuration": {
+      "title": "Cortex",
+      "properties": {
+        "cortex.mcpServerPath": {
+          "type": "string",
+          "default": "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/@alaarab/cortex/mcp/dist/index.js",
+          "description": "Absolute path to the cortex MCP server entrypoint JavaScript file."
+        },
+        "cortex.storePath": {
+          "type": "string",
+          "default": "/home/alaarab/.cortex",
+          "description": "Path to the local cortex store directory passed to the MCP server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5.4",
+    "vscode": "^1.1.37"
+  }
+}
