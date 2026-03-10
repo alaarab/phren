@@ -94,7 +94,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
   }
 
   if (command === "projects") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return; }
-  if (command === "backlog") { host.setView("Backlog"); host.setMessage(`  ${TAB_ICONS.Backlog} Backlog`); return; }
+  if (command === "tasks" || command === "backlog") { host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return; }
   if (command === "learnings" || command === "findings") { host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Findings`); return; }
   if (command === "memory") { host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return; }
   if (command === "machines") { host.setView("Machines/Profiles"); host.setMessage("  Machines/Profiles"); return; }
@@ -505,7 +505,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
 function suggestCommand(input: string): string | undefined {
   const known = [
-    "help", "projects", "backlog", "findings", "review queue", "machines", "health",
+    "help", "projects", "tasks", "backlog", "findings", "review queue", "machines", "health",
     "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
     "work next", "tidy", "find add", "find remove", "mq approve", "mq reject",
     "mq edit", "machine map", "profile add-project", "profile remove-project",
@@ -523,7 +523,7 @@ function suggestCommand(input: string): string | undefined {
 
 export function completeInput(line: string, cortexPath: string, profile: string, state: ShellState): string[] {
   const commands = [
-    ":projects", ":backlog", ":findings", ":review queue", ":machines", ":health",
+    ":projects", ":tasks", ":backlog", ":findings", ":review queue", ":machines", ":health",
     ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
     ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
     ":mq approve", ":mq reject", ":mq edit", ":machine map",
@@ -592,7 +592,7 @@ export function getListItems(
         ? cards.filter((c) => `${c.name} ${c.summary} ${c.docs.join(" ")}`.toLowerCase().includes(state.filter!.toLowerCase()))
         : cards;
     }
-    case "Backlog": {
+    case "Tasks": {
       if (!state.project) return [];
       const result = readBacklog(cortexPath, state.project);
       if (!result.ok) return [];
@@ -641,9 +641,9 @@ async function activateSelected(host: NavigationHost): Promise<void> {
 
   switch (host.state.view) {
     case "Projects":
-      if (item.name) { host.state.project = item.name; saveShellState(host.cortexPath, host.state); host.setView("Backlog"); host.setMessage(`  ${style.green("●")} ${style.boldCyan(item.name)}`); }
+      if (item.name) { host.state.project = item.name; saveShellState(host.cortexPath, host.state); host.setView("Tasks"); host.setMessage(`  ${style.green("●")} ${style.boldCyan(item.name)}`); }
       break;
-    case "Backlog":
+    case "Tasks":
       if (item.id) {
         const project = host.ensureProjectSelected();
         if (!project) return;
@@ -681,7 +681,7 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
   const project = host.state.project;
 
   switch (host.state.view) {
-    case "Backlog":
+    case "Tasks":
       if (key === "a") { host.startInput("add", ""); }
       else if (key === "d" && item?.id) {
         if (!project) { host.setMessage("Select a project first."); return; }
@@ -779,7 +779,7 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
   if (key === "\x1b[A") { host.moveCursor(-1); showCursorPosition(host); return true; }
   if (key === "\x1b[B") { host.moveCursor(1); showCursorPosition(host); return true; }
   if (key === "\x1b[D") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Projects is the dashboard landing screen")}`); } else { prevTab(host); } return true; }
-  if (key === "\x1b[C") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Press ↵ to enter the selected project's backlog")}`); } else { nextTab(host); } return true; }
+  if (key === "\x1b[C") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Press ↵ to enter the selected project's tasks")}`); } else { nextTab(host); } return true; }
   if (key === "\x1b[5~") { host.moveCursor(-10); showCursorPosition(host); return true; }
   if (key === "\x1b[6~") { host.moveCursor(10); showCursorPosition(host); return true; }
   if (key === "\x1b[H" || key === "\x1b[1~") { host.setCursor(0); showCursorPosition(host); return true; }
@@ -799,7 +799,7 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
     return true;
   }
   if (key === "p") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
-  if (key === "b") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Backlog"); host.setMessage(`  ${TAB_ICONS.Backlog} Backlog`); return true; }
+  if (key === "b") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return true; }
   if (key === "l") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
   if (key === "m") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
   if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }

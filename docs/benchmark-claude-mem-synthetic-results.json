@@ -1,0 +1,89 @@
+{
+  "runDate": "2026-03-10T02:28:31.067Z",
+  "generator": "claude-mem-synthetic-observations/v1",
+  "conditions": {
+    "platform": "linux",
+    "arch": "x64",
+    "bunVersion": "1.3.10",
+    "claudeMemRoot": "/tmp/claude-mem-bench-yNUZf2/repo",
+    "uvxPath": "/tmp/uv-wheel-0toYRz/out/uv-0.10.9.data/scripts/uvx",
+    "dataDir": "/tmp/claude-bench-run1/home/.claude-mem",
+    "sizes": [
+      100
+    ],
+    "queriesPerSize": 6,
+    "keepTemp": true,
+    "runRoot": "/tmp/claude-bench-run1"
+  },
+  "runs": [
+    {
+      "size": 100,
+      "project": "synthetic-bench-100",
+      "queries": [
+        "needle-000000-payments-api-stale-lock-recovery",
+        "sim-000000 payments-api file-lock stale-lock-recovery",
+        "needle-000016-queue-processor-backlog-token-budget",
+        "sim-000016 queue-processor citation-check backlog-token-budget",
+        "needle-000033-review-ui-incremental-index-rebuild",
+        "sim-000033 review-ui trust-decay incremental-index-rebuild"
+      ],
+      "seedMs": 87.63,
+      "backfillMs": 11062.13,
+      "coldQueryMs": 167.81,
+      "search": {
+        "avg": 168.82,
+        "p50": 167.84,
+        "p95": 173.5,
+        "min": 157.6,
+        "max": 177.83
+      },
+      "hits": 6,
+      "exactTopHits": 2,
+      "misses": [],
+      "runs": [
+        {
+          "query": "needle-000000-payments-api-stale-lock-recovery",
+          "searchMs": 173.5,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 000000",
+          "exactTopHit": true
+        },
+        {
+          "query": "sim-000000 payments-api file-lock stale-lock-recovery",
+          "searchMs": 167.84,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 000000",
+          "exactTopHit": true
+        },
+        {
+          "query": "needle-000016-queue-processor-backlog-token-budget",
+          "searchMs": 177.83,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 000000",
+          "exactTopHit": false
+        },
+        {
+          "query": "sim-000016 queue-processor citation-check backlog-token-budget",
+          "searchMs": 169.07,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 000000",
+          "exactTopHit": false
+        },
+        {
+          "query": "needle-000033-review-ui-incremental-index-rebuild",
+          "searchMs": 157.6,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 000000",
+          "exactTopHit": false
+        },
+        {
+          "query": "sim-000033 review-ui trust-decay incremental-index-rebuild",
+          "searchMs": 167.06,
+          "totalResults": 10,
+          "topTitle": "Synthetic Memory 000000",
+          "exactTopHit": false
+        }
+      ]
+    }
+  ]
+}

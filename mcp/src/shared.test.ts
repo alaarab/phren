@@ -1643,6 +1643,7 @@ describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
     expect(wp.requireMaintainerApproval).toBe(true);
     expect(wp.lowConfidenceThreshold).toBe(0.7);
     expect(wp.riskySections).toEqual(["Stale", "Conflicts"]);
+    expect(wp.taskMode).toBe("manual");
   });
 
   it("filters invalid riskySections values", () => {
@@ -1660,9 +1661,12 @@ describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
   it("admin can update workflow policy", () => {
     const cortex = makeCortex();
     grantAdmin(cortex);
-    const result = updateWorkflowPolicy(cortex, { lowConfidenceThreshold: 0.5 });
+    const result = updateWorkflowPolicy(cortex, { lowConfidenceThreshold: 0.5, taskMode: "auto" });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.lowConfidenceThreshold).toBe(0.5);
+    if (result.ok) {
+      expect(result.data.lowConfidenceThreshold).toBe(0.5);
+      expect(result.data.taskMode).toBe("auto");
+    }
   });
 });
 

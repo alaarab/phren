@@ -75,8 +75,8 @@ describe("mcp-backlog GitHub issue tools", () => {
     tmp.cleanup();
   });
 
-  it("links an existing GitHub issue to a backlog item", async () => {
-    const res = parseResult(await server.call("link_backlog_item_issue", {
+  it("links an existing GitHub issue to a task", async () => {
+    const res = parseResult(await server.call("link_task_issue", {
       project,
       item: "bid:deadbeef",
       issue_number: 14,
@@ -92,8 +92,8 @@ describe("mcp-backlog GitHub issue tools", () => {
     expect(backlog.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
   });
 
-  it("promotes a backlog item into a GitHub issue and links it back", async () => {
-    const res = parseResult(await server.call("promote_backlog_item_to_issue", {
+  it("promotes a task into a GitHub issue and links it back", async () => {
+    const res = parseResult(await server.call("promote_task_to_issue", {
       project,
       item: "bid:deadbeef",
     }));
@@ -108,7 +108,7 @@ describe("mcp-backlog GitHub issue tools", () => {
   });
 
   it("can mark the item done after promotion", async () => {
-    const res = parseResult(await server.call("promote_backlog_item_to_issue", {
+    const res = parseResult(await server.call("promote_task_to_issue", {
       project,
       item: "bid:deadbeef",
       mark_done: true,

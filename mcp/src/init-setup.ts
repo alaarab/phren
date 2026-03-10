@@ -367,6 +367,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
         requireMaintainerApproval: true,
         lowConfidenceThreshold: 0.7,
         riskySections: ["Stale", "Conflicts"],
+        taskMode: "manual",
       }, null, 2) + "\n"
     );
   }
@@ -519,7 +520,7 @@ export function bootstrapFromExisting(cortexPath: string, projectPath: string, p
   if (!fs.existsSync(path.join(projDir, "backlog.md"))) {
     atomicWriteText(
       path.join(projDir, "backlog.md"),
-      `# ${projectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
+      `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
     );
   }
 

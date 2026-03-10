@@ -71,6 +71,14 @@ MCP or hooks-only, either works. Same knowledge base either way.
 
 ---
 
+## Positioning
+
+Cortex sits in the same broad agent-memory space as claude-mem, Supermemory, Mem0, GitHub Copilot Memory, and research systems such as MemoryBank and MemGPT. It does not claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas.
+
+The distinction is architectural: Cortex applies those patterns to an owner-operated memory store built from markdown + git, with explicit governance, review workflows, and shared use across agents, projects, and machines.
+
+---
+
 ## Why cortex
 
 **Targeted retrieval, not a config dump.** CLAUDE.md loads the whole file every time. Cortex searches what you actually wrote and injects only what matches -- about 550 tokens by default. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET`.

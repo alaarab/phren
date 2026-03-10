@@ -91,6 +91,7 @@ import {
 } from "./cli-hooks-session.js";
 import { approximateTokens } from "./shared-retrieval.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { handleTaskPromptLifecycle } from "./task-lifecycle.js";
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -243,6 +244,17 @@ export async function handleHookPrompt() {
     }
 
     const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getCortexPath(), sessionId);
+    const taskLifecycle = handleTaskPromptLifecycle({
+      cortexPath: getCortexPath(),
+      prompt,
+      project: detectedProject,
+      sessionId,
+      intent,
+    });
+    if (taskLifecycle.noticeLines.length > 0) {
+      parts.push("");
+      parts.push(...taskLifecycle.noticeLines);
+    }
     // Add budget info to trace
     if (parts.length > 0) {
       const traceIdx = parts.findIndex(p => p.includes("trace:"));

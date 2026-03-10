@@ -239,7 +239,7 @@ export async function runStatus() {
     totalQueue += countQueueItems(cortexPath, projName);
   }
 
-  console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalBacklog} backlog, ${totalQueue} queued`);
+  console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalBacklog} tasks, ${totalQueue} queued`);
 
   const runtime = readRuntimeHealth(cortexPath);
   console.log(`\n  ${BOLD}Sync:${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);

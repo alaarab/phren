@@ -688,9 +688,9 @@ describe("link", () => {
       );
 
       const result = await runDoctor(cortexPath, false, true);
-      const backlogCheck = result.checks.find(c => c.name === "data:backlog:doc-proj");
-      expect(backlogCheck).toBeDefined();
-      expect(backlogCheck!.ok).toBe(true);
+      const tasksCheck = result.checks.find(c => c.name === "data:tasks:doc-proj");
+      expect(tasksCheck).toBeDefined();
+      expect(tasksCheck!.ok).toBe(true);
     });
 
     it("checkData flags backlog items whose specific terms do not match repo/docs", async () => {
@@ -720,10 +720,10 @@ describe("link", () => {
       fs.writeFileSync(path.join(repoDir, "src", "shell-view.ts"), "export const shellView = true;\n");
 
       const result = await runDoctor(cortexPath, false, true);
-      const hygieneCheck = result.checks.find(c => c.name === "data:backlog-hygiene:doc-proj");
+      const hygieneCheck = result.checks.find(c => c.name === "data:task-hygiene:doc-proj");
       expect(hygieneCheck).toBeDefined();
       expect(hygieneCheck!.ok).toBe(false);
-      expect(hygieneCheck!.detail).toContain("suspect item");
+      expect(hygieneCheck!.detail).toContain("suspect task");
       expect(hygieneCheck!.detail).toContain("Q1");
     });
 

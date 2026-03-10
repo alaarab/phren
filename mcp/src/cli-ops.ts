@@ -15,7 +15,7 @@ import { resolveSubprocessArgs } from "./cli-hooks.js";
 export function handleBacklogView(profile: string) {
   const docs = readBacklogs(getCortexPath(), profile);
   if (!docs.length) {
-    console.log("No backlogs found.");
+    console.log("No tasks found.");
     return;
   }
 
@@ -50,7 +50,7 @@ export function handleBacklogView(profile: string) {
   }
 
   if (totalActive === 0 && totalQueue === 0) {
-    console.log("All backlogs are empty.");
+    console.log("All tasks are empty.");
     return;
   }
 
@@ -95,7 +95,7 @@ export async function handleQuickstart() {
   if (!fs.existsSync(projectDir)) {
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), `# ${normalizedProjectName} Findings\n`);
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), `# ${normalizedProjectName} Backlog\n\n## Active\n\n## Queue\n\n## Done\n`);
+    fs.writeFileSync(path.join(projectDir, "backlog.md"), `# ${normalizedProjectName} Tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
   }
 
   console.log(`\n\u2713 cortex ready. Project: ${normalizedProjectName}. Try: cortex search 'your query'`);

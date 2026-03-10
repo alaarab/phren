@@ -109,7 +109,7 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
 
   const viewHints: Record<string, string[]> = {
     Projects: [`${k("↵")} ${d("open project")}`, `${k("i")} ${d("intro mode")}`],
-    Backlog: [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
+    Tasks: [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
     Findings: [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
     "Review Queue": [`${k("a")} ${d("keep")}`, `${k("d")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
     Skills: [`${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
@@ -204,14 +204,14 @@ function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntr
   const lines = [
     `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
     ctx.state.project
-      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim("· ↵ opens selected project backlog")}`
-      : `  ${style.dim("No project selected yet")}  ${style.dim("· ↵ sets context and opens backlog")}`,
+      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim("· ↵ opens selected project tasks")}`
+      : `  ${style.dim("No project selected yet")}  ${style.dim("· ↵ sets context and opens tasks")}`,
     `  ${style.dim("Sync")} ${style.dim(runtime.lastSync?.lastPushStatus || runtime.lastAutoSave?.status || "unknown")}  ${style.dim("·")}  ${style.dim("unsynced")} ${style.bold(String(runtime.lastSync?.unsyncedCommits ?? 0))}  ${style.dim("·")}  ${style.dim("intro")} ${style.cyan(ctx.state.introMode || "once-per-version")}`,
   ];
 
   if (height >= 12) {
     lines.push("");
-    lines.push(`  ${style.bold("Backlog pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active backlog across this profile.")}`);
+    lines.push(`  ${style.bold("Task pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active tasks across this profile.")}`);
     lines.push(`  ${style.bold("Recent findings")}  ${findingsPreview.length ? findingsPreview.join(style.dim("  ·  ")) : style.dim("No findings yet.")}`);
   }
 
@@ -324,7 +324,7 @@ function parseSubsections(backlogPath: string, project: string, cache: Subsectio
   return { map, cache: newCache };
 }
 
-// ── Backlog view ───────────────────────────────────────────────────────────
+// ── Tasks view ─────────────────────────────────────────────────────────────
 
 function renderBacklogView(ctx: ViewContext, cursor: number, height: number, subsectionsCache: SubsectionsCache | null): { lines: string[]; subsectionsCache: SubsectionsCache | null } {
   const cols = renderWidth();
@@ -352,7 +352,7 @@ function renderBacklogView(ctx: ViewContext, cursor: number, height: number, sub
   const flatItems = [...active, ...queue, ...done];
 
   if (!flatItems.length) {
-    const hint = ctx.state.filter ? "  No items match the filter." : `  No backlog items. Press ${style.boldCyan("a")} to add one.`;
+    const hint = ctx.state.filter ? "  No items match the filter." : `  No tasks yet. Press ${style.boldCyan("a")} to add one.`;
     return { lines: [...warnings, style.dim(hint)], subsectionsCache: newCache };
   }
 
@@ -855,7 +855,7 @@ export async function renderShell(
       case "Projects":
         contentLines = renderProjectsView(ctx, cursor, height);
         break;
-      case "Backlog": {
+      case "Tasks": {
         const result = renderBacklogView(ctx, cursor, height, subsectionsCache);
         contentLines = result.lines;
         setSubsectionsCache(result.subsectionsCache);

@@ -110,15 +110,15 @@ export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath, profile, withWriteQueue, updateFileInIndex } = ctx;
 
   server.registerTool(
-    "get_backlog",
+    "get_tasks",
     {
-      title: "◆ cortex · backlog",
-      description: "Get backlog items. Defaults to Active and Queue sections only. Pass status='all' to include Done items.",
+      title: "◆ cortex · tasks",
+      description: "Get tasks. Defaults to Active and Queue sections only. Pass status='all' to include Done items.",
       inputSchema: z.object({
         project: z.string().optional().describe("Project name. Omit to get all projects."),
-        id: z.string().optional().describe("Backlog item ID like A1, Q3, D2. Requires project."),
-        item: z.string().optional().describe("Exact backlog item text. Requires project."),
-        status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which backlog sections to include. Defaults to 'active+queue'."),
+        id: z.string().optional().describe("Task ID like A1, Q3, D2. Requires project."),
+        item: z.string().optional().describe("Exact task text. Requires project."),
+        status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which task sections to include. Defaults to 'active+queue'."),
         limit: z.number().int().min(1).max(200).optional().describe("Max items per Active/Queue section to return. Default 20."),
         done_limit: z.number().int().min(1).max(200).optional().describe("Max Done items to return (most recent). Default 5. Done sections are capped tightly to avoid large responses."),
         offset: z.number().int().min(0).optional().describe("Skip the first N items in each section before applying limit. Use with limit for pagination (e.g. offset:20, limit:20 for page 2)."),
@@ -140,7 +140,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           (id && !bidLookup && entry.id.toLowerCase() === id.toLowerCase()) ||
           (item && entry.line.trim() === item.trim())
         );
-        if (!match) return mcpResponse({ ok: false, error: `No backlog item found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
+        if (!match) return mcpResponse({ ok: false, error: `No task found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
         return mcpResponse({
           ok: true,
           message: `${match.id}: ${match.line} (${match.section})`,
@@ -159,7 +159,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         });
       }
 
-      // Full backlog for one project
+      // Full task list for one project
       if (project) {
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         const result = readBacklog(cortexPath, project);
@@ -169,7 +169,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!fs.existsSync(doc.path)) {
           return mcpResponse({
             ok: true,
-            message: `No backlog found for "${project}".`,
+            message: `No tasks found for "${project}".`,
             data: { project, items: view.doc.items, includedSections: view.includedSections, totalItems: view.totalItems },
           });
         }
@@ -192,7 +192,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       // All projects
       const docs = readBacklogs(cortexPath, profile);
-      if (!docs.length) return mcpResponse({ ok: true, message: "No backlogs found.", data: { projects: [] } });
+      if (!docs.length) return mcpResponse({ ok: true, message: "No tasks found.", data: { projects: [] } });
       const views = docs.map((doc) => ({ project: doc.project, doc, view: buildBacklogView(doc, status, limit, done_limit, offset), issues: doc.issues }));
       const anyTruncated = views.some(({ view }) => view.truncated);
       let parts: string[];
@@ -215,7 +215,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "add_backlog_item",
+    "add_task",
     {
       title: "◆ cortex · add task",
       description: "Append a task to a project's backlog.md. Adds to the Queue section.",
@@ -236,7 +236,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "add_backlog_items",
+    "add_tasks",
     {
       title: "◆ cortex · add tasks (bulk)",
       description: "Append multiple tasks to a project's backlog.md in one call. Adds to the Queue section.",
@@ -252,16 +252,16 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, errors } = result.data;
         if (added.length > 0) updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
-        return mcpResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} items to ${project} backlog`, data: { project, added, errors } });
+        return mcpResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} tasks to ${project}`, data: { project, added, errors } });
       });
     }
   );
 
   server.registerTool(
-    "complete_backlog_item",
+    "complete_task",
     {
       title: "◆ cortex · done",
-      description: "Move a backlog item to the Done section by matching text.",
+      description: "Move a task to the Done section by matching text.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         item: z.string().describe("Exact or partial text of the item to complete."),
@@ -279,10 +279,10 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "complete_backlog_items",
+    "complete_tasks",
     {
       title: "◆ cortex · done (bulk)",
-      description: "Move multiple backlog items to Done in one call. Pass an array of partial item texts.",
+      description: "Move multiple tasks to Done in one call. Pass an array of partial item texts.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         items: z.array(z.string()).describe("List of partial item texts to complete."),
@@ -301,16 +301,17 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "update_backlog_item",
+    "update_task",
     {
       title: "◆ cortex · update task",
-      description: "Update a backlog item's priority, context, or section by matching text.",
+      description: "Update a task's priority, context, or section by matching text.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        item: z.string().describe("Partial text to match against existing backlog items."),
+        item: z.string().describe("Partial text to match against existing tasks."),
         updates: z.object({
           priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
-          context: z.string().optional().describe("Text to append to (or create) the Context: line below the item."),
+          context: z.string().optional().describe("Text to set on the Context: line below the task."),
+          replace_context: z.boolean().optional().describe("If true, replace the existing Context: value instead of appending."),
           section: z.enum(["queue", "active", "done", "Queue", "Active", "Done"]).optional().describe("Move item to this section: Queue, Active, or Done."),
           github_issue: z.union([z.number().int().positive(), z.string()]).optional().describe("GitHub issue number (for example 14 or '#14')."),
           github_url: z.string().optional().describe("GitHub issue URL to associate with the backlog item."),
@@ -330,13 +331,13 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "link_backlog_item_issue",
+    "link_task_issue",
     {
       title: "◆ cortex · link task issue",
-      description: "Link or unlink a backlog item to an existing GitHub issue.",
+      description: "Link or unlink a task to an existing GitHub issue.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        item: z.string().describe("Backlog item text, ID, or stable bid to link."),
+        item: z.string().describe("Task text, ID, or stable bid to link."),
         issue_number: z.union([z.number().int().positive(), z.string()]).optional().describe("Existing GitHub issue number (for example 14 or '#14')."),
         issue_url: z.string().optional().describe("Existing GitHub issue URL."),
         unlink: z.boolean().optional().describe("If true, remove any linked issue from the backlog item."),
@@ -372,8 +373,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({
           ok: true,
           message: unlink
-            ? `Removed GitHub link from ${project} backlog item.`
-            : `Linked ${project} backlog item to ${result.data.githubIssue ? `#${result.data.githubIssue}` : result.data.githubUrl}.`,
+            ? `Removed GitHub link from ${project} task.`
+            : `Linked ${project} task to ${result.data.githubIssue ? `#${result.data.githubIssue}` : result.data.githubUrl}.`,
           data: {
             project,
             item,
@@ -387,17 +388,17 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "promote_backlog_item_to_issue",
+    "promote_task_to_issue",
     {
       title: "◆ cortex · promote task",
-      description: "Create a GitHub issue from a backlog item and link it back into the backlog.",
+      description: "Create a GitHub issue from a task and link it back into the task list.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        item: z.string().describe("Backlog item text, ID, or stable bid to promote."),
+        item: z.string().describe("Task text, ID, or stable bid to promote."),
         repo: z.string().optional().describe("Target GitHub repo in owner/name form. If omitted, cortex tries to infer it from CLAUDE.md or summary.md."),
-        title: z.string().optional().describe("Optional GitHub issue title. Defaults to the backlog item text."),
-        body: z.string().optional().describe("Optional GitHub issue body. Defaults to a body built from the backlog item plus context."),
-        mark_done: z.boolean().optional().describe("If true, mark the backlog item Done after creating and linking the issue."),
+        title: z.string().optional().describe("Optional GitHub issue title. Defaults to the task text."),
+        body: z.string().optional().describe("Optional GitHub issue body. Defaults to a body built from the task plus context."),
+        mark_done: z.boolean().optional().describe("If true, mark the task Done after creating and linking the issue."),
       }),
     },
     async ({ project, item, repo, title, body, mark_done }) => {
@@ -432,7 +433,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
         return mcpResponse({
           ok: true,
-          message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} backlog item.`,
+          message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} task.`,
           data: {
             project,
             item,
@@ -447,10 +448,10 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "pin_backlog_item",
+    "pin_task",
     {
       title: "◆ cortex · pin task",
-      description: "Pin a backlog item so it floats to the top of its section.",
+      description: "Pin a task so it floats to the top of its section.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         item: z.string().describe("Partial item text or ID to pin."),
@@ -468,7 +469,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "work_next_backlog_item",
+    "work_next_task",
     {
       title: "◆ cortex · work next",
       description: "Move the highest-priority Queue item to Active so it becomes the next task to work on.",
@@ -488,10 +489,10 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   server.registerTool(
-    "tidy_backlog_done",
+    "tidy_done_tasks",
     {
       title: "◆ cortex · tidy done",
-      description: "Archive old Done items beyond the keep limit to keep the backlog tidy.",
+      description: "Archive old Done items beyond the keep limit to keep the task list tidy.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         keep: z.number().optional().describe("Number of recent Done items to keep. Default 30."),

@@ -273,7 +273,7 @@ export class CortexShell {
     if (!input) return true;
     if (["q", "quit", ":q", ":quit", ":exit"].includes(input.toLowerCase())) return false;
     if (input === "p") { this.setView("Projects"); this.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
-    if (input === "b") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Backlog"); this.setMessage(`  ${TAB_ICONS.Backlog} Backlog`); return true; }
+    if (input === "b") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Tasks"); this.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return true; }
     if (input === "l") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Findings"); this.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
     if (input === "m") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
     if (input === "s") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Skills"); this.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }

@@ -31,7 +31,7 @@ Usage:
                                          Search your cortex
   cortex add-finding <project> "..."     Save an insight
   cortex pin <project> "..."             Pin a canonical memory
-  cortex backlog                         Cross-project backlog view
+  cortex tasks                           Cross-project task view
   cortex skill-list                      List installed skills
   cortex doctor [--fix] [--check-data] [--agents]
                                          Health check and self-heal (--agents: show agent integrations only)
@@ -89,7 +89,7 @@ Environment:
   CORTEX_CONTEXT_SNIPPET_LINES   Max lines per injected snippet (default: 6)
   CORTEX_CONTEXT_SNIPPET_CHARS   Max chars per injected snippet (default: 520)
   CORTEX_MAX_INJECT_TOKENS       Hard cap on total injected tokens (default: 2000)
-  CORTEX_BACKLOG_PRIORITY        Priorities to include in injection: high,medium,low (default: high,medium)
+  CORTEX_BACKLOG_PRIORITY        Priorities to include in task injection: high,medium,low (default: high,medium)
   CORTEX_MEMORY_TTL_DAYS         Override memory TTL for trust filtering
   CORTEX_HOOK_TIMEOUT_MS         Hook subprocess timeout in ms (default: 14000)
   CORTEX_FINDINGS_CAP            Max findings per date section before consolidation (default: 20)
@@ -127,7 +127,7 @@ const CLI_COMMANDS = [
   "skills",
   "hooks",
   "detect-skills",
-  "backlog",
+  "tasks",
   "quickstart",
   "background-maintenance",
   "background-sync",
@@ -232,9 +232,11 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
 
   if (argvCommand === "verify") {
     const { runPostInitVerify, getVerifyOutcomeNote } = await import("./init.js");
+    const { getWorkflowPolicy } = await import("./shared-governance.js");
     const cortexPath = defaultCortexPath();
     const result = runPostInitVerify(cortexPath);
     console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
+    console.log(`  tasks: ${getWorkflowPolicy(cortexPath).taskMode} mode`);
     for (const check of result.checks) {
       console.log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
       if (!check.ok && check.fix) {

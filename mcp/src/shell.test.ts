@@ -144,7 +144,7 @@ describe("CortexShell", () => {
     await shell.handleInput(":open demo");
     await shell.handleInput("b");
     let output = await shell.render();
-    expect(output).toContain("▤ Backlog");
+    expect(output).toContain("▤ Tasks");
     expect(output).toContain("demo");
 
     await shell.handleInput("l");
@@ -161,7 +161,7 @@ describe("CortexShell", () => {
     const shell = createShell(dir);
     const output = await shell.render();
     expect(output).toContain("◉ Projects");
-    expect(output).toContain("Backlog pulse");
+    expect(output).toContain("Task pulse");
     expect(output).toContain("Recent findings");
     expect(output).toContain("No project selected yet");
   });
@@ -299,7 +299,7 @@ describe("CortexShell", () => {
 
     await shell.handleInput("b");
     const stateAfterBacklog = loadShellState(dir);
-    expect(stateAfterBacklog.view).toBe("Backlog");
+    expect(stateAfterBacklog.view).toBe("Tasks");
 
     await shell.handleInput("l");
     const stateAfterFindings = loadShellState(dir);
@@ -307,7 +307,7 @@ describe("CortexShell", () => {
 
     await shell.handleInput("b");
     const stateBackAgain = loadShellState(dir);
-    expect(stateBackAgain.view).toBe("Backlog");
+    expect(stateBackAgain.view).toBe("Tasks");
   });
 
   it("renders a branded startup intro frame set", () => {

@@ -5,8 +5,8 @@ describe("tool registry", () => {
   it("extracts the live MCP tool inventory from registerTool calls", () => {
     const tools = getRegisteredTools();
     expect(tools.length).toBe(50);
-    expect(tools.some((tool) => tool.name === "link_backlog_item_issue")).toBe(true);
-    expect(tools.some((tool) => tool.name === "promote_backlog_item_to_issue")).toBe(true);
+    expect(tools.some((tool) => tool.name === "link_task_issue")).toBe(true);
+    expect(tools.some((tool) => tool.name === "promote_task_to_issue")).toBe(true);
   });
 
   it("renders grouped markdown for cortex.SKILL.md", () => {

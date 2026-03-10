@@ -38,6 +38,7 @@
     "test": "vitest run mcp/src",
     "bench": "tsx mcp/bench/locomo-runner.ts --sessions 3",
     "bench:retrieval": "tsx scripts/bench-retrieval-modes.ts",
+    "bench:retrieval:synthetic": "tsx scripts/bench-retrieval-synthetic.ts",
     "prepublishOnly": "npm run build && npm test"
   },
   "engines": {

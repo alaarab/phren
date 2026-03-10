@@ -140,7 +140,7 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleSkillsNamespace(args, profile);
     case "hooks":
       return handleHooksNamespace(args);
-    case "backlog":
+    case "tasks":
       return handleBacklogView(profile);
     case "projects":
       return handleProjectsNamespace(args, profile);

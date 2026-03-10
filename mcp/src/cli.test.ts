@@ -1142,10 +1142,10 @@ describe("CLI integration: skill-list", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// NEW TESTS: backlog command
+// NEW TESTS: tasks command
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("CLI integration: backlog", () => {
+describe("CLI integration: tasks", () => {
   let cortexDir: string;
   let cleanup: () => void;
 
@@ -1155,14 +1155,13 @@ describe("CLI integration: backlog", () => {
 
   afterEach(() => cleanup());
 
-  it("prints no backlogs found when none exist", () => {
+  it("prints no tasks found when none exist", () => {
     const { stdout, exitCode } = runCli(
-      ["backlog"],
+      ["tasks"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    // Either "No backlogs found" or "All backlogs are empty"
-    expect(stdout).toMatch(/(No backlogs found|All backlogs are empty)/);
+    expect(stdout).toMatch(/(No tasks found|All tasks are empty)/);
   });
 
   it("lists active and queued items", () => {
@@ -1174,7 +1173,7 @@ describe("CLI integration: backlog", () => {
     );
 
     const { stdout, exitCode } = runCli(
-      ["backlog"],
+      ["tasks"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -1195,7 +1194,7 @@ describe("CLI integration: backlog", () => {
     }
 
     const { stdout, exitCode } = runCli(
-      ["backlog"],
+      ["tasks"],
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
@@ -1459,7 +1458,7 @@ describe("CLI integration: doctor edge cases", () => {
     expect(output).toContain("machine-registered");
   });
 
-  it("--check-data reports suspect backlog hygiene items", () => {
+  it("--check-data reports suspect task hygiene items", () => {
     const profilesDir = path.join(cortexDir, "profiles");
     fs.mkdirSync(profilesDir, { recursive: true });
     fs.writeFileSync(path.join(profilesDir, "test.yaml"), "name: test\ndescription: Test\nprojects:\n  - doc-proj\n");
@@ -1481,8 +1480,8 @@ describe("CLI integration: doctor edge cases", () => {
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     const output = stdout + stderr;
-    expect(output).toContain("data:backlog-hygiene:doc-proj");
-    expect(output).toContain("suspect item");
+    expect(output).toContain("data:task-hygiene:doc-proj");
+    expect(output).toContain("suspect task");
   });
 });
 

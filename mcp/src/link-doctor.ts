@@ -546,15 +546,15 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
         const content = fs.readFileSync(backlogPath, "utf8");
         const issues = validateBacklogFormat(content);
         checks.push({
-          name: `data:backlog:${projectName}`,
+          name: `data:tasks:${projectName}`,
           ok: issues.length === 0,
-          detail: issues.length ? issues.join("; ") : "valid",
+          detail: issues.length ? issues.join("; ") : "valid task file",
         });
 
         const repoPath = findProjectDir(projectName);
         const hygiene = inspectBacklogHygiene(cortexPath, projectName, repoPath);
         checks.push({
-          name: `data:backlog-hygiene:${projectName}`,
+          name: `data:task-hygiene:${projectName}`,
           ok: hygiene.ok,
           detail: hygiene.detail,
         });

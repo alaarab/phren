@@ -36,7 +36,7 @@ export async function handleConfig(args: string[]) {
 
 Subcommands:
   cortex config policy [get|set ...]     Memory retention, TTL, confidence, decay
-  cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds
+  cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds, task automation mode
   cortex config access [get|set ...]     Role-based permissions (admin/maintainer/contributor/viewer)
   cortex config index [get|set ...]      Indexer include/exclude globs
   cortex config machines                 Registered machines and profiles
@@ -153,7 +153,7 @@ export async function handleWorkflowPolicy(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: cortex config workflow [get|set --requireMaintainerApproval=true --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts]");
+  console.error("Usage: cortex config workflow [get|set --requireMaintainerApproval=true --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts --taskMode=manual]");
   process.exit(1);
 }
 

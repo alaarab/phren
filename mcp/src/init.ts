@@ -231,7 +231,7 @@ async function runWalkthrough(): Promise<{ machine: string; profile: string; mcp
 
   log("\n─── MCP ────────────────────────────────────────────────────────────────");
   log("MCP mode registers cortex as a tool server so your AI agent can call it");
-  log("directly: search memory, manage backlog, save findings, etc.");
+  log("directly: search memory, manage tasks, save findings, etc.");
   log("  Recommended for: Claude Code, Cursor, Copilot CLI, Codex");
   log("  Alternative: hooks-only mode (read-only context injection, any agent)");
   log("  Change later: npx @alaarab/cortex mcp-mode on|off");
@@ -732,7 +732,7 @@ export async function runInit(opts: InitOptions = {}) {
       );
       atomicWriteText(
         path.join(cortexPath, firstProjectName, "backlog.md"),
-        `# ${firstProjectName} backlog\n\n## Active\n\n## Queue\n\n## Done\n`
+        `# ${firstProjectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
       );
     }
     const profileName = opts.profile || "personal";
