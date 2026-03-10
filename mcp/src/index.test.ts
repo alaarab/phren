@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFileSync } from "child_process";
 import { sanitizeFts5Query, isValidProjectName, safeProjectPath, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import { debugLog } from "./shared.js";
 import {
@@ -19,48 +18,12 @@ import {
   addFindingToFile,
   extractConflictVersions,
 } from "./shared-content.js";
-import { grantAdmin, makeTempDir } from "./test-helpers.js";
+import { grantAdmin, makeTempDir, runCliExec } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 
-const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
-const REPO_ROOT = path.resolve(__dirname, "../..");
-let cliBuiltForCurrentProcess = false;
-
-function ensureCliBuilt(): void {
-  if (fs.existsSync(CLI_PATH)) {
-    cliBuiltForCurrentProcess = true;
-    return;
-  }
-  if (cliBuiltForCurrentProcess) return;
-  execFileSync("npm", ["run", "build"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30000,
-  });
-  cliBuiltForCurrentProcess = true;
-}
-
-function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
-  try {
-    ensureCliBuilt();
-    const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
-      encoding: "utf8",
-      env: { ...process.env, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30000,
-    });
-    return { stdout, stderr: "", exitCode: 0 };
-  } catch (err: any) {
-    return {
-      stdout: err.stdout?.toString() || "",
-      stderr: err.stderr?.toString() || "",
-      exitCode: err.status ?? 1,
-    };
-  }
-}
+const runCli = runCliExec;
 
 describe("sanitizeFts5Query", () => {
   it("passes through a normal query", () => {

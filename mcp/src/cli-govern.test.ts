@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir, writeFile, grantAdmin } from "./test-helpers.js";
+import { makeTempDir, writeFile, grantAdmin, suppressOutput } from "./test-helpers.js";
 
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
@@ -136,7 +136,7 @@ describe("handleMaintain", () => {
     makeProject(cortex, "proj", { "FINDINGS.md": "- a valid finding line\n" });
     const { handleMaintain } = await importGovern(cortex);
     // Should not throw
-    await handleMaintain(["govern", "proj", "--dry-run"]);
+    await suppressOutput(() => handleMaintain(["govern", "proj", "--dry-run"]));
   });
 
   it("routes prune subcommand without error", async () => {
@@ -144,7 +144,7 @@ describe("handleMaintain", () => {
     grantAdmin(cortex);
     makeProject(cortex, "proj", { "FINDINGS.md": "- a finding\n" });
     const { handleMaintain } = await importGovern(cortex);
-    await handleMaintain(["prune", "proj", "--dry-run"]);
+    await suppressOutput(() => handleMaintain(["prune", "proj", "--dry-run"]));
   });
 
   it("routes consolidate subcommand without error", async () => {
@@ -152,7 +152,7 @@ describe("handleMaintain", () => {
     grantAdmin(cortex);
     makeProject(cortex, "proj", { "FINDINGS.md": "- a finding\n" });
     const { handleMaintain } = await importGovern(cortex);
-    await handleMaintain(["consolidate", "proj", "--dry-run"]);
+    await suppressOutput(() => handleMaintain(["consolidate", "proj", "--dry-run"]));
   });
 
   it("prints help for unknown subcommand and exits", async () => {
@@ -163,7 +163,7 @@ describe("handleMaintain", () => {
       throw new Error("process.exit");
     });
     try {
-      await handleMaintain(["unknown-sub"]);
+      await suppressOutput(() => handleMaintain(["unknown-sub"]));
     } catch (e: any) {
       expect(e.message).toBe("process.exit");
     }
@@ -176,7 +176,7 @@ describe("handleMaintain", () => {
     grantAdmin(cortex);
     const { handleMaintain } = await importGovern(cortex);
     // undefined subcommand => prints help, no exit
-    await handleMaintain([]);
+    await suppressOutput(() => handleMaintain([]));
   });
 });
 

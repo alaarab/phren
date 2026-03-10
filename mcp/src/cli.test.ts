@@ -1,47 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFileSync, spawnSync } from "child_process";
-import { grantAdmin, makeTempDir, setupIsolatedCliEnv, type IsolatedCliEnv } from "./test-helpers.js";
+import { grantAdmin, makeTempDir, setupIsolatedCliEnv, runCliSpawn, type IsolatedCliEnv } from "./test-helpers.js";
 import { getMachineName } from "./link.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
-const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
-const REPO_ROOT = path.resolve(__dirname, "../..");
-let cliBuiltForCurrentProcess = false;
-
-function ensureCliBuilt(): void {
-  if (fs.existsSync(CLI_PATH)) {
-    cliBuiltForCurrentProcess = true;
-    return;
-  }
-  if (cliBuiltForCurrentProcess) return;
-  execFileSync("npm", ["run", "build"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30000,
-  });
-  cliBuiltForCurrentProcess = true;
-}
-
-function runCli(args: string[], env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
-  ensureCliBuilt();
-  const result = spawnSync(process.execPath, [CLI_PATH, ...args], {
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30000,
-  });
-  if (result.error) {
-    throw result.error;
-  }
-  return {
-    stdout: result.stdout || "",
-    stderr: result.stderr || "",
-    exitCode: result.status ?? 1,
-  };
-}
+const runCli = runCliSpawn;
 
 function setupCortexDir(): { cortexDir: string; cleanup: () => void } {
   const tmp = makeTempDir("cortex-cli-test-");

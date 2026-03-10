@@ -62,7 +62,7 @@ import {
   extractConflictVersions,
 } from "./shared-content.js";
 import { isValidProjectName } from "./utils.js";
-import { grantAdmin, makeTempDir } from "./test-helpers.js";
+import { grantAdmin, makeTempDir, suppressOutput } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -182,12 +182,12 @@ describe("findCortexPath", () => {
 });
 
 describe("ensureCortexPath", () => {
-  it("creates ~/.cortex if nothing exists", () => {
+  it("creates ~/.cortex if nothing exists", async () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
     process.env.HOME = tmp.path;
     try {
-      const result = ensureCortexPath();
+      const result = await suppressOutput(() => Promise.resolve(ensureCortexPath()));
       expect(result).toBe(path.join(tmp.path, ".cortex"));
       expect(fs.existsSync(result)).toBe(true);
       expect(fs.existsSync(path.join(result, "README.md"))).toBe(true);
@@ -320,7 +320,7 @@ describe("buildIndex and queryRows", () => {
       // Q18: when a profile is set but the file is malformed, getProjectDirs returns []
       // and buildIndex produces an empty (but valid) FTS database — it does NOT widen
       // to all projects, which would violate profile-based access control.
-      const db = await buildIndex(cortex, "broken");
+      const db = await suppressOutput(() => buildIndex(cortex, "broken"));
       const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["fallback"]);
       expect(rows).toBeNull(); // empty DB — no documents indexed
       db.close();
@@ -1856,9 +1856,9 @@ describe("getProjectDirs", () => {
     expect(names).toContain("org");
   });
 
-  it("rejects invalid profile names", () => {
+  it("rejects invalid profile names", async () => {
     const cortex = makeCortex();
-    const dirs = getProjectDirs(cortex, "../bad");
+    const dirs = await suppressOutput(() => Promise.resolve(getProjectDirs(cortex, "../bad")));
     expect(dirs).toEqual([]);
   });
 });
@@ -2100,12 +2100,12 @@ describe("findCortexPathWithArg", () => {
     expect(() => findCortexPathWithArg("/nonexistent/path")).toThrow();
   });
 
-  it("falls back to ensureCortexPath when no arg given", () => {
+  it("falls back to ensureCortexPath when no arg given", async () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
     process.env.HOME = tmp.path;
     try {
-      const result = findCortexPathWithArg();
+      const result = await suppressOutput(() => Promise.resolve(findCortexPathWithArg()));
       expect(result).toBe(path.join(tmp.path, ".cortex"));
       expect(fs.existsSync(result)).toBe(true);
     } finally {
