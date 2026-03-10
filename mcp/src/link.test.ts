@@ -535,6 +535,9 @@ describe("link", () => {
       const content = fs.readFileSync(skillFile, "utf8");
       expect(content).toContain("cortex");
       expect(content).toContain("hooks:");
+      expect(content).toContain("npx -y @alaarab/cortex@");
+      expect(content).not.toContain(tmpRoot);
+      expect(content).not.toContain(".npm/_npx");
     });
 
     it("mirrors resolved global plus project skills and generates AGENTS.md", async () => {

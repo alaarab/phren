@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { commandExists, detectInstalledTools, buildLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks } from "./hooks.js";
+import { commandExists, detectInstalledTools, buildLifecycleCommands, buildSharedLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks } from "./hooks.js";
 import { makeTempDir } from "./test-helpers.js";
 import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import { CortexError, type CortexErrorCode } from "./shared.js";
@@ -71,6 +71,19 @@ describe("hooks", () => {
     it("escapes paths with special characters", () => {
       const cmds = buildLifecycleCommands('/tmp/my "cortex" path');
       expect(cmds.sessionStart).toContain('\\"cortex\\"');
+    });
+  });
+
+  describe("buildSharedLifecycleCommands", () => {
+    it("uses versioned npx commands without embedding local cortex paths", () => {
+      const cmds = buildSharedLifecycleCommands();
+      expect(cmds.sessionStart).toContain("npx -y @alaarab/cortex@");
+      expect(cmds.sessionStart).toContain("hook-session-start");
+      expect(cmds.userPromptSubmit).toContain("hook-prompt");
+      expect(cmds.stop).toContain("hook-stop");
+      expect(cmds.hookTool).toContain("hook-tool");
+      expect(cmds.sessionStart).not.toContain("CORTEX_PATH=");
+      expect(cmds.sessionStart).not.toContain(".npm/_npx");
     });
   });
 
@@ -491,6 +504,7 @@ describe("hooks", () => {
       expect(configured).toEqual(["Copilot CLI", "Codex"]);
 
       const lifecycle = buildLifecycleCommands(cortexPath);
+      const sharedLifecycle = buildSharedLifecycleCommands();
       const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "cortex.json"), "utf8"));
       expect(copilot.hooks.sessionStart[0].bash).toBe(lifecycle.sessionStart);
       expect(copilot.hooks.userPromptSubmitted[0].bash).toBe(lifecycle.userPromptSubmit);
@@ -499,9 +513,11 @@ describe("hooks", () => {
       expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(false);
 
       const codex = JSON.parse(fs.readFileSync(path.join(cortexPath, "codex.json"), "utf8"));
-      expect(codex.hooks.SessionStart[0].command).toBe(lifecycle.sessionStart);
-      expect(codex.hooks.UserPromptSubmit[0].command).toBe(lifecycle.userPromptSubmit);
-      expect(codex.hooks.Stop[0].command).toBe(lifecycle.stop);
+      expect(codex.hooks.SessionStart[0].command).toBe(sharedLifecycle.sessionStart);
+      expect(codex.hooks.UserPromptSubmit[0].command).toBe(sharedLifecycle.userPromptSubmit);
+      expect(codex.hooks.Stop[0].command).toBe(sharedLifecycle.stop);
+      expect(codex.hooks.SessionStart[0].command).not.toContain(cortexPath);
+      expect(codex.hooks.SessionStart[0].command).not.toContain(".npm/_npx");
 
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(false);
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "cursor"))).toBe(false);

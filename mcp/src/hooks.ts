@@ -83,6 +83,16 @@ export interface LifecycleCommands {
   hookTool: string;
 }
 
+function buildPackageLifecycleCommands(): LifecycleCommands {
+  const packageSpec = cortexPackageSpec();
+  return {
+    sessionStart: `npx -y ${packageSpec} hook-session-start`,
+    userPromptSubmit: `npx -y ${packageSpec} hook-prompt`,
+    stop: `npx -y ${packageSpec} hook-stop`,
+    hookTool: `npx -y ${packageSpec} hook-tool`,
+  };
+}
+
 export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
   const entry = resolveCliEntryScript();
   const isWindows = process.platform === "win32";
@@ -121,6 +131,10 @@ export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
     stop: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-stop`,
     hookTool: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-tool`,
   };
+}
+
+export function buildSharedLifecycleCommands(): LifecycleCommands {
+  return buildPackageLifecycleCommands();
 }
 
 function installSessionWrapper(tool: string, cortexPath: string): boolean {
@@ -491,6 +505,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
   if (detected.has("codex")) {
     const codexFile = hookConfigPath("codex", cortexPath);
     try {
+      const lifecycle = buildSharedLifecycleCommands();
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] configureAllHooks codexRead: ${errorMessage(err)}\n`);
@@ -498,9 +513,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       const config: CodexHookConfig = {
         ...existing,
         hooks: {
-          SessionStart: [{ type: "command", command: pullCmd }],
-          UserPromptSubmit: [{ type: "command", command: promptCmd }],
-          Stop: [{ type: "command", command: stopCmd }],
+          SessionStart: [{ type: "command", command: lifecycle.sessionStart }],
+          UserPromptSubmit: [{ type: "command", command: lifecycle.userPromptSubmit }],
+          Stop: [{ type: "command", command: lifecycle.stop }],
         },
       };
       if (!validateCodexConfig(config)) throw new Error("invalid codex hook config shape");
