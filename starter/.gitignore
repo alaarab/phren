@@ -1,5 +1,13 @@
 .DS_Store
 *.swp
+.governance/memory-scores.json
+.governance/memory-usage.log
+.governance/runtime-health.json
+.governance/session-metrics.json
+.governance/search-history.jsonl
+.governance/background-maintenance.log
+.governance/canonical-locks.json
+.governance/shell-state.json
 .runtime/
 .sessions/
 .cache/

@@ -113,6 +113,16 @@ describe.sequential("mcp mode configuration", () => {
     expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "skills", "pipeline.md.new"));
   });
 
+  it("ships starter gitignore entries for local governance runtime state", () => {
+    const starterGitignore = fs.readFileSync(path.join("starter", ".gitignore"), "utf8");
+
+    expect(starterGitignore).toContain(".governance/runtime-health.json");
+    expect(starterGitignore).toContain(".governance/memory-scores.json");
+    expect(starterGitignore).toContain(".governance/shell-state.json");
+    expect(starterGitignore).toContain(".runtime/");
+    expect(starterGitignore).toContain(".sessions/");
+  });
+
   it("defaults to mcp enabled and persists preference updates", () => {
     expect(getMcpEnabledPreference(cortexPath)).toBe(true);
     setMcpEnabledPreference(cortexPath, false);
