@@ -1,8 +1,7 @@
 import * as fs from "fs";
-import * as path from "path";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import { debugLog, defaultCortexPath, homePath } from "./cortex-paths.js";
-import { readInstallPreferences } from "./init-preferences.js";
+import { governanceInstallPreferencesFile, readInstallPreferences } from "./init-preferences.js";
 import { errorMessage } from "./utils.js";
 
 export const PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
@@ -21,31 +20,61 @@ function parseProactivityLevel(raw: string | undefined | null): ProactivityLevel
     : undefined;
 }
 
-function readLegacyGovernanceProactivityPreference(): ProactivityLevel | undefined {
+interface GovernanceProactivityPreferences {
+  proactivity?: ProactivityLevel;
+  proactivityFindings?: ProactivityLevel;
+  proactivityBacklog?: ProactivityLevel;
+}
+
+function readGovernanceProactivityPreferences(): GovernanceProactivityPreferences {
   const candidates = new Set<string>([
-    path.join(defaultCortexPath(), ".governance", "install-preferences.json"),
-    homePath(".cortex", ".governance", "install-preferences.json"),
+    governanceInstallPreferencesFile(defaultCortexPath()),
+    governanceInstallPreferencesFile(homePath(".cortex")),
   ]);
 
   for (const filePath of candidates) {
     if (!fs.existsSync(filePath)) continue;
     try {
-      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as { proactivity?: string };
-      const level = parseProactivityLevel(parsed?.proactivity);
-      if (level) return level;
+      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+        proactivity?: string;
+        proactivityFindings?: string;
+        proactivityBacklog?: string;
+      };
+      return {
+        proactivity: parseProactivityLevel(parsed?.proactivity),
+        proactivityFindings: parseProactivityLevel(parsed?.proactivityFindings),
+        proactivityBacklog: parseProactivityLevel(parsed?.proactivityBacklog),
+      };
     } catch (err: unknown) {
-      debugLog(`readLegacyGovernanceProactivityPreference: failed to parse ${filePath}: ${errorMessage(err)}`);
+      debugLog(`readGovernanceProactivityPreferences: failed to parse ${filePath}: ${errorMessage(err)}`);
     }
   }
 
-  return undefined;
+  return {};
 }
 
 function getConfiguredProactivityDefault(): ProactivityLevel {
+  const governancePreference = readGovernanceProactivityPreferences().proactivity;
+  if (governancePreference) return governancePreference;
+
   const runtimePreference = parseProactivityLevel(readInstallPreferences(defaultCortexPath()).proactivity);
   if (runtimePreference) return runtimePreference;
 
-  return readLegacyGovernanceProactivityPreference() ?? DEFAULT_PROACTIVITY_LEVEL;
+  return DEFAULT_PROACTIVITY_LEVEL;
+}
+
+function getConfiguredProactivityLevelForFindingsDefault(): ProactivityLevel {
+  const sharedEnvPreference = parseProactivityLevel(process.env.CORTEX_PROACTIVITY);
+  if (sharedEnvPreference) return sharedEnvPreference;
+
+  return readGovernanceProactivityPreferences().proactivityFindings ?? getConfiguredProactivityDefault();
+}
+
+function getConfiguredProactivityLevelForBacklogDefault(): ProactivityLevel {
+  const sharedEnvPreference = parseProactivityLevel(process.env.CORTEX_PROACTIVITY);
+  if (sharedEnvPreference) return sharedEnvPreference;
+
+  return readGovernanceProactivityPreferences().proactivityBacklog ?? getConfiguredProactivityDefault();
 }
 
 function resolveProactivityLevel(raw: string | undefined, fallback: ProactivityLevel): ProactivityLevel {
@@ -59,12 +88,12 @@ export function getProactivityLevel(): ProactivityLevel {
 
 export function getProactivityLevelForFindings(): ProactivityLevel {
   bootstrapCortexDotEnv();
-  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY_FINDINGS, getProactivityLevel());
+  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY_FINDINGS, getConfiguredProactivityLevelForFindingsDefault());
 }
 
 export function getProactivityLevelForBacklog(): ProactivityLevel {
   bootstrapCortexDotEnv();
-  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY_BACKLOG, getProactivityLevel());
+  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY_BACKLOG, getConfiguredProactivityLevelForBacklogDefault());
 }
 
 export function hasExplicitFindingSignal(...texts: Array<string | undefined | null>): boolean {

@@ -11,6 +11,18 @@ import {
 } from "./shared-governance.js";
 import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "./data-access.js";
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "./telemetry.js";
+import {
+  governanceInstallPreferencesFile,
+  readGovernanceInstallPreferences,
+  writeGovernanceInstallPreferences,
+} from "./init-preferences.js";
+import {
+  PROACTIVITY_LEVELS,
+  getProactivityLevel,
+  getProactivityLevelForBacklog,
+  getProactivityLevelForFindings,
+  type ProactivityLevel,
+} from "./proactivity.js";
 // ── Config router ────────────────────────────────────────────────────────────
 
 export async function handleConfig(args: string[]) {
@@ -31,6 +43,10 @@ export async function handleConfig(args: string[]) {
       return handleConfigProfiles();
     case "telemetry":
       return handleConfigTelemetry(rest);
+    case "proactivity":
+    case "proactivity.findings":
+    case "proactivity.backlog":
+      return handleConfigProactivity(sub, rest);
     default:
       console.log(`cortex config - manage settings and policies
 
@@ -39,6 +55,11 @@ Subcommands:
   cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds, task automation mode
   cortex config access [get|set ...]     Role-based permissions (admin/maintainer/contributor/viewer)
   cortex config index [get|set ...]      Indexer include/exclude globs
+  cortex config proactivity [level]      Base auto-capture level (high|medium|low)
+  cortex config proactivity.findings [level]
+                                        Findings-specific auto-capture level override
+  cortex config proactivity.backlog [level]
+                                        Backlog-specific auto-capture level override
   cortex config machines                 Registered machines and profiles
   cortex config profiles                 All profiles and their projects
   cortex config telemetry [on|off|reset] Local usage stats (opt-in, no external reporting)`);
@@ -47,6 +68,70 @@ Subcommands:
         process.exit(1);
       }
   }
+}
+
+function normalizeProactivityLevel(raw: string | undefined): ProactivityLevel | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  return PROACTIVITY_LEVELS.includes(normalized as ProactivityLevel)
+    ? normalized as ProactivityLevel
+    : undefined;
+}
+
+function printProactivityUsage(subcommand: string): void {
+  console.error(`Usage: cortex config ${subcommand} [high|medium|low]`);
+}
+
+function proactivityConfigSnapshot(cortexPath: string) {
+  const prefs = readGovernanceInstallPreferences(cortexPath);
+  return {
+    path: governanceInstallPreferencesFile(cortexPath),
+    configured: {
+      proactivity: prefs.proactivity ?? null,
+      proactivityFindings: prefs.proactivityFindings ?? null,
+      proactivityBacklog: prefs.proactivityBacklog ?? null,
+    },
+    effective: {
+      proactivity: getProactivityLevel(),
+      proactivityFindings: getProactivityLevelForFindings(),
+      proactivityBacklog: getProactivityLevelForBacklog(),
+    },
+  };
+}
+
+function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findings" | "proactivity.backlog", args: string[]) {
+  const cortexPath = getCortexPath();
+  const value = args[0];
+
+  if (value === undefined) {
+    console.log(JSON.stringify(proactivityConfigSnapshot(cortexPath), null, 2));
+    return;
+  }
+
+  if (args.length !== 1) {
+    printProactivityUsage(subcommand);
+    process.exit(1);
+  }
+
+  const level = normalizeProactivityLevel(value);
+  if (!level) {
+    printProactivityUsage(subcommand);
+    process.exit(1);
+  }
+
+  switch (subcommand) {
+    case "proactivity":
+      writeGovernanceInstallPreferences(cortexPath, { proactivity: level });
+      break;
+    case "proactivity.findings":
+      writeGovernanceInstallPreferences(cortexPath, { proactivityFindings: level });
+      break;
+    case "proactivity.backlog":
+      writeGovernanceInstallPreferences(cortexPath, { proactivityBacklog: level });
+      break;
+  }
+
+  console.log(JSON.stringify(proactivityConfigSnapshot(cortexPath), null, 2));
 }
 
 // ── Index policy ─────────────────────────────────────────────────────────────

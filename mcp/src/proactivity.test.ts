@@ -91,6 +91,18 @@ describe("proactivity config", () => {
     expect(getProactivityLevelForBacklog()).toBe("low");
   });
 
+  it("uses split governance install preferences for findings and backlog defaults", () => {
+    writeGovernanceInstallPreferences({
+      proactivity: "low",
+      proactivityFindings: "high",
+      proactivityBacklog: "medium",
+    });
+
+    expect(getProactivityLevel()).toBe("low");
+    expect(getProactivityLevelForFindings()).toBe("high");
+    expect(getProactivityLevelForBacklog()).toBe("medium");
+  });
+
   it("keeps env vars higher priority than governance defaults", () => {
     writeGovernanceInstallPreferences({ proactivity: "low" });
     process.env.CORTEX_PROACTIVITY = "medium";
