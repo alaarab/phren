@@ -28,7 +28,7 @@
   linkcolor=blue!45!black,
   urlcolor=blue!45!black,
   citecolor=blue!45!black,
-  pdftitle={Cortex: A Git-Backed Memory System for AI Agents},
+  pdftitle={Cortex: A Git-Backed Project Memory System},
   pdfauthor={Ala Arab}
 }
 
@@ -58,7 +58,7 @@
 \title{\vspace{-0.8em}Cortex: A Git-Backed Project Memory System\\[2pt]
 \large Architecture, Governance, Concurrent Use, and Comparative Assessment}
 \author{Ala Arab}
-\date{March 9, 2026}
+\date{March 10, 2026}
 
 \begin{document}
 
@@ -256,6 +256,10 @@ This section is intentionally split between what is currently comparable and wha
 
 The current paper can support two kinds of claims. First, architecture-level differences such as ownership, governance, portability, and review workflow can be compared from public evidence. Second, direct measured retrieval claims are currently defensible only for Cortex, and potentially for other local systems once they are benchmarked on shared corpora. No public retrieval-latency benchmark spans all four systems in a directly comparable way, so cross-system speed claims still require direct measurement.
 
+\subsection{Measured local comparison on a shared synthetic corpus}
+
+A fresh March 10, 2026 rerun exercised Cortex and claude-mem on the same identifier-heavy synthetic corpora at 1k, 10k, and 100k memories using persisted local stores and the same query shape \cite{cortex-bench,cortex-bench-claude,cortex-bench-compare}. The result is operational rather than universal: Cortex averaged 5.19/13.20/91.63\,ms lexical query latency with exact top-hit rates of 12/12 at each size, while claude-mem averaged 221.07/147.91/225.11\,ms with exact top-hit rates of 0/8. Even with \texttt{--skip-seed}, claude-mem still paid 25--4062\,ms of Chroma-side backfill/check work before the query path settled. This does not show that lexical retrieval is always superior to semantic retrieval. It shows that on a coding-style corpus with strong identifiers, Cortex's lexical-first path was cheaper, more stable, and more exact.
+
 \subsection{Operational fit (non-empirical)}
 
 \begin{itemize}
@@ -327,6 +331,7 @@ These numbers are implementation checks on one live cortex store, not a general 
   \item persistent candidate pruning still reduced the cosine stage to roughly 6.3--8.6\% of the eligible corpus when vector recovery did fire.
 \end{itemize}
 The interpretation is intentionally modest: on this corpus the lexical path was strong enough that vector recovery was usually unnecessary, so the hybrid path inherited nearly the same speed profile. Synthetic large-corpus scaling runs are documented separately in the benchmark protocol; they are useful for index and latency scaling, but they answer a different question than this live-store measurement.
+The March 10 shared-corpus rerun against claude-mem reached the same practical conclusion from the other direction: on identifier-heavy coding queries, lexical-first retrieval stayed cheaper and more exact than the semantic-first alternative, even when the competitor's corpus had already been seeded.
 
 \section{Limitations}
 \label{sec:limitations}
@@ -393,6 +398,8 @@ Managed alternatives are reasonable when memory is expected to arrive bundled wi
 \bibitem{cortex-hooks} Cortex: \texttt{mcp/src/hooks.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/hooks.ts}
 \bibitem{cortex-index} Cortex: \texttt{mcp/src/index.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/index.ts}
 \bibitem{cortex-bench} Cortex: \texttt{scripts/bench-retrieval-modes.ts}. \url{https://github.com/alaarab/cortex/blob/main/scripts/bench-retrieval-modes.ts}
+\bibitem{cortex-bench-claude} Cortex: \texttt{scripts/bench-claude-mem-synthetic.ts}. \url{https://github.com/alaarab/cortex/blob/main/scripts/bench-claude-mem-synthetic.ts}
+\bibitem{cortex-bench-compare} Cortex: \texttt{docs/benchmark-comparison-fair.md}. \url{https://github.com/alaarab/cortex/blob/main/docs/benchmark-comparison-fair.md}
 \end{thebibliography}
 \end{multicols}
 
