@@ -9,6 +9,7 @@ import { showFindingDetail } from "./findingViewer";
 import { showProjectFile } from "./projectFileViewer";
 import { showSkillEditor } from "./skillEditor";
 import { showTaskDetail } from "./taskViewer";
+import { showQueueItemDetail, type QueueItemData } from "./queueViewer";
 import { pathExists, resolveRuntimeConfig } from "./runtimeConfig";
 
 let client: CortexClient | undefined;
@@ -195,6 +196,68 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
+  const openQueueItemDisposable = vscode.commands.registerCommand(
+    "cortex.openQueueItem",
+    (item: QueueItemData) => {
+      showQueueItemDetail(cortexClient, item, refreshTree);
+    },
+  );
+
+  const filterFindingsByDateDisposable = vscode.commands.registerCommand(
+    "cortex.filterFindingsByDate",
+    async () => {
+      const current = treeDataProvider.getDateFilter();
+      const picks: vscode.QuickPickItem[] = [
+        { label: "Today", description: "Show only today's findings" },
+        { label: "Last 7 days", description: "Show findings from the past week" },
+        { label: "Last 30 days", description: "Show findings from the past month" },
+        { label: "Custom range...", description: "Pick a start and end date" },
+        { label: "Clear filter", description: current ? `Currently: ${current.label}` : "No filter active" },
+      ];
+
+      const choice = await vscode.window.showQuickPick(picks, { placeHolder: "Filter findings by date" });
+      if (!choice) return;
+
+      if (choice.label === "Clear filter") {
+        treeDataProvider.setDateFilter(undefined);
+        return;
+      }
+
+      const today = new Date();
+      const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+      if (choice.label === "Today") {
+        const todayStr = fmt(today);
+        treeDataProvider.setDateFilter({ from: todayStr, to: todayStr, label: "Today" });
+      } else if (choice.label === "Last 7 days") {
+        const from = new Date(today);
+        from.setDate(from.getDate() - 7);
+        treeDataProvider.setDateFilter({ from: fmt(from), to: fmt(today), label: "Last 7 days" });
+      } else if (choice.label === "Last 30 days") {
+        const from = new Date(today);
+        from.setDate(from.getDate() - 30);
+        treeDataProvider.setDateFilter({ from: fmt(from), to: fmt(today), label: "Last 30 days" });
+      } else if (choice.label === "Custom range...") {
+        const fromStr = await vscode.window.showInputBox({
+          prompt: "Start date (YYYY-MM-DD)",
+          placeHolder: "2026-01-01",
+          validateInput: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : "Use YYYY-MM-DD format",
+        });
+        if (!fromStr) return;
+
+        const toStr = await vscode.window.showInputBox({
+          prompt: "End date (YYYY-MM-DD)",
+          placeHolder: fmt(today),
+          value: fmt(today),
+          validateInput: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : "Use YYYY-MM-DD format",
+        });
+        if (!toStr) return;
+
+        treeDataProvider.setDateFilter({ from: fromStr, to: toStr, label: `${fromStr} to ${toStr}` });
+      }
+    },
+  );
+
   context.subscriptions.push(
     setActiveProjectDisposable,
     addFindingDisposable,
@@ -207,6 +270,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     toggleSkillDisposable,
     toggleHookDisposable,
     openTaskDisposable,
+    openQueueItemDisposable,
+    filterFindingsByDateDisposable,
   );
 
   try {

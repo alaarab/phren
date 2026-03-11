@@ -41,6 +41,13 @@ class CortexTreeProvider {
         this.onDidChangeTreeDataEmitter = new vscode.EventEmitter();
         this.onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
     }
+    setDateFilter(filter) {
+        this.dateFilter = filter;
+        this.onDidChangeTreeDataEmitter.fire(undefined);
+    }
+    getDateFilter() {
+        return this.dateFilter;
+    }
     dispose() {
         this.onDidChangeTreeDataEmitter.dispose();
     }
@@ -81,6 +88,7 @@ class CortexTreeProvider {
             return [
                 { kind: "category", projectName: element.projectName, category: "findings" },
                 { kind: "category", projectName: element.projectName, category: "task" },
+                { kind: "category", projectName: element.projectName, category: "queue" },
                 { kind: "category", projectName: element.projectName, category: "reference" },
             ];
         }
@@ -91,10 +99,16 @@ class CortexTreeProvider {
             if (element.category === "task") {
                 return this.getTaskSectionGroups(element.projectName);
             }
+            if (element.category === "queue") {
+                return this.getQueueSectionGroups(element.projectName);
+            }
             if (element.category === "reference") {
                 return this.getReferenceNodes(element.projectName);
             }
             return [];
+        }
+        if (element.kind === "queueSectionGroup") {
+            return this.getQueueItemsForSection(element.projectName, element.section);
         }
         if (element.kind === "findingDateGroup") {
             return this.getFindingsForDate(element.projectName, element.date);
@@ -149,10 +163,17 @@ class CortexTreeProvider {
             }
             case "category": {
                 const cat = element.category ?? "unknown";
-                const categoryLabel = cat.charAt(0).toUpperCase() + cat.slice(1);
+                const categoryLabels = { findings: "Findings", task: "Task", queue: "Review Queue", reference: "Reference" };
+                let categoryLabel = categoryLabels[cat] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
+                if (cat === "findings" && this.dateFilter) {
+                    categoryLabel += ` [${this.dateFilter.label}]`;
+                }
                 const item = new vscode.TreeItem(categoryLabel, vscode.TreeItemCollapsibleState.Collapsed);
                 item.iconPath = themeIcon(categoryIconId(cat));
                 item.id = `cortex.category.${element.projectName}.${cat}`;
+                if (cat === "findings") {
+                    item.contextValue = "cortex.category.findings";
+                }
                 return item;
             }
             case "findingDateGroup": {
@@ -191,6 +212,27 @@ class CortexTreeProvider {
                 item.command = {
                     command: "cortex.openTask",
                     title: "Open Task",
+                    arguments: [element],
+                };
+                return item;
+            }
+            case "queueSectionGroup": {
+                const queueIcons = { Review: "inbox", Stale: "history", Conflicts: "warning" };
+                const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
+                item.description = `${element.count}`;
+                item.iconPath = themeIcon(queueIcons[element.section] ?? "list-flat");
+                item.id = `cortex.queueSectionGroup.${element.projectName}.${element.section}`;
+                return item;
+            }
+            case "queueItem": {
+                const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
+                const confLabel = element.confidence !== undefined ? ` (${Math.round(element.confidence * 100)}%)` : "";
+                item.tooltip = `${element.section} ${element.id}${confLabel}\n${element.date}\n${element.text}`;
+                item.iconPath = themeIcon(element.risky ? "warning" : "mail");
+                item.id = `cortex.queueItem.${element.projectName}.${element.id}`;
+                item.command = {
+                    command: "cortex.openQueueItem",
+                    title: "Open Queue Item",
                     arguments: [element],
                 };
                 return item;
@@ -268,9 +310,22 @@ class CortexTreeProvider {
     }
     async getFindingDateGroups(projectName) {
         try {
-            const findings = await this.fetchFindings(projectName);
+            let findings = await this.fetchFindings(projectName);
+            // Apply date filter if set
+            if (this.dateFilter) {
+                findings = findings.filter((f) => {
+                    if (f.date === "unknown")
+                        return false;
+                    if (this.dateFilter.from && f.date < this.dateFilter.from)
+                        return false;
+                    if (this.dateFilter.to && f.date > this.dateFilter.to)
+                        return false;
+                    return true;
+                });
+            }
             if (findings.length === 0) {
-                return [{ kind: "message", label: "No findings", iconId: "list-flat" }];
+                const msg = this.dateFilter ? "No findings in date range" : "No findings";
+                return [{ kind: "message", label: msg, iconId: "list-flat" }];
             }
             // Group by date, preserve order (most recent first)
             const dateOrder = [];
@@ -296,7 +351,19 @@ class CortexTreeProvider {
     }
     async getFindingsForDate(projectName, date) {
         try {
-            const findings = await this.fetchFindings(projectName);
+            let findings = await this.fetchFindings(projectName);
+            // Apply date filter if set
+            if (this.dateFilter) {
+                findings = findings.filter((f) => {
+                    if (f.date === "unknown")
+                        return false;
+                    if (this.dateFilter.from && f.date < this.dateFilter.from)
+                        return false;
+                    if (this.dateFilter.to && f.date > this.dateFilter.to)
+                        return false;
+                    return true;
+                });
+            }
             return findings
                 .filter((f) => (f.date || "unknown") === date)
                 .map((finding) => ({
@@ -352,6 +419,54 @@ class CortexTreeProvider {
         }
         catch (error) {
             return [this.errorNode("Failed to load tasks", error)];
+        }
+    }
+    async getQueueSectionGroups(projectName) {
+        try {
+            const items = await this.fetchQueueItems(projectName);
+            if (items.length === 0) {
+                return [{ kind: "message", label: "No items in review queue", iconId: "inbox" }];
+            }
+            const sections = ["Review", "Stale", "Conflicts"];
+            const groups = [];
+            for (const section of sections) {
+                const count = items.filter((i) => i.section === section).length;
+                if (count > 0) {
+                    groups.push({
+                        kind: "queueSectionGroup",
+                        projectName,
+                        section,
+                        count,
+                    });
+                }
+            }
+            return groups.length > 0 ? groups : [{ kind: "message", label: "No items in review queue", iconId: "inbox" }];
+        }
+        catch (error) {
+            return [this.errorNode("Failed to load review queue", error)];
+        }
+    }
+    async getQueueItemsForSection(projectName, section) {
+        try {
+            const items = await this.fetchQueueItems(projectName);
+            return items
+                .filter((i) => i.section === section)
+                .map((item) => ({
+                kind: "queueItem",
+                projectName,
+                id: item.id,
+                section: item.section,
+                date: item.date,
+                text: item.text,
+                line: item.line,
+                confidence: item.confidence,
+                risky: item.risky,
+                machine: item.machine,
+                model: item.model,
+            }));
+        }
+        catch (error) {
+            return [this.errorNode("Failed to load queue items", error)];
         }
     }
     async getReferenceNodes(projectName) {
@@ -510,6 +625,34 @@ class CortexTreeProvider {
         }
         return tasks;
     }
+    async fetchQueueItems(projectName) {
+        const raw = await this.client.getReviewQueue(projectName);
+        const data = responseData(raw);
+        const items = asArray(data?.items);
+        const parsed = [];
+        for (const entry of items) {
+            const record = asRecord(entry);
+            const id = asString(record?.id);
+            const text = asString(record?.text);
+            if (!id || !text) {
+                continue;
+            }
+            const sectionRaw = asString(record?.section) ?? "Review";
+            const section = (["Review", "Stale", "Conflicts"].includes(sectionRaw) ? sectionRaw : "Review");
+            parsed.push({
+                id,
+                section,
+                date: asString(record?.date) ?? "unknown",
+                text,
+                line: asString(record?.line) ?? text,
+                confidence: asNumber(record?.confidence),
+                risky: asBoolean(record?.risky) ?? false,
+                machine: asString(record?.machine),
+                model: asString(record?.model),
+            });
+        }
+        return parsed;
+    }
     async fetchSkills() {
         const raw = await this.client.listSkills();
         const data = responseData(raw);
@@ -544,6 +687,9 @@ function categoryIconId(category) {
     if (category === "task") {
         return "checklist";
     }
+    if (category === "queue") {
+        return "inbox";
+    }
     return "book";
 }
 function taskIconId(task) {
@@ -576,6 +722,9 @@ function asString(value) {
 }
 function asBoolean(value) {
     return typeof value === "boolean" ? value : undefined;
+}
+function asNumber(value) {
+    return typeof value === "number" ? value : undefined;
 }
 function responseData(value) {
     const response = asRecord(value);

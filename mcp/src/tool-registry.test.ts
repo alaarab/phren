@@ -4,13 +4,13 @@ import { getRegisteredTools, getToolCount, renderToolCatalogMarkdown } from "./t
 describe("tool registry", () => {
   it("extracts the live MCP tool inventory from registerTool calls", () => {
     const tools = getRegisteredTools();
-    expect(tools.length).toBe(50);
+    expect(tools.length).toBe(51);
     expect(tools.some((tool) => tool.name === "link_task_issue")).toBe(true);
     expect(tools.some((tool) => tool.name === "promote_task_to_issue")).toBe(true);
   });
 
   it("renders grouped markdown for cortex.SKILL.md", () => {
-    expect(getToolCount()).toBe(50);
+    expect(getToolCount()).toBe(51);
     const markdown = renderToolCatalogMarkdown();
     expect(markdown).toContain("**Search and browse:**");
     expect(markdown).toContain("`search_knowledge`");

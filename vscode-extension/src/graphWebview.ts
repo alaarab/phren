@@ -36,6 +36,7 @@ interface TaskData {
 }
 
 interface EntityData {
+  id?: string;
   name: string;
   type: string;
   refCount: number;
@@ -151,7 +152,7 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
       label: projectName,
       subtype: "project",
       text: summary.summary,
-      radius: 18,
+      radius: Math.min(14 + Math.sqrt(findings.length + tasks.length) * 1.5, 30),
       color: "#7c3aed",
     });
 
@@ -199,11 +200,12 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
   // Entity nodes and edges
   const projectNameSet = new Set(projects.map((p) => p.name));
   for (const entity of entities) {
-    const entityId = `entity:${entity.name}`;
+    const entityId = entity.id || `entity:${entity.name}`;
     const connectedProjects: string[] = [];
     for (const doc of entity.docs) {
       for (const pName of projectNameSet) {
-        if (doc.includes(pName)) {
+        // Path-separator-aware matching: doc must start with "projectName/"
+        if (doc === pName || doc.startsWith(pName + "/") || doc.startsWith(pName + "\\")) {
           connectedProjects.push(pName);
         }
       }
@@ -244,7 +246,7 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
       if (!nodes.find((n) => n.id === refId)) {
         let refProject = "";
         for (const pName of projectNameSet) {
-          if (doc.includes(pName)) {
+          if (doc.startsWith(pName + "/")) {
             refProject = pName;
             break;
           }
@@ -288,9 +290,13 @@ async function fetchProjects(client: CortexClient): Promise<{ name: string; brie
   for (const entry of asArray(data?.projects)) {
     const record = asRecord(entry);
     const name = asString(record?.name);
-    if (name) {
-      parsed.push({ name, brief: asString(record?.brief) });
-    }
+    // Skip bogus entries: paths, reserved names, stale FTS entries
+    if (!name) continue;
+    if (name.includes(":") || name.includes("/") || name.includes("\\")) continue;
+    if (name === "global" || name === "scripts" || name === "templates" || name === "profiles") continue;
+    // Filter known stale/non-profile projects (should be fixed at MCP level long-term)
+    if (name === "dendron" || name === "cortex-framework" || name === "max4liveplugins" || name === "pcn-reports") continue;
+    parsed.push({ name, brief: asString(record?.brief) });
   }
   return parsed;
 }
@@ -497,7 +503,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     .type-badge.reference { background:#14b8a6; }
     .file-badges { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
     .file-badge { font-size:11px; padding:3px 8px; border-radius:999px; border:1px solid var(--border); background:color-mix(in srgb,var(--vscode-editorWidget-background) 80%,transparent); }
-    .detail-text { white-space:pre-wrap; line-height:1.5; font-size:13px; border:1px solid var(--border); border-radius:8px; padding:10px 12px; background:color-mix(in srgb,var(--vscode-editorWidget-background) 60%,transparent); margin-top:8px; }
+    .detail-text { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.5; font-size:13px; border:1px solid var(--border); border-radius:8px; padding:10px 12px; background:color-mix(in srgb,var(--vscode-editorWidget-background) 60%,transparent); margin-top:8px; }
     .detail-label { font-size:11px; opacity:0.6; margin-top:10px; }
     .quality-bar { margin-top:8px; padding:8px; border:1px solid var(--border); border-radius:6px; font-size:12px; }
     .quality-bar .q-row { display:flex; justify-content:space-between; margin:2px 0; }
@@ -510,6 +516,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   </style>
 </head>
 <body>
+  <a href="#detail" class="sr-only" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;z-index:100;" onfocus="this.style.position='static';this.style.width='auto';this.style.height='auto';" onblur="this.style.position='absolute';this.style.left='-9999px';this.style.width='1px';this.style.height='1px';">Skip to details panel</a>
   <div class="filter-bar">
     <input type="text" id="searchBox" placeholder="Search nodes...">
     <div class="type-toggles">
@@ -528,13 +535,21 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       <option value="stale">Stale</option>
       <option value="decaying">Decaying</option>
     </select>
+    <label>Age</label>
+    <select id="filterAge">
+      <option value="all">All</option>
+      <option value="7d">Last 7 days</option>
+      <option value="30d">Last 30 days</option>
+      <option value="90d">Last 90 days</option>
+    </select>
     <label>Limit</label>
     <input type="range" id="nodeLimit" min="10" max="10000" value="500" step="10">
     <span class="limit-val" id="limitVal">500</span>
   </div>
   <main class="layout">
     <section class="canvas-wrap">
-      <canvas id="graph" aria-label="Cortex entity graph"></canvas>
+      <canvas id="graph" aria-label="Cortex entity graph" tabindex="0" role="application"></canvas>
+      <div id="graph-tooltip" style="display:none;position:absolute;pointer-events:none;padding:4px 8px;border-radius:4px;font-size:12px;max-width:300px;word-break:break-all;background:var(--vscode-editorWidget-background);color:var(--vscode-foreground);border:1px solid var(--border);z-index:10;box-shadow:0 2px 6px rgba(0,0,0,0.3)"></div>
       <div class="controls">
         <button id="zoomIn" title="Zoom in">+</button>
         <button id="zoomOut" title="Zoom out">&minus;</button>
@@ -554,8 +569,18 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   var ctx = canvas.getContext("2d");
   var detail = document.getElementById("detail");
   var typeToggles = document.querySelectorAll(".type-toggle");
+
+  // Debug: show node counts in initial detail panel
+  var _counts = {};
+  for (var _i = 0; _i < payload.nodes.length; _i++) {
+    var _k = payload.nodes[_i].kind;
+    _counts[_k] = (_counts[_k] || 0) + 1;
+  }
+  detail.innerHTML = "<h2>Graph loaded</h2><div class='node-name'>Node counts</div>"
+    + "<div class='detail-text'>" + JSON.stringify(_counts) + "\\nEdges: " + payload.edges.length + "</div>";
   var filterProject = document.getElementById("filterProject");
   var filterHealth = document.getElementById("filterHealth");
+  var filterAge = document.getElementById("filterAge");
   var searchBox = document.getElementById("searchBox");
   var nodeLimit = document.getElementById("nodeLimit");
   var limitVal = document.getElementById("limitVal");
@@ -565,17 +590,42 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
 
   /* ── quality multiplier (mirrors governance-scores.ts) ── */
   var NOW = Date.now();
-  function computeQuality(node) {
+
+  // Precompute score lookup: Map from stable node ID/project prefix to best score entry
+  var _scoreByNodeId = {};
+  var _scoreByProject = {};
+  (function buildScoreLookup() {
     var entries = payload.scores && payload.scores.entries ? payload.scores.entries : {};
-    var entry = null;
-    // Try to find a matching score entry by stableId or id
     var keys = Object.keys(entries);
     for (var k = 0; k < keys.length; k++) {
-      if (node.id.indexOf(keys[k]) !== -1 || keys[k].indexOf(node.label) !== -1) {
-        entry = entries[keys[k]];
-        break;
+      var key = keys[k];
+      var entry = entries[key];
+      // Index by exact key
+      _scoreByNodeId[key] = entry;
+      // Also index by project prefix (first path segment)
+      var slashIdx = key.indexOf("/");
+      if (slashIdx !== -1) {
+        var proj = key.substring(0, slashIdx);
+        var existing = _scoreByProject[proj];
+        if (!existing || (entry.impressions || 0) > (existing.impressions || 0)) {
+          _scoreByProject[proj] = entry;
+        }
       }
     }
+  })();
+
+  function lookupScore(node) {
+    // 1. Exact match on stableId if available
+    if (node.stableId && _scoreByNodeId[node.stableId]) return _scoreByNodeId[node.stableId];
+    // 2. Exact match on node.id
+    if (_scoreByNodeId[node.id]) return _scoreByNodeId[node.id];
+    // 3. Project-level fallback
+    if (node.projectName && _scoreByProject[node.projectName]) return _scoreByProject[node.projectName];
+    return null;
+  }
+
+  function computeQuality(node) {
+    var entry = lookupScore(node);
     if (!entry) return { multiplier: 1.0, daysSinceUse: -1, helpful: 0 };
 
     var daysSinceUse = entry.lastUsedAt ? (NOW - new Date(entry.lastUsedAt).getTime()) / 86400000 : 999;
@@ -599,6 +649,47 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     return "decaying";
   }
 
+  /* ── accessibility: health indicators + ARIA ── */
+  function healthStatusLabel(cat) {
+    if (cat === "recent" || cat === "normal") return "H";
+    if (cat === "stale") return "S";
+    if (cat === "decaying") return "D";
+    return null;
+  }
+
+  function healthDashPattern(cat, sc) {
+    if (cat === "recent" || cat === "normal") return [];
+    if (cat === "stale") return [6 / sc, 3 / sc];
+    if (cat === "decaying") return [2 / sc, 3 / sc];
+    return [];
+  }
+
+  var liveRegion = null;
+  var focusedNodeIndex = -1;
+
+  function announce(text) {
+    if (!liveRegion) return;
+    liveRegion.textContent = "";
+    setTimeout(function() { liveRegion.textContent = text; }, 50);
+  }
+
+  function announceNode(node) {
+    if (!node) { announce("No node selected"); return; }
+    var cat = healthCategory(node.daysSinceUse);
+    var parts = [node.label, node.kind];
+    if (cat !== "unknown") parts.push(cat + " health");
+    announce("Selected: " + parts.join(", "));
+  }
+
+  function announceFilterChange() {
+    announce("Showing " + activeNodes.length + " of " + payload.nodes.length + " nodes");
+  }
+
+  function panToNode(nd) {
+    panX = canvasW / 2 - nd.x * scale;
+    panY = canvasH / 2 - nd.y * scale;
+  }
+
   /* ── project filter ── */
   var projectNames = [];
   for (var i = 0; i < payload.nodes.length; i++) {
@@ -617,11 +708,6 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   var selectedId = null;
   var activeNodes = [], activeLinks = [];
   var searchMatches = new Set();
-  var animFrame = null;
-  var alpha = 1.0;
-  var alphaDecay = 0.06;
-  var alphaMin = 0.005;
-  var autoFitOnSettle = true;
   var pulsePhase = 0;
 
   function esc(v) {
@@ -640,7 +726,14 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     var activeKinds = getActiveKinds();
     var projVal = filterProject.value;
     var healthVal = filterHealth.value;
+    var ageVal = filterAge.value;
     var limit = parseInt(nodeLimit.value, 10);
+
+    // Age filter: compute cutoff date
+    var ageCutoff = 0;
+    if (ageVal === "7d") ageCutoff = NOW - 7 * 86400000;
+    else if (ageVal === "30d") ageCutoff = NOW - 30 * 86400000;
+    else if (ageVal === "90d") ageCutoff = NOW - 90 * 86400000;
 
     var filtered = [];
     for (var i = 0; i < payload.nodes.length; i++) {
@@ -653,6 +746,11 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
         if (healthVal === "healthy" && cat !== "recent" && cat !== "normal" && cat !== "unknown") continue;
         if (healthVal === "stale" && cat !== "stale") continue;
         if (healthVal === "decaying" && cat !== "decaying") continue;
+      }
+      // Age filter: skip nodes older than cutoff (projects always pass)
+      if (ageCutoff > 0 && n.kind !== "project") {
+        var nodeDate = n.date ? new Date(n.date).getTime() : 0;
+        if (nodeDate > 0 && nodeDate < ageCutoff) continue;
       }
       filtered.push(n);
     }
@@ -696,94 +794,120 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     return { nodes: result, edges: edgeResult };
   }
 
-  /* ── Barnes-Hut Quadtree ── */
-  var THETA = 0.7;
-  function Quadtree(x, y, w, h) {
-    this.x = x; this.y = y; this.w = w; this.h = h;
-    this.body = null; this.mass = 0; this.cx = 0; this.cy = 0;
-    this.nw = null; this.ne = null; this.sw = null; this.se = null;
-    this.divided = false;
-  }
-  Quadtree.prototype.subdivide = function() {
-    var hw = this.w / 2, hh = this.h / 2;
-    this.nw = new Quadtree(this.x, this.y, hw, hh);
-    this.ne = new Quadtree(this.x + hw, this.y, hw, hh);
-    this.sw = new Quadtree(this.x, this.y + hh, hw, hh);
-    this.se = new Quadtree(this.x + hw, this.y + hh, hw, hh);
-    this.divided = true;
-  };
-  Quadtree.prototype.insert = function(node) {
-    if (node.x < this.x || node.x > this.x + this.w || node.y < this.y || node.y > this.y + this.h) return;
-    if (!this.body && !this.divided) { this.body = node; this.mass = 1; this.cx = node.x; this.cy = node.y; return; }
-    if (!this.divided) {
-      this.subdivide();
-      if (this.body) {
-        var old = this.body; this.body = null;
-        this.nw.insert(old); this.ne.insert(old); this.sw.insert(old); this.se.insert(old);
-      }
-    }
-    this.nw.insert(node); this.ne.insert(node); this.sw.insert(node); this.se.insert(node);
-    this.mass++;
-    this.cx = (this.cx * (this.mass - 1) + node.x) / this.mass;
-    this.cy = (this.cy * (this.mass - 1) + node.y) / this.mass;
-  };
-  Quadtree.prototype.computeMass = function() {
-    if (this.body) { this.mass = 1; this.cx = this.body.x; this.cy = this.body.y; return; }
-    if (!this.divided) { this.mass = 0; return; }
-    this.nw.computeMass(); this.ne.computeMass(); this.sw.computeMass(); this.se.computeMass();
-    this.mass = this.nw.mass + this.ne.mass + this.sw.mass + this.se.mass;
-    if (this.mass > 0) {
-      this.cx = (this.nw.cx * this.nw.mass + this.ne.cx * this.ne.mass + this.sw.cx * this.sw.mass + this.se.cx * this.se.mass) / this.mass;
-      this.cy = (this.nw.cy * this.nw.mass + this.ne.cy * this.ne.mass + this.sw.cy * this.sw.mass + this.se.cy * this.se.mass) / this.mass;
-    }
-  };
-  Quadtree.prototype.forceOn = function(node, strength) {
-    if (this.mass === 0) return;
-    var dx = this.cx - node.x, dy = this.cy - node.y;
-    var distSq = dx * dx + dy * dy;
-    if (distSq < 1) distSq = 1;
-    // If leaf with single body, or cell is far enough
-    if (!this.divided || (this.w / Math.sqrt(distSq)) < THETA) {
-      if (this.body === node) return;
-      var dist = Math.sqrt(distSq);
-      var f = -strength * this.mass / distSq;
-      node.fx += (dx / dist) * f;
-      node.fy += (dy / dist) * f;
-      return;
-    }
-    this.nw.forceOn(node, strength); this.ne.forceOn(node, strength);
-    this.sw.forceOn(node, strength); this.se.forceOn(node, strength);
-  };
-
   /* ── resize ── */
   function resizeCanvas() {
     var rect = canvas.parentElement.getBoundingClientRect();
+    var oldW = canvasW, oldH = canvasH;
     canvasW = Math.max(rect.width, 100);
     canvasH = Math.max(rect.height, 100);
     canvas.width = canvasW * dpr;
     canvas.height = canvasH * dpr;
     canvas.style.width = canvasW + "px";
     canvas.style.height = canvasH + "px";
+    /* preserve viewport center on resize */
+    if (oldW > 0 && oldH > 0) {
+      var oldCX = (oldW / 2 - panX) / scale;
+      var oldCY = (oldH / 2 - panY) / scale;
+      panX = canvasW / 2 - oldCX * scale;
+      panY = canvasH / 2 - oldCY * scale;
+    }
     render();
   }
   window.addEventListener("resize", resizeCanvas);
 
-  /* ── rebuild ── */
+  /* ── PURE STATIC ring layout — NO force simulation ── */
+  var PI2 = Math.PI * 2;
+  var PER_RING = 8;         // nodes per ring
+  var RING_START = 38;      // first ring distance from parent
+  var RING_GAP = 22;        // distance between rings
+
+  function computeChildPositions(parentX, parentY, children) {
+    for (var i = 0; i < children.length; i++) {
+      var ring = Math.floor(i / PER_RING);
+      var pos = i % PER_RING;
+      var countInRing = Math.min(children.length - ring * PER_RING, PER_RING);
+      var r = RING_START + ring * RING_GAP;
+      var offset = (ring % 2 === 1) ? PI2 / (countInRing * 2) : 0;
+      var a = (PI2 * pos / countInRing) + offset;
+      children[i]._rx = parentX + Math.cos(a) * r;
+      children[i]._ry = parentY + Math.sin(a) * r;
+    }
+  }
+
+  /* ── rebuild (pure static — no simulation) ── */
   function rebuild() {
     var data = getFilteredData();
-    activeNodes = data.nodes.map(function(n) {
-      var q = computeQuality(n);
-      return {
-        id: n.id, kind: n.kind, projectName: n.projectName, label: n.label,
-        subtype: n.subtype, text: n.text, radius: n.radius, color: n.color,
-        refCount: n.refCount, date: n.date, section: n.section, priority: n.priority,
-        entityType: n.entityType, connectedProjects: n.connectedProjects,
+
+    var rawProjects = [], allChildren = [];
+    for (var ni = 0; ni < data.nodes.length; ni++) {
+      var nd = data.nodes[ni];
+      if (nd.kind === "project") rawProjects.push(nd);
+      else allChildren.push(nd);
+    }
+
+    // Group children by project
+    var groups = {};
+    for (var ci = 0; ci < allChildren.length; ci++) {
+      var pname = allChildren[ci].projectName || "";
+      if (!groups[pname]) groups[pname] = [];
+      groups[pname].push(allChildren[ci]);
+    }
+
+    // Compute max cluster outer radius
+    var maxClusterR = 30;
+    for (var mc = 0; mc < rawProjects.length; mc++) {
+      var grp = groups[rawProjects[mc].projectName] || [];
+      var lastRing = grp.length > 0 ? Math.floor((grp.length - 1) / PER_RING) : 0;
+      var outerR = RING_START + lastRing * RING_GAP + 14;
+      if (outerR > maxClusterR) maxClusterR = outerR;
+    }
+
+    // Place projects on a ring large enough that clusters never overlap
+    var cx = canvasW / 2, cy = canvasH / 2;
+    var n = rawProjects.length;
+    // Allow clusters to be closer (70% of no-overlap distance) — tighter feel
+    var minProjR = n <= 1 ? 0 : n <= 2 ? maxClusterR * 1.6 : (maxClusterR * 0.7) / Math.sin(Math.PI / n);
+    var projR = Math.max(minProjR, 120);
+    var projMap = {};
+
+    var liveProjects = [];
+    for (var pi = 0; pi < rawProjects.length; pi++) {
+      var rp = rawProjects[pi];
+      var angle = PI2 * pi / Math.max(n, 1) - Math.PI / 2;
+      var q = computeQuality(rp);
+      var lp = {
+        id: rp.id, kind: rp.kind, projectName: rp.projectName, label: rp.label,
+        subtype: rp.subtype, text: rp.text, radius: rp.radius, color: rp.color,
         qualityMultiplier: q.multiplier, daysSinceUse: q.daysSinceUse, helpful: q.helpful,
-        x: canvasW / 2 + (Math.random() - 0.5) * canvasW * 0.5,
-        y: canvasH / 2 + (Math.random() - 0.5) * canvasH * 0.5,
-        vx: 0, vy: 0, fx: 0, fy: 0
+        x: cx + Math.cos(angle) * projR,
+        y: cy + Math.sin(angle) * projR
       };
-    });
+      liveProjects.push(lp);
+      projMap[rp.projectName] = lp;
+    }
+
+    // Place children in rings around their parent
+    var liveChildren = [];
+    for (var pn in groups) {
+      var par = projMap[pn];
+      var px = par ? par.x : cx, py = par ? par.y : cy;
+      computeChildPositions(px, py, groups[pn]);
+      for (var gi = 0; gi < groups[pn].length; gi++) {
+        var rc = groups[pn][gi];
+        var q2 = computeQuality(rc);
+        liveChildren.push({
+          id: rc.id, kind: rc.kind, projectName: rc.projectName, label: rc.label,
+          subtype: rc.subtype, text: rc.text, radius: rc.radius, color: rc.color,
+          refCount: rc.refCount, date: rc.date, section: rc.section, priority: rc.priority,
+          entityType: rc.entityType, connectedProjects: rc.connectedProjects,
+          qualityMultiplier: q2.multiplier, daysSinceUse: q2.daysSinceUse, helpful: q2.helpful,
+          x: rc._rx, y: rc._ry,
+          _parentName: rc.projectName
+        });
+      }
+    }
+
+    activeNodes = liveProjects.concat(liveChildren);
 
     var byId = {};
     for (var i = 0; i < activeNodes.length; i++) byId[activeNodes[i].id] = activeNodes[i];
@@ -792,6 +916,22 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     for (var j = 0; j < data.edges.length; j++) {
       var s = byId[data.edges[j].source], t = byId[data.edges[j].target];
       if (s && t) activeLinks.push({ source: s, target: t });
+    }
+
+    autoFit();
+  }
+
+  // Recompute child ring positions after a project is dragged
+  function recomputeChildren(projectNode) {
+    var pname = projectNode.projectName;
+    var kids = [];
+    for (var i = 0; i < activeNodes.length; i++) {
+      if (activeNodes[i]._parentName === pname) kids.push(activeNodes[i]);
+    }
+    computeChildPositions(projectNode.x, projectNode.y, kids);
+    for (var j = 0; j < kids.length; j++) {
+      kids[j].x = kids[j]._rx;
+      kids[j].y = kids[j]._ry;
     }
   }
 
@@ -803,198 +943,153 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     ctx.translate(panX, panY);
     ctx.scale(scale, scale);
 
-    // Edges: batch by single color
-    ctx.strokeStyle = "rgba(128,128,128,0.12)";
-    ctx.lineWidth = 0.5 / scale;
-    ctx.beginPath();
-    for (var e = 0; e < activeLinks.length; e++) {
-      var link = activeLinks[e];
-      ctx.moveTo(link.source.x, link.source.y);
-      ctx.lineTo(link.target.x, link.target.y);
-    }
-    ctx.stroke();
-
-    // Group nodes by color for batched fills
-    var colorGroups = {};
-    for (var i = 0; i < activeNodes.length; i++) {
-      var n = activeNodes[i];
-      var c = n.color;
-      if (!colorGroups[c]) colorGroups[c] = [];
-      colorGroups[c].push(n);
-    }
-
-    var PI2 = Math.PI * 2;
-    var colors = Object.keys(colorGroups);
-
-    for (var ci = 0; ci < colors.length; ci++) {
-      var group = colorGroups[colors[ci]];
-      // Draw fills
-      for (var gi = 0; gi < group.length; gi++) {
-        var nd = group[gi];
-        var opacity = nodeOpacity(nd.qualityMultiplier || 1);
-        ctx.globalAlpha = opacity;
-        ctx.fillStyle = nd.color;
-        ctx.beginPath();
-        ctx.arc(nd.x, nd.y, nd.radius, 0, PI2);
-        ctx.fill();
-
-        // Health ring
-        var health = healthCategory(nd.daysSinceUse);
-        var ringColor = null;
-        if (health === "recent") ringColor = "#22c55e";
-        else if (health === "stale") ringColor = "#f97316";
-        else if (health === "decaying") ringColor = "#ef4444";
-
-        if (ringColor) {
-          ctx.strokeStyle = ringColor;
-          ctx.lineWidth = 2 / scale;
+    // Cross-project edges — bright and visible
+    ctx.lineWidth = Math.max(0.5, Math.min(2.5 / scale, 3));
+    var _hasSearch = searchMatches.size > 0;
+    if (_hasSearch) {
+      for (var e = 0; e < activeLinks.length; e++) {
+        var link = activeLinks[e];
+        if (link.source.kind === "project" && link.target.kind === "project") {
+          var sMatch = searchMatches.has(link.source.id);
+          var tMatch = searchMatches.has(link.target.id);
           ctx.beginPath();
-          ctx.arc(nd.x, nd.y, nd.radius + 2, 0, PI2);
-          ctx.stroke();
-        }
-
-        // Pulse animation for high-helpful nodes
-        if (nd.helpful >= 3) {
-          var pulseR = nd.radius + 4 + Math.sin(pulsePhase * 3) * 2;
-          ctx.globalAlpha = 0.2 + Math.sin(pulsePhase * 3) * 0.1;
-          ctx.strokeStyle = "#22c55e";
-          ctx.lineWidth = 1.5 / scale;
-          ctx.beginPath();
-          ctx.arc(nd.x, nd.y, pulseR, 0, PI2);
-          ctx.stroke();
-        }
-
-        // Selection ring
-        if (nd.id === selectedId) {
-          ctx.globalAlpha = 1;
-          ctx.strokeStyle = "#ffffff";
-          ctx.lineWidth = 3 / scale;
-          ctx.beginPath();
-          ctx.arc(nd.x, nd.y, nd.radius + 1, 0, PI2);
-          ctx.stroke();
-        }
-
-        // Search highlight
-        if (searchMatches.has(nd.id)) {
-          ctx.globalAlpha = 0.8;
-          ctx.strokeStyle = "#facc15";
-          ctx.lineWidth = 3 / scale;
-          ctx.beginPath();
-          ctx.arc(nd.x, nd.y, nd.radius + 3, 0, PI2);
+          ctx.strokeStyle = (sMatch || tMatch) ? "rgba(160,170,255,0.6)" : "rgba(160,170,255,0.06)";
+          ctx.moveTo(link.source.x, link.source.y);
+          ctx.lineTo(link.target.x, link.target.y);
           ctx.stroke();
         }
       }
+    } else {
+      ctx.strokeStyle = "rgba(160,170,255,0.6)";
+      ctx.beginPath();
+      for (var e = 0; e < activeLinks.length; e++) {
+        var link = activeLinks[e];
+        if (link.source.kind === "project" && link.target.kind === "project") {
+          ctx.moveTo(link.source.x, link.source.y);
+          ctx.lineTo(link.target.x, link.target.y);
+        }
+      }
+      ctx.stroke();
     }
 
-    // Labels (semantic zoom with text backgrounds for readability)
+    // Draw nodes
+    for (var i = 0; i < activeNodes.length; i++) {
+      var nd = activeNodes[i];
+      var opacity = nodeOpacity(nd.qualityMultiplier || 1);
+      /* dim non-matching nodes when search is active */
+      if (searchMatches.size > 0 && !searchMatches.has(nd.id)) opacity = 0.1;
+      ctx.globalAlpha = opacity;
+      ctx.fillStyle = nd.color;
+      ctx.beginPath();
+      ctx.arc(nd.x, nd.y, nd.radius, 0, PI2);
+      ctx.fill();
+
+      // Health ring with dash pattern + text label (WCAG 1.4.1)
+      var health = healthCategory(nd.daysSinceUse);
+      var ringColor = null;
+      if (health === "recent") ringColor = "#22c55e";
+      else if (health === "stale") ringColor = "#f97316";
+      else if (health === "decaying") ringColor = "#ef4444";
+      if (ringColor) {
+        var dashPat = healthDashPattern(health, scale);
+        ctx.strokeStyle = ringColor;
+        ctx.lineWidth = Math.max(0.5, Math.min(2 / scale, 3));
+        if (dashPat.length) ctx.setLineDash(dashPat);
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, nd.radius + 2, 0, PI2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        var hlbl = healthStatusLabel(health);
+        if (hlbl && scale >= 0.5) {
+          var hfs = Math.max(7, Math.round(8 / scale));
+          ctx.font = "600 " + hfs + "px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "#ffffff";
+          ctx.globalAlpha = 0.9;
+          ctx.fillText(hlbl, nd.x, nd.y);
+          ctx.globalAlpha = 1.0;
+        }
+      }
+
+      // Pulse for high-helpful nodes
+      if (nd.helpful >= 3) {
+        var pulseR = nd.radius + 4 + Math.sin(pulsePhase * 3) * 2;
+        ctx.globalAlpha = 0.2 + Math.sin(pulsePhase * 3) * 0.1;
+        ctx.strokeStyle = "#22c55e";
+        ctx.lineWidth = Math.max(0.5, Math.min(1.5 / scale, 3));
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, pulseR, 0, PI2);
+        ctx.stroke();
+      }
+
+      // Selection ring
+      if (nd.id === selectedId) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = Math.max(0.5, Math.min(2.5 / scale, 3));
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, nd.radius + 1.5, 0, PI2);
+        ctx.stroke();
+      }
+
+      // Keyboard focus ring (distinct from selection)
+      if (i === focusedNodeIndex && nd.id !== selectedId) {
+        ctx.globalAlpha = 1;
+        ctx.setLineDash([4 / scale, 3 / scale]);
+        ctx.strokeStyle = "#60a5fa";
+        ctx.lineWidth = 2 / scale;
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, nd.radius + 3, 0, PI2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Search highlight
+      if (searchMatches.has(nd.id)) {
+        ctx.globalAlpha = 0.8;
+        ctx.strokeStyle = "#facc15";
+        ctx.lineWidth = Math.max(0.5, Math.min(2.5 / scale, 3));
+        ctx.beginPath();
+        ctx.arc(nd.x, nd.y, nd.radius + 3, 0, PI2);
+        ctx.stroke();
+      }
+    }
+
+    // Labels — always visible, constant screen-space size
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    var fontSize = Math.max(9, 11 / scale);
-    ctx.font = "500 " + fontSize + "px -apple-system,BlinkMacSystemFont,sans-serif";
+    var fg = getComputedStyle(document.body).color || "#ccc";
+    var bg = getComputedStyle(document.body).backgroundColor || "#1e1e1e";
 
-    if (scale >= 0.25) {
-      var fg = getComputedStyle(document.body).color || "#ccc";
-      var bg = getComputedStyle(document.body).backgroundColor || "#1e1e1e";
+    for (var li = 0; li < activeNodes.length; li++) {
+      var ln = activeNodes[li];
 
-      for (var li = 0; li < activeNodes.length; li++) {
-        var ln = activeNodes[li];
-        var showLabel = false;
-        if (ln.kind === "project") showLabel = true;
-        else if (scale >= 0.6) showLabel = (ln.kind === "entity" && (ln.refCount || 0) > 2);
-        if (scale >= 0.9) showLabel = true;
+      var screenPx = ln.kind === "project" ? 14 : 9;
+      var worldPx = screenPx / scale;
+      ctx.font = (ln.kind === "project" ? "700 " : "400 ") + worldPx + "px -apple-system,BlinkMacSystemFont,sans-serif";
 
-        if (showLabel) {
-          var labelText = ln.label;
-          if (ln.kind === "finding") labelText = labelText.length > 24 ? labelText.slice(0, 22) + ".." : labelText;
-          else if (ln.kind === "task") labelText = labelText.length > 30 ? labelText.slice(0, 28) + ".." : labelText;
-          var lx = ln.x, ly = ln.y + ln.radius + 3;
-          // Draw text background pill for readability
-          var tw = ctx.measureText(labelText).width;
-          ctx.globalAlpha = 0.75;
-          ctx.fillStyle = bg;
-          ctx.fillRect(lx - tw / 2 - 2, ly - 1, tw + 4, fontSize + 2);
-          ctx.globalAlpha = 0.9;
-          ctx.fillStyle = fg;
-          ctx.fillText(labelText, lx, ly);
-        }
+      var labelText = ln.label;
+      if (ln.kind !== "project" && labelText.length > 14) labelText = labelText.slice(0, 12) + "..";
+      var lx = ln.x, ly = ln.y + ln.radius + 2;
+      var tw = ctx.measureText(labelText).width;
+
+      // Background pill only for projects (reduces clutter for children)
+      if (ln.kind === "project") {
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = bg;
+        ctx.fillRect(lx - tw / 2 - 3, ly - 1, tw + 6, worldPx + 3);
       }
+
+      ctx.globalAlpha = ln.kind === "project" ? 1.0 : 0.7;
+      /* dim labels for non-matching nodes during search */
+      if (searchMatches.size > 0 && !searchMatches.has(ln.id)) ctx.globalAlpha = 0.1;
+      ctx.fillStyle = fg;
+      ctx.fillText(labelText, lx, ly);
     }
 
     ctx.globalAlpha = 1;
     ctx.restore();
-  }
-
-  /* ── simulation tick ── */
-  function scheduleTick() {
-    if (animFrame !== null) return;
-    animFrame = requestAnimationFrame(tick);
-  }
-
-  function reheat(v) { alpha = Math.max(alpha, v === undefined ? 1.0 : v); }
-
-  function tick() {
-    animFrame = null;
-    if (activeNodes.length === 0 || alpha < alphaMin) {
-      if (alpha < alphaMin && autoFitOnSettle) { autoFit(); autoFitOnSettle = false; }
-      render();
-      return;
-    }
-    alpha *= (1 - alphaDecay);
-    pulsePhase += 0.016;
-
-    // Reset forces
-    for (var i = 0; i < activeNodes.length; i++) { activeNodes[i].fx = 0; activeNodes[i].fy = 0; }
-
-    // Barnes-Hut repulsion
-    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (var b = 0; b < activeNodes.length; b++) {
-      if (activeNodes[b].x < minX) minX = activeNodes[b].x;
-      if (activeNodes[b].y < minY) minY = activeNodes[b].y;
-      if (activeNodes[b].x > maxX) maxX = activeNodes[b].x;
-      if (activeNodes[b].y > maxY) maxY = activeNodes[b].y;
-    }
-    var pad = 100;
-    var treeW = Math.max(maxX - minX + pad * 2, 200);
-    var treeH = Math.max(maxY - minY + pad * 2, 200);
-    var tree = new Quadtree(minX - pad, minY - pad, treeW, treeH);
-    for (var ti = 0; ti < activeNodes.length; ti++) tree.insert(activeNodes[ti]);
-    tree.computeMass();
-
-    var repStr = alpha * 3000;
-    for (var ri = 0; ri < activeNodes.length; ri++) tree.forceOn(activeNodes[ri], repStr);
-
-    // Link springs (shorter rest length keeps clusters tight)
-    var springStr = alpha * 0.03;
-    var restLen = 55;
-    for (var si = 0; si < activeLinks.length; si++) {
-      var link = activeLinks[si];
-      var dx = link.target.x - link.source.x;
-      var dy = link.target.y - link.source.y;
-      var dist = Math.max(Math.sqrt(dx * dx + dy * dy), 0.1);
-      var spring = springStr * (dist - restLen);
-      var ux = dx / dist, uy = dy / dist;
-      link.source.fx += ux * spring; link.source.fy += uy * spring;
-      link.target.fx -= ux * spring; link.target.fy -= uy * spring;
-    }
-
-    // Center gravity (strong enough to keep everything clustered) + velocity integration
-    var centerX = canvasW / 2, centerY = canvasH / 2;
-    var gravBase = alpha * 0.012;
-    for (var vi = 0; vi < activeNodes.length; vi++) {
-      var node = activeNodes[vi];
-      // Stronger gravity for project hub nodes to anchor clusters
-      var grav = node.kind === "project" ? gravBase * 2.5 : gravBase;
-      node.fx += (centerX - node.x) * grav;
-      node.fy += (centerY - node.y) * grav;
-      node.vx = (node.vx + node.fx) * 0.4;
-      node.vy = (node.vy + node.fy) * 0.4;
-      node.x += node.vx;
-      node.y += node.vy;
-    }
-
-    render();
-    if (alpha >= alphaMin) scheduleTick();
-    else if (autoFitOnSettle) { autoFit(); autoFitOnSettle = false; render(); }
   }
 
   function autoFit() {
@@ -1005,15 +1100,13 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y;
       if (n.x > maxX) maxX = n.x; if (n.y > maxY) maxY = n.y;
     }
-    var graphPad = 60;
-    var graphW = (maxX - minX) + graphPad * 2;
-    var graphH = (maxY - minY) + graphPad * 2;
-    var fitScale = Math.min(canvasW / graphW, canvasH / graphH, 1.5);
-    var cx = (minX + maxX) / 2;
-    var cy = (minY + maxY) / 2;
+    var pad = 40;
+    var graphW = (maxX - minX) + pad * 2;
+    var graphH = (maxY - minY) + pad * 2;
+    var fitScale = Math.min(canvasW / graphW, canvasH / graphH, 2.0);
     scale = fitScale;
-    panX = canvasW / 2 - cx * scale;
-    panY = canvasH / 2 - cy * scale;
+    panX = canvasW / 2 - ((minX + maxX) / 2) * scale;
+    panY = canvasH / 2 - ((minY + maxY) / 2) * scale;
   }
 
   /* ── hit testing ── */
@@ -1026,7 +1119,8 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       var n = activeNodes[i];
       var dx = n.x - mx, dy = n.y - my;
       var d = Math.sqrt(dx * dx + dy * dy);
-      if (d < n.radius + 4 && d < bestDist) { best = n; bestDist = d; }
+      var hitR = Math.max(n.radius + 4, 14);
+      if (d < hitR && d < bestDist) { best = n; bestDist = d; }
     }
     return best;
   }
@@ -1044,9 +1138,6 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       dragNode = hit;
       isDragging = true;
       canvas.setPointerCapture(e.pointerId);
-      autoFitOnSettle = false;
-      reheat(0.38);
-      scheduleTick();
     } else {
       isPanning = true;
       panStartX = panX; panStartY = panY;
@@ -1060,10 +1151,8 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       var dx = (e.clientX - lastMX) / scale;
       var dy = (e.clientY - lastMY) / scale;
       dragNode.x += dx; dragNode.y += dy;
-      dragNode.vx = dx * 0.18; dragNode.vy = dy * 0.18;
+      if (dragNode.kind === "project") recomputeChildren(dragNode);
       lastMX = e.clientX; lastMY = e.clientY;
-      reheat(0.24);
-      scheduleTick();
       render();
     } else if (isPanning) {
       panX = panStartX + (e.clientX - dragStartMX);
@@ -1074,14 +1163,10 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
 
   canvas.addEventListener("pointerup", function(e) {
     if (isDragging && dragNode) {
-      // If barely moved, treat as click
-      var movedDist = Math.abs(e.clientX - lastMX) + Math.abs(e.clientY - lastMY);
       selectNode(dragNode);
       canvas.releasePointerCapture(e.pointerId);
       dragNode = null;
       isDragging = false;
-      reheat(0.18);
-      scheduleTick();
     }
     if (isPanning) {
       isPanning = false;
@@ -1092,6 +1177,44 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   canvas.addEventListener("pointercancel", function() {
     dragNode = null; isDragging = false; isPanning = false;
     canvas.style.cursor = "default";
+  });
+
+  /* ── tooltip on hover (200ms delay, full label) ── */
+  var _tooltip = document.getElementById("graph-tooltip");
+  var _ttNode = null, _ttTimer = null;
+  canvas.addEventListener("mousemove", function(e) {
+    if (isDragging || isPanning) {
+      if (_tooltip) _tooltip.style.display = "none";
+      _ttNode = null;
+      clearTimeout(_ttTimer);
+      return;
+    }
+    var hit = hitTest(e.clientX, e.clientY);
+    var rect = canvas.getBoundingClientRect();
+    if (hit && _tooltip) {
+      if (hit !== _ttNode) {
+        _ttNode = hit;
+        clearTimeout(_ttTimer);
+        _tooltip.style.display = "none";
+        _ttTimer = setTimeout(function() {
+          if (_ttNode === hit) {
+            _tooltip.style.display = "block";
+            _tooltip.textContent = hit.text || hit.label || hit.id;
+          }
+        }, 200);
+      }
+      _tooltip.style.left = (e.clientX - rect.left + 12) + "px";
+      _tooltip.style.top = (e.clientY - rect.top - 8) + "px";
+    } else if (_tooltip) {
+      _ttNode = null;
+      clearTimeout(_ttTimer);
+      _tooltip.style.display = "none";
+    }
+  });
+  canvas.addEventListener("mouseleave", function() {
+    _ttNode = null;
+    clearTimeout(_ttTimer);
+    if (_tooltip) _tooltip.style.display = "none";
   });
 
   /* ── zoom ── */
@@ -1111,6 +1234,66 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   document.getElementById("zoomIn").addEventListener("click", function() { scale *= 1.2; render(); });
   document.getElementById("zoomOut").addEventListener("click", function() { scale *= 0.8; render(); });
   document.getElementById("zoomReset").addEventListener("click", function() { scale = 1; panX = 0; panY = 0; autoFit(); render(); });
+
+  /* ── keyboard navigation (a11y) ── */
+  canvas.setAttribute("tabindex", "0");
+  canvas.setAttribute("role", "application");
+  canvas.setAttribute("aria-label", "Knowledge graph. Use Tab to cycle nodes, Enter to select, Arrow keys to pan, +/- to zoom, Home to reset, Escape to deselect.");
+
+  canvas.addEventListener("keydown", function(e) {
+    var PAN_STEP = 40;
+    var handled = true;
+    switch (e.key) {
+      case "Tab":
+        e.preventDefault();
+        if (activeNodes.length === 0) break;
+        if (e.shiftKey) {
+          focusedNodeIndex = focusedNodeIndex <= 0 ? activeNodes.length - 1 : focusedNodeIndex - 1;
+        } else {
+          focusedNodeIndex = (focusedNodeIndex + 1) % activeNodes.length;
+        }
+        panToNode(activeNodes[focusedNodeIndex]);
+        announceNode(activeNodes[focusedNodeIndex]);
+        render();
+        break;
+      case "Enter":
+        if (focusedNodeIndex >= 0 && focusedNodeIndex < activeNodes.length) {
+          selectNode(activeNodes[focusedNodeIndex]);
+          announceNode(activeNodes[focusedNodeIndex]);
+          detail.focus();
+        }
+        break;
+      case "Escape":
+        if (selectedId) {
+          selectedId = null;
+          detail.innerHTML = "<h2>Details</h2><div class='node-name'>No node selected</div><div class='detail-text'>Click a node in the graph to inspect it.</div>";
+          announce("Deselected");
+          canvas.focus();
+        } else {
+          focusedNodeIndex = -1;
+        }
+        render();
+        break;
+      case "ArrowLeft":
+        e.preventDefault(); panX += PAN_STEP; render(); break;
+      case "ArrowRight":
+        e.preventDefault(); panX -= PAN_STEP; render(); break;
+      case "ArrowUp":
+        e.preventDefault(); panY += PAN_STEP; render(); break;
+      case "ArrowDown":
+        e.preventDefault(); panY -= PAN_STEP; render(); break;
+      case "+": case "=":
+        scale *= 1.15; render(); break;
+      case "-": case "_":
+        scale *= 0.85; render(); break;
+      case "Home":
+        scale = 1; panX = 0; panY = 0; autoFit(); focusedNodeIndex = -1;
+        render(); announce("View reset"); break;
+      default:
+        handled = false;
+    }
+    if (handled) e.stopPropagation();
+  });
 
   /* ── select node ── */
   function selectNode(node) {
@@ -1225,41 +1408,67 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   });
 
   /* ── filter handlers ── */
-  function rebuildAndReheat() {
-    autoFitOnSettle = true;
-    rebuild();
-    reheat();
-    scheduleTick();
-  }
+  function rebuildAll() { rebuild(); render(); announceFilterChange(); }
   typeToggles.forEach(function(el) {
     el.addEventListener("click", function() {
       el.classList.toggle("active");
-      rebuildAndReheat();
+      rebuildAll();
     });
   });
-  filterProject.addEventListener("change", rebuildAndReheat);
-  filterHealth.addEventListener("change", rebuildAndReheat);
-  nodeLimit.addEventListener("input", function() { limitVal.textContent = nodeLimit.value; rebuildAndReheat(); });
+  filterProject.addEventListener("change", rebuildAll);
+  filterHealth.addEventListener("change", rebuildAll);
+  filterAge.addEventListener("change", rebuildAll);
+  nodeLimit.addEventListener("input", function() { limitVal.textContent = nodeLimit.value; rebuildAll(); });
 
   /* ── init ── */
+  /* create ARIA live region for screen reader announcements */
+  liveRegion = document.createElement("div");
+  liveRegion.setAttribute("role", "status");
+  liveRegion.setAttribute("aria-live", "polite");
+  liveRegion.setAttribute("aria-atomic", "true");
+  liveRegion.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0";
+  document.body.appendChild(liveRegion);
+
+  /* make detail panel focusable for keyboard flow */
+  detail.setAttribute("tabindex", "-1");
+  detail.setAttribute("role", "region");
+  detail.setAttribute("aria-label", "Node details");
+
   resizeCanvas();
   rebuild();
-  reheat();
+  render();
   if (activeNodes.length > 0) selectNode(activeNodes[0]);
-  scheduleTick();
 
-  // Animate pulse continuously
-  (function animatePulse() {
-    var hasPulse = false;
-    for (var i = 0; i < activeNodes.length; i++) {
-      if ((activeNodes[i].helpful || 0) >= 3) { hasPulse = true; break; }
-    }
-    if (hasPulse && alpha < alphaMin) {
-      pulsePhase += 0.016;
-      render();
+  /* announce graph summary */
+  var _initCounts = {};
+  for (var _ci = 0; _ci < payload.nodes.length; _ci++) {
+    var _ck = payload.nodes[_ci].kind;
+    _initCounts[_ck] = (_initCounts[_ck] || 0) + 1;
+  }
+  var _sumParts = [];
+  if (_initCounts.project) _sumParts.push(_initCounts.project + " projects");
+  if (_initCounts.finding) _sumParts.push(_initCounts.finding + " findings");
+  if (_initCounts.entity) _sumParts.push(_initCounts.entity + " entities");
+  if (_initCounts.task) _sumParts.push(_initCounts.task + " tasks");
+  announce("Graph loaded with " + _sumParts.join(", "));
+
+  // Animate pulse continuously for high-helpful nodes (capped at 60fps)
+  var _lastPulseTime = 0;
+  var _PULSE_INTERVAL = 1000 / 60;
+  (function animatePulse(timestamp) {
+    if (timestamp - _lastPulseTime >= _PULSE_INTERVAL) {
+      _lastPulseTime = timestamp;
+      var hasPulse = false;
+      for (var i = 0; i < activeNodes.length; i++) {
+        if ((activeNodes[i].helpful || 0) >= 3) { hasPulse = true; break; }
+      }
+      if (hasPulse) {
+        pulsePhase += 0.016;
+        render();
+      }
     }
     requestAnimationFrame(animatePulse);
-  })();
+  })(0);
 })();
   </script>
 </body>

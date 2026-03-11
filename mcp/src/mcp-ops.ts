@@ -6,7 +6,7 @@ import * as path from "path";
 import { runtimeFile, getProjectDirs } from "./shared.js";
 import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
-import { approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.js";
+import { approveQueueItem, rejectQueueItem, editQueueItem, readReviewQueue } from "./data-access.js";
 import { addProjectFromPath } from "./core-project.js";
 import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "./project-config.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
@@ -286,6 +286,31 @@ export function register(server: McpServer, ctx: McpContext): void {
         ok: true,
         message: `Found ${allErrors.length} error(s), showing last ${recent.length}:\n\n${recent.join("\n")}`,
         data: { errors: recent, total: allErrors.length, sources: { hookErrors: hookErrors.length, debugErrors: debugErrors.length } },
+      });
+    }
+  );
+
+  // ── get_review_queue ─────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_review_queue",
+    {
+      title: "◆ cortex · get review queue",
+      description:
+        "List all items in a project's memory review queue (MEMORY_QUEUE.md). " +
+        "Returns items with their id, section (Review/Stale/Conflicts), date, text, confidence, and risky flag.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+      }),
+    },
+    async ({ project }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+      const result = readReviewQueue(cortexPath, project);
+      if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+      return mcpResponse({
+        ok: true,
+        message: `${result.data.length} queue item(s) for "${project}".`,
+        data: { items: result.data },
       });
     }
   );

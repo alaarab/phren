@@ -10,7 +10,8 @@
  *   - <div class="graph-legend">
  *   - <div id="graph-detail-panel"> with graph-detail-meta and graph-detail-body
  *
- * Host page must provide: esc(str), _authToken
+ * Self-contained: defines its own esc() helper and accepts data via
+ * window.cortexGraph.mount(data) — no external dependencies.
  */
 
 export function renderGraphScript(): string {
@@ -18,6 +19,11 @@ export function renderGraphScript(): string {
 /* ── Knowledge Graph (Canvas2D + Barnes-Hut) ─────────────────────────── */
 (function() {
   'use strict';
+
+  /* ── internal helpers ────────────────────────────────────────────────── */
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
 
   /* ── colour & size maps ─────────────────────────────────────────────── */
   var COLORS = {
@@ -53,6 +59,10 @@ export function renderGraphScript(): string {
   var animFrame = null;
   var canvas, ctx, tooltip;
   var pulseT = 0;
+  var _tooltipNode = null, _tooltipTimer = null;
+  var _prevVisibleCount = 0;
+  var focusedNodeIndex = -1;
+  var liveRegion = null;
 
   /* ── helpers ────────────────────────────────────────────────────────── */
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -64,22 +74,36 @@ export function renderGraphScript(): string {
 
   function nodeColor(n) { return COLORS[n.group] || COLORS.other; }
 
-  /* ── quality / decay ────────────────────────────────────────────────── */
-  function qualityMultiplier(node) {
-    if (!allScores || !node.project) return 1.0;
-    var best = null;
-    var prefix = node.project + '/';
+  /* ── precomputed score lookups ─────────────────────────────────────── */
+  var _scoreLookup = {};  // project -> best score entry (precomputed)
+
+  function buildScoreLookup() {
+    _scoreLookup = {};
+    if (!allScores) return;
     var keys = Object.keys(allScores);
     for (var i = 0; i < keys.length; i++) {
-      if (keys[i].indexOf(prefix) === 0) {
-        var s = allScores[keys[i]];
-        if (!best || (s.impressions || 0) > (best.impressions || 0)) best = s;
+      var key = keys[i];
+      var slashIdx = key.indexOf('/');
+      if (slashIdx === -1) continue;
+      var proj = key.substring(0, slashIdx);
+      var s = allScores[key];
+      var existing = _scoreLookup[proj];
+      if (!existing || (s.impressions || 0) > (existing.impressions || 0)) {
+        _scoreLookup[proj] = s;
       }
     }
-    if (!best) return 1.0;
+  }
 
+  function bestScoreForNode(node) {
+    if (!node.project) return null;
+    return _scoreLookup[node.project] || null;
+  }
+
+  /* ── quality / decay (unified thresholds) ────────────────────────── */
+  function computeQualityFromEntry(entry) {
+    if (!entry) return { multiplier: 1.0, daysSince: -1 };
     var now = Date.now();
-    var lastUsed = best.lastUsedAt ? new Date(best.lastUsedAt).getTime() : 0;
+    var lastUsed = entry.lastUsedAt ? new Date(entry.lastUsedAt).getTime() : 0;
     var daysSince = lastUsed ? (now - lastUsed) / 86400000 : 999;
 
     var recencyBoost = 0;
@@ -87,34 +111,124 @@ export function renderGraphScript(): string {
     else if (daysSince <= 30) recencyBoost = 0;
     else recencyBoost = Math.max(-0.3, -0.1 * Math.floor((daysSince - 30) / 30));
 
-    var impressions = best.impressions || 0;
+    var impressions = entry.impressions || 0;
     var frequencyBoost = Math.min(0.2, Math.log(impressions + 1) / Math.LN2 * 0.05);
 
-    var helpful = best.helpful || 0;
-    var reprompt = best.repromptPenalty || 0;
-    var regression = best.regressionPenalty || 0;
+    var helpful = entry.helpful || 0;
+    var reprompt = entry.repromptPenalty || 0;
+    var regression = entry.regressionPenalty || 0;
     var feedbackScore = helpful * 0.15 - (reprompt + regression * 2) * 0.2;
 
-    return clamp(1 + feedbackScore + recencyBoost + frequencyBoost, 0.2, 1.5);
+    return { multiplier: clamp(1 + feedbackScore + recencyBoost + frequencyBoost, 0.2, 1.5), daysSince: daysSince };
   }
 
-  function healthRingColor(node) {
-    if (!allScores || !node.project) return null;
-    var prefix = node.project + '/';
-    var best = null;
-    var keys = Object.keys(allScores);
-    for (var i = 0; i < keys.length; i++) {
-      if (keys[i].indexOf(prefix) === 0) {
-        var s = allScores[keys[i]];
-        if (!best || (s.impressions || 0) > (best.impressions || 0)) best = s;
-      }
+  function qualityMultiplier(node) {
+    return computeQualityFromEntry(bestScoreForNode(node)).multiplier;
+  }
+
+  /* ── relevance score (drives gravity toward center) ──────────────── */
+  // Combines frequency (refCount/impressions) + recency (quality multiplier)
+  // Returns 0.1 (stale/rarely-used → drifts to edges) to 1.0 (active/important → pulls to center)
+  function nodeRelevance(node) {
+    // Project nodes always anchor at center
+    if (node.group === 'project') return 1.0;
+
+    // Frequency component: refCount or link degree (log scale, capped)
+    var refs = node.refCount || 0;
+    var freqScore = Math.min(1.0, Math.log(refs + 1) / Math.log(20)); // 0 refs → 0, 20+ refs → 1.0
+
+    // Recency/quality component from score data
+    var qualScore = 0.5; // default when no score data
+    var entry = bestScoreForNode(node);
+    if (entry) {
+      var q = computeQualityFromEntry(entry);
+      qualScore = clamp((q.multiplier - 0.2) / 1.3, 0, 1); // normalize 0.2-1.5 → 0-1
     }
-    if (!best || !best.lastUsedAt) return null;
-    var days = (Date.now() - new Date(best.lastUsedAt).getTime()) / 86400000;
-    if (days <= 7) return '#10b981';
-    if (days <= 30) return null;
-    if (days <= 90) return '#f59e0b';
+
+    // Blend: 40% frequency, 60% recency/quality
+    var raw = freqScore * 0.4 + qualScore * 0.6;
+    return clamp(raw, 0.1, 1.0);
+  }
+
+  // Unified health ring thresholds: matches the quality multiplier thresholds
+  // multiplier >= 0.8 -> healthy (green), 0.5-0.8 -> stale (yellow), <0.5 -> decaying (red)
+  function healthRingColor(node) {
+    var entry = bestScoreForNode(node);
+    if (!entry || !entry.lastUsedAt) return null;
+    var q = computeQualityFromEntry(entry);
+    if (q.multiplier >= 0.8) return '#10b981';
+    if (q.multiplier >= 0.5) return '#f59e0b';
     return '#ef4444';
+  }
+
+
+  function healthStatusLabel(node) {
+    var entry = bestScoreForNode(node);
+    if (!entry || !entry.lastUsedAt) return null;
+    var q = computeQualityFromEntry(entry);
+    if (q.multiplier >= 0.8) return 'H';
+    if (q.multiplier >= 0.5) return 'S';
+    return 'D';
+  }
+
+  function healthStatusText(node) {
+    var entry = bestScoreForNode(node);
+    if (!entry || !entry.lastUsedAt) return 'unknown';
+    var q = computeQualityFromEntry(entry);
+    if (q.multiplier >= 0.8) return 'healthy';
+    if (q.multiplier >= 0.5) return 'stale';
+    return 'decaying';
+  }
+
+  function healthRingDash(node) {
+    var entry = bestScoreForNode(node);
+    if (!entry || !entry.lastUsedAt) return null;
+    var q = computeQualityFromEntry(entry);
+    if (q.multiplier >= 0.8) return [];
+    if (q.multiplier >= 0.5) return [6, 3];
+    return [2, 3];
+  }
+
+  function announce(text) {
+    if (!liveRegion) return;
+    liveRegion.textContent = '';
+    setTimeout(function() { liveRegion.textContent = text; }, 50);
+  }
+
+  function announceNode(node) {
+    if (!node) { announce('No node selected'); return; }
+    var parts = [node.label || node.id, node.group || 'node'];
+    var health = healthStatusText(node);
+    if (health !== 'unknown') parts.push(health + ' health');
+    announce('Selected: ' + parts.join(', '));
+  }
+
+  function announceFilterChange() {
+    announce('Showing ' + visibleNodes.length + ' of ' + allNodes.length + ' nodes');
+  }
+
+  function announceGraphSummary() {
+    var counts = {};
+    for (var i = 0; i < allNodes.length; i++) {
+      var g = allNodes[i].group || 'other';
+      counts[g] = (counts[g] || 0) + 1;
+    }
+    var parts = [];
+    if (counts.project) parts.push(counts.project + ' projects');
+    var fc = 0;
+    var fGroups = ['decision','pitfall','pattern','tradeoff','architecture','bug'];
+    for (var f = 0; f < fGroups.length; f++) fc += (counts[fGroups[f]] || 0);
+    if (fc) parts.push(fc + ' findings');
+    if (counts.entity) parts.push(counts.entity + ' entities');
+    var tc = (counts['task-active']||0) + (counts['task-queue']||0);
+    if (tc) parts.push(tc + ' tasks');
+    announce('Graph with ' + parts.join(', '));
+  }
+
+  function panToNode(node) {
+    if (!node) return;
+    panX = W / 2 - node.x * scale;
+    panY = H / 2 - node.y * scale;
   }
 
   /* ── Barnes-Hut Quadtree ────────────────────────────────────────────── */
@@ -138,6 +252,14 @@ export function renderGraphScript(): string {
   };
   QTNode.prototype.insert = function(node) {
     if (!this.contains(node.x, node.y)) return false;
+    // Min-cell guard: stop subdividing when cell is too small (prevents infinite recursion
+    // from duplicate/near-duplicate positions)
+    if (this.w < 0.01 || this.h < 0.01) {
+      this.totalMass++;
+      this.cx = (this.cx * (this.totalMass - 1) + node.x) / this.totalMass;
+      this.cy = (this.cy * (this.totalMass - 1) + node.y) / this.totalMass;
+      return true;
+    }
     if (!this.body && !this.divided) {
       this.body = node;
       this.totalMass = 1;
@@ -146,6 +268,11 @@ export function renderGraphScript(): string {
       return true;
     }
     if (!this.divided) {
+      // Jitter duplicate positions to prevent infinite subdivision
+      if (this.body && this.body.x === node.x && this.body.y === node.y) {
+        node.x += (Math.random() - 0.5) * 0.1;
+        node.y += (Math.random() - 0.5) * 0.1;
+      }
       this.subdivide();
       if (this.body) {
         var old = this.body;
@@ -184,8 +311,10 @@ export function renderGraphScript(): string {
   };
 
   /* ── force simulation ───────────────────────────────────────────────── */
-  var THETA = 0.7, REPULSION = 3000, SPRING_K = 0.03, REST_LEN = 55;
-  var GRAVITY = 0.012, ALPHA_DECAY = 0.06, MIN_ALPHA = 0.005, DAMPING = 0.4;
+  var THETA = 0.7, REPULSION = 8000, SPRING_K = 0.02, REST_LEN = 120;
+  var GRAVITY = 0.006, ALPHA_DECAY = 0.04, MIN_ALPHA = 0.005, DAMPING = 0.35;
+
+  var SMALL_GRAPH_THRESHOLD = 100;
 
   function simulate() {
     if (alpha < MIN_ALPHA) return;
@@ -195,25 +324,45 @@ export function renderGraphScript(): string {
     var n = nodes.length;
     if (n === 0) return;
 
-    /* build quadtree */
-    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (var i = 0; i < n; i++) {
-      if (nodes[i].x < minX) minX = nodes[i].x;
-      if (nodes[i].y < minY) minY = nodes[i].y;
-      if (nodes[i].x > maxX) maxX = nodes[i].x;
-      if (nodes[i].y > maxY) maxY = nodes[i].y;
-    }
-    var pad = 100;
-    var qt = new QTNode(minX - pad, minY - pad, (maxX - minX) + pad * 2, (maxY - minY) + pad * 2);
-    for (var i = 0; i < n; i++) qt.insert(nodes[i]);
+    if (n < SMALL_GRAPH_THRESHOLD) {
+      /* direct N^2 repulsion for small graphs (cheaper than quadtree overhead) */
+      for (var i = 0; i < n; i++) {
+        var nd = nodes[i];
+        if (nd === dragging) continue;
+        var fx = 0, fy = 0;
+        for (var j = 0; j < n; j++) {
+          if (i === j) continue;
+          var dx = nodes[j].x - nd.x;
+          var dy = nodes[j].y - nd.y;
+          var dist = Math.sqrt(dx * dx + dy * dy) + 0.1;
+          var force = -REPULSION / (dist * dist);
+          fx += force * dx / dist;
+          fy += force * dy / dist;
+        }
+        nd.vx = (nd.vx || 0) + fx * alpha;
+        nd.vy = (nd.vy || 0) + fy * alpha;
+      }
+    } else {
+      /* build quadtree for Barnes-Hut */
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (var i = 0; i < n; i++) {
+        if (nodes[i].x < minX) minX = nodes[i].x;
+        if (nodes[i].y < minY) minY = nodes[i].y;
+        if (nodes[i].x > maxX) maxX = nodes[i].x;
+        if (nodes[i].y > maxY) maxY = nodes[i].y;
+      }
+      var pad = 100;
+      var qt = new QTNode(minX - pad, minY - pad, (maxX - minX) + pad * 2, (maxY - minY) + pad * 2);
+      for (var i = 0; i < n; i++) qt.insert(nodes[i]);
 
-    /* repulsion via quadtree */
-    for (var i = 0; i < n; i++) {
-      var nd = nodes[i];
-      if (nd === dragging) continue;
-      var r = qt.computeForce(nd, THETA, REPULSION, 0, 0);
-      nd.vx = (nd.vx || 0) + r.fx * alpha;
-      nd.vy = (nd.vy || 0) + r.fy * alpha;
+      /* repulsion via quadtree */
+      for (var i = 0; i < n; i++) {
+        var nd = nodes[i];
+        if (nd === dragging) continue;
+        var r = qt.computeForce(nd, THETA, REPULSION, 0, 0);
+        nd.vx = (nd.vx || 0) + r.fx * alpha;
+        nd.vy = (nd.vy || 0) + r.fy * alpha;
+      }
     }
 
     /* spring forces */
@@ -229,13 +378,18 @@ export function renderGraphScript(): string {
       if (t !== dragging) { t.vx -= fx; t.vy -= fy; }
     }
 
-    /* center gravity (stronger for project hubs to anchor clusters) */
+    /* relevance-based center gravity: relevant nodes pull to center, stale drift out */
     var cx = W / 2 / scale - panX / scale;
     var cy = H / 2 / scale - panY / scale;
+    /* scale gravity down for larger graphs so clusters spread */
+    var gravScale = n > 50 ? 50 / n : 1;
     for (var i = 0; i < n; i++) {
       var nd = nodes[i];
       if (nd === dragging) continue;
-      var grav = nd.group === 'project' ? GRAVITY * 2.5 : GRAVITY;
+      var rel = nodeRelevance(nd);
+      // relevance modulates gravity: high relevance → 3x base, low → 0.3x base
+      // this creates a natural center-to-edge gradient by importance
+      var grav = GRAVITY * (0.3 + rel * 2.7) * gravScale;
       nd.vx += (cx - nd.x) * grav * alpha;
       nd.vy += (cy - nd.y) * grav * alpha;
     }
@@ -268,6 +422,14 @@ export function renderGraphScript(): string {
   }
 
   function applyFilters() {
+    // Clear stale selection when filters change — the selected node may no longer be visible
+    if (selectedNode) {
+      selectedNode = null;
+      var metaEl = document.getElementById('graph-detail-meta');
+      var bodyEl = document.getElementById('graph-detail-body');
+      if (metaEl) metaEl.innerHTML = 'Click a bubble to inspect it.';
+      if (bodyEl) bodyEl.innerHTML = '<p class="text-muted" style="margin:0">Use the graph filters, then click a project or finding bubble to pin its details here.</p>';
+    }
     var nodeMap = {};
     var filtered = [];
     for (var i = 0; i < allNodes.length; i++) {
@@ -279,12 +441,6 @@ export function renderGraphScript(): string {
         if (filterHealth === 'healthy' && mult < 0.8) continue;
         if (filterHealth === 'stale' && (mult < 0.5 || mult >= 0.8)) continue;
         if (filterHealth === 'decaying' && mult >= 0.5) continue;
-      }
-      if (searchQuery) {
-        var q = searchQuery.toLowerCase();
-        var label = (n.label || '').toLowerCase();
-        var full = (n.fullLabel || '').toLowerCase();
-        if (label.indexOf(q) === -1 && full.indexOf(q) === -1) continue;
       }
       filtered.push(n);
     }
@@ -306,7 +462,12 @@ export function renderGraphScript(): string {
     }
 
     updateLegend();
-    alpha = 1.0;
+    /* only restart simulation if node count changed significantly */
+    var oldCount = _prevVisibleCount || 0;
+    _prevVisibleCount = visibleNodes.length;
+    if (oldCount === 0 || Math.abs(visibleNodes.length - oldCount) > oldCount * 0.1) {
+      alpha = 1.0;
+    }
   }
 
   /* ── legend ─────────────────────────────────────────────────────────── */
@@ -334,7 +495,10 @@ export function renderGraphScript(): string {
     canvas.width = W * dpr;
     canvas.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
+    /* theme-aware background */
+    var isDarkBg = document.documentElement.getAttribute('data-theme') === 'dark';
+    ctx.fillStyle = isDarkBg ? '#0b0f1a' : '#f8f9fb';
+    ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.translate(panX, panY);
     ctx.scale(scale, scale);
@@ -345,38 +509,47 @@ export function renderGraphScript(): string {
     var links = visibleLinks;
 
     /* 1. edges */
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(150,150,150,0.18)';
-    ctx.lineWidth = 0.8 / scale;
-    for (var i = 0; i < links.length; i++) {
-      var lk = links[i];
-      if (!lk._source || !lk._target) continue;
-      ctx.moveTo(lk._source.x, lk._source.y);
-      ctx.lineTo(lk._target.x, lk._target.y);
-    }
-    ctx.stroke();
-
-    /* 2. health rings (batch by colour) */
-    var ringBuckets = { '#10b981': [], '#f59e0b': [], '#ef4444': [] };
-    for (var i = 0; i < nodes.length; i++) {
-      var rc = healthRingColor(nodes[i]);
-      if (rc && ringBuckets[rc]) ringBuckets[rc].push(nodes[i]);
-    }
-    var ringColors = Object.keys(ringBuckets);
-    for (var ci = 0; ci < ringColors.length; ci++) {
-      var col = ringColors[ci];
-      var bucket = ringBuckets[col];
-      if (bucket.length === 0) continue;
+    ctx.lineWidth = Math.max(0.5, Math.min(0.8 / scale, 3));
+    if (searchQuery) {
+      var _sq = searchQuery.toLowerCase();
+      for (var i = 0; i < links.length; i++) {
+        var lk = links[i];
+        if (!lk._source || !lk._target) continue;
+        var sMatch = ((lk._source.label || '').toLowerCase().indexOf(_sq) !== -1 || (lk._source.fullLabel || '').toLowerCase().indexOf(_sq) !== -1);
+        var tMatch = ((lk._target.label || '').toLowerCase().indexOf(_sq) !== -1 || (lk._target.fullLabel || '').toLowerCase().indexOf(_sq) !== -1);
+        ctx.beginPath();
+        ctx.strokeStyle = (sMatch || tMatch) ? 'rgba(150,150,150,0.18)' : 'rgba(150,150,150,0.04)';
+        ctx.moveTo(lk._source.x, lk._source.y);
+        ctx.lineTo(lk._target.x, lk._target.y);
+        ctx.stroke();
+      }
+    } else {
       ctx.beginPath();
-      ctx.strokeStyle = col;
-      ctx.lineWidth = 2 / scale;
-      for (var i = 0; i < bucket.length; i++) {
-        var nd = bucket[i];
-        var rr = nodeRadius(nd) + 3;
-        ctx.moveTo(nd.x + rr, nd.y);
-        ctx.arc(nd.x, nd.y, rr, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(150,150,150,0.18)';
+      for (var i = 0; i < links.length; i++) {
+        var lk = links[i];
+        if (!lk._source || !lk._target) continue;
+        ctx.moveTo(lk._source.x, lk._source.y);
+        ctx.lineTo(lk._target.x, lk._target.y);
       }
       ctx.stroke();
+    }
+
+    /* 2. health rings with dash patterns + text labels (WCAG 1.4.1) */
+    for (var i = 0; i < nodes.length; i++) {
+      var nd = nodes[i];
+      var rc = healthRingColor(nd);
+      if (!rc) continue;
+      var rr = nodeRadius(nd) + 3;
+      var dash = healthRingDash(nd);
+      ctx.beginPath();
+      ctx.strokeStyle = rc;
+      ctx.lineWidth = 2 / scale;
+      if (dash && dash.length) { ctx.setLineDash(dash.map(function(d) { return d / scale; })); }
+      else { ctx.setLineDash([]); }
+      ctx.arc(nd.x, nd.y, rr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     /* 3. nodes (batch by fill colour, apply opacity) */
@@ -395,6 +568,13 @@ export function renderGraphScript(): string {
         var mult = qualityMultiplier(nd);
         var opacity = 0.3 + (mult - 0.2) * (0.7 / 1.3);
         opacity = clamp(opacity, 0.3, 1.0);
+        /* dim non-matching nodes when search is active */
+        if (searchQuery) {
+          var sq = searchQuery.toLowerCase();
+          var sl = (nd.label || '').toLowerCase();
+          var sf = (nd.fullLabel || '').toLowerCase();
+          if (sl.indexOf(sq) === -1 && sf.indexOf(sq) === -1) opacity = 0.1;
+        }
         ctx.globalAlpha = opacity;
         ctx.beginPath();
         ctx.arc(nd.x, nd.y, nodeRadius(nd), 0, Math.PI * 2);
@@ -403,6 +583,23 @@ export function renderGraphScript(): string {
       }
     }
     ctx.globalAlpha = 1.0;
+
+    /* 3b. health status text labels on top of nodes (WCAG 1.4.1) */
+    if (scale >= 0.4) {
+      for (var i = 0; i < nodes.length; i++) {
+        var nd = nodes[i];
+        var hlbl = healthStatusLabel(nd);
+        if (!hlbl) continue;
+        var hfs = Math.max(7, Math.round(8 / scale));
+        ctx.font = '600 ' + hfs + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.9;
+        ctx.fillText(hlbl, nd.x, nd.y);
+      }
+      ctx.globalAlpha = 1.0;
+    }
 
     /* 4. pulse rings for high-helpful nodes */
     for (var i = 0; i < nodes.length; i++) {
@@ -420,36 +617,37 @@ export function renderGraphScript(): string {
     }
 
     /* 5. labels (semantic zoom with text backgrounds) */
-    if (scale >= 0.25) {
+    if (scale >= 0.2) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       var labelFg = isDark ? '#e0e0e0' : '#111827';
-      var labelBg = isDark ? 'rgba(11,15,26,0.8)' : 'rgba(248,249,251,0.85)';
+      var labelBg = isDark ? 'rgba(11,15,26,0.85)' : 'rgba(248,249,251,0.9)';
       for (var i = 0; i < nodes.length; i++) {
         var nd = nodes[i];
         var r = nodeRadius(nd);
         var show = false;
-        var fontSize = Math.max(9, Math.round(10 / scale));
+        var fontSize = Math.max(10, Math.round(11 / scale));
         if (nd.group === 'project') {
           show = true;
-          ctx.font = 'bold ' + Math.max(9, Math.round(11 / scale)) + 'px sans-serif';
-        } else if (scale >= 0.9) {
+          ctx.font = 'bold ' + Math.max(11, Math.round(13 / scale)) + 'px sans-serif';
+        } else if (scale >= 0.6) {
           show = true;
           ctx.font = '500 ' + fontSize + 'px sans-serif';
-        } else if (scale >= 0.6 && nd.group === 'entity' && (nd.refCount || 0) > 2) {
+        } else if (scale >= 0.35 && nd.group === 'entity' && (nd.refCount || 0) > 2) {
           show = true;
           ctx.font = '500 ' + fontSize + 'px sans-serif';
         }
         if (show) {
           var lbl = nd.label || '';
-          if (lbl.length > 24) lbl = lbl.slice(0, 22) + '..';
-          var lx = nd.x, ly = nd.y + r + 3;
+          if (lbl.length > 28) lbl = lbl.slice(0, 26) + '..';
+          var labelPad = r + 6;
+          var lx = nd.x, ly = nd.y + labelPad;
           var tw = ctx.measureText(lbl).width;
-          ctx.globalAlpha = 0.75;
+          ctx.globalAlpha = 0.85;
           ctx.fillStyle = labelBg;
-          ctx.fillRect(lx - tw / 2 - 2, ly - 1, tw + 4, fontSize + 2);
-          ctx.globalAlpha = 0.9;
+          ctx.fillRect(lx - tw / 2 - 4, ly - 2, tw + 8, fontSize + 4);
+          ctx.globalAlpha = 0.95;
           ctx.fillStyle = labelFg;
           ctx.fillText(lbl, lx, ly);
           ctx.globalAlpha = 1.0;
@@ -464,6 +662,20 @@ export function renderGraphScript(): string {
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2.5 / scale;
       ctx.stroke();
+    }
+
+    /* 6b. keyboard focus ring (distinct from selection) */
+    if (focusedNodeIndex >= 0 && focusedNodeIndex < visibleNodes.length) {
+      var fNode = visibleNodes[focusedNodeIndex];
+      if (fNode !== selectedNode) {
+        ctx.beginPath();
+        ctx.arc(fNode.x, fNode.y, nodeRadius(fNode) + 6, 0, Math.PI * 2);
+        ctx.setLineDash([4 / scale, 3 / scale]);
+        ctx.strokeStyle = '#60a5fa';
+        ctx.lineWidth = 2 / scale;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
 
     /* 7. search highlights */
@@ -486,19 +698,9 @@ export function renderGraphScript(): string {
     ctx.restore();
   }
 
-  /* ── score lookup helper ────────────────────────────────────────────── */
+  /* ── score lookup helper (uses precomputed map) ──────────────────── */
   function matchScore(node) {
-    if (!allScores || !node.project) return null;
-    var prefix = node.project + '/';
-    var best = null;
-    var keys = Object.keys(allScores);
-    for (var i = 0; i < keys.length; i++) {
-      if (keys[i].indexOf(prefix) === 0) {
-        var s = allScores[keys[i]];
-        if (!best || (s.impressions || 0) > (best.impressions || 0)) best = s;
-      }
-    }
-    return best;
+    return bestScoreForNode(node);
   }
 
   /* ── hit testing ────────────────────────────────────────────────────── */
@@ -510,7 +712,7 @@ export function renderGraphScript(): string {
       var nd = visibleNodes[i];
       var dx = nd.x - gx, dy = nd.y - gy;
       var dist = Math.sqrt(dx * dx + dy * dy);
-      var r = nodeRadius(nd) + 4;
+      var r = Math.max(nodeRadius(nd) + 4, 14);
       if (dist < r && dist < closestDist) {
         closest = nd;
         closestDist = dist;
@@ -584,7 +786,7 @@ export function renderGraphScript(): string {
     } else if (FINDING_GROUPS[node.group]) {
       metaEl.innerHTML = 'Finding ' + badge(node.group, COLORS[node.group] || COLORS.other) +
         (node.project ? ' ' + badge(node.project, COLORS.project) : '');
-      html += '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6">' + esc(node.fullLabel || node.label) + '</div>';
+      html += '<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.6">' + esc(node.fullLabel || node.label) + '</div>';
       html += qualityBar;
       if (healthText) html += '<div style="margin-top:4px">' + healthText + '</div>';
 
@@ -594,7 +796,7 @@ export function renderGraphScript(): string {
       metaEl.innerHTML = 'Task ' + badge(secLabel, secColor) +
         (node.priority ? ' ' + badge(node.priority, '#6b7280') : '') +
         (node.project ? ' ' + badge(node.project, COLORS.project) : '');
-      html += '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6">' + esc(node.fullLabel || node.label) + '</div>';
+      html += '<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.6">' + esc(node.fullLabel || node.label) + '</div>';
       html += qualityBar;
 
     } else if (node.group === 'entity') {
@@ -631,6 +833,7 @@ export function renderGraphScript(): string {
     }
 
     bodyEl.innerHTML = html;
+    announceNode(node);
     render();
   }
 
@@ -675,14 +878,25 @@ export function renderGraphScript(): string {
         panY = my - panStartY;
         render();
       } else {
-        /* tooltip */
+        /* tooltip with 200ms hover delay, showing full label */
         var hit = hitTest(mx, my);
         if (hit && tooltip) {
-          tooltip.style.display = 'block';
+          if (hit !== _tooltipNode) {
+            _tooltipNode = hit;
+            clearTimeout(_tooltipTimer);
+            tooltip.style.display = 'none';
+            _tooltipTimer = setTimeout(function() {
+              if (_tooltipNode === hit) {
+                tooltip.style.display = 'block';
+                tooltip.innerHTML = esc(hit.fullLabel || hit.label || hit.id);
+              }
+            }, 200);
+          }
           tooltip.style.left = (mx + 12) + 'px';
           tooltip.style.top = (my - 8) + 'px';
-          tooltip.innerHTML = esc(hit.label || hit.id);
         } else if (tooltip) {
+          _tooltipNode = null;
+          clearTimeout(_tooltipTimer);
           tooltip.style.display = 'none';
         }
       }
@@ -713,6 +927,95 @@ export function renderGraphScript(): string {
       scale = newScale;
       render();
     }, { passive: false });
+
+    /* ── keyboard navigation (a11y) ──────────────────────────────────── */
+    canvas.setAttribute('tabindex', '0');
+    canvas.setAttribute('role', 'application');
+    canvas.setAttribute('aria-label', 'Knowledge graph. Use Tab to cycle nodes, Enter to select, Arrow keys to pan, +/- to zoom, Home to reset, Escape to deselect.');
+
+    canvas.addEventListener('keydown', function(e) {
+      var PAN_STEP = 40;
+      var handled = true;
+
+      switch (e.key) {
+        case 'Tab':
+          e.preventDefault();
+          if (visibleNodes.length === 0) break;
+          if (e.shiftKey) {
+            focusedNodeIndex = focusedNodeIndex <= 0 ? visibleNodes.length - 1 : focusedNodeIndex - 1;
+          } else {
+            focusedNodeIndex = (focusedNodeIndex + 1) % visibleNodes.length;
+          }
+          var fn = visibleNodes[focusedNodeIndex];
+          panToNode(fn);
+          announceNode(fn);
+          render();
+          break;
+        case 'Enter':
+          if (focusedNodeIndex >= 0 && focusedNodeIndex < visibleNodes.length) {
+            var sn = visibleNodes[focusedNodeIndex];
+            renderGraphDetails(sn);
+            announceNode(sn);
+            /* move focus to detail panel */
+            var dp = document.getElementById('graph-detail-panel');
+            if (dp) dp.focus();
+          }
+          break;
+        case 'Escape':
+          if (selectedNode) {
+            var prevFocus = focusedNodeIndex;
+            renderGraphDetails(null);
+            focusedNodeIndex = prevFocus;
+            announceNode(null);
+            canvas.focus();
+          } else {
+            focusedNodeIndex = -1;
+            render();
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          panX += PAN_STEP;
+          render();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          panX -= PAN_STEP;
+          render();
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          panY += PAN_STEP;
+          render();
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          panY -= PAN_STEP;
+          render();
+          break;
+        case '+':
+        case '=':
+          scale = clamp(scale * 1.15, 0.05, 10);
+          render();
+          break;
+        case '-':
+        case '_':
+          scale = clamp(scale * 0.85, 0.05, 10);
+          render();
+          break;
+        case 'Home':
+          scale = 1;
+          panX = 0;
+          panY = 0;
+          focusedNodeIndex = -1;
+          render();
+          announce('View reset');
+          break;
+        default:
+          handled = false;
+      }
+      if (handled) e.stopPropagation();
+    });
   }
 
   /* ── filter bar construction ────────────────────────────────────────── */
@@ -730,26 +1033,30 @@ export function renderGraphScript(): string {
       { key: 'entity', label: 'Entities', color: '#06b6d4' },
       { key: 'reference', label: 'Refs', color: '#14b8a6' }
     ];
-    var typeHtml = '';
+    var typeHtml = '<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Type</span>';
     for (var i = 0; i < types.length; i++) {
       var t = types[i];
       var isActive = !!filterTypes[t.key];
-      var style = 'display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:11px;cursor:pointer;user-select:none;' + (isActive ? 'opacity:1' : 'opacity:0.4');
+      var pillBg = isActive ? t.color + '22' : 'transparent';
+      var pillBorder = isActive ? t.color + '55' : 'var(--border)';
+      var style = 'display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;border:1px solid ' + pillBorder + ';font-size:12px;font-weight:500;cursor:pointer;user-select:none;background:' + pillBg + ';transition:all .15s;' + (isActive ? 'opacity:1' : 'opacity:0.45');
       typeHtml += '<span style="' + style + '" onclick="graphFilterBy(\\'' + t.key + '\\')">';
-      typeHtml += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + t.color + '"></span>';
-      typeHtml += esc(t.label) + '</span> ';
+      typeHtml += '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + t.color + '"></span>';
+      typeHtml += esc(t.label) + '</span>';
     }
 
-    /* health filter */
-    typeHtml += ' <select onchange="graphHealthFilter(this.value)" style="margin-left:8px;padding:3px 8px;border-radius:4px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px">';
+    /* separator + health filter */
+    typeHtml += '<span style="display:inline-block;width:1px;height:20px;background:var(--border);margin:0 6px"></span>';
+    typeHtml += '<select onchange="graphHealthFilter(this.value)" style="padding:5px 10px;border-radius:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px;cursor:pointer">';
     typeHtml += '<option value="all"' + (filterHealth === 'all' ? ' selected' : '') + '>All health</option>';
     typeHtml += '<option value="healthy"' + (filterHealth === 'healthy' ? ' selected' : '') + '>Healthy (&ge;0.8)</option>';
     typeHtml += '<option value="stale"' + (filterHealth === 'stale' ? ' selected' : '') + '>Stale (0.5-0.8)</option>';
     typeHtml += '<option value="decaying"' + (filterHealth === 'decaying' ? ' selected' : '') + '>Decaying (&lt;0.5)</option>';
     typeHtml += '</select>';
 
-    /* search input */
-    typeHtml += ' <input type="text" placeholder="Search nodes..." style="margin-left:8px;padding:3px 8px;border-radius:4px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px;width:140px" oninput="graphSearchFilter(this.value)" />';
+    /* separator + search input */
+    typeHtml += '<span style="display:inline-block;width:1px;height:20px;background:var(--border);margin:0 6px"></span>';
+    typeHtml += '<input type="text" placeholder="Search nodes..." style="padding:5px 12px;border-radius:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px;width:160px" oninput="graphSearchFilter(this.value)" />';
 
     filterEl.innerHTML = typeHtml;
 
@@ -759,20 +1066,22 @@ export function renderGraphScript(): string {
       for (var i = 0; i < allNodes.length; i++) {
         if (allNodes[i].project) projects[allNodes[i].project] = 1;
       }
-      var projHtml = '<button class="' + (filterProject === 'all' ? 'btn btn-sm active' : 'btn btn-sm') + '" onclick="graphProjectFilter(\\'all\\')">All</button>';
+      var projHtml = '<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Project</span>';
+      projHtml += '<button class="' + (filterProject === 'all' ? 'btn btn-sm active' : 'btn btn-sm') + '" style="padding:4px 12px" onclick="graphProjectFilter(\\'all\\')">All</button>';
       var projNames = Object.keys(projects).sort();
       for (var i = 0; i < projNames.length; i++) {
         var p = projNames[i];
         var cls = p === filterProject ? 'btn btn-sm active' : 'btn btn-sm';
-        projHtml += '<button class="' + cls + '" onclick="graphProjectFilter(\\'' + esc(p).replace(/'/g, "\\\\'") + '\\')">' + esc(p) + '</button>';
+        projHtml += '<button class="' + cls + '" style="padding:4px 12px" onclick="graphProjectFilter(\\'' + esc(p).replace(/'/g, "\\\\'") + '\\')">' + esc(p) + '</button>';
       }
       projectFilterEl.innerHTML = projHtml;
     }
 
     /* node limit */
     if (limitRow) {
-      limitRow.innerHTML = '<label style="font-size:12px;color:var(--muted)">Max nodes</label>' +
-        '<input type="number" min="10" max="10000" value="' + nodeLimit + '" style="width:70px;padding:3px 6px;border-radius:4px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" onchange="applyGraphLimit(parseInt(this.value,10))" />';
+      limitRow.innerHTML = '<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Limit</span>' +
+        '<input type="number" min="10" max="10000" value="' + nodeLimit + '" style="width:72px;padding:5px 8px;border-radius:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" onchange="applyGraphLimit(parseInt(this.value,10))" />' +
+        '<span style="font-size:11px;color:var(--muted)">' + visibleNodes.length + ' of ' + allNodes.length + ' nodes</span>';
     }
   }
 
@@ -780,15 +1089,34 @@ export function renderGraphScript(): string {
   function resize() {
     var container = canvas.parentElement;
     if (!container) return;
+    var oldW = W, oldH = H;
     W = container.clientWidth;
     H = container.clientHeight || 500;
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
+    /* preserve viewport center on resize */
+    if (oldW > 0 && oldH > 0) {
+      var oldCX = (oldW / 2 - panX) / scale;
+      var oldCY = (oldH / 2 - panY) / scale;
+      panX = W / 2 - oldCX * scale;
+      panY = H / 2 - oldCY * scale;
+    }
     render();
   }
 
-  /* ── animation loop ─────────────────────────────────────────────────── */
-  function tick() {
+  /* ── animation loop (capped at 60fps) ───────────────────────────────── */
+  var lastTickTime = 0;
+  var TICK_INTERVAL = 1000 / 60; /* ~16.67ms */
+  function tick(timestamp) {
+    if (timestamp - lastTickTime < TICK_INTERVAL) {
+      if (alpha > 0 || dragging) {
+        animFrame = requestAnimationFrame(tick);
+      } else {
+        animFrame = null;
+      }
+      return;
+    }
+    lastTickTime = timestamp;
     simulate();
     render();
     if (alpha > 0 || dragging) {
@@ -808,13 +1136,18 @@ export function renderGraphScript(): string {
   /* ── initial layout ─────────────────────────────────────────────────── */
   function initPositions() {
     var n = visibleNodes.length;
-    var radius = Math.max(80, Math.sqrt(n) * 18);
+    var maxRadius = Math.max(120, Math.sqrt(n) * 40);
     for (var i = 0; i < n; i++) {
+      var nd = visibleNodes[i];
       var angle = (2 * Math.PI * i) / n;
-      visibleNodes[i].x = W / 2 + radius * Math.cos(angle);
-      visibleNodes[i].y = H / 2 + radius * Math.sin(angle);
-      visibleNodes[i].vx = 0;
-      visibleNodes[i].vy = 0;
+      var jitter = 0.85 + Math.random() * 0.3;
+      // Relevance-based starting distance: high relevance starts near center
+      var rel = nodeRelevance(nd);
+      var r = maxRadius * (0.2 + (1 - rel) * 0.8) * jitter;
+      nd.x = W / 2 + r * Math.cos(angle);
+      nd.y = H / 2 + r * Math.sin(angle);
+      nd.vx = 0;
+      nd.vy = 0;
     }
   }
 
@@ -838,6 +1171,7 @@ export function renderGraphScript(): string {
     buildFilterBar();
     initPositions();
     startSimulation();
+    announceFilterChange();
   };
 
   window.graphProjectFilter = function(proj) {
@@ -846,6 +1180,7 @@ export function renderGraphScript(): string {
     buildFilterBar();
     initPositions();
     startSimulation();
+    announceFilterChange();
   };
 
   window.graphHealthFilter = function(val) {
@@ -853,6 +1188,7 @@ export function renderGraphScript(): string {
     applyFilters();
     initPositions();
     startSimulation();
+    announceFilterChange();
   };
 
   window.graphSearchFilter = function(q) {
@@ -873,33 +1209,49 @@ export function renderGraphScript(): string {
     startSimulation();
   };
 
-  /* ── initGraph (called when graph tab is first shown) ───────────────── */
-  window.initGraph = function() {
-    canvas = document.getElementById('graph-canvas');
-    tooltip = document.getElementById('graph-tooltip');
-    if (!canvas) return;
-    ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  /* ── mount (called by host loadGraph with pre-fetched data) ─────────── */
+  window.cortexGraph = {
+    mount: function(data) {
+      canvas = document.getElementById('graph-canvas');
+      tooltip = document.getElementById('graph-tooltip');
+      if (!canvas) {
+        console.error('[cortexGraph] #graph-canvas not found');
+        return;
+      }
+      ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    resize();
-    window.addEventListener('resize', resize);
+      resize();
+      window.addEventListener('resize', resize);
 
-    fetch('/api/graph?_auth=' + _authToken)
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        allNodes = data.nodes || [];
-        allLinks = data.links || [];
-        allScores = data.scores || {};
+      allNodes = data.nodes || [];
+      allLinks = data.links || [];
+      allScores = data.scores || {};
+      buildScoreLookup();
 
-        applyFilters();
-        buildFilterBar();
-        initPositions();
-        setupInteraction();
-        startSimulation();
-      })
-      .catch(function(err) {
-        console.error('Graph load failed:', err);
-      });
+      /* create ARIA live region for screen reader announcements */
+      liveRegion = document.createElement('div');
+      liveRegion.setAttribute('role', 'status');
+      liveRegion.setAttribute('aria-live', 'polite');
+      liveRegion.setAttribute('aria-atomic', 'true');
+      liveRegion.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
+      document.body.appendChild(liveRegion);
+
+      /* make detail panel focusable for keyboard flow */
+      var detailPanel = document.getElementById('graph-detail-panel');
+      if (detailPanel && !detailPanel.hasAttribute('tabindex')) {
+        detailPanel.setAttribute('tabindex', '-1');
+        detailPanel.setAttribute('role', 'region');
+        detailPanel.setAttribute('aria-label', 'Node details');
+      }
+
+      applyFilters();
+      buildFilterBar();
+      initPositions();
+      setupInteraction();
+      startSimulation();
+      announceGraphSummary();
+    }
   };
 })();
 `;

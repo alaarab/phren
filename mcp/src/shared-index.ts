@@ -22,6 +22,7 @@ import { getProjectOwnershipMode, readProjectConfig } from "./project-config.js"
 import {
   buildSourceDocKey,
   queryDocRows,
+  queryRows,
   type SqlJsDatabase,
 } from "./index-query.js";
 
@@ -701,8 +702,19 @@ function mergeManualLinks(db: SqlJsDatabase, cortexPath: string): void {
   try {
     const manualLinks: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> =
       JSON.parse(fs.readFileSync(manualLinksPath, 'utf8'));
+    let pruned = false;
+    const validLinks: typeof manualLinks = [];
     for (const link of manualLinks) {
       try {
+        // Validate: skip manual links whose sourceDoc no longer exists in the index
+        const docCheck = queryRows(db, "SELECT 1 FROM docs WHERE source_key = ? LIMIT 1", [link.sourceDoc]);
+        if (!docCheck || docCheck.length === 0) {
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] manualLinks: pruning stale link to "${link.sourceDoc}"\n`);
+          pruned = true;
+          continue;
+        }
+        validLinks.push(link);
+
         db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [link.entity, link.entityType, new Date().toISOString().slice(0, 10)]);
         db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [link.sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
         const eRes = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [link.entity, link.entityType]);
@@ -729,6 +741,18 @@ function mergeManualLinks(db: SqlJsDatabase, cortexPath: string): void {
         }
       } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] manualLinks entry: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+    }
+    // Rewrite manual-links.json if stale entries were pruned
+    if (pruned) {
+      try {
+        withFileLock(manualLinksPath, () => {
+          const tmpPath = manualLinksPath + `.tmp-${crypto.randomUUID()}`;
+          fs.writeFileSync(tmpPath, JSON.stringify(validLinks, null, 2));
+          fs.renameSync(tmpPath, manualLinksPath);
+        });
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] manualLinks prune write: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   } catch (err: unknown) {

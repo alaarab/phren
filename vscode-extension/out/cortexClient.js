@@ -86,6 +86,18 @@ class CortexClient {
     async removeFinding(project, text) {
         return this.callTool("remove_finding", { project, finding: text });
     }
+    async getReviewQueue(project) {
+        return this.callTool("get_review_queue", { project });
+    }
+    async approveQueueItem(project, item) {
+        return this.callTool("approve_queue_item", { project, item });
+    }
+    async rejectQueueItem(project, item) {
+        return this.callTool("reject_queue_item", { project, item });
+    }
+    async editQueueItem(project, item, newText) {
+        return this.callTool("edit_queue_item", { project, item, new_text: newText });
+    }
     async readGraph(project) {
         const args = {};
         if (project)

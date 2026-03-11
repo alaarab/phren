@@ -70,9 +70,12 @@ export function extractEntityNames(content: string): string[] {
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) {
       const name = match[1] || match[0];
-      if (name && name.length > 1 && name.length < 100) {
-        found.add(name.toLowerCase());
-      }
+      if (!name || name.length <= 1 || name.length >= 100) continue;
+      // Skip version strings (e.g. "1.2.3", "v2.0.0-beta")
+      if (/^v?\d+\.\d+/.test(name)) continue;
+      // Skip file paths (e.g. "src/utils/helper.ts", "./config.json")
+      if (/^\.?\//.test(name) || /\.(ts|js|json|md|yaml|yml|py|go|rs|java|tsx|jsx|css|html|txt|sh|toml|cfg|ini|env|lock)$/i.test(name)) continue;
+      found.add(name.toLowerCase());
     }
   }
 
@@ -126,24 +129,70 @@ export function ensureGlobalEntitiesTable(db: SqlJsDatabase): void {
 /**
  * Parse user-defined entity names from CLAUDE.md frontmatter.
  * Looks for: <!-- cortex:entities: Redis,MyService,InternalAPI -->
+ *
+ * Results are cached per project+mtime to avoid repeated sync readFileSync calls
+ * during a single index build that processes many docs for the same project.
  */
+const _userEntityCache = new Map<string, { mtime: number; entities: string[] }>();
+
 function parseUserDefinedEntities(cortexPath: string, project: string): string[] {
   const claudeMdPath = `${cortexPath}/${project}/CLAUDE.md`;
   try {
     if (!fs.existsSync(claudeMdPath)) return [];
+    const stat = fs.statSync(claudeMdPath);
+    const mtimeMs = stat.mtimeMs;
+    const cacheKey = `${cortexPath}/${project}`;
+    const cached = _userEntityCache.get(cacheKey);
+    if (cached && cached.mtime === mtimeMs) return cached.entities;
+
     const content = fs.readFileSync(claudeMdPath, "utf-8");
     const match = content.match(/<!--\s*cortex:entities:\s*(.+?)\s*-->/);
-    if (!match) return [];
-    return match[1].split(",").map(s => s.trim()).filter(s => s.length > 0);
+    const entities = match
+      ? match[1].split(",").map(s => s.trim()).filter(s => s.length > 0)
+      : [];
+    _userEntityCache.set(cacheKey, { mtime: mtimeMs, entities });
+    return entities;
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] parseUserDefinedEntities: ${err instanceof Error ? err.message : String(err)}\n`);
     return [];
   }
 }
 
+/** Clear the user entity cache (call between index builds). */
+export function clearUserEntityCache(): void {
+  _userEntityCache.clear();
+}
+
+// Words that commonly start sentences or appear in titles — not entity names
+const SENTENCE_START_WORDS = new Set([
+  "the", "this", "that", "these", "those", "when", "where", "which", "while",
+  "what", "with", "will", "would", "should", "could", "have", "has", "had",
+  "been", "being", "before", "after", "about", "above", "below", "between",
+  "only", "also", "even", "just", "like", "make", "made", "many", "more",
+  "most", "much", "must", "need", "never", "note", "once", "other", "over",
+  "same", "some", "such", "sure", "take", "than", "them", "then", "they",
+  "each", "every", "both", "either", "neither", "here", "there", "first",
+  "second", "third", "next", "last", "new", "old", "good", "bad", "best",
+  "however", "therefore", "because", "although", "since", "unless", "until",
+  "instead", "rather", "already", "always", "never", "sometimes", "often",
+]);
+
+// Patterns that look like version strings, file paths, or dates — not entities
+const FALSE_POSITIVE_PATTERNS = [
+  /^v?\d+\.\d+/,              // version strings: 1.2.3, v2.0
+  /^[A-Z]:\\/,                // Windows paths: C:\
+  /^\//,                       // Unix paths: /usr/bin
+  /^\d{4}-\d{2}/,             // ISO dates: 2026-03
+  /^[A-Z]{2,6}$/,             // All-caps abbreviations shorter than 7 chars (OK, API, etc.)
+  /^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i, // Month names
+];
+
 /**
  * Extract capitalized noun phrases (2+ words starting with uppercase) as candidate entities.
  * e.g. "Auth Service", "Data Pipeline", "Internal API"
+ *
+ * Filters out common false positives: sentence-start capitalization, version strings,
+ * file paths, and single-word abbreviations.
  */
 function extractCapitalizedPhrases(content: string): string[] {
   const found = new Set<string>();
@@ -151,10 +200,16 @@ function extractCapitalizedPhrases(content: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(content)) !== null) {
     const phrase = match[1];
-    // Filter out common false positives (sentence starts, etc.)
-    if (phrase.length >= 4 && phrase.length < 60) {
-      found.add(phrase.toLowerCase());
-    }
+    if (phrase.length < 4 || phrase.length >= 60) continue;
+
+    // Check if first word is a common sentence-start word
+    const firstWord = phrase.split(/\s+/)[0].toLowerCase();
+    if (SENTENCE_START_WORDS.has(firstWord)) continue;
+
+    // Check if it looks like a false positive pattern
+    if (FALSE_POSITIVE_PATTERNS.some(p => p.test(phrase))) continue;
+
+    found.add(phrase.toLowerCase());
   }
   return [...found];
 }
