@@ -5,6 +5,7 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { isVersionNewer } from "./init.js";
 import { getMachineName } from "./machine-identity.js";
+import { PACKAGE_NAME } from "./package-metadata.js";
 import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, updateFileChecksums, verifyFileChecksums } from "./link.js";
 
 describe("link", () => {
@@ -381,7 +382,7 @@ describe("link", () => {
       fs.mkdirSync(cortexProject, { recursive: true });
       fs.writeFileSync(path.join(cortexProject, "CLAUDE.md"), "# Test");
       fs.writeFileSync(path.join(cortexProject, "summary.md"), "**What:** A planning test project\n");
-      fs.writeFileSync(path.join(cortexProject, "backlog.md"), "# Backlog\n\n## Active\n\n- Important task\n");
+      fs.writeFileSync(path.join(cortexProject, "tasks.md"), "# Task\n\n## Active\n\n- Important task\n");
 
       const realContextFile = path.join(homeDir, ".cortex-context.md");
       await runLink(cortexPath, { machine: "test-machine", profile: "test", task: "planning" });
@@ -556,7 +557,7 @@ describe("link", () => {
       const content = fs.readFileSync(skillFile, "utf8");
       expect(content).toContain("cortex");
       expect(content).toContain("hooks:");
-      expect(content).toContain("npx -y cortex@");
+      expect(content).toContain(`npx -y ${PACKAGE_NAME}@`);
       expect(content).not.toContain(tmpRoot);
       expect(content).not.toContain(".npm/_npx");
     });
@@ -713,7 +714,7 @@ describe("link", () => {
       expect(policyCheck!.ok).toBe(false);
     });
 
-    it("checkData validates backlog format", async () => {
+    it("checkData validates task format", async () => {
       // Need a profile for getProjectDirs to work
       const profilesDir = path.join(cortexPath, "profiles");
       fs.mkdirSync(profilesDir, { recursive: true });
@@ -729,8 +730,8 @@ describe("link", () => {
       const projDir = path.join(cortexPath, "doc-proj");
       fs.mkdirSync(projDir, { recursive: true });
       fs.writeFileSync(
-        path.join(projDir, "backlog.md"),
-        "# doc-proj Backlog\n\n## Active\n\n- Task one\n\n## Queue\n\n## Done\n\n"
+        path.join(projDir, "tasks.md"),
+        "# doc-proj Task\n\n## Active\n\n- Task one\n\n## Queue\n\n## Done\n\n"
       );
 
       const result = await runDoctor(cortexPath, false, true);
@@ -739,7 +740,7 @@ describe("link", () => {
       expect(tasksCheck!.ok).toBe(true);
     });
 
-    it("checkData flags backlog items whose specific terms do not match repo/docs", async () => {
+    it("checkData flags task items whose specific terms do not match repo/docs", async () => {
       const profilesDir = path.join(cortexPath, "profiles");
       const projectsRoot = path.join(tmpRoot, "projects");
       process.env.PROJECTS_DIR = projectsRoot;
@@ -757,8 +758,8 @@ describe("link", () => {
       const projDir = path.join(cortexPath, "doc-proj");
       fs.mkdirSync(projDir, { recursive: true });
       fs.writeFileSync(
-        path.join(projDir, "backlog.md"),
-        "# doc-proj Backlog\n\n## Active\n\n- Refactor `shell-view.ts` selection rendering\n\n## Queue\n\n- Improve chart interface with bubble details and device type filters\n\n## Done\n\n"
+        path.join(projDir, "tasks.md"),
+        "# doc-proj Task\n\n## Active\n\n- Refactor `shell-view.ts` selection rendering\n\n## Queue\n\n- Improve chart interface with bubble details and device type filters\n\n## Done\n\n"
       );
 
       const repoDir = path.join(projectsRoot, "doc-proj");
@@ -971,7 +972,7 @@ hooks:
       fs.mkdirSync(path.join(cortex, "testproj"), { recursive: true });
       fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
       fs.writeFileSync(path.join(cortex, "testproj", "FINDINGS.md"), "# FINDINGS\n\n- Test finding\n");
-      fs.writeFileSync(path.join(cortex, "testproj", "backlog.md"), "# backlog\n\n## Queue\n\n- Item\n");
+      fs.writeFileSync(path.join(cortex, "testproj", "tasks.md"), "# task\n\n## Queue\n\n- Item\n");
     });
 
     afterEach(() => { tmp.cleanup(); });

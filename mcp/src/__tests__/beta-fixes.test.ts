@@ -99,7 +99,7 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     expect(filtered.rows[0].content).not.toContain("Ancient knowledge entry");
   });
 
-  it("does not filter non-trust types like claude or backlog", () => {
+  it("does not filter non-trust types like claude or task", () => {
     const content = [
       "# Findings",
       "",
@@ -230,7 +230,9 @@ describe("autoArchiveToReference guards", () => {
     expect(occurrences).toBe(1);
 
     // The other entry should be archived
-    const refFiles = fs.readdirSync(refDir).filter(f => f.endsWith(".md"));
+    const refFiles = fs.readdirSync(refDir, { recursive: true })
+      .map(f => String(f))
+      .filter(f => f.endsWith(".md"));
     const allRefContent = refFiles.map(f => fs.readFileSync(path.join(refDir, f), "utf8")).join("\n");
     expect(allRefContent).toContain("API endpoint rate limiting");
 

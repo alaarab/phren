@@ -23,7 +23,7 @@ vi.mock("child_process", () => ({
 }));
 
 import { runCortexUpdate } from "./update.js";
-import { PACKAGE_SPEC } from "./package-metadata.js";
+import { PACKAGE_NAME, PACKAGE_SPEC } from "./package-metadata.js";
 
 function npmExec(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
@@ -144,12 +144,12 @@ describe("runCortexUpdate", () => {
     expect(result.message).toContain("Run `cortex update --refresh-starter`");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       npmExec(),
-      ["install", "-g", "cortex@latest"],
+      ["install", "-g", `${PACKAGE_NAME}@latest`],
       expect.objectContaining({ encoding: "utf8" })
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(
       npmExec(),
-      ["list", "-g", "cortex", "--depth=0"],
+      ["list", "-g", PACKAGE_NAME, "--depth=0"],
       expect.objectContaining({ encoding: "utf8" })
     );
   });

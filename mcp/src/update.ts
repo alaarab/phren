@@ -14,18 +14,6 @@ function packageRootFromRuntime(): string {
   return path.resolve(path.dirname(current), "..", "..");
 }
 
-function readPackageName(packageRoot: string): string | null {
-  const packageJson = path.join(packageRoot, "package.json");
-  if (!fs.existsSync(packageJson)) return null;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(packageJson, "utf8")) as { name?: string };
-    return parsed.name || null;
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readPackageName: ${errorMessage(err)}\n`);
-    return null;
-  }
-}
-
 function run(cmd: string, args: string[], cwd?: string): string {
   return execFileSync(cmd, args, {
     cwd,
@@ -75,11 +63,10 @@ function maybeRefreshStarter(root: string, builtEntry: string, refreshStarter: b
 
 export async function runCortexUpdate(opts: RunCortexUpdateOptions = {}): Promise<UpdateResult> {
   const root = packageRootFromRuntime();
-  const pkgName = readPackageName(root) || PACKAGE_NAME;
   const hasGit = fs.existsSync(path.join(root, ".git"));
   const builtEntry = path.join(root, "mcp", "dist", "index.js");
 
-  if (pkgName === "cortex" && hasGit) {
+  if (hasGit) {
     try {
       // Warn if working tree is dirty (autostash handles it, but good to know)
       try {
