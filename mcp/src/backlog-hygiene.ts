@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { readBacklog } from "./data-backlog.js";
+import { isTaskFileName, readBacklog } from "./data-backlog.js";
 import { STOP_WORDS, extractKeywords, errorMessage } from "./utils.js";
 
 const TEXT_EXTENSIONS = new Set([
@@ -146,7 +146,7 @@ function collectCorpus(root: string): string[] {
         continue;
       }
       if (!entry.isFile()) continue;
-      if (entry.name.toLowerCase() === "backlog.md") continue;
+      if (isTaskFileName(entry.name)) continue;
       filesSeen += 1;
       const rel = path.relative(root, fullPath).replace(/\\/g, "/").toLowerCase();
       texts.push(rel);

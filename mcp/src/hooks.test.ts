@@ -83,7 +83,7 @@ describe("hooks", () => {
   describe("buildSharedLifecycleCommands", () => {
     it("uses versioned npx commands without embedding local cortex paths", () => {
       const cmds = buildSharedLifecycleCommands();
-      expect(cmds.sessionStart).toContain("npx -y cortex@");
+      expect(cmds.sessionStart).toContain("npx -y @alaarab/cortex@");
       expect(cmds.sessionStart).toContain("hook-session-start");
       expect(cmds.userPromptSubmit).toContain("hook-prompt");
       expect(cmds.stop).toContain("hook-stop");
@@ -455,7 +455,7 @@ describe("hooks", () => {
     it("buildLifecycleCommands uses local node entry script when available", () => {
       fs.writeFileSync(localEntryScript, "// test entry for hooks unit tests\n");
 
-      const cmds = buildLifecycleCommands("/tmp/cortex");
+      const cmds = buildLifecycleCommands("/tmpcortex");
       expect(cmds.sessionStart).toContain(" node ");
       expect(cmds.userPromptSubmit).toContain(" node ");
       expect(cmds.stop).toContain(" node ");

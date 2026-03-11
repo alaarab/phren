@@ -19,7 +19,7 @@ vi.mock("./shared.js", async (importOriginal) => {
   const orig: any = await importOriginal();
   return {
     ...orig,
-    ensureCortexPath: () => "/tmp/cortex-fake",
+    ensureCortexPath: () => "/tmpcortex-fake",
     detectProject: () => "test-proj",
     debugLog: () => {},
     addFindingToFile: vi.fn(),

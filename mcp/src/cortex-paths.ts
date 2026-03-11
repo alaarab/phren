@@ -130,7 +130,7 @@ function requireDirectory(resolved: string, label: string): string {
 }
 
 // Pure lookup: find an existing cortex root directory, returns null if none found
-// Priority: CORTEX_PATH env > ~/.cortex > ~/cortex
+// Priority: CORTEX_PATH env > ~/.cortex > ~cortex
 // Memoized: keyed on CORTEX_PATH+HOME so test overrides are respected.
 let cachedCortexPath: string | null | undefined;
 let cachedCortexPathKey: string | undefined;
@@ -167,7 +167,7 @@ export function ensureCortexPath(): string {
   fs.mkdirSync(defaultPath, { recursive: true });
   fs.writeFileSync(
     path.join(defaultPath, "README.md"),
-    `# My Cortex\n\nThis is your personal project store. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md FINDINGS.md backlog.md\n\`\`\`\n\nOr run \`/cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
+    `# My Cortex\n\nThis is your personal project store. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md FINDINGS.md tasks.md\n\`\`\`\n\nOr run \`cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
   );
   cachedCortexPathKey = `${process.env.CORTEX_PATH ?? ""}|${process.env.HOME ?? ""}|${process.env.USERPROFILE ?? ""}`;
   cachedCortexPath = defaultPath;
@@ -318,7 +318,7 @@ export function computeCortexLiveStateToken(cortexPath: string): string {
   for (const projectDir of projectDirs) {
     const project = path.basename(projectDir);
     parts.push(`project:${project}`);
-    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "backlog.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md", "topic-config.json"]) {
+    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "tasks.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md", "topic-config.json"]) {
       pushFileToken(parts, path.join(projectDir, file));
     }
     pushDirTokens(parts, path.join(projectDir, "reference"));

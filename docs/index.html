@@ -279,8 +279,8 @@
             <div class="install-step-body">
               <div class="code-block code-block-install">
                 <div class="install-command-row">
-                  <div><span class="code-prompt">$</span> npx cortex init</div>
-                  <button class="copy-btn" data-cmd="npx cortex init">copy</button>
+                  <div><span class="code-prompt">$</span> cortex init</div>
+                  <button class="copy-btn" data-cmd="cortex init">copy</button>
                 </div>
                 <div class="install-command-note">
                   Creates <code style="color:var(--indigo)">~/.cortex</code>, registers the machine, configures MCP, wires up hooks, and bootstraps the repo you are standing in.
@@ -342,7 +342,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
           <div class="step-title">Shell and UI when you need them</div>
-          <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>npx cortex</code> opens the interactive shell. <code>npx cortex review-ui</code> opens the browser with your memory graph and review queue.</p>
+          <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>cortex</code> opens the interactive shell. <code>cortex review-ui</code> opens the browser with your memory graph and review queue.</p>
         </div>
       </div>
     </div>
@@ -595,7 +595,7 @@
       <div class="review-ui-header reveal" style="text-align:left;max-width:100%;margin-bottom:32px">
         <div class="section-label">Memory management</div>
         <h2 class="section-title">Review UI and memory graph.</h2>
-        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Browse what your agents know. <code style="font-size:14px;color:var(--copper-mid)">npx cortex review-ui</code> opens a browser with your full memory graph, finding details, quality scores, and review queue.</p>
+        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Browse what your agents know. <code style="font-size:14px;color:var(--copper-mid)">cortex review-ui</code> opens a browser with your full memory graph, finding details, quality scores, and review queue.</p>
       </div>
       <div class="rui-mock reveal">
         <div class="rui-mock-chrome">
@@ -604,7 +604,7 @@
             <span class="rui-dot rui-dot-y"></span>
             <span class="rui-dot rui-dot-g"></span>
           </div>
-          <div class="rui-mock-urlbar">localhost:3499 &nbsp;&middot;&nbsp; npx cortex review-ui</div>
+          <div class="rui-mock-urlbar">localhost:3499 &nbsp;&middot;&nbsp; cortex review-ui</div>
         </div>
         <div class="rui-mock-body">
           <div class="rui-mock-sidebar">
@@ -814,7 +814,7 @@
         </div>
         <div class="skill-card reveal reveal-delay-2">
           <div class="skill-name">/cortex-init</div>
-          <div class="skill-desc">Scaffold a brand-new project entry. Use <code style="font-size:11px;color:var(--text-muted)">npx cortex add</code> for an existing repo.</div>
+          <div class="skill-desc">Scaffold a brand-new project entry. Use <code style="font-size:11px;color:var(--text-muted)">cortex add</code> for an existing repo.</div>
         </div>
         <div class="skill-card reveal">
           <div class="skill-name">/cortex-discover</div>
@@ -826,7 +826,7 @@
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Drop your own skills into <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">npx cortex init</code> wires them up on the next refresh. Starter templates include examples without prescribing your workflow.</div>
+          <div class="skill-desc">Drop your own skills into <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex init</code> wires them up on the next refresh. Starter templates include examples without prescribing your workflow.</div>
         </div>
       </div>
     </div>

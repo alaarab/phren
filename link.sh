@@ -294,13 +294,13 @@ write_context_file() {
   local wrapped=""
   wrapped+="<!-- cortex-managed -->"$'\n'
   wrapped+="$managed_content"$'\n'
-  wrapped+="<!-- /cortex-managed -->"
+  wrapped+="<!-- cortex-managed -->"
 
   if [ -f "$CONTEXT_FILE" ] && grep -q '<!-- cortex-managed -->' "$CONTEXT_FILE" 2>/dev/null; then
     # Preserve user content before and after the managed block
     local before after
     before="$(sed -n '1,/<!-- cortex-managed -->/{ /<!-- cortex-managed -->/d; p; }' "$CONTEXT_FILE")"
-    after="$(sed -n '/<!-- \/cortex-managed -->/,${  /<!-- \/cortex-managed -->/d; p; }' "$CONTEXT_FILE")"
+    after="$(sed -n '/<!-- \cortex-managed -->/,${  /<!-- \cortex-managed -->/d; p; }' "$CONTEXT_FILE")"
 
     local tmp
     tmp="$(mktemp "${CONTEXT_FILE}.XXXXXX")"
@@ -462,8 +462,8 @@ configure_mcp() {
   # Check for a local dist first (if you cloned the framework)
   for candidate in \
     "$SCRIPT_DIR/mcp/dist/index.js" \
-    "$HOME/cortex/mcp/dist/index.js" \
-    "$HOME/Projects/cortex/mcp/dist/index.js"; do
+    "$HOMEcortex/mcp/dist/index.js" \
+    "$HOME/Projectscortex/mcp/dist/index.js"; do
     if [ -f "$candidate" ]; then
       mcp_dist="$candidate"
       mcp_cmd="node"
@@ -546,8 +546,8 @@ configure_vscode_mcp() {
   # Check for a local dist first
   for candidate in \
     "$SCRIPT_DIR/mcp/dist/index.js" \
-    "$HOME/cortex/mcp/dist/index.js" \
-    "$HOME/Projects/cortex/mcp/dist/index.js"; do
+    "$HOMEcortex/mcp/dist/index.js" \
+    "$HOME/Projectscortex/mcp/dist/index.js"; do
     if [ -f "$candidate" ]; then
       mcp_dist="$candidate"
       mcp_cmd="node"

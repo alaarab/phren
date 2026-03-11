@@ -6,11 +6,13 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
+  canonicalTaskFilePath,
   listProjectCards,
   readBacklog,
   readFindings,
   readReviewQueue,
   readRuntimeHealth,
+  resolveTaskFilePath,
   ShellState,
 } from "./data-access.js";
 import {
@@ -352,7 +354,9 @@ function renderBacklogView(ctx: ViewContext, cursor: number, height: number, sub
     ? [`  ${style.yellow("⚠")}  ${style.yellow(parsed.issues.join("; "))}`, ""]
     : [];
 
-  const backlogFile = path.join(ctx.cortexPath, project, "backlog.md");
+  const backlogFile = resolveTaskFilePath(ctx.cortexPath, project)
+    ?? canonicalTaskFilePath(ctx.cortexPath, project)
+    ?? path.join(ctx.cortexPath, project, "tasks.md");
   const subsResult = parseSubsections(backlogFile, project, subsectionsCache);
   const subsections = subsResult.map;
   const newCache = subsResult.cache;

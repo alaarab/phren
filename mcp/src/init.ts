@@ -818,8 +818,8 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  1. Start a new Claude session in your project directory — cortex injects context automatically`);
       log(`  2. Run \`npx cortex doctor\` to verify everything is wired correctly`);
       log(`  3. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.backlog\``);
-      log(`  4. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
-      log(`  5. After working across projects, run /cortex-consolidate to find cross-project patterns`);
+      log(`  4. After your first week, run cortex-discover to surface gaps in your project knowledge`);
+      log(`  5. After working across projects, run cortex-consolidate to find cross-project patterns`);
       log(``);
       return;
   }
@@ -1121,8 +1121,8 @@ export async function runInit(opts: InitOptions = {}) {
   if (!mcpEnabled) {
     log(`  ${step++}. Turn MCP on: npx cortex mcp-mode on`);
   }
-  log(`  ${step++}. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
-  log(`  ${step++}. After working across projects, run /cortex-consolidate to find cross-project patterns`);
+  log(`  ${step++}. After your first week, run cortex-discover to surface gaps in your project knowledge`);
+  log(`  ${step++}. After working across projects, run cortex-consolidate to find cross-project patterns`);
   log(`\n  Read ${cortexPath}/README.md for a guided tour of each file.`);
 
   log(``);

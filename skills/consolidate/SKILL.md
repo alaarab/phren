@@ -4,7 +4,7 @@ description: Find patterns across project findings and surface insights that app
 dependencies:
   - git
 ---
-# /cortex-consolidate - Cross-project synthesis
+# cortex-consolidate - Cross-project synthesis
 
 > Find patterns across project findings and surface insights that apply everywhere.
 
@@ -34,7 +34,7 @@ ls "$CORTEX_DIR" 2>/dev/null
 ```
 
 If it doesn't exist, tell the user:
-> "No cortex directory found at ~/.cortex. This skill needs a cortex repo with project findings. Run `/cortex-init` to set one up, or set CORTEX_DIR if yours is elsewhere."
+> "No cortex directory found at ~/.cortex. This skill needs a cortex repo with project findings. Run `cortex-init` to set one up, or set CORTEX_DIR if yours is elsewhere."
 
 ### 2. Gather ALL findings
 
@@ -113,7 +113,7 @@ Rules for each entry:
 ### 6. Report
 
 ```
-/cortex-consolidate
+cortex-consolidate
 
 Scanned: my-app (12 findings), backend (8 findings), frontend (5 findings)
 
@@ -149,4 +149,4 @@ git push  # only if remote exists
 ## Related skills
 
 - `add_finding()`: capture findings during a session via MCP
-- `/cortex-sync`: sync the consolidated findings to other machines
+- `cortex-sync`: sync the consolidated findings to other machines

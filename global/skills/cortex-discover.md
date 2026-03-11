@@ -5,7 +5,7 @@ dependencies:
   - git
   - gh
 ---
-# /cortex-discover - Cortex health check
+# cortex-discover - Cortex health check
 
 > Audit your cortex repo and tell you exactly what needs attention.
 
@@ -30,7 +30,7 @@ ls "$CORTEX_DIR" 2>/dev/null
 ```
 
 If it doesn't exist:
-> "No cortex directory found at ~/.cortex. Run `/cortex-init` to set one up."
+> "No cortex directory found at ~/.cortex. Run `cortex-init` to set one up."
 
 ### 2. Scan all projects
 
@@ -115,7 +115,7 @@ If yes, gather the 5 fields from the user and write the file to `$CORTEX_DIR/mya
 ### 7. Output the report
 
 ```
-/cortex-discover
+cortex-discover
 
 ## Section 1: Missing files
 
@@ -169,7 +169,7 @@ The "Top 3" section is the most important part. Make these:
 
 ## Related skills
 
-- `/cortex-init`: scaffold missing files for a project
+- `cortex-init`: scaffold missing files for a project
 - `add_finding()`: capture findings via MCP (fixes "missing FINDINGS.md")
-- `/cortex-consolidate`: synthesize cross-project patterns
+- `cortex-consolidate`: synthesize cross-project patterns
 - `/backlog`: work on stuck backlog items

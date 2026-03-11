@@ -19,6 +19,7 @@ import {
   readBacklog,
   readBacklogs,
   resolveBacklogItem,
+  TASKS_FILENAME,
   updateBacklogItem as updateBacklogItemStore,
 } from "./data-access.js";
 import {
@@ -35,6 +36,10 @@ const BACKLOG_SECTION_ORDER: BacklogSection[] = ["Active", "Queue", "Done"];
 const DEFAULT_BACKLOG_LIMIT = 20;
 /** Done items are historical — cap tightly by default to avoid large responses. */
 const DEFAULT_DONE_LIMIT = 5;
+
+function refreshTaskIndex(updateFileInIndex: (filePath: string) => void, cortexPath: string, project: string): void {
+  updateFileInIndex(path.join(cortexPath, project, TASKS_FILENAME));
+}
 
 function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: number, doneLimit?: number, offset?: number): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number; totalUnpaged: number; truncated: boolean } {
   let includedSections: BacklogSection[];
@@ -218,7 +223,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "add_task",
     {
       title: "◆ cortex · add task",
-      description: "Append a task to a project's backlog.md. Adds to the Queue section.",
+      description: "Append a task to a project's tasks.md file. Adds to the Queue section.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your cortex)."),
         item: z.string().describe("The task to add."),
@@ -229,7 +234,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = addBacklogItemStore(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -239,7 +244,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "add_tasks",
     {
       title: "◆ cortex · add tasks (bulk)",
-      description: "Append multiple tasks to a project's backlog.md in one call. Adds to the Queue section.",
+      description: "Append multiple tasks to a project's tasks.md file in one call. Adds to the Queue section.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         items: z.array(z.string()).describe("List of tasks to add."),
@@ -251,7 +256,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = addBacklogItemsBatch(cortexPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, errors } = result.data;
-        if (added.length > 0) updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        if (added.length > 0) refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} tasks to ${project}`, data: { project, added, errors } });
       });
     }
@@ -272,7 +277,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = completeBacklogItemStore(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -294,7 +299,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = completeBacklogItemsBatch(cortexPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { completed, errors } = result.data;
-        if (completed.length > 0) updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        if (completed.length > 0) refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
       });
     }
@@ -324,7 +329,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = updateBacklogItemStore(cortexPath, project, item, updates);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
       });
     }
@@ -369,7 +374,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           unlink: unlink ?? false,
         });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({
           ok: true,
           message: unlink
@@ -430,7 +435,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!completed.ok) return mcpResponse({ ok: false, error: completed.error, errorCode: completed.code });
         }
 
-        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({
           ok: true,
           message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} task.`,
@@ -462,7 +467,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = pinBacklogItem(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -482,7 +487,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = workNextBacklogItem(cortexPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project } });
       });
     }
@@ -504,7 +509,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = tidyBacklogDone(cortexPath, project, keep ?? 30, dry_run ?? false);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        if (!dry_run) updateFileInIndex(path.join(cortexPath, project, "backlog.md"));
+        if (!dry_run) refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, keep: keep ?? 30, dryRun: dry_run ?? false } });
       });
     }

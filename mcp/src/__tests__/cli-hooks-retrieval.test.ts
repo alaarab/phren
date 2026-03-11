@@ -145,7 +145,7 @@ describe("searchDocuments", () => {
   it("retries with a relaxed FTS query when the strict lexical query misses", () => {
     const strictQuery = buildRobustFtsQuery("semantic search setup during init with ollama");
     const seenQueries: string[] = [];
-    const row = ["cortex", "FINDINGS.md", "findings", "Semantic opt-in during init should finish at the dependency level", "/tmp/cortex/FINDINGS.md"];
+    const row = ["cortex", "FINDINGS.md", "findings", "Semantic opt-in during init should finish at the dependency level", "/tmpcortex/FINDINGS.md"];
     const mockDb = {
       exec: (sql: string, params: any[]) => {
         if (sql.includes("MATCH")) {
@@ -168,7 +168,7 @@ describe("searchDocuments", () => {
       null
     );
 
-    expect(result?.[0]?.path).toBe("/tmp/cortex/FINDINGS.md");
+    expect(result?.[0]?.path).toBe("/tmpcortex/FINDINGS.md");
     expect(seenQueries).toHaveLength(2);
     expect(seenQueries[1]).toContain(" OR ");
   });

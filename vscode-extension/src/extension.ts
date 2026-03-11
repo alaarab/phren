@@ -19,7 +19,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const config = vscode.workspace.getConfiguration("cortex");
   const mcpServerPath = config.get<string>(
     "mcpServerPath",
-    "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/cortex/mcp/dist/index.js",
+    "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modulescortex/mcp/dist/index.js",
   );
   const storePath = config.get<string>("storePath", "/home/alaarab/.cortex");
   const nodePath = config.get<string>("nodePath", "node");

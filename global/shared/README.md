@@ -21,5 +21,5 @@ The import path is relative to `~/.cortex/global/`. Imports are resolved recursi
 ## What doesn't go here
 
 - Project-specific config (that stays in `<project>/CLAUDE.md`)
-- Findings (those go in FINDINGS.md files and get consolidated by `/cortex-consolidate`)
+- Findings (those go in FINDINGS.md files and get consolidated by `cortex-consolidate`)
 - Skills (those go in `global/skills/`)

@@ -13,6 +13,7 @@ import {
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { withFileLock as withFileLockRaw } from "./shared-governance.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
+import { TASK_FILE_ALIASES } from "./data-backlog.js";
 
 function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
   try {
@@ -215,8 +216,10 @@ function buildProjectCard(dir: string): ProjectCard {
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("#")) || "";
-  const docs = ["CLAUDE.md", "FINDINGS.md", "summary.md", "backlog.md", "MEMORY_QUEUE.md"]
+  const docs = ["CLAUDE.md", "FINDINGS.md", "summary.md", "MEMORY_QUEUE.md"]
     .filter((file) => fs.existsSync(path.join(dir, file)));
+  const taskFile = TASK_FILE_ALIASES.find((file) => fs.existsSync(path.join(dir, file)));
+  if (taskFile) docs.push(taskFile);
   return { name, summary, docs };
 }
 

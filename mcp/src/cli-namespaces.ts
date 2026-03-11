@@ -13,6 +13,7 @@ import { readInstallPreferences, writeInstallPreferences, type InstallPreference
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
+import { TASK_FILE_ALIASES } from "./data-backlog.js";
 import {
   PROJECT_HOOK_EVENTS,
   PROJECT_OWNERSHIP_MODES,
@@ -625,7 +626,7 @@ function handleProjectsList(profile: string) {
     }
     const tags: string[] = [];
     if (dirFiles.has("FINDINGS.md")) tags.push("findings");
-    if (dirFiles.has("backlog.md")) tags.push("backlog");
+    if (TASK_FILE_ALIASES.some((filename) => dirFiles.has(filename))) tags.push("tasks");
     const tagStr = tags.length ? `  [${tags.join(", ")}]` : "";
     console.log(`  ${name}${tagStr}`);
   }

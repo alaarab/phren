@@ -3,6 +3,7 @@ import { cortexErr, cortexOk, type CortexResult } from "./shared.js";
 import { bootstrapFromExisting } from "./init-setup.js";
 import { resolveActiveProfile } from "./profile-store.js";
 import type { ProjectOwnershipMode } from "./project-config.js";
+import { TASKS_FILENAME } from "./data-backlog.js";
 
 export interface AddedProjectData {
   project: string;
@@ -43,7 +44,7 @@ export function addProjectFromPath(
       claude: added.claudePath,
       summary: path.join(cortexPath, added.project, "summary.md"),
       findings: path.join(cortexPath, added.project, "FINDINGS.md"),
-      backlog: path.join(cortexPath, added.project, "backlog.md"),
+      backlog: path.join(cortexPath, added.project, TASKS_FILENAME),
     },
   });
 }

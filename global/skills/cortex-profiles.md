@@ -4,9 +4,9 @@ description: Manage machine-to-profile and profile-to-project mappings in cortex
 dependencies:
   - git
 ---
-# /cortex-profiles - Manage your profiles
+# cortex-profiles - Manage your profiles
 
-> **Multi-machine only.** This skill is for users who sync cortex across multiple machines and need to control which projects appear where. If you only use one machine, you can skip this -- `/cortex-sync` handles everything you need.
+> **Multi-machine only.** This skill is for users who sync cortex across multiple machines and need to control which projects appear where. If you only use one machine, you can skip this -- `cortex-sync` handles everything you need.
 
 > Add projects to profiles, move projects between profiles, create new profiles, and check what's in each one.
 
@@ -24,7 +24,7 @@ You need a cortex repo. The profiles live in `~/.cortex/profiles/` and machine m
   machines.yaml
 ```
 
-If you don't have a cortex repo yet, start with `/cortex-init`.
+If you don't have a cortex repo yet, start with `cortex-init`.
 
 ## What's a profile?
 
@@ -92,7 +92,7 @@ User says: "this machine is my work laptop"
 2. Ask which profile to use (show available profiles from `~/.cortex/profiles/`)
 3. Add/update the line in `~/.cortex/machines.yaml`: `work-laptop: work`
 4. Commit the change
-5. Run `/cortex-sync` to activate
+5. Run `cortex-sync` to activate
 
 ### "List my profiles"
 
@@ -113,9 +113,9 @@ git commit -m "update profiles"
 git push  # only if remote exists
 ```
 
-Then suggest running `/cortex-sync` to activate changes on this machine.
+Then suggest running `cortex-sync` to activate changes on this machine.
 
 ## Related skills
 
-- `/cortex-sync`: sync your profiles to this machine and activate them
-- `/cortex-init`: create a new project or bootstrap cortex from scratch
+- `cortex-sync`: sync your profiles to this machine and activate them
+- `cortex-init`: create a new project or bootstrap cortex from scratch

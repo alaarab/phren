@@ -14,7 +14,7 @@ import { detectProject, findFtsCacheForPath, listIndexedDocumentPaths } from "./
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
-import { readRuntimeHealth } from "./data-access.js";
+import { readRuntimeHealth, resolveTaskFilePath } from "./data-access.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -234,7 +234,8 @@ export async function runStatus() {
   for (const dir of projectDirs) {
     const projName = path.basename(dir);
     totalFindings += countBullets(path.join(cortexPath, projName, "FINDINGS.md"));
-    totalBacklog += countBullets(path.join(cortexPath, projName, "backlog.md"));
+    const taskPath = resolveTaskFilePath(cortexPath, projName);
+    if (taskPath) totalBacklog += countBullets(taskPath);
     totalQueue += countQueueItems(cortexPath, projName);
   }
 

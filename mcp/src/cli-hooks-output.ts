@@ -113,7 +113,7 @@ export function buildHookOutput(
     }
   }
 
-  parts.push("</cortex-context>");
+  parts.push("<cortex-context>");
 
   const changedCount = gitCtx?.changedFiles.size ?? 0;
   if (gitCtx) {

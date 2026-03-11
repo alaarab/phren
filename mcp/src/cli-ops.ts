@@ -8,7 +8,7 @@ import {
   normalizeProjectNameForCreate,
 } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
-import { readBacklogs } from "./data-access.js";
+import { readBacklogs, TASKS_FILENAME } from "./data-access.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import { resolveSubprocessArgs } from "./cli-hooks.js";
 
@@ -95,7 +95,7 @@ export async function handleQuickstart() {
   if (!fs.existsSync(projectDir)) {
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), `# ${normalizedProjectName} Findings\n`);
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), `# ${normalizedProjectName} Tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), `# ${normalizedProjectName} Tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
   }
 
   console.log(`\n\u2713 cortex ready. Project: ${normalizedProjectName}. Try: cortex search 'your query'`);

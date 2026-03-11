@@ -3,7 +3,7 @@
 The cortex shell is a terminal UI for browsing and managing your project store. It launches automatically when you run `cortex` with no arguments in a terminal, or explicitly with `cortex shell`.
 
 ```bash
-npx cortex shell
+cortex shell
 ```
 
 ## Views
@@ -20,7 +20,7 @@ The currently selected project is marked with a green dot. Use `↵` or `:open <
 
 ### Backlog (`b`)
 
-Shows the selected project's backlog.md parsed into three sections: Active, Queue, and Done. Each item has an auto-generated ID for easy reference in commands.
+Shows the selected project's `tasks.md` file parsed into three sections: Active, Queue, and Done. Each item has an auto-generated ID for easy reference in commands.
 
 ### Findings (`l`)
 

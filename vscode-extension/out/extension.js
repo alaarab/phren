@@ -52,7 +52,7 @@ async function activate(context) {
     context.subscriptions.push(outputChannel);
     outputChannel.appendLine("Cortex extension activating...");
     const config = vscode.workspace.getConfiguration("cortex");
-    const mcpServerPath = config.get("mcpServerPath", "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/cortex/mcp/dist/index.js");
+    const mcpServerPath = config.get("mcpServerPath", "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modulescortex/mcp/dist/index.js");
     const storePath = config.get("storePath", "/home/alaarab/.cortex");
     const nodePath = config.get("nodePath", "node");
     const cortexClient = new cortexClient_1.CortexClient({

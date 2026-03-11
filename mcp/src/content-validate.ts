@@ -5,6 +5,7 @@ import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { countActiveFindings } from "./content-archive.js";
+import { isTaskFileName } from "./data-backlog.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;
@@ -135,7 +136,7 @@ export function stripBacklogDoneSection(content: string): string {
 }
 
 /**
- * Validate backlog.md format and structure.
+ * Validate tasks.md format and structure.
  * Returns an array of issue description strings (empty array means valid).
  */
 export function validateBacklogFormat(content: string): string[] {
@@ -244,7 +245,7 @@ function findingBulletText(block: string): string {
  * Extract non-entry preamble content from a FINDINGS.md string.
  * Returns lines that appear before the first date section heading (## YYYY-MM-DD)
  * and are not the title line, so things like <!-- consolidated: ... --> markers
- * and <details>/cortex:archive blocks are preserved during merge.
+ * and <details>cortex:archive blocks are preserved during merge.
  */
 function extractFindingsPreamble(content: string): string[] {
   const lines = content.split("\n");
@@ -370,7 +371,7 @@ function backlogRecordKey(record: BacklogRecord): string {
   return record.bullet.replace(MERGE_BID_PATTERN, "").trim().toLowerCase();
 }
 
-// Parse backlog.md into a map of section name -> multi-line BacklogRecord entries.
+// Parse tasks.md into a map of section name -> multi-line BacklogRecord entries.
 function parseBacklogSections(content: string): Map<string, BacklogRecord[]> {
   const sections = new Map<string, BacklogRecord[]>();
   let current = "";
@@ -408,7 +409,7 @@ function parseBacklogSections(content: string): Map<string, BacklogRecord[]> {
 }
 
 /**
- * Merge two backlog.md versions: union items per section, deduplicated by stable ID when
+ * Merge two tasks.md versions: union items per section, deduplicated by stable ID when
  * present or by normalised bullet text otherwise. Context/continuation lines are preserved.
  * Ours wins on conflict. Section order follows Active > Queue > Done.
  */
@@ -457,7 +458,7 @@ export function mergeBacklog(ours: string, theirs: string): string {
 }
 
 /**
- * Attempt to auto-resolve git conflicts in FINDINGS.md and backlog.md files.
+ * Attempt to auto-resolve git conflicts in FINDINGS.md and tasks.md files.
  * Returns true if all conflicts were resolved, false if any remain.
  */
 export function autoMergeConflicts(cortexPath: string): boolean {
@@ -483,7 +484,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
     const fullPath = path.join(cortexPath, relFile);
     const filename = path.basename(relFile).toLowerCase();
 
-    const canAutoMerge = filename === "findings.md" || filename === "backlog.md";
+    const canAutoMerge = filename === "findings.md" || isTaskFileName(filename);
     if (!canAutoMerge) {
       debugLog(`Cannot auto-merge: ${relFile} (not a known mergeable file)`);
       allResolved = false;

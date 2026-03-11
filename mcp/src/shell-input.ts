@@ -27,10 +27,12 @@ import {
   setMachineProfile,
   ShellState,
   tidyBacklogDone,
+  canonicalTaskFilePath,
   unpinBacklogItem,
   updateBacklogItem,
   workNextBacklogItem,
   loadShellState,
+  resolveTaskFilePath,
 } from "./data-access.js";
 import { runtimeFile } from "./shared.js";
 import { handleGovernMemories } from "./cli-govern.js";
@@ -79,6 +81,12 @@ export interface NavigationHost extends PaletteHost {
   prevHealthView: ShellView | undefined;
   filter: string | undefined;
   setFilter(value: string): void;
+}
+
+function taskFileForProject(cortexPath: string, project: string): string {
+  return resolveTaskFilePath(cortexPath, project)
+    ?? canonicalTaskFilePath(cortexPath, project)
+    ?? path.join(cortexPath, project, "tasks.md");
 }
 
 export async function executePalette(host: PaletteHost, input: string): Promise<void> {
@@ -163,13 +171,13 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const ids = expandIds(match);
     if (ids.length > 1) {
       host.confirmThen(`Complete ${ids.length} items (${ids.join(", ")})?`, () => {
-        const file = path.join(host.cortexPath, project, "backlog.md");
+        const file = taskFileForProject(host.cortexPath, project);
         host.snapshotForUndo(`complete ${ids.length} items`, file);
         host.setMessage(ids.map((id) => resultMsg(completeBacklogItem(host.cortexPath, project, id))).join("; "));
       });
     } else {
       host.confirmThen(`Complete "${match}"?`, () => {
-        const file = path.join(host.cortexPath, project, "backlog.md");
+        const file = taskFileForProject(host.cortexPath, project);
         host.snapshotForUndo(`complete "${match}"`, file);
         host.setMessage(`  ${resultMsg(completeBacklogItem(host.cortexPath, project, match))}`);
       });
@@ -186,7 +194,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const match = parts.slice(1, -1).join(" ");
     const ids = expandIds(match);
     if (ids.length > 1) {
-      const file = path.join(host.cortexPath, project, "backlog.md");
+      const file = taskFileForProject(host.cortexPath, project);
       host.snapshotForUndo(`move ${ids.length} items to ${section}`, file);
       host.setMessage(ids.map((id) => resultMsg(updateBacklogItem(host.cortexPath, project, id, { section }))).join("; "));
     } else {
@@ -244,7 +252,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     const keep = parts[1] ? Number.parseInt(parts[1], 10) : 30;
-    const file = path.join(host.cortexPath, project, "backlog.md");
+    const file = taskFileForProject(host.cortexPath, project);
     host.snapshotForUndo("tidy", file);
     host.setMessage(`  ${resultMsg(tidyBacklogDone(host.cortexPath, project, Number.isNaN(keep) ? 30 : keep))}`);
     return;
@@ -647,7 +655,7 @@ async function activateSelected(host: NavigationHost): Promise<void> {
       if (item.id) {
         const project = host.ensureProjectSelected();
         if (!project) return;
-        const file = path.join(host.cortexPath, project, "backlog.md");
+        const file = taskFileForProject(host.cortexPath, project);
         host.confirmThen(`Complete ${style.dim(item.id)} "${item.line}"?`, () => {
           host.snapshotForUndo(`complete ${item.id}`, file);
           const r = completeBacklogItem(host.cortexPath, project, item.id!);
@@ -685,7 +693,7 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
       if (key === "a") { host.startInput("add", ""); }
       else if (key === "d" && item?.id) {
         if (!project) { host.setMessage("Select a project first."); return; }
-        const file = path.join(host.cortexPath, project, "backlog.md");
+        const file = taskFileForProject(host.cortexPath, project);
         const backlogResult = readBacklog(host.cortexPath, project);
         const isActive = backlogResult.ok && backlogResult.data.items.Active.some((i: BacklogItem) => i.id === item.id);
         const targetSection = isActive ? "Queue" : "Active";

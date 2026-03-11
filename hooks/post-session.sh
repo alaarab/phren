@@ -26,7 +26,7 @@ if [ "$STOP_ACTIVE" = "true" ]; then
 fi
 
 # Find the cortex directory
-CORTEX_DIR="${CORTEX_DIR:-$HOME/cortex}"
+CORTEX_DIR="${CORTEX_DIR:-$HOMEcortex}"
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
 # If no cwd from stdin, skip
@@ -78,7 +78,7 @@ Session wrapping up for project "$PROJECT". Before stopping, run a quick cortex-
 3. Keep entries short, one line per learning, grouped by topic.
 EOF
 else
-  echo "Session ended for project \"$PROJECT\". Consider running /cortex-learn to capture what you just learned."
+  echo "Session ended for project \"$PROJECT\". Consider running cortex-learn to capture what you just learned."
 fi
 
 exit 0

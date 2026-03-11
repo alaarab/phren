@@ -101,7 +101,7 @@ describe("mcp-search vector fallback", () => {
           "FINDINGS.md",
           "findings",
           "Semantic opt-in during init should finish at the dependency level",
-          `${tmp.path}/cortex/FINDINGS.md`,
+          `${tmp.path}cortex/FINDINGS.md`,
         ]],
       }];
     };

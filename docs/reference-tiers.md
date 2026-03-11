@@ -57,7 +57,7 @@ Search still treats these topic docs as normal reference material, so moving mac
 
 Patterns that apply across all projects: conventions, workflow preferences, tool configuration, shared skills. Global findings are indexed and searchable from any project context.
 
-When to use: a pattern confirmed in 2+ projects (the `/cortex-consolidate` skill promotes these automatically), personal workflow preferences, or shared skills.
+When to use: a pattern confirmed in 2+ projects (the `cortex-consolidate` skill promotes these automatically), personal workflow preferences, or shared skills.
 
 ## How search works across tiers
 

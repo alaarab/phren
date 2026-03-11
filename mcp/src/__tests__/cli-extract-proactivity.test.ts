@@ -15,7 +15,7 @@ vi.mock("../shared.js", async (importOriginal) => {
     debugLog: vi.fn(),
     appendAuditLog: vi.fn(),
     EXEC_TIMEOUT_MS: 5000,
-    getCortexPath: () => "/tmp/cortex-proactivity-test",
+    getCortexPath: () => "/tmpcortex-proactivity-test",
   };
 });
 
@@ -127,6 +127,6 @@ describe("cli-extract proactivity gating", () => {
 
     expect(appendFindingJournal).not.toHaveBeenCalled();
     expect(appendReviewQueue).not.toHaveBeenCalled();
-    expect(appendAuditLog).toHaveBeenCalledWith("/tmp/cortex-proactivity-test", "extract_memories", "project=demo skipped=proactivity_low");
+    expect(appendAuditLog).toHaveBeenCalledWith("/tmpcortex-proactivity-test", "extract_memories", "project=demo skipped=proactivity_low");
   });
 });

@@ -31,6 +31,8 @@ const QUEUE_HEADINGS = new Set(["queue", "queued", "backlog", "todo", "upcoming"
 const DONE_HEADINGS = new Set(["done", "completed", "finished", "archived"]);
 
 export type BacklogSection = "Active" | "Queue" | "Done";
+export const TASKS_FILENAME = "tasks.md";
+export const TASK_FILE_ALIASES = [TASKS_FILENAME] as const;
 
 export interface BacklogItem {
   /** Positional ID for display (e.g. "A1", "Q3"). Recomputed on every read — use stableId for persistent references. */
@@ -173,10 +175,18 @@ function stripBid(text: string): { clean: string; bid?: string } {
   return { clean: text.replace(BID_PATTERN, "").trimEnd(), bid: m[1] };
 }
 
-function backlogFilePath(cortexPath: string, project: string): string | null {
+export function canonicalTaskFilePath(cortexPath: string, project: string): string | null {
   const resolved = safeProjectPath(cortexPath, project);
   if (!resolved) return null;
-  return path.join(resolved, "backlog.md");
+  return path.join(resolved, TASKS_FILENAME);
+}
+
+export function isTaskFileName(filename: string): boolean {
+  return filename.toLowerCase() === TASKS_FILENAME;
+}
+
+export function resolveTaskFilePath(cortexPath: string, project: string): string | null {
+  return canonicalTaskFilePath(cortexPath, project);
 }
 
 function normalizeBacklogItemLine(item: BacklogItem): string {
@@ -332,28 +342,28 @@ export function readBacklog(cortexPath: string, project: string): CortexResult<B
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const backlogPath = backlogFilePath(cortexPath, project);
-  if (!backlogPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
+  const taskPath = canonicalTaskFilePath(cortexPath, project);
+  if (!taskPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
 
-  if (!fs.existsSync(backlogPath)) {
+  if (!fs.existsSync(taskPath)) {
     return cortexOk({
       project,
       title: `# ${project} tasks`,
-      path: backlogPath,
+      path: taskPath,
       issues: [],
       items: { Active: [], Queue: [], Done: [] },
     });
   }
 
-  const content = fs.readFileSync(backlogPath, "utf8");
-  return cortexOk(parseBacklogContent(project, backlogPath, content));
+  const content = fs.readFileSync(taskPath, "utf8");
+  return cortexOk(parseBacklogContent(project, taskPath, content));
 }
 
 export function readBacklogs(cortexPath: string, profile?: string): BacklogDoc[] {
   const projects = getProjectDirs(cortexPath, profile).map((dir) => path.basename(dir)).sort();
   const result: BacklogDoc[] = [];
   for (const project of projects) {
-    const file = backlogFilePath(cortexPath, project);
+    const file = canonicalTaskFilePath(cortexPath, project);
     if (!file || !fs.existsSync(file)) continue;
     const parsed = readBacklog(cortexPath, project);
     if (!parsed.ok) continue;
@@ -372,7 +382,7 @@ export function resolveBacklogItem(cortexPath: string, project: string, match: s
 }
 
 export function addBacklogItem(cortexPath: string, project: string, item: string): CortexResult<string> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
   // Validate project exists before acquiring the lock — withFileLock creates the parent
   // directory via mkdirSync, which would silently create an unintended project directory.
@@ -397,7 +407,7 @@ export function addBacklogItem(cortexPath: string, project: string, item: string
 }
 
 export function addBacklogItems(cortexPath: string, project: string, items: string[]): CortexResult<{ added: string[]; errors: string[] }> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
   const preCheck = ensureProject(cortexPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
@@ -429,7 +439,7 @@ export function addBacklogItems(cortexPath: string, project: string, items: stri
 }
 
 export function completeBacklogItems(cortexPath: string, project: string, matches: string[]): CortexResult<{ completed: string[]; errors: string[] }> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
@@ -456,7 +466,7 @@ export function completeBacklogItems(cortexPath: string, project: string, matche
 }
 
 export function completeBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
@@ -482,7 +492,7 @@ export function updateBacklogItem(
   match: string,
   updates: { priority?: string; context?: string; replace_context?: boolean; section?: string; github_issue?: number | string; github_url?: string; unlink_github?: boolean }
 ): CortexResult<string> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
@@ -555,7 +565,7 @@ export function updateBacklogItem(
 }
 
 export function pinBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
@@ -579,7 +589,7 @@ export function pinBacklogItem(cortexPath: string, project: string, match: strin
 }
 
 export function unpinBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
@@ -600,7 +610,7 @@ export function unpinBacklogItem(cortexPath: string, project: string, match: str
 }
 
 export function workNextBacklogItem(cortexPath: string, project: string): CortexResult<string> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
@@ -627,7 +637,7 @@ export function workNextBacklogItem(cortexPath: string, project: string): Cortex
 }
 
 export function tidyBacklogDone(cortexPath: string, project: string, keep: number = 30, dryRun?: boolean): CortexResult<string> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
@@ -669,7 +679,7 @@ export function linkBacklogItemIssue(
   match: string,
   link: { github_issue?: number | string; github_url?: string; unlink?: boolean }
 ): CortexResult<BacklogItem> {
-  const bPath = backlogFilePath(cortexPath, project);
+  const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {

@@ -9,7 +9,7 @@
 
 **Long-term memory for your AI agents.**
 
-[![npm](https://img.shields.io/npm/v/cortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
+[![npm](https://img.shields.io/npm/v/%40alaarab%2Fcortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
 [![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fcortex-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/)
 [![Whitepaper PDF](https://img.shields.io/badge/whitepaper-PDF-2563EB?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/whitepaper.pdf)
 
@@ -25,16 +25,17 @@ Project memory should not disappear between sessions or get stranded on one mach
 ## Getting started
 
 ```bash
-npx cortex init
+npm install -g @alaarab/cortex
+cortex init
 # Preview changes without writing files
-npx cortex init --dry-run
+cortex init --dry-run
 ```
 
 | Scenario | What to do |
 |---|---|
-| First time | `npx cortex init` |
+| First time | `npm install -g @alaarab/cortex && cortex init` |
 | Add a project | Open a session there and let the agent ask, or run `cortex add` |
-| New machine | `npx cortex init` and paste your cortex repo URL |
+| New machine | `cortex init` and paste your cortex repo URL |
 
 This one command bootstraps Cortex locally. It:
 - Creates `~/.cortex` with starter templates
@@ -127,7 +128,7 @@ Two more things run in the background:
 | `REFERENCE.md` | Deep reference: API details, data models, things too long for CLAUDE.md |
 | `FINDINGS.md` | Bugs hit, patterns discovered, things to avoid next time |
 | `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
-| `backlog.md` | Task list that persists across sessions |
+| `tasks.md` | Task list that persists across sessions |
 | `MEMORY_QUEUE.md` | Items waiting for your review |
 | `skills/` | Project-local Cortex skill source files; the resolved agent-facing mirror is generated into `.claude/skills/` as local state and should not be committed from app repos |
 
@@ -145,7 +146,7 @@ git remote add origin git@github.com:YOU/my-cortex.git
 git push -u origin main
 ```
 
-On a new machine: run `npx cortex init` and paste your repo URL when the walkthrough asks if you have an existing cortex repo.
+On a new machine: run `cortex init` and paste your repo URL when the walkthrough asks if you have an existing cortex repo.
 
 `SessionStart` pulls on open. The Stop hook commits locally after each response and queues a best-effort push when a remote exists. This is eventual consistency -- git gives you portability and auditability, not real-time sync.
 
@@ -175,13 +176,13 @@ Profiles decide which projects are active on each machine. `cortex init` is the 
 If you want stable names across laptops, desktops, and CI, set the machine name explicitly at onboarding instead of relying on the raw OS hostname:
 
 ```bash
-npx cortex init --machine work-laptop --profile work
+cortex init --machine work-laptop --profile work
 ```
 
 For CI or unattended setup:
 
 ```bash
-npx cortex init --machine ci-runner --profile work
+cortex init --machine ci-runner --profile work
 ```
 
 </details>
@@ -215,7 +216,7 @@ Because it's all markdown in git, you have a full record of what your agents lea
 Hooks-only mode (no MCP tools):
 
 ```bash
-npx cortex init --mcp off
+cortex init --mcp off
 ```
 
 Toggle anytime:

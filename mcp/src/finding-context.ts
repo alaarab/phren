@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { safeProjectPath } from "./utils.js";
+import { resolveTaskFilePath } from "./data-backlog.js";
 
 type BacklogSection = "Active" | "Queue" | "Done";
 type BacklogPriority = "high" | "medium" | "low" | undefined;
@@ -133,14 +134,16 @@ export function resolveFindingBacklogReference(
 ): BacklogReferenceResolution {
   const projectDir = safeProjectPath(cortexPath, project);
   if (!projectDir) return { error: `Invalid project name: "${project}".` };
-  const items = parseBacklogItems(path.join(projectDir, "backlog.md"));
+  const taskPath = resolveTaskFilePath(cortexPath, project);
+  const items = parseBacklogItems(taskPath ?? path.join(projectDir, "tasks.md"));
   return resolveBacklogItemMatch(items, match);
 }
 
 export function resolveAutoFindingBacklogItem(cortexPath: string, project: string): string | undefined {
   const projectDir = safeProjectPath(cortexPath, project);
   if (!projectDir) return undefined;
-  const active = parseBacklogItems(path.join(projectDir, "backlog.md")).filter(
+  const taskPath = resolveTaskFilePath(cortexPath, project);
+  const active = parseBacklogItems(taskPath ?? path.join(projectDir, "tasks.md")).filter(
     (item) => item.section === "Active" && item.stableId,
   );
   if (active.length === 1) return active[0].stableId;

@@ -26,6 +26,7 @@ import {
   readFindings,
   addFinding,
   removeFinding,
+  TASKS_FILENAME,
 } from "./data-access.js";
 import { CortexError } from "./shared.js";
 import { grantAdmin, makeTempDir, resultMsg, spawnTsxWorker, REPO_ROOT } from "./test-helpers.js";
@@ -85,7 +86,7 @@ const SAMPLE_FINDINGS = `# testproject FINDINGS
 
 describe("readBacklog", () => {
   it("parses a valid backlog with Active/Queue/Done sections", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
     const result = readBacklog(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -395,12 +396,12 @@ describe("pin/unpin backlog items", () => {
     const item = after.data.items.Queue.find((i) => i.line.includes("rate limiting"));
     expect(item?.pinned).toBe(true);
 
-    const raw = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    const raw = fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
     expect(raw).toContain("[pinned]");
   });
 
   it("unpins a pinned item", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
     pinBacklogItem(tmpDir, PROJECT, "rate limiting");
     const msg = unpinBacklogItem(tmpDir, PROJECT, "rate limiting");
     expect(resultMsg(msg)).toContain("Unpinned");
@@ -410,7 +411,7 @@ describe("pin/unpin backlog items", () => {
     const item = after.data.items.Queue.find((i) => i.line.includes("rate limiting"));
     expect(item?.pinned).toBeUndefined();
 
-    const raw = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    const raw = fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
     expect(raw).not.toContain("[pinned]");
   });
 
@@ -799,8 +800,8 @@ describe("file locking", () => {
   });
 
   it("lock file is cleaned up after successful backlog write", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
+    const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
 
     addBacklogItem(tmpDir, PROJECT, "Lock cleanup test");
 
@@ -817,8 +818,8 @@ describe("file locking", () => {
   });
 
   it("stale lock is recovered: old .lock file does not block writes", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
+    const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
 
     // Create a stale lock file with old timestamp
     fs.writeFileSync(lockPath, `99999\n${Date.now() - 60000}`);
@@ -850,15 +851,15 @@ describe("file locking", () => {
   });
 
   it("returns lock timeout and does not write backlog changes under lock contention", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
+    const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
     process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "150";
     process.env.CORTEX_FILE_LOCK_POLL_MS = "25";
-    const before = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    const before = fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
     const msg = addBacklogItem(tmpDir, PROJECT, "Blocked by lock");
-    const after = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    const after = fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
     delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
     delete process.env.CORTEX_FILE_LOCK_POLL_MS;
     fs.unlinkSync(lockPath);
@@ -870,8 +871,8 @@ describe("file locking", () => {
   });
 
   it("prevents workNextBacklogItem mutation when backlog lock times out", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
+    const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
     process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "150";

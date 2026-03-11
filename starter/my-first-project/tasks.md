@@ -13,7 +13,7 @@
 
 - [ ] Push this cortex repo to a private GitHub repo for backup
 - [ ] Run `cortex doctor` to verify everything is wired up
-- [ ] Add a second project with `/cortex-init <name>` or `cortex shell`
+- [ ] Add a second project with `cortex-init <name>` or `cortex shell`
 
 ### P2: Nice to have
 

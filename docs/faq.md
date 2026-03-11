@@ -121,7 +121,7 @@ Project setup note:
 No. MCP is recommended — it gives agents 51 tools for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
-npx cortex init --mcp off
+cortex init --mcp off
 ```
 
 Toggle anytime:
@@ -134,7 +134,7 @@ cortex mcp-mode off
 ## How do I preview init changes without writing files?
 
 ```bash
-npx cortex init --dry-run
+cortex init --dry-run
 ```
 
 Prints what would be created or updated and exits without touching anything.

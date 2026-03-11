@@ -25,7 +25,7 @@ describe("startLiveStatePoller", () => {
       .mockReturnValueOnce("token-b");
 
     const stop = startLiveStatePoller({
-      cortexPath: "/tmp/cortex",
+      cortexPath: "/tmpcortex",
       shell,
       repaint,
       intervalMs: 100,
@@ -59,7 +59,7 @@ describe("startLiveStatePoller", () => {
       .mockReturnValue("token-c");
 
     const stop = startLiveStatePoller({
-      cortexPath: "/tmp/cortex",
+      cortexPath: "/tmpcortex",
       shell,
       repaint,
       intervalMs: 100,
@@ -94,7 +94,7 @@ describe("startLiveStatePoller", () => {
       .mockReturnValue("token-b");
 
     const stop = startLiveStatePoller({
-      cortexPath: "/tmp/cortex",
+      cortexPath: "/tmpcortex",
       shell,
       repaint,
       intervalMs: 100,
@@ -121,7 +121,7 @@ describe("startLiveStatePoller", () => {
       .mockReturnValue("token-c");
 
     const stop = startLiveStatePoller({
-      cortexPath: "/tmp/cortex",
+      cortexPath: "/tmpcortex",
       shell,
       repaint,
       intervalMs: 100,

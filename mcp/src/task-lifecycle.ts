@@ -212,7 +212,7 @@ function buildSuggestionNotice(project: string, line: string, issueMeta: { githu
     `Task suggestion for ${project}:`,
     `- ${line}`,
     ...(githubLine ? [githubLine] : []),
-    "</cortex-notice>",
+    "<cortex-notice>",
   ];
 }
 
@@ -304,7 +304,7 @@ export function handleTaskPromptLifecycle(args: {
     noticeLines: [
       "<cortex-notice>",
       `Active task (${args.project}): ${resolved.data.line}`,
-      "</cortex-notice>",
+      "<cortex-notice>",
     ],
   };
 }

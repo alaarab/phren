@@ -121,7 +121,7 @@ describe("buildHookOutput", () => {
     expect(parts[0]).toContain("myproj");
     expect(parts[0]).toContain("1 result");
     expect(parts[1]).toBe("<cortex-context>");
-    expect(parts).toContain("</cortex-context>");
+    expect(parts).toContain("<cortex-context>");
     const trace = parts.find((p) => p.includes("trace:"));
     expect(trace).toBeDefined();
     expect(trace).toContain("intent=general");

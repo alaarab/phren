@@ -159,7 +159,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck version: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
-      // FTS index (lives in /tmp/cortex-fts-*/, not .runtime/)
+      // FTS index (lives in /tmpcortex-fts-*/, not .runtime/)
       let indexStatus: { exists: boolean; sizeBytes?: number } = { exists: false };
       try {
         indexStatus = findFtsCacheForPath(cortexPath, activeProfile);

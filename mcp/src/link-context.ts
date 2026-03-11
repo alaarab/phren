@@ -3,6 +3,7 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { isValidProjectName } from "./utils.js";
 import { homeDir, homePath } from "./shared.js";
+import { resolveTaskFilePath } from "./data-backlog.js";
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
@@ -35,14 +36,14 @@ function allKnownProjects(cortexPath: string): string[] {
 
 function writeContextFile(managedContent: string) {
   const contextFile = contextFilePath();
-  const wrapped = `<!-- cortex-managed -->\n${managedContent}\n<!-- /cortex-managed -->`;
+  const wrapped = `<!-- cortex-managed -->\n${managedContent}\n<!-- cortex-managed -->`;
   if (fs.existsSync(contextFile)) {
     const existing = fs.readFileSync(contextFile, "utf8");
     if (existing.includes("<!-- cortex-managed -->")) {
       const startIdx = existing.indexOf("<!-- cortex-managed -->");
-      const endIdx = existing.indexOf("<!-- /cortex-managed -->");
+      const endIdx = existing.indexOf("<!-- cortex-managed -->");
       const before = startIdx > 0 ? existing.slice(0, startIdx).trimEnd() : "";
-      const after = endIdx !== -1 ? existing.slice(endIdx + "<!-- /cortex-managed -->".length).trimStart() : "";
+      const after = endIdx !== -1 ? existing.slice(endIdx + "<!-- cortex-managed -->".length).trimStart() : "";
       const parts = [before, wrapped, after].filter(Boolean);
       fs.writeFileSync(contextFile, parts.join("\n") + "\n");
       return;
@@ -126,11 +127,11 @@ export function writeContextPlanning(machine: string, profile: string, mcpStatus
       break;
     }
     const summaryFile = path.join(cortexPath, project, "summary.md");
-    const backlogFile = path.join(cortexPath, project, "backlog.md");
-    if (!fs.existsSync(summaryFile) && !fs.existsSync(backlogFile)) continue;
+    const backlogFile = resolveTaskFilePath(cortexPath, project);
+    if (!fs.existsSync(summaryFile) && !backlogFile) continue;
     content += `\n\n## ${project}\n`;
     if (fs.existsSync(summaryFile)) content += fs.readFileSync(summaryFile, "utf8") + "\n";
-    if (fs.existsSync(backlogFile)) {
+    if (backlogFile && fs.existsSync(backlogFile)) {
       let backlog = fs.readFileSync(backlogFile, "utf8");
       const remaining = MAX_CONTEXT_BYTES - content.length;
       if (backlog.length > remaining && remaining > 0) {

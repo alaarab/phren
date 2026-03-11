@@ -2,18 +2,19 @@
 
 MCP server that indexes your personal cortex and exposes it to AI agents via full-text search.
 
-On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index. 51 tools let agents search, browse, manage backlogs, capture findings, link backlog items to GitHub issues, and track entities across your projects.
+On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index. 51 tools let agents search, browse, manage tasks, capture findings, link task items to GitHub issues, and track entities across your projects.
 
 ## Install
 
 ```bash
-npx cortex init
+npm install -g @alaarab/cortex
+cortex init
 ```
 
 Or add manually to Claude Code:
 
 ```bash
-claude mcp add cortex -- npx -y cortex ~/.cortex
+claude mcp add cortex -- cortex ~/.cortex
 ```
 
 ## Environment variables
@@ -61,12 +62,12 @@ No parameters.
 5. Builds an in-memory SQLite FTS5 index with Porter stemming
 6. Serves tools over stdio using the MCP protocol
 
-File types are derived from filenames: `CLAUDE.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `backlog.md` -> "backlog", files under `reference/` -> "reference", files under `skills/` -> "skill".
+File types are derived from filenames: `CLAUDE.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "backlog", files under `reference/` -> "reference", files under `skills/` -> "skill".
 
 ## Development
 
 ```bash
-cd ~/cortex
+cd ~cortex
 npm install
 npm run build    # Compile TypeScript
 npm run dev      # Run with tsx (hot reload)

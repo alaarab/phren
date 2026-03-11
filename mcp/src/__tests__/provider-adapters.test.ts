@@ -32,7 +32,7 @@ describe("provider adapter path resolution", () => {
   });
 
   it("keeps Codex hook config rooted in cortexPath even when HOME points elsewhere", () => {
-    const cortexPath = "/tmp/cortex-store";
+    const cortexPath = "/tmpcortex-store";
     const env = {
       HOME: "/Users/tester",
       USERPROFILE: "C:\\Users\\Tester",

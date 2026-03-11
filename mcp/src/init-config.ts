@@ -205,7 +205,7 @@ export function removeMcpServerAtPath(filePath: string): boolean {
 export function isCortexCommand(command: string): boolean {
   // Detect CORTEX_PATH= env var prefix (present in all lifecycle hook commands)
   if (/\bCORTEX_PATH=/.test(command)) return true;
-  // Detect npx/cortex package references
+  // Detect npxcortex package references
   if (command.includes("cortex")) return true;
   // Detect bare "cortex" executable segment
   const segments = command.split(/[/\\\s]+/);

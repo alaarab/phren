@@ -5,7 +5,7 @@ Open-source framework that gives Claude persistent memory across sessions and ma
 
 ## Project Location
 
-Source lives at `~/cortex`. Published to npm. Starter templates are bundled in the package.
+Source lives at `~cortex`. Published to npm. Starter templates are bundled in the package.
 
 ## Key Files
 
@@ -32,7 +32,7 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 ## Commands
 
 ```bash
-cd ~/cortex
+cd ~cortex
 npm run build      # compile TypeScript
 npm test           # run the vitest suite
 npm publish        # publish to npm (needs OTP)
@@ -164,11 +164,11 @@ cortex maintain extract [project]      Mine git/GitHub signals
 - Threshold: 25 entries since last consolidation, OR 60 days + 10 entries
 - Notice fires once per session via ~/.cortex/.noticed-{session_id} files
 - details blocks in FINDINGS.md are stripped before FTS5 indexing so archived entries don't pollute search
-- /cortex-consolidate skill: archives old entries in details block, writes marker, promotes cross-project patterns to global at 2+ projects
+- cortex-consolidate skill: archives old entries in details block, writes marker, promotes cross-project patterns to global at 2+ projects
 
 ## Architecture
 
-Full data flow documentation lives at `~/cortex/docs/architecture.md`. Key diagram:
+Full data flow documentation lives at `~cortex/docs/architecture.md`. Key diagram:
 
 ```
 User Prompt -> SessionStart (git pull) -> UserPromptSubmit (FTS5 search, inject context)

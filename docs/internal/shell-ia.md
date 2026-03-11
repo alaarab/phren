@@ -46,7 +46,7 @@
   - no review queue entries
 - Error:
   - invalid project/profile names
-  - missing files (`backlog.md`, `FINDINGS.md`, `machines.yaml`)
+  - missing files (`tasks.md`, `FINDINGS.md`, `machines.yaml`)
   - command parse/argument failures
 - Loading:
   - synchronous rendering with short status feedback in footer

@@ -64,7 +64,7 @@ Each query result is scored on a 3-point scale:
 
 ```bash
 # Build cortex first
-cd ~/cortex && npm run build
+cd ~cortex && npm run build
 
 # Run the benchmark
 npx tsx mcp/src/__tests__/benchmark/harness.ts

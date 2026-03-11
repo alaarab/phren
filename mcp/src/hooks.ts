@@ -452,7 +452,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
   const promptCmd = lifecycle.userPromptSubmit;
   const stopCmd = lifecycle.stop;
 
-  // ── GitHub Copilot CLI (user-level: ~/.github/hooks/cortex.json) ──────────
+  // ── GitHub Copilot CLI (user-level: ~/.github/hookscortex.json) ──────────
   if (detected.has("copilot")) {
     const copilotFile = hookConfigPath("copilot", cortexPath);
     const copilotHooksDir = path.dirname(copilotFile);

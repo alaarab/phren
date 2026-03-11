@@ -16,6 +16,7 @@ import {
   editQueueItem,
   readReviewQueue,
   rejectQueueItem,
+  TASKS_FILENAME,
 } from "./data-access.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
@@ -383,7 +384,7 @@ export function createReviewUiHttpServer(
         res.end(JSON.stringify({ ok: false, error: "Invalid project or file" }));
         return;
       }
-      const allowedFiles = ["FINDINGS.md", "backlog.md", "CLAUDE.md", "summary.md"];
+      const allowedFiles = ["FINDINGS.md", TASKS_FILENAME, "CLAUDE.md", "summary.md"];
       if (!allowedFiles.includes(file)) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: `File not allowed: ${file}` }));

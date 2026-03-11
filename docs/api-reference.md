@@ -234,7 +234,7 @@ Record feedback on whether an injected memory was helpful or noisy.
 ### `add_project`
 
 Bootstraps a repo or working directory into cortex and adds it to the active profile. Pass the path explicitly; when no `profile` is provided, cortex uses `CORTEX_PROFILE` or the current machine mapping from `machines.yaml`.
-Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `backlog.md` under `~/.cortex/<project>`.
+Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.cortex/<project>`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -411,7 +411,7 @@ Show hook enable/disable status for all tools (claude, copilot, cursor, codex), 
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `project` | string | no | Include project-level lifecycle hook overrides from `<cortexPath>/<project>/cortex.project.yaml`. |
+| `project` | string | no | Include project-level lifecycle hook overrides from `<cortexPath>/<project>cortex.project.yaml`. |
 
 ### `toggle_hooks`
 

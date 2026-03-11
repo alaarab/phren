@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { getProjectDirs } from "./shared.js";
+import { TASK_FILE_ALIASES } from "./data-backlog.js";
 
 interface ChecksumStore {
   [relativePath: string]: { sha256: string; updatedAt: string };
@@ -40,7 +41,7 @@ export function updateFileChecksums(cortexPath: string, profileName?: string): {
   const tracked: string[] = [];
   const dirs = getProjectDirs(cortexPath, profileName);
   for (const dir of dirs) {
-    for (const name of ["FINDINGS.md", "backlog.md", "CANONICAL_MEMORIES.md"]) {
+    for (const name of ["FINDINGS.md", ...TASK_FILE_ALIASES, "CANONICAL_MEMORIES.md"]) {
       const full = path.join(dir, name);
       if (!fs.existsSync(full)) continue;
       const rel = path.relative(cortexPath, full).replace(/\\/g, "/");

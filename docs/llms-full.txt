@@ -1,8 +1,8 @@
 cortex - Long-term memory for your AI agents.
-npm package: cortex
+npm package: @alaarab/cortex
 
 Quick start:
-  npx cortex init
+  cortex init
   This creates ~/.cortex, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
@@ -134,7 +134,7 @@ Key File Locations:
   ~/.cortex/<project>/reference/      - deep reference docs and archived topic buckets
   ~/.cortex/<project>/reference/topics/ - machine-managed topic docs for archived findings
   ~/.cortex/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
-  ~/.cortex/<project>/backlog.md      - task queue across sessions
+  ~/.cortex/<project>/tasks.md        - task queue across sessions
   ~/.cortex/<project>/MEMORY_QUEUE.md - items pending human review
   ~/.cortex/.runtime/                 - audit.log, search history, caches
   ~/.cortex/.governance/              - governance policy JSON files

@@ -4,7 +4,7 @@ description: Sync your Claude skills and project config across machines using pr
 dependencies:
   - git
 ---
-# /cortex-sync - Profile-aware sync
+# cortex-sync - Profile-aware sync
 
 > Sync your Claude skills and project config across machines using profiles that control what goes where.
 
@@ -38,7 +38,7 @@ Cortex uses profiles to decide what goes where. A profile is a list of projects.
 
 ## Sync down (pull to this machine)
 
-When the user says "get my skills", "sync my config", "pull from cortex", or just "/cortex-sync":
+When the user says "get my skills", "sync my config", "pull from cortex", or just "cortex-sync":
 
 ### 1. Find the cortex directory
 
@@ -87,7 +87,7 @@ projects:
   - api-server
 ```
 
-If no profiles exist yet, offer to create one with `/cortex-init`.
+If no profiles exist yet, offer to create one with `cortex-init`.
 
 ### 4. Pull latest
 
@@ -125,7 +125,7 @@ Last synced: <date>
 - api-server: Description from summary.md
 
 ## Global skills
-/cortex-sync, /cortex-init, /cortex-consolidate, /cortex-discover
+cortex-sync, cortex-init, cortex-consolidate, cortex-discover
 ```
 
 Pull project descriptions from each project's `summary.md` if it exists.
@@ -162,7 +162,7 @@ Skip the "global" entry since it has a different structure. Only check actual pr
 ### 9. Report
 
 ```
-/cortex-sync down: <machine-name> (<profile-name>)
+cortex-sync down: <machine-name> (<profile-name>)
 
 Synced:
   - myapp (CLAUDE.md + 3 skills)
@@ -235,10 +235,10 @@ mkdir -p ~/.cortex && echo "my-machine-name" > ~/.cortex/.machine-id
 # 3. Map it to a profile in machines.yaml
 #    Add a line: my-machine-name: work
 
-# 4. Run /cortex-sync
+# 4. Run cortex-sync
 ```
 
-If you don't have a cortex repo yet, start with `/cortex-init` to create one from scratch.
+If you don't have a cortex repo yet, start with `cortex-init` to create one from scratch.
 
 ## Conflict resolution
 
@@ -256,6 +256,6 @@ When two machines edit the same cortex file before syncing, `git pull` will hit 
 
 ## Related skills
 
-- `/cortex-init`: create a new project or set up cortex from scratch
+- `cortex-init`: create a new project or set up cortex from scratch
 - `add_finding()`: capture findings via MCP (synced across machines by `push_changes()`)
-- `/cortex-consolidate`: synthesize findings across projects
+- `cortex-consolidate`: synthesize findings across projects

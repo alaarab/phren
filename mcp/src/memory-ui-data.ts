@@ -12,6 +12,7 @@ import { readInstallPreferences } from "./init-preferences.js";
 import { readCustomHooks } from "./hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "./provider-adapters.js";
 import { getAllSkills } from "./skill-registry.js";
+import { resolveTaskFilePath } from "./data-backlog.js";
 
 interface GraphNode {
   id: string;
@@ -281,7 +282,7 @@ export function collectProjectsForUI(cortexPath: string, profile?: string): Proj
 
     const dir = path.join(cortexPath, project);
     const findingsPath = path.join(dir, "FINDINGS.md");
-    const backlogPath = path.join(dir, "backlog.md");
+    const backlogPath = resolveTaskFilePath(cortexPath, project);
     const claudeMdPath = path.join(dir, "CLAUDE.md");
     const summaryPath = path.join(dir, "summary.md");
     const refPath = path.join(dir, "reference");
@@ -307,7 +308,7 @@ export function collectProjectsForUI(cortexPath: string, profile?: string): Proj
     }
 
     let backlogCount = 0;
-    if (fs.existsSync(backlogPath)) {
+    if (backlogPath && fs.existsSync(backlogPath)) {
       const content = fs.readFileSync(backlogPath, "utf8");
       const queueMatch = content.match(/## Queue[\s\S]*?(?=## |$)/);
       if (queueMatch) backlogCount = (queueMatch[0].match(/^- /gm) || []).length;

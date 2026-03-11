@@ -115,7 +115,7 @@ Missing keys default to the value of `hooksEnabled`. When `hooksEnabled` is `fal
 
 ## Per-project hook overrides
 
-Tracked projects can override lifecycle hooks in `<cortexPath>/<project>/cortex.project.yaml`:
+Tracked projects can override lifecycle hooks in `<cortexPath>/<project>cortex.project.yaml`:
 
 ```yaml
 hooks:

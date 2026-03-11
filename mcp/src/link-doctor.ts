@@ -21,6 +21,7 @@ import { validateSkillFrontmatter, validateSkillsDir } from "./link-skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./link-checksums.js";
 import { buildSkillManifest } from "./skill-registry.js";
 import { inspectBacklogHygiene } from "./backlog-hygiene.js";
+import { resolveTaskFilePath, TASK_FILE_ALIASES } from "./data-backlog.js";
 import {
   getMachineName,
   lookupProfile,
@@ -408,7 +409,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     checks.push({
       name: "copilot-hooks",
       ok: fs.existsSync(copilotHooks),
-      detail: fs.existsSync(copilotHooks) ? "copilot hooks config present" : "missing ~/.github/hooks/cortex.json",
+      detail: fs.existsSync(copilotHooks) ? "copilot hooks config present" : "missing ~/.github/hookscortex.json",
     });
     checks.push({
       name: "copilot-config-writable",
@@ -519,8 +520,8 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      const backlogPath = path.join(projectDir, "backlog.md");
-      if (fs.existsSync(backlogPath)) {
+      const backlogPath = resolveTaskFilePath(cortexPath, projectName);
+      if (backlogPath && fs.existsSync(backlogPath)) {
         const content = fs.readFileSync(backlogPath, "utf8");
         const issues = validateBacklogFormat(content);
         checks.push({
@@ -555,7 +556,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      for (const mdFile of ["FINDINGS.md", "backlog.md", "MEMORY_QUEUE.md", "CLAUDE.md", "REFERENCE.md"]) {
+      for (const mdFile of ["FINDINGS.md", ...TASK_FILE_ALIASES, "MEMORY_QUEUE.md", "CLAUDE.md", "REFERENCE.md"]) {
         const filePath = path.join(projectDir, mdFile);
         if (!fs.existsSync(filePath)) continue;
         const content = fs.readFileSync(filePath, "utf8");

@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-03-11
+
+### Changed
+- `tasks.md` is now the canonical task file across the runtime, starter projects, review UI, and docs. The legacy `backlog.md` starter files were removed and task-file guidance now points at `tasks.md`.
+- Install and onboarding guidance now treats `cortex` as the real user-facing command after `npm install -g @alaarab/cortex`, instead of steering people toward `npx cortex`.
+
+### Fixed
+- Public docs, post-init verification messages, and the bundled review UI template no longer leak `backlog.md` file references or `npx cortex` examples in the normal install path.
+- Packaging metadata and release docs now reflect the scoped npm package (`@alaarab/cortex`) while preserving `cortex` as the executable users run.
+
 ## [1.28.0] - 2026-03-10
 
 ### Changed
@@ -462,7 +472,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Post-compaction context**: hook-context CLI subcommand re-injects project summary, learnings, and backlog after context compaction so Claude stays oriented.
 - **Synonym search**: FTS5 queries now expand synonyms automatically. Searching "throttling" also finds "rate limit", "429", and related terms. Works in both MCP tools and CLI.
 - **CLI subcommands**: `cortex search`, `cortex hook-prompt`, `cortex hook-context`, `cortex add-learning` for use by hooks and scripts.
-- `npx @alaarab/cortex init` now registers UserPromptSubmit and Stop hooks in `~/.claude/settings.json` alongside the MCP server.
+- `npx cortex init` now registers UserPromptSubmit and Stop hooks in `~/.claude/settings.json` alongside the MCP server.
 - New shared module (`shared.ts`) extracts reusable infrastructure (buildIndex, queryRows, extractSnippet, addLearningToFile) for both MCP and CLI use.
 
 ### Changed
@@ -488,7 +498,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - README: removed duplicate JSON config blocks, fixed skill count (5 not 6), updated `/cortex:learn` references to `/cortex-update`
 - README: added `update_backlog_item` tool and `search_cortex` type filter to MCP docs
-- README: replaced outdated `cd mcp && npm run build` instructions with `npx @alaarab/cortex init`
+- README: replaced outdated `cd mcp && npm run build` instructions with `npx cortex init`
 - Site: fixed `MEMORY.md` reference to `CLAUDE.md` in bento card, `/cortex-learn` to `/cortex-update`
 - Site: updated "Clones the starter" to "Creates" (bundled since v1.6.0)
 - llms-install.md: fixed tool parameter signatures to match actual MCP server, added `-y` to npx commands
@@ -558,7 +568,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.2.0] - 2026-03-04
 
 ### Added
-- `npx @alaarab/cortex init`: one-command setup that clones cortex-starter to `~/.cortex`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
+- `npx cortex init`: one-command setup that clones cortex-starter to `~/.cortex`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
 - link.sh symlinks `CLAUDE-*.md` split files alongside `CLAUDE.md` for `@import` support
 
 ## [1.1.4] - 2026-03-04
@@ -573,7 +583,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - GitHub Pages landing site (`docs/`)
 - Auto-creates `~/.cortex` with starter README on first run (no error on fresh install)
-- CLI path argument: `claude mcp add cortex -- npx @alaarab/cortex ~/custom/path`
+- CLI path argument: `claude mcp add cortex -- npx cortex ~/custom/path`
 - Plugin marketplace support: `.claude-plugin/marketplace.json`
 - Skills installable via `/plugin marketplace add alaarab/cortex` + `/plugin install cortex@cortex`
 - LICENSE file
@@ -594,7 +604,7 @@ Initial release.
 - Tools: `search_cortex`, `get_project_summary`, `list_projects`
 - Profile-aware project indexing via `profiles/*.yaml`
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, backlog, pipeline, release, creative
-- `@alaarab/cortex` on npm
+- `cortex` on npm
 
 [Unreleased]: https://github.com/alaarab/cortex/compare/v1.25.0...HEAD
 [1.25.0]: https://github.com/alaarab/cortex/compare/v1.20.0...v1.25.0

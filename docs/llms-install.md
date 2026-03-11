@@ -5,8 +5,9 @@ cortex keeps project memory portable across sessions and machines. It runs as an
 ## Quick Start
 
 ```bash
-npx cortex init
-npx cortex init --dry-run
+npm install -g @alaarab/cortex
+cortex init
+cortex init --dry-run
 ```
 
 This creates `~/.cortex`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.
@@ -26,12 +27,12 @@ To update the installed package and refresh shipped starter globals in one flow:
 cortex update --refresh-starter
 ```
 
-The older `npx cortex init --apply-starter-update` path still works when you only want to refresh starter assets without running the full update flow.
+Use `cortex init --apply-starter-update` when you only want to refresh starter assets without running the full update flow.
 
 To remove everything:
 
 ```bash
-npx cortex uninstall
+cortex uninstall
 ```
 
 ## Maintenance Safety
@@ -54,7 +55,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `get_backlog` | `project?`, `id?`, `item?` | Read the task list for one project, or all projects if omitted. Fetch a single item by ID or text. |
-| `add_backlog_item` | `project`, `item` | Append a task to a project's Queue section in `backlog.md`. |
+| `add_backlog_item` | `project`, `item` | Append a task to a project's Queue section in `tasks.md`. |
 | `complete_backlog_item` | `project`, `item` | Move a task to Done by text match. |
 | `complete_backlog_items` | `project`, `items[]` | Bulk complete multiple items in one call. |
 | `update_backlog_item` | `project`, `item`, `updates` | Update an item's priority, context, section, or linked GitHub issue. |
@@ -123,8 +124,8 @@ Hooks are registered in `~/.claude/settings.json` during init. They also install
 Toggle MCP and hooks independently:
 
 ```bash
-npx cortex mcp-mode on|off|status
-npx cortex hooks-mode on|off|status
+cortex mcp-mode on|off|status
+cortex hooks-mode on|off|status
 ```
 
 When MCP is off but hooks are on, cortex still injects context via hooks (no MCP tools available to the agent). When hooks are off, the hook commands exit immediately without doing work.

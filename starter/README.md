@@ -15,7 +15,7 @@ Each subdirectory is a project. Add one for every codebase you work on.
 │   ├── CLAUDE.md    # architecture, commands, key patterns
 │   ├── summary.md   # five-line project card
 │   ├── FINDINGS.md  # findings accumulated over time
-│   ├── backlog.md   # task queue that persists across sessions
+│   ├── tasks.md     # task queue that persists across sessions
 │   └── .claude/
 │       └── skills/  # project-specific skills
 ├── profiles/        # YAML files mapping project sets to machine roles
@@ -32,7 +32,7 @@ New to cortex? Here's what each file does and when it matters.
 
 **FINDINGS.md** fills itself. As Claude discovers findings, patterns, and decisions during your sessions, it calls `add_finding()` and entries land here grouped by date. Old entries fade from retrieval over time. Wrong entries can be removed with `remove_finding()`.
 
-**backlog.md** is your task board file. The filename is historical; the file now keeps Active (working now), Queue (up next), and Done (finished) in one place so the work history stays with the project. You can also manage it from `npx cortex shell`.
+**tasks.md** is your task board file. It keeps Active (working now), Queue (up next), and Done (finished) in one place so the work history stays with the project. You can also manage it from `npx cortex shell`.
 
 **global/CLAUDE.md** applies everywhere. Your style preferences, tool choices, things Claude should always know regardless of which project you're in.
 

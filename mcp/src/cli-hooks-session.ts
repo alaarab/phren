@@ -36,6 +36,7 @@ import { detectProjectDir, ensureLocalGitRepo, isProjectTracked } from "./init-s
 import { isToolHookEnabled } from "./hooks.js";
 import { appendFindingJournal } from "./finding-journal.js";
 import { isProjectHookEnabled } from "./project-config.js";
+import { isTaskFileName } from "./data-backlog.js";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import {
   buildIndex,
@@ -101,7 +102,7 @@ export function getUntrackedProjectNotice(cortexPath: string, cwd: string): stri
     "If they say no, tell them they can always run `npx cortex add` later from this directory.",
     "If they say yes, also ask whether Cortex should manage repo instruction files or leave their existing repo-owned CLAUDE/AGENTS files alone.",
     `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="cortex-managed"|"detached"|"repo-managed", or run \`npx cortex add\` from that directory.`,
-    "</cortex-notice>",
+    "<cortex-notice>",
     "",
   ].join("\n");
 }
@@ -413,7 +414,7 @@ async function countUnsyncedCommits(cwd: string): Promise<number> {
 
 function isMergeableMarkdown(relPath: string): boolean {
   const filename = path.basename(relPath).toLowerCase();
-  return filename === "findings.md" || filename === "backlog.md";
+  return filename === "findings.md" || isTaskFileName(filename);
 }
 
 async function snapshotLocalMergeableFiles(cwd: string): Promise<Map<string, string>> {
@@ -1053,7 +1054,7 @@ export async function handleHookContext() {
     }
   }
 
-  parts.push("</cortex-context>");
+  parts.push("<cortex-context>");
 
   if (parts.length > 2) {
     console.log(parts.join("\n"));

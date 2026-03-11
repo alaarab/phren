@@ -98,7 +98,7 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "summary.md": "summary",
   "findings.md": "findings",
   "reference.md": "reference",
-  "backlog.md": "backlog",
+  "tasks.md": "backlog",
   "changelog.md": "changelog",
   "canonical_memories.md": "canonical",
   "memory_queue.md": "memory-queue",

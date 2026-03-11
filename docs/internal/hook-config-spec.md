@@ -78,7 +78,7 @@ Claude Code hooks are registered directly in the user's settings file under the 
 
 ### Copilot CLI
 
-**Config file:** `~/.github/hooks/cortex.json`
+**Config file:** `~/.github/hookscortex.json`
 
 ```jsonc
 {
@@ -268,7 +268,7 @@ When `hookTools` is present, each tool key controls whether hooks and wrappers a
 
 ## Per-Project Hook Overrides
 
-Tracked projects can override lifecycle hooks in `<cortexPath>/<project>/cortex.project.yaml`:
+Tracked projects can override lifecycle hooks in `<cortexPath>/<project>cortex.project.yaml`:
 
 ```yaml
 hooks:
@@ -294,6 +294,6 @@ Every config is validated before being written to disk. If validation fails, the
 | Tool | Hook Config | Wrapper | MCP Config |
 |---|---|---|---|
 | Claude Code | `~/.claude/settings.json` | n/a (native) | `~/.claude/settings.json` |
-| Copilot CLI | `~/.github/hooks/cortex.json` | `~/.local/bin/copilot` | `~/.github/mcp.json` |
+| Copilot CLI | `~/.github/hookscortex.json` | `~/.local/bin/copilot` | `~/.github/mcp.json` |
 | Cursor | `~/.cursor/hooks.json` | `~/.local/bin/cursor` | `~/.cursor/mcp.json` |
 | Codex | `<cortexPath>/codex.json` | `~/.local/bin/codex` | `~/.codex/config.json` |

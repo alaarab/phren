@@ -321,8 +321,8 @@ export async function handleHookPrompt() {
         parts.push(`<cortex-notice>`);
         parts.push(`Findings ready for consolidation:`);
         parts.push(notices.join("\n"));
-        parts.push(`Run /cortex-consolidate when ready.`);
-        parts.push(`</cortex-notice>`);
+        parts.push(`Run cortex-consolidate when ready.`);
+        parts.push(`<cortex-notice>`);
       }
 
       if (noticeFile) {
@@ -342,7 +342,7 @@ export async function handleHookPrompt() {
     console.log(parts.join("\n"));
   } catch (err: unknown) {
     const msg = errorMessage(err);
-    process.stdout.write(`\n<cortex-error>cortex hook failed: ${msg}. Check ~/.cortex/.runtime/debug.log for details.</cortex-error>\n`);
+    process.stdout.write(`\n<cortex-error>cortex hook failed: ${msg}. Check ~/.cortex/.runtime/debug.log for details.<cortex-error>\n`);
     debugLog(`hook-prompt error: ${msg}`);
     process.exit(0);
   }

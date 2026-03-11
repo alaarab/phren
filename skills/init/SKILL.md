@@ -4,7 +4,7 @@ description: Set up a new project in cortex with summary, CLAUDE.md, backlog, an
 dependencies:
   - git
 ---
-# /cortex-init - Scaffold a new project
+# cortex-init - Scaffold a new project
 
 > Set up a new project in cortex with summary, CLAUDE.md, backlog, and skill templates.
 
@@ -13,8 +13,8 @@ Add a new project to your cortex instance, or bootstrap cortex itself if you're 
 ## Usage
 
 ```
-/cortex-init my-new-project    # scaffold a specific project
-/cortex-init                   # list existing projects, suggest unconfigured ones
+cortex-init my-new-project    # scaffold a specific project
+cortex-init                   # list existing projects, suggest unconfigured ones
 ```
 
 ## First: find or create the cortex directory
@@ -168,12 +168,12 @@ If `gh` isn't available, show the manual steps:
 >   git remote add origin git@github.com:YOU/my-cortex.git
 >   git push -u origin main
 >
-> Once it's on GitHub, clone it on any machine and run `/cortex:sync` to activate."
+> Once it's on GitHub, clone it on any machine and run `cortex:sync` to activate."
 
 ### 9. Report
 
 ```
-/cortex-init <project-name>
+cortex-init <project-name>
 
 Created:
   $CORTEX_DIR/<project-name>/summary.md
@@ -183,19 +183,19 @@ Created:
 
 Added to profile: default
 
-Run /cortex-sync to activate on this machine.
+Run cortex-sync to activate on this machine.
 ```
 
 ## Without a project name
 
-When user just runs `/cortex-init` with no args:
+When user just runs `cortex-init` with no args:
 
 1. If cortex directory exists, list all directories that have a `summary.md` (configured projects)
 2. Look for directories in `~/` that look like projects (have package.json, pyproject.toml, Cargo.toml, go.mod, etc.) but don't have a cortex entry
 3. Show both lists and suggest adding unconfigured ones
 
 ```
-/cortex-init: project scan
+cortex-init: project scan
 
 Configured in cortex:
   myapp, api-server
@@ -204,13 +204,13 @@ Found on this machine but not in cortex:
   ~/side-project (has package.json)
   ~/experiments/rust-thing (has Cargo.toml)
 
-Run /cortex-init <name> to add one.
+Run cortex-init <name> to add one.
 ```
 
 If cortex doesn't exist at all, offer to bootstrap it from scratch.
 
 ## Related skills
 
-- `/cortex-sync`: activate the new project on this machine after init
-- `/cortex-discover`: find what to build next in a project
+- `cortex-sync`: activate the new project on this machine after init
+- `cortex-discover`: find what to build next in a project
 - `/backlog`: manage the project's task queue

@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName } from "./utils.js";
-import { readFindings, readBacklog } from "./data-access.js";
+import { readFindings, readBacklog, resolveTaskFilePath, TASKS_FILENAME } from "./data-access.js";
 import { debugLog, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "./shared.js";
 
 
@@ -62,9 +62,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       const backlogResult = readBacklog(cortexPath, project);
       if (backlogResult.ok) {
         exported.backlog = backlogResult.data.items;
-        // Also export raw backlog.md string for lossless round-trip (preserves priority/pinned/stable IDs)
-        const backlogRawPath = path.join(projectDir, "backlog.md");
-        if (fs.existsSync(backlogRawPath)) exported.backlogRaw = fs.readFileSync(backlogRawPath, "utf8");
+        // Also export the raw task file string for lossless round-trip (preserves priority/pinned/stable IDs)
+        const backlogRawPath = resolveTaskFilePath(cortexPath, project);
+        if (backlogRawPath && fs.existsSync(backlogRawPath)) exported.backlogRaw = fs.readFileSync(backlogRawPath, "utf8");
       }
 
       const claudePath = path.join(projectDir, "CLAUDE.md");
@@ -153,7 +153,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (typeof backlogRaw === "string") return backlogRaw;
           if (!parsed.backlog) return null;
           const sections = ["Active", "Queue", "Done"] as const;
-          const lines = [`# ${projectName} backlog`, ""];
+          const lines = [`# ${projectName} tasks`, ""];
           for (const section of sections) {
             lines.push(`## ${section}`, "");
             const items = parsed.backlog[section];
@@ -200,8 +200,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
           const backlogContent = buildBacklogContent();
           if (backlogContent) {
-            fs.writeFileSync(path.join(stagedProjectDir, "backlog.md"), backlogContent);
-            imported.push("backlog.md");
+            fs.writeFileSync(path.join(stagedProjectDir, TASKS_FILENAME), backlogContent);
+            imported.push(TASKS_FILENAME);
           }
 
           const backupDir = overwrite ? path.join(cortexPath, `${projectName}.import-backup-${Date.now()}`) : null;

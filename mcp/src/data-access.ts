@@ -40,6 +40,11 @@ export {
   workNextBacklogItem,
   tidyBacklogDone,
   backlogMarkdown,
+  TASKS_FILENAME,
+  TASK_FILE_ALIASES,
+  canonicalTaskFilePath,
+  resolveTaskFilePath,
+  isTaskFileName,
 } from "./data-backlog.js";
 export {
   addProjectToProfile,

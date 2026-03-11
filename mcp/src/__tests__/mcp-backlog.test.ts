@@ -6,6 +6,7 @@ import {
   addBacklogItem,
   completeBacklogItem,
   readBacklog,
+  TASKS_FILENAME,
 } from "../data-access.js";
 
 const PROJECT = "testproject";
@@ -43,8 +44,8 @@ afterEach(() => {
 });
 
 describe("add_backlog_item MCP tool", () => {
-  it("happy path: item gets added to backlog.md", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+  it("happy path: item gets added to the task file", () => {
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
     const msg = addBacklogItem(tmpDir, PROJECT, "Set up monitoring dashboard");
     expect(msg.ok).toBe(true);
     expect(resultMsg(msg)).toContain("Added");
@@ -56,10 +57,10 @@ describe("add_backlog_item MCP tool", () => {
     expect(queueLines).toContain("Set up monitoring dashboard");
   });
 
-  it("creates backlog.md when none exists", () => {
+  it("creates the task file when none exists", () => {
     const msg = addBacklogItem(tmpDir, PROJECT, "First task ever");
     expect(msg.ok).toBe(true);
-    expect(fs.existsSync(path.join(projectDir, "backlog.md"))).toBe(true);
+    expect(fs.existsSync(path.join(projectDir, TASKS_FILENAME))).toBe(true);
 
     const after = readBacklog(tmpDir, PROJECT);
     if (!after.ok) return;
@@ -81,7 +82,7 @@ describe("add_backlog_item MCP tool", () => {
 
 describe("complete_backlog_item MCP tool", () => {
   it("item moves to Done", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
     const msg = completeBacklogItem(tmpDir, PROJECT, "rate limiting");
     expect(msg.ok).toBe(true);
     expect(resultMsg(msg)).toContain("Marked done");
@@ -95,14 +96,14 @@ describe("complete_backlog_item MCP tool", () => {
   });
 
   it("nonexistent item returns error message", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
     const msg = completeBacklogItem(tmpDir, PROJECT, "nonexistent item xyz123");
     expect(msg.ok).toBe(false);
     expect(resultMsg(msg)).toContain("Item not found");
   });
 
   it("completes by item ID", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
     const msg = completeBacklogItem(tmpDir, PROJECT, "Q1");
     expect(msg.ok).toBe(true);
 
@@ -123,7 +124,7 @@ describe("readBacklog done_limit", () => {
     // Seed Active section with 10 items
     const activeItems = "# backlog\n\n## Active\n\n" +
       Array.from({ length: 10 }, (_, i) => `- [ ] Done item ${i + 1}`).join("\n") + "\n\n## Queue\n\n## Done\n";
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), activeItems);
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), activeItems);
 
     // Complete each item in order 1..10; completeBacklogItem uses unshift so last completed is at index 0
     for (let i = 1; i <= 10; i++) {

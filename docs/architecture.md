@@ -138,7 +138,7 @@ Stop
   +-> schedule background sync worker (if remote configured)
         push in detached step
         pull --rebase on conflict
-        auto-merge FINDINGS.md / backlog.md if possible
+        auto-merge FINDINGS.md / tasks.md if possible
 ```
 
 ## MCP Server
@@ -199,7 +199,7 @@ All state lives in `~/.cortex/` as plain files, committed to git.
     FINDINGS.md            # captured insights (with citation comments)
     CANONICAL_MEMORIES.md  # pinned high-signal memories
     MEMORY_QUEUE.md        # pending review (stale/conflicts/low-value)
-    backlog.md             # task tracking (Active/Queue/Done)
+    tasks.md               # task tracking (Active/Queue/Done)
   global/
     CLAUDE.md              # cross-project instructions
     FINDINGS.md            # cross-project insights

@@ -13,7 +13,7 @@ VS Code extension for browsing, searching, and managing Cortex knowledge directl
 ## Prerequisites
 
 - Cortex MCP server installed and available on disk.
-- `cortex.mcpServerPath` configured to the MCP server entrypoint file (for example: `/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/cortex/mcp/dist/index.js`).
+- `cortex.mcpServerPath` configured to the MCP server entrypoint file (for example: `/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modulescortex/mcp/dist/index.js`).
 
 ## Configuration
 

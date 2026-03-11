@@ -23,6 +23,7 @@ import {
 import { errorMessage } from "./utils.js";
 import { ROOT, STARTER_DIR, VERSION, resolveEntryScript } from "./init-shared.js";
 import { readInstallPreferences } from "./init-preferences.js";
+import { TASKS_FILENAME } from "./data-backlog.js";
 import {
   getProjectOwnershipDefault,
   parseProjectOwnershipMode,
@@ -356,9 +357,9 @@ export function ensureProjectScaffold(projectDir: string, projectName: string): 
     );
   }
 
-  if (!fs.existsSync(path.join(projectDir, "backlog.md"))) {
+  if (!fs.existsSync(path.join(projectDir, TASKS_FILENAME))) {
     atomicWriteText(
-      path.join(projectDir, "backlog.md"),
+      path.join(projectDir, TASKS_FILENAME),
       `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
     );
   }
@@ -494,9 +495,9 @@ export function bootstrapFromExisting(
       `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${resolvedPath} -->\n`
     );
   }
-  if (!fs.existsSync(path.join(projDir, "backlog.md"))) {
+  if (!fs.existsSync(path.join(projDir, TASKS_FILENAME))) {
     atomicWriteText(
-      path.join(projDir, "backlog.md"),
+      path.join(projDir, TASKS_FILENAME),
       `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
     );
   }
@@ -598,7 +599,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "git-installed",
     ok: Boolean(gitVersion),
     detail: gitVersion || "git not found in PATH",
-    fix: gitVersion ? undefined : "Install git and re-run `npx cortex init`.",
+    fix: gitVersion ? undefined : "Install git and re-run `cortex init`.",
   });
   checks.push({
     name: "node-version",
@@ -650,8 +651,8 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     fix: mcpOk
       ? undefined
       : prefs.mcpEnabled === false
-        ? "Optional: run `npx cortex mcp-mode on` or `npx cortex init` if you want MCP enabled."
-        : "Run `npx cortex init` to register the MCP server",
+        ? "Optional: run `cortex mcp-mode on` or `cortex init` if you want MCP enabled."
+        : "Run `cortex init` to register the MCP server",
   });
   checks.push({
     name: "hooks-registered",
@@ -664,8 +665,8 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     fix: hooksOk
       ? undefined
       : prefs.hooksEnabled === false
-        ? "Optional: run `npx cortex hooks-mode on` or `npx cortex init` if you want hooks enabled."
-        : "Run `npx cortex init` to install or refresh hooks",
+        ? "Optional: run `cortex hooks-mode on` or `cortex init` if you want hooks enabled."
+        : "Run `cortex init` to install or refresh hooks",
   });
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
@@ -674,7 +675,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "global-claude",
     ok: globalOk,
     detail: globalOk ? "global/CLAUDE.md exists" : "global/CLAUDE.md missing",
-    fix: globalOk ? undefined : "Run `npx cortex init` to create starter files",
+    fix: globalOk ? undefined : "Run `cortex init` to create starter files",
   });
 
   const govDir = path.join(cortexPath, ".governance");
@@ -683,7 +684,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "config",
     ok: govOk,
     detail: govOk ? ".governance/ config directory exists" : ".governance/ config directory missing",
-    fix: govOk ? undefined : "Run `npx cortex init` to create governance config",
+    fix: govOk ? undefined : "Run `cortex init` to create governance config",
   });
 
   const installedPrefs = readInstallPreferences(cortexPath);
@@ -695,7 +696,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     detail: installedVersion
       ? (versionOk ? `install metadata matches running version (${VERSION})` : `install metadata is ${installedVersion}, runtime is ${VERSION}`)
       : "install metadata missing installedVersion",
-    fix: versionOk ? undefined : "Run `npx cortex update` or `npx cortex init` to refresh install metadata.",
+    fix: versionOk ? undefined : "Run `cortex update` or `cortex init` to refresh install metadata.",
   });
 
   let ftsOk = false;
@@ -710,7 +711,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "fts-index",
     ok: ftsOk,
     detail: ftsOk ? "Project directories found for indexing" : "No project directories found in cortex path",
-    fix: ftsOk ? undefined : "Create a project: `cd ~/your-project && npx cortex add`",
+    fix: ftsOk ? undefined : "Create a project: `cd ~/your-project && cortex add`",
   });
 
   checks.push(getHookEntrypointCheck());

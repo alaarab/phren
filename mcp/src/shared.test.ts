@@ -535,7 +535,7 @@ describe("detectProject", () => {
     const cortex = makeCortex();
     makeProject(cortex, "cortex", { "summary.md": "# cortex\n" });
 
-    const result = detectProject(cortex, "/home/user/cortex/mcp/src");
+    const result = detectProject(cortex, "/home/cortex/mcp/src");
     expect(result).toBe("cortex");
   });
 });
@@ -1331,26 +1331,26 @@ describe("autoMergeConflicts", () => {
     expect(content).not.toContain("<<<<<<<");
   });
 
-  it("auto-merges a conflicted backlog.md", () => {
+  it("auto-merges a conflicted tasks.md", () => {
     const { execFileSync } = require("child_process");
 
-    commitFile(gitDir, "proj/backlog.md", "# backlog\n\n## Active\n\n- Base task\n\n## Queue\n\n## Done\n", "base");
+    commitFile(gitDir, "proj/tasks.md", "# tasks\n\n## Active\n\n- Base task\n\n## Queue\n\n## Done\n", "base");
     const primaryBranch = currentBranch(gitDir);
 
     execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-b"], { stdio: "pipe" });
     fs.writeFileSync(
-      path.join(gitDir, "proj", "backlog.md"),
-      "# backlog\n\n## Active\n\n- Branch task\n\n## Queue\n\n## Done\n"
+      path.join(gitDir, "proj", "tasks.md"),
+      "# tasks\n\n## Active\n\n- Branch task\n\n## Queue\n\n## Done\n"
     );
-    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/backlog.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/tasks.md"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "branch change"], { stdio: "ignore" });
 
     execFileSync("git", ["-C", gitDir, "checkout", primaryBranch], { stdio: "pipe" });
     fs.writeFileSync(
-      path.join(gitDir, "proj", "backlog.md"),
-      "# backlog\n\n## Active\n\n- Master task\n\n## Queue\n\n## Done\n"
+      path.join(gitDir, "proj", "tasks.md"),
+      "# tasks\n\n## Active\n\n- Master task\n\n## Queue\n\n## Done\n"
     );
-    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/backlog.md"], { stdio: "ignore" });
+    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/tasks.md"], { stdio: "ignore" });
     execFileSync("git", ["-C", gitDir, "commit", "-m", "master change"], { stdio: "ignore" });
 
     try {
@@ -1363,14 +1363,14 @@ describe("autoMergeConflicts", () => {
       encoding: "utf8",
     }).trim();
 
-    if (!status.includes("backlog.md")) {
+    if (!status.includes("tasks.md")) {
       return;
     }
 
     const resolved = autoMergeConflicts(gitDir);
     expect(resolved).toBe(true);
 
-    const content = fs.readFileSync(path.join(gitDir, "proj", "backlog.md"), "utf8");
+    const content = fs.readFileSync(path.join(gitDir, "proj", "tasks.md"), "utf8");
     expect(content).toContain("Branch task");
     expect(content).toContain("Master task");
     expect(content).not.toContain("<<<<<<<");

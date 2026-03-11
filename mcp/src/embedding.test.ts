@@ -109,8 +109,8 @@ describe("embedding cache helpers", () => {
     vi.spyOn(embeddingOps, "persistDb").mockImplementation(() => {});
     const apiSpy = vi.spyOn(embeddingOps, "getApiEmbeddings").mockResolvedValue([[0.1, 0.2, 0.3]]);
 
-    const first = await getCachedEmbeddings("/tmp/cortex", ["hello"], "key", "model");
-    const second = await getCachedEmbeddings("/tmp/cortex", ["hello"], "key", "model");
+    const first = await getCachedEmbeddings("/tmpcortex", ["hello"], "key", "model");
+    const second = await getCachedEmbeddings("/tmpcortex", ["hello"], "key", "model");
 
     expect(first).toEqual([[0.1, 0.2, 0.3]]);
     expect(second).toEqual([[0.1, 0.2, 0.3]]);
@@ -126,8 +126,8 @@ describe("embedding cache helpers", () => {
     vi.spyOn(embeddingOps, "getApiEmbedding").mockRejectedValue(new Error("boom"));
     vi.spyOn(embeddingOps, "getApiEmbeddings").mockRejectedValue(new Error("boom"));
 
-    await expect(getCachedEmbedding("/tmp/cortex", "hello", "key", "model")).resolves.toEqual([]);
-    await expect(getCachedEmbeddings("/tmp/cortex", ["hello", "world"], "key", "model")).resolves.toEqual([[], []]);
+    await expect(getCachedEmbedding("/tmpcortex", "hello", "key", "model")).resolves.toEqual([]);
+    await expect(getCachedEmbeddings("/tmpcortex", ["hello", "world"], "key", "model")).resolves.toEqual([[], []]);
   });
 
   it("closes the DB after a successful cached operation", async () => {
@@ -136,7 +136,7 @@ describe("embedding cache helpers", () => {
     vi.spyOn(embeddingOps, "openCacheDb").mockResolvedValue(db);
     vi.spyOn(embeddingOps, "lookupCache").mockReturnValue([0.5, 0.25]);
 
-    const result = await getCachedEmbedding("/tmp/cortex", "hello", "key", "model");
+    const result = await getCachedEmbedding("/tmpcortex", "hello", "key", "model");
 
     expect(result).toEqual([0.5, 0.25]);
     expect(db.close).toHaveBeenCalledTimes(1);
@@ -149,7 +149,7 @@ describe("embedding cache helpers", () => {
     vi.spyOn(embeddingOps, "lookupCache").mockReturnValue(null);
     vi.spyOn(embeddingOps, "getApiEmbedding").mockRejectedValue(new Error("network error"));
 
-    await getCachedEmbedding("/tmp/cortex", "fail", "key", "model");
+    await getCachedEmbedding("/tmpcortex", "fail", "key", "model");
 
     expect(db.close).toHaveBeenCalledTimes(1);
   });
@@ -161,13 +161,13 @@ describe("embedding cache helpers", () => {
     vi.spyOn(embeddingOps, "lookupCache").mockReturnValue(null);
     vi.spyOn(embeddingOps, "getApiEmbeddings").mockRejectedValue(new Error("network error"));
 
-    await getCachedEmbeddings("/tmp/cortex", ["a", "b"], "key", "model");
+    await getCachedEmbeddings("/tmpcortex", ["a", "b"], "key", "model");
 
     expect(db.close).toHaveBeenCalledTimes(1);
   });
 
   it("getCachedEmbeddings returns empty array for empty input", async () => {
-    const result = await getCachedEmbeddings("/tmp/cortex", [], "key", "model");
+    const result = await getCachedEmbeddings("/tmpcortex", [], "key", "model");
     expect(result).toEqual([]);
   });
 
@@ -186,7 +186,7 @@ describe("embedding cache helpers", () => {
     vi.spyOn(embeddingOps, "persistDb").mockImplementation(() => {});
     vi.spyOn(embeddingOps, "getApiEmbeddings").mockResolvedValue([[0.2], [0.3]]);
 
-    const result = await getCachedEmbeddings("/tmp/cortex", ["a", "b", "c"], "key", "model");
+    const result = await getCachedEmbeddings("/tmpcortex", ["a", "b", "c"], "key", "model");
 
     expect(result).toEqual([[0.1], [0.2], [0.3]]);
     expect(embeddingOps.getApiEmbeddings).toHaveBeenCalledTimes(1);
@@ -201,7 +201,7 @@ describe("embedding cache helpers", () => {
     const insertSpy = vi.spyOn(embeddingOps, "insertCache").mockImplementation(() => {});
     const persistSpy = vi.spyOn(embeddingOps, "persistDb").mockImplementation(() => {});
 
-    const result = await getCachedEmbedding("/tmp/cortex", "hello", "key", "model");
+    const result = await getCachedEmbedding("/tmpcortex", "hello", "key", "model");
 
     expect(result).toEqual([0.9, 0.8]);
     expect(insertSpy).toHaveBeenCalledTimes(1);
@@ -216,7 +216,7 @@ describe("embedding cache helpers", () => {
     const insertSpy = vi.spyOn(embeddingOps, "insertCache").mockImplementation(() => {});
     const apiSpy = vi.spyOn(embeddingOps, "getApiEmbedding").mockResolvedValue([0.9]);
 
-    const result = await getCachedEmbedding("/tmp/cortex", "hello", "key", "model");
+    const result = await getCachedEmbedding("/tmpcortex", "hello", "key", "model");
 
     expect(result).toEqual([0.5]);
     expect(insertSpy).not.toHaveBeenCalled();

@@ -72,7 +72,7 @@ describe("searchDocumentsAsync vector gating", () => {
       ["proj", "three.md", "summary", "alpha beta gamma", "/tmp/three.md"],
     ]);
 
-    await searchDocumentsAsync(db, "\"alpha\"", "alpha beta gamma", "alpha beta gamma", null, true, "/tmp/cortex");
+    await searchDocumentsAsync(db, "\"alpha\"", "alpha beta gamma", "alpha beta gamma", null, true, "/tmpcortex");
 
     expect(vectorFallback).not.toHaveBeenCalled();
   });
@@ -89,7 +89,7 @@ describe("searchDocumentsAsync vector gating", () => {
       "semantic search setup during init with ollama",
       null,
       true,
-      "/tmp/cortex"
+      "/tmpcortex"
     );
 
     expect(vectorFallback).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe("searchDocumentsAsync vector gating", () => {
   it("runs vector fallback when lexical retrieval is empty", async () => {
     const db = makeDb([]);
 
-    await searchDocumentsAsync(db, "\"webhook\"", "external webhook alerts discord", "external webhook alerts discord", null, true, "/tmp/cortex");
+    await searchDocumentsAsync(db, "\"webhook\"", "external webhook alerts discord", "external webhook alerts discord", null, true, "/tmpcortex");
 
     expect(vectorFallback).toHaveBeenCalledOnce();
   });
@@ -121,7 +121,7 @@ describe("searchDocumentsAsync vector gating", () => {
               "FINDINGS.md",
               "findings",
               "Semantic opt-in during init should finish at the dependency level",
-              "/tmp/cortex/FINDINGS.md",
+              "/tmpcortex/FINDINGS.md",
             ]],
           }];
         }
@@ -138,10 +138,10 @@ describe("searchDocumentsAsync vector gating", () => {
       "semantic search setup during init ollama",
       null,
       true,
-      "/tmp/cortex"
+      "/tmpcortex"
     );
 
-    expect(rows?.[0]?.path).toBe("/tmp/cortex/FINDINGS.md");
+    expect(rows?.[0]?.path).toBe("/tmpcortex/FINDINGS.md");
     expect(vectorFallback).not.toHaveBeenCalled();
   });
 });
