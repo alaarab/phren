@@ -51,7 +51,7 @@ describe("mcp-data: export/import round-trip", () => {
     tmp.cleanup();
   });
 
-  it("exports a project with findings, backlog, and summary", async () => {
+  it("exports a project with findings, task, and summary", async () => {
     const projectDir = path.join(tmp.path, "test-proj");
     fs.mkdirSync(projectDir, { recursive: true });
 
@@ -61,8 +61,8 @@ describe("mcp-data: export/import round-trip", () => {
       "# test-proj Findings\n\n## 2026-03-01\n\n- Always use WAL mode\n"
     );
     writeFile(
-      path.join(projectDir, "backlog.md"),
-      "# test-proj backlog\n\n## Active\n\n- [ ] Add caching\n\n## Queue\n\n## Done\n\n- [x] Setup CI\n"
+      path.join(projectDir, "tasks.md"),
+      "# test-proj task\n\n## Active\n\n- [ ] Add caching\n\n## Queue\n\n## Done\n\n- [x] Setup CI\n"
     );
     writeFile(path.join(projectDir, "CLAUDE.md"), "# Instructions\nUse vitest.");
 
@@ -74,8 +74,8 @@ describe("mcp-data: export/import round-trip", () => {
     expect(res.data.summary).toContain("A test project.");
     expect(res.data.claudeMd).toContain("Use vitest");
     expect(res.data.findingsRaw).toContain("Always use WAL mode");
-    expect(res.data.backlog.Active).toHaveLength(1);
-    expect(res.data.backlog.Done).toHaveLength(1);
+    expect(res.data.task.Active).toHaveLength(1);
+    expect(res.data.task.Done).toHaveLength(1);
   });
 
   it("import recreates project files from exported JSON", async () => {
@@ -88,8 +88,8 @@ describe("mcp-data: export/import round-trip", () => {
       "# orig Findings\n\n## 2026-03-01\n\n- Finding alpha\n"
     );
     writeFile(
-      path.join(projectDir, "backlog.md"),
-      "# orig backlog\n\n## Active\n\n- [ ] Task one\n\n## Queue\n\n## Done\n"
+      path.join(projectDir, "tasks.md"),
+      "# orig task\n\n## Active\n\n- [ ] Task one\n\n## Queue\n\n## Done\n"
     );
     writeFile(path.join(projectDir, "CLAUDE.md"), "# Claude\nBe concise.");
 
@@ -195,12 +195,12 @@ describe("mcp-data: export/import round-trip", () => {
     expect(fs.existsSync(path.join(tmp.path, "cortex"))).toBe(true);
   });
 
-  it("import builds backlog content from structured data", async () => {
+  it("import builds task content from structured data", async () => {
     register(server as any, makeCtx(tmp.path));
 
     const payload = {
-      project: "backlog-test",
-      backlog: {
+      project: "task-test",
+      task: {
         Active: [{ line: "Active task", checked: false, githubIssue: 14, githubUrl: "https://github.com/alaarab/cortex/issues/14" }],
         Queue: [{ line: "Queued task", checked: false }],
         Done: [{ line: "Done task", checked: true }],
@@ -211,27 +211,27 @@ describe("mcp-data: export/import round-trip", () => {
     );
     expect(res.ok).toBe(true);
 
-    const backlog = fs.readFileSync(path.join(tmp.path, "backlog-test", "backlog.md"), "utf8");
-    expect(backlog).toContain("- [ ] Active task");
-    expect(backlog).toContain("GitHub: #14 https://github.com/alaarab/cortex/issues/14");
-    expect(backlog).toContain("- [ ] Queued task");
-    expect(backlog).toContain("- [x] Done task");
+    const task = fs.readFileSync(path.join(tmp.path, "task-test", "tasks.md"), "utf8");
+    expect(task).toContain("- [ ] Active task");
+    expect(task).toContain("GitHub: #14 https://github.com/alaarab/cortex/issues/14");
+    expect(task).toContain("- [ ] Queued task");
+    expect(task).toContain("- [x] Done task");
   });
 
-  it("export includes structured GitHub issue linkage on backlog items", async () => {
-    const projectDir = path.join(tmp.path, "gh-backlog");
+  it("export includes structured GitHub issue linkage on task items", async () => {
+    const projectDir = path.join(tmp.path, "gh-task");
     fs.mkdirSync(projectDir, { recursive: true });
     writeFile(
-      path.join(projectDir, "backlog.md"),
-      "# gh-backlog backlog\n\n## Active\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  GitHub: #14 https://github.com/alaarab/cortex/issues/14\n\n## Queue\n\n## Done\n"
+      path.join(projectDir, "tasks.md"),
+      "# gh-task task\n\n## Active\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  GitHub: #14 https://github.com/alaarab/cortex/issues/14\n\n## Queue\n\n## Done\n"
     );
 
     register(server as any, makeCtx(tmp.path));
 
-    const res = parseResult(await server.call("export_project", { project: "gh-backlog" }));
+    const res = parseResult(await server.call("export_project", { project: "gh-task" }));
     expect(res.ok).toBe(true);
-    expect(res.data.backlog.Active[0].githubIssue).toBe(14);
-    expect(res.data.backlog.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    expect(res.data.task.Active[0].githubIssue).toBe(14);
+    expect(res.data.task.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
   });
 
   it("import builds findings content from learnings array", async () => {

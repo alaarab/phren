@@ -11,7 +11,7 @@ import {
   getProjectDirs,
 } from "./shared.js";
 import { withFileLock as withFileLockRaw } from "./shared-governance.js";
-import { validateBacklogFormat } from "./shared-content.js";
+import { validateTaskFormat } from "./shared-content.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 
 function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
@@ -27,19 +27,19 @@ function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexRes
 }
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
-const QUEUE_HEADINGS = new Set(["queue", "queued", "backlog", "todo", "upcoming", "next"]);
+const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);
 const DONE_HEADINGS = new Set(["done", "completed", "finished", "archived"]);
 
-export type BacklogSection = "Active" | "Queue" | "Done";
+export type TaskSection = "Active" | "Queue" | "Done";
 export const TASKS_FILENAME = "tasks.md";
 export const TASK_FILE_ALIASES = [TASKS_FILENAME] as const;
 
-export interface BacklogItem {
+export interface TaskItem {
   /** Positional ID for display (e.g. "A1", "Q3"). Recomputed on every read — use stableId for persistent references. */
   id: string;
   /** Content-addressed stable ID embedded in the file as `<!-- bid:HASH -->`. Survives reordering and completions. */
   stableId?: string;
-  section: BacklogSection;
+  section: TaskSection;
   line: string;
   checked: boolean;
   priority?: "high" | "medium" | "low";
@@ -49,15 +49,15 @@ export interface BacklogItem {
   githubUrl?: string;
 }
 
-export interface BacklogDoc {
+export interface TaskDoc {
   project: string;
   title: string;
-  items: Record<BacklogSection, BacklogItem[]>;
+  items: Record<TaskSection, TaskItem[]>;
   issues: string[];
   path: string;
 }
 
-const BACKLOG_SECTIONS: BacklogSection[] = ["Active", "Queue", "Done"];
+const TASK_SECTIONS: TaskSection[] = ["Active", "Queue", "Done"];
 
 function normalizePriority(text: string): "high" | "medium" | "low" | undefined {
   const m = text.replace(/\s*\[pinned\]/gi, "").match(/\[(high|medium|low)\]\s*$/i);
@@ -106,7 +106,7 @@ function isValidGitHubIssueUrl(raw: string): boolean {
   return Boolean(parseGitHubIssueReference(raw).githubUrl);
 }
 
-function formatGitHubIssueReference(item: BacklogItem): string | undefined {
+function formatGitHubIssueReference(item: TaskItem): string | undefined {
   if (!item.githubIssue && !item.githubUrl) return undefined;
   if (item.githubIssue && item.githubUrl) return `#${item.githubIssue} ${item.githubUrl}`;
   if (item.githubIssue) return `#${item.githubIssue}`;
@@ -160,7 +160,7 @@ function ensureProject(cortexPath: string, project: string): CortexResult<string
   return cortexOk(dir);
 }
 
-/** Pattern that matches the stable-ID comment embedded in backlog item lines. */
+/** Pattern that matches the stable-ID comment embedded in task item lines. */
 const BID_PATTERN = /\s*<!--\s*bid:([a-z0-9]{8})\s*-->/;
 
 /** Generate a new 8-character random stable ID. */
@@ -189,7 +189,7 @@ export function resolveTaskFilePath(cortexPath: string, project: string): string
   return canonicalTaskFilePath(cortexPath, project);
 }
 
-function normalizeBacklogItemLine(item: BacklogItem): string {
+function normalizeTaskItemLine(item: TaskItem): string {
   let text = stripPinnedTag(item.line.replace(/\s*\[(high|medium|low)\]\s*$/gi, "")).trim();
   if (item.priority) text = `${text} [${item.priority}]`;
   if (item.pinned) text = `${text} [pinned]`;
@@ -199,17 +199,17 @@ function normalizeBacklogItemLine(item: BacklogItem): string {
   return `${prefix}${text} <!-- bid:${bid} -->`;
 }
 
-function parseBacklogContent(project: string, backlogPath: string, content: string): BacklogDoc {
+function parseTaskContent(project: string, taskPath: string, content: string): TaskDoc {
   const lines = content.split("\n");
-  const title = lines[0]?.trim() || `# ${project} backlog`;
-  const items: Record<BacklogSection, BacklogItem[]> = {
+  const title = lines[0]?.trim() || `# ${project} tasks`;
+  const items: Record<TaskSection, TaskItem[]> = {
     Active: [],
     Queue: [],
     Done: [],
   };
 
-  let section: BacklogSection = "Queue";
-  const sectionCounters: Record<BacklogSection, number> = { Active: 0, Queue: 0, Done: 0 };
+  let section: TaskSection = "Queue";
+  const sectionCounters: Record<TaskSection, number> = { Active: 0, Queue: 0, Done: 0 };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const heading = line.trim().match(/^##\s+(.+?)[\s]*$/);
@@ -252,18 +252,18 @@ function parseBacklogContent(project: string, backlogPath: string, content: stri
   return {
     project,
     title,
-    path: backlogPath,
+    path: taskPath,
     items,
-    issues: validateBacklogFormat(content),
+    issues: validateTaskFormat(content),
   };
 }
 
-function renderBacklog(doc: BacklogDoc): string {
+function renderTask(doc: TaskDoc): string {
   const out: string[] = [doc.title, ""];
-  for (const section of BACKLOG_SECTIONS) {
+  for (const section of TASK_SECTIONS) {
     out.push(`## ${section}`, "");
     for (const item of doc.items[section]) {
-      out.push(normalizeBacklogItemLine(item));
+      out.push(normalizeTaskItemLine(item));
       if (item.context) out.push(`  Context: ${item.context}`);
       const githubRef = formatGitHubIssueReference(item);
       if (githubRef) out.push(`  GitHub: ${githubRef}`);
@@ -274,30 +274,30 @@ function renderBacklog(doc: BacklogDoc): string {
 }
 
 function findItemByMatch(
-  doc: BacklogDoc,
+  doc: TaskDoc,
   match: string
-): { match?: { section: BacklogSection; index: number }; error?: string; errorCode?: CortexErrorCode } {
+): { match?: { section: TaskSection; index: number }; error?: string; errorCode?: CortexErrorCode } {
   const needle = match.trim().toLowerCase();
   if (!needle) return { error: `${CortexError.EMPTY_INPUT}: Please provide the item text or ID to match against.`, errorCode: CortexError.EMPTY_INPUT };
 
   // 1a) Stable ID match (bid:XXXX or just the 8-char hex).
   const bidNeedle = needle.replace(/^bid:/, "");
   if (/^[a-f0-9]{8}$/.test(bidNeedle)) {
-    for (const section of BACKLOG_SECTIONS) {
+    for (const section of TASK_SECTIONS) {
       const idx = doc.items[section].findIndex((item) => item.stableId === bidNeedle);
       if (idx !== -1) return { match: { section, index: idx } };
     }
   }
 
   // 1b) Positional ID match (A1, Q2, D3).
-  for (const section of BACKLOG_SECTIONS) {
+  for (const section of TASK_SECTIONS) {
     const idx = doc.items[section].findIndex((item) => item.id.toLowerCase() === needle);
     if (idx !== -1) return { match: { section, index: idx } };
   }
 
   // 2) Exact line match.
-  const exact: Array<{ section: BacklogSection; index: number }> = [];
-  for (const section of BACKLOG_SECTIONS) {
+  const exact: Array<{ section: TaskSection; index: number }> = [];
+  for (const section of TASK_SECTIONS) {
     doc.items[section].forEach((item, index) => {
       if (item.line.trim().toLowerCase() === needle) exact.push({ section, index });
     });
@@ -308,8 +308,8 @@ function findItemByMatch(
   }
 
   // 3) Substring fallback, but only when unique.
-  const partial: Array<{ section: BacklogSection; index: number }> = [];
-  for (const section of BACKLOG_SECTIONS) {
+  const partial: Array<{ section: TaskSection; index: number }> = [];
+  for (const section of TASK_SECTIONS) {
     doc.items[section].forEach((item, index) => {
       if (item.line.toLowerCase().includes(needle)) partial.push({ section, index });
     });
@@ -321,24 +321,24 @@ function findItemByMatch(
   return { error: `${CortexError.NOT_FOUND}: Item not found — no task matching "${match}".`, errorCode: CortexError.NOT_FOUND };
 }
 
-function backlogItemNotFound(project: string, match: string): CortexResult<never> {
+function taskItemNotFound(project: string, match: string): CortexResult<never> {
   return cortexErr(
     `Item not found: no task matching "${match}" in project "${project}". Check the item text or use its ID (shown in the tasks view).`,
     CortexError.NOT_FOUND
   );
 }
 
-function writeBacklogDoc(doc: BacklogDoc): void {
+function writeTaskDoc(doc: TaskDoc): void {
   const tmpPath = `${doc.path}.tmp-${randomUUID()}`;
-  fs.writeFileSync(tmpPath, renderBacklog(doc));
+  fs.writeFileSync(tmpPath, renderTask(doc));
   fs.renameSync(tmpPath, doc.path);
 }
 
-function backlogArchivePath(cortexPath: string, project: string): string {
-  return path.join(cortexPath, ".governance", "backlog-archive", `${project}.md`);
+function taskArchivePath(cortexPath: string, project: string): string {
+  return path.join(cortexPath, ".governance", "task-archive", `${project}.md`);
 }
 
-export function readBacklog(cortexPath: string, project: string): CortexResult<BacklogDoc> {
+export function readTasks(cortexPath: string, project: string): CortexResult<TaskDoc> {
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
@@ -356,32 +356,32 @@ export function readBacklog(cortexPath: string, project: string): CortexResult<B
   }
 
   const content = fs.readFileSync(taskPath, "utf8");
-  return cortexOk(parseBacklogContent(project, taskPath, content));
+  return cortexOk(parseTaskContent(project, taskPath, content));
 }
 
-export function readBacklogs(cortexPath: string, profile?: string): BacklogDoc[] {
+export function readTasksAcrossProjects(cortexPath: string, profile?: string): TaskDoc[] {
   const projects = getProjectDirs(cortexPath, profile).map((dir) => path.basename(dir)).sort();
-  const result: BacklogDoc[] = [];
+  const result: TaskDoc[] = [];
   for (const project of projects) {
     const file = canonicalTaskFilePath(cortexPath, project);
     if (!file || !fs.existsSync(file)) continue;
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) continue;
     result.push(parsed.data);
   }
   return result;
 }
 
-export function resolveBacklogItem(cortexPath: string, project: string, match: string): CortexResult<BacklogItem> {
-  const parsed = readBacklog(cortexPath, project);
+export function resolveTaskItem(cortexPath: string, project: string, match: string): CortexResult<TaskItem> {
+  const parsed = readTasks(cortexPath, project);
   if (!parsed.ok) return forwardErr(parsed);
   const found = findItemByMatch(parsed.data, match);
   if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
-  if (!found.match) return backlogItemNotFound(project, match);
+  if (!found.match) return taskItemNotFound(project, match);
   return cortexOk(parsed.data.items[found.match.section][found.match.index]);
 }
 
-export function addBacklogItem(cortexPath: string, project: string, item: string): CortexResult<string> {
+export function addTask(cortexPath: string, project: string, item: string): CortexResult<string> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
   // Validate project exists before acquiring the lock — withFileLock creates the parent
@@ -390,7 +390,7 @@ export function addBacklogItem(cortexPath: string, project: string, item: string
   if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const line = item.replace(/^-\s*/, "").trim();
@@ -401,19 +401,19 @@ export function addBacklogItem(cortexPath: string, project: string, item: string
       checked: false,
       priority: normalizePriority(line),
     });
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk(`Added task in ${project}: ${line}`);
   });
 }
 
-export function addBacklogItems(cortexPath: string, project: string, items: string[]): CortexResult<{ added: string[]; errors: string[] }> {
+export function addTasks(cortexPath: string, project: string, items: string[]): CortexResult<{ added: string[]; errors: string[] }> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
   const preCheck = ensureProject(cortexPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const added: string[] = [];
@@ -433,17 +433,17 @@ export function addBacklogItems(cortexPath: string, project: string, items: stri
       });
       added.push(line);
     }
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk({ added, errors });
   });
 }
 
-export function completeBacklogItems(cortexPath: string, project: string, matches: string[]): CortexResult<{ completed: string[]; errors: string[] }> {
+export function completeTasks(cortexPath: string, project: string, matches: string[]): CortexResult<{ completed: string[]; errors: string[] }> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const completed: string[] = [];
@@ -460,33 +460,33 @@ export function completeBacklogItems(cortexPath: string, project: string, matche
       parsed.data.items.Done.unshift(item);
       completed.push(item.line);
     }
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk({ completed, errors });
   });
 }
 
-export function completeBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
+export function completeTask(cortexPath: string, project: string, match: string): CortexResult<string> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
     if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return backlogItemNotFound(project, match);
+    if (!found.match) return taskItemNotFound(project, match);
 
     const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
     item.section = "Done";
     item.checked = true;
     parsed.data.items.Done.unshift(item);
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk(`Marked done in ${project}: ${item.line}`);
   });
 }
 
-export function updateBacklogItem(
+export function updateTask(
   cortexPath: string,
   project: string,
   match: string,
@@ -496,12 +496,12 @@ export function updateBacklogItem(
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
     if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return backlogItemNotFound(project, match);
+    if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
     const changes: string[] = [];
@@ -551,7 +551,7 @@ export function updateBacklogItem(
       const target = updates.section[0].toUpperCase() + updates.section.slice(1).toLowerCase();
       if (["Active", "Queue", "Done"].includes(target)) {
         parsed.data.items[found.match.section].splice(found.match.index, 1);
-        const section = target as BacklogSection;
+        const section = target as TaskSection;
         item.section = section;
         item.checked = section === "Done";
         parsed.data.items[section].unshift(item);
@@ -559,22 +559,22 @@ export function updateBacklogItem(
       }
     }
 
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk(`Updated item in ${project}: ${changes.join(", ") || "no changes"}`);
   });
 }
 
-export function pinBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
+export function pinTask(cortexPath: string, project: string, match: string): CortexResult<string> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
     if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return backlogItemNotFound(project, match);
+    if (!found.match) return taskItemNotFound(project, match);
 
     const section = found.match.section;
     const item = parsed.data.items[section][found.match.index];
@@ -583,38 +583,38 @@ export function pinBacklogItem(cortexPath: string, project: string, match: strin
     item.line = stripPinnedTag(item.line);
     parsed.data.items[section].splice(found.match.index, 1);
     parsed.data.items[section].unshift(item);
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk(`Pinned in ${project}: ${item.line}`);
   });
 }
 
-export function unpinBacklogItem(cortexPath: string, project: string, match: string): CortexResult<string> {
+export function unpinTask(cortexPath: string, project: string, match: string): CortexResult<string> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
     if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return backlogItemNotFound(project, match);
+    if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
     if (!item.pinned) return cortexOk(`Not pinned in ${project}: ${item.line}`);
     item.pinned = undefined;
     item.line = stripPinnedTag(item.line);
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk(`Unpinned in ${project}: ${item.line}`);
   });
 }
 
-export function workNextBacklogItem(cortexPath: string, project: string): CortexResult<string> {
+export function workNextTask(cortexPath: string, project: string): CortexResult<string> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
     if (!parsed.data.items.Queue.length) {
       return cortexErr(`No queued tasks in "${project}". Add items with :add or the add_task tool.`, CortexError.NOT_FOUND);
@@ -631,17 +631,17 @@ export function workNextBacklogItem(cortexPath: string, project: string): Cortex
     item.section = "Active";
     item.checked = false;
     parsed.data.items.Active.push(item);
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk(`Moved next queue item to Active in ${project}: ${item.line}`);
   });
 }
 
-export function tidyBacklogDone(cortexPath: string, project: string, keep: number = 30, dryRun?: boolean): CortexResult<string> {
+export function tidyDoneTasks(cortexPath: string, project: string, keep: number = 30, dryRun?: boolean): CortexResult<string> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const safeKeep = Number.isFinite(keep) ? Math.max(0, Math.floor(keep)) : 30;
@@ -656,39 +656,39 @@ export function tidyBacklogDone(cortexPath: string, project: string, keep: numbe
 
     parsed.data.items.Done = parsed.data.items.Done.slice(0, safeKeep);
 
-    const archiveFile = backlogArchivePath(cortexPath, project);
+    const archiveFile = taskArchivePath(cortexPath, project);
     fs.mkdirSync(path.dirname(archiveFile), { recursive: true });
     const stamp = new Date().toISOString();
     const lines = archived.map((item) => `- [x] ${item.line}${item.context ? `\n  Context: ${item.context}` : ""}`);
     const block = `## ${stamp}\n\n${lines.join("\n")}\n\n`;
-    const prior = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, "utf8") : `# ${project} task archive\n\n`;
+    const prior = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, "utf8") : `# ${project} tasks archive\n\n`;
     fs.writeFileSync(archiveFile, prior + block);
 
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk(`Tidied ${project}: archived ${archived.length} done item(s), kept ${safeKeep}.`);
   });
 }
 
-export function backlogMarkdown(doc: BacklogDoc): string {
-  return renderBacklog(doc);
+export function taskMarkdown(doc: TaskDoc): string {
+  return renderTask(doc);
 }
 
-export function linkBacklogItemIssue(
+export function linkTaskIssue(
   cortexPath: string,
   project: string,
   match: string,
   link: { github_issue?: number | string; github_url?: string; unlink?: boolean }
-): CortexResult<BacklogItem> {
+): CortexResult<TaskItem> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readBacklog(cortexPath, project);
+    const parsed = readTasks(cortexPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
     if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
-    if (!found.match) return backlogItemNotFound(project, match);
+    if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
     if (link.unlink) {
@@ -714,7 +714,7 @@ export function linkBacklogItemIssue(
       item.githubUrl = parsedLink.githubUrl;
     }
 
-    writeBacklogDoc(parsed.data);
+    writeTaskDoc(parsed.data);
     return cortexOk(item);
   });
 }

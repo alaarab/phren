@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName } from "./utils.js";
-import { readFindings, readBacklog, resolveTaskFilePath, TASKS_FILENAME } from "./data-access.js";
+import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } from "./data-access.js";
 import { debugLog, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "./shared.js";
 
 
@@ -14,7 +14,7 @@ const importPayloadSchema = z.object({
   overwrite: z.boolean().optional(),
   summary: z.string().optional(),
   claudeMd: z.string().optional(),
-  backlogRaw: z.string().optional(),
+  taskRaw: z.string().optional(),
   learnings: z
     .array(
       z.object({
@@ -22,7 +22,7 @@ const importPayloadSchema = z.object({
       }).passthrough()
     )
     .optional(),
-  backlog: z
+  task: z
     .object({
       Active: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional(), githubIssue: z.number().optional(), githubUrl: z.string().optional() }).passthrough()).optional(),
       Queue: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional(), githubIssue: z.number().optional(), githubUrl: z.string().optional() }).passthrough()).optional(),
@@ -39,7 +39,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "export_project",
     {
       title: "◆ cortex · export",
-      description: "Export a project's data (findings, backlog, summary) as portable JSON for sharing or backup.",
+      description: "Export a project's data (findings, task, summary) as portable JSON for sharing or backup.",
       inputSchema: z.object({
         project: z.string().describe("Project name to export."),
       }),
@@ -59,12 +59,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       const findingsPath = path.join(projectDir, "FINDINGS.md");
       if (fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
 
-      const backlogResult = readBacklog(cortexPath, project);
-      if (backlogResult.ok) {
-        exported.backlog = backlogResult.data.items;
+      const taskResult = readTasks(cortexPath, project);
+      if (taskResult.ok) {
+        exported.task = taskResult.data.items;
         // Also export the raw task file string for lossless round-trip (preserves priority/pinned/stable IDs)
-        const backlogRawPath = resolveTaskFilePath(cortexPath, project);
-        if (backlogRawPath && fs.existsSync(backlogRawPath)) exported.backlogRaw = fs.readFileSync(backlogRawPath, "utf8");
+        const taskRawPath = resolveTaskFilePath(cortexPath, project);
+        if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
       }
 
       const claudePath = path.join(projectDir, "CLAUDE.md");
@@ -101,7 +101,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const parsed = parsedResult.data;
 
         // Warn about unknown fields silently discarded by .passthrough()
-        const knownTopLevel = new Set(["project", "overwrite", "summary", "claudeMd", "learnings", "backlog", "exportedAt", "version", "findingsRaw"]);
+        const knownTopLevel = new Set(["project", "overwrite", "summary", "claudeMd", "learnings", "task", "exportedAt", "version", "findingsRaw"]);
         const unknownFields = Object.keys(decoded as Record<string, unknown>).filter(k => !knownTopLevel.has(k));
         if (unknownFields.length > 0) {
           debugLog(`import_project: unknown fields will be ignored: ${unknownFields.join(", ")}`);
@@ -147,16 +147,16 @@ export function register(server: McpServer, ctx: McpContext): void {
           return lines.join("\n");
         };
 
-        const buildBacklogContent = () => {
-          // Prefer the raw backlog string (lossless: preserves priority/pinned/stable IDs)
-          const backlogRaw = (parsed as Record<string, unknown>).backlogRaw;
-          if (typeof backlogRaw === "string") return backlogRaw;
-          if (!parsed.backlog) return null;
+        const buildTaskContent = () => {
+          // Prefer the raw task string (lossless: preserves priority/pinned/stable IDs)
+          const taskRaw = (parsed as Record<string, unknown>).taskRaw;
+          if (typeof taskRaw === "string") return taskRaw;
+          if (!parsed.task) return null;
           const sections = ["Active", "Queue", "Done"] as const;
           const lines = [`# ${projectName} tasks`, ""];
           for (const section of sections) {
             lines.push(`## ${section}`, "");
-            const items = parsed.backlog[section];
+            const items = parsed.task[section];
             if (items) {
               for (const item of items) {
                 const prefix = item.checked || section === "Done" ? "- [x] " : "- [ ] ";
@@ -198,9 +198,9 @@ export function register(server: McpServer, ctx: McpContext): void {
             imported.push("FINDINGS.md");
           }
 
-          const backlogContent = buildBacklogContent();
-          if (backlogContent) {
-            fs.writeFileSync(path.join(stagedProjectDir, TASKS_FILENAME), backlogContent);
+          const taskContent = buildTaskContent();
+          if (taskContent) {
+            fs.writeFileSync(path.join(stagedProjectDir, TASKS_FILENAME), taskContent);
             imported.push(TASKS_FILENAME);
           }
 

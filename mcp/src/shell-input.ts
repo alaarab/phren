@@ -7,16 +7,16 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import {
-  addBacklogItem,
+  addTask,
   addFinding,
   addProjectToProfile,
   approveQueueItem,
-  BacklogItem,
-  completeBacklogItem,
+  TaskItem,
+  completeTask,
   editQueueItem,
   listProjectCards,
-  pinBacklogItem,
-  readBacklog,
+  pinTask,
+  readTasks,
   readFindings,
   readReviewQueue,
   rejectQueueItem,
@@ -26,11 +26,11 @@ import {
   saveShellState,
   setMachineProfile,
   ShellState,
-  tidyBacklogDone,
+  tidyDoneTasks,
   canonicalTaskFilePath,
-  unpinBacklogItem,
-  updateBacklogItem,
-  workNextBacklogItem,
+  unpinTask,
+  updateTask,
+  workNextTask,
   loadShellState,
   resolveTaskFilePath,
 } from "./data-access.js";
@@ -48,7 +48,7 @@ import {
   tokenize,
   expandIds,
   normalizeSection,
-  backlogsByFilter,
+  tasksByFilter,
   queueByFilter,
 } from "./shell-palette.js";
 import { errorMessage } from "./utils.js";
@@ -102,7 +102,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
   }
 
   if (command === "projects") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return; }
-  if (command === "tasks" || command === "backlog") { host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return; }
+  if (command === "tasks" || command === "task") { host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return; }
   if (command === "learnings" || command === "findings") { host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Findings`); return; }
   if (command === "memory") { host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return; }
   if (command === "machines") { host.setView("Machines/Profiles"); host.setMessage("  Machines/Profiles"); return; }
@@ -159,7 +159,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!project) return;
     const text = trimmed.slice("add".length).trim();
     if (!text) { host.setMessage("  Usage: :add <task>"); return; }
-    host.setMessage(`  ${resultMsg(addBacklogItem(host.cortexPath, project, text))}`);
+    host.setMessage(`  ${resultMsg(addTask(host.cortexPath, project, text))}`);
     return;
   }
 
@@ -173,13 +173,13 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       host.confirmThen(`Complete ${ids.length} items (${ids.join(", ")})?`, () => {
         const file = taskFileForProject(host.cortexPath, project);
         host.snapshotForUndo(`complete ${ids.length} items`, file);
-        host.setMessage(ids.map((id) => resultMsg(completeBacklogItem(host.cortexPath, project, id))).join("; "));
+        host.setMessage(ids.map((id) => resultMsg(completeTask(host.cortexPath, project, id))).join("; "));
       });
     } else {
       host.confirmThen(`Complete "${match}"?`, () => {
         const file = taskFileForProject(host.cortexPath, project);
         host.snapshotForUndo(`complete "${match}"`, file);
-        host.setMessage(`  ${resultMsg(completeBacklogItem(host.cortexPath, project, match))}`);
+        host.setMessage(`  ${resultMsg(completeTask(host.cortexPath, project, match))}`);
       });
     }
     return;
@@ -196,9 +196,9 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (ids.length > 1) {
       const file = taskFileForProject(host.cortexPath, project);
       host.snapshotForUndo(`move ${ids.length} items to ${section}`, file);
-      host.setMessage(ids.map((id) => resultMsg(updateBacklogItem(host.cortexPath, project, id, { section }))).join("; "));
+      host.setMessage(ids.map((id) => resultMsg(updateTask(host.cortexPath, project, id, { section }))).join("; "));
     } else {
-      host.setMessage(`  ${resultMsg(updateBacklogItem(host.cortexPath, project, match, { section }))}`);
+      host.setMessage(`  ${resultMsg(updateTask(host.cortexPath, project, match, { section }))}`);
     }
     return;
   }
@@ -211,7 +211,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!["high", "medium", "low"].includes(priorityRaw)) { host.setMessage("  Priority must be high|medium|low"); return; }
     const priority = priorityRaw as "high" | "medium" | "low";
     const match = parts.slice(1, -1).join(" ");
-    host.setMessage(`  ${resultMsg(updateBacklogItem(host.cortexPath, project, match, { priority }))}`);
+    host.setMessage(`  ${resultMsg(updateTask(host.cortexPath, project, match, { priority }))}`);
     return;
   }
 
@@ -221,7 +221,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (parts.length < 3) { host.setMessage("  Usage: :context <id|match> <text>"); return; }
     const match = parts[1];
     const context = parts.slice(2).join(" ");
-    host.setMessage(`  ${resultMsg(updateBacklogItem(host.cortexPath, project, match, { context }))}`);
+    host.setMessage(`  ${resultMsg(updateTask(host.cortexPath, project, match, { context }))}`);
     return;
   }
 
@@ -229,7 +229,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     if (parts.length < 2) { host.setMessage("  Usage: :pin <id|match>"); return; }
-    host.setMessage(`  ${resultMsg(pinBacklogItem(host.cortexPath, project, parts.slice(1).join(" ")))}`);
+    host.setMessage(`  ${resultMsg(pinTask(host.cortexPath, project, parts.slice(1).join(" ")))}`);
     return;
   }
 
@@ -237,14 +237,14 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     if (parts.length < 2) { host.setMessage("  Usage: :unpin <id|match>"); return; }
-    host.setMessage(`  ${resultMsg(unpinBacklogItem(host.cortexPath, project, parts.slice(1).join(" ")))}`);
+    host.setMessage(`  ${resultMsg(unpinTask(host.cortexPath, project, parts.slice(1).join(" ")))}`);
     return;
   }
 
   if (command === "work" && parts[1]?.toLowerCase() === "next") {
     const project = host.ensureProjectSelected();
     if (!project) return;
-    host.setMessage(`  ${resultMsg(workNextBacklogItem(host.cortexPath, project))}`);
+    host.setMessage(`  ${resultMsg(workNextTask(host.cortexPath, project))}`);
     return;
   }
 
@@ -254,7 +254,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const keep = parts[1] ? Number.parseInt(parts[1], 10) : 30;
     const file = taskFileForProject(host.cortexPath, project);
     host.snapshotForUndo("tidy", file);
-    host.setMessage(`  ${resultMsg(tidyBacklogDone(host.cortexPath, project, Number.isNaN(keep) ? 30 : keep))}`);
+    host.setMessage(`  ${resultMsg(tidyDoneTasks(host.cortexPath, project, Number.isNaN(keep) ? 30 : keep))}`);
     return;
   }
 
@@ -513,7 +513,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
 function suggestCommand(input: string): string | undefined {
   const known = [
-    "help", "projects", "tasks", "backlog", "findings", "review queue", "machines", "health",
+    "help", "projects", "tasks", "task", "findings", "review queue", "machines", "health",
     "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
     "work next", "tidy", "find add", "find remove", "mq approve", "mq reject",
     "mq edit", "machine map", "profile add-project", "profile remove-project",
@@ -531,7 +531,7 @@ function suggestCommand(input: string): string | undefined {
 
 export function completeInput(line: string, cortexPath: string, profile: string, state: ShellState): string[] {
   const commands = [
-    ":projects", ":tasks", ":backlog", ":findings", ":review queue", ":machines", ":health",
+    ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health",
     ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
     ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
     ":mq approve", ":mq reject", ":mq edit", ":machine map",
@@ -560,7 +560,7 @@ export function completeInput(line: string, cortexPath: string, profile: string,
   if (["complete", "move", "reprioritize", "context", "pin", "unpin"].includes(cmd)) {
     const project = state.project;
     if (!project) return [];
-    const result = readBacklog(cortexPath, project);
+    const result = readTasks(cortexPath, project);
     if (!result.ok) return [];
     return [
       ...result.data.items.Active,
@@ -602,10 +602,10 @@ export function getListItems(
     }
     case "Tasks": {
       if (!state.project) return [];
-      const result = readBacklog(cortexPath, state.project);
+      const result = readTasks(cortexPath, state.project);
       if (!result.ok) return [];
-      const active = state.filter ? backlogsByFilter(result.data.items.Active, state.filter) : result.data.items.Active;
-      const queue = state.filter ? backlogsByFilter(result.data.items.Queue, state.filter) : result.data.items.Queue;
+      const active = state.filter ? tasksByFilter(result.data.items.Active, state.filter) : result.data.items.Active;
+      const queue = state.filter ? tasksByFilter(result.data.items.Queue, state.filter) : result.data.items.Queue;
       return [...active, ...queue];
     }
     case "Findings": {
@@ -658,7 +658,7 @@ async function activateSelected(host: NavigationHost): Promise<void> {
         const file = taskFileForProject(host.cortexPath, project);
         host.confirmThen(`Complete ${style.dim(item.id)} "${item.line}"?`, () => {
           host.snapshotForUndo(`complete ${item.id}`, file);
-          const r = completeBacklogItem(host.cortexPath, project, item.id!);
+          const r = completeTask(host.cortexPath, project, item.id!);
           host.invalidateSubsectionsCache();
           host.setMessage(`  ${resultMsg(r)}`);
           host.setCursor(Math.max(0, cursor - 1));
@@ -694,11 +694,11 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
       else if (key === "d" && item?.id) {
         if (!project) { host.setMessage("Select a project first."); return; }
         const file = taskFileForProject(host.cortexPath, project);
-        const backlogResult = readBacklog(host.cortexPath, project);
-        const isActive = backlogResult.ok && backlogResult.data.items.Active.some((i: BacklogItem) => i.id === item.id);
+        const taskResult = readTasks(host.cortexPath, project);
+        const isActive = taskResult.ok && taskResult.data.items.Active.some((i: TaskItem) => i.id === item.id);
         const targetSection = isActive ? "Queue" : "Active";
         host.snapshotForUndo(`move ${item.id} → ${targetSection.toLowerCase()}`, file);
-        const r = updateBacklogItem(host.cortexPath, project, item.id, { section: targetSection });
+        const r = updateTask(host.cortexPath, project, item.id, { section: targetSection });
         host.invalidateSubsectionsCache();
         host.setMessage(`  ${resultMsg(r)}`);
       }

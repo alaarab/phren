@@ -96,31 +96,31 @@ describe("vectorFallback content hydration", () => {
     expect(results[0].content).toContain("high score content");
   });
 
-  it("strips backlog Done items the same way the indexer does", async () => {
-    const backlogPath = path.join(tmp.path, "proj", "backlog.md");
+  it("strips task Done items the same way the indexer does", async () => {
+    const taskPath = path.join(tmp.path, "proj", "tasks.md");
     writeFile(
-      backlogPath,
-      "# Backlog\n\n## Active\n- Keep this visible\n\n## Done\n- Hidden completed task\n"
+      taskPath,
+      "# Task\n\n## Active\n- Keep this visible\n\n## Done\n- Hidden completed task\n"
     );
 
     const cache = getEmbeddingCache(tmp.path);
     (cache as any)._setEntries([
-      { path: backlogPath, model: "nomic-embed-text", vec: [0.1, 0.2, 0.3] },
+      { path: taskPath, model: "nomic-embed-text", vec: [0.1, 0.2, 0.3] },
     ]);
 
     vi.mocked(cosineSimilarity).mockReturnValue(0.8);
 
-    const results = await vectorFallback(tmp.path, "backlog query", new Set(), 5);
+    const results = await vectorFallback(tmp.path, "task query", new Set(), 5);
     expect(results.length).toBe(1);
     expect(results[0].content).toContain("Keep this visible");
     expect(results[0].content).not.toContain("Hidden completed task");
   });
 
-  it("classifies Windows-style backlog paths correctly during hydration", async () => {
-    expect(deriveVectorDocIdentity("C:\\cortex", "C:\\cortex\\proj\\backlog.md")).toEqual({
+  it("classifies Windows-style task paths correctly during hydration", async () => {
+    expect(deriveVectorDocIdentity("C:\\cortex", "C:\\cortex\\proj\\tasks.md")).toEqual({
       project: "proj",
-      filename: "backlog.md",
-      relFile: "backlog.md",
+      filename: "tasks.md",
+      relFile: "tasks.md",
     });
   });
 });

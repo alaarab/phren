@@ -35,7 +35,7 @@ Full-text search across all indexed markdown files with synonym expansion.
 ```
 query: string     - FTS5 query (supports AND, OR, NOT, "phrase matching")
 limit?: number    - Max results, 1-20, default 5
-type?: string     - Filter: "claude", "findings", "reference", "summary", "backlog", "skill"
+type?: string     - Filter: "claude", "findings", "reference", "summary", "task", "skill"
 project?: string  - Filter to a specific project
 ```
 
@@ -62,7 +62,7 @@ No parameters.
 5. Builds an in-memory SQLite FTS5 index with Porter stemming
 6. Serves tools over stdio using the MCP protocol
 
-File types are derived from filenames: `CLAUDE.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "backlog", files under `reference/` -> "reference", files under `skills/` -> "skill".
+File types are derived from filenames: `CLAUDE.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "task", files under `reference/` -> "reference", files under `skills/` -> "skill".
 
 ## Development
 

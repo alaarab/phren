@@ -92,7 +92,7 @@ Environment:
   CORTEX_CONTEXT_SNIPPET_LINES   Max lines per injected snippet (default: 6)
   CORTEX_CONTEXT_SNIPPET_CHARS   Max chars per injected snippet (default: 520)
   CORTEX_MAX_INJECT_TOKENS       Hard cap on total injected tokens (default: 2000)
-  CORTEX_BACKLOG_PRIORITY        Priorities to include in task injection: high,medium,low (default: high,medium)
+  CORTEX_TASK_PRIORITY        Priorities to include in task injection: high,medium,low (default: high,medium)
   CORTEX_MEMORY_TTL_DAYS         Override memory TTL for trust filtering
   CORTEX_HOOK_TIMEOUT_MS         Hook subprocess timeout in ms (default: 14000)
   CORTEX_FINDINGS_CAP            Max findings per date section before consolidation (default: 20)
@@ -247,7 +247,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       console.log(`Added project "${added.data.project}" (${added.data.ownership})`);
       if (added.data.files.claude) console.log(`  ${added.data.files.claude}`);
       console.log(`  ${added.data.files.findings}`);
-      console.log(`  ${added.data.files.backlog}`);
+      console.log(`  ${added.data.files.task}`);
       console.log(`  ${added.data.files.summary}`);
     } catch (e) {
       console.error(`Could not add project: ${e instanceof Error ? e.message : String(e)}`);
@@ -265,7 +265,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const ownershipMode = parseProjectOwnershipMode(getOptionValue(initArgs, "--project-ownership"));
     const taskMode = parseTaskModeFlag(getOptionValue(initArgs, "--task-mode"));
     const findingsProactivity = parseProactivityFlag(getOptionValue(initArgs, "--findings-proactivity"));
-    const backlogProactivity = parseProactivityFlag(getOptionValue(initArgs, "--backlog-proactivity"));
+    const taskProactivity = parseProactivityFlag(getOptionValue(initArgs, "--task-proactivity"));
     const mcpMode = mcpIdx !== -1 ? parseMcpMode(initArgs[mcpIdx + 1]) : undefined;
     if (mcpIdx !== -1 && !mcpMode) {
       console.error(`Invalid --mcp value "${initArgs[mcpIdx + 1] || ""}". Use "on" or "off".`);
@@ -286,9 +286,9 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       console.error(`Invalid --findings-proactivity value "${findingsArg}". Use one of: high, medium, low.`);
       return finish(1);
     }
-    const backlogArg = getOptionValue(initArgs, "--backlog-proactivity");
-    if (backlogArg && !backlogProactivity) {
-      console.error(`Invalid --backlog-proactivity value "${backlogArg}". Use one of: high, medium, low.`);
+    const taskArg = getOptionValue(initArgs, "--task-proactivity");
+    if (taskArg && !taskProactivity) {
+      console.error(`Invalid --task-proactivity value "${taskArg}". Use one of: high, medium, low.`);
       return finish(1);
     }
     await runInit({
@@ -298,7 +298,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       projectOwnershipDefault: ownershipMode,
       taskMode,
       findingsProactivity,
-      backlogProactivity,
+      taskProactivity,
       template: templateIdx !== -1 ? initArgs[templateIdx + 1] : undefined,
       applyStarterUpdate: initArgs.includes("--apply-starter-update"),
       dryRun: initArgs.includes("--dry-run"),

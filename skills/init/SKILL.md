@@ -1,12 +1,12 @@
 ---
 name: init
-description: Set up a new project in cortex with summary, CLAUDE.md, backlog, and skill templates.
+description: Set up a new project in cortex with summary, CLAUDE.md, task, and skill templates.
 dependencies:
   - git
 ---
 # cortex-init - Scaffold a new project
 
-> Set up a new project in cortex with summary, CLAUDE.md, backlog, and skill templates.
+> Set up a new project in cortex with summary, CLAUDE.md, task, and skill templates.
 
 Add a new project to your cortex instance, or bootstrap cortex itself if you're starting fresh.
 
@@ -94,10 +94,10 @@ Ask the user for these if you can't figure them out from the project directory. 
 
 Pre-fill from the project's existing README or package.json if available. Leave architecture and conventions as placeholders with the HTML comments.
 
-### 5. Create backlog.md
+### 5. Create tasks.md
 
 ```markdown
-# <project-name> backlog
+# <project-name> tasks
 
 ## Active
 
@@ -178,7 +178,7 @@ cortex-init <project-name>
 Created:
   $CORTEX_DIR/<project-name>/summary.md
   $CORTEX_DIR/<project-name>/CLAUDE.md
-  $CORTEX_DIR/<project-name>/backlog.md
+  $CORTEX_DIR/<project-name>/tasks.md
   $CORTEX_DIR/<project-name>/skills/README.md
 
 Added to profile: default
@@ -213,4 +213,4 @@ If cortex doesn't exist at all, offer to bootstrap it from scratch.
 
 - `cortex-sync`: activate the new project on this machine after init
 - `cortex-discover`: find what to build next in a project
-- `/backlog`: manage the project's task queue
+- `/tasks`: manage the project's task queue

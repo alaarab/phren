@@ -167,7 +167,7 @@ describe("normalizeIndexedContent", () => {
 ## 2026-03-09
 
 - Safe refactors stay incremental <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex model:gpt-5 -->
-  <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","backlog_item":"deadbeef"} -->
+  <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","task_item":"deadbeef"} -->
 `,
       "findings",
       cortex,

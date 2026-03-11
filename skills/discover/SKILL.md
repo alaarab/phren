@@ -9,7 +9,7 @@ dependencies:
 
 > Audit your cortex repo and tell you exactly what needs attention.
 
-Scans your cortex directory for missing files, stale content, skill gaps, and stuck backlog items. Outputs a concrete, prioritized action list.
+Scans your cortex directory for missing files, stale content, skill gaps, and stuck task items. Outputs a concrete, prioritized action list.
 
 **Works standalone.** Just needs a cortex directory.
 
@@ -44,7 +44,7 @@ for dir in "$CORTEX_DIR"/*/; do
   [ -f "$dir/CLAUDE.md" ]    && echo "$PROJECT: has CLAUDE.md"    || echo "$PROJECT: MISSING CLAUDE.md"
   [ -f "$dir/summary.md" ]   && echo "$PROJECT: has summary.md"   || echo "$PROJECT: MISSING summary.md"
   [ -f "$dir/FINDINGS.md" ] && echo "$PROJECT: has FINDINGS.md" || echo "$PROJECT: MISSING FINDINGS.md"
-  [ -f "$dir/backlog.md" ]   && echo "$PROJECT: has backlog.md"   || echo "$PROJECT: MISSING backlog.md"
+  [ -f "$dir/tasks.md" ]   && echo "$PROJECT: has tasks.md"   || echo "$PROJECT: MISSING tasks.md"
 done
 ```
 
@@ -74,19 +74,19 @@ Flag anything not updated in 30+ days as stale.
 
 ### 4. Detect skill gaps
 
-Look at patterns in backlog.md files and FINDINGS.md files across projects. A skill gap is when:
+Look at patterns in tasks.md files and FINDINGS.md files across projects. A skill gap is when:
 - Multiple projects repeat the same manual process (e.g., "remember to update the changelog," which should be a skill)
 - A FINDINGS.md entry says "next time, do X first," which is a skill waiting to happen
-- A backlog item keeps getting deferred, and might need a skill to make it easier
+- A task item keeps getting deferred, and might need a skill to make it easier
 
 Also check global/skills/ to see what skills exist, and whether any project's workflow isn't covered.
 
-### 5. Check backlog health
+### 5. Check task health
 
-For each project with a backlog.md:
+For each project with a tasks.md:
 - Count total items, completed items, items with no recent progress
-- Flag backlogs where nothing has been completed recently
-- Flag backlogs with items older than 60 days that haven't moved
+- Flag tasks where nothing has been completed recently
+- Flag tasks with items older than 60 days that haven't moved
 
 ### 6. Scaffold missing summary.md files
 
@@ -121,7 +121,7 @@ cortex-discover
 
 Projects without core files:
 
-| Project | CLAUDE.md | summary.md | FINDINGS.md | backlog.md |
+| Project | CLAUDE.md | summary.md | FINDINGS.md | tasks.md |
 |---------|-----------|------------|--------------|------------|
 | myapp   | ok        | MISSING    | MISSING      | ok         |
 | api     | ok        | ok         | ok           | MISSING    |
@@ -135,10 +135,10 @@ Files not updated in 30+ days:
 ## Section 3: Skill gaps
 
 Things you do repeatedly that could be skills:
-- "Update changelog before release" appears in 3 project backlogs. Consider a `/changelog` skill.
+- "Update changelog before release" appears in 3 project tasks. Consider a `/changelog` skill.
 - my-app FINDINGS.md mentions "always run parity check" 4 times. Already have `/parity`, but it's not in the workflow skill.
 
-## Section 4: Backlog health
+## Section 4: Task health
 
 - my-app: 12 items (3 completed, 2 stale > 60 days)
 - backend: 5 items (0 completed, all stale)
@@ -151,7 +151,7 @@ Stuck items:
 ## Top 3 things to work on next
 
 1. **Add FINDINGS.md to myapp.** You've been working on it actively but capturing nothing. Use `add_finding()` during your next session.
-2. **Unstick api-server backlog.** 5 items, 0 completed. Either work them or trim them. Stale backlogs are worse than no backlog.
+2. **Unstick api-server task.** 5 items, 0 completed. Either work them or trim them. Stale tasks are worse than no task.
 3. **Create a `/changelog` skill.** You're doing it manually in 3 projects. 15 minutes to write the skill saves hours over time.
 ```
 
@@ -172,4 +172,4 @@ The "Top 3" section is the most important part. Make these:
 - `cortex-init`: scaffold missing files for a project
 - `add_finding()`: capture findings via MCP (fixes "missing FINDINGS.md")
 - `cortex-consolidate`: synthesize cross-project patterns
-- `/backlog`: work on stuck backlog items
+- `/tasks`: work on stuck task items

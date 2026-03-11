@@ -5,11 +5,11 @@ export {
   type ConsolidationStatus,
   checkConsolidationNeeded,
   validateFindingsFormat,
-  stripBacklogDoneSection,
-  validateBacklogFormat,
+  stripTaskDoneSection,
+  validateTaskFormat,
   extractConflictVersions,
   mergeFindings,
-  mergeBacklog,
+  mergeTask,
   autoMergeConflicts,
 } from "./content-validate.js";
 

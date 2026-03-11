@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { getProjectDirs } from "./shared.js";
-import { TASK_FILE_ALIASES } from "./data-backlog.js";
+import { TASK_FILE_ALIASES } from "./data-tasks.js";
 
 interface ChecksumStore {
   [relativePath: string]: { sha256: string; updatedAt: string };

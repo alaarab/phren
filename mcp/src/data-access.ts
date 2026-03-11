@@ -24,28 +24,28 @@ import {
   parseCitationComment,
   parseSourceComment,
 } from "./content-citation.js";
-export type { BacklogSection, BacklogItem, BacklogDoc } from "./data-backlog.js";
+export type { TaskSection, TaskItem, TaskDoc } from "./data-tasks.js";
 export {
-  readBacklog,
-  readBacklogs,
-  resolveBacklogItem,
-  addBacklogItem,
-  addBacklogItems,
-  completeBacklogItems,
-  completeBacklogItem,
-  updateBacklogItem,
-  linkBacklogItemIssue,
-  pinBacklogItem,
-  unpinBacklogItem,
-  workNextBacklogItem,
-  tidyBacklogDone,
-  backlogMarkdown,
+  readTasks,
+  readTasksAcrossProjects,
+  resolveTaskItem,
+  addTask,
+  addTasks,
+  completeTasks,
+  completeTask,
+  updateTask,
+  linkTaskIssue,
+  pinTask,
+  unpinTask,
+  workNextTask,
+  tidyDoneTasks,
+  taskMarkdown,
   TASKS_FILENAME,
   TASK_FILE_ALIASES,
   canonicalTaskFilePath,
   resolveTaskFilePath,
   isTaskFileName,
-} from "./data-backlog.js";
+} from "./data-tasks.js";
 export {
   addProjectToProfile,
   listMachines,
@@ -94,7 +94,7 @@ export interface FindingItem {
   text: string;
   citation?: string;
   citationData?: FindingCitation;
-  backlogItem?: string;
+  taskItem?: string;
   confidence?: number;
   machine?: string;
   actor?: string;
@@ -168,7 +168,7 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
       confidence,
       citation,
       citationData,
-      backlogItem: citationData?.backlog_item,
+      taskItem: citationData?.task_item,
       machine: source?.machine,
       actor: source?.actor,
       tool: source?.tool,

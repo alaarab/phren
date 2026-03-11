@@ -51,13 +51,13 @@ import {
   addFindingToFile,
   checkConsolidationNeeded,
   mergeFindings,
-  mergeBacklog,
+  mergeTask,
   autoMergeConflicts,
   filterTrustedFindingsDetailed,
   upsertCanonical,
   validateFindingsFormat,
-  validateBacklogFormat,
-  stripBacklogDoneSection,
+  validateTaskFormat,
+  stripTaskDoneSection,
   isDuplicateFinding,
   extractConflictVersions,
 } from "./shared-content.js";
@@ -1189,27 +1189,27 @@ describe("mergeFindings (shared.test)", () => {
   });
 });
 
-// --- mergeBacklog ---
+// --- mergeTask ---
 
-describe("mergeBacklog (shared.test)", () => {
+describe("mergeTask (shared.test)", () => {
   it("combines items from both sides", () => {
-    const ours = "# backlog\n\n## Active\n\n- Our task\n\n## Queue\n\n## Done\n";
-    const theirs = "# backlog\n\n## Active\n\n- Their task\n\n## Queue\n\n## Done\n";
-    const merged = mergeBacklog(ours, theirs);
+    const ours = "# task\n\n## Active\n\n- Our task\n\n## Queue\n\n## Done\n";
+    const theirs = "# task\n\n## Active\n\n- Their task\n\n## Queue\n\n## Done\n";
+    const merged = mergeTask(ours, theirs);
     expect(merged).toContain("- Our task");
     expect(merged).toContain("- Their task");
   });
 
   it("deduplicates identical items across sides", () => {
-    const content = "# backlog\n\n## Active\n\n- Same task\n\n## Queue\n\n## Done\n";
-    const merged = mergeBacklog(content, content);
+    const content = "# task\n\n## Active\n\n- Same task\n\n## Queue\n\n## Done\n";
+    const merged = mergeTask(content, content);
     const count = (merged.match(/- Same task/g) || []).length;
     expect(count).toBe(1);
   });
 
   it("orders sections Active, Queue, Done first", () => {
-    const content = "# backlog\n\n## Done\n\n- D\n\n## Active\n\n- A\n\n## Queue\n\n- Q\n";
-    const merged = mergeBacklog(content, content);
+    const content = "# task\n\n## Done\n\n- D\n\n## Active\n\n- A\n\n## Queue\n\n- Q\n";
+    const merged = mergeTask(content, content);
     const activeIdx = merged.indexOf("## Active");
     const queueIdx = merged.indexOf("## Queue");
     const doneIdx = merged.indexOf("## Done");
@@ -1218,16 +1218,16 @@ describe("mergeBacklog (shared.test)", () => {
   });
 
   it("preserves title from ours", () => {
-    const ours = "# My Backlog\n\n## Active\n\n## Queue\n\n## Done\n";
+    const ours = "# My Task\n\n## Active\n\n## Queue\n\n## Done\n";
     const theirs = "# Other\n\n## Active\n\n## Queue\n\n## Done\n";
-    const merged = mergeBacklog(ours, theirs);
-    expect(merged.startsWith("# My Backlog")).toBe(true);
+    const merged = mergeTask(ours, theirs);
+    expect(merged.startsWith("# My Task")).toBe(true);
   });
 
   it("merges items from different sections", () => {
-    const ours = "# backlog\n\n## Active\n\n- Active task\n\n## Queue\n\n## Done\n";
-    const theirs = "# backlog\n\n## Active\n\n## Queue\n\n- Queued task\n\n## Done\n";
-    const merged = mergeBacklog(ours, theirs);
+    const ours = "# task\n\n## Active\n\n- Active task\n\n## Queue\n\n## Done\n";
+    const theirs = "# task\n\n## Active\n\n## Queue\n\n- Queued task\n\n## Done\n";
+    const merged = mergeTask(ours, theirs);
     expect(merged).toContain("- Active task");
     expect(merged).toContain("- Queued task");
   });
@@ -1482,42 +1482,42 @@ describe("validateFindingsFormat", () => {
   });
 });
 
-// --- validateBacklogFormat ---
+// --- validateTaskFormat ---
 
-describe("validateBacklogFormat", () => {
+describe("validateTaskFormat", () => {
   it("returns empty for valid format", () => {
-    const content = "# backlog\n\n## Active\n\n- Task\n\n## Queue\n\n## Done\n";
-    const issues = validateBacklogFormat(content);
+    const content = "# task\n\n## Active\n\n- Task\n\n## Queue\n\n## Done\n";
+    const issues = validateTaskFormat(content);
     expect(issues).toEqual([]);
   });
 
   it("flags missing title heading", () => {
     const content = "## Active\n\n- Task\n";
-    const issues = validateBacklogFormat(content);
+    const issues = validateTaskFormat(content);
     expect(issues.some(i => i.includes("title"))).toBe(true);
   });
 
   it("flags missing sections", () => {
-    const content = "# backlog\n\nJust some text without sections.\n";
-    const issues = validateBacklogFormat(content);
+    const content = "# task\n\nJust some text without sections.\n";
+    const issues = validateTaskFormat(content);
     expect(issues.some(i => i.includes("sections"))).toBe(true);
   });
 });
 
-// --- stripBacklogDoneSection ---
+// --- stripTaskDoneSection ---
 
-describe("stripBacklogDoneSection", () => {
+describe("stripTaskDoneSection", () => {
   it("strips everything after ## Done", () => {
-    const content = "# backlog\n\n## Active\n\n- A\n\n## Done\n\n- Completed\n- Also done\n";
-    const result = stripBacklogDoneSection(content);
+    const content = "# task\n\n## Active\n\n- A\n\n## Done\n\n- Completed\n- Also done\n";
+    const result = stripTaskDoneSection(content);
     expect(result).toContain("## Active");
     expect(result).not.toContain("## Done");
     expect(result).not.toContain("Completed");
   });
 
   it("returns content unchanged when no Done section", () => {
-    const content = "# backlog\n\n## Active\n\n- A\n\n## Queue\n\n- B\n";
-    expect(stripBacklogDoneSection(content)).toBe(content);
+    const content = "# task\n\n## Active\n\n- A\n\n## Queue\n\n- B\n";
+    expect(stripTaskDoneSection(content)).toBe(content);
   });
 });
 
@@ -2206,7 +2206,7 @@ describe("parseCortexErrorCode", () => {
   });
 
   it("returns undefined for non-error strings", () => {
-    expect(parseCortexErrorCode("Added to project backlog: task")).toBeUndefined();
+    expect(parseCortexErrorCode("Added to project task: task")).toBeUndefined();
     expect(parseCortexErrorCode("Marked done in project: item")).toBeUndefined();
     expect(parseCortexErrorCode("")).toBeUndefined();
   });

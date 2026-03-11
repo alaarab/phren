@@ -14,7 +14,7 @@ export interface InstallPreferences {
   projectOwnershipDefault?: "cortex-managed" | "detached" | "repo-managed";
   proactivity?: "high" | "medium" | "low";
   proactivityFindings?: "high" | "medium" | "low";
-  proactivityBacklog?: "high" | "medium" | "low";
+  proactivityTask?: "high" | "medium" | "low";
   hookTools?: Record<string, boolean>;
   disabledSkills?: Record<string, boolean>;
   installedVersion?: string;

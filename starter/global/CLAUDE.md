@@ -19,7 +19,7 @@ These skills are available as a full set via cortex, or individually from the Cl
 | Skill | What it does |
 |-------|-------------|
 | `/cortex-sync` | Pull cortex to a new machine or push config changes back to the repo |
-| `/cortex-init` | Scaffold a new project with summary, CLAUDE.md, backlog |
+| `/cortex-init` | Scaffold a new project with summary, CLAUDE.md, task |
 | `/cortex-discover` | Research what's missing in a project and surface gaps and opportunities |
 | `/cortex-consolidate` | Find patterns across all project FINDINGS.md files |
 
@@ -46,7 +46,7 @@ Put personal workflow skills in `~/.cortex/global/skills/` and list them here. S
 All skills and project config live in `~/.cortex` (or wherever `CORTEX_DIR` points). This is a git repo that syncs across machines using profiles.
 
 - `~/.cortex/global/`: skills and config that apply everywhere
-- `~/.cortex/<project>/`: per-project CLAUDE.md, skills, backlog, findings
+- `~/.cortex/<project>/`: per-project CLAUDE.md, skills, task, findings
 - `~/.cortex/profiles/`: YAML files mapping project sets to machine roles
 - `~/.cortex/machines.yaml`: maps machine hostnames to profiles
 
@@ -59,10 +59,10 @@ The cortex MCP server is running. Use these tools proactively. Don't ask the use
 - **At session start:** call `list_projects()` to see what's active, then `get_project_summary(name)` for the relevant project
 - **When the user mentions a project, codebase, or task:** call `search_knowledge(query)` before asking questions
 - **When the user asks about commands, architecture, conventions, or past decisions:** call `search_knowledge(query)` first
-- **When the user mentions a task or todo:** call `get_backlog(project)` to see what's already tracked
+- **When the user mentions a task or todo:** call `get_tasks(project)` to see what's already tracked
 - **When you discover a non-obvious pattern, bug, or workaround:** call `add_finding(project, insight)` immediately
-- **When the user says they want to do something later:** call `add_backlog_item(project, item)` instead of listing it in chat
-- **When a task is finished:** call `complete_backlog_item(project, item)` without being asked
+- **When the user says they want to do something later:** call `add_task(project, item)` instead of listing it in chat
+- **When a task is finished:** call `complete_task(project, item)` without being asked
 
 **What NOT to store as a finding:**
 - Credentials, API keys, tokens, passwords, or anything that looks like a secret
@@ -73,7 +73,7 @@ The cortex MCP server is running. Use these tools proactively. Don't ask the use
 
 If you're unsure whether something is worth saving, skip it. High-signal entries beat volume.
 
-The goal: Claude should already know the context before the user has to explain it. Backlogs stay in files, not buried in chat history.
+The goal: Claude should already know the context before the user has to explain it. Tasks stay in files, not buried in chat history.
 
 ## Machine context
 

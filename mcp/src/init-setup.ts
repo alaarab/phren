@@ -23,7 +23,7 @@ import {
 import { errorMessage } from "./utils.js";
 import { ROOT, STARTER_DIR, VERSION, resolveEntryScript } from "./init-shared.js";
 import { readInstallPreferences } from "./init-preferences.js";
-import { TASKS_FILENAME } from "./data-backlog.js";
+import { TASKS_FILENAME } from "./data-tasks.js";
 import {
   getProjectOwnershipDefault,
   parseProjectOwnershipMode,

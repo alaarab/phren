@@ -21,7 +21,7 @@ import {
 } from "./shared-index.js";
 import {
   autoMergeConflicts,
-  mergeBacklog,
+  mergeTask,
   mergeFindings,
 } from "./shared-content.js";
 import { runGit, isFeatureEnabled, errorMessage } from "./utils.js";
@@ -36,17 +36,17 @@ import { detectProjectDir, ensureLocalGitRepo, isProjectTracked } from "./init-s
 import { isToolHookEnabled } from "./hooks.js";
 import { appendFindingJournal } from "./finding-journal.js";
 import { isProjectHookEnabled } from "./project-config.js";
-import { isTaskFileName } from "./data-backlog.js";
+import { isTaskFileName } from "./data-tasks.js";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import {
   buildIndex,
   queryRows,
 } from "./shared-index.js";
 import type { SelectedSnippet } from "./shared-retrieval.js";
-import { filterBacklogByPriority } from "./shared-retrieval.js";
+import { filterTaskByPriority } from "./shared-retrieval.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { finalizeTaskSession } from "./task-lifecycle.js";
-import { getProactivityLevelForBacklog, getProactivityLevelForFindings, hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
+import { getProactivityLevelForTask, getProactivityLevelForFindings, hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 
 function getRuntimeProfile(): string {
   return resolveRuntimeProfile(getCortexPath());
@@ -443,7 +443,7 @@ async function reconcileMergeableFiles(cwd: string, snapshots: Map<string, strin
     const filename = path.basename(relPath).toLowerCase();
     const merged = filename === "findings.md"
       ? mergeFindings(current, localBeforePull)
-      : mergeBacklog(current, localBeforePull);
+      : mergeTask(current, localBeforePull);
     if (merged === current) continue;
     fs.writeFileSync(fullPath, merged);
     changedAny = true;
@@ -674,9 +674,9 @@ export async function handleHookStop() {
   // Needed for auto-capture transcript_path parsing.
   const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
   const taskSessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
-  const backlogLevel = getProactivityLevelForBacklog();
-  if (taskSessionId && backlogLevel !== "high") {
-    debugLog(`hook-stop backlog proactivity=${backlogLevel}`);
+  const taskLevel = getProactivityLevelForTask();
+  if (taskSessionId && taskLevel !== "high") {
+    debugLog(`hook-stop task proactivity=${taskLevel}`);
   }
 
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
@@ -807,7 +807,7 @@ export async function handleHookStop() {
         const file = m[2].trim();
         if (!changes.has(proj)) changes.set(proj, new Set());
         if (/findings/i.test(file)) changes.get(proj)!.add("findings");
-        else if (/backlog/i.test(file)) changes.get(proj)!.add("backlog");
+        else if (/tasks/i.test(file)) changes.get(proj)!.add("task");
         else if (/CLAUDE/i.test(file)) changes.get(proj)!.add("config");
         else if (/summary/i.test(file)) changes.get(proj)!.add("summary");
         else if (/skill/i.test(file)) changes.get(proj)!.add("skills");
@@ -1029,15 +1029,15 @@ export async function handleHookContext() {
       }
     }
 
-    const backlogRow = queryRows(
+    const taskRow = queryRows(
       db,
-      "SELECT content FROM docs WHERE project = ? AND type = 'backlog'",
+      "SELECT content FROM docs WHERE project = ? AND type = 'task'",
       [project]
     );
-    if (backlogRow) {
-      const content = backlogRow[0][0] as string;
+    if (taskRow) {
+      const content = taskRow[0][0] as string;
       const activeItems = content.split("\n").filter(l => l.startsWith("- "));
-      const filtered = filterBacklogByPriority(activeItems);
+      const filtered = filterTaskByPriority(activeItems);
       const trimmed = filtered.slice(0, 5);
       if (trimmed.length > 0) {
         parts.push("## Active tasks");

@@ -225,7 +225,7 @@ describe.sequential("review-ui server", () => {
     };
 
     const before = await readToken();
-    fs.appendFileSync(path.join(tmpRoot, "demo", "backlog.md"), "\n- [ ] Live refresh item\n");
+    fs.appendFileSync(path.join(tmpRoot, "demo", "tasks.md"), "\n- [ ] Live refresh item\n");
     const after = await readToken();
     expect(after).not.toBe(before);
   });

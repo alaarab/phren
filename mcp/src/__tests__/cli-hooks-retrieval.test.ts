@@ -50,14 +50,14 @@ describe("rankResults", () => {
     }
   });
 
-  it("keeps a single strong backlog result when it clearly beats non-backlog noise", () => {
-    const longBacklogPrefix = Array.from({ length: 28 }, (_, i) => `filler${i}`).join(" ");
+  it("keeps a single strong task result when it clearly beats non-task noise", () => {
+    const longTaskPrefix = Array.from({ length: 28 }, (_, i) => `filler${i}`).join(" ");
     const rows: DocRow[] = [
       makeDocRow(
         "sampleatlas",
-        "backlog.md",
-        "backlog",
-        `# backlog\n- ${longBacklogPrefix}\n- Route alerts to an external webhook instead of Discord for monitors`
+        "tasks.md",
+        "task",
+        `# task\n- ${longTaskPrefix}\n- Route alerts to an external webhook instead of Discord for monitors`
       ),
       makeDocRow(
         "sampleportal",
@@ -84,8 +84,8 @@ describe("rankResults", () => {
       "alerts to external webhook instead of discord"
     );
 
-    expect(ranked.some((row) => row.type === "backlog")).toBe(true);
-    expect(ranked.findIndex((row) => row.type === "backlog")).toBeLessThan(
+    expect(ranked.some((row) => row.type === "task")).toBe(true);
+    expect(ranked.findIndex((row) => row.type === "task")).toBeLessThan(
       ranked.findIndex((row) => row.project === "sampleops")
     );
   });

@@ -134,11 +134,11 @@ describe("supersession", () => {
 });
 
 describe("finding provenance", () => {
-  it("auto-stamps active backlog and active session context", () => {
+  it("auto-stamps active task and active session context", () => {
     grantAdmin(tmp.path, "codex-worker");
     writeFile(
-      path.join(tmp.path, PROJECT, "backlog.md"),
-      `# ${PROJECT} backlog
+      path.join(tmp.path, PROJECT, "tasks.md"),
+      `# ${PROJECT} tasks
 
 ## Active
 
@@ -156,16 +156,16 @@ describe("finding provenance", () => {
     expect(result.ok).toBe(true);
 
     const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain('"backlog_item":"deadbeef"');
+    expect(content).toContain('"task_item":"deadbeef"');
     expect(content).toContain("actor:codex-worker");
     expect(content).toContain("model:gpt-5");
     expect(content).toContain("session:session-1234");
   });
 
-  it("resolves explicit backlog_item references to the stable ID", () => {
+  it("resolves explicit task_item references to the stable ID", () => {
     writeFile(
-      path.join(tmp.path, PROJECT, "backlog.md"),
-      `# ${PROJECT} backlog
+      path.join(tmp.path, PROJECT, "tasks.md"),
+      `# ${PROJECT} tasks
 
 ## Active
 
@@ -173,19 +173,19 @@ describe("finding provenance", () => {
 `,
     );
 
-    const result = addFindingToFile(tmp.path, PROJECT, "Backlog linkage should survive reordering", {
-      backlog_item: "A1",
+    const result = addFindingToFile(tmp.path, PROJECT, "Task linkage should survive reordering", {
+      task_item: "A1",
     });
     expect(result.ok).toBe(true);
 
     const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain('"backlog_item":"deadbeef"');
+    expect(content).toContain('"task_item":"deadbeef"');
   });
 
-  it("rejects invalid backlog_item references", () => {
+  it("rejects invalid task_item references", () => {
     writeFile(
-      path.join(tmp.path, PROJECT, "backlog.md"),
-      `# ${PROJECT} backlog
+      path.join(tmp.path, PROJECT, "tasks.md"),
+      `# ${PROJECT} tasks
 
 ## Active
 
@@ -194,7 +194,7 @@ describe("finding provenance", () => {
     );
 
     const result = addFindingToFile(tmp.path, PROJECT, "This should not save", {
-      backlog_item: "missing item",
+      task_item: "missing item",
     });
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
@@ -301,7 +301,7 @@ describe("consolidation semantics", () => {
       `# ${PROJECT} Findings\n\n## 2026-03-01\n\n${manyFindings}\n`
     );
 
-    const r = addFindingToFile(tmp.path, PROJECT, "Newest finding after a large backlog");
+    const r = addFindingToFile(tmp.path, PROJECT, "Newest finding after a large task");
     expect(r.ok).toBe(true);
     expect(fs.existsSync(path.join(tmp.path, ".runtime", "consolidation-needed.txt"))).toBe(false);
     if (r.ok && typeof r.data === "string") {

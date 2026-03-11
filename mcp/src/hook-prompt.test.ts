@@ -14,7 +14,7 @@ import {
   buildHookOutput,
   trackSessionMetrics,
   applyTrustFilter,
-  filterBacklogByPriority,
+  filterTaskByPriority,
   type HookPromptInput,
   type SelectedSnippet,
 } from "./cli.js";
@@ -343,20 +343,20 @@ describe("trackSessionMetrics", () => {
   });
 });
 
-describe("filterBacklogByPriority", () => {
-  const savedEnv = process.env.CORTEX_BACKLOG_PRIORITY;
+describe("filterTaskByPriority", () => {
+  const savedEnv = process.env.CORTEX_TASK_PRIORITY;
 
   afterEach(() => {
     if (savedEnv === undefined) {
-      delete process.env.CORTEX_BACKLOG_PRIORITY;
+      delete process.env.CORTEX_TASK_PRIORITY;
     } else {
-      process.env.CORTEX_BACKLOG_PRIORITY = savedEnv;
+      process.env.CORTEX_TASK_PRIORITY = savedEnv;
     }
   });
 
   it("passes items without priority tags through by default", () => {
     const items = ["- Fix login bug", "- Add dashboard"];
-    const result = filterBacklogByPriority(items);
+    const result = filterTaskByPriority(items);
     expect(result).toEqual(items);
   });
 
@@ -366,20 +366,20 @@ describe("filterBacklogByPriority", () => {
       "- [medium] Improve caching",
       "- [low] Rename variable",
     ];
-    const result = filterBacklogByPriority(items);
+    const result = filterTaskByPriority(items);
     expect(result).toHaveLength(2);
     expect(result[0]).toContain("[high]");
     expect(result[1]).toContain("[medium]");
   });
 
-  it("filters based on CORTEX_BACKLOG_PRIORITY env var", () => {
-    process.env.CORTEX_BACKLOG_PRIORITY = "high";
+  it("filters based on CORTEX_TASK_PRIORITY env var", () => {
+    process.env.CORTEX_TASK_PRIORITY = "high";
     const items = [
       "- [high] Critical fix",
       "- [medium] Nice to have",
       "- [low] Polish",
     ];
-    const result = filterBacklogByPriority(items);
+    const result = filterTaskByPriority(items);
     expect(result).toHaveLength(1);
     expect(result[0]).toContain("[high]");
   });
@@ -390,14 +390,14 @@ describe("filterBacklogByPriority", () => {
       "- [medium] Medium",
       "- [low] Low priority",
     ];
-    const result = filterBacklogByPriority(items, ["low"]);
+    const result = filterTaskByPriority(items, ["low"]);
     expect(result).toHaveLength(1);
     expect(result[0]).toContain("[low]");
   });
 
   it("is case-insensitive for priority tags", () => {
     const items = ["- [HIGH] Important task", "- [Low] Minor task"];
-    const result = filterBacklogByPriority(items);
+    const result = filterTaskByPriority(items);
     expect(result).toHaveLength(1);
     expect(result[0]).toContain("[HIGH]");
   });

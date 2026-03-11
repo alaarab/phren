@@ -31,7 +31,7 @@ const SEARCH_TYPES = new Set([
   "summary",
   "findings",
   "reference",
-  "backlog",
+  "task",
   "changelog",
   "canonical",
   "memory-queue",
@@ -63,7 +63,7 @@ function printSearchUsage() {
   console.error("  cortex search --project <name> [--type <type>] [--limit <n>] [--all]");
   console.error("  cortex search --history                    Show recent searches");
   console.error("  cortex search --from-history <n>           Re-run search #n from history");
-  console.error("  type: claude|summary|findings|reference|backlog|changelog|canonical|memory-queue|skill|other");
+  console.error("  type: claude|summary|findings|reference|task|changelog|canonical|memory-queue|skill|other");
 }
 
 function validateAndNormalizeSearchOptions(

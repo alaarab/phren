@@ -1,17 +1,17 @@
 import * as fs from "fs";
 import * as path from "path";
 import { safeProjectPath } from "./utils.js";
-import { resolveTaskFilePath } from "./data-backlog.js";
+import { resolveTaskFilePath } from "./data-tasks.js";
 
-type BacklogSection = "Active" | "Queue" | "Done";
-type BacklogPriority = "high" | "medium" | "low" | undefined;
+type TaskSection = "Active" | "Queue" | "Done";
+type TaskPriority = "high" | "medium" | "low" | undefined;
 
-interface ParsedBacklogItem {
+interface ParsedTaskItem {
   id: string;
   stableId?: string;
-  section: BacklogSection;
+  section: TaskSection;
   line: string;
-  priority?: BacklogPriority;
+  priority?: TaskPriority;
   pinned?: boolean;
 }
 
@@ -22,13 +22,13 @@ interface SessionStateSnapshot {
   endedAt?: string;
 }
 
-export interface BacklogReferenceResolution {
+export interface TaskReferenceResolution {
   stableId?: string;
   error?: string;
 }
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
-const QUEUE_HEADINGS = new Set(["queue", "queued", "backlog", "todo", "upcoming", "next"]);
+const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);
 const DONE_HEADINGS = new Set(["done", "completed", "finished", "archived"]);
 const BID_PATTERN = /\s*<!--\s*bid:([a-z0-9]{8})\s*-->/;
 
@@ -48,22 +48,22 @@ function stripBid(text: string): { clean: string; bid?: string } {
   };
 }
 
-function normalizePriority(text: string): BacklogPriority {
+function normalizePriority(text: string): TaskPriority {
   const match = text.replace(/\s*\[pinned\]/gi, "").match(/\[(high|medium|low)\]\s*$/i);
   if (!match) return undefined;
-  return match[1].toLowerCase() as BacklogPriority;
+  return match[1].toLowerCase() as TaskPriority;
 }
 
 function detectPinned(text: string): boolean {
   return /\[pinned\]/i.test(text);
 }
 
-function parseBacklogItems(backlogPath: string): ParsedBacklogItem[] {
-  if (!fs.existsSync(backlogPath)) return [];
-  const lines = fs.readFileSync(backlogPath, "utf8").split("\n");
-  let section: BacklogSection = "Queue";
-  const counters: Record<BacklogSection, number> = { Active: 0, Queue: 0, Done: 0 };
-  const items: ParsedBacklogItem[] = [];
+function parseTaskItems(taskPath: string): ParsedTaskItem[] {
+  if (!fs.existsSync(taskPath)) return [];
+  const lines = fs.readFileSync(taskPath, "utf8").split("\n");
+  let section: TaskSection = "Queue";
+  const counters: Record<TaskSection, number> = { Active: 0, Queue: 0, Done: 0 };
+  const items: ParsedTaskItem[] = [];
 
   for (const line of lines) {
     const heading = line.trim().match(/^##\s+(.+?)[\s]*$/);
@@ -93,7 +93,7 @@ function parseBacklogItems(backlogPath: string): ParsedBacklogItem[] {
   return items;
 }
 
-function resolveBacklogItemMatch(items: ParsedBacklogItem[], match: string): BacklogReferenceResolution {
+function resolveTaskItemMatch(items: ParsedTaskItem[], match: string): TaskReferenceResolution {
   const needle = match.trim().toLowerCase();
   if (!needle) return { error: "task reference must not be empty." };
 
@@ -127,23 +127,23 @@ function resolveBacklogItemMatch(items: ParsedBacklogItem[], match: string): Bac
   return { error: `No task matching "${match}" in project tasks.` };
 }
 
-export function resolveFindingBacklogReference(
+export function resolveFindingTaskReference(
   cortexPath: string,
   project: string,
   match: string,
-): BacklogReferenceResolution {
+): TaskReferenceResolution {
   const projectDir = safeProjectPath(cortexPath, project);
   if (!projectDir) return { error: `Invalid project name: "${project}".` };
   const taskPath = resolveTaskFilePath(cortexPath, project);
-  const items = parseBacklogItems(taskPath ?? path.join(projectDir, "tasks.md"));
-  return resolveBacklogItemMatch(items, match);
+  const items = parseTaskItems(taskPath ?? path.join(projectDir, "tasks.md"));
+  return resolveTaskItemMatch(items, match);
 }
 
-export function resolveAutoFindingBacklogItem(cortexPath: string, project: string): string | undefined {
+export function resolveAutoFindingTaskItem(cortexPath: string, project: string): string | undefined {
   const projectDir = safeProjectPath(cortexPath, project);
   if (!projectDir) return undefined;
   const taskPath = resolveTaskFilePath(cortexPath, project);
-  const active = parseBacklogItems(taskPath ?? path.join(projectDir, "tasks.md")).filter(
+  const active = parseTaskItems(taskPath ?? path.join(projectDir, "tasks.md")).filter(
     (item) => item.section === "Active" && item.stableId,
   );
   if (active.length === 1) return active[0].stableId;

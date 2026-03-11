@@ -1,14 +1,14 @@
 import * as fs from "fs";
 import {
-  addBacklogItem,
-  completeBacklogItem,
-  readBacklog,
-  resolveBacklogItem,
-  updateBacklogItem,
-  type BacklogItem,
+  addTask,
+  completeTask,
+  readTasks,
+  resolveTaskItem,
+  updateTask,
+  type TaskItem,
 } from "./data-access.js";
-import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./backlog-github.js";
-import { getProactivityLevelForBacklog, shouldAutoCaptureBacklogForLevel, type ProactivityLevel } from "./proactivity.js";
+import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./tasks-github.js";
+import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, type ProactivityLevel } from "./proactivity.js";
 import { getWorkflowPolicy } from "./shared-governance.js";
 import { debugLog, sessionMarker } from "./shared.js";
 import { errorMessage } from "./utils.js";
@@ -32,7 +32,7 @@ export interface TaskPromptLifecycleResult {
 }
 
 const ACTION_PREFIX_RE = /^(?:please\s+|can you\s+|could you\s+|would you\s+|i want you to\s+|i want to\s+|let(?:'|’)s\s+|lets\s+|help me\s+)/i;
-const EXPLICIT_BACKLOG_PREFIX_RE = /^(?:add(?:\s+(?:this|that|it))?\s+(?:to\s+(?:the\s+)?)?(?:backlog|todo(?:\s+list)?|task(?:\s+list)?)|add\s+(?:a\s+)?task|put(?:\s+(?:this|that|it))?\s+(?:in|on)\s+(?:the\s+)?(?:backlog|todo(?:\s+list)?|task(?:\s+list)?))\s*(?::|-|,)?\s*/i;
+const EXPLICIT_TASK_PREFIX_RE = /^(?:add(?:\s+(?:this|that|it))?\s+(?:to\s+(?:the\s+)?)?(?:task|todo(?:\s+list)?|task(?:\s+list)?)|add\s+(?:a\s+)?task|put(?:\s+(?:this|that|it))?\s+(?:in|on)\s+(?:the\s+)?(?:task|todo(?:\s+list)?|task(?:\s+list)?))\s*(?::|-|,)?\s*/i;
 const NON_ACTIONABLE_RE = /\b(brainstorm|idea|ideas|maybe|what if|should we|could we|would it make sense|question|explain|why is|how does)\b/i;
 const ACTIONABLE_RE = /\b(add|build|change|complete|continue|create|delete|fix|implement|improve|investigate|make|move|refactor|remove|rename|repair|ship|start|update|wire)\b/i;
 const CONTINUE_RE = /\b(continue|keep going|finish|resume|pick up|work on that|that task)\b/i;
@@ -125,8 +125,8 @@ function normalizeTaskSummary(prompt: string): string {
     .replace(/\s+/g, " ")
     .trim();
   const stripped = withoutGithub.replace(ACTION_PREFIX_RE, "").trim();
-  const withoutBacklogPrefix = stripped.replace(EXPLICIT_BACKLOG_PREFIX_RE, "").trim();
-  const taskSource = withoutBacklogPrefix || stripped;
+  const withoutTaskPrefix = stripped.replace(EXPLICIT_TASK_PREFIX_RE, "").trim();
+  const taskSource = withoutTaskPrefix || stripped;
   const firstClause = taskSource.split(/[\n.!?]/)[0]?.trim() || taskSource;
   const cleaned = firstClause
     .replace(/^to\s+/i, "")
@@ -147,7 +147,7 @@ function tokenizeTaskText(value: string): string[] {
     .filter((token) => token.length >= 4 && !TASK_STOP_WORDS.has(token));
 }
 
-function overlapScore(prompt: string, item: BacklogItem): number {
+function overlapScore(prompt: string, item: TaskItem): number {
   const promptTokens = new Set(tokenizeTaskText(prompt));
   if (promptTokens.size === 0) return 0;
   const itemTokens = tokenizeTaskText(item.line);
@@ -159,7 +159,7 @@ function overlapScore(prompt: string, item: BacklogItem): number {
   return score;
 }
 
-function matchExistingActiveTask(prompt: string, activeItems: BacklogItem[]): BacklogItem | null {
+function matchExistingActiveTask(prompt: string, activeItems: TaskItem[]): TaskItem | null {
   if (activeItems.length === 0) return null;
   if (activeItems.length === 1 && CONTINUE_RE.test(prompt)) return activeItems[0];
 
@@ -175,9 +175,9 @@ function matchExistingActiveTask(prompt: string, activeItems: BacklogItem[]): Ba
   return null;
 }
 
-function resolveTrackedSessionTask(cortexPath: string, state: TaskSessionState): BacklogItem | null {
+function resolveTrackedSessionTask(cortexPath: string, state: TaskSessionState): TaskItem | null {
   const match = state.stableId ? `bid:${state.stableId}` : state.item;
-  const resolved = resolveBacklogItem(cortexPath, state.project, match);
+  const resolved = resolveTaskItem(cortexPath, state.project, match);
   return resolved.ok ? resolved.data : null;
 }
 
@@ -216,7 +216,7 @@ function buildSuggestionNotice(project: string, line: string, issueMeta: { githu
   ];
 }
 
-function persistTaskAttachment(cortexPath: string, sessionId: string, project: string, item: BacklogItem, summary: string, mode: Extract<TaskMode, "suggest" | "auto">): void {
+function persistTaskAttachment(cortexPath: string, sessionId: string, project: string, item: TaskItem, summary: string, mode: Extract<TaskMode, "suggest" | "auto">): void {
   writeTaskSessionState(cortexPath, {
     sessionId,
     project,
@@ -235,7 +235,7 @@ export function handleTaskPromptLifecycle(args: {
   project: string | null;
   sessionId?: string;
   intent: string;
-  backlogLevel?: ProactivityLevel;
+  taskLevel?: ProactivityLevel;
 }): TaskPromptLifecycleResult {
   const mode = getTaskMode(args.cortexPath);
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
@@ -244,13 +244,13 @@ export function handleTaskPromptLifecycle(args: {
   if (!isActionablePrompt(args.prompt, args.intent)) {
     return { mode, noticeLines: [] };
   }
-  const backlogLevel = args.backlogLevel ?? getProactivityLevelForBacklog();
-  if (mode === "auto" && !shouldAutoCaptureBacklogForLevel(backlogLevel, args.prompt)) {
-    debugLog(`task lifecycle skipped ${args.project}: backlog proactivity=${backlogLevel}`);
+  const taskLevel = args.taskLevel ?? getProactivityLevelForTask();
+  if (mode === "auto" && !shouldAutoCaptureTaskForLevel(taskLevel, args.prompt)) {
+    debugLog(`task lifecycle skipped ${args.project}: task proactivity=${taskLevel}`);
     return { mode, noticeLines: [] };
   }
 
-  const parsed = readBacklog(args.cortexPath, args.project);
+  const parsed = readTasks(args.cortexPath, args.project);
   if (!parsed.ok) return { mode, noticeLines: [] };
 
   const summary = normalizeTaskSummary(args.prompt);
@@ -274,14 +274,14 @@ export function handleTaskPromptLifecycle(args: {
 
   const targetMatch = reusable?.stableId ? `bid:${reusable.stableId}` : reusable?.id;
   if (!reusable) {
-    const add = addBacklogItem(args.cortexPath, args.project, summary);
+    const add = addTask(args.cortexPath, args.project, summary);
     if (!add.ok) {
       debugLog(`task lifecycle add ${args.project}: ${add.error}`);
       return { mode, noticeLines: [] };
     }
   }
 
-  const update = updateBacklogItem(args.cortexPath, args.project, targetMatch || summary, {
+  const update = updateTask(args.cortexPath, args.project, targetMatch || summary, {
     section: "active",
     context: summary,
     replace_context: true,
@@ -292,7 +292,7 @@ export function handleTaskPromptLifecycle(args: {
     return { mode, noticeLines: [] };
   }
 
-  const resolved = resolveBacklogItem(args.cortexPath, args.project, targetMatch || summary);
+  const resolved = resolveTaskItem(args.cortexPath, args.project, targetMatch || summary);
   if (!resolved.ok) {
     debugLog(`task lifecycle resolve ${args.project}: ${resolved.error}`);
     return { mode, noticeLines: [] };
@@ -321,7 +321,7 @@ export function finalizeTaskSession(args: {
 
   const match = state.stableId ? `bid:${state.stableId}` : state.item;
   if (args.status === "saved-local" || args.status === "saved-pushed") {
-    const completed = completeBacklogItem(args.cortexPath, state.project, match);
+    const completed = completeTask(args.cortexPath, state.project, match);
     if (!completed.ok) {
       debugLog(`task lifecycle complete ${state.project}: ${completed.error}`);
       return;
@@ -331,7 +331,7 @@ export function finalizeTaskSession(args: {
   }
 
   if (args.status === "error") {
-    const blocked = updateBacklogItem(args.cortexPath, state.project, match, {
+    const blocked = updateTask(args.cortexPath, state.project, match, {
       section: "active",
       context: `Blocked: ${args.detail}`,
       replace_context: true,

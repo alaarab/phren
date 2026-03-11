@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  readBacklog,
-  addBacklogItem,
-  completeBacklogItem,
+  readTasks,
+  addTask,
+  completeTask,
   readFindings,
   addFinding,
   removeFinding,
@@ -41,9 +41,9 @@ afterEach(() => {
 });
 
 describe("corrupted file recovery", () => {
-  it("handles empty backlog.md without crashing", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), "");
-    const result = readBacklog(tmpDir, PROJECT);
+  it("handles empty tasks.md without crashing", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), "");
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.items.Active).toHaveLength(0);
@@ -51,9 +51,9 @@ describe("corrupted file recovery", () => {
     expect(result.data.items.Done).toHaveLength(0);
   });
 
-  it("handles backlog.md with no sections", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), "# chaos backlog\n\nJust some text\n");
-    const result = readBacklog(tmpDir, PROJECT);
+  it("handles tasks.md with no sections", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), "# chaos task\n\nJust some text\n");
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // No items since there are no bullet points
@@ -61,10 +61,10 @@ describe("corrupted file recovery", () => {
     expect(result.data.items.Queue).toHaveLength(0);
   });
 
-  it("handles backlog.md with only Done section", () => {
-    const content = `# chaos backlog\n\n## Done\n\n- [x] Only done item\n`;
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
-    const result = readBacklog(tmpDir, PROJECT);
+  it("handles tasks.md with only Done section", () => {
+    const content = `# chaos task\n\n## Done\n\n- [x] Only done item\n`;
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), content);
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.items.Done).toHaveLength(1);
@@ -140,14 +140,14 @@ describe("boundary and edge case inputs", () => {
   it("handles project name with maximum valid length", () => {
     const longName = "a".repeat(50);
     fs.mkdirSync(path.join(tmpDir, longName), { recursive: true });
-    const result = readBacklog(tmpDir, longName);
+    const result = readTasks(tmpDir, longName);
     expect(result.ok).toBe(true);
   });
 
   it("rejects project names with special characters", () => {
     const badNames = ["../escape", "with spaces", "with/slash", "with@symbol", ".hidden"];
     for (const name of badNames) {
-      const result = readBacklog(tmpDir, name);
+      const result = readTasks(tmpDir, name);
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect([CortexError.INVALID_PROJECT_NAME, CortexError.PROJECT_NOT_FOUND]).toContain(result.code);
@@ -162,20 +162,20 @@ describe("boundary and edge case inputs", () => {
     expect(msg.ok).toBe(false);
   });
 
-  it("handles adding a backlog item with unicode characters", () => {
-    const backlog = `# chaos backlog\n\n## Queue\n\n## Done\n`;
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), backlog);
-    const msg = addBacklogItem(tmpDir, PROJECT, "Fix emoji handling: rocket launch complete");
+  it("handles adding a task item with unicode characters", () => {
+    const task = `# chaos task\n\n## Queue\n\n## Done\n`;
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), task);
+    const msg = addTask(tmpDir, PROJECT, "Fix emoji handling: rocket launch complete");
     expect(msg.ok).toBe(true);
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     expect(after.data.items.Queue[0].line).toContain("rocket launch complete");
   });
 
   it("handles completing a non-existent item gracefully", () => {
-    const backlog = `# chaos backlog\n\n## Queue\n\n- [ ] Only item\n\n## Done\n`;
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), backlog);
-    const msg = completeBacklogItem(tmpDir, PROJECT, "This item does not exist at all");
+    const task = `# chaos task\n\n## Queue\n\n- [ ] Only item\n\n## Done\n`;
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), task);
+    const msg = completeTask(tmpDir, PROJECT, "This item does not exist at all");
     expect(msg.ok).toBe(false);
     if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
   });
@@ -211,19 +211,19 @@ describe("boundary and edge case inputs", () => {
 });
 
 describe("filesystem fault injection", () => {
-  it("handles read-only project directory for backlog add", () => {
-    // Create a valid backlog but make the directory read-only
-    const backlog = `# chaos backlog\n\n## Queue\n\n## Done\n`;
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), backlog);
+  it("handles read-only project directory for task add", () => {
+    // Create a valid task but make the directory read-only
+    const task = `# chaos task\n\n## Queue\n\n## Done\n`;
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), task);
 
     // Make file read-only
-    fs.chmodSync(path.join(projectDir, "backlog.md"), 0o444);
+    fs.chmodSync(path.join(projectDir, "tasks.md"), 0o444);
     try {
-      // The lock file write or the backlog rewrite should fail with an EACCES error.
+      // The lock file write or the task rewrite should fail with an EACCES error.
       // The withFileLock function does not catch write errors so it throws.
       let threw = false;
       try {
-        addBacklogItem(tmpDir, PROJECT, "Should fail on read-only");
+        addTask(tmpDir, PROJECT, "Should fail on read-only");
       } catch (err: any) {
         threw = true;
         expect(err.code || err.message).toMatch(/EACCES|EPERM|permission/i);
@@ -231,7 +231,7 @@ describe("filesystem fault injection", () => {
       // Either it threw (expected) or succeeded (e.g., running as root)
       expect(threw || true).toBe(true);
     } finally {
-      fs.chmodSync(path.join(projectDir, "backlog.md"), 0o644);
+      fs.chmodSync(path.join(projectDir, "tasks.md"), 0o644);
     }
   });
 
@@ -416,14 +416,14 @@ describe("concurrent environment variable isolation", () => {
   });
 
   it("respects CORTEX_FILE_LOCK_MAX_WAIT_MS override", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), "# chaos backlog\n\n## Queue\n\n## Done\n");
-    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), "# chaos task\n\n## Queue\n\n## Done\n");
+    const lockPath = path.join(projectDir, "tasks.md.lock");
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
     process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "50";
     process.env.CORTEX_FILE_LOCK_POLL_MS = "10";
     const start = Date.now();
-    const msg = addBacklogItem(tmpDir, PROJECT, "Should timeout quickly");
+    const msg = addTask(tmpDir, PROJECT, "Should timeout quickly");
     const elapsed = Date.now() - start;
 
     fs.unlinkSync(lockPath);
@@ -434,8 +434,8 @@ describe("concurrent environment variable isolation", () => {
   });
 
   it("respects CORTEX_FILE_LOCK_STALE_MS override", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), "# chaos backlog\n\n## Queue\n\n## Done\n");
-    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), "# chaos task\n\n## Queue\n\n## Done\n");
+    const lockPath = path.join(projectDir, "tasks.md.lock");
     fs.writeFileSync(lockPath, `99999\n${Date.now() - 2000}`);
     const past = new Date(Date.now() - 2000);
     fs.utimesSync(lockPath, past, past);
@@ -443,7 +443,7 @@ describe("concurrent environment variable isolation", () => {
     // Set stale threshold to 1 second so the 2-second-old lock is stale
     process.env.CORTEX_FILE_LOCK_STALE_MS = "1000";
 
-    const msg = addBacklogItem(tmpDir, PROJECT, "After custom stale threshold");
+    const msg = addTask(tmpDir, PROJECT, "After custom stale threshold");
     expect(msg.ok).toBe(true);
     expect(fs.existsSync(lockPath)).toBe(false);
   });

@@ -22,7 +22,7 @@ import {
 import {
   PROACTIVITY_LEVELS,
   getProactivityLevel,
-  getProactivityLevelForBacklog,
+  getProactivityLevelForTask,
   getProactivityLevelForFindings,
   type ProactivityLevel,
 } from "./proactivity.js";
@@ -53,7 +53,7 @@ export async function handleConfig(args: string[]) {
       return handleConfigTelemetry(rest);
     case "proactivity":
     case "proactivity.findings":
-    case "proactivity.backlog":
+    case "proactivity.tasks":
       return handleConfigProactivity(sub, rest);
     case "project-ownership":
       return handleConfigProjectOwnership(rest);
@@ -68,8 +68,8 @@ Subcommands:
   cortex config proactivity [level]      Base auto-capture level (high|medium|low)
   cortex config proactivity.findings [level]
                                         Findings-specific auto-capture level override
-  cortex config proactivity.backlog [level]
-                                        Backlog-specific auto-capture level override
+  cortex config proactivity.tasks [level]
+                                        Task-specific auto-capture level override
   cortex config project-ownership [mode]
                                         Default ownership for future project enrollments
   cortex config machines                 Registered machines and profiles
@@ -101,17 +101,17 @@ function proactivityConfigSnapshot(cortexPath: string) {
     configured: {
       proactivity: prefs.proactivity ?? null,
       proactivityFindings: prefs.proactivityFindings ?? null,
-      proactivityBacklog: prefs.proactivityBacklog ?? null,
+      proactivityTask: prefs.proactivityTask ?? null,
     },
     effective: {
       proactivity: getProactivityLevel(),
       proactivityFindings: getProactivityLevelForFindings(),
-      proactivityBacklog: getProactivityLevelForBacklog(),
+      proactivityTask: getProactivityLevelForTask(),
     },
   };
 }
 
-function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findings" | "proactivity.backlog", args: string[]) {
+function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findings" | "proactivity.tasks", args: string[]) {
   const cortexPath = getCortexPath();
   const value = args[0];
 
@@ -138,8 +138,8 @@ function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findin
     case "proactivity.findings":
       writeGovernanceInstallPreferences(cortexPath, { proactivityFindings: level });
       break;
-    case "proactivity.backlog":
-      writeGovernanceInstallPreferences(cortexPath, { proactivityBacklog: level });
+    case "proactivity.tasks":
+      writeGovernanceInstallPreferences(cortexPath, { proactivityTask: level });
       break;
   }
 

@@ -5,7 +5,7 @@ import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
 import { buildIndex, updateFileInIndex, type SqlJsDatabase } from "../shared-index.js";
 import { register as registerSearch } from "../mcp-search.js";
 import { register as registerFinding } from "../mcp-finding.js";
-import { register as registerBacklog } from "../mcp-backlog.js";
+import { register as registerTask } from "../mcp-tasks.js";
 import type { McpContext } from "../mcp-types.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
@@ -64,7 +64,7 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     };
     registerSearch(server as any, ctx);
     registerFinding(server as any, ctx);
-    registerBacklog(server as any, ctx);
+    registerTask(server as any, ctx);
   });
 
   afterEach(() => {
@@ -168,7 +168,7 @@ describe("MCP integration: tasks immediately searchable after add", () => {
   let db: SqlJsDatabase;
 
   beforeEach(async () => {
-    tmp = makeTempDir("mcp-backlog-search-");
+    tmp = makeTempDir("mcp-tasks-search-");
     grantAdmin(tmp.path);
     const dir = path.join(tmp.path, "search-proj");
     fs.mkdirSync(dir, { recursive: true });
@@ -191,7 +191,7 @@ describe("MCP integration: tasks immediately searchable after add", () => {
       withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
     };
     registerSearch(server as any, ctx);
-    registerBacklog(server as any, ctx);
+    registerTask(server as any, ctx);
   });
 
   afterEach(() => {

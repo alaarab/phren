@@ -15,7 +15,7 @@ import { detectProject } from "./shared-index.js";
 import { commandExists } from "./hooks.js";
 import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, resolveExecCommand } from "./utils.js";
 import { appendFindingJournal, compactFindingJournals } from "./finding-journal.js";
-import { getProactivityLevelForBacklog, getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
+import { getProactivityLevelForTask, getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -277,9 +277,9 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
   }
 
   const findingsLevel = getProactivityLevelForFindings();
-  const backlogLevel = getProactivityLevelForBacklog();
-  if (backlogLevel !== "high") {
-    debugLog(`extract-memories backlog proactivity=${backlogLevel}`);
+  const taskLevel = getProactivityLevelForTask();
+  if (taskLevel !== "high") {
+    debugLog(`extract-memories task proactivity=${taskLevel}`);
   }
   if (findingsLevel === "low") {
     appendAuditLog(getCortexPath(), "extract_memories", `project=${project} skipped=proactivity_low`);

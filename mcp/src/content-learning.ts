@@ -18,8 +18,8 @@ import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCo
 import { validateFindingsFormat, validateFinding } from "./content-validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./content-archive.js";
 import {
-  resolveAutoFindingBacklogItem,
-  resolveFindingBacklogReference,
+  resolveAutoFindingTaskItem,
+  resolveFindingTaskReference,
   resolveFindingSessionId,
 } from "./finding-context.js";
 
@@ -78,7 +78,7 @@ function buildFindingCitation(
     line: citationInput?.line,
     commit: citationInput?.commit || (citationInput?.repo || inferredRepo ? headCommit ?? getHeadCommit(citationInput?.repo || inferredRepo || "") : undefined),
     supersedes: citationInput?.supersedes,
-    backlog_item: citationInput?.backlog_item,
+    task_item: citationInput?.task_item,
   };
   if (citation.repo && citation.commit && (!citation.file || !citation.line)) {
     const inferred = inferCitationLocation(citation.repo, citation.commit);
@@ -134,18 +134,18 @@ function resolveFindingCitationInput(
   citationInput?: Partial<FindingCitation>,
 ): CortexResult<Partial<FindingCitation> | undefined> {
   const resolved = citationInput ? { ...citationInput } : {};
-  if (citationInput?.backlog_item) {
-    const backlogResolution = resolveFindingBacklogReference(cortexPath, project, citationInput.backlog_item);
-    if (backlogResolution.error) {
-      return cortexErr(backlogResolution.error, CortexError.VALIDATION_ERROR);
+  if (citationInput?.task_item) {
+    const taskResolution = resolveFindingTaskReference(cortexPath, project, citationInput.task_item);
+    if (taskResolution.error) {
+      return cortexErr(taskResolution.error, CortexError.VALIDATION_ERROR);
     }
-    if (backlogResolution.stableId) {
-      resolved.backlog_item = backlogResolution.stableId;
+    if (taskResolution.stableId) {
+      resolved.task_item = taskResolution.stableId;
     }
   } else {
-    const backlogItem = resolveAutoFindingBacklogItem(cortexPath, project);
-    if (backlogItem) {
-      resolved.backlog_item = backlogItem;
+    const taskItem = resolveAutoFindingTaskItem(cortexPath, project);
+    if (taskItem) {
+      resolved.task_item = taskItem;
     }
   }
 

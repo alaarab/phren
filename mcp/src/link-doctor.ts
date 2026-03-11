@@ -15,13 +15,13 @@ import {
 import { validateGovernanceJson } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
 import { buildIndex, queryRows } from "./shared-index.js";
-import { validateBacklogFormat, validateFindingsFormat } from "./shared-content.js";
+import { validateTaskFormat, validateFindingsFormat } from "./shared-content.js";
 import { detectInstalledTools } from "./hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./link-skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./link-checksums.js";
 import { buildSkillManifest } from "./skill-registry.js";
-import { inspectBacklogHygiene } from "./backlog-hygiene.js";
-import { resolveTaskFilePath, TASK_FILE_ALIASES } from "./data-backlog.js";
+import { inspectTaskHygiene } from "./task-hygiene.js";
+import { resolveTaskFilePath, TASK_FILE_ALIASES } from "./data-tasks.js";
 import {
   getMachineName,
   lookupProfile,
@@ -520,10 +520,10 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      const backlogPath = resolveTaskFilePath(cortexPath, projectName);
-      if (backlogPath && fs.existsSync(backlogPath)) {
-        const content = fs.readFileSync(backlogPath, "utf8");
-        const issues = validateBacklogFormat(content);
+      const taskPath = resolveTaskFilePath(cortexPath, projectName);
+      if (taskPath && fs.existsSync(taskPath)) {
+        const content = fs.readFileSync(taskPath, "utf8");
+        const issues = validateTaskFormat(content);
         checks.push({
           name: `data:tasks:${projectName}`,
           ok: issues.length === 0,
@@ -531,7 +531,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
         });
 
         const repoPath = findProjectDir(projectName);
-        const hygiene = inspectBacklogHygiene(cortexPath, projectName, repoPath);
+        const hygiene = inspectTaskHygiene(cortexPath, projectName, repoPath);
         checks.push({
           name: `data:task-hygiene:${projectName}`,
           ok: hygiene.ok,

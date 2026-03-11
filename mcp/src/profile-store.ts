@@ -13,7 +13,7 @@ import {
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { withFileLock as withFileLockRaw } from "./shared-governance.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
-import { TASK_FILE_ALIASES } from "./data-backlog.js";
+import { TASK_FILE_ALIASES } from "./data-tasks.js";
 
 function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
   try {

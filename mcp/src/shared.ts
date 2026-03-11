@@ -67,11 +67,11 @@ export {
   type ProactivityLevel,
   getProactivityLevel,
   getProactivityLevelForFindings,
-  getProactivityLevelForBacklog,
+  getProactivityLevelForTask,
   hasExplicitFindingSignal,
-  hasExplicitBacklogSignal,
+  hasExplicitTaskSignal,
   shouldAutoCaptureFindingsForLevel,
-  shouldAutoCaptureBacklogForLevel,
+  shouldAutoCaptureTaskForLevel,
 } from "./proactivity.js";
 
 const RESERVED_PROJECT_DIR_NAMES = new Set(["profiles", "templates", "global"]);

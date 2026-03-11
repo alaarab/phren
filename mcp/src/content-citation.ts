@@ -11,7 +11,7 @@ export interface FindingCitation {
   line?: number;
   commit?: string;
   supersedes?: string;
-  backlog_item?: string;
+  task_item?: string;
 }
 
 export interface FindingSource {
@@ -142,7 +142,7 @@ export function parseCitationComment(line: string): FindingCitation | null {
       line: typeof parsed.line === "number" ? parsed.line : undefined,
       commit: typeof parsed.commit === "string" ? parsed.commit : undefined,
       supersedes: typeof parsed.supersedes === "string" ? parsed.supersedes : undefined,
-      backlog_item: typeof parsed.backlog_item === "string" ? parsed.backlog_item : undefined,
+      task_item: typeof parsed.task_item === "string" ? parsed.task_item : undefined,
     };
   } catch (err: unknown) {
     debugLog(`parseCitationComment: malformed citation JSON: ${errorMessage(err)}`);

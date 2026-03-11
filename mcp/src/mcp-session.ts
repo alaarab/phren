@@ -10,7 +10,7 @@ import { isValidProjectName } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
 import { readExtractedFacts } from "./mcp-extract-facts.js";
 import { resolveFindingSessionId } from "./finding-context.js";
-import { resolveTaskFilePath } from "./data-backlog.js";
+import { resolveTaskFilePath } from "./data-tasks.js";
 
 interface SessionState {
   sessionId: string;
@@ -281,19 +281,19 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start findingsRead: ${err instanceof Error ? err.message : String(err)}\n`);
         }
       }
-      const backlogPath = resolveTaskFilePath(cortexPath, activeProject);
-      if (backlogPath) {
+      const taskPath = resolveTaskFilePath(cortexPath, activeProject);
+      if (taskPath) {
         try {
-          const content = fs.readFileSync(backlogPath, "utf-8");
+          const content = fs.readFileSync(taskPath, "utf-8");
           const queueStart = content.indexOf("## Queue");
           if (queueStart >= 0) {
             const queueItems = content.slice(queueStart).split("\n").filter(l => l.startsWith("- [ ]")).slice(0, 5);
             if (queueItems.length > 0) {
-              parts.push(`## Active backlog (${activeProject})\n${queueItems.join("\n")}`);
+              parts.push(`## Active task (${activeProject})\n${queueItems.join("\n")}`);
             }
           }
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start backlogRead: ${err instanceof Error ? err.message : String(err)}\n`);
+          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start taskRead: ${err instanceof Error ? err.message : String(err)}\n`);
         }
       }
       // Surface extracted preferences/facts for this project

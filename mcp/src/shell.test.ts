@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { CortexShell } from "./shell.js";
-import { readBacklog, readFindings, readReviewQueue, loadShellState } from "./data-access.js";
+import { readTasks, readFindings, readReviewQueue, loadShellState } from "./data-access.js";
 import { writeFile as write, makeTempDir } from "./test-helpers.js";
 import { shellStartupFrames, stripAnsi } from "./shell-render.js";
 
@@ -19,9 +19,9 @@ function seedCortex(root: string): TempContext {
     "# demo\n\nSmall demo project for tests.\n"
   );
   write(
-    path.join(root, project, "backlog.md"),
+    path.join(root, project, "tasks.md"),
     [
-      "# demo backlog",
+      "# demo task",
       "",
       "## Active",
       "",
@@ -202,7 +202,7 @@ describe("CortexShell", () => {
     });
   });
 
-  it("supports backlog mutations including work next and tidy", async () => {
+  it("supports task mutations including work next and tidy", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
     await shell.handleInput(":add write shell tests [medium]");
@@ -210,7 +210,7 @@ describe("CortexShell", () => {
     await shell.handleInput(":complete write shell tests");
     await shell.handleInput("y");
 
-    const parsedInitial = readBacklog(dir, "demo");
+    const parsedInitial = readTasks(dir, "demo");
     expect(parsedInitial.ok).toBe(true);
     if (!parsedInitial.ok) throw new Error(parsedInitial.error);
     expect(parsedInitial.data.items.Done.some((item) => item.line.includes("write shell tests"))).toBe(true);
@@ -221,11 +221,11 @@ describe("CortexShell", () => {
     await shell.handleInput("y");
     await shell.handleInput(":tidy 1");
 
-    const parsedAfterTidy = readBacklog(dir, "demo");
+    const parsedAfterTidy = readTasks(dir, "demo");
     expect(parsedAfterTidy.ok).toBe(true);
     if (!parsedAfterTidy.ok) throw new Error(parsedAfterTidy.error);
     expect(parsedAfterTidy.data.items.Done.length).toBe(1);
-    const archiveFile = path.join(dir, ".governance", "backlog-archive", "demo.md");
+    const archiveFile = path.join(dir, ".governance", "task-archive", "demo.md");
     expect(fs.existsSync(archiveFile)).toBe(true);
   });
 
@@ -279,7 +279,7 @@ describe("CortexShell", () => {
 
   it("falls back to the default shell view when persisted state is invalid", async () => {
     const statePath = path.join(dir, ".runtime", "shell-state.json");
-    write(statePath, JSON.stringify({ view: "Backlog", project: "demo", page: 2 }, null, 2));
+    write(statePath, JSON.stringify({ view: "Task", project: "demo", page: 2 }, null, 2));
 
     const shell = createShell(dir);
     const output = await shell.render();
@@ -312,8 +312,8 @@ describe("CortexShell", () => {
     await shell.handleInput(":open demo");
 
     await shell.handleInput("b");
-    const stateAfterBacklog = loadShellState(dir);
-    expect(stateAfterBacklog.view).toBe("Tasks");
+    const stateAfterTask = loadShellState(dir);
+    expect(stateAfterTask.view).toBe("Tasks");
 
     await shell.handleInput("l");
     const stateAfterFindings = loadShellState(dir);
@@ -407,19 +407,19 @@ describe("CortexShell", () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
 
-    const backlogBefore = fs.readFileSync(path.join(dir, "demo", "backlog.md"), "utf8");
+    const taskBefore = fs.readFileSync(path.join(dir, "demo", "tasks.md"), "utf8");
     await shell.handleInput(":complete active item");
     await shell.handleInput("y");
 
-    const parsedAfter = readBacklog(dir, "demo");
+    const parsedAfter = readTasks(dir, "demo");
     expect(parsedAfter.ok).toBe(true);
     if (parsedAfter.ok) {
       expect(parsedAfter.data.items.Done.some((i) => i.line.includes("active item"))).toBe(true);
     }
 
     await shell.handleInput(":undo");
-    const backlogAfterUndo = fs.readFileSync(path.join(dir, "demo", "backlog.md"), "utf8");
-    expect(backlogAfterUndo).toBe(backlogBefore);
+    const taskAfterUndo = fs.readFileSync(path.join(dir, "demo", "tasks.md"), "utf8");
+    expect(taskAfterUndo).toBe(taskBefore);
   });
 
   it(":undo reports nothing when stack is empty", async () => {
@@ -438,7 +438,7 @@ describe("CortexShell", () => {
     await shell.handleInput(":complete first bulk task,second bulk task");
     await shell.handleInput("y");
 
-    const parsed = readBacklog(dir, "demo");
+    const parsed = readTasks(dir, "demo");
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
       const doneLines = parsed.data.items.Done.map((i) => i.line);
@@ -455,11 +455,11 @@ describe("CortexShell", () => {
     expect(output).toMatch(/Relink ok.*\(\d+\.\d+s\)/);
   });
 
-  it("displays backlog subsection headers (P0, P1, etc) when present", async () => {
+  it("displays task subsection headers (P0, P1, etc) when present", async () => {
     write(
-      path.join(dir, "demo", "backlog.md"),
+      path.join(dir, "demo", "tasks.md"),
       [
-        "# demo backlog",
+        "# demo task",
         "",
         "## Active",
         "",
@@ -496,7 +496,7 @@ describe("CortexShell", () => {
     expect(output).toContain("update docs");
   });
 
-  it("per-section backlog IDs start at 1 for each section (#112)", async () => {
+  it("per-section task IDs start at 1 for each section (#112)", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
     await shell.handleInput("b");

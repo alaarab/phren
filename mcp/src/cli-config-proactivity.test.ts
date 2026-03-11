@@ -9,7 +9,7 @@ const originalEnv = {
   CORTEX_PATH: process.env.CORTEX_PATH,
   CORTEX_PROACTIVITY: process.env.CORTEX_PROACTIVITY,
   CORTEX_PROACTIVITY_FINDINGS: process.env.CORTEX_PROACTIVITY_FINDINGS,
-  CORTEX_PROACTIVITY_BACKLOG: process.env.CORTEX_PROACTIVITY_BACKLOG,
+  CORTEX_PROACTIVITY_TASKS: process.env.CORTEX_PROACTIVITY_TASKS,
 };
 
 let tmpCleanup: (() => void) | undefined;
@@ -61,7 +61,7 @@ describe("handleConfig proactivity", () => {
     process.env.CORTEX_PATH = cortexDir;
     delete process.env.CORTEX_PROACTIVITY;
     delete process.env.CORTEX_PROACTIVITY_FINDINGS;
-    delete process.env.CORTEX_PROACTIVITY_BACKLOG;
+    delete process.env.CORTEX_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
@@ -71,7 +71,7 @@ describe("handleConfig proactivity", () => {
     restoreEnv("CORTEX_PATH");
     restoreEnv("CORTEX_PROACTIVITY");
     restoreEnv("CORTEX_PROACTIVITY_FINDINGS");
-    restoreEnv("CORTEX_PROACTIVITY_BACKLOG");
+    restoreEnv("CORTEX_PROACTIVITY_TASKS");
     tmpCleanup?.();
   });
 
@@ -86,10 +86,10 @@ describe("handleConfig proactivity", () => {
     expect(data.path).toBe(governancePrefsPath());
     expect(data.configured.proactivity).toBeNull();
     expect(data.configured.proactivityFindings).toBeNull();
-    expect(data.configured.proactivityBacklog).toBeNull();
+    expect(data.configured.proactivityTask).toBeNull();
     expect(data.effective.proactivity).toBe("high");
     expect(data.effective.proactivityFindings).toBe("high");
-    expect(data.effective.proactivityBacklog).toBe("high");
+    expect(data.effective.proactivityTask).toBe("high");
   });
 
   it("persists base proactivity in governance install preferences", async () => {
@@ -103,33 +103,33 @@ describe("handleConfig proactivity", () => {
     expect(data.configured.proactivity).toBe("medium");
     expect(data.effective.proactivity).toBe("medium");
     expect(data.effective.proactivityFindings).toBe("medium");
-    expect(data.effective.proactivityBacklog).toBe("medium");
+    expect(data.effective.proactivityTask).toBe("medium");
 
     const stored = JSON.parse(fs.readFileSync(governancePrefsPath(), "utf8"));
     expect(stored.proactivity).toBe("medium");
   });
 
-  it("persists findings and backlog overrides independently", async () => {
+  it("persists findings and task overrides independently", async () => {
     const { handleConfig } = await importCliConfig();
     const output = captureConsole();
 
     await handleConfig(["proactivity", "low"]);
     await handleConfig(["proactivity.findings", "high"]);
-    await handleConfig(["proactivity.backlog", "medium"]);
+    await handleConfig(["proactivity.tasks", "medium"]);
 
     expect(output.logs).toHaveLength(3);
     const data = JSON.parse(output.logs[2]);
     expect(data.configured.proactivity).toBe("low");
     expect(data.configured.proactivityFindings).toBe("high");
-    expect(data.configured.proactivityBacklog).toBe("medium");
+    expect(data.configured.proactivityTask).toBe("medium");
     expect(data.effective.proactivity).toBe("low");
     expect(data.effective.proactivityFindings).toBe("high");
-    expect(data.effective.proactivityBacklog).toBe("medium");
+    expect(data.effective.proactivityTask).toBe("medium");
 
     const stored = JSON.parse(fs.readFileSync(governancePrefsPath(), "utf8"));
     expect(stored.proactivity).toBe("low");
     expect(stored.proactivityFindings).toBe("high");
-    expect(stored.proactivityBacklog).toBe("medium");
+    expect(stored.proactivityTask).toBe("medium");
   });
 
   it("rejects invalid proactivity values", async () => {

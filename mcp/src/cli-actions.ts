@@ -210,7 +210,7 @@ export async function handleMemoryUi(args: string[]) {
 export async function handleShell(args: string[], profile: string) {
   if (args.includes("--help") || args.includes("-h")) {
     console.log("Usage: cortex shell");
-    console.log("Interactive shell with views for Projects, Backlog, Findings, Review Queue, Skills, Hooks, Machines/Profiles, and Health.");
+    console.log("Interactive shell with views for Projects, Task, Findings, Review Queue, Skills, Hooks, Machines/Profiles, and Health.");
     return;
   }
   await startShell(getCortexPath(), profile);

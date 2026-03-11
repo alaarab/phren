@@ -6,7 +6,7 @@ import * as yaml from "js-yaml";
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const STARTER_ROOT = path.join(REPO_ROOT, "starter");
 const TEMPLATE_ROOT = path.join(STARTER_ROOT, "templates");
-const REQUIRED_TEMPLATE_FILES = ["CLAUDE.md", "summary.md", "backlog.md", "FINDINGS.md"];
+const REQUIRED_TEMPLATE_FILES = ["CLAUDE.md", "summary.md", "tasks.md", "FINDINGS.md"];
 
 describe("shipped starter assets", () => {
   it("parses bundled profile YAML files and machines.yaml comments cleanly", () => {

@@ -12,7 +12,7 @@ import {
   homeDir,
 } from "./shared.js";
 import { getIndexPolicy, withFileLock } from "./shared-governance.js";
-import { stripBacklogDoneSection } from "./shared-content.js";
+import { stripTaskDoneSection } from "./shared-content.js";
 import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
 import { extractAndLinkEntities, ensureGlobalEntitiesTable } from "./shared-entity-graph.js";
@@ -98,7 +98,7 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "summary.md": "summary",
   "findings.md": "findings",
   "reference.md": "reference",
-  "tasks.md": "backlog",
+  "tasks.md": "task",
   "changelog.md": "changelog",
   "canonical_memories.md": "canonical",
   "memory_queue.md": "memory-queue",
@@ -463,8 +463,8 @@ export function normalizeIndexedContent(content: string, type: string, cortexPat
     .replace(/<!--\s*source:\s*.*?-->/g, "")
     .replace(/<!--\s*cortex:cite\s+\{[\s\S]*?\}\s*-->/g, "");
   normalized = resolveImports(normalized, cortexPath);
-  if (type === "backlog") {
-    normalized = stripBacklogDoneSection(normalized);
+  if (type === "task") {
+    normalized = stripTaskDoneSection(normalized);
   }
   if (typeof maxChars === "number" && maxChars >= 0) {
     normalized = normalized.slice(0, maxChars);

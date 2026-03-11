@@ -1,7 +1,7 @@
 import { execFileSync } from "child_process";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import type { BacklogItem, QueueItem } from "./data-access.js";
+import type { TaskItem, QueueItem } from "./data-access.js";
 import { runLink } from "./link.js";
 import { runCortexUpdate } from "./update.js";
 import {
@@ -49,7 +49,7 @@ export function tokenize(input: string): string[] {
   return out;
 }
 
-export function backlogsByFilter(items: BacklogItem[], filter: string): BacklogItem[] {
+export function tasksByFilter(items: TaskItem[], filter: string): TaskItem[] {
   const needle = filter.toLowerCase().trim();
   if (!needle) return items;
   return items.filter((item) =>

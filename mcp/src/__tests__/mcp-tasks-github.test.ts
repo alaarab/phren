@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { register } from "../mcp-backlog.js";
-import { readBacklog } from "../data-access.js";
+import { register } from "../mcp-tasks.js";
+import { readTasks } from "../data-access.js";
 import type { McpContext } from "../mcp-types.js";
 
-vi.mock("../backlog-github.js", () => ({
-  buildBacklogIssueBody: vi.fn(() => "generated body"),
-  createGithubIssueForBacklog: vi.fn(() => ({
+vi.mock("../tasks-github.js", () => ({
+  buildTaskIssueBody: vi.fn(() => "generated body"),
+  createGithubIssueForTask: vi.fn(() => ({
     ok: true,
     data: {
       repo: "alaarab/cortex",
@@ -54,18 +54,18 @@ function makeCtx(cortexPath: string): McpContext {
   };
 }
 
-describe("mcp-backlog GitHub issue tools", () => {
+describe("mcp-tasks GitHub issue tools", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
   const project = "cortex";
 
   beforeEach(() => {
-    tmp = makeTempDir("mcp-backlog-github-");
+    tmp = makeTempDir("mcp-tasks-github-");
     grantAdmin(tmp.path);
     fs.mkdirSync(path.join(tmp.path, project), { recursive: true });
     fs.writeFileSync(
-      path.join(tmp.path, project, "backlog.md"),
-      "# cortex backlog\n\n## Active\n\n## Queue\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  Context: Backlog items should optionally link to GitHub issues\n\n## Done\n"
+      path.join(tmp.path, project, "tasks.md"),
+      "# cortex task\n\n## Active\n\n## Queue\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  Context: Task items should optionally link to GitHub issues\n\n## Done\n"
     );
     server = makeMockServer();
     register(server as any, makeCtx(tmp.path));
@@ -85,11 +85,11 @@ describe("mcp-backlog GitHub issue tools", () => {
     expect(res.ok).toBe(true);
     expect(res.data.githubIssue).toBe(14);
 
-    const backlog = readBacklog(tmp.path, project);
-    expect(backlog.ok).toBe(true);
-    if (!backlog.ok) return;
-    expect(backlog.data.items.Queue[0].githubIssue).toBe(14);
-    expect(backlog.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Queue[0].githubIssue).toBe(14);
+    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
   });
 
   it("promotes a task into a GitHub issue and links it back", async () => {
@@ -101,10 +101,10 @@ describe("mcp-backlog GitHub issue tools", () => {
     expect(res.data.githubIssue).toBe(14);
     expect(res.data.githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
 
-    const backlog = readBacklog(tmp.path, project);
-    expect(backlog.ok).toBe(true);
-    if (!backlog.ok) return;
-    expect(backlog.data.items.Queue[0].githubIssue).toBe(14);
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Queue[0].githubIssue).toBe(14);
   });
 
   it("can mark the item done after promotion", async () => {
@@ -115,10 +115,10 @@ describe("mcp-backlog GitHub issue tools", () => {
     }));
     expect(res.ok).toBe(true);
 
-    const backlog = readBacklog(tmp.path, project);
-    expect(backlog.ok).toBe(true);
-    if (!backlog.ok) return;
-    expect(backlog.data.items.Queue).toHaveLength(0);
-    expect(backlog.data.items.Done[0].githubIssue).toBe(14);
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Queue).toHaveLength(0);
+    expect(task.data.items.Done[0].githubIssue).toBe(14);
   });
 });

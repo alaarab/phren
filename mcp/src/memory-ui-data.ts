@@ -12,7 +12,7 @@ import { readInstallPreferences } from "./init-preferences.js";
 import { readCustomHooks } from "./hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "./provider-adapters.js";
 import { getAllSkills } from "./skill-registry.js";
-import { resolveTaskFilePath } from "./data-backlog.js";
+import { resolveTaskFilePath } from "./data-tasks.js";
 
 interface GraphNode {
   id: string;
@@ -32,7 +32,7 @@ interface GraphLink {
 interface ProjectInfo {
   name: string;
   findingCount: number;
-  backlogCount: number;
+  taskCount: number;
   hasClaudeMd: boolean;
   hasSummary: boolean;
   hasReference: boolean;
@@ -282,7 +282,7 @@ export function collectProjectsForUI(cortexPath: string, profile?: string): Proj
 
     const dir = path.join(cortexPath, project);
     const findingsPath = path.join(dir, "FINDINGS.md");
-    const backlogPath = resolveTaskFilePath(cortexPath, project);
+    const taskPath = resolveTaskFilePath(cortexPath, project);
     const claudeMdPath = path.join(dir, "CLAUDE.md");
     const summaryPath = path.join(dir, "summary.md");
     const refPath = path.join(dir, "reference");
@@ -307,11 +307,11 @@ export function collectProjectsForUI(cortexPath: string, profile?: string): Proj
       }
     }
 
-    let backlogCount = 0;
-    if (backlogPath && fs.existsSync(backlogPath)) {
-      const content = fs.readFileSync(backlogPath, "utf8");
+    let taskCount = 0;
+    if (taskPath && fs.existsSync(taskPath)) {
+      const content = fs.readFileSync(taskPath, "utf8");
       const queueMatch = content.match(/## Queue[\s\S]*?(?=## |$)/);
-      if (queueMatch) backlogCount = (queueMatch[0].match(/^- /gm) || []).length;
+      if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
     }
 
     let summaryText = "";
@@ -331,7 +331,7 @@ export function collectProjectsForUI(cortexPath: string, profile?: string): Proj
     results.push({
       name: project,
       findingCount,
-      backlogCount,
+      taskCount,
       hasClaudeMd: fs.existsSync(claudeMdPath),
       hasSummary: fs.existsSync(summaryPath),
       hasReference: fs.existsSync(refPath) && fs.statSync(refPath).isDirectory(),
@@ -341,5 +341,5 @@ export function collectProjectsForUI(cortexPath: string, profile?: string): Proj
     });
   }
 
-  return results.sort((a, b) => (b.findingCount + b.backlogCount) - (a.findingCount + a.backlogCount));
+  return results.sort((a, b) => (b.findingCount + b.taskCount) - (a.findingCount + a.taskCount));
 }

@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { isTaskFileName, readBacklog } from "./data-backlog.js";
+import { isTaskFileName, readTasks } from "./data-tasks.js";
 import { STOP_WORDS, extractKeywords, errorMessage } from "./utils.js";
 
 const TEXT_EXTENSIONS = new Set([
@@ -41,10 +41,10 @@ const SKIP_DIRS = new Set([
   "target",
 ]);
 
-const GENERIC_BACKLOG_TERMS = new Set([
+const GENERIC_TASK_TERMS = new Set([
   "add",
   "audit",
-  "backlog",
+  "task",
   "check",
   "checks",
   "coverage",
@@ -84,17 +84,17 @@ const GENERIC_BACKLOG_TERMS = new Set([
 const MAX_TEXT_BYTES = 16 * 1024;
 const MAX_FILES_PER_ROOT = 400;
 
-export interface BacklogHygieneIssue {
+export interface TaskHygieneIssue {
   id: string;
   line: string;
   reason: "anchors-missing" | "keywords-missing";
   evidence: string[];
 }
 
-export interface BacklogHygieneResult {
+export interface TaskHygieneResult {
   ok: boolean;
   detail: string;
-  issues: BacklogHygieneIssue[];
+  issues: TaskHygieneIssue[];
 }
 
 function uniqueValues(values: Iterable<string>): string[] {
@@ -154,7 +154,7 @@ function collectCorpus(root: string): string[] {
       try {
         texts.push(fs.readFileSync(fullPath, "utf8").slice(0, MAX_TEXT_BYTES).toLowerCase());
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backlog hygiene read ${fullPath}: ${errorMessage(err)}\n`);
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] task hygiene read ${fullPath}: ${errorMessage(err)}\n`);
       }
       if (filesSeen >= MAX_FILES_PER_ROOT) break;
     }
@@ -204,13 +204,13 @@ function extractDistinctiveKeywords(line: string): string[] {
     rawTerms.filter((term) => {
       if (term.length < 4) return false;
       if (STOP_WORDS.has(term)) return false;
-      if (GENERIC_BACKLOG_TERMS.has(term)) return false;
+      if (GENERIC_TASK_TERMS.has(term)) return false;
       return true;
     })
   ).slice(0, 6);
 }
 
-function formatDetail(issues: BacklogHygieneIssue[], roots: string[]): string {
+function formatDetail(issues: TaskHygieneIssue[], roots: string[]): string {
   if (roots.length === 0) return "skipped: no project repo/docs roots available for task hygiene scan";
   if (issues.length === 0) return `ok across ${roots.length} root${roots.length === 1 ? "" : "s"}`;
   const preview = issues
@@ -220,8 +220,8 @@ function formatDetail(issues: BacklogHygieneIssue[], roots: string[]): string {
   return `${issues.length} suspect task(s): ${preview}`;
 }
 
-export function inspectBacklogHygiene(cortexPath: string, project: string, repoPath?: string | null): BacklogHygieneResult {
-  const parsed = readBacklog(cortexPath, project);
+export function inspectTaskHygiene(cortexPath: string, project: string, repoPath?: string | null): TaskHygieneResult {
+  const parsed = readTasks(cortexPath, project);
   if (!parsed.ok) {
     return { ok: true, detail: "skipped: tasks unavailable", issues: [] };
   }
@@ -232,7 +232,7 @@ export function inspectBacklogHygiene(cortexPath: string, project: string, repoP
   ].filter((candidate) => candidate && fs.existsSync(candidate)));
 
   const corpus = roots.flatMap((root) => collectCorpus(root));
-  const issues: BacklogHygieneIssue[] = [];
+  const issues: TaskHygieneIssue[] = [];
   const items = [...parsed.data.items.Active, ...parsed.data.items.Queue];
 
   for (const item of items) {

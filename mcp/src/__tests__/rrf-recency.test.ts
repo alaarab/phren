@@ -85,7 +85,7 @@ describe("recencyBoost", () => {
   it("returns 0 for non-findings type", () => {
     const today = new Date().toISOString().slice(0, 10);
     expect(recencyBoost("claude", today)).toBe(0);
-    expect(recencyBoost("backlog", today)).toBe(0);
+    expect(recencyBoost("task", today)).toBe(0);
   });
 
   it("returns 0 for invalid date string", () => {

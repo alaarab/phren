@@ -56,7 +56,7 @@ If you cloned manually:
 2. **Work normally**: Claude reads your project docs and uses past findings
 3. **Findings accumulate**: insights get saved to FINDINGS.md automatically
 4. **Session ends**: cortex auto-commits and pushes changes
-5. **Review occasionally**: run `npx cortex shell` to triage queued memories, manage backlogs, and check health
+5. **Review occasionally**: run `npx cortex shell` to triage queued memories, manage tasks, and check health
 
 ## Syncing across machines
 

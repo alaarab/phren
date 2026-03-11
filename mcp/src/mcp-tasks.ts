@@ -5,35 +5,35 @@ import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName } from "./utils.js";
 import {
-  addBacklogItem as addBacklogItemStore,
-  addBacklogItems as addBacklogItemsBatch,
-  backlogMarkdown,
-  type BacklogDoc,
-  type BacklogSection,
-  completeBacklogItem as completeBacklogItemStore,
-  completeBacklogItems as completeBacklogItemsBatch,
-  linkBacklogItemIssue,
-  pinBacklogItem,
-  workNextBacklogItem,
-  tidyBacklogDone,
-  readBacklog,
-  readBacklogs,
-  resolveBacklogItem,
+  addTask as addTaskStore,
+  addTasks as addTasksBatch,
+  taskMarkdown,
+  type TaskDoc,
+  type TaskSection,
+  completeTask as completeTaskStore,
+  completeTasks as completeTasksBatch,
+  linkTaskIssue,
+  pinTask,
+  workNextTask,
+  tidyDoneTasks,
+  readTasks,
+  readTasksAcrossProjects,
+  resolveTaskItem,
   TASKS_FILENAME,
-  updateBacklogItem as updateBacklogItemStore,
+  updateTask as updateTaskStore,
 } from "./data-access.js";
 import {
-  buildBacklogIssueBody,
-  createGithubIssueForBacklog,
+  buildTaskIssueBody,
+  createGithubIssueForTask,
   parseGithubIssueUrl,
   resolveProjectGithubRepo,
-} from "./backlog-github.js";
+} from "./tasks-github.js";
 
-type BacklogStatus = "all" | "active" | "queue" | "done" | "active+queue";
+type TaskStatus = "all" | "active" | "queue" | "done" | "active+queue";
 
-const BACKLOG_SECTION_ORDER: BacklogSection[] = ["Active", "Queue", "Done"];
+const TASK_SECTION_ORDER: TaskSection[] = ["Active", "Queue", "Done"];
 
-const DEFAULT_BACKLOG_LIMIT = 20;
+const DEFAULT_TASK_LIMIT = 20;
 /** Done items are historical — cap tightly by default to avoid large responses. */
 const DEFAULT_DONE_LIMIT = 5;
 
@@ -41,10 +41,10 @@ function refreshTaskIndex(updateFileInIndex: (filePath: string) => void, cortexP
   updateFileInIndex(path.join(cortexPath, project, TASKS_FILENAME));
 }
 
-function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: number, doneLimit?: number, offset?: number): { doc: BacklogDoc; includedSections: BacklogSection[]; totalItems: number; totalUnpaged: number; truncated: boolean } {
-  let includedSections: BacklogSection[];
+function buildTaskView(doc: TaskDoc, status?: TaskStatus, limit?: number, doneLimit?: number, offset?: number): { doc: TaskDoc; includedSections: TaskSection[]; totalItems: number; totalUnpaged: number; truncated: boolean } {
+  let includedSections: TaskSection[];
   if (status === "all") {
-    includedSections = BACKLOG_SECTION_ORDER;
+    includedSections = TASK_SECTION_ORDER;
   } else if (status === "done") {
     includedSections = ["Done"];
   } else if (status === "active") {
@@ -55,12 +55,12 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
     includedSections = ["Active", "Queue"];
   }
 
-  const effectiveLimit = limit ?? DEFAULT_BACKLOG_LIMIT;
+  const effectiveLimit = limit ?? DEFAULT_TASK_LIMIT;
   const effectiveDoneLimit = doneLimit ?? DEFAULT_DONE_LIMIT;
   const effectiveOffset = offset ?? 0;
   let truncated = false;
 
-  const items: Record<BacklogSection, BacklogDoc["items"][BacklogSection]> = {
+  const items: Record<TaskSection, TaskDoc["items"][TaskSection]> = {
     Active: [],
     Queue: [],
     Done: [],
@@ -81,7 +81,7 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
     }
   }
 
-  const totalItems = BACKLOG_SECTION_ORDER.reduce((sum, section) => sum + items[section].length, 0);
+  const totalItems = TASK_SECTION_ORDER.reduce((sum, section) => sum + items[section].length, 0);
 
   return {
     doc: { ...doc, items },
@@ -92,7 +92,7 @@ function buildBacklogView(doc: BacklogDoc, status?: BacklogStatus, limit?: numbe
   };
 }
 
-function buildBacklogSummary(doc: BacklogDoc, includedSections: BacklogSection[]): string {
+function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[]): string {
   const lines: string[] = [`## ${doc.project}`];
   for (const section of includedSections) {
     const items = doc.items[section];
@@ -135,7 +135,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        const result = readBacklog(cortexPath, project);
+        const result = readTasks(cortexPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
@@ -167,10 +167,10 @@ export function register(server: McpServer, ctx: McpContext): void {
       // Full task list for one project
       if (project) {
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        const result = readBacklog(cortexPath, project);
+        const result = readTasks(cortexPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
-        const view = buildBacklogView(doc, status, limit, done_limit, offset);
+        const view = buildTaskView(doc, status, limit, done_limit, offset);
         if (!fs.existsSync(doc.path)) {
           return mcpResponse({
             ok: true,
@@ -181,7 +181,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (summary) {
           return mcpResponse({
             ok: true,
-            message: buildBacklogSummary(view.doc, view.includedSections),
+            message: buildTaskSummary(view.doc, view.includedSections),
             data: { project, includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
           });
         }
@@ -190,23 +190,23 @@ export function register(server: McpServer, ctx: McpContext): void {
           : (offset ? `\n\n_Page offset: ${offset}. ${view.totalItems} items returned._` : "");
         return mcpResponse({
           ok: true,
-          message: `## ${project}\n${backlogMarkdown(view.doc)}${paginationNote}`,
+          message: `## ${project}\n${taskMarkdown(view.doc)}${paginationNote}`,
           data: { project, items: view.doc.items, issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, totalUnpaged: view.totalUnpaged, offset: offset ?? 0, truncated: view.truncated },
         });
       }
 
       // All projects
-      const docs = readBacklogs(cortexPath, profile);
+      const docs = readTasksAcrossProjects(cortexPath, profile);
       if (!docs.length) return mcpResponse({ ok: true, message: "No tasks found.", data: { projects: [] } });
-      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildBacklogView(doc, status, limit, done_limit, offset), issues: doc.issues }));
+      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildTaskView(doc, status, limit, done_limit, offset), issues: doc.issues }));
       const anyTruncated = views.some(({ view }) => view.truncated);
       let parts: string[];
       if (summary) {
-        parts = views.map(({ view }) => buildBacklogSummary(view.doc, view.includedSections));
+        parts = views.map(({ view }) => buildTaskSummary(view.doc, view.includedSections));
       } else {
-        parts = views.map(({ project, view }) => `## ${project}\n${backlogMarkdown(view.doc)}`);
+        parts = views.map(({ project, view }) => `## ${project}\n${taskMarkdown(view.doc)}`);
       }
-      const truncationNote = anyTruncated && !summary ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_BACKLOG_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
+      const truncationNote = anyTruncated && !summary ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_TASK_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
       const projectData = views.map(({ project, view, issues }) => ({
         project,
         items: view.doc.items,
@@ -232,7 +232,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = addBacklogItemStore(cortexPath, project, item);
+        const result = addTaskStore(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
@@ -253,7 +253,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, items }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = addBacklogItemsBatch(cortexPath, project, items);
+        const result = addTasksBatch(cortexPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, errors } = result.data;
         if (added.length > 0) refreshTaskIndex(updateFileInIndex, cortexPath, project);
@@ -275,7 +275,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = completeBacklogItemStore(cortexPath, project, item);
+        const result = completeTaskStore(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
@@ -296,7 +296,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, items }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = completeBacklogItemsBatch(cortexPath, project, items);
+        const result = completeTasksBatch(cortexPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { completed, errors } = result.data;
         if (completed.length > 0) refreshTaskIndex(updateFileInIndex, cortexPath, project);
@@ -319,7 +319,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           replace_context: z.boolean().optional().describe("If true, replace the existing Context: value instead of appending."),
           section: z.enum(["queue", "active", "done", "Queue", "Active", "Done"]).optional().describe("Move item to this section: Queue, Active, or Done."),
           github_issue: z.union([z.number().int().positive(), z.string()]).optional().describe("GitHub issue number (for example 14 or '#14')."),
-          github_url: z.string().optional().describe("GitHub issue URL to associate with the backlog item."),
+          github_url: z.string().optional().describe("GitHub issue URL to associate with the task item."),
           unlink_github: z.boolean().optional().describe("If true, remove any linked GitHub issue metadata from the item."),
         }).describe("Fields to update. All are optional."),
       }),
@@ -327,7 +327,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item, updates }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = updateBacklogItemStore(cortexPath, project, item, updates);
+        const result = updateTaskStore(cortexPath, project, item, updates);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
@@ -345,7 +345,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         item: z.string().describe("Task text, ID, or stable bid to link."),
         issue_number: z.union([z.number().int().positive(), z.string()]).optional().describe("Existing GitHub issue number (for example 14 or '#14')."),
         issue_url: z.string().optional().describe("Existing GitHub issue URL."),
-        unlink: z.boolean().optional().describe("If true, remove any linked issue from the backlog item."),
+        unlink: z.boolean().optional().describe("If true, remove any linked issue from the task item."),
       }),
     },
     async ({ project, item, issue_number, issue_url, unlink }) => {
@@ -368,7 +368,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
 
-        const result = linkBacklogItemIssue(cortexPath, project, item, {
+        const result = linkTaskIssue(cortexPath, project, item, {
           github_issue: issue_number,
           github_url: issue_url,
           unlink: unlink ?? false,
@@ -409,7 +409,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item, repo, title, body, mark_done }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const match = resolveBacklogItem(cortexPath, project, item);
+        const match = resolveTaskItem(cortexPath, project, item);
         if (!match.ok) return mcpResponse({ ok: false, error: match.error, errorCode: match.code });
 
         const targetRepo = repo || resolveProjectGithubRepo(cortexPath, project);
@@ -417,21 +417,21 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok: false, error: "Could not infer a GitHub repo for this project. Provide repo in owner/name form or add a GitHub URL to CLAUDE.md/summary.md." });
         }
 
-        const created = createGithubIssueForBacklog({
+        const created = createGithubIssueForTask({
           repo: targetRepo,
           title: title?.trim() || match.data.line.replace(/\s*\[(high|medium|low)\]\s*$/i, "").trim(),
-          body: body?.trim() || buildBacklogIssueBody(project, match.data),
+          body: body?.trim() || buildTaskIssueBody(project, match.data),
         });
         if (!created.ok) return mcpResponse({ ok: false, error: created.error, errorCode: created.code });
 
-        const linked = linkBacklogItemIssue(cortexPath, project, match.data.stableId ? `bid:${match.data.stableId}` : match.data.id, {
+        const linked = linkTaskIssue(cortexPath, project, match.data.stableId ? `bid:${match.data.stableId}` : match.data.id, {
           github_issue: created.data.issueNumber,
           github_url: created.data.url,
         });
         if (!linked.ok) return mcpResponse({ ok: false, error: linked.error, errorCode: linked.code });
 
         if (mark_done) {
-          const completed = completeBacklogItemStore(cortexPath, project, linked.data.stableId ? `bid:${linked.data.stableId}` : linked.data.id);
+          const completed = completeTaskStore(cortexPath, project, linked.data.stableId ? `bid:${linked.data.stableId}` : linked.data.id);
           if (!completed.ok) return mcpResponse({ ok: false, error: completed.error, errorCode: completed.code });
         }
 
@@ -465,7 +465,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = pinBacklogItem(cortexPath, project, item);
+        const result = pinTask(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
@@ -485,7 +485,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = workNextBacklogItem(cortexPath, project);
+        const result = workNextTask(cortexPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project } });
@@ -507,7 +507,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, keep, dry_run }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = tidyBacklogDone(cortexPath, project, keep ?? 30, dry_run ?? false);
+        const result = tidyDoneTasks(cortexPath, project, keep ?? 30, dry_run ?? false);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         if (!dry_run) refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, keep: keep ?? 30, dryRun: dry_run ?? false } });

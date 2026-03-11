@@ -8,12 +8,12 @@ import {
   normalizeProjectNameForCreate,
 } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
-import { readBacklogs, TASKS_FILENAME } from "./data-access.js";
+import { readTasksAcrossProjects, TASKS_FILENAME } from "./data-access.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import { resolveSubprocessArgs } from "./cli-hooks.js";
 
-export function handleBacklogView(profile: string) {
-  const docs = readBacklogs(getCortexPath(), profile);
+export function handleTaskView(profile: string) {
+  const docs = readTasksAcrossProjects(getCortexPath(), profile);
   if (!docs.length) {
     console.log("No tasks found.");
     return;

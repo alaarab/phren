@@ -631,7 +631,7 @@ describe("runInit walkthrough integration", () => {
       yes: true,
       projectOwnershipDefault: "detached",
       findingsProactivity: "medium",
-      backlogProactivity: "low",
+      taskProactivity: "low",
       taskMode: "suggest",
     }));
 
@@ -641,7 +641,7 @@ describe("runInit walkthrough integration", () => {
 
     expect(installPrefs.projectOwnershipDefault).toBe("detached");
     expect(governancePrefs.proactivityFindings).toBe("medium");
-    expect(governancePrefs.proactivityBacklog).toBe("low");
+    expect(governancePrefs.proactivityTask).toBe("low");
     expect(workflowPolicy.taskMode).toBe("suggest");
   });
 

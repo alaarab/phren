@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "./test-helpers.js";
 import { handleTaskPromptLifecycle, finalizeTaskSession } from "./task-lifecycle.js";
-import { readBacklog } from "./data-access.js";
+import { readTasks } from "./data-access.js";
 
 describe("task lifecycle", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -19,7 +19,7 @@ describe("task lifecycle", () => {
       riskySections: ["Stale", "Conflicts"],
       taskMode: "manual",
     }, null, 2) + "\n");
-    writeFile(path.join(tmp.path, project, "backlog.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
+    writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
     writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/cortex\n");
   });
 
@@ -28,7 +28,7 @@ describe("task lifecycle", () => {
     tmp.cleanup();
   });
 
-  it("suggest mode proposes a task without mutating backlog.md", () => {
+  it("suggest mode proposes a task without mutating tasks.md", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
       requireMaintainerApproval: true,
@@ -37,7 +37,7 @@ describe("task lifecycle", () => {
       taskMode: "suggest",
     }, null, 2) + "\n");
 
-    const before = fs.readFileSync(path.join(tmp.path, project, "backlog.md"), "utf8");
+    const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
     const result = handleTaskPromptLifecycle({
       cortexPath: tmp.path,
       prompt: "Implement automatic task management for hooks",
@@ -48,7 +48,7 @@ describe("task lifecycle", () => {
 
     expect(result.mode).toBe("suggest");
     expect(result.noticeLines.join("\n")).toContain("Task suggestion");
-    const after = fs.readFileSync(path.join(tmp.path, project, "backlog.md"), "utf8");
+    const after = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
     expect(after).toBe(before);
   });
 
@@ -72,13 +72,13 @@ describe("task lifecycle", () => {
     expect(result.mode).toBe("auto");
     expect(result.noticeLines.join("\n")).toContain("Active task");
 
-    const backlog = readBacklog(tmp.path, project);
-    expect(backlog.ok).toBe(true);
-    if (!backlog.ok) return;
-    expect(backlog.data.items.Active).toHaveLength(1);
-    expect(backlog.data.items.Active[0].context).toContain("Implement automatic task management for hooks");
-    expect(backlog.data.items.Active[0].githubIssue).toBe(14);
-    expect(backlog.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Active).toHaveLength(1);
+    expect(task.data.items.Active[0].context).toContain("Implement automatic task management for hooks");
+    expect(task.data.items.Active[0].githubIssue).toBe(14);
+    expect(task.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
   });
 
   it("auto mode completes the tracked task after a successful stop", () => {
@@ -105,10 +105,10 @@ describe("task lifecycle", () => {
       detail: "commit saved; background sync scheduled",
     });
 
-    const backlog = readBacklog(tmp.path, project);
-    expect(backlog.ok).toBe(true);
-    if (!backlog.ok) return;
-    expect(backlog.data.items.Active).toHaveLength(0);
-    expect(backlog.data.items.Done[0].line).toContain("Fix narrow terminal task rendering");
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Active).toHaveLength(0);
+    expect(task.data.items.Done[0].line).toContain("Fix narrow terminal task rendering");
   });
 });

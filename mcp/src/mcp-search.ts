@@ -140,7 +140,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         project: z.string().optional().describe("Filter by project name."),
         type: z.enum(DOC_TYPES)
           .optional()
-          .describe("Filter by document type: claude, findings, reference, summary, backlog, skill"),
+          .describe("Filter by document type: claude, findings, reference, summary, task, skill"),
         tag: z.preprocess(
           value => typeof value === "string" ? value.toLowerCase() : value,
           z.enum(FINDING_TAGS)
@@ -261,7 +261,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           db,
           undefined,
           query,
-          { skipBacklogFilter: true, filterType: filterType ?? null }
+          { skipTaskFilter: true, filterType: filterType ?? null }
         ).slice(0, maxResults);
 
         const results = rows.map((row) => {
@@ -416,8 +416,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Page ${pageNum} out of range. Total pages: ${totalPages}.` });
       }
 
-      const badgeTypes = ["claude", "findings", "summary", "backlog"] as const;
-      const badgeLabels: Record<string, string> = { claude: "CLAUDE.md", findings: "FINDINGS", summary: "summary", backlog: "backlog" };
+      const badgeTypes = ["claude", "findings", "summary", "task"] as const;
+      const badgeLabels: Record<string, string> = { claude: "CLAUDE.md", findings: "FINDINGS", summary: "summary", task: "task" };
 
       const projectList = pageProjects.map((proj) => {
         const rows = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ?", [proj]) ?? [];
@@ -471,7 +471,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const capped = items.slice(0, limit ?? 50);
       const lines = capped.map((entry) => {
         const metadata: string[] = [];
-        if (entry.backlogItem) metadata.push(`backlog=${entry.backlogItem}`);
+        if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
         if (entry.sessionId) metadata.push(`session=${entry.sessionId.slice(0, 8)}`);
         if (entry.actor) metadata.push(`actor=${entry.actor}`);
         if (entry.tool) metadata.push(`tool=${entry.tool}`);

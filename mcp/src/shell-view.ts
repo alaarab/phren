@@ -8,7 +8,7 @@ import * as path from "path";
 import {
   canonicalTaskFilePath,
   listProjectCards,
-  readBacklog,
+  readTasks,
   readFindings,
   readReviewQueue,
   readRuntimeHealth,
@@ -37,7 +37,7 @@ import {
   type DoctorResultLike,
 } from "./shell-types.js";
 import {
-  backlogsByFilter,
+  tasksByFilter,
   queueByFilter,
 } from "./shell-palette.js";
 import {
@@ -180,14 +180,14 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
       };
     }
 
-    const backlog = readBacklog(ctx.cortexPath, card.name);
+    const task = readTasks(ctx.cortexPath, card.name);
     const findings = readFindings(ctx.cortexPath, card.name);
     const review = readReviewQueue(ctx.cortexPath, card.name);
 
     return {
       ...card,
-      activeCount: backlog.ok ? backlog.data.items.Active.length : 0,
-      queueCount: backlog.ok ? backlog.data.items.Queue.length : 0,
+      activeCount: task.ok ? task.data.items.Active.length : 0,
+      queueCount: task.ok ? task.data.items.Queue.length : 0,
       findingCount: findings.ok ? findings.data.length : 0,
       reviewCount: review.ok ? review.data.length : 0,
     };
@@ -291,7 +291,7 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
   return [...dashboardLines, ...vp.lines];
 }
 
-// ── Backlog helpers ────────────────────────────────────────────────────────
+// ── Task helpers ────────────────────────────────────────────────────────
 
 function sectionBullet(title: string): { bullet: string; colorFn: (s: string) => string } {
   switch (title) {
@@ -310,11 +310,11 @@ export interface SubsectionsCache {
 
 const BID_RE = /<!--\s*bid:([a-z0-9]{8})\s*-->/;
 
-function parseSubsections(backlogPath: string, project: string, cache: SubsectionsCache | null): { map: Map<string, string>; cache: SubsectionsCache } {
+function parseSubsections(taskPath: string, project: string, cache: SubsectionsCache | null): { map: Map<string, string>; cache: SubsectionsCache } {
   if (cache?.project === project) return { map: cache.map, cache };
   const map = new Map<string, string>();
   try {
-    const raw = fs.readFileSync(backlogPath, "utf8");
+    const raw = fs.readFileSync(taskPath, "utf8");
     let currentSub = "";
     let rowIdx = 0;
     for (const line of raw.split("\n")) {
@@ -339,14 +339,14 @@ function parseSubsections(backlogPath: string, project: string, cache: Subsectio
 
 // ── Tasks view ─────────────────────────────────────────────────────────────
 
-function renderBacklogView(ctx: ViewContext, cursor: number, height: number, subsectionsCache: SubsectionsCache | null): { lines: string[]; subsectionsCache: SubsectionsCache | null } {
+function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsectionsCache: SubsectionsCache | null): { lines: string[]; subsectionsCache: SubsectionsCache | null } {
   const cols = renderWidth();
   const project = ctx.state.project;
   if (!project) {
     return { lines: [style.dim("  No project selected — navigate to Projects (← →) and press ↵")], subsectionsCache };
   }
 
-  const result = readBacklog(ctx.cortexPath, project);
+  const result = readTasks(ctx.cortexPath, project);
   if (!result.ok) return { lines: [result.error], subsectionsCache };
 
   const parsed = result.data;
@@ -354,16 +354,16 @@ function renderBacklogView(ctx: ViewContext, cursor: number, height: number, sub
     ? [`  ${style.yellow("⚠")}  ${style.yellow(parsed.issues.join("; "))}`, ""]
     : [];
 
-  const backlogFile = resolveTaskFilePath(ctx.cortexPath, project)
+  const taskFile = resolveTaskFilePath(ctx.cortexPath, project)
     ?? canonicalTaskFilePath(ctx.cortexPath, project)
     ?? path.join(ctx.cortexPath, project, "tasks.md");
-  const subsResult = parseSubsections(backlogFile, project, subsectionsCache);
+  const subsResult = parseSubsections(taskFile, project, subsectionsCache);
   const subsections = subsResult.map;
   const newCache = subsResult.cache;
 
-  const active = ctx.state.filter ? backlogsByFilter(parsed.items.Active, ctx.state.filter) : parsed.items.Active;
-  const queue = ctx.state.filter ? backlogsByFilter(parsed.items.Queue, ctx.state.filter) : parsed.items.Queue;
-  const done = ctx.state.filter ? backlogsByFilter(parsed.items.Done, ctx.state.filter) : parsed.items.Done;
+  const active = ctx.state.filter ? tasksByFilter(parsed.items.Active, ctx.state.filter) : parsed.items.Active;
+  const queue = ctx.state.filter ? tasksByFilter(parsed.items.Queue, ctx.state.filter) : parsed.items.Queue;
+  const done = ctx.state.filter ? tasksByFilter(parsed.items.Done, ctx.state.filter) : parsed.items.Done;
   const flatItems = [...active, ...queue, ...done];
 
   if (!flatItems.length) {
@@ -875,7 +875,7 @@ export async function renderShell(
         contentLines = renderProjectsView(ctx, cursor, height);
         break;
       case "Tasks": {
-        const result = renderBacklogView(ctx, cursor, height, subsectionsCache);
+        const result = renderTaskView(ctx, cursor, height, subsectionsCache);
         contentLines = result.lines;
         setSubsectionsCache(result.subsectionsCache);
         break;

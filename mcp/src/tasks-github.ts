@@ -3,7 +3,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { EXEC_TIMEOUT_MS, cortexErr, cortexOk, type CortexResult, CortexError } from "./shared.js";
 import { errorMessage, resolveExecCommand } from "./utils.js";
-import type { BacklogItem } from "./data-backlog.js";
+import type { TaskItem } from "./data-tasks.js";
 
 const GITHUB_REPO_URL = /https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?:\/|\b|$)/;
 const GITHUB_ISSUE_URL = /https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)(?:[?#][^\s]*)?$/;
@@ -40,22 +40,22 @@ export function resolveProjectGithubRepo(cortexPath: string, project: string): s
   return undefined;
 }
 
-export function buildBacklogIssueBody(project: string, item: BacklogItem): string {
+export function buildTaskIssueBody(project: string, item: TaskItem): string {
   const lines = [
-    `Imported from cortex backlog for project \`${project}\`.`,
+    `Imported from cortex task for project \`${project}\`.`,
     "",
-    `Backlog item: ${item.line}`,
+    `Task item: ${item.line}`,
   ];
   if (item.context) {
     lines.push("", `Context: ${item.context}`);
   }
   if (item.stableId) {
-    lines.push("", `Backlog ID: \`bid:${item.stableId}\``);
+    lines.push("", `Task ID: \`bid:${item.stableId}\``);
   }
   return lines.join("\n");
 }
 
-export function createGithubIssueForBacklog(args: {
+export function createGithubIssueForTask(args: {
   repo: string;
   title: string;
   body: string;

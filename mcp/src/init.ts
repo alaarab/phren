@@ -50,7 +50,7 @@ export {
   type ProactivityLevel,
   getProactivityLevel,
   getProactivityLevelForFindings,
-  getProactivityLevelForBacklog,
+  getProactivityLevelForTask,
 } from "./proactivity.js";
 
 export type { PostInitCheck } from "./init-setup.js";
@@ -173,7 +173,7 @@ export interface InitOptions {
   hooks?: McpMode;
   projectOwnershipDefault?: ProjectOwnershipMode;
   findingsProactivity?: ProactivityLevel;
-  backlogProactivity?: ProactivityLevel;
+  taskProactivity?: ProactivityLevel;
   taskMode?: "off" | "manual" | "suggest" | "auto";
   applyStarterUpdate?: boolean;
   dryRun?: boolean;
@@ -256,7 +256,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   hooks: McpMode;
   projectOwnershipDefault: ProjectOwnershipMode;
   findingsProactivity: ProactivityLevel;
-  backlogProactivity: ProactivityLevel;
+  taskProactivity: ProactivityLevel;
   taskMode: "off" | "manual" | "suggest" | "auto";
   bootstrapCurrentProject: boolean;
   bootstrapOwnership?: ProjectOwnershipMode;
@@ -288,7 +288,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
       hooks: "on",
       projectOwnershipDefault: "cortex-managed",
       findingsProactivity: "high",
-      backlogProactivity: "medium",
+      taskProactivity: "medium",
       taskMode: "manual",
       bootstrapCurrentProject: false,
       ollamaEnabled: false,
@@ -397,19 +397,19 @@ async function runWalkthrough(cortexPath: string): Promise<{
 
   log("\n─── Task Management ────────────────────────────────────────────────────");
   log("Choose how far cortex should go when it sees actionable work in your prompts.");
-  log("  off: never touch backlog automatically");
-  log("  manual: backlog stays fully manual");
+  log("  off: never touch task automatically");
+  log("  manual: task stays fully manual");
   log("  suggest: propose tasks, but do not write them");
   log("  auto: write/update active tasks when intent is clear");
   log("  Change later: npx cortex config workflow set --taskMode=<mode>");
   const taskModeAnswer = (await ask(`Task mode [off/manual/suggest/auto] (manual): `)).trim();
   const taskMode = parseTaskMode(taskModeAnswer) ?? "manual";
-  let backlogProactivity: ProactivityLevel = "medium";
+  let taskProactivity: ProactivityLevel = "medium";
   if (taskMode === "auto") {
-    log("  Backlog proactivity controls how much evidence cortex needs before auto-writing tasks.");
-    log("  Change later: npx cortex config proactivity.backlog <high|medium|low>");
-    const backlogAnswer = (await ask(`Backlog proactivity [high/medium/low] (medium): `)).trim();
-    backlogProactivity = parseProactivityAnswer(backlogAnswer, "medium");
+    log("  Task proactivity controls how much evidence cortex needs before auto-writing tasks.");
+    log("  Change later: npx cortex config proactivity.tasks <high|medium|low>");
+    const taskAnswer = (await ask(`Task proactivity [high/medium/low] (medium): `)).trim();
+    taskProactivity = parseProactivityAnswer(taskAnswer, "medium");
   }
 
   // Only offer semantic dedup/conflict when an LLM endpoint is explicitly configured.
@@ -482,7 +482,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
     hooks,
     projectOwnershipDefault,
     findingsProactivity,
-    backlogProactivity,
+    taskProactivity,
     taskMode,
     bootstrapCurrentProject,
     bootstrapOwnership,
@@ -545,10 +545,10 @@ function applyOnboardingPreferences(cortexPath: string, opts: InitOptions): void
   }
   const governancePatch: {
     proactivityFindings?: ProactivityLevel;
-    proactivityBacklog?: ProactivityLevel;
+    proactivityTask?: ProactivityLevel;
   } = {};
   if (opts.findingsProactivity) governancePatch.proactivityFindings = opts.findingsProactivity;
-  if (opts.backlogProactivity) governancePatch.proactivityBacklog = opts.backlogProactivity;
+  if (opts.taskProactivity) governancePatch.proactivityTask = opts.taskProactivity;
   if (Object.keys(governancePatch).length > 0) {
     writeGovernanceInstallPreferences(cortexPath, governancePatch);
   }
@@ -579,7 +579,7 @@ export async function runInit(opts: InitOptions = {}) {
     opts.hooks = opts.hooks || answers.hooks;
     opts.projectOwnershipDefault = opts.projectOwnershipDefault || answers.projectOwnershipDefault;
     opts.findingsProactivity = opts.findingsProactivity || answers.findingsProactivity;
-    opts.backlogProactivity = opts.backlogProactivity || answers.backlogProactivity;
+    opts.taskProactivity = opts.taskProactivity || answers.taskProactivity;
     opts.taskMode = opts.taskMode || answers.taskMode;
     if (answers.cloneUrl) {
       opts._walkthroughCloneUrl = answers.cloneUrl;
@@ -817,7 +817,7 @@ export async function runInit(opts: InitOptions = {}) {
       log(`\nNext steps:`);
       log(`  1. Start a new Claude session in your project directory — cortex injects context automatically`);
       log(`  2. Run \`npx cortex doctor\` to verify everything is wired correctly`);
-      log(`  3. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.backlog\``);
+      log(`  3. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.tasks\``);
       log(`  4. After your first week, run cortex-discover to surface gaps in your project knowledge`);
       log(`  5. After working across projects, run cortex-consolidate to find cross-project patterns`);
       log(``);
@@ -1091,7 +1091,7 @@ export async function runInit(opts: InitOptions = {}) {
   let step = 1;
   log(`  ${step++}. Start a new Claude session in your project directory — cortex injects context automatically`);
   log(`  ${step++}. Run \`npx cortex doctor\` to verify everything is wired correctly`);
-  log(`  ${step++}. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.backlog\``);
+  log(`  ${step++}. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.tasks\``);
 
   const gh = opts._walkthroughGithub;
   if (gh) {

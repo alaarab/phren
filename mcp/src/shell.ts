@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
-  addBacklogItem,
+  addTask,
   addFinding,
   editQueueItem,
   loadShellState,
@@ -155,7 +155,7 @@ export class CortexShell {
     switch (ctx) {
       case "filter": this.setFilter(buf); break;
       case "command": await this.runPalette(buf.startsWith(":") ? buf.slice(1) : buf); break;
-      case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addBacklogItem(this.cortexPath, p, buf))}`); break; }
+      case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addTask(this.cortexPath, p, buf))}`); break; }
       case "learn-add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addFinding(this.cortexPath, p, buf))}`); break; }
       case "skill-add": {
         const p = this.ensureProjectSelected();

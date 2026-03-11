@@ -143,7 +143,7 @@ After syncing, check each active project in the cortex directory for missing fil
 - `CLAUDE.md`: project-level Claude instructions
 
 **Recommended files** (note if missing, don't warn):
-- `backlog.md`: persistent task queue
+- `tasks.md`: persistent task queue
 - `FINDINGS.md`: captured session findings
 
 For each project in the profile, check `$CORTEX_DIR/<project>/` for these files and print:
@@ -244,7 +244,7 @@ If you don't have a cortex repo yet, start with `cortex-init` to create one from
 
 When two machines edit the same cortex file before syncing, `git pull` will hit a merge conflict. Here's how to handle each file type:
 
-**backlog.md**: Take both changes. Backlog items from both machines are valid. Concat them, deduplicate if needed, commit.
+**tasks.md**: Take both changes. Task items from both machines are valid. Concat them, deduplicate if needed, commit.
 
 **FINDINGS.md**: Take both changes. Keep entries in chronological order. If both machines added entries on the same date, interleave or group them under the same date heading.
 

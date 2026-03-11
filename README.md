@@ -261,7 +261,7 @@ For a brand-new scaffold inside Claude:
 - `cortex add` is the supported path for existing repos.
 - Change the default add behavior later with `cortex config project-ownership <mode>`.
 - Change task automation later with `cortex config workflow set --taskMode=<off|manual|suggest|auto>`.
-- Tune capture levels later with `cortex config proactivity.findings <high|medium|low>` and `cortex config proactivity.backlog <high|medium|low>`.
+- Tune capture levels later with `cortex config proactivity.findings <high|medium|low>` and `cortex config proactivity.tasks <high|medium|low>`.
 - Platform support and release expectations are documented in [docs/platform-matrix.md](docs/platform-matrix.md).
 - Best-effort vs fail-closed behavior is documented in [docs/error-reporting.md](docs/error-reporting.md).
 - Package/update behavior is documented in [docs/versioning.md](docs/versioning.md).
@@ -334,14 +334,14 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 
 | Tool | What it does |
 |------|-------------|
-| `get_backlog` | Read tasks for one or all projects, or fetch a single item by ID or text. |
-| `add_backlog_item` | Add a task to the Queue section. |
-| `add_backlog_items` | Bulk add multiple tasks in one call. |
-| `complete_backlog_item` | Match by text, move to Done. |
-| `complete_backlog_items` | Bulk complete multiple items in one call. |
-| `update_backlog_item` | Change priority, context, section, or linked GitHub issue. |
-| `link_backlog_item_issue` | Link or unlink an existing GitHub issue on a task item. |
-| `promote_backlog_item_to_issue` | Create a GitHub issue from a task item and write the link back. |
+| `get_tasks` | Read tasks for one or all projects, or fetch a single item by ID or text. |
+| `add_task` | Add a task to the Queue section. |
+| `add_tasks` | Bulk add multiple tasks in one call. |
+| `complete_task` | Match by text, move to Done. |
+| `complete_tasks` | Bulk complete multiple items in one call. |
+| `update_task` | Change priority, context, section, or linked GitHub issue. |
+| `link_task_issue` | Link or unlink an existing GitHub issue on a task item. |
+| `promote_task_to_issue` | Create a GitHub issue from a task item and write the link back. |
 
 ### Finding capture
 
@@ -439,7 +439,7 @@ cortex                                   # interactive shell (TTY default)
 cortex search "rate limiting"            # FTS5 search with synonym expansion
 cortex add-finding <project> "..."       # append a finding from the terminal
 cortex pin <project> "..."               # promote canonical memory
-cortex backlog [project]                 # cross-project task view
+cortex tasks [project]                 # cross-project task view
 cortex status                            # health, active project, stats
 cortex doctor [--fix]                    # health checks + optional self-heal
 cortex verify                            # check init completed correctly
@@ -457,7 +457,7 @@ cortex hooks-mode [on|off|status]        # toggle hook execution
 cortex config project-ownership [mode]   # default ownership for future project enrollments
 cortex config workflow set --taskMode=manual  # set task handling mode
 cortex config proactivity.findings [level]    # findings auto-capture aggressiveness
-cortex config proactivity.backlog [level]     # backlog auto-capture aggressiveness
+cortex config proactivity.tasks [level]     # task auto-capture aggressiveness
 
 cortex skills list                       # list all installed skills
 cortex skills add <project> <path>       # add a skill to a project

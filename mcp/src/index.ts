@@ -16,7 +16,7 @@ import {
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { register as registerSearch } from "./mcp-search.js";
-import { register as registerBacklog } from "./mcp-backlog.js";
+import { register as registerTask } from "./mcp-tasks.js";
 import { register as registerFinding } from "./mcp-finding.js";
 import { register as registerMemory } from "./mcp-memory.js";
 import { register as registerData } from "./mcp-data.js";
@@ -185,7 +185,7 @@ async function main() {
   };
 
   registerSearch(server, ctx);
-  registerBacklog(server, ctx);
+  registerTask(server, ctx);
   registerFinding(server, ctx);
   registerMemory(server, ctx);
   registerData(server, ctx);

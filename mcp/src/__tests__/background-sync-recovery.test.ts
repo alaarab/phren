@@ -52,7 +52,7 @@ describe("handleBackgroundSync recovery", () => {
     configureRepo(repoB);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
-    fs.writeFileSync(path.join(repoA, "demo", "backlog.md"), "# backlog\n\n## Active\n\n- Base task\n");
+    fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# task\n\n## Active\n\n- Base task\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
     const primaryBranch = currentBranch(repoA);
@@ -60,7 +60,7 @@ describe("handleBackgroundSync recovery", () => {
 
     checkoutRemoteBranch(repoB, primaryBranch);
 
-    fs.writeFileSync(path.join(repoA, "demo", "backlog.md"), "# backlog\n\n## Active\n\n- Base task\n- Remote task\n");
+    fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# task\n\n## Active\n\n- Base task\n- Remote task\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "remote"], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["push"], { cwd: repoA, stdio: "ignore" });
@@ -152,10 +152,10 @@ describe("handleBackgroundSync recovery", () => {
     expect(fs.readFileSync(path.join(repoB, "demo", "summary.md"), "utf8")).not.toContain("<<<<<<<");
   }, RECOVERY_TEST_TIMEOUT_MS);
 
-  it("auto-merges backlog conflicts without leaving merge markers behind", async () => {
-    const remote = path.join(tmp.path, "remote-backlog.git");
-    const repoA = path.join(tmp.path, "repo-backlog-a");
-    const repoB = path.join(tmp.path, "repo-backlog-b");
+  it("auto-merges task conflicts without leaving merge markers behind", async () => {
+    const remote = path.join(tmp.path, "remote-task.git");
+    const repoA = path.join(tmp.path, "repo-task-a");
+    const repoB = path.join(tmp.path, "repo-task-b");
 
     execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
     execFileSync("git", ["clone", remote, repoA], { stdio: "ignore" });
@@ -166,31 +166,31 @@ describe("handleBackgroundSync recovery", () => {
     fs.mkdirSync(path.join(repoB, ".governance"), { recursive: true });
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
-    fs.writeFileSync(path.join(repoA, "demo", "backlog.md"), "# demo backlog\n\n## Active\n\n- [ ] Base task\n\n## Queue\n\n## Done\n");
+    fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# demo task\n\n## Active\n\n- [ ] Base task\n\n## Queue\n\n## Done\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
     const primaryBranch = currentBranch(repoA);
     execFileSync("git", ["push", "-u", "origin", primaryBranch], { cwd: repoA, stdio: "ignore" });
     checkoutRemoteBranch(repoB, primaryBranch);
 
-    fs.writeFileSync(path.join(repoA, "demo", "backlog.md"), "# demo backlog\n\n## Active\n\n- [ ] Base task\n- [ ] Remote task\n\n## Queue\n\n## Done\n");
+    fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# demo task\n\n## Active\n\n- [ ] Base task\n- [ ] Remote task\n\n## Queue\n\n## Done\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
-    execFileSync("git", ["commit", "-m", "remote backlog"], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "remote task"], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["push"], { cwd: repoA, stdio: "ignore" });
 
-    fs.writeFileSync(path.join(repoB, "demo", "backlog.md"), "# demo backlog\n\n## Active\n\n- [ ] Base task\n- [ ] Local task\n\n## Queue\n\n## Done\n");
+    fs.writeFileSync(path.join(repoB, "demo", "tasks.md"), "# demo task\n\n## Active\n\n- [ ] Base task\n- [ ] Local task\n\n## Queue\n\n## Done\n");
     execFileSync("git", ["add", "."], { cwd: repoB, stdio: "ignore" });
-    execFileSync("git", ["commit", "-m", "local backlog"], { cwd: repoB, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "local task"], { cwd: repoB, stdio: "ignore" });
 
     process.env.CORTEX_PATH = repoB;
     const { handleBackgroundSync } = await import("../cli-hooks-session.js");
     await handleBackgroundSync();
 
     execFileSync("git", ["pull", "--quiet"], { cwd: repoA, stdio: "ignore" });
-    const backlog = fs.readFileSync(path.join(repoA, "demo", "backlog.md"), "utf8");
-    expect(backlog).toContain("Remote task");
-    expect(backlog).toContain("Local task");
-    expect(backlog).not.toContain("<<<<<<<");
+    const task = fs.readFileSync(path.join(repoA, "demo", "tasks.md"), "utf8");
+    expect(task).toContain("Remote task");
+    expect(task).toContain("Local task");
+    expect(task).not.toContain("<<<<<<<");
   }, RECOVERY_TEST_TIMEOUT_MS);
 
 });

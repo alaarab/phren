@@ -3,7 +3,7 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { isValidProjectName } from "./utils.js";
 import { homeDir, homePath } from "./shared.js";
-import { resolveTaskFilePath } from "./data-backlog.js";
+import { resolveTaskFilePath } from "./data-tasks.js";
 
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
@@ -127,17 +127,17 @@ export function writeContextPlanning(machine: string, profile: string, mcpStatus
       break;
     }
     const summaryFile = path.join(cortexPath, project, "summary.md");
-    const backlogFile = resolveTaskFilePath(cortexPath, project);
-    if (!fs.existsSync(summaryFile) && !backlogFile) continue;
+    const taskFile = resolveTaskFilePath(cortexPath, project);
+    if (!fs.existsSync(summaryFile) && !taskFile) continue;
     content += `\n\n## ${project}\n`;
     if (fs.existsSync(summaryFile)) content += fs.readFileSync(summaryFile, "utf8") + "\n";
-    if (backlogFile && fs.existsSync(backlogFile)) {
-      let backlog = fs.readFileSync(backlogFile, "utf8");
+    if (taskFile && fs.existsSync(taskFile)) {
+      let task = fs.readFileSync(taskFile, "utf8");
       const remaining = MAX_CONTEXT_BYTES - content.length;
-      if (backlog.length > remaining && remaining > 0) {
-        backlog = backlog.slice(0, remaining) + "\n(backlog truncated)\n";
+      if (task.length > remaining && remaining > 0) {
+        task = task.slice(0, remaining) + "\n(task truncated)\n";
       }
-      content += `\n### Backlog\n${backlog}\n`;
+      content += `\n### Task\n${task}\n`;
     }
   }
   writeContextFile(content);

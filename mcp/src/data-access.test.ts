@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  readBacklog,
-  addBacklogItem,
-  completeBacklogItem,
-  updateBacklogItem,
-  linkBacklogItemIssue,
-  resolveBacklogItem,
-  workNextBacklogItem,
-  pinBacklogItem,
-  unpinBacklogItem,
-  tidyBacklogDone,
+  readTasks,
+  addTask,
+  completeTask,
+  updateTask,
+  linkTaskIssue,
+  resolveTaskItem,
+  workNextTask,
+  pinTask,
+  unpinTask,
+  tidyDoneTasks,
   readReviewQueue,
   approveQueueItem,
   rejectQueueItem,
@@ -54,7 +54,7 @@ afterEach(() => {
   delete process.env.CORTEX_ACTOR;
 });
 
-const SAMPLE_BACKLOG = `# testproject backlog
+const SAMPLE_TASK = `# testproject tasks
 
 ## Active
 
@@ -84,10 +84,10 @@ const SAMPLE_FINDINGS = `# testproject FINDINGS
 - vitest needs pool: "forks" when testing native addons
 `;
 
-describe("readBacklog", () => {
-  it("parses a valid backlog with Active/Queue/Done sections", () => {
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
-    const result = readBacklog(tmpDir, PROJECT);
+describe("readTasks", () => {
+  it("parses a valid task with Active/Queue/Done sections", () => {
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -106,8 +106,8 @@ describe("readBacklog", () => {
     expect(result.data.items.Done[0].checked).toBe(true);
   });
 
-  it("returns an empty backlog when the file does not exist", () => {
-    const result = readBacklog(tmpDir, PROJECT);
+  it("returns an empty task when the file does not exist", () => {
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -117,21 +117,21 @@ describe("readBacklog", () => {
   });
 
   it("returns an error for an invalid project name", () => {
-    const result = readBacklog(tmpDir, "../escape");
+    const result = readTasks(tmpDir, "../escape");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe(CortexError.INVALID_PROJECT_NAME);
   });
 
   it("returns an error for a missing project directory", () => {
-    const result = readBacklog(tmpDir, "nonexistent");
+    const result = readTasks(tmpDir, "nonexistent");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
   });
 
-  it("handles a backlog with no items", () => {
-    const empty = `# testproject backlog\n\n## Active\n\n## Queue\n\n## Done\n`;
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), empty);
-    const result = readBacklog(tmpDir, PROJECT);
+  it("handles a task with no items", () => {
+    const empty = `# testproject task\n\n## Active\n\n## Queue\n\n## Done\n`;
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), empty);
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -141,8 +141,8 @@ describe("readBacklog", () => {
   });
 
   it("uses per-section counters so IDs start at 1 within each section (#112)", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const result = readBacklog(tmpDir, PROJECT);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -155,7 +155,7 @@ describe("readBacklog", () => {
 
   it("recognizes custom section headers like 'In Progress' and 'Todo' (#113)", () => {
     const custom = [
-      "# testproject backlog",
+      "# testproject task",
       "",
       "## In Progress",
       "",
@@ -170,8 +170,8 @@ describe("readBacklog", () => {
       "- [x] task completed",
       "",
     ].join("\n");
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), custom);
-    const result = readBacklog(tmpDir, PROJECT);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), custom);
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -183,8 +183,8 @@ describe("readBacklog", () => {
     expect(result.data.items.Done[0].line).toBe("task completed");
   });
 
-  it("parses GitHub issue metadata stored under backlog items", () => {
-    const content = `# testproject backlog
+  it("parses GitHub issue metadata stored under task items", () => {
+    const content = `# testproject tasks
 
 ## Active
 
@@ -196,8 +196,8 @@ describe("readBacklog", () => {
 
 ## Done
 `;
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
-    const result = readBacklog(tmpDir, PROJECT);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), content);
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -208,14 +208,14 @@ describe("readBacklog", () => {
   });
 });
 
-describe("addBacklogItem", () => {
+describe("addTask", () => {
   it("adds an item to the Queue section", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = addBacklogItem(tmpDir, PROJECT, "Add WebSocket support");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = addTask(tmpDir, PROJECT, "Add WebSocket support");
     expect(resultMsg(msg)).toContain("Added");
     expect(resultMsg(msg)).toContain("Add WebSocket support");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(after.data.items.Queue).toHaveLength(3);
@@ -223,41 +223,41 @@ describe("addBacklogItem", () => {
   });
 
   it("strips leading bullet prefix from input", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    addBacklogItem(tmpDir, PROJECT, "- Already has dash");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    addTask(tmpDir, PROJECT, "- Already has dash");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     expect(after.data.items.Queue[2].line).toBe("Already has dash");
   });
 
-  it("creates a backlog file when none exists", () => {
-    const msg = addBacklogItem(tmpDir, PROJECT, "First item");
+  it("creates a task file when none exists", () => {
+    const msg = addTask(tmpDir, PROJECT, "First item");
     expect(resultMsg(msg)).toContain("Added");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     expect(after.data.items.Queue).toHaveLength(1);
   });
 
   it("parses priority from the added item", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    addBacklogItem(tmpDir, PROJECT, "Urgent fix [high]");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    addTask(tmpDir, PROJECT, "Urgent fix [high]");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     const added = after.data.items.Queue.find((i) => i.line.includes("Urgent fix"));
     expect(added?.priority).toBe("high");
   });
 });
 
-describe("completeBacklogItem", () => {
+describe("completeTask", () => {
   it("moves a matched item to Done", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = completeBacklogItem(tmpDir, PROJECT, "rate limiting");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = completeTask(tmpDir, PROJECT, "rate limiting");
     expect(resultMsg(msg)).toContain("Marked done");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     expect(after.data.items.Queue).toHaveLength(1);
     expect(after.data.items.Done).toHaveLength(2);
@@ -266,34 +266,34 @@ describe("completeBacklogItem", () => {
   });
 
   it("matches by item ID", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = completeBacklogItem(tmpDir, PROJECT, "A1");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = completeTask(tmpDir, PROJECT, "A1");
     expect(resultMsg(msg)).toContain("Marked done");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     expect(after.data.items.Active).toHaveLength(1);
     expect(after.data.items.Done[0].line).toContain("auth middleware");
   });
 
   it("returns an error when no item matches", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = completeBacklogItem(tmpDir, PROJECT, "nonexistent item xyz");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = completeTask(tmpDir, PROJECT, "nonexistent item xyz");
     expect(resultMsg(msg)).toContain("Item not found");
   });
 });
 
-describe("backlog mutation helpers", () => {
-  it("updateBacklogItem updates priority/context/section in one call", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", {
+describe("task mutation helpers", () => {
+  it("updateTask updates priority/context/section in one call", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = updateTask(tmpDir, PROJECT, "Add rate limiting", {
       priority: "high",
       context: "protect burst traffic",
       section: "active",
     });
     expect(resultMsg(msg)).toContain("Updated item");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     expect(after.data.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(false);
     const moved = after.data.items.Active.find((i) => i.line.includes("Add rate limiting"));
@@ -302,44 +302,44 @@ describe("backlog mutation helpers", () => {
     expect(moved?.context).toContain("burst traffic");
   });
 
-  it("updateBacklogItem links and unlinks GitHub issue metadata", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    let msg = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", {
+  it("updateTask links and unlinks GitHub issue metadata", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    let msg = updateTask(tmpDir, PROJECT, "Add rate limiting", {
       github_issue: "#14",
       github_url: "https://github.com/alaarab/cortex/issues/14",
     });
     expect(resultMsg(msg)).toContain("github -> #14");
 
-    let after = resolveBacklogItem(tmpDir, PROJECT, "Add rate limiting");
+    let after = resolveTaskItem(tmpDir, PROJECT, "Add rate limiting");
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(after.data.githubIssue).toBe(14);
     expect(after.data.githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
 
-    msg = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", {
+    msg = updateTask(tmpDir, PROJECT, "Add rate limiting", {
       unlink_github: true,
     });
     expect(resultMsg(msg)).toContain("github link removed");
 
-    after = resolveBacklogItem(tmpDir, PROJECT, "Add rate limiting");
+    after = resolveTaskItem(tmpDir, PROJECT, "Add rate limiting");
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(after.data.githubIssue).toBeUndefined();
     expect(after.data.githubUrl).toBeUndefined();
   });
 
-  it("linkBacklogItemIssue persists GitHub metadata across section moves", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const linked = linkBacklogItemIssue(tmpDir, PROJECT, "Add rate limiting", {
+  it("linkTaskIssue persists GitHub metadata across section moves", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const linked = linkTaskIssue(tmpDir, PROJECT, "Add rate limiting", {
       github_issue: 22,
       github_url: "https://github.com/alaarab/cortex/issues/22",
     });
     expect(linked.ok).toBe(true);
 
-    const moved = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", { section: "active" });
+    const moved = updateTask(tmpDir, PROJECT, "Add rate limiting", { section: "active" });
     expect(moved.ok).toBe(true);
 
-    const after = resolveBacklogItem(tmpDir, PROJECT, "Add rate limiting");
+    const after = resolveTaskItem(tmpDir, PROJECT, "Add rate limiting");
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(after.data.section).toBe("Active");
@@ -347,17 +347,17 @@ describe("backlog mutation helpers", () => {
     expect(after.data.githubUrl).toBe("https://github.com/alaarab/cortex/issues/22");
   });
 
-  it("rejects invalid github_url values during backlog updates", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = updateBacklogItem(tmpDir, PROJECT, "Add rate limiting", {
+  it("rejects invalid github_url values during task updates", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = updateTask(tmpDir, PROJECT, "Add rate limiting", {
       github_url: "https://example.com/issues/14",
     });
     expect(msg.ok).toBe(false);
     expect(resultMsg(msg)).toContain("github_url must be a valid GitHub issue URL");
   });
 
-  it("tidyBacklogDone writes archive and trims done list", () => {
-    const content = `# testproject backlog
+  it("tidyDoneTasks writes archive and trims done list", () => {
+    const content = `# testproject tasks
 
 ## Active
 
@@ -369,15 +369,15 @@ describe("backlog mutation helpers", () => {
 - [x] done B
 - [x] done C
 `;
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
-    const msg = tidyBacklogDone(tmpDir, PROJECT, 1);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), content);
+    const msg = tidyDoneTasks(tmpDir, PROJECT, 1);
     expect(resultMsg(msg)).toContain("archived 2");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     expect(after.data.items.Done).toHaveLength(1);
 
-    const archive = path.join(tmpDir, ".governance", "backlog-archive", `${PROJECT}.md`);
+    const archive = path.join(tmpDir, ".governance", "task-archive", `${PROJECT}.md`);
     expect(fs.existsSync(archive)).toBe(true);
     const archiveContent = fs.readFileSync(archive, "utf8");
     expect(archiveContent).toContain("done B");
@@ -385,13 +385,13 @@ describe("backlog mutation helpers", () => {
   });
 });
 
-describe("pin/unpin backlog items", () => {
+describe("pin/unpin task items", () => {
   it("pins an item and persists the [pinned] tag", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = pinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = pinTask(tmpDir, PROJECT, "rate limiting");
     expect(resultMsg(msg)).toContain("Pinned");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     const item = after.data.items.Queue.find((i) => i.line.includes("rate limiting"));
     expect(item?.pinned).toBe(true);
@@ -401,12 +401,12 @@ describe("pin/unpin backlog items", () => {
   });
 
   it("unpins a pinned item", () => {
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
-    pinBacklogItem(tmpDir, PROJECT, "rate limiting");
-    const msg = unpinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
+    pinTask(tmpDir, PROJECT, "rate limiting");
+    const msg = unpinTask(tmpDir, PROJECT, "rate limiting");
     expect(resultMsg(msg)).toContain("Unpinned");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     const item = after.data.items.Queue.find((i) => i.line.includes("rate limiting"));
     expect(item?.pinned).toBeUndefined();
@@ -416,20 +416,20 @@ describe("pin/unpin backlog items", () => {
   });
 
   it("returns already-pinned message for double pin", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    pinBacklogItem(tmpDir, PROJECT, "rate limiting");
-    const msg = pinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    pinTask(tmpDir, PROJECT, "rate limiting");
+    const msg = pinTask(tmpDir, PROJECT, "rate limiting");
     expect(resultMsg(msg)).toContain("Already pinned");
   });
 
   it("returns not-pinned message for unpin on unpinned item", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = unpinBacklogItem(tmpDir, PROJECT, "rate limiting");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = unpinTask(tmpDir, PROJECT, "rate limiting");
     expect(resultMsg(msg)).toContain("Not pinned");
   });
 
-  it("parses existing [pinned] tags from backlog file", () => {
-    const content = `# testproject backlog
+  it("parses existing [pinned] tags from task file", () => {
+    const content = `# testproject tasks
 
 ## Active
 
@@ -443,8 +443,8 @@ describe("pin/unpin backlog items", () => {
 
 - [x] Set up CI pipeline
 `;
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
-    const result = readBacklog(tmpDir, PROJECT);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), content);
+    const result = readTasks(tmpDir, PROJECT);
     if (!result.ok) return;
     expect(result.data.items.Active[0].pinned).toBe(true);
     expect(result.data.items.Active[0].priority).toBe("high");
@@ -452,8 +452,8 @@ describe("pin/unpin backlog items", () => {
   });
 
   it("pin works with item ID", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = pinBacklogItem(tmpDir, PROJECT, "Q1");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = pinTask(tmpDir, PROJECT, "Q1");
     expect(resultMsg(msg)).toContain("Pinned");
   });
 });
@@ -509,7 +509,7 @@ describe("readFindings", () => {
 ## 2026-03-09
 
 - Refactor slices should stay independently releasable <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->
-  <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","backlog_item":"deadbeef"} -->
+  <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","task_item":"deadbeef"} -->
 `,
     );
     const result = readFindings(tmpDir, PROJECT);
@@ -518,12 +518,12 @@ describe("readFindings", () => {
 
     expect(result.data).toHaveLength(1);
     expect(result.data[0].text).toBe("Refactor slices should stay independently releasable");
-    expect(result.data[0].backlogItem).toBe("deadbeef");
+    expect(result.data[0].taskItem).toBe("deadbeef");
     expect(result.data[0].actor).toBe("codex");
     expect(result.data[0].tool).toBe("codex");
     expect(result.data[0].model).toBe("gpt-5");
     expect(result.data[0].sessionId).toBe("session-1234");
-    expect(result.data[0].citationData?.backlog_item).toBe("deadbeef");
+    expect(result.data[0].citationData?.task_item).toBe("deadbeef");
   });
 });
 
@@ -741,13 +741,13 @@ describe("machines, profiles, and shell state", () => {
   it("listProjectCards includes summary/docs", () => {
     fs.writeFileSync(path.join(projectDir, "summary.md"), "# testproject\n\nQuick summary line\n");
     fs.writeFileSync(path.join(projectDir, "CLAUDE.md"), "# testproject\n");
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
 
     const cards = listProjectCards(tmpDir);
     const card = cards.find((c) => c.name === PROJECT);
     expect(card).toBeDefined();
     expect(card?.summary).toContain("Quick summary");
-    expect(card?.docs).toContain("backlog.md");
+    expect(card?.docs).toContain("tasks.md");
   });
 
   it("save/load/reset shell state round trips", () => {
@@ -774,12 +774,12 @@ describe("machines, profiles, and shell state", () => {
 });
 
 describe("file locking", () => {
-  it("two sequential addBacklogItem calls produce both items", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    addBacklogItem(tmpDir, PROJECT, "First concurrent item");
-    addBacklogItem(tmpDir, PROJECT, "Second concurrent item");
+  it("two sequential addTask calls produce both items", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    addTask(tmpDir, PROJECT, "First concurrent item");
+    addTask(tmpDir, PROJECT, "Second concurrent item");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     const lines = after.data.items.Queue.map((i) => i.line);
@@ -799,11 +799,11 @@ describe("file locking", () => {
     expect(texts.some((t) => t.includes("Second finding"))).toBe(true);
   });
 
-  it("lock file is cleaned up after successful backlog write", () => {
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
+  it("lock file is cleaned up after successful task write", () => {
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
     const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
 
-    addBacklogItem(tmpDir, PROJECT, "Lock cleanup test");
+    addTask(tmpDir, PROJECT, "Lock cleanup test");
 
     expect(fs.existsSync(lockPath)).toBe(false);
   });
@@ -818,7 +818,7 @@ describe("file locking", () => {
   });
 
   it("stale lock is recovered: old .lock file does not block writes", () => {
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
     const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
 
     // Create a stale lock file with old timestamp
@@ -827,10 +827,10 @@ describe("file locking", () => {
     const past = new Date(Date.now() - 60000);
     fs.utimesSync(lockPath, past, past);
 
-    const msg = addBacklogItem(tmpDir, PROJECT, "After stale lock");
+    const msg = addTask(tmpDir, PROJECT, "After stale lock");
     expect(resultMsg(msg)).toContain("Added");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     const lines = after.data.items.Queue.map((i) => i.line);
     expect(lines).toContain("After stale lock");
@@ -850,15 +850,15 @@ describe("file locking", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
-  it("returns lock timeout and does not write backlog changes under lock contention", () => {
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
+  it("returns lock timeout and does not write task changes under lock contention", () => {
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
     const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
     process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "150";
     process.env.CORTEX_FILE_LOCK_POLL_MS = "25";
     const before = fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
-    const msg = addBacklogItem(tmpDir, PROJECT, "Blocked by lock");
+    const msg = addTask(tmpDir, PROJECT, "Blocked by lock");
     const after = fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
     delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
     delete process.env.CORTEX_FILE_LOCK_POLL_MS;
@@ -870,14 +870,14 @@ describe("file locking", () => {
     expect(after).not.toContain("Blocked by lock");
   });
 
-  it("prevents workNextBacklogItem mutation when backlog lock times out", () => {
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_BACKLOG);
+  it("prevents workNextTask mutation when task lock times out", () => {
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
     const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
     process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "150";
     process.env.CORTEX_FILE_LOCK_POLL_MS = "25";
-    const msg = workNextBacklogItem(tmpDir, PROJECT);
+    const msg = workNextTask(tmpDir, PROJECT);
     delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
     delete process.env.CORTEX_FILE_LOCK_POLL_MS;
     fs.unlinkSync(lockPath);
@@ -885,21 +885,21 @@ describe("file locking", () => {
     expect(msg.ok).toBe(false);
     if (!msg.ok) expect(msg.code).toBe(CortexError.LOCK_TIMEOUT);
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     expect(after.data.items.Active.some((i) => i.line.includes("Add rate limiting"))).toBe(false);
     expect(after.data.items.Queue.some((i) => i.line.includes("Add rate limiting"))).toBe(true);
   });
 
-  it.skipIf(process.platform === "win32")("allows concurrent backlog writes from two processes without data loss", async () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+  it.skipIf(process.platform === "win32")("allows concurrent task writes from two processes without data loss", async () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
 
     // Use forward slashes in import paths for Windows compatibility
     const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
     const mkCode = (item: string) =>
-      `import { addBacklogItem } from ${JSON.stringify(dataAccessPath)};` +
+      `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
       `process.env.CORTEX_ACTOR='vitest-admin';` +
-      `const out=addBacklogItem(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
+      `const out=addTask(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
     const [a, b] = await Promise.all([
@@ -910,7 +910,7 @@ describe("file locking", () => {
     expect(a.exitCode).toBe(0);
     expect(b.exitCode).toBe(0);
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
     const lines = after.data.items.Queue.map((i) => i.line);
     expect(lines).toContain("Concurrent item A");
@@ -944,10 +944,10 @@ describe("file locking", () => {
 
 // --- findItemByMatch returns explicit error on no match ---
 
-describe("findItemByMatch via completeBacklogItem", () => {
+describe("findItemByMatch via completeTask", () => {
   it("returns error with 'Item not found' when no item matches (not undefined)", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = completeBacklogItem(tmpDir, PROJECT, "completely nonexistent item zzz");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = completeTask(tmpDir, PROJECT, "completely nonexistent item zzz");
     expect(msg.ok).toBe(false);
     if (!msg.ok) {
       expect(msg.error).toContain("not found");
@@ -955,12 +955,12 @@ describe("findItemByMatch via completeBacklogItem", () => {
   });
 });
 
-// --- Backlog header whitespace tolerance ---
+// --- Task header whitespace tolerance ---
 
-describe("backlog header whitespace tolerance", () => {
+describe("task header whitespace tolerance", () => {
   it("parses section headers with extra trailing whitespace", () => {
     const content = [
-      "# testproject backlog",
+      "# testproject task",
       "",
       "## Active   ",
       "",
@@ -975,8 +975,8 @@ describe("backlog header whitespace tolerance", () => {
       "- [x] task done",
       "",
     ].join("\n");
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), content);
-    const result = readBacklog(tmpDir, PROJECT);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), content);
+    const result = readTasks(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -992,20 +992,20 @@ describe("backlog header whitespace tolerance", () => {
 // --- Structured error codes ---
 
 describe("structured error codes in data-access", () => {
-  it("readBacklog returns INVALID_PROJECT_NAME for path traversal", () => {
-    const result = readBacklog(tmpDir, "../escape");
+  it("readTasks returns INVALID_PROJECT_NAME for path traversal", () => {
+    const result = readTasks(tmpDir, "../escape");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe(CortexError.INVALID_PROJECT_NAME);
   });
 
-  it("readBacklog returns PROJECT_NOT_FOUND for missing project", () => {
-    const result = readBacklog(tmpDir, "nonexistent");
+  it("readTasks returns PROJECT_NOT_FOUND for missing project", () => {
+    const result = readTasks(tmpDir, "nonexistent");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
   });
 
-  it("completeBacklogItem returns NOT_FOUND for unmatched item", () => {
-    const msg = completeBacklogItem(tmpDir, PROJECT, "does-not-exist");
+  it("completeTask returns NOT_FOUND for unmatched item", () => {
+    const msg = completeTask(tmpDir, PROJECT, "does-not-exist");
     expect(msg.ok).toBe(false);
     if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
   });

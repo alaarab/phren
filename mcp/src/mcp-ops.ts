@@ -35,7 +35,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ cortex · add project",
       description:
         "Bootstrap a project into cortex from a repo or working directory. " +
-        "Copies or creates CLAUDE.md/summary/backlog/findings under ~/.cortex/<project> and adds the project to the active profile.",
+        "Copies or creates CLAUDE.md/summary/tasks/findings under ~/.cortex/<project> and adds the project to the active profile.",
       inputSchema: z.object({
         path: z.string().describe("Project path to import. Pass the current repo path explicitly."),
         profile: z.string().optional().describe("Profile to update. Defaults to the active profile."),

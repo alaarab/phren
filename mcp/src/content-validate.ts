@@ -5,7 +5,7 @@ import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { countActiveFindings } from "./content-archive.js";
-import { isTaskFileName } from "./data-backlog.js";
+import { isTaskFileName } from "./data-tasks.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;
@@ -124,11 +124,11 @@ export function validateFindingsFormat(content: string): string[] {
 }
 
 /**
- * Strip the ## Done section (and equivalents) from backlog content to reduce index bloat.
+ * Strip the ## Done section (and equivalents) from task content to reduce index bloat.
  * Keeps the title, Active, and Queue sections which are the actionable parts.
  * Handles: Done, Completed, Archived, Finished, Complete.
  */
-export function stripBacklogDoneSection(content: string): string {
+export function stripTaskDoneSection(content: string): string {
   const donePattern = /^## (Done|Completed|Archived|Finished|Complete)\b.*$/im;
   const match = content.match(donePattern);
   if (!match || match.index === undefined) return content;
@@ -139,7 +139,7 @@ export function stripBacklogDoneSection(content: string): string {
  * Validate tasks.md format and structure.
  * Returns an array of issue description strings (empty array means valid).
  */
-export function validateBacklogFormat(content: string): string[] {
+export function validateTaskFormat(content: string): string[] {
   const issues: string[] = [];
   const lines = content.split("\n");
 
@@ -347,8 +347,8 @@ export function mergeFindings(ours: string, theirs: string): string {
   return lines.join("\n");
 }
 
-/** A parsed backlog record that may span multiple lines (bullet + Context: continuation). */
-interface BacklogRecord {
+/** A parsed task record that may span multiple lines (bullet + Context: continuation). */
+interface TaskRecord {
   /** The stable bid:XXXXXXXX if present in the bullet line, used as merge key. */
   stableId?: string;
   /** The bullet line itself. */
@@ -357,25 +357,25 @@ interface BacklogRecord {
   continuations: string[];
 }
 
-/** Pattern for stable bid comment embedded in backlog lines. */
+/** Pattern for stable bid comment embedded in task lines. */
 const MERGE_BID_PATTERN = /<!--\s*bid:([a-z0-9]{8})\s*-->/;
 
-/** Render a BacklogRecord back to its original lines. */
-function renderBacklogRecord(record: BacklogRecord): string[] {
+/** Render a TaskRecord back to its original lines. */
+function renderTaskRecord(record: TaskRecord): string[] {
   return [record.bullet, ...record.continuations];
 }
 
 /** Merge key: stable ID if present, otherwise normalised bullet text. */
-function backlogRecordKey(record: BacklogRecord): string {
+function taskRecordKey(record: TaskRecord): string {
   if (record.stableId) return `bid:${record.stableId}`;
   return record.bullet.replace(MERGE_BID_PATTERN, "").trim().toLowerCase();
 }
 
-// Parse tasks.md into a map of section name -> multi-line BacklogRecord entries.
-function parseBacklogSections(content: string): Map<string, BacklogRecord[]> {
-  const sections = new Map<string, BacklogRecord[]>();
+// Parse tasks.md into a map of section name -> multi-line TaskRecord entries.
+function parseTaskSections(content: string): Map<string, TaskRecord[]> {
+  const sections = new Map<string, TaskRecord[]>();
   let current = "";
-  let currentRecord: BacklogRecord | null = null;
+  let currentRecord: TaskRecord | null = null;
 
   const flush = () => {
     if (currentRecord && current) {
@@ -413,9 +413,9 @@ function parseBacklogSections(content: string): Map<string, BacklogRecord[]> {
  * present or by normalised bullet text otherwise. Context/continuation lines are preserved.
  * Ours wins on conflict. Section order follows Active > Queue > Done.
  */
-export function mergeBacklog(ours: string, theirs: string): string {
-  const ourSections = parseBacklogSections(ours);
-  const theirSections = parseBacklogSections(theirs);
+export function mergeTask(ours: string, theirs: string): string {
+  const ourSections = parseTaskSections(ours);
+  const theirSections = parseTaskSections(theirs);
 
   const sectionOrder = ["Active", "Queue", "Done"];
   const allSections = [...new Set([...ourSections.keys(), ...theirSections.keys()])];
@@ -424,7 +424,7 @@ export function mergeBacklog(ours: string, theirs: string): string {
     ...allSections.filter(s => !sectionOrder.includes(s)),
   ];
 
-  const titleLine = ours.split("\n")[0] || "# backlog";
+  const titleLine = ours.split("\n")[0] || "# task";
   const lines = [titleLine, ""];
 
   for (const section of ordered) {
@@ -432,10 +432,10 @@ export function mergeBacklog(ours: string, theirs: string): string {
     const theirItems = theirSections.get(section) ?? [];
 
     // Merge: ours wins; include theirs only when key not already seen
-    const seen = new Map<string, BacklogRecord>();
-    for (const record of ourItems) seen.set(backlogRecordKey(record), record);
+    const seen = new Map<string, TaskRecord>();
+    for (const record of ourItems) seen.set(taskRecordKey(record), record);
     for (const record of theirItems) {
-      const key = backlogRecordKey(record);
+      const key = taskRecordKey(record);
       if (!seen.has(key)) {
         seen.set(key, record);
       } else if (record.stableId) {
@@ -449,7 +449,7 @@ export function mergeBacklog(ours: string, theirs: string): string {
 
     lines.push(`## ${section}`, "");
     for (const record of seen.values()) {
-      lines.push(...renderBacklogRecord(record));
+      lines.push(...renderTaskRecord(record));
     }
     lines.push("");
   }
@@ -498,7 +498,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
 
       const merged = filename === "findings.md"
         ? mergeFindings(versions.ours, versions.theirs)
-        : mergeBacklog(versions.ours, versions.theirs);
+        : mergeTask(versions.ours, versions.theirs);
 
       const tmpMergePath = fullPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpMergePath, merged);

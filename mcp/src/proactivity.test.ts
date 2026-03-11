@@ -4,7 +4,7 @@ import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
 import {
   getProactivityLevel,
-  getProactivityLevelForBacklog,
+  getProactivityLevelForTask,
   getProactivityLevelForFindings,
   hasExplicitFindingSignal,
   shouldAutoCaptureFindingsForLevel,
@@ -17,7 +17,7 @@ describe("proactivity config", () => {
     CORTEX_PATH: process.env.CORTEX_PATH,
     CORTEX_PROACTIVITY: process.env.CORTEX_PROACTIVITY,
     CORTEX_PROACTIVITY_FINDINGS: process.env.CORTEX_PROACTIVITY_FINDINGS,
-    CORTEX_PROACTIVITY_BACKLOG: process.env.CORTEX_PROACTIVITY_BACKLOG,
+    CORTEX_PROACTIVITY_TASKS: process.env.CORTEX_PROACTIVITY_TASKS,
   };
 
   let tmpCleanup: (() => void) | undefined;
@@ -46,7 +46,7 @@ describe("proactivity config", () => {
     delete process.env.CORTEX_PATH;
     delete process.env.CORTEX_PROACTIVITY;
     delete process.env.CORTEX_PROACTIVITY_FINDINGS;
-    delete process.env.CORTEX_PROACTIVITY_BACKLOG;
+    delete process.env.CORTEX_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
@@ -55,14 +55,14 @@ describe("proactivity config", () => {
     restoreEnv("CORTEX_PATH");
     restoreEnv("CORTEX_PROACTIVITY");
     restoreEnv("CORTEX_PROACTIVITY_FINDINGS");
-    restoreEnv("CORTEX_PROACTIVITY_BACKLOG");
+    restoreEnv("CORTEX_PROACTIVITY_TASKS");
     tmpCleanup?.();
   });
 
   it("defaults to high when no env var or preference is set", () => {
     expect(getProactivityLevel()).toBe("high");
     expect(getProactivityLevelForFindings()).toBe("high");
-    expect(getProactivityLevelForBacklog()).toBe("high");
+    expect(getProactivityLevelForTask()).toBe("high");
   });
 
   it("uses CORTEX_PROACTIVITY as the shared override", () => {
@@ -70,17 +70,17 @@ describe("proactivity config", () => {
 
     expect(getProactivityLevel()).toBe("medium");
     expect(getProactivityLevelForFindings()).toBe("medium");
-    expect(getProactivityLevelForBacklog()).toBe("medium");
+    expect(getProactivityLevelForTask()).toBe("medium");
   });
 
-  it("lets findings and backlog env vars override the shared level", () => {
+  it("lets findings and task env vars override the shared level", () => {
     process.env.CORTEX_PROACTIVITY = "low";
     process.env.CORTEX_PROACTIVITY_FINDINGS = "high";
-    process.env.CORTEX_PROACTIVITY_BACKLOG = "medium";
+    process.env.CORTEX_PROACTIVITY_TASKS = "medium";
 
     expect(getProactivityLevel()).toBe("low");
     expect(getProactivityLevelForFindings()).toBe("high");
-    expect(getProactivityLevelForBacklog()).toBe("medium");
+    expect(getProactivityLevelForTask()).toBe("medium");
   });
 
   it("falls back to governance install preferences when env vars are unset", () => {
@@ -88,19 +88,19 @@ describe("proactivity config", () => {
 
     expect(getProactivityLevel()).toBe("low");
     expect(getProactivityLevelForFindings()).toBe("low");
-    expect(getProactivityLevelForBacklog()).toBe("low");
+    expect(getProactivityLevelForTask()).toBe("low");
   });
 
-  it("uses split governance install preferences for findings and backlog defaults", () => {
+  it("uses split governance install preferences for findings and task defaults", () => {
     writeGovernanceInstallPreferences({
       proactivity: "low",
       proactivityFindings: "high",
-      proactivityBacklog: "medium",
+      proactivityTask: "medium",
     });
 
     expect(getProactivityLevel()).toBe("low");
     expect(getProactivityLevelForFindings()).toBe("high");
-    expect(getProactivityLevelForBacklog()).toBe("medium");
+    expect(getProactivityLevelForTask()).toBe("medium");
   });
 
   it("keeps env vars higher priority than governance defaults", () => {
@@ -110,7 +110,7 @@ describe("proactivity config", () => {
 
     expect(getProactivityLevel()).toBe("medium");
     expect(getProactivityLevelForFindings()).toBe("high");
-    expect(getProactivityLevelForBacklog()).toBe("medium");
+    expect(getProactivityLevelForTask()).toBe("medium");
   });
 
   it("detects explicit finding signal phrases and tags", () => {

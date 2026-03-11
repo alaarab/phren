@@ -49,9 +49,9 @@ const LOW_FOCUS_SNIPPET_SCORE = 0.3;
 const VERY_LOW_FOCUS_SNIPPET_SCORE = 0.14;
 const LOW_FOCUS_SNIPPET_LINE_CAP = 3;
 const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
-const BACKLOG_RESCUE_MIN_OVERLAP = 0.3;
-const BACKLOG_RESCUE_OVERLAP_MARGIN = 0.12;
-const BACKLOG_RESCUE_SCORE_MARGIN = 0.6;
+const TASK_RESCUE_MIN_OVERLAP = 0.3;
+const TASK_RESCUE_OVERLAP_MARGIN = 0.12;
+const TASK_RESCUE_SCORE_MARGIN = 0.6;
 
 /** Fraction of bullets that must be low-value before applying the low-value penalty. */
 const LOW_VALUE_BULLET_FRACTION = 0.5;
@@ -70,7 +70,7 @@ export function detectTaskIntent(prompt: string): "debug" | "review" | "build" |
 function intentBoost(intent: string, docType: string): number {
   if (intent === "debug" && (docType === "findings" || docType === "reference")) return 3;
   if (intent === "review" && (docType === "canonical" || docType === "changelog")) return 3;
-  if (intent === "build" && (docType === "backlog" || docType === "reference")) return 2;
+  if (intent === "build" && (docType === "task" || docType === "reference")) return 2;
   if (intent === "docs" && (docType === "summary" || docType === "claude")) return 2;
   if (docType === "canonical") return 2;
   return 0;
@@ -330,12 +330,12 @@ function compactSnippet(snippet: string, maxLines: number, maxChars: number): st
   return out;
 }
 
-// ── Backlog priority filtering ───────────────────────────────────────────────
+// ── Task priority filtering ───────────────────────────────────────────────
 
 const PRIORITY_TAG_RE = /\[(high|medium|low)\]/i;
 
-export function filterBacklogByPriority(items: string[], allowedPriorities?: string[]): string[] {
-  const envPriorities = process.env.CORTEX_BACKLOG_PRIORITY;
+export function filterTaskByPriority(items: string[], allowedPriorities?: string[]): string[] {
+  const envPriorities = process.env.CORTEX_TASK_PRIORITY;
   const allowed = new Set(
     (allowedPriorities || (envPriorities ? envPriorities.split(",").map(s => s.trim().toLowerCase()) : ["high", "medium"]))
   );
@@ -689,7 +689,7 @@ export function rankResults(
   db: SqlJsDatabase,
   cwd?: string,
   query?: string,
-  opts?: { filterType?: string | null; skipBacklogFilter?: boolean }
+  opts?: { filterType?: string | null; skipTaskFilter?: boolean }
 ): DocRow[] {
   let ranked = [...rows];
   const queryTokens = query ? tokenizeForOverlap(query) : [];
@@ -822,18 +822,18 @@ export function rankResults(
     return (a.doc.path || `${a.doc.project}/${a.doc.filename}`).localeCompare(b.doc.path || `${b.doc.project}/${b.doc.filename}`);
   });
 
-  const shouldFilterBacklog = intent !== "build" && !opts?.skipBacklogFilter && opts?.filterType !== "backlog";
-  const rescuedBacklogPaths = new Set<string>();
-  if (shouldFilterBacklog && queryTokens.length > 0) {
-    const bestBacklog = scored.find((entry) => entry.doc.type === "backlog");
-    if (bestBacklog && bestBacklog.queryOverlap >= BACKLOG_RESCUE_MIN_OVERLAP) {
-      const bestNonBacklog = scored.find((entry) => entry.doc.type !== "backlog");
+  const shouldFilterTask = intent !== "build" && !opts?.skipTaskFilter && opts?.filterType !== "task";
+  const rescuedTaskPaths = new Set<string>();
+  if (shouldFilterTask && queryTokens.length > 0) {
+    const bestTask = scored.find((entry) => entry.doc.type === "task");
+    if (bestTask && bestTask.queryOverlap >= TASK_RESCUE_MIN_OVERLAP) {
+      const bestNonTask = scored.find((entry) => entry.doc.type !== "task");
       if (
-        !bestNonBacklog
-        || bestBacklog.queryOverlap >= bestNonBacklog.queryOverlap + BACKLOG_RESCUE_OVERLAP_MARGIN
-        || bestBacklog.score >= bestNonBacklog.score + BACKLOG_RESCUE_SCORE_MARGIN
+        !bestNonTask
+        || bestTask.queryOverlap >= bestNonTask.queryOverlap + TASK_RESCUE_OVERLAP_MARGIN
+        || bestTask.score >= bestNonTask.score + TASK_RESCUE_SCORE_MARGIN
       ) {
-        rescuedBacklogPaths.add(bestBacklog.doc.path || `${bestBacklog.doc.project}/${bestBacklog.doc.filename}`);
+        rescuedTaskPaths.add(bestTask.doc.path || `${bestTask.doc.project}/${bestTask.doc.filename}`);
       }
     }
   }
@@ -841,11 +841,11 @@ export function rankResults(
 
   ranked = ranked.slice(0, 8);
 
-  if (shouldFilterBacklog) {
+  if (shouldFilterTask) {
     ranked = ranked.filter((r) => {
-      if (r.type !== "backlog") return true;
+      if (r.type !== "task") return true;
       const key = r.path || `${r.project}/${r.filename}`;
-      return rescuedBacklogPaths.has(key);
+      return rescuedTaskPaths.has(key);
     });
   }
 

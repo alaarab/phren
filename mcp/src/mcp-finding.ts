@@ -53,7 +53,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           repo: z.string().optional().describe("Git repository root path for citation validation."),
           commit: z.string().optional().describe("Git commit SHA that supports this finding."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
-          backlog_item: z.string().optional().describe("Backlog item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
+          task_item: z.string().optional().describe("Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
         }).optional().describe("Optional source citation for traceability."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
         findingType: z.enum(FINDING_TYPES)
@@ -263,7 +263,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ cortex · push",
       description:
         "Commit and push any changes in the cortex repo. Call this at the end of a session " +
-        "or after adding multiple findings/backlog items. Commits all modified files in the " +
+        "or after adding multiple findings/tasks items. Commits all modified files in the " +
         "cortex directory and pushes if a remote is configured.",
       inputSchema: z.object({
         message: z.string().optional().describe("Commit message. Defaults to 'update cortex'."),

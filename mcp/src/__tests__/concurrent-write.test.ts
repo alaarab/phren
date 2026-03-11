@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  readBacklog,
-  addBacklogItem,
-  addBacklogItems,
-  completeBacklogItem,
-  completeBacklogItems,
-  updateBacklogItem,
+  readTasks,
+  addTask,
+  addTasks,
+  completeTask,
+  completeTasks,
+  updateTask,
   addFinding,
   removeFinding,
   readFindings,
@@ -29,7 +29,7 @@ let tmpCleanup: () => void;
 
 const runWorker = spawnTsxWorker;
 
-const SAMPLE_BACKLOG = `# conctest backlog
+const SAMPLE_TASK = `# conctest tasks
 
 ## Active
 
@@ -61,14 +61,14 @@ afterEach(() => {
 });
 
 describe("concurrent write safety - in-process", () => {
-  it("rapid sequential backlog adds do not lose items", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+  it("rapid sequential task adds do not lose items", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
     const count = 10;
     for (let i = 0; i < count; i++) {
-      const msg = addBacklogItem(tmpDir, PROJECT, `Rapid item ${i}`);
+      const msg = addTask(tmpDir, PROJECT, `Rapid item ${i}`);
       expect(msg.ok).toBe(true);
     }
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     // Original 3 + 10 new items
@@ -94,14 +94,14 @@ describe("concurrent write safety - in-process", () => {
   });
 
   it("interleaved add and complete operations preserve integrity", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    addBacklogItem(tmpDir, PROJECT, "Interleave A");
-    completeBacklogItem(tmpDir, PROJECT, "Queue task one");
-    addBacklogItem(tmpDir, PROJECT, "Interleave B");
-    completeBacklogItem(tmpDir, PROJECT, "Queue task two");
-    addBacklogItem(tmpDir, PROJECT, "Interleave C");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    addTask(tmpDir, PROJECT, "Interleave A");
+    completeTask(tmpDir, PROJECT, "Queue task one");
+    addTask(tmpDir, PROJECT, "Interleave B");
+    completeTask(tmpDir, PROJECT, "Queue task two");
+    addTask(tmpDir, PROJECT, "Interleave C");
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     // Queue: original 3 - 2 completed + 3 added = 4
@@ -115,16 +115,16 @@ describe("concurrent write safety - in-process", () => {
   });
 
   it("lock timeout returns proper error code and does not mutate file", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const lockPath = path.join(projectDir, "tasks.md.lock");
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
     process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "100";
     process.env.CORTEX_FILE_LOCK_POLL_MS = "20";
 
-    const before = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
-    const msg = addBacklogItem(tmpDir, PROJECT, "Should not be added");
-    const after = fs.readFileSync(path.join(projectDir, "backlog.md"), "utf8");
+    const before = fs.readFileSync(path.join(projectDir, "tasks.md"), "utf8");
+    const msg = addTask(tmpDir, PROJECT, "Should not be added");
+    const after = fs.readFileSync(path.join(projectDir, "tasks.md"), "utf8");
 
     fs.unlinkSync(lockPath);
 
@@ -137,13 +137,13 @@ describe("concurrent write safety - in-process", () => {
   });
 
   it("stale lock recovery allows write to proceed", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const lockPath = path.join(projectDir, "backlog.md.lock");
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const lockPath = path.join(projectDir, "tasks.md.lock");
     fs.writeFileSync(lockPath, `99999\n${Date.now() - 60000}`);
     const past = new Date(Date.now() - 60000);
     fs.utimesSync(lockPath, past, past);
 
-    const msg = addBacklogItem(tmpDir, PROJECT, "After stale recovery");
+    const msg = addTask(tmpDir, PROJECT, "After stale recovery");
     expect(msg.ok).toBe(true);
     expect(fs.existsSync(lockPath)).toBe(false);
   });
@@ -158,27 +158,27 @@ describe("concurrent write safety - in-process", () => {
   });
 
   it("bulk add operations are atomic under a single lock", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
     const items = Array.from({ length: 5 }, (_, i) => `Bulk item ${i}`);
-    const msg = addBacklogItems(tmpDir, PROJECT, items);
+    const msg = addTasks(tmpDir, PROJECT, items);
     expect(msg.ok).toBe(true);
     if (!msg.ok) return;
     expect(msg.data.added).toHaveLength(5);
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(after.data.items.Queue).toHaveLength(3 + 5);
   });
 
   it("bulk complete operations are atomic under a single lock", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    const msg = completeBacklogItems(tmpDir, PROJECT, ["Queue task one", "Queue task two"]);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = completeTasks(tmpDir, PROJECT, ["Queue task one", "Queue task two"]);
     expect(msg.ok).toBe(true);
     if (!msg.ok) return;
     expect(msg.data.completed).toHaveLength(2);
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(after.data.items.Queue).toHaveLength(1);
@@ -186,11 +186,11 @@ describe("concurrent write safety - in-process", () => {
   });
 
   it("concurrent lock on different files does not interfere", () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
-    // These operate on different files (backlog.md vs FINDINGS.md) so should not block each other
-    const backlogMsg = addBacklogItem(tmpDir, PROJECT, "Backlog addition");
-    const findingMsg = addFinding(tmpDir, PROJECT, "Finding alongside backlog write");
-    expect(backlogMsg.ok).toBe(true);
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    // These operate on different files (tasks.md vs FINDINGS.md) so should not block each other
+    const taskMsg = addTask(tmpDir, PROJECT, "Task addition");
+    const findingMsg = addFinding(tmpDir, PROJECT, "Finding alongside task write");
+    expect(taskMsg.ok).toBe(true);
     expect(findingMsg.ok).toBe(true);
   });
 });
@@ -255,14 +255,14 @@ describe("concurrent write safety - queue operations", () => {
 });
 
 describe.skipIf(process.platform === "win32")("concurrent write safety - cross-process", () => {
-  it("three concurrent backlog adds from separate processes all succeed", async () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+  it("three concurrent task adds from separate processes all succeed", async () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
     const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
 
     const mkCode = (item: string) =>
-      `import { addBacklogItem } from ${JSON.stringify(dataAccessPath)};` +
+      `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
       `process.env.CORTEX_ACTOR='vitest-admin';` +
-      `const out=addBacklogItem(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
+      `const out=addTask(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
     const results = await Promise.all([
@@ -275,7 +275,7 @@ describe.skipIf(process.platform === "win32")("concurrent write safety - cross-p
       expect(r.exitCode).toBe(0);
     }
 
-    const after = readBacklog(tmpDir, PROJECT);
+    const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     const lines = after.data.items.Queue.map((i) => i.line);
@@ -284,14 +284,14 @@ describe.skipIf(process.platform === "win32")("concurrent write safety - cross-p
     expect(lines).toContain("Process item C");
   });
 
-  it("concurrent finding and backlog writes from separate processes both succeed", async () => {
-    fs.writeFileSync(path.join(projectDir, "backlog.md"), SAMPLE_BACKLOG);
+  it("concurrent finding and task writes from separate processes both succeed", async () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
     const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
 
-    const backlogCode =
-      `import { addBacklogItem } from ${JSON.stringify(dataAccessPath)};` +
+    const taskCode =
+      `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
       `process.env.CORTEX_ACTOR='vitest-admin';` +
-      `const out=addBacklogItem(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},"Cross-process backlog item");` +
+      `const out=addTask(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},"Cross-process task item");` +
       `console.log(out.ok ? out.data : out.error);`;
 
     const findingCode =
@@ -300,18 +300,18 @@ describe.skipIf(process.platform === "win32")("concurrent write safety - cross-p
       `const out=addFinding(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},"Cross-process finding with unique content");` +
       `console.log(out.ok ? out.data : out.error);`;
 
-    const [backlogResult, findingResult] = await Promise.all([
-      runWorker(backlogCode),
+    const [taskResult, findingResult] = await Promise.all([
+      runWorker(taskCode),
       runWorker(findingCode),
     ]);
 
-    expect(backlogResult.exitCode).toBe(0);
+    expect(taskResult.exitCode).toBe(0);
     expect(findingResult.exitCode).toBe(0);
 
-    const backlog = readBacklog(tmpDir, PROJECT);
-    expect(backlog.ok).toBe(true);
-    if (backlog.ok) {
-      expect(backlog.data.items.Queue.map((i) => i.line)).toContain("Cross-process backlog item");
+    const task = readTasks(tmpDir, PROJECT);
+    expect(task.ok).toBe(true);
+    if (task.ok) {
+      expect(task.data.items.Queue.map((i) => i.line)).toContain("Cross-process task item");
     }
 
     const findings = readFindings(tmpDir, PROJECT);

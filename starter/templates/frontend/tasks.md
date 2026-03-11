@@ -1,4 +1,4 @@
-# {{project}} backlog
+# {{project}} tasks
 
 ## Active
 

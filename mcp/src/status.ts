@@ -228,18 +228,18 @@ export async function runStatus() {
   // Stats
   const projectDirs = getProjectDirs(cortexPath, profile);
   let totalFindings = 0;
-  let totalBacklog = 0;
+  let totalTask = 0;
   let totalQueue = 0;
 
   for (const dir of projectDirs) {
     const projName = path.basename(dir);
     totalFindings += countBullets(path.join(cortexPath, projName, "FINDINGS.md"));
     const taskPath = resolveTaskFilePath(cortexPath, projName);
-    if (taskPath) totalBacklog += countBullets(taskPath);
+    if (taskPath) totalTask += countBullets(taskPath);
     totalQueue += countQueueItems(cortexPath, projName);
   }
 
-  console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalBacklog} tasks, ${totalQueue} queued`);
+  console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalTask} tasks, ${totalQueue} queued`);
 
   const runtime = readRuntimeHealth(cortexPath);
   console.log(`\n  ${BOLD}Sync:${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildBacklogIssueBody, extractGithubRepoFromText, parseGithubIssueUrl } from "../backlog-github.js";
+import { buildTaskIssueBody, extractGithubRepoFromText, parseGithubIssueUrl } from "../tasks-github.js";
 
-describe("backlog-github helpers", () => {
+describe("tasks-github helpers", () => {
   it("parses GitHub issue URLs into repo and issue number", () => {
     expect(parseGithubIssueUrl("https://github.com/alaarab/cortex/issues/14")).toEqual({
       repo: "alaarab/cortex",
@@ -14,14 +14,14 @@ describe("backlog-github helpers", () => {
     expect(extractGithubRepoFromText("Repo: https://github.com/alaarab/cortex\n")).toBe("alaarab/cortex");
   });
 
-  it("builds an issue body from backlog item context", () => {
-    const body = buildBacklogIssueBody("cortex", {
+  it("builds an issue body from task item context", () => {
+    const body = buildTaskIssueBody("cortex", {
       id: "Q1",
       stableId: "deadbeef",
       section: "Queue",
       line: "Ship GitHub issue linkage [high]",
       checked: false,
-      context: "Need optional issue linkage for backlog items",
+      context: "Need optional issue linkage for task items",
       githubIssue: undefined,
       githubUrl: undefined,
     });

@@ -28,7 +28,7 @@ import { isToolHookEnabled } from "./hooks.js";
 import { handleExtractMemories } from "./cli-extract.js";
 import { appendAuditLog } from "./shared.js";
 import { updateRuntimeHealth } from "./shared-governance.js";
-import { getProactivityLevelForBacklog, getProactivityLevelForFindings } from "./proactivity.js";
+import { getProactivityLevelForTask, getProactivityLevelForFindings } from "./proactivity.js";
 import * as fs from "fs";
 
 // ── Re-exports from focused modules ─────────────────────────────────────────
@@ -51,7 +51,7 @@ export {
 // Retrieval
 export {
   detectTaskIntent,
-  filterBacklogByPriority,
+  filterTaskByPriority,
   searchDocuments,
   applyTrustFilter,
   rankResults,
@@ -253,14 +253,14 @@ export async function handleHookPrompt() {
     }
 
     const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getCortexPath(), sessionId);
-    const backlogLevel = getProactivityLevelForBacklog();
+    const taskLevel = getProactivityLevelForTask();
     const taskLifecycle = handleTaskPromptLifecycle({
       cortexPath: getCortexPath(),
       prompt,
       project: detectedProject,
       sessionId,
       intent,
-      backlogLevel,
+      taskLevel,
     });
     if (taskLifecycle.noticeLines.length > 0) {
       parts.push("");

@@ -13,7 +13,7 @@ import { readInstallPreferences, writeInstallPreferences, type InstallPreference
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
-import { TASK_FILE_ALIASES } from "./data-backlog.js";
+import { TASK_FILE_ALIASES } from "./data-tasks.js";
 import {
   PROJECT_HOOK_EVENTS,
   PROJECT_OWNERSHIP_MODES,

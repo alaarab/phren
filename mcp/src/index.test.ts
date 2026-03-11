@@ -11,9 +11,9 @@ import {
 } from "./shared-governance.js";
 import {
   validateFindingsFormat,
-  validateBacklogFormat,
+  validateTaskFormat,
   mergeFindings,
-  mergeBacklog,
+  mergeTask,
   filterTrustedFindings,
   addFindingToFile,
   extractConflictVersions,
@@ -51,9 +51,9 @@ describe("sanitizeFts5Query", () => {
   });
 
   it("removes all known column filters", () => {
-    // Whitelist strips colons, so "type:backlog" -> "type backlog"
-    expect(sanitizeFts5Query("type:backlog")).toContain("backlog");
-    expect(sanitizeFts5Query("type:backlog")).not.toContain(":");
+    // Whitelist strips colons, so "type:task" -> "type task"
+    expect(sanitizeFts5Query("type:task")).toContain("task");
+    expect(sanitizeFts5Query("type:task")).not.toContain(":");
     expect(sanitizeFts5Query("project:foo")).toContain("foo");
     expect(sanitizeFts5Query("project:foo")).not.toContain(":");
     expect(sanitizeFts5Query("filename:bar")).toContain("bar");
@@ -371,31 +371,31 @@ describe("validateFindingsFormat", () => {
   });
 });
 
-describe("validateBacklogFormat", () => {
+describe("validateTaskFormat", () => {
   it("returns no issues for valid content", () => {
-    const content = "# backlog\n\n## Active\n\n- Task A\n\n## Queue\n\n## Done\n";
-    expect(validateBacklogFormat(content)).toEqual([]);
+    const content = "# task\n\n## Active\n\n- Task A\n\n## Queue\n\n## Done\n";
+    expect(validateTaskFormat(content)).toEqual([]);
   });
 
   it("flags missing title heading", () => {
     const content = "## Active\n\n- Task A\n";
-    const issues = validateBacklogFormat(content);
+    const issues = validateTaskFormat(content);
     expect(issues.some(i => i.includes("Missing title heading"))).toBe(true);
   });
 
   it("flags missing standard sections", () => {
-    const content = "# backlog\n\n- Task A\n";
-    const issues = validateBacklogFormat(content);
+    const content = "# task\n\n- Task A\n";
+    const issues = validateTaskFormat(content);
     expect(issues.some(i => i.includes("Missing expected sections"))).toBe(true);
   });
 
   it("accepts content with only Queue section", () => {
-    const content = "# backlog\n\n## Queue\n\n- Task B\n";
-    expect(validateBacklogFormat(content)).toEqual([]);
+    const content = "# task\n\n## Queue\n\n- Task B\n";
+    expect(validateTaskFormat(content)).toEqual([]);
   });
 
   it("can return multiple issues at once", () => {
-    const issues = validateBacklogFormat("no heading here");
+    const issues = validateTaskFormat("no heading here");
     expect(issues.length).toBeGreaterThanOrEqual(2);
   });
 });
@@ -484,26 +484,26 @@ describe("mergeFindings", () => {
   });
 });
 
-describe("mergeBacklog", () => {
+describe("mergeTask", () => {
   it("combines items from both sides", () => {
-    const ours = "# backlog\n\n## Active\n\n- Ours task\n\n## Queue\n\n## Done\n";
-    const theirs = "# backlog\n\n## Active\n\n- Their task\n\n## Queue\n\n## Done\n";
-    const merged = mergeBacklog(ours, theirs);
+    const ours = "# task\n\n## Active\n\n- Ours task\n\n## Queue\n\n## Done\n";
+    const theirs = "# task\n\n## Active\n\n- Their task\n\n## Queue\n\n## Done\n";
+    const merged = mergeTask(ours, theirs);
     expect(merged).toContain("- Ours task");
     expect(merged).toContain("- Their task");
   });
 
   it("deduplicates identical items", () => {
-    const content = "# backlog\n\n## Active\n\n- Same task\n\n## Queue\n\n## Done\n";
-    const merged = mergeBacklog(content, content);
+    const content = "# task\n\n## Active\n\n- Same task\n\n## Queue\n\n## Done\n";
+    const merged = mergeTask(content, content);
     const count = (merged.match(/- Same task/g) || []).length;
     expect(count).toBe(1);
   });
 
   it("orders sections Active, Queue, Done first", () => {
-    const ours = "# backlog\n\n## Done\n\n- D\n\n## Active\n\n- A\n\n## Queue\n\n- Q\n";
+    const ours = "# task\n\n## Done\n\n- D\n\n## Active\n\n- A\n\n## Queue\n\n- Q\n";
     const theirs = ours;
-    const merged = mergeBacklog(ours, theirs);
+    const merged = mergeTask(ours, theirs);
     const activeIdx = merged.indexOf("## Active");
     const queueIdx = merged.indexOf("## Queue");
     const doneIdx = merged.indexOf("## Done");
@@ -512,10 +512,10 @@ describe("mergeBacklog", () => {
   });
 
   it("preserves title from ours", () => {
-    const ours = "# My Backlog\n\n## Active\n\n## Queue\n\n## Done\n";
+    const ours = "# My Task\n\n## Active\n\n## Queue\n\n## Done\n";
     const theirs = "# Other\n\n## Active\n\n## Queue\n\n## Done\n";
-    const merged = mergeBacklog(ours, theirs);
-    expect(merged.startsWith("# My Backlog")).toBe(true);
+    const merged = mergeTask(ours, theirs);
+    expect(merged.startsWith("# My Task")).toBe(true);
   });
 });
 

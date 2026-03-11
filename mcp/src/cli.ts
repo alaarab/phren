@@ -9,7 +9,7 @@ export {
   selectSnippets,
   buildHookOutput,
   trackSessionMetrics,
-  filterBacklogByPriority,
+  filterTaskByPriority,
   parseCitations,
   validateCitation,
   annotateStale,
@@ -56,7 +56,7 @@ import {
   handleSkillList,
 } from "./cli-namespaces.js";
 import {
-  handleBacklogView,
+  handleTaskView,
   handleQuickstart,
   handleDebugInjection,
   handleInspectIndex,
@@ -140,7 +140,7 @@ export async function runCliCommand(command: string, args: string[]) {
     case "hooks":
       return handleHooksNamespace(args);
     case "tasks":
-      return handleBacklogView(profile);
+      return handleTaskView(profile);
     case "projects":
       return handleProjectsNamespace(args, profile);
     case "quickstart":

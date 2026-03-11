@@ -474,7 +474,7 @@ describe("CLI integration: search edge cases", () => {
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# alpha FINDINGS\n\n## 2025-06-01\n\n- caching layer timeout fix\n- database connection pool sizing\n");
     fs.writeFileSync(path.join(projDir, "summary.md"), "# alpha\n\n**What:** A caching project\n");
-    fs.writeFileSync(path.join(projDir, "backlog.md"), "# alpha Backlog\n\n## Active\n\n- Implement retry logic\n\n## Queue\n\n- Refactor config loader\n\n## Done\n\n- Initial setup\n");
+    fs.writeFileSync(path.join(projDir, "tasks.md"), "# alpha Task\n\n## Active\n\n- Implement retry logic\n\n## Queue\n\n- Refactor config loader\n\n## Done\n\n- Initial setup\n");
     fs.writeFileSync(path.join(projDir, "CANONICAL_MEMORIES.md"), "# Canonical\n\n- Always use UTC timestamps (pinned)\n");
     fs.writeFileSync(path.join(projDir, "CLAUDE.md"), "# alpha\n\nProject-level instructions for alpha.\n");
   });
@@ -1087,11 +1087,11 @@ describe("CLI integration: tasks", () => {
   });
 
   it("lists active and queued items", () => {
-    const projDir = path.join(cortexDir, "backlog-proj");
+    const projDir = path.join(cortexDir, "task-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(
-      path.join(projDir, "backlog.md"),
-      "# backlog-proj Backlog\n\n## Active\n\n- Fix login bug\n- Update dependencies\n\n## Queue\n\n- Add dark mode\n\n## Done\n\n- Setup project\n"
+      path.join(projDir, "tasks.md"),
+      "# task-proj Task\n\n## Active\n\n- Fix login bug\n- Update dependencies\n\n## Queue\n\n- Add dark mode\n\n## Done\n\n- Setup project\n"
     );
 
     const { stdout, exitCode } = runCli(
@@ -1099,7 +1099,7 @@ describe("CLI integration: tasks", () => {
       { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("backlog-proj");
+    expect(stdout).toContain("task-proj");
     expect(stdout).toContain("Fix login bug");
     expect(stdout).toContain("Add dark mode");
     expect(stdout).toContain("2 active, 1 queued");
@@ -1110,8 +1110,8 @@ describe("CLI integration: tasks", () => {
       const projDir = path.join(cortexDir, name);
       fs.mkdirSync(projDir, { recursive: true });
       fs.writeFileSync(
-        path.join(projDir, "backlog.md"),
-        `# ${name} Backlog\n\n## Active\n\n- Task for ${name}\n\n## Queue\n\n## Done\n\n`
+        path.join(projDir, "tasks.md"),
+        `# ${name} Task\n\n## Active\n\n- Task for ${name}\n\n## Queue\n\n## Done\n\n`
       );
     }
 
@@ -1323,8 +1323,8 @@ describe("CLI integration: doctor edge cases", () => {
     const projDir = path.join(cortexDir, "doc-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(
-      path.join(projDir, "backlog.md"),
-      "# doc-proj Backlog\n\n## Active\n\n## Queue\n\n- Improve chart interface with bubble details and device type filters\n\n## Done\n"
+      path.join(projDir, "tasks.md"),
+      "# doc-proj Task\n\n## Active\n\n## Queue\n\n- Improve chart interface with bubble details and device type filters\n\n## Done\n"
     );
 
     const repoDir = path.join(projectsDir, "doc-proj");
