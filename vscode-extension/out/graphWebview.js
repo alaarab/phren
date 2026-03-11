@@ -516,11 +516,17 @@ ${graphScript}
   var payload = ${safePayload};
 
   var graphNodes = [];
+  var topicMap = {};
   for (var i = 0; i < payload.nodes.length; i++) {
     var n = payload.nodes[i];
     var group = 'other';
     if (n.kind === 'project') group = 'project';
-    else if (n.kind === 'finding') group = n.subtype || 'other';
+    else if (n.kind === 'finding') {
+      group = n.topicSlug ? 'topic:' + n.topicSlug : 'topic:general';
+      if (n.topicSlug && !topicMap[n.topicSlug]) {
+        topicMap[n.topicSlug] = n.topicLabel || n.topicSlug;
+      }
+    }
     else if (n.kind === 'task') group = 'task-' + (n.subtype || 'queue');
     else if (n.kind === 'entity') group = 'entity';
     else if (n.kind === 'reference') group = 'reference';
@@ -536,8 +542,16 @@ ${graphScript}
       section: n.section || '',
       priority: n.priority || '',
       refDocs: n.docs || [],
-      connectedProjects: n.connectedProjects || []
+      connectedProjects: n.connectedProjects || [],
+      topicSlug: n.topicSlug || '',
+      topicLabel: n.topicLabel || '',
+      tagged: n.kind === 'finding'
     });
+  }
+  var topics = [];
+  var tSlugs = Object.keys(topicMap);
+  for (var ti = 0; ti < tSlugs.length; ti++) {
+    topics.push({ slug: tSlugs[ti], label: topicMap[tSlugs[ti]] });
   }
 
   var graphLinks = [];
@@ -571,7 +585,8 @@ ${graphScript}
     window.cortexGraph.mount({
       nodes: graphNodes,
       links: graphLinks,
-      scores: scores
+      scores: scores,
+      topics: topics
     });
   } else {
     var fallback = document.getElementById('graph-canvas');
