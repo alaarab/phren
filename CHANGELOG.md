@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [1.29.0] - 2026-03-11
+## [1.29.1] - 2026-03-11
 
 ### Changed
 - `tasks.md` is now the canonical task file across the runtime, starter projects, review UI, and docs. The legacy `tasks.md` starter files were removed and task-file guidance now points at `tasks.md`.
@@ -608,7 +608,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `cortex` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.25.0...HEAD
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.29.1...HEAD
+[1.29.1]: https://github.com/alaarab/cortex/compare/v1.28.0...v1.29.1
 [1.25.0]: https://github.com/alaarab/cortex/compare/v1.20.0...v1.25.0
 [1.16.0]: https://github.com/alaarab/cortex/compare/v1.15.6...v1.16.0
 [1.15.6]: https://github.com/alaarab/cortex/compare/v1.15.5...v1.15.6
