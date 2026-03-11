@@ -173,10 +173,9 @@
     "publish:extension": "vsce publish"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.6.2",
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.85.0",
-    "typescript": "^5.5.4",
-    "vscode": "^1.1.37"
+    "@vscode/vsce": "^3.6.2",
+    "typescript": "^5.5.4"
   }
 }
