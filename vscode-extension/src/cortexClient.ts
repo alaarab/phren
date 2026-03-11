@@ -167,6 +167,22 @@ export class CortexClient {
     return this.callTool("remove_finding", { project, finding: text });
   }
 
+  async getReviewQueue(project: string): Promise<unknown> {
+    return this.callTool("get_review_queue", { project });
+  }
+
+  async approveQueueItem(project: string, item: string): Promise<unknown> {
+    return this.callTool("approve_queue_item", { project, item });
+  }
+
+  async rejectQueueItem(project: string, item: string): Promise<unknown> {
+    return this.callTool("reject_queue_item", { project, item });
+  }
+
+  async editQueueItem(project: string, item: string, newText: string): Promise<unknown> {
+    return this.callTool("edit_queue_item", { project, item, new_text: newText });
+  }
+
   async readGraph(project?: string): Promise<unknown> {
     const args: Record<string, unknown> = {};
     if (project) args.project = project;

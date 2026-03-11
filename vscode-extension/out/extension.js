@@ -46,6 +46,7 @@ const findingViewer_1 = require("./findingViewer");
 const projectFileViewer_1 = require("./projectFileViewer");
 const skillEditor_1 = require("./skillEditor");
 const taskViewer_1 = require("./taskViewer");
+const queueViewer_1 = require("./queueViewer");
 const runtimeConfig_1 = require("./runtimeConfig");
 let client;
 let outputChannel;
@@ -188,7 +189,61 @@ async function activate(context) {
     const openTaskDisposable = vscode.commands.registerCommand("cortex.openTask", (task) => {
         (0, taskViewer_1.showTaskDetail)(cortexClient, task, refreshTree);
     });
-    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable);
+    const openQueueItemDisposable = vscode.commands.registerCommand("cortex.openQueueItem", (item) => {
+        (0, queueViewer_1.showQueueItemDetail)(cortexClient, item, refreshTree);
+    });
+    const filterFindingsByDateDisposable = vscode.commands.registerCommand("cortex.filterFindingsByDate", async () => {
+        const current = treeDataProvider.getDateFilter();
+        const picks = [
+            { label: "Today", description: "Show only today's findings" },
+            { label: "Last 7 days", description: "Show findings from the past week" },
+            { label: "Last 30 days", description: "Show findings from the past month" },
+            { label: "Custom range...", description: "Pick a start and end date" },
+            { label: "Clear filter", description: current ? `Currently: ${current.label}` : "No filter active" },
+        ];
+        const choice = await vscode.window.showQuickPick(picks, { placeHolder: "Filter findings by date" });
+        if (!choice)
+            return;
+        if (choice.label === "Clear filter") {
+            treeDataProvider.setDateFilter(undefined);
+            return;
+        }
+        const today = new Date();
+        const fmt = (d) => d.toISOString().slice(0, 10);
+        if (choice.label === "Today") {
+            const todayStr = fmt(today);
+            treeDataProvider.setDateFilter({ from: todayStr, to: todayStr, label: "Today" });
+        }
+        else if (choice.label === "Last 7 days") {
+            const from = new Date(today);
+            from.setDate(from.getDate() - 7);
+            treeDataProvider.setDateFilter({ from: fmt(from), to: fmt(today), label: "Last 7 days" });
+        }
+        else if (choice.label === "Last 30 days") {
+            const from = new Date(today);
+            from.setDate(from.getDate() - 30);
+            treeDataProvider.setDateFilter({ from: fmt(from), to: fmt(today), label: "Last 30 days" });
+        }
+        else if (choice.label === "Custom range...") {
+            const fromStr = await vscode.window.showInputBox({
+                prompt: "Start date (YYYY-MM-DD)",
+                placeHolder: "2026-01-01",
+                validateInput: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : "Use YYYY-MM-DD format",
+            });
+            if (!fromStr)
+                return;
+            const toStr = await vscode.window.showInputBox({
+                prompt: "End date (YYYY-MM-DD)",
+                placeHolder: fmt(today),
+                value: fmt(today),
+                validateInput: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : "Use YYYY-MM-DD format",
+            });
+            if (!toStr)
+                return;
+            treeDataProvider.setDateFilter({ from: fromStr, to: toStr, label: `${fromStr} to ${toStr}` });
+        }
+    });
+    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, filterFindingsByDateDisposable);
     try {
         await statusBar.initialize();
         outputChannel.appendLine("Status bar initialized successfully");

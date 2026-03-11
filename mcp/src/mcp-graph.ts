@@ -166,10 +166,10 @@ export function register(server: McpServer, ctx: McpContext): void {
       let sql: string;
       let params: (string | number)[];
 
+      // Step 1: Get entity list with counts (no GROUP_CONCAT to avoid comma-in-value bugs)
       if (project) {
         sql = `
-          SELECT e.name, e.type, COUNT(el.source_id) as ref_count,
-                 GROUP_CONCAT(DISTINCT el.source_doc) as docs
+          SELECT e.id, e.name, e.type, COUNT(el.source_id) as ref_count
           FROM entities e
           JOIN entity_links el ON el.target_id = e.id
           WHERE e.type != 'document' AND el.source_doc LIKE ?
@@ -180,8 +180,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         params = [`${project}/%`, max, skip];
       } else {
         sql = `
-          SELECT e.name, e.type, COUNT(el.source_id) as ref_count,
-                 GROUP_CONCAT(DISTINCT el.source_doc) as docs
+          SELECT e.id, e.name, e.type, COUNT(el.source_id) as ref_count
           FROM entities e
           JOIN entity_links el ON el.target_id = e.id
           WHERE e.type != 'document'
@@ -197,12 +196,24 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: true, data: { entities: [], total, hasMore: false }, message: "No entities in the graph." });
       }
 
-      const entities = rows.map(r => ({
-        name: String(r[0]),
-        type: String(r[1]),
-        refCount: Number(r[2]),
-        docs: String(r[3] || "").split(",").filter(Boolean),
-      }));
+      // Step 2: For each entity, fetch its docs as separate rows
+      const entities = rows.map(r => {
+        const entityId = Number(r[0]);
+        const docSql = project
+          ? "SELECT DISTINCT el.source_doc FROM entity_links el WHERE el.target_id = ? AND el.source_doc LIKE ?"
+          : "SELECT DISTINCT el.source_doc FROM entity_links el WHERE el.target_id = ?";
+        const docParams: (string | number)[] = project ? [entityId, `${project}/%`] : [entityId];
+        const docRows = queryRows(db, docSql, docParams);
+        const docs = (docRows || []).map(dr => String(dr[0]));
+        const entityName = String(r[1]);
+        return {
+          id: `entity:${entityName}`,
+          name: entityName,
+          type: String(r[2]),
+          refCount: Number(r[3]),
+          docs,
+        };
+      });
 
       const hasMore = skip + entities.length < total;
       return mcpResponse({ ok: true, data: { entities, total, hasMore, offset: skip, limit: max } });

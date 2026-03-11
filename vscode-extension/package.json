@@ -77,6 +77,15 @@
       {
         "command": "cortex.openTask",
         "title": "Cortex: Open Task"
+      },
+      {
+        "command": "cortex.openQueueItem",
+        "title": "Cortex: Open Queue Item"
+      },
+      {
+        "command": "cortex.filterFindingsByDate",
+        "title": "Cortex: Filter Findings by Date",
+        "icon": "$(calendar)"
       }
     ],
     "keybindings": [
@@ -91,6 +100,13 @@
         {
           "command": "cortex.addFinding",
           "when": "editorHasSelection"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cortex.filterFindingsByDate",
+          "when": "viewItem == cortex.category.findings",
+          "group": "inline"
         }
       ],
       "view/title": [

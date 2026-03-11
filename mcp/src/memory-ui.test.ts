@@ -458,8 +458,8 @@ describe("review-ui HTML rendering", () => {
       const body = renderPageForTests(tmpRoot, "csrf-token");
       expect(body).toContain('id="graph-detail-panel"');
       expect(body).toContain('id="graph-detail-body"');
-      expect(body).toContain("graphSourceFilterBy(this.value)");
-      expect(body).toContain("graphClearSelection()");
+      expect(body).toContain("cortexGraph");
+      expect(body).toContain("window.graphClearSelection");
     } finally {
       cleanup();
     }
