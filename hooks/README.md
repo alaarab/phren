@@ -113,6 +113,18 @@ By default, `hooksEnabled` is all-or-nothing. To control which tools get session
 
 Missing keys default to the value of `hooksEnabled`. When `hooksEnabled` is `false`, all tools are disabled regardless of `hookTools`.
 
+## Per-project hook overrides
+
+Tracked projects can override lifecycle hooks in `<cortexPath>/<project>/cortex.project.yaml`:
+
+```yaml
+hooks:
+  enabled: false
+  UserPromptSubmit: true
+```
+
+`hooks.enabled` sets the default for that project. Event-specific keys (`UserPromptSubmit`, `Stop`, `SessionStart`, `PostToolUse`) override the base toggle when present. This lets you keep hooks disabled for one project while still allowing a specific lifecycle event if needed.
+
 See `docs/internal/hook-config-spec.md` for the full schema specification.
 
 ## Dependencies

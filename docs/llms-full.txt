@@ -1,8 +1,8 @@
 cortex - Long-term memory for your AI agents.
-npm package: @alaarab/cortex
+npm package: cortex
 
 Quick start:
-  npx @alaarab/cortex init
+  npx cortex init
   This creates ~/.cortex, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
@@ -63,8 +63,8 @@ MCP Tools (51):
     disable_skill(name, project) - disable a skill without deleting its file
 
   Hooks management:
-    list_hooks() - show hook status for all tools + custom hooks + config paths
-    toggle_hooks(enabled, tool?) - enable/disable hooks globally or per tool
+    list_hooks(project?) - show hook status for all tools + custom hooks + config paths, optionally including project overrides
+    toggle_hooks(enabled, tool?, project?, event?) - enable/disable hooks globally, per tool, or per tracked project/event
     add_custom_hook(event, command, timeout?) - add a custom integration hook
     remove_custom_hook(event, command?) - remove custom hooks by event/command match
 
@@ -130,7 +130,9 @@ Key File Locations:
   ~/.cortex/profiles/                 - profile YAML files listing projects per profile
   ~/.cortex/<project>/summary.md      - five-line project summary card
   ~/.cortex/<project>/CLAUDE.md       - full project context (architecture, commands, conventions)
-  ~/.cortex/<project>/reference/      - deep reference docs (API details, data models)
+  ~/.cortex/<project>/topic-config.json - project-owned archive topic definitions
+  ~/.cortex/<project>/reference/      - deep reference docs and archived topic buckets
+  ~/.cortex/<project>/reference/topics/ - machine-managed topic docs for archived findings
   ~/.cortex/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
   ~/.cortex/<project>/backlog.md      - task queue across sessions
   ~/.cortex/<project>/MEMORY_QUEUE.md - items pending human review

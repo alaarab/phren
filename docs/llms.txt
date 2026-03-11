@@ -1,6 +1,6 @@
 cortex - Long-term memory for your AI agents.
 
-Install: npx @alaarab/cortex init
+Install: npx cortex init
 
 Key features:
 - Automatic context injection into every prompt via lifecycle hooks

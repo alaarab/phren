@@ -68,7 +68,7 @@ function hasCommandHook(value: unknown): boolean {
 export async function runStatus() {
   const cortexPath = findCortexPath();
   if (!cortexPath) {
-    console.log(`${RED}cortex not found${RESET}. Run ${CYAN}npx @alaarab/cortex init${RESET} to set up.`);
+    console.log(`${RED}cortex not found${RESET}. Run ${CYAN}npx cortex init${RESET} to set up.`);
     process.exit(1);
   }
 

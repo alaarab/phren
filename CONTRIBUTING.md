@@ -27,7 +27,7 @@ The build compiles TypeScript from `mcp/src/` into `mcp/dist/` and marks the ent
 | `mcp/src/shared.ts` | Core logic: FTS5 indexing, querying, memory governance |
 | `mcp/src/cli.ts` | CLI subcommands (search, doctor, shell, etc.) |
 | `mcp/src/utils.ts` | FTS5 sanitization, synonym expansion, keyword extraction |
-| `mcp/src/init.ts` | `npx @alaarab/cortex init`: configures MCP + hooks |
+| `mcp/src/init.ts` | `npx cortex init`: configures MCP + hooks |
 | `mcp/src/link.ts` | Profile sync, symlinks, hooks, context |
 | `mcp/src/data-access.ts` | Backlog CRUD, machine/profile listing, learning management |
 | `starter/` | Template files copied to `~/.cortex` on init |

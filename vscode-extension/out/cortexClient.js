@@ -53,6 +53,39 @@ class CortexClient {
     async getProjectSummary(project) {
         return this.callTool("get_project_summary", { name: project });
     }
+    async listSkills() {
+        return this.callTool("list_skills", {});
+    }
+    async readSkill(name, project) {
+        return this.callTool("read_skill", project ? { name, project } : { name });
+    }
+    async writeSkill(name, content, scope) {
+        return this.callTool("write_skill", { name, content, scope });
+    }
+    async enableSkill(name, project) {
+        return this.callTool("enable_skill", project ? { name, project } : { name });
+    }
+    async disableSkill(name, project) {
+        return this.callTool("disable_skill", project ? { name, project } : { name });
+    }
+    async listHooks() {
+        return this.callTool("list_hooks", {});
+    }
+    async toggleHooks(enabled, tool) {
+        return this.callTool("toggle_hooks", tool ? { enabled, tool } : { enabled });
+    }
+    async memoryFeedback(key, feedback) {
+        return this.callTool("memory_feedback", { key, feedback });
+    }
+    async updateTask(project, item, updates) {
+        return this.callTool("update_task", { project, item, ...updates });
+    }
+    async completeTask(project, item) {
+        return this.callTool("complete_task", { project, item });
+    }
+    async removeFinding(project, text) {
+        return this.callTool("remove_finding", { project, text });
+    }
     async dispose() {
         if (this.disposed) {
             return;

@@ -79,7 +79,7 @@ export async function runCortexUpdate(opts: RunCortexUpdateOptions = {}): Promis
   const hasGit = fs.existsSync(path.join(root, ".git"));
   const builtEntry = path.join(root, "mcp", "dist", "index.js");
 
-  if (pkgName === "@alaarab/cortex" && hasGit) {
+  if (pkgName === "cortex" && hasGit) {
     try {
       // Warn if working tree is dirty (autostash handles it, but good to know)
       try {

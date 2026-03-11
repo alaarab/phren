@@ -41,12 +41,10 @@ const CortexTreeProvider_1 = require("./providers/CortexTreeProvider");
 const searchQuickPick_1 = require("./searchQuickPick");
 const statusBar_1 = require("./statusBar");
 const graphWebview_1 = require("./graphWebview");
-const SCAFFOLDED_COMMAND_IDS = [
-    "cortex.getFindings",
-    "cortex.getTasks",
-    "cortex.listProjects",
-    "cortex.getProjectSummary",
-];
+const findingViewer_1 = require("./findingViewer");
+const projectFileViewer_1 = require("./projectFileViewer");
+const skillEditor_1 = require("./skillEditor");
+const taskViewer_1 = require("./taskViewer");
 let client;
 let outputChannel;
 async function activate(context) {
@@ -54,7 +52,7 @@ async function activate(context) {
     context.subscriptions.push(outputChannel);
     outputChannel.appendLine("Cortex extension activating...");
     const config = vscode.workspace.getConfiguration("cortex");
-    const mcpServerPath = config.get("mcpServerPath", "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/@alaarab/cortex/mcp/dist/index.js");
+    const mcpServerPath = config.get("mcpServerPath", "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/cortex/mcp/dist/index.js");
     const storePath = config.get("storePath", "/home/alaarab/.cortex");
     const nodePath = config.get("nodePath", "node");
     const cortexClient = new cortexClient_1.CortexClient({
@@ -122,7 +120,56 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to refresh Cortex extension state: ${toErrorMessage(error)}`);
         }
     });
-    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable);
+    const refreshTree = () => treeDataProvider.refresh();
+    const openFindingDisposable = vscode.commands.registerCommand("cortex.openFinding", (finding) => {
+        (0, findingViewer_1.showFindingDetail)(cortexClient, finding, refreshTree);
+    });
+    const openProjectFileDisposable = vscode.commands.registerCommand("cortex.openProjectFile", async (projectName, fileName) => {
+        try {
+            await (0, projectFileViewer_1.showProjectFile)(cortexClient, projectName, fileName);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to open project file: ${toErrorMessage(error)}`);
+        }
+    });
+    const openSkillDisposable = vscode.commands.registerCommand("cortex.openSkill", async (skillName, skillSource) => {
+        try {
+            await (0, skillEditor_1.showSkillEditor)(cortexClient, skillName, skillSource);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to open skill: ${toErrorMessage(error)}`);
+        }
+    });
+    const toggleSkillDisposable = vscode.commands.registerCommand("cortex.toggleSkill", async (skillName, skillSource, currentlyEnabled) => {
+        try {
+            const project = skillSource === "global" ? undefined : skillSource;
+            if (currentlyEnabled) {
+                await cortexClient.disableSkill(skillName, project);
+            }
+            else {
+                await cortexClient.enableSkill(skillName, project);
+            }
+            treeDataProvider.refresh();
+            await vscode.window.showInformationMessage(`Skill "${skillName}" ${currentlyEnabled ? "disabled" : "enabled"}.`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to toggle skill: ${toErrorMessage(error)}`);
+        }
+    });
+    const toggleHookDisposable = vscode.commands.registerCommand("cortex.toggleHook", async (tool, currentlyEnabled) => {
+        try {
+            await cortexClient.toggleHooks(!currentlyEnabled, tool);
+            treeDataProvider.refresh();
+            await vscode.window.showInformationMessage(`Hooks for "${tool}" ${currentlyEnabled ? "disabled" : "enabled"}.`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to toggle hook: ${toErrorMessage(error)}`);
+        }
+    });
+    const openTaskDisposable = vscode.commands.registerCommand("cortex.openTask", (task) => {
+        (0, taskViewer_1.showTaskDetail)(cortexClient, task, refreshTree);
+    });
+    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable);
     try {
         await statusBar.initialize();
         outputChannel.appendLine("Status bar initialized successfully");
@@ -130,12 +177,6 @@ async function activate(context) {
     catch (error) {
         outputChannel.appendLine(`Status bar init failed: ${toErrorMessage(error)}`);
         await vscode.window.showErrorMessage(`Failed to initialize active Cortex project: ${toErrorMessage(error)}`);
-    }
-    for (const commandId of SCAFFOLDED_COMMAND_IDS) {
-        const disposable = vscode.commands.registerCommand(commandId, async () => {
-            await vscode.window.showInformationMessage(`${commandId} is scaffolded but not implemented yet.`);
-        });
-        context.subscriptions.push(disposable);
     }
 }
 async function deactivate() {

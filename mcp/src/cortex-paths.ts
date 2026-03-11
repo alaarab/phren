@@ -318,9 +318,10 @@ export function computeCortexLiveStateToken(cortexPath: string): string {
   for (const projectDir of projectDirs) {
     const project = path.basename(projectDir);
     parts.push(`project:${project}`);
-    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "backlog.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md"]) {
+    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "backlog.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md", "topic-config.json"]) {
       pushFileToken(parts, path.join(projectDir, file));
     }
+    pushDirTokens(parts, path.join(projectDir, "reference"));
     pushDirTokens(parts, path.join(projectDir, "skills"));
     pushDirTokens(parts, path.join(projectDir, ".claude", "skills"));
   }

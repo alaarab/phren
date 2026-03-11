@@ -114,6 +114,50 @@ export class CortexClient {
     return this.callTool("get_project_summary", { name: project });
   }
 
+  async listSkills(): Promise<unknown> {
+    return this.callTool("list_skills", {});
+  }
+
+  async readSkill(name: string, project?: string): Promise<unknown> {
+    return this.callTool("read_skill", project ? { name, project } : { name });
+  }
+
+  async writeSkill(name: string, content: string, scope: string): Promise<unknown> {
+    return this.callTool("write_skill", { name, content, scope });
+  }
+
+  async enableSkill(name: string, project?: string): Promise<unknown> {
+    return this.callTool("enable_skill", project ? { name, project } : { name });
+  }
+
+  async disableSkill(name: string, project?: string): Promise<unknown> {
+    return this.callTool("disable_skill", project ? { name, project } : { name });
+  }
+
+  async listHooks(): Promise<unknown> {
+    return this.callTool("list_hooks", {});
+  }
+
+  async toggleHooks(enabled: boolean, tool?: string): Promise<unknown> {
+    return this.callTool("toggle_hooks", tool ? { enabled, tool } : { enabled });
+  }
+
+  async memoryFeedback(key: string, feedback: string): Promise<unknown> {
+    return this.callTool("memory_feedback", { key, feedback });
+  }
+
+  async updateTask(project: string, item: string, updates: Record<string, unknown>): Promise<unknown> {
+    return this.callTool("update_task", { project, item, ...updates });
+  }
+
+  async completeTask(project: string, item: string): Promise<unknown> {
+    return this.callTool("complete_task", { project, item });
+  }
+
+  async removeFinding(project: string, text: string): Promise<unknown> {
+    return this.callTool("remove_finding", { project, text });
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) {
       return;

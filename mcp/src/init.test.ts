@@ -3,6 +3,7 @@ import { makeTempDir, suppressOutput } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { execFileSync } from "child_process";
 import {
   configureClaude,
   configureCodexMcp,
@@ -147,7 +148,7 @@ describe.sequential("mcp mode configuration", () => {
       JSON.stringify(
         {
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
+            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
           },
         },
         null,
@@ -200,7 +201,7 @@ describe.sequential("mcp mode configuration", () => {
       JSON.stringify(
         {
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
+            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
           },
         },
         null,
@@ -242,7 +243,7 @@ describe.sequential("mcp mode configuration", () => {
       JSON.stringify(
         {
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
+            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
           },
         },
         null,
@@ -271,7 +272,7 @@ describe.sequential("mcp mode configuration", () => {
       JSON.stringify(
         {
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
+            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
           },
         },
         null,
@@ -378,7 +379,7 @@ describe.sequential("mcp mode configuration", () => {
         {
           hooks: { Stop: [{ type: "command", command: "echo keep" }] },
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "@alaarab/cortex", "/old/path"] },
+            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
           },
         },
         null,
@@ -483,7 +484,7 @@ describe("ensureGovernanceFiles", () => {
     expect(Array.isArray(access.admins)).toBe(true);
 
     const workflow = JSON.parse(fs.readFileSync(path.join(govDir, "workflow-policy.json"), "utf8"));
-    expect(workflow.requireMaintainerApproval).toBe(true);
+    expect(workflow.requireMaintainerApproval).toBe(false);
 
     const indexPol = JSON.parse(fs.readFileSync(path.join(govDir, "index-policy.json"), "utf8"));
     expect(Array.isArray(indexPol.includeGlobs)).toBe(true);
@@ -571,6 +572,28 @@ describe("runInit walkthrough integration", () => {
     expect(fs.existsSync(path.join(cortexPath, ".governance", "retention-policy.json"))).toBe(true);
   });
 
+  it("fresh init starts empty and initializes a local git repo", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-empty");
+    process.env.CORTEX_PATH = cortexPath;
+
+    await suppressOutput(() => runInit({ yes: true }));
+
+    expect(fs.existsSync(path.join(cortexPath, "my-api"))).toBe(false);
+    expect(fs.existsSync(path.join(cortexPath, "my-frontend"))).toBe(false);
+    expect(fs.existsSync(path.join(cortexPath, "my-first-project"))).toBe(false);
+
+    const defaultProfile = fs.readFileSync(path.join(cortexPath, "profiles", "default.yaml"), "utf8");
+    expect(defaultProfile).toContain("- global");
+    expect(defaultProfile).not.toContain("my-api");
+    expect(defaultProfile).not.toContain("my-frontend");
+
+    const insideWorkTree = execFileSync("git", ["-C", cortexPath, "rev-parse", "--is-inside-work-tree"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    expect(insideWorkTree).toBe("true");
+  });
+
   it("init output explains next steps without a restart step", async () => {
     const cortexPath = path.join(tmpRoot, "cortex-restart-msg");
     process.env.CORTEX_PATH = cortexPath;
@@ -588,20 +611,16 @@ describe("runInit walkthrough integration", () => {
     expect(output).not.toContain("Restart your agent");
   });
 
-  it("walkthrough project name renames starter default project", async () => {
+  it("walkthrough project name seeds the requested starter project only", async () => {
     const cortexPath = path.join(tmpRoot, "cortex-rename");
     process.env.CORTEX_PATH = cortexPath;
-    // Simulate walkthrough result via internal _walkthroughProject
     const opts: any = { yes: true, _walkthroughProject: "my-app" };
-    // yes skips interactive but we manually set the walkthrough project
-    // We need to bypass the walkthrough check, so set yes=false but make stdin non-TTY
     opts.yes = true;
     await suppressOutput(() => runInit(opts));
 
-    // The default project "my-first-project" should not exist if starter has it
-    // But _walkthroughProject is only read when !hasExistingInstall, and yes=true means walkthrough is skipped
-    // So we test the rename path directly by checking the init sets up correctly
     expect(fs.existsSync(cortexPath)).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, "my-app", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, "my-first-project"))).toBe(false);
   });
 
   it("persists onboarding defaults for ownership, proactivity, and task mode", async () => {
@@ -907,9 +926,11 @@ describe("project templates", () => {
       await suppressOutput(() => runInit({ yes: true, template: "python-project" }));
       const cortexDir = path.join(tmpDir, "cortex");
       const claudeMd = fs.readFileSync(path.join(cortexDir, "my-first-project", "CLAUDE.md"), "utf8");
+      const profile = fs.readFileSync(path.join(cortexDir, "profiles", "default.yaml"), "utf8");
       expect(claudeMd).toContain("Python project");
       expect(claudeMd).toContain("pytest");
       expect(claudeMd).not.toContain("{{project}}");
+      expect(profile).toContain("- my-first-project");
     } finally {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origHome;

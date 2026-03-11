@@ -22,4 +22,4 @@
 
 ## Done
 
-- [x] Run `npx @alaarab/cortex init` to set up cortex
+- [x] Run `npx cortex init` to set up cortex

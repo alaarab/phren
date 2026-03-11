@@ -5,8 +5,8 @@ cortex keeps project memory portable across sessions and machines. It runs as an
 ## Quick Start
 
 ```bash
-npx @alaarab/cortex init
-npx @alaarab/cortex init --dry-run
+npx cortex init
+npx cortex init --dry-run
 ```
 
 This creates `~/.cortex`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.
@@ -26,12 +26,12 @@ To update the installed package and refresh shipped starter globals in one flow:
 cortex update --refresh-starter
 ```
 
-The older `npx @alaarab/cortex init --apply-starter-update` path still works when you only want to refresh starter assets without running the full update flow.
+The older `npx cortex init --apply-starter-update` path still works when you only want to refresh starter assets without running the full update flow.
 
 To remove everything:
 
 ```bash
-npx @alaarab/cortex uninstall
+npx cortex uninstall
 ```
 
 ## Maintenance Safety
@@ -123,8 +123,8 @@ Hooks are registered in `~/.claude/settings.json` during init. They also install
 Toggle MCP and hooks independently:
 
 ```bash
-npx @alaarab/cortex mcp-mode on|off|status
-npx @alaarab/cortex hooks-mode on|off|status
+npx cortex mcp-mode on|off|status
+npx cortex hooks-mode on|off|status
 ```
 
 When MCP is off but hooks are on, cortex still injects context via hooks (no MCP tools available to the agent). When hooks are off, the hook commands exit immediately without doing work.

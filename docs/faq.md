@@ -57,9 +57,24 @@ All thresholds are configurable via `cortex config policy`.
 cortex review-ui
 ```
 
-Opens a browser-based interface at `localhost:3499` (configurable with `--port`). From there you can approve, reject, or edit entries in the memory queue — findings that failed trust filtering and are waiting for your review.
+Opens a browser-based interface at `localhost:3499` (configurable with `--port`). From there you can approve, reject, or edit entries in the memory queue and inspect project memory without starting an agent session.
 
 You can filter by machine, model, and project. Useful when you're running agents across multiple machines and want to triage what each one produced.
+
+Inside a project, the `Reference` tab shows three buckets side by side:
+
+- project topics from `topic-config.json`
+- suggested topics inferred from project language
+- other hand-written docs under `reference/`
+
+From that tab you can:
+
+- read topic docs under `reference/topics/<slug>.md`
+- add, edit, or delete project-owned topics
+- adopt a suggested topic with one click
+- run a safe reclassification pass that moves legacy auto-generated `reference/*.md` topic docs into `reference/topics/` while leaving hand-written docs alone
+
+If a project has never customized topics, the UI shows a starter-topics banner. Saving topics in the UI writes `topic-config.json` and creates the matching topic docs immediately so they are visible before the next archive cycle.
 
 The terminal shell (`cortex`, then press `m`) covers the same workflow if you prefer staying in the terminal.
 
@@ -106,7 +121,7 @@ Project setup note:
 No. MCP is recommended — it gives agents 51 tools for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
-npx @alaarab/cortex init --mcp off
+npx cortex init --mcp off
 ```
 
 Toggle anytime:
@@ -119,7 +134,7 @@ cortex mcp-mode off
 ## How do I preview init changes without writing files?
 
 ```bash
-npx @alaarab/cortex init --dry-run
+npx cortex init --dry-run
 ```
 
 Prints what would be created or updated and exits without touching anything.

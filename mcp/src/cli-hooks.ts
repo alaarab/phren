@@ -18,6 +18,7 @@ import {
   buildIndex,
   detectProject,
 } from "./shared-index.js";
+import { isProjectHookEnabled } from "./project-config.js";
 import {
   checkConsolidationNeeded,
 } from "./shared-content.js";
@@ -169,6 +170,11 @@ export async function handleHookPrompt() {
   const intent = detectTaskIntent(prompt);
   const detectedProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
   if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
+
+  if (!isProjectHookEnabled(getCortexPath(), detectedProject, "UserPromptSubmit")) {
+    appendAuditLog(getCortexPath(), "hook_prompt", `status=project_disabled project=${detectedProject}`);
+    process.exit(0);
+  }
 
   const safeQuery = buildRobustFtsQuery(keywords, detectedProject, getCortexPath());
   if (!safeQuery) process.exit(0);

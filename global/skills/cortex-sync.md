@@ -102,7 +102,7 @@ If this fails (not a git repo, no remote), tell the user. Don't silently skip.
 Run init against the pulled cortex repo so hooks, MCP registration, and machine/profile wiring are refreshed:
 
 ```bash
-CORTEX_PATH="$CORTEX_DIR" npx @alaarab/cortex init -y
+CORTEX_PATH="$CORTEX_DIR" npx cortex init -y
 ```
 
 If the user is in an untracked repo afterward, tell them to open a session there and let the agent ask, or run `cortex add` from that directory.

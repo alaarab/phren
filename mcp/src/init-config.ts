@@ -93,7 +93,7 @@ function buildMcpServerConfig(cortexPath: string) {
   }
   return {
     command: "npx",
-    args: ["-y", `@alaarab/cortex@${VERSION}`, cortexPath],
+    args: ["-y", `cortex@${VERSION}`, cortexPath],
   };
 }
 
@@ -205,11 +205,11 @@ export function removeMcpServerAtPath(filePath: string): boolean {
 export function isCortexCommand(command: string): boolean {
   // Detect CORTEX_PATH= env var prefix (present in all lifecycle hook commands)
   if (/\bCORTEX_PATH=/.test(command)) return true;
-  // Detect npx/@alaarab/cortex package references
-  if (command.includes("@alaarab/cortex")) return true;
+  // Detect npx/cortex package references
+  if (command.includes("cortex")) return true;
   // Detect bare "cortex" executable segment
   const segments = command.split(/[/\\\s]+/);
-  if (segments.some(seg => seg === "cortex" || seg.startsWith("cortex@") || seg.startsWith("@alaarab/cortex"))) return true;
+  if (segments.some(seg => seg === "cortex" || seg.startsWith("cortex@") || seg.startsWith("cortex"))) return true;
   // Also match commands that include cortex hook subcommands (used when installed via absolute path)
   const HOOK_MARKERS = ["hook-prompt", "hook-stop", "hook-session-start", "hook-tool"];
   if (HOOK_MARKERS.some(m => command.includes(m))) return true;

@@ -32,6 +32,15 @@ describe("init setup onboarding helpers", () => {
     expect(detectProjectDir(nestedDir, cortexPath)).toBe(projectRoot);
   });
 
+  it("detects an AGENTS.md-rooted project before git is initialized", () => {
+    const codexRoot = path.join(tmp.path, "codex-app");
+    const nestedDir = path.join(codexRoot, "src", "feature");
+    fs.mkdirSync(nestedDir, { recursive: true });
+    fs.writeFileSync(path.join(codexRoot, "AGENTS.md"), "# codex-app\n");
+
+    expect(detectProjectDir(nestedDir, cortexPath)).toBe(codexRoot);
+  });
+
   it("checks tracking against the active profile when provided", () => {
     expect(isProjectTracked(cortexPath, "app", "work")).toBe(false);
     expect(isProjectTracked(cortexPath, "app-api", "personal")).toBe(true);

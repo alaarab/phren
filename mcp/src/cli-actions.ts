@@ -198,9 +198,13 @@ export async function handleQualityFeedback(args: string[]) {
 
 export async function handleMemoryUi(args: string[]) {
   const portArg = args.find((arg) => arg.startsWith("--port="));
+  const noOpen = args.includes("--no-open");
   const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
   const safePort = Number.isNaN(port) ? 3499 : port;
-  await startReviewUi(getCortexPath(), safePort, resolveRuntimeProfile(getCortexPath()));
+  await startReviewUi(getCortexPath(), safePort, resolveRuntimeProfile(getCortexPath()), {
+    autoOpen: !noOpen,
+    allowPortFallback: !portArg,
+  });
 }
 
 export async function handleShell(args: string[], profile: string) {

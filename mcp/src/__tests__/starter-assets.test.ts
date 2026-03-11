@@ -55,27 +55,32 @@ describe("shipped starter assets", () => {
     }
   });
 
-  it("keeps shipped sample profile entries aligned with starter project directories", () => {
-    const starterProjects = fs.readdirSync(STARTER_ROOT, { withFileTypes: true })
+  it("keeps bundled example projects out of fresh starter profiles", () => {
+    const bundledExamples = fs.readdirSync(STARTER_ROOT, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .filter((name) => !["global", "profiles", "templates"].includes(name))
       .sort();
 
-    expect(starterProjects.length).toBeGreaterThan(0);
+    expect(bundledExamples.length).toBeGreaterThan(0);
 
-    for (const project of starterProjects) {
+    for (const project of bundledExamples) {
       const projectDir = path.join(STARTER_ROOT, project);
       for (const file of REQUIRED_TEMPLATE_FILES) {
         expect(fs.existsSync(path.join(projectDir, file)), `${project} is missing ${file}`).toBe(true);
       }
     }
 
-    const defaultProfile = yaml.load(
-      fs.readFileSync(path.join(STARTER_ROOT, "profiles", "default.yaml"), "utf8"),
-      { schema: yaml.CORE_SCHEMA },
-    ) as { projects?: unknown[] };
-    const defaultProjects = (defaultProfile.projects ?? []).map((entry) => String(entry)).sort();
-    expect(defaultProjects).toEqual(starterProjects);
+    for (const profileFile of ["default.yaml", "personal.yaml", "work.yaml"]) {
+      const parsed = yaml.load(
+        fs.readFileSync(path.join(STARTER_ROOT, "profiles", profileFile), "utf8"),
+        { schema: yaml.CORE_SCHEMA },
+      ) as { projects?: unknown[] };
+      const projects = (parsed.projects ?? []).map((entry) => String(entry));
+      expect(projects).toContain("global");
+      for (const example of bundledExamples) {
+        expect(projects).not.toContain(example);
+      }
+    }
   });
 });

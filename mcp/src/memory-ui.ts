@@ -2,6 +2,7 @@ import {
   createReviewUiHttpServer,
   startReviewUiServer,
   type ReviewUiOptions,
+  type ReviewUiStartOptions,
 } from "./memory-ui-server.js";
 import { renderReviewUiPage } from "./memory-ui-page.js";
 
@@ -11,6 +12,6 @@ export function createReviewUiServer(cortexPath: string, opts?: ReviewUiOptions,
   return createReviewUiHttpServer(cortexPath, renderReviewUiPage, profile, opts);
 }
 
-export async function startReviewUi(cortexPath: string, port: number, profile?: string): Promise<void> {
-  await startReviewUiServer(cortexPath, port, renderReviewUiPage, profile);
+export async function startReviewUi(cortexPath: string, port: number, profile?: string, opts?: ReviewUiStartOptions): Promise<void> {
+  await startReviewUiServer(cortexPath, port, renderReviewUiPage, profile, opts);
 }

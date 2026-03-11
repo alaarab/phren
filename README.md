@@ -9,7 +9,7 @@
 
 **Long-term memory for your AI agents.**
 
-[![npm](https://img.shields.io/npm/v/@alaarab/cortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
+[![npm](https://img.shields.io/npm/v/cortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
 [![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fcortex-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/)
 [![Whitepaper PDF](https://img.shields.io/badge/whitepaper-PDF-2563EB?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/whitepaper.pdf)
 
@@ -25,16 +25,16 @@ Project memory should not disappear between sessions or get stranded on one mach
 ## Getting started
 
 ```bash
-npx @alaarab/cortex init
+npx cortex init
 # Preview changes without writing files
-npx @alaarab/cortex init --dry-run
+npx cortex init --dry-run
 ```
 
 | Scenario | What to do |
 |---|---|
-| First time | `npx @alaarab/cortex init` |
+| First time | `npx cortex init` |
 | Add a project | Open a session there and let the agent ask, or run `cortex add` |
-| New machine | `npx @alaarab/cortex init` and paste your cortex repo URL |
+| New machine | `npx cortex init` and paste your cortex repo URL |
 
 This one command bootstraps Cortex locally. It:
 - Creates `~/.cortex` with starter templates
@@ -145,7 +145,7 @@ git remote add origin git@github.com:YOU/my-cortex.git
 git push -u origin main
 ```
 
-On a new machine: run `npx @alaarab/cortex init` and paste your repo URL when the walkthrough asks if you have an existing cortex repo.
+On a new machine: run `npx cortex init` and paste your repo URL when the walkthrough asks if you have an existing cortex repo.
 
 `SessionStart` pulls on open. The Stop hook commits locally after each response and queues a best-effort push when a remote exists. This is eventual consistency -- git gives you portability and auditability, not real-time sync.
 
@@ -175,13 +175,13 @@ Profiles decide which projects are active on each machine. `cortex init` is the 
 If you want stable names across laptops, desktops, and CI, set the machine name explicitly at onboarding instead of relying on the raw OS hostname:
 
 ```bash
-npx @alaarab/cortex init --machine work-laptop --profile work
+npx cortex init --machine work-laptop --profile work
 ```
 
 For CI or unattended setup:
 
 ```bash
-npx @alaarab/cortex init --machine ci-runner --profile work
+npx cortex init --machine ci-runner --profile work
 ```
 
 </details>
@@ -215,7 +215,7 @@ Because it's all markdown in git, you have a full record of what your agents lea
 Hooks-only mode (no MCP tools):
 
 ```bash
-npx @alaarab/cortex init --mcp off
+npx cortex init --mcp off
 ```
 
 Toggle anytime:
@@ -507,7 +507,7 @@ See [docs/environment.md](docs/environment.md) for all feature flags and env var
 <details>
 <summary><strong>Repository structure</strong></summary>
 
-This repo has two roles: it's the source code for the `@alaarab/cortex` npm package, and it ships the starter files that `cortex init` copies to `~/.cortex`. The top-level directories break down like this:
+This repo has two roles: it's the source code for the `cortex` npm package, and it ships the starter files that `cortex init` copies to `~/.cortex`. The top-level directories break down like this:
 
 | Directory | What it is | When you'd touch it |
 |-----------|-----------|---------------------|

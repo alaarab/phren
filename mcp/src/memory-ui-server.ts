@@ -4,6 +4,7 @@ import { timingSafeEqual } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as querystring from "querystring";
+import { spawn } from "child_process";
 import {
   CortexError,
   computeCortexLiveStateToken,
@@ -28,6 +29,7 @@ import {
   recentAccepted,
   recentUsage,
 } from "./memory-ui-data.js";
+import { ensureTopicReferenceDoc, getProjectTopicsResponse, listProjectReferenceDocs, readReferenceContent, reclassifyLegacyTopicDocs, writeProjectTopics } from "./project-topics.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
 
@@ -36,8 +38,90 @@ export interface ReviewUiOptions {
   csrfTokens?: Map<string, number>;
 }
 
+export interface ReviewUiStartOptions {
+  autoOpen?: boolean;
+  allowPortFallback?: boolean;
+  browserLauncher?: (url: string) => Promise<void> | void;
+}
+
 const CSRF_TOKEN_TTL_MS = 15 * 60 * 1000;
 const MAX_FORM_BODY_BYTES = 1_048_576;
+const REVIEW_UI_READY_ATTEMPTS = 12;
+const REVIEW_UI_READY_DELAY_MS = 75;
+
+export function getReviewUiBrowserCommand(url: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
+  if (platform === "darwin") return { command: "open", args: [url] };
+  if (platform === "win32") return { command: process.env.ComSpec || "cmd.exe", args: ["/c", "start", "", url] };
+  return { command: "xdg-open", args: [url] };
+}
+
+export async function launchReviewUiBrowser(url: string): Promise<void> {
+  const { command, args } = getReviewUiBrowserCommand(url);
+  await new Promise<void>((resolve, reject) => {
+    try {
+      const child = spawn(command, args, { detached: true, stdio: "ignore" });
+      child.once("error", reject);
+      child.once("spawn", () => {
+        child.removeListener("error", reject);
+        child.unref();
+        resolve();
+      });
+    } catch (err: unknown) {
+      reject(err);
+    }
+  });
+}
+
+export async function waitForReviewUiReady(
+  url: string,
+  attempts: number = REVIEW_UI_READY_ATTEMPTS,
+  delayMs: number = REVIEW_UI_READY_DELAY_MS,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const ready = await new Promise<boolean>((resolve) => {
+      const req = http.get(url, (res) => {
+        res.resume();
+        resolve(true);
+      });
+      req.setTimeout(1000, () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.on("error", () => resolve(false));
+    });
+    if (ready) return true;
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return false;
+}
+
+function isAddressInUse(err: unknown): boolean {
+  return Boolean(err && typeof err === "object" && "code" in err && (err as NodeJS.ErrnoException).code === "EADDRINUSE");
+}
+
+async function listenOnLoopback(server: http.Server, port: number): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const onError = (err: Error) => {
+      server.off("listening", onListening);
+      reject(err);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("failed to determine review-ui port"));
+        return;
+      }
+      resolve(address.port);
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  });
+}
 
 function pruneExpiredCsrfTokens(csrfTokens?: Map<string, number>): void {
   if (!csrfTokens) return;
@@ -212,6 +296,21 @@ function handleLegacyQueueActionResult(res: http.ServerResponse, result: CortexR
   res.end(result.error);
 }
 
+function parseTopicsPayload(raw: string): Array<{ slug: string; label: string; description: string; keywords: string[] }> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map((topic) => ({
+      slug: String(topic?.slug || ""),
+      label: String(topic?.label || ""),
+      description: String(topic?.description || ""),
+      keywords: Array.isArray(topic?.keywords) ? topic.keywords.map((keyword: unknown) => String(keyword)) : [],
+    }));
+  } catch {
+    return null;
+  }
+}
+
 export function createReviewUiHttpServer(
   cortexPath: string,
   renderPage: (cortexPath: string, authToken?: string) => string,
@@ -298,6 +397,42 @@ export function createReviewUiHttpServer(
       }
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ ok: true, content: fs.readFileSync(filePath, "utf8") }));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/project-topics") {
+      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
+      const project = String(qs.project || "");
+      if (!project || !isValidProjectName(project)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(cortexPath, project) }));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/project-reference-list") {
+      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
+      const project = String(qs.project || "");
+      if (!project || !isValidProjectName(project)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: true, ...listProjectReferenceDocs(cortexPath, project) }));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/project-reference-content") {
+      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
+      const project = String(qs.project || "");
+      const file = String(qs.file || "");
+      const contentResult = readReferenceContent(cortexPath, project, file);
+      res.writeHead(contentResult.ok ? 200 : 400, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(contentResult.ok ? { ok: true, content: contentResult.content } : { ok: false, error: contentResult.error }));
       return;
     }
 
@@ -408,6 +543,62 @@ export function createReviewUiHttpServer(
       return;
     }
 
+    if (req.method === "POST" && pathname === "/api/project-topics/save") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const rawTopics = String(parsed.topics || "");
+        if (!project || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
+          return;
+        }
+        const topics = parseTopicsPayload(rawTopics);
+        if (!topics) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Invalid topics payload" }));
+          return;
+        }
+        const saved = writeProjectTopics(cortexPath, project, topics);
+        if (!saved.ok) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify(saved));
+          return;
+        }
+        for (const topic of saved.topics) {
+          const ensured = ensureTopicReferenceDoc(cortexPath, project, topic);
+          if (!ensured.ok) {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: ensured.error }));
+            return;
+          }
+        }
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(cortexPath, project) }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/project-topics/reclassify") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        if (!project || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
+          return;
+        }
+        const result = reclassifyLegacyTopicDocs(cortexPath, project);
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      });
+      return;
+    }
+
     if (req.method === "GET" && pathname.startsWith("/api/graph")) {
       const graphParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
       const focusProject = graphParams.get("project") || undefined;
@@ -484,22 +675,42 @@ export async function startReviewUiServer(
   port: number,
   renderPage: (cortexPath: string, authToken?: string) => string,
   profile?: string,
+  opts: ReviewUiStartOptions = {},
 ): Promise<void> {
   const authToken = crypto.randomUUID();
   const csrfTokens = new Map<string, number>();
   const server = createReviewUiHttpServer(cortexPath, renderPage, profile, { authToken, csrfTokens });
-  const reviewUrl = `http://127.0.0.1:${port}/?_auth=${encodeURIComponent(authToken)}`;
+  let boundPort: number;
+  try {
+    boundPort = await listenOnLoopback(server, port);
+  } catch (err: unknown) {
+    if (!opts.allowPortFallback || port === 0 || !isAddressInUse(err)) throw err;
+    process.stderr.write(`[cortex] review-ui port ${port} is busy, using a random local port instead\n`);
+    boundPort = await listenOnLoopback(server, 0);
+  }
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
-      server.removeListener("error", reject);
-      resolve();
-    });
-  });
+  const publicUrl = `http://127.0.0.1:${boundPort}`;
+  const reviewUrl = `${publicUrl}/?_auth=${encodeURIComponent(authToken)}`;
+  const ready = await waitForReviewUiReady(reviewUrl);
 
-  process.stdout.write(`cortex review-ui running at http://127.0.0.1:${port}\n`);
+  process.stdout.write(`cortex review-ui running at ${publicUrl}\n`);
   process.stderr.write(`open: ${reviewUrl}\n`);
+  if (!ready) {
+    process.stderr.write("[cortex] review-ui health check did not confirm readiness before launch\n");
+  }
+
+  const shouldAutoOpen = opts.autoOpen ?? Boolean(process.stdout.isTTY);
+  if (shouldAutoOpen) {
+    try {
+      if (opts.browserLauncher) await opts.browserLauncher(reviewUrl);
+      else await launchReviewUiBrowser(reviewUrl);
+    } catch (err: unknown) {
+      process.stderr.write(`[cortex] review-ui browser launch failed: ${errorMessage(err)}\n`);
+      process.stdout.write(`secure session URL: ${reviewUrl}\n`);
+    }
+  } else {
+    process.stdout.write(`secure session URL: ${reviewUrl}\n`);
+  }
 
   await new Promise<void>((resolve) => {
     const shutdown = () => {

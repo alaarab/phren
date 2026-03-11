@@ -1,7 +1,7 @@
 <!-- tokens: ~1400 -->
 # cortex
 
-Open-source framework that gives Claude persistent memory across sessions and machines. Published as `@alaarab/cortex` on npm.
+Open-source framework that gives Claude persistent memory across sessions and machines. Published as `cortex` on npm.
 
 ## Project Location
 
@@ -18,7 +18,7 @@ Source lives at `~/cortex`. Published to npm. Starter templates are bundled in t
 | `mcp/src/shared-index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
 | `mcp/src/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
 | `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
-| `mcp/src/init.ts` | `npx @alaarab/cortex init`: configures MCP + hooks for all detected agents |
+| `mcp/src/init.ts` | `npx cortex init`: configures MCP + hooks for all detected agents |
 | `mcp/src/link.ts` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
 | `mcp/src/data-access.ts` | Data layer: backlog CRUD, machine/profile listing, finding management |
 | `mcp/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
@@ -98,8 +98,8 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `remove_skill(name, project?)` : delete a skill file
 
 **Hooks management:**
-- `list_hooks()` : show hook status for all tools (claude/copilot/cursor/codex) + custom hooks + config paths
-- `toggle_hooks(enabled, tool?)` : enable/disable hooks globally or per tool
+- `list_hooks(project?)` : show hook status for all tools (claude/copilot/cursor/codex) + custom hooks + config paths, optionally including per-project overrides
+- `toggle_hooks(enabled, tool?, project?, event?)` : enable/disable hooks globally, per tool, or per tracked project/event
 - `add_custom_hook(event, command, timeout?)` : add a custom integration hook
 - `remove_custom_hook(event, command?)` : remove custom hooks by event/command match
 
@@ -132,7 +132,7 @@ cortex skills list                     List all installed skills
 cortex skills add <project> <path>     Add a skill to a project
 cortex skills remove <project> <name>  Remove a skill from a project
 
-cortex hooks list                      Show hook enable/disable status per tool
+cortex hooks list [--project <name>]   Show hook enable/disable status per tool and optional project overrides
 cortex hooks enable <tool>             Enable hooks for tool (claude/copilot/cursor/codex)
 cortex hooks disable <tool>            Disable hooks for tool
 

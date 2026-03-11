@@ -476,7 +476,7 @@ configure_mcp() {
   if [ -z "$mcp_dist" ]; then
     if command -v npx &>/dev/null; then
       mcp_cmd="npx"
-      mcp_args="-y @alaarab/cortex $SCRIPT_DIR"
+      mcp_args="-y cortex $SCRIPT_DIR"
     else
       echo "not_built"
       return 0
@@ -512,7 +512,7 @@ configure_mcp() {
   # Build the args array for jq
   local jq_args_expr
   if [ "$mcp_cmd" = "npx" ]; then
-    jq_args_expr='["-y", "@alaarab/cortex", $dir]'
+    jq_args_expr='["-y", "cortex", $dir]'
   else
     jq_args_expr='[$dist]'
   fi
@@ -560,7 +560,7 @@ configure_vscode_mcp() {
   if [ -z "$mcp_dist" ]; then
     if command -v npx &>/dev/null; then
       mcp_cmd="npx"
-      jq_args_expr='["-y", "@alaarab/cortex", $dir]'
+      jq_args_expr='["-y", "cortex", $dir]'
     else
       echo "not_built"
       return 0
@@ -596,7 +596,7 @@ configure_vscode_mcp() {
   else
     if [ ! -f "$mcp_file" ]; then
       if [ "$mcp_cmd" = "npx" ]; then
-        printf '{\n  "servers": {\n    "cortex": {"command": "npx", "args": ["-y", "@alaarab/cortex", "%s"]}\n  }\n}\n' "$SCRIPT_DIR" > "$mcp_file"
+        printf '{\n  "servers": {\n    "cortex": {"command": "npx", "args": ["-y", "cortex", "%s"]}\n  }\n}\n' "$SCRIPT_DIR" > "$mcp_file"
       else
         printf '{\n  "servers": {\n    "cortex": {"command": "node", "args": ["%s"]}\n  }\n}\n' "$mcp_dist" > "$mcp_file"
       fi

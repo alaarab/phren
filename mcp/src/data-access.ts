@@ -12,6 +12,7 @@ import {
 import {
   checkPermission,
   getWorkflowPolicy,
+  normalizeQueueEntryText,
   withFileLock as withFileLockRaw,
 } from "./shared-governance.js";
 import {
@@ -247,7 +248,11 @@ function parseQueueLine(line: string): { date?: string; text: string; confidence
   let machine = source?.machine;
   let model = source?.model;
   // Strip the confidence marker from the canonical text so it doesn't pollute FINDINGS.md
-  const text = rawText.replace(/\s*\[confidence\s+[01](?:\.\d+)?\]/gi, "").trim();
+  const sanitized = normalizeQueueEntryText(
+    rawText.replace(/\s*\[confidence\s+[01](?:\.\d+)?\]/gi, "").trim(),
+    { truncate: true },
+  );
+  const text = sanitized.ok ? sanitized.data.text : "";
   return {
     date: parsed?.[1],
     text,
@@ -417,8 +422,9 @@ export function editQueueItem(cortexPath: string, project: string, match: string
   const denial = checkPermission(cortexPath, "queue");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
 
-  const trimmed = newText.trim();
-  if (!trimmed) return cortexErr(`New memory text cannot be empty.`, CortexError.EMPTY_INPUT);
+  const normalized = normalizeQueueEntryText(newText);
+  if (!normalized.ok) return forwardErr(normalized);
+  const trimmed = normalized.data.text;
 
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);

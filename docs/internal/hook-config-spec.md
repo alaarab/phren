@@ -204,7 +204,7 @@ CORTEX_PATH="<escaped-path>" node "<entry-script>" <subcommand>
 Or the npx fallback when the local entry script is not found:
 
 ```
-CORTEX_PATH="<escaped-path>" npx -y @alaarab/cortex@<version> <subcommand>
+CORTEX_PATH="<escaped-path>" npx -y cortex@<version> <subcommand>
 ```
 
 Shared synced artifacts that may move across machines, such as `codex.json` and
@@ -212,7 +212,7 @@ Shared synced artifacts that may move across machines, such as `codex.json` and
 absolute paths:
 
 ```
-npx -y @alaarab/cortex@<version> <subcommand>
+npx -y cortex@<version> <subcommand>
 ```
 
 **Subcommands:**
@@ -265,6 +265,25 @@ Individual tools can be enabled or disabled independently via `install-preferenc
 ```
 
 When `hookTools` is present, each tool key controls whether hooks and wrappers are configured for that tool. Missing keys default to the value of `hooksEnabled`. When `hooksEnabled` is `false`, all tools are disabled regardless of `hookTools`.
+
+## Per-Project Hook Overrides
+
+Tracked projects can override lifecycle hooks in `<cortexPath>/<project>/cortex.project.yaml`:
+
+```yaml
+hooks:
+  enabled: false
+  UserPromptSubmit: true
+  Stop: false
+  SessionStart: false
+  PostToolUse: false
+```
+
+Rules:
+- `hooks.enabled` sets the base lifecycle hook default for that project.
+- Event-specific keys override the base toggle when present.
+- Missing keys inherit from the next layer up: event key -> project `hooks.enabled` -> global `hooksEnabled`.
+- Project overrides are enforced at runtime by the lifecycle entrypoints. Global/user-level hook configs are still written, but the hook exits early when the active tracked project disables that event.
 
 ## Validation
 

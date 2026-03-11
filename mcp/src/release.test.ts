@@ -138,9 +138,9 @@ describe.sequential("1.10.x release hardening gates", () => {
       JSON.stringify(
         {
           hooks: {
-            UserPromptSubmit: [{ matcher: "", hooks: [{ type: "command", command: "npx @alaarab/cortex hook-prompt" }] }],
-            Stop: [{ matcher: "", hooks: [{ type: "command", command: "npx @alaarab/cortex hook-stop" }] }],
-            SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "npx @alaarab/cortex hook-session-start" }] }],
+            UserPromptSubmit: [{ matcher: "", hooks: [{ type: "command", command: "npx cortex hook-prompt" }] }],
+            Stop: [{ matcher: "", hooks: [{ type: "command", command: "npx cortex hook-stop" }] }],
+            SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "npx cortex hook-session-start" }] }],
           },
         },
         null,

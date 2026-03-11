@@ -277,7 +277,7 @@ describe("memory workflow policy", () => {
 
   it("returns defaults when no workflow policy file exists", () => {
     const policy = getWorkflowPolicy(cortexDir);
-    expect(policy.requireMaintainerApproval).toBe(true);
+    expect(policy.requireMaintainerApproval).toBe(false);
     expect(policy.lowConfidenceThreshold).toBe(0.7);
     expect(policy.riskySections).toContain("Stale");
   });

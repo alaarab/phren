@@ -6,6 +6,7 @@ import * as path from "path";
 import * as http from "http";
 import * as querystring from "querystring";
 import { createReviewUiServer, renderPageForTests } from "./memory-ui.js";
+import { getReviewUiBrowserCommand, waitForReviewUiReady } from "./memory-ui-server.js";
 
 function seedProject(root: string): void {
   write(
@@ -159,6 +160,15 @@ describe.sequential("review-ui server", () => {
         maintainers: [],
         contributors: ["review-ui-contributor"],
         viewers: [],
+      }, null, 2) + "\n"
+    );
+    write(
+      path.join(tmpRoot, ".governance", "workflow-policy.json"),
+      JSON.stringify({
+        requireMaintainerApproval: true,
+        lowConfidenceThreshold: 0.7,
+        riskySections: ["Stale", "Conflicts"],
+        taskMode: "manual",
       }, null, 2) + "\n"
     );
     const staleLine = "- [2026-03-04] Remove stale memory [confidence 0.55]";
@@ -421,6 +431,26 @@ describe("review-ui HTML rendering", () => {
     }
   });
 
+  it("uses safe review-queue handlers and escaped plain-text rendering for queue items", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-review-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain("window.reviewActionFromEl = function(btn, action)");
+      expect(body).toContain("window.reviewEditSubmitFromEl = function(e, form)");
+      expect(body).toContain("reviewActionFromEl(this,\\'approve\\')");
+      expect(body).toContain("reviewActionFromEl(this,\\'reject\\')");
+      expect(body).toContain("reviewEditSubmitFromEl(event,this)");
+      expect(body).toContain("var cardText = esc(item.text);");
+      expect(body).toContain("'<div class=\"review-card-text\">' + cardText + '</div>'");
+      expect(body).toContain("textEl.innerHTML = esc(newText).replace(/\\n/g, '<br>');");
+      expect(body).not.toContain("marked.parse(item.text)");
+      expect(body).not.toContain("JSON.stringify(item.line)");
+    } finally {
+      cleanup();
+    }
+  });
+
   it("renders graph detail scaffolding and enhanced graph controls", () => {
     const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-graph-html-");
     try {
@@ -431,6 +461,40 @@ describe("review-ui HTML rendering", () => {
       expect(body).toContain("graphSourceFilterBy(this.value)");
       expect(body).toContain("graphClearSelection()");
     } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("review-ui launch helpers", () => {
+  it("builds browser launch commands for each supported platform", () => {
+    expect(getReviewUiBrowserCommand("http://127.0.0.1:3499", "darwin")).toEqual({
+      command: "open",
+      args: ["http://127.0.0.1:3499"],
+    });
+    expect(getReviewUiBrowserCommand("http://127.0.0.1:3499", "win32")).toEqual({
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/c", "start", "", "http://127.0.0.1:3499"],
+    });
+    expect(getReviewUiBrowserCommand("http://127.0.0.1:3499", "linux")).toEqual({
+      command: "xdg-open",
+      args: ["http://127.0.0.1:3499"],
+    });
+  });
+
+  it("waits for the review-ui server to answer before launch", async () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-ready-");
+    const server = createReviewUiServer(tmpRoot);
+    seedProject(tmpRoot);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("failed to bind test server");
+      const ready = await waitForReviewUiReady(`http://127.0.0.1:${address.port}/`);
+      expect(ready).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
       cleanup();
     }
   });

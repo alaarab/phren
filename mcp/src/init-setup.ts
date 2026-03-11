@@ -56,6 +56,12 @@ export interface BootstrapProjectResult {
   claudePath: string | null;
 }
 
+export interface LocalGitRepoStatus {
+  ok: boolean;
+  initialized: boolean;
+  detail: string;
+}
+
 function isExpectedVerifyFailure(cortexPath: string, check: Pick<PostInitCheck, "name" | "ok">): boolean {
   if (check.ok) return false;
   if (check.name === "git-remote") return true;
@@ -256,7 +262,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
       workflow,
       JSON.stringify({
         schemaVersion: sv,
-        requireMaintainerApproval: true,
+        requireMaintainerApproval: false,
         lowConfidenceThreshold: 0.7,
         riskySections: ["Stale", "Conflicts"],
         taskMode: "manual",
@@ -324,6 +330,75 @@ export function applyTemplate(projectDir: string, templateName: string, projectN
   }
   copyTemplateDir(templateDir, projectDir);
   return true;
+}
+
+export function ensureProjectScaffold(projectDir: string, projectName: string): void {
+  fs.mkdirSync(projectDir, { recursive: true });
+
+  if (!fs.existsSync(path.join(projectDir, "summary.md"))) {
+    atomicWriteText(
+      path.join(projectDir, "summary.md"),
+      `# ${projectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
+    );
+  }
+
+  if (!fs.existsSync(path.join(projectDir, "CLAUDE.md"))) {
+    atomicWriteText(
+      path.join(projectDir, "CLAUDE.md"),
+      `# ${projectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
+    );
+  }
+
+  if (!fs.existsSync(path.join(projectDir, "FINDINGS.md"))) {
+    atomicWriteText(
+      path.join(projectDir, "FINDINGS.md"),
+      `# ${projectName} FINDINGS\n\n<!-- Findings are captured automatically during sessions and committed on exit -->\n`
+    );
+  }
+
+  if (!fs.existsSync(path.join(projectDir, "backlog.md"))) {
+    atomicWriteText(
+      path.join(projectDir, "backlog.md"),
+      `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
+    );
+  }
+}
+
+export function ensureLocalGitRepo(cortexPath: string): LocalGitRepoStatus {
+  try {
+    execFileSync("git", ["-C", cortexPath, "rev-parse", "--is-inside-work-tree"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    return { ok: true, initialized: false, detail: "existing git repo" };
+  } catch {
+    // Fall through to initialization below.
+  }
+
+  try {
+    try {
+      execFileSync("git", ["-C", cortexPath, "init", "--initial-branch=main"], {
+        stdio: ["ignore", "ignore", "ignore"],
+        timeout: EXEC_TIMEOUT_QUICK_MS,
+      });
+    } catch {
+      execFileSync("git", ["-C", cortexPath, "init"], {
+        stdio: ["ignore", "ignore", "ignore"],
+        timeout: EXEC_TIMEOUT_QUICK_MS,
+      });
+      try {
+        execFileSync("git", ["-C", cortexPath, "branch", "-M", "main"], {
+          stdio: ["ignore", "ignore", "ignore"],
+          timeout: EXEC_TIMEOUT_QUICK_MS,
+        });
+      } catch {
+        // Older git versions may not support renaming immediately here.
+      }
+    }
+    return { ok: true, initialized: true, detail: "initialized local git repo" };
+  } catch (err: unknown) {
+    return { ok: false, initialized: false, detail: `git init failed: ${errorMessage(err)}` };
+  }
 }
 
 /** Bootstrap a cortex project from an existing project directory with CLAUDE.md.
@@ -478,7 +553,7 @@ export function updateMachinesYaml(cortexPath: string, machine?: string, profile
  * Returns the path if it qualifies, null otherwise.
  * A directory qualifies if it:
  * - Is not the home directory or cortex directory
- * - Has a CLAUDE.md, .claude/CLAUDE.md, or .git directory
+ * - Has a CLAUDE.md, AGENTS.md, .claude/CLAUDE.md, or .git directory
  */
 export function detectProjectDir(dir: string, cortexPath: string): string | null {
   const home = os.homedir();
@@ -489,8 +564,9 @@ export function detectProjectDir(dir: string, cortexPath: string): string | null
     if (current.startsWith(resolvedCortexPath + path.sep)) return null;
     const hasClaude = fs.existsSync(path.join(current, "CLAUDE.md")) ||
       fs.existsSync(path.join(current, ".claude", "CLAUDE.md"));
+    const hasAgents = fs.existsSync(path.join(current, "AGENTS.md"));
     const hasGit = fs.existsSync(path.join(current, ".git"));
-    if (hasClaude || hasGit) return current;
+    if (hasClaude || hasAgents || hasGit) return current;
     const parent = path.dirname(current);
     if (parent === current || parent === home) break;
     current = parent;
@@ -522,7 +598,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "git-installed",
     ok: Boolean(gitVersion),
     detail: gitVersion || "git not found in PATH",
-    fix: gitVersion ? undefined : "Install git and re-run `npx @alaarab/cortex init`.",
+    fix: gitVersion ? undefined : "Install git and re-run `npx cortex init`.",
   });
   checks.push({
     name: "node-version",
@@ -574,8 +650,8 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     fix: mcpOk
       ? undefined
       : prefs.mcpEnabled === false
-        ? "Optional: run `cortex mcp-mode on` or `npx @alaarab/cortex init` if you want MCP enabled."
-        : "Run `npx @alaarab/cortex init` to register the MCP server",
+        ? "Optional: run `npx cortex mcp-mode on` or `npx cortex init` if you want MCP enabled."
+        : "Run `npx cortex init` to register the MCP server",
   });
   checks.push({
     name: "hooks-registered",
@@ -588,8 +664,8 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     fix: hooksOk
       ? undefined
       : prefs.hooksEnabled === false
-        ? "Optional: run `cortex hooks-mode on` or `npx @alaarab/cortex init` if you want hooks enabled."
-        : "Run `npx @alaarab/cortex init` to install or refresh hooks",
+        ? "Optional: run `npx cortex hooks-mode on` or `npx cortex init` if you want hooks enabled."
+        : "Run `npx cortex init` to install or refresh hooks",
   });
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
@@ -598,7 +674,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "global-claude",
     ok: globalOk,
     detail: globalOk ? "global/CLAUDE.md exists" : "global/CLAUDE.md missing",
-    fix: globalOk ? undefined : "Run `npx @alaarab/cortex init` to create starter files",
+    fix: globalOk ? undefined : "Run `npx cortex init` to create starter files",
   });
 
   const govDir = path.join(cortexPath, ".governance");
@@ -607,7 +683,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "config",
     ok: govOk,
     detail: govOk ? ".governance/ config directory exists" : ".governance/ config directory missing",
-    fix: govOk ? undefined : "Run `npx @alaarab/cortex init` to create governance config",
+    fix: govOk ? undefined : "Run `npx cortex init` to create governance config",
   });
 
   const installedPrefs = readInstallPreferences(cortexPath);
@@ -619,7 +695,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     detail: installedVersion
       ? (versionOk ? `install metadata matches running version (${VERSION})` : `install metadata is ${installedVersion}, runtime is ${VERSION}`)
       : "install metadata missing installedVersion",
-    fix: versionOk ? undefined : "Run `cortex update` or `npx @alaarab/cortex init` to refresh install metadata.",
+    fix: versionOk ? undefined : "Run `npx cortex update` or `npx cortex init` to refresh install metadata.",
   });
 
   let ftsOk = false;
@@ -634,7 +710,7 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     name: "fts-index",
     ok: ftsOk,
     detail: ftsOk ? "Project directories found for indexing" : "No project directories found in cortex path",
-    fix: ftsOk ? undefined : "Create a project: `cd ~/your-project && cortex add`",
+    fix: ftsOk ? undefined : "Create a project: `cd ~/your-project && npx cortex add`",
   });
 
   checks.push(getHookEntrypointCheck());

@@ -4,46 +4,7 @@ import * as crypto from "crypto";
 import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, tryUnlink, type CortexResult } from "./shared.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import { withFileLock } from "./shared-governance.js";
-
-// ── Reference tier helpers ───────────────────────────────────────────────────
-
-const TOPIC_KEYWORDS: Record<string, string[]> = {
-  api: ["api", "endpoint", "route", "rest", "graphql", "grpc", "request", "response", "http", "url", "webhook", "cors"],
-  database: ["database", "db", "sql", "query", "index", "migration", "schema", "table", "column", "postgres", "mysql", "sqlite", "mongo", "redis", "orm"],
-  performance: ["performance", "speed", "latency", "cache", "optimize", "memory", "cpu", "bottleneck", "profiling", "benchmark", "throughput", "lazy"],
-  security: ["security", "vulnerability", "xss", "csrf", "injection", "sanitize", "escape", "encrypt", "decrypt", "hash", "salt", "tls", "ssl"],
-  frontend: ["frontend", "ui", "ux", "css", "html", "dom", "render", "component", "layout", "responsive", "animation", "browser", "react", "vue", "angular"],
-  testing: ["test", "spec", "assert", "mock", "stub", "fixture", "coverage", "jest", "vitest", "playwright", "e2e", "unit", "integration"],
-  devops: ["deploy", "ci", "cd", "pipeline", "docker", "kubernetes", "container", "infra", "terraform", "aws", "cloud", "monitoring", "logging"],
-  architecture: ["architecture", "design", "pattern", "layer", "module", "system", "structure", "microservice", "monolith", "event-driven", "plugin"],
-  debugging: ["debug", "bug", "error", "crash", "fix", "issue", "stack", "trace", "breakpoint", "log", "workaround", "pitfall", "caveat"],
-  tooling: ["tool", "cli", "script", "build", "webpack", "vite", "eslint", "prettier", "npm", "package", "config", "plugin", "hook", "git"],
-  auth: ["auth", "login", "logout", "session", "token", "jwt", "oauth", "sso", "permission", "role", "access", "credential"],
-  data: ["data", "model", "schema", "serialize", "deserialize", "json", "csv", "transform", "validate", "parse", "format", "encode"],
-  mobile: ["mobile", "ios", "android", "react-native", "flutter", "native", "touch", "gesture", "push-notification", "app-store"],
-  ai_ml: ["ai", "ml", "model", "embedding", "vector", "llm", "prompt", "token", "inference", "training", "neural", "gpt", "claude"],
-  general: [],
-};
-
-function classifyTopic(bullet: string): string {
-  const lower = bullet.toLowerCase();
-  let bestTopic = "general";
-  let bestScore = 0;
-
-  for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
-    if (topic === "general") continue;
-    let score = 0;
-    for (const kw of keywords) {
-      if (lower.includes(kw)) score++;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestTopic = topic;
-    }
-  }
-
-  return bestTopic;
-}
+import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "./project-topics.js";
 
 /**
  * Count active (non-archived) finding entries in FINDINGS.md content.
@@ -116,13 +77,22 @@ function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
   const normalizedBullet = bullet.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().toLowerCase();
   if (!normalizedBullet) return false;
   try {
-    const files = fs.readdirSync(referenceDir).filter(f => f.endsWith(".md"));
-    for (const file of files) {
-      const content = fs.readFileSync(path.join(referenceDir, file), "utf8");
-      for (const line of content.split("\n")) {
-        if (!line.startsWith("- ")) continue;
-        const normalizedLine = line.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().toLowerCase();
-        if (normalizedLine === normalizedBullet) return true;
+    const stack = [referenceDir];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const fullPath = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(fullPath);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+        const content = fs.readFileSync(fullPath, "utf8");
+        for (const line of content.split("\n")) {
+          if (!line.startsWith("- ")) continue;
+          const normalizedLine = line.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().toLowerCase();
+          if (normalizedLine === normalizedBullet) return true;
+        }
       }
     }
   } catch (err: unknown) {
@@ -185,6 +155,8 @@ export function autoArchiveToReference(
 
   // Guard: skip entries already present in reference tier (prevent double-archive)
   const referenceDir = path.join(resolvedDir, "reference");
+  const { topics } = readProjectTopics(cortexPath, project);
+  const today = new Date().toISOString().slice(0, 10);
   const actuallyArchived: ParsedEntry[] = [];
   for (const entry of toArchive) {
     if (isAlreadyArchived(referenceDir, entry.bullet)) {
@@ -195,53 +167,34 @@ export function autoArchiveToReference(
   }
 
   // Group archived entries by topic
-  const byTopic = new Map<string, ParsedEntry[]>();
+  const byTopic = new Map<string, Array<{ date: string; bullet: string; citation?: string }>>();
   for (const entry of actuallyArchived) {
-    const topic = classifyTopic(entry.bullet);
-    if (!byTopic.has(topic)) byTopic.set(topic, []);
-    byTopic.get(topic)!.push(entry);
+    const topic = classifyTopicForText(entry.bullet, topics);
+    const bucket = byTopic.get(topic.slug) ?? [];
+    bucket.push({ date: today, bullet: entry.bullet, citation: entry.citation });
+    byTopic.set(topic.slug, bucket);
   }
 
-  // Write to reference/{topic}.md (atomic rename per file)
+  // Write to reference/topics/{topic}.md (atomic rename per file)
   fs.mkdirSync(referenceDir, { recursive: true });
-  const today = new Date().toISOString().slice(0, 10);
 
   const successfulTopics = new Set<string>();
-  for (const [topic, topicEntries] of byTopic) {
-    const filePath = path.join(referenceDir, `${topic}.md`);
-    // Q11: hold per-file lock on each reference file while writing.
-    // Catch per-topic so one failed reference write doesn't abort the whole archive.
+  for (const [topicSlug, topicEntries] of byTopic) {
+    const filePath = topicReferencePath(cortexPath, project, topicSlug);
+    const topic = topics.find((item) => item.slug === topicSlug) ?? topics.find((item) => item.slug === "general");
+    if (!filePath || !topic) continue;
     try {
-      withFileLock(filePath, () => {
-        let existing = "";
-        if (fs.existsSync(filePath)) {
-          existing = fs.readFileSync(filePath, "utf8");
-        } else {
-          existing = `# ${project} - ${topic}\n`;
-        }
-
-        const newSection = [`\n## Archived ${today}\n`];
-        for (const entry of topicEntries) {
-          newSection.push(entry.bullet);
-          if (entry.citation) newSection.push(entry.citation);
-        }
-        newSection.push("");
-
-        const refContent = existing.trimEnd() + "\n" + newSection.join("\n");
-        const tmpRefPath = filePath + `.tmp-${crypto.randomUUID()}`;
-        fs.writeFileSync(tmpRefPath, refContent);
-        fs.renameSync(tmpRefPath, filePath);
-      });
-      successfulTopics.add(topic);
-    } catch (err) {
-      debugLog(`auto_archive: failed to write reference file for topic "${topic}": ${errorMessage(err)}`);
+      appendArchivedEntriesToTopicDoc(filePath, project, topic, topicEntries);
+      successfulTopics.add(topicSlug);
+    } catch (err: unknown) {
+      debugLog(`auto_archive: failed to write reference file for topic "${topicSlug}": ${errorMessage(err)}`);
     }
   }
 
   // Only remove entries whose topics were successfully written to reference files,
   // plus entries already present in reference (safe to remove since they're already archived).
   const alreadyArchivedEntries = toArchive.filter(entry => !actuallyArchived.includes(entry));
-  const successfullyArchived = actuallyArchived.filter(entry => successfulTopics.has(classifyTopic(entry.bullet)));
+  const successfullyArchived = actuallyArchived.filter(entry => successfulTopics.has(classifyTopicForText(entry.bullet, topics).slug));
   const safeToRemove = [...successfullyArchived, ...alreadyArchivedEntries];
 
   // Remove archived entries from FINDINGS.md

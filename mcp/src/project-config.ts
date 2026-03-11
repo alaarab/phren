@@ -19,12 +19,19 @@ export interface ProjectConfig {
   ownership?: ProjectOwnershipMode;
   skills?: boolean;
   hooks?: {
+    enabled?: boolean;
     UserPromptSubmit?: boolean;
     Stop?: boolean;
     SessionStart?: boolean;
+    PostToolUse?: boolean;
   };
   mcpServers?: Record<string, ProjectMcpServerEntry>;
 }
+
+export const PROJECT_HOOK_EVENTS = ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const;
+export type ProjectHookEvent = typeof PROJECT_HOOK_EVENTS[number];
+
+type ProjectHookConfig = NonNullable<ProjectConfig["hooks"]>;
 
 export function parseProjectOwnershipMode(raw: string | undefined | null): ProjectOwnershipMode | undefined {
   if (!raw) return undefined;
@@ -73,4 +80,37 @@ export function getProjectOwnershipDefault(cortexPath: string): ProjectOwnership
 
 export function getProjectOwnershipMode(cortexPath: string, project: string, config?: ProjectConfig): ProjectOwnershipMode {
   return parseProjectOwnershipMode((config ?? readProjectConfig(cortexPath, project)).ownership) ?? "cortex-managed";
+}
+
+function normalizeHookConfig(config?: ProjectConfig): ProjectHookConfig {
+  const hooks = config?.hooks;
+  return hooks && typeof hooks === "object" ? hooks : {};
+}
+
+export function isProjectHookEnabled(
+  cortexPath: string,
+  project: string | null | undefined,
+  event: ProjectHookEvent,
+  config?: ProjectConfig,
+): boolean {
+  if (!project) return true;
+  const hooks = normalizeHookConfig(config ?? readProjectConfig(cortexPath, project));
+  const eventValue = hooks[event];
+  if (typeof eventValue === "boolean") return eventValue;
+  if (typeof hooks.enabled === "boolean") return hooks.enabled;
+  return true;
+}
+
+export function writeProjectHookConfig(
+  cortexPath: string,
+  project: string,
+  patch: Partial<ProjectHookConfig>,
+): ProjectConfig {
+  const current = readProjectConfig(cortexPath, project);
+  return writeProjectConfig(cortexPath, project, {
+    hooks: {
+      ...normalizeHookConfig(current),
+      ...patch,
+    },
+  });
 }

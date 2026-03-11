@@ -18,6 +18,39 @@ Long-form reference docs: API specs, architecture decisions, data model document
 
 When to use: documentation too long or structured for a bullet point in FINDINGS.md. Reference material the agent should find when searching for specific technical details.
 
+### Project-owned topic archives
+
+Auto-archived findings now live under `reference/topics/<slug>.md` instead of being mixed into the root of `reference/`. These topic docs are machine-managed buckets for archived findings, while the rest of `reference/` remains available for hand-written docs.
+
+- `topic-config.json` at the project root defines the topic list for that project.
+- If `topic-config.json` does not exist yet, cortex falls back to built-in starter topics.
+- `general` is the required fallback topic and cannot be removed.
+- Each topic doc includes a small `cortex:auto-topic` marker so the UI can distinguish managed archive buckets from hand-written reference docs.
+
+Example `topic-config.json`:
+
+```json
+{
+  "version": 1,
+  "topics": [
+    {
+      "slug": "rendering",
+      "label": "Rendering",
+      "description": "Graphics, shaders, frame pacing, and visual systems.",
+      "keywords": ["shader", "frame", "render", "materials"]
+    },
+    {
+      "slug": "general",
+      "label": "General",
+      "description": "Fallback bucket for uncategorized findings.",
+      "keywords": []
+    }
+  ]
+}
+```
+
+Search still treats these topic docs as normal reference material, so moving machine-managed archives into `reference/topics/` does not remove them from lexical lookup.
+
 ## Global (cross-project tier)
 
 **Location:** `~/.cortex/global/`
