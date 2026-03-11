@@ -7,6 +7,8 @@ import { withFileLock } from "./governance-locks.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
 
+export const MAX_QUEUE_ENTRY_LENGTH = 500;
+
 type MemoryRole = "admin" | "maintainer" | "contributor" | "viewer";
 type MemoryAction = "read" | "write" | "queue" | "pin" | "policy" | "delete";
 
@@ -110,7 +112,7 @@ const DEFAULT_POLICY: RetentionPolicy = {
 
 const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-  requireMaintainerApproval: true,
+  requireMaintainerApproval: false,
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
   taskMode: "manual",
@@ -693,6 +695,40 @@ function normalizeBulletForQueue(line: string): string {
   return line.startsWith("- ") ? line.slice(2).trim() : line.trim();
 }
 
+function cleanQueueEntryText(raw: string): string {
+  return String(raw ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\0/g, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/\\[nrt]/g, " ")
+    .replace(/\\"/g, "\"")
+    .replace(/\\\\/g, "\\")
+    .replace(/\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function normalizeQueueEntryText(
+  raw: string,
+  opts: { truncate?: boolean } = {},
+): CortexResult<{ text: string; truncated: boolean }> {
+  const cleaned = cleanQueueEntryText(raw);
+  if (!cleaned) return cortexErr("Memory text cannot be empty.", CortexError.EMPTY_INPUT);
+  if (cleaned.length <= MAX_QUEUE_ENTRY_LENGTH) {
+    return cortexOk({ text: cleaned, truncated: false });
+  }
+  if (!opts.truncate) {
+    return cortexErr(
+      `Memory text exceeds maximum length of ${MAX_QUEUE_ENTRY_LENGTH} characters (got ${cleaned.length}). Shorten it before saving.`,
+      CortexError.VALIDATION_ERROR,
+    );
+  }
+  return cortexOk({
+    text: cleaned.slice(0, MAX_QUEUE_ENTRY_LENGTH - 1).trimEnd() + "…",
+    truncated: true,
+  });
+}
+
 export function appendReviewQueue(
   cortexPath: string,
   project: string,
@@ -707,7 +743,15 @@ export function appendReviewQueue(
   const queuePath = path.join(resolvedDir, "MEMORY_QUEUE.md");
   const today = new Date().toISOString().slice(0, 10);
 
-  const normalized = entries.map(normalizeBulletForQueue).filter(Boolean);
+  const normalized: string[] = [];
+  for (const entry of entries) {
+    const sanitized = normalizeQueueEntryText(normalizeBulletForQueue(entry), { truncate: true });
+    if (!sanitized.ok) continue;
+    if (sanitized.data.truncated) {
+      debugLog(`appendReviewQueue: truncated oversized queue entry for ${project}`);
+    }
+    normalized.push(sanitized.data.text);
+  }
   if (normalized.length === 0) return cortexOk(0);
 
   return withFileLock(queuePath, () => {

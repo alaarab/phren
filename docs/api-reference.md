@@ -409,16 +409,20 @@ Disable a skill without deleting its file.
 
 Show hook enable/disable status for all tools (claude, copilot, cursor, codex), custom hooks, and config file paths.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Include project-level lifecycle hook overrides from `<cortexPath>/<project>/cortex.project.yaml`. |
 
 ### `toggle_hooks`
 
-Enable or disable hooks globally or for a specific tool.
+Enable or disable hooks globally, for a specific tool, or for a tracked project.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `enabled` | boolean | yes | Whether to enable or disable hooks. |
 | `tool` | string | no | Specific tool to toggle (e.g. "claude", "cursor"). Omit for global toggle. |
+| `project` | string | no | Tracked project name for project-level lifecycle hook overrides. |
+| `event` | string | no | Optional lifecycle event for a project override: `UserPromptSubmit`, `Stop`, `SessionStart`, `PostToolUse`. Requires `project`. |
 
 ### `add_custom_hook`
 

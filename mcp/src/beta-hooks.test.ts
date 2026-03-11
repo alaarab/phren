@@ -283,6 +283,19 @@ describe("extractToolFindings", () => {
     expect(bug).toBeDefined();
     expect(bug!.confidence).toBe(0.85);
   });
+
+  it("prefers changed content over escaped tool-response blobs for Edit explicit tags", () => {
+    const candidates = extractToolFindings(
+      "Edit",
+      { file_path: "/src/app.ts", new_string: "// [pattern] Keep retry budgets capped per request" },
+      '{"ok":true,"diff":"// [pattern] Keep retry budgets capped per request\\nconst next = 1;"}'
+    );
+    const pattern = candidates.find((c) => c.text.includes("[pattern]"));
+    expect(pattern).toBeDefined();
+    expect(pattern!.text).toContain("Keep retry budgets capped per request");
+    expect(pattern!.text).not.toContain('\\"');
+    expect(pattern!.text).not.toContain("\\n");
+  });
 });
 
 describe("filterToolFindingsForProactivity", () => {

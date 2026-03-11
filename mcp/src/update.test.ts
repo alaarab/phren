@@ -144,12 +144,12 @@ describe("runCortexUpdate", () => {
     expect(result.message).toContain("Run `cortex update --refresh-starter`");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       npmExec(),
-      ["install", "-g", "@alaarab/cortex@latest"],
+      ["install", "-g", "cortex@latest"],
       expect.objectContaining({ encoding: "utf8" })
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(
       npmExec(),
-      ["list", "-g", "@alaarab/cortex", "--depth=0"],
+      ["list", "-g", "cortex", "--depth=0"],
       expect.objectContaining({ encoding: "utf8" })
     );
   });

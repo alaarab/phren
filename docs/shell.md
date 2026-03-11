@@ -3,7 +3,7 @@
 The cortex shell is a terminal UI for browsing and managing your project store. It launches automatically when you run `cortex` with no arguments in a terminal, or explicitly with `cortex shell`.
 
 ```bash
-npx @alaarab/cortex shell
+npx cortex shell
 ```
 
 ## Views

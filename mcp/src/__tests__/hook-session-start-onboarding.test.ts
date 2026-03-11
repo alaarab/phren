@@ -30,7 +30,7 @@ describe("hook session start onboarding notice", () => {
     const notice = getUntrackedProjectNotice(cortexPath, repoDir);
     expect(notice).toContain("Ask the user whether they want to add it to cortex now.");
     expect(notice).toContain("ownership=\"cortex-managed\"|\"detached\"|\"repo-managed\"");
-    expect(notice).toContain("run `cortex add`");
+    expect(notice).toContain("run `npx cortex add`");
   });
 
   it("returns null once the project is already tracked", () => {

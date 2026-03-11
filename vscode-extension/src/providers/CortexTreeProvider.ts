@@ -4,6 +4,11 @@ import { CortexClient } from "../cortexClient";
 type BacklogSection = "Active" | "Queue" | "Done";
 type CortexCategory = "findings" | "backlog" | "reference";
 
+interface RootSectionNode {
+  kind: "rootSection";
+  section: "projects" | "skills" | "hooks" | "graph";
+}
+
 interface ProjectNode {
   kind: "project";
   projectName: string;
@@ -33,6 +38,31 @@ interface TaskNode {
   checked: boolean;
 }
 
+interface SkillGroupNode {
+  kind: "skillGroup";
+  source: string;
+}
+
+interface SkillNode {
+  kind: "skill";
+  name: string;
+  source: string;
+  enabled: boolean;
+  path?: string;
+}
+
+interface HookNode {
+  kind: "hook";
+  tool: string;
+  enabled: boolean;
+}
+
+interface ReferenceFileNode {
+  kind: "referenceFile";
+  projectName: string;
+  fileName: string;
+}
+
 interface MessageNode {
   kind: "message";
   label: string;
@@ -40,7 +70,17 @@ interface MessageNode {
   iconId?: string;
 }
 
-type CortexNode = ProjectNode | CategoryNode | FindingNode | TaskNode | MessageNode;
+type CortexNode =
+  | RootSectionNode
+  | ProjectNode
+  | CategoryNode
+  | FindingNode
+  | TaskNode
+  | SkillGroupNode
+  | SkillNode
+  | HookNode
+  | ReferenceFileNode
+  | MessageNode;
 
 interface ProjectSummary {
   name: string;
@@ -60,6 +100,13 @@ interface TaskSummary {
   checked: boolean;
 }
 
+interface SkillSummary {
+  name: string;
+  source: string;
+  enabled: boolean;
+  path?: string;
+}
+
 export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, vscode.Disposable {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<CortexNode | undefined | null>();
 
@@ -72,7 +119,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
   }
 
   refresh(): void {
-    this.onDidChangeTreeDataEmitter.fire();
+    this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
   async getChildren(element?: CortexNode): Promise<CortexNode[]> {
@@ -86,7 +133,25 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
 
   private async getChildrenInner(element?: CortexNode): Promise<CortexNode[]> {
     if (!element) {
-      return this.getProjectNodes();
+      return [
+        { kind: "rootSection", section: "projects" },
+        { kind: "rootSection", section: "skills" },
+        { kind: "rootSection", section: "hooks" },
+        { kind: "rootSection", section: "graph" },
+      ];
+    }
+
+    if (element.kind === "rootSection") {
+      if (element.section === "projects") {
+        return this.getProjectNodes();
+      }
+      if (element.section === "skills") {
+        return this.getSkillGroupNodes();
+      }
+      if (element.section === "hooks") {
+        return this.getHookNodes();
+      }
+      return [];
     }
 
     if (element.kind === "project") {
@@ -104,7 +169,14 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       if (element.category === "backlog") {
         return this.getBacklogNodes(element.projectName);
       }
-      return [{ kind: "message", label: "coming soon", iconId: "clock" }];
+      if (element.category === "reference") {
+        return this.getReferenceNodes(element.projectName);
+      }
+      return [];
+    }
+
+    if (element.kind === "skillGroup") {
+      return this.getSkillsForGroup(element.source);
     }
 
     return [];
@@ -126,6 +198,25 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       return new vscode.TreeItem("(unknown)", vscode.TreeItemCollapsibleState.None);
     }
     switch (element.kind) {
+      case "rootSection": {
+        const labels: Record<string, string> = { projects: "Projects", skills: "Skills", hooks: "Hooks", graph: "Entity Graph" };
+        const icons: Record<string, string> = { projects: "folder-library", skills: "extensions", hooks: "plug", graph: "type-hierarchy" };
+        const label = labels[element.section] ?? element.section;
+
+        if (element.section === "graph") {
+          const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+          item.iconPath = themeIcon(icons[element.section]);
+          item.id = `cortex.root.${element.section}`;
+          item.command = { command: "cortex.showGraph", title: "Show Entity Graph" };
+          item.tooltip = "Open the Cortex entity graph visualization";
+          return item;
+        }
+
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+        item.iconPath = themeIcon(icons[element.section] ?? "symbol-misc");
+        item.id = `cortex.root.${element.section}`;
+        return item;
+      }
       case "project": {
         const item = new vscode.TreeItem(element.projectName, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = element.brief ? truncate(element.brief, 72) : undefined;
@@ -148,14 +239,71 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         item.tooltip = `${element.date}\n${element.text}`;
         item.iconPath = themeIcon("file");
         item.id = `cortex.finding.${element.projectName}.${element.id}`;
+        item.command = {
+          command: "cortex.openFinding",
+          title: "Open Finding",
+          arguments: [element],
+        };
         return item;
       }
       case "task": {
-        const item = new vscode.TreeItem(element.line, vscode.TreeItemCollapsibleState.None);
-        item.description = `${element.id} | ${element.section}`;
+        const sectionTag = element.section === "Done" ? "[Done]" : element.section === "Active" ? "[Active]" : "[Queue]";
+        const item = new vscode.TreeItem(`${sectionTag} ${element.line}`, vscode.TreeItemCollapsibleState.None);
+        item.description = element.id;
         item.tooltip = `${element.section} (${element.id})\n${element.line}`;
         item.iconPath = themeIcon(taskIconId(element));
         item.id = `cortex.task.${element.projectName}.${element.id}`;
+        item.command = {
+          command: "cortex.openTask",
+          title: "Open Task",
+          arguments: [element],
+        };
+        return item;
+      }
+      case "skillGroup": {
+        const label = element.source.charAt(0).toUpperCase() + element.source.slice(1);
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+        item.iconPath = themeIcon(element.source === "global" ? "globe" : "folder");
+        item.id = `cortex.skillGroup.${element.source}`;
+        return item;
+      }
+      case "skill": {
+        const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
+        item.description = element.enabled ? "enabled" : "disabled";
+        item.tooltip = `${element.name} (${element.source})\n${element.enabled ? "Enabled" : "Disabled"}${element.path ? `\n${element.path}` : ""}`;
+        item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
+        item.id = `cortex.skill.${element.source}.${element.name}`;
+        item.contextValue = element.enabled ? "cortex.skill.enabled" : "cortex.skill.disabled";
+        item.command = {
+          command: "cortex.openSkill",
+          title: "Open Skill",
+          arguments: [element.name, element.source],
+        };
+        return item;
+      }
+      case "hook": {
+        const item = new vscode.TreeItem(element.tool, vscode.TreeItemCollapsibleState.None);
+        item.description = element.enabled ? "enabled" : "disabled";
+        item.tooltip = `${element.tool}: ${element.enabled ? "hooks enabled" : "hooks disabled"}\nClick to toggle`;
+        item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
+        item.id = `cortex.hook.${element.tool}`;
+        item.contextValue = element.enabled ? "cortex.hook.enabled" : "cortex.hook.disabled";
+        item.command = {
+          command: "cortex.toggleHook",
+          title: "Toggle Hook",
+          arguments: [element.tool, element.enabled],
+        };
+        return item;
+      }
+      case "referenceFile": {
+        const item = new vscode.TreeItem(element.fileName, vscode.TreeItemCollapsibleState.None);
+        item.iconPath = themeIcon("file");
+        item.id = `cortex.reference.${element.projectName}.${element.fileName}`;
+        item.command = {
+          command: "cortex.openProjectFile",
+          title: "Open File",
+          arguments: [element.projectName, `reference/${element.fileName}`],
+        };
         return item;
       }
       case "message": {
@@ -167,6 +315,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
+  // --- Data fetchers ---
+
   private async getProjectNodes(): Promise<CortexNode[]> {
     try {
       const projects = await this.fetchProjects();
@@ -174,7 +324,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         return [{ kind: "message", label: "No projects found", description: "Index projects to populate Cortex.", iconId: "info" }];
       }
       return projects.map((project) => ({
-        kind: "project",
+        kind: "project" as const,
         projectName: project.name,
         brief: project.brief,
       }));
@@ -190,7 +340,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         return [{ kind: "message", label: "No findings", iconId: "list-flat" }];
       }
       return findings.map((finding) => ({
-        kind: "finding",
+        kind: "finding" as const,
         projectName,
         id: finding.id,
         date: finding.date,
@@ -208,7 +358,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         return [{ kind: "message", label: "No backlog items", iconId: "checklist" }];
       }
       return tasks.map((task) => ({
-        kind: "task",
+        kind: "task" as const,
         projectName,
         id: task.id,
         line: task.line,
@@ -219,6 +369,107 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       return [this.errorNode("Failed to load backlog", error)];
     }
   }
+
+  private async getReferenceNodes(projectName: string): Promise<CortexNode[]> {
+    try {
+      const raw = await this.client.getProjectSummary(projectName);
+      const data = responseData(raw);
+      const files = asArray(data?.files);
+      const refFiles: CortexNode[] = [];
+
+      for (const entry of files) {
+        const record = asRecord(entry);
+        const name = asString(record?.name) ?? asString(record?.path) ?? (typeof entry === "string" ? entry : undefined);
+        if (!name) {
+          continue;
+        }
+        if (name.startsWith("reference/") || name.startsWith("reference\\")) {
+          const fileName = name.replace(/^reference[/\\]/, "");
+          if (fileName) {
+            refFiles.push({ kind: "referenceFile", projectName, fileName });
+          }
+        }
+      }
+
+      if (refFiles.length === 0) {
+        return [{ kind: "message", label: "No reference docs", iconId: "book" }];
+      }
+      return refFiles;
+    } catch (error) {
+      return [this.errorNode("Failed to load reference files", error)];
+    }
+  }
+
+  private async getSkillGroupNodes(): Promise<CortexNode[]> {
+    try {
+      const skills = await this.fetchSkills();
+      if (skills.length === 0) {
+        return [{ kind: "message", label: "No skills installed", iconId: "extensions" }];
+      }
+
+      const sources = new Set<string>();
+      for (const skill of skills) {
+        sources.add(skill.source);
+      }
+
+      // Sort: global first, then alphabetical
+      const sorted = [...sources].sort((a, b) => {
+        if (a === "global") return -1;
+        if (b === "global") return 1;
+        return a.localeCompare(b);
+      });
+
+      return sorted.map((source) => ({ kind: "skillGroup" as const, source }));
+    } catch (error) {
+      return [this.errorNode("Failed to load skills", error)];
+    }
+  }
+
+  private async getSkillsForGroup(source: string): Promise<CortexNode[]> {
+    try {
+      const skills = await this.fetchSkills();
+      const filtered = skills.filter((s) => s.source === source);
+      if (filtered.length === 0) {
+        return [{ kind: "message", label: "No skills in this group", iconId: "extensions" }];
+      }
+      return filtered.map((skill) => ({
+        kind: "skill" as const,
+        name: skill.name,
+        source: skill.source,
+        enabled: skill.enabled,
+        path: skill.path,
+      }));
+    } catch (error) {
+      return [this.errorNode("Failed to load skills", error)];
+    }
+  }
+
+  private async getHookNodes(): Promise<CortexNode[]> {
+    try {
+      const raw = await this.client.listHooks();
+      const data = responseData(raw);
+      const tools = asArray(data?.tools);
+
+      if (tools.length === 0) {
+        return [{ kind: "message", label: "No hooks configured", iconId: "plug" }];
+      }
+
+      const nodes: CortexNode[] = [];
+      for (const entry of tools) {
+        const record = asRecord(entry);
+        const tool = asString(record?.tool);
+        if (!tool) { continue; }
+        const enabled = asBoolean(record?.enabled) ?? false;
+        nodes.push({ kind: "hook", tool, enabled });
+      }
+
+      return nodes;
+    } catch (error) {
+      return [this.errorNode("Failed to load hooks", error)];
+    }
+  }
+
+  // --- Raw fetch helpers ---
 
   private async fetchProjects(): Promise<ProjectSummary[]> {
     const raw = await this.client.listProjects();
@@ -290,6 +541,31 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
 
     return tasks;
+  }
+
+  private async fetchSkills(): Promise<SkillSummary[]> {
+    const raw = await this.client.listSkills();
+    const data = responseData(raw);
+    const skills = asArray(data?.skills);
+    const parsed: SkillSummary[] = [];
+
+    for (const entry of skills) {
+      const record = asRecord(entry);
+      const name = asString(record?.name);
+      const source = asString(record?.source);
+      if (!name || !source) {
+        continue;
+      }
+
+      parsed.push({
+        name,
+        source,
+        enabled: asBoolean(record?.enabled) ?? true,
+        path: asString(record?.path),
+      });
+    }
+
+    return parsed;
   }
 
   private errorNode(label: string, error: unknown): MessageNode {

@@ -67,7 +67,7 @@ export function resolveActiveProfile(cortexPath: string, requestedProfile?: stri
 
 export function listMachines(cortexPath: string): CortexResult<Record<string, string>> {
   const machinesPath = path.join(cortexPath, "machines.yaml");
-  if (!fs.existsSync(machinesPath)) return cortexErr(`machines.yaml not found. Run 'npx @alaarab/cortex init' to set up your cortex.`, CortexError.FILE_NOT_FOUND);
+  if (!fs.existsSync(machinesPath)) return cortexErr(`machines.yaml not found. Run 'npx cortex init' to set up your cortex.`, CortexError.FILE_NOT_FOUND);
   try {
     const raw = fs.readFileSync(machinesPath, "utf8");
     const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
@@ -127,7 +127,7 @@ export function setMachineProfile(cortexPath: string, machine: string, profile: 
 
 export function listProfiles(cortexPath: string): CortexResult<ProfileInfo[]> {
   const profilesDir = path.join(cortexPath, "profiles");
-  if (!fs.existsSync(profilesDir)) return cortexErr(`No profiles/ directory found. Run 'npx @alaarab/cortex init' to set up your cortex.`, CortexError.FILE_NOT_FOUND);
+  if (!fs.existsSync(profilesDir)) return cortexErr(`No profiles/ directory found. Run 'npx cortex init' to set up your cortex.`, CortexError.FILE_NOT_FOUND);
   const files = fs.readdirSync(profilesDir).filter((file) => file.endsWith(".yaml")).sort();
   const profiles: ProfileInfo[] = [];
 

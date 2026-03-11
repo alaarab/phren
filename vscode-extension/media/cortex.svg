@@ -1,7 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-  <circle cx="7" cy="7" r="3"/>
-  <circle cx="17" cy="7" r="3"/>
-  <circle cx="12" cy="17" r="3"/>
-  <path d="M9.6 8.6L10.8 15.2"/>
-  <path d="M14.4 8.6L13.2 15.2"/>
+<svg width="24" height="24" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer C arc connections -->
+  <line x1="72" y1="22" x2="46" y2="26" stroke="#C5C5C5" stroke-width="2.5"/>
+  <line x1="46" y1="26" x2="26" y2="42" stroke="#C5C5C5" stroke-width="2.5"/>
+  <line x1="26" y1="42" x2="22" y2="64" stroke="#C5C5C5" stroke-width="2.5"/>
+  <line x1="22" y1="64" x2="26" y2="86" stroke="#C5C5C5" stroke-width="2.5"/>
+  <line x1="26" y1="86" x2="46" y2="102" stroke="#C5C5C5" stroke-width="2.5"/>
+  <line x1="46" y1="102" x2="72" y2="106" stroke="#C5C5C5" stroke-width="2.5"/>
+
+  <!-- Spokes to center -->
+  <line x1="72" y1="22" x2="64" y2="64" stroke="#C5C5C5" stroke-width="1.5" opacity="0.4"/>
+  <line x1="46" y1="26" x2="64" y2="64" stroke="#C5C5C5" stroke-width="1.5" opacity="0.4"/>
+  <line x1="26" y1="42" x2="64" y2="64" stroke="#C5C5C5" stroke-width="1.5" opacity="0.4"/>
+  <line x1="22" y1="64" x2="64" y2="64" stroke="#C5C5C5" stroke-width="1.5" opacity="0.4"/>
+  <line x1="26" y1="86" x2="64" y2="64" stroke="#C5C5C5" stroke-width="1.5" opacity="0.4"/>
+  <line x1="46" y1="102" x2="64" y2="64" stroke="#C5C5C5" stroke-width="1.5" opacity="0.4"/>
+  <line x1="72" y1="106" x2="64" y2="64" stroke="#C5C5C5" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Outer C arc nodes -->
+  <circle cx="72" cy="22" r="6" fill="#C5C5C5"/>
+  <circle cx="46" cy="26" r="5" fill="#C5C5C5"/>
+  <circle cx="26" cy="42" r="5" fill="#C5C5C5"/>
+  <circle cx="22" cy="64" r="6" fill="#C5C5C5"/>
+  <circle cx="26" cy="86" r="5" fill="#C5C5C5"/>
+  <circle cx="46" cy="102" r="5" fill="#C5C5C5"/>
+  <circle cx="72" cy="106" r="6" fill="#C5C5C5"/>
+
+  <!-- Center node -->
+  <circle cx="64" cy="64" r="10" fill="#C5C5C5"/>
 </svg>

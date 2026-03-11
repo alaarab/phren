@@ -61,6 +61,7 @@ export {
   listTemplates,
   detectProjectDir,
   isProjectTracked,
+  ensureLocalGitRepo,
 } from "./init-setup.js";
 
 // Imports from helpers (used internally in this file)
@@ -94,6 +95,8 @@ import {
   applyStarterTemplateUpdates,
   listTemplates,
   applyTemplate,
+  ensureProjectScaffold,
+  ensureLocalGitRepo,
   bootstrapFromExisting,
   updateMachinesYaml,
   detectProjectDir,
@@ -109,6 +112,7 @@ import {
 } from "./project-config.js";
 import { PROACTIVITY_LEVELS, type ProactivityLevel } from "./proactivity.js";
 import { getWorkflowPolicy, updateWorkflowPolicy } from "./shared-governance.js";
+import { addProjectToProfile } from "./profile-store.js";
 
 export type McpMode = "on" | "off";
 
@@ -308,7 +312,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   log("  cortex-managed: Cortex may mirror CLAUDE.md / AGENTS.md into the repo");
   log("  detached: Cortex keeps its own docs but does not write into the repo");
   log("  repo-managed: keep the repo's existing CLAUDE/AGENTS files as canonical");
-  log("  Change later: cortex config project-ownership <mode>");
+  log("  Change later: npx cortex config project-ownership <mode>");
   const ownershipAnswer = (await ask(`Default project ownership [cortex-managed/detached/repo-managed] (detached): `)).trim();
   const projectOwnershipDefault = parseProjectOwnershipMode(ownershipAnswer) ?? "detached";
 
@@ -317,7 +321,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   log("directly: search memory, manage tasks, save findings, etc.");
   log("  Recommended for: Claude Code, Cursor, Copilot CLI, Codex");
   log("  Alternative: hooks-only mode (read-only context injection, any agent)");
-  log("  Change later: npx @alaarab/cortex mcp-mode on|off");
+  log("  Change later: npx cortex mcp-mode on|off");
   const mcpAnswer = (await ask(`Enable MCP? [Y/n]: `)).trim().toLowerCase();
   const mcp: McpMode = (mcpAnswer === "n" || mcpAnswer === "no") ? "off" : "on";
 
@@ -327,7 +331,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   log("  - UserPromptSubmit: searches cortex and injects relevant context");
   log("  - Stop: commits and pushes any new findings after each response");
   log("  What they touch: ~/.claude/settings.json (hooks section only)");
-  log("  Change later: npx @alaarab/cortex hooks-mode on|off");
+  log("  Change later: npx cortex hooks-mode on|off");
   const hooksAnswer = (await ask(`Enable hooks? [Y/n]: `)).trim().toLowerCase();
   const hooks: McpMode = (hooksAnswer === "n" || hooksAnswer === "no") ? "off" : "on";
 
@@ -384,7 +388,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   let findingsProactivity: ProactivityLevel = "high";
   if (autoCaptureEnabled) {
     log("  Findings capture level controls how eager cortex is to save lessons automatically.");
-    log("  Change later: cortex config proactivity.findings <high|medium|low>");
+    log("  Change later: npx cortex config proactivity.findings <high|medium|low>");
     const findingsAnswer = (await ask(`Findings capture level [high/medium/low] (high): `)).trim();
     findingsProactivity = parseProactivityAnswer(findingsAnswer, "high");
   } else {
@@ -397,13 +401,13 @@ async function runWalkthrough(cortexPath: string): Promise<{
   log("  manual: backlog stays fully manual");
   log("  suggest: propose tasks, but do not write them");
   log("  auto: write/update active tasks when intent is clear");
-  log("  Change later: cortex config workflow set --taskMode=<mode>");
+  log("  Change later: npx cortex config workflow set --taskMode=<mode>");
   const taskModeAnswer = (await ask(`Task mode [off/manual/suggest/auto] (manual): `)).trim();
   const taskMode = parseTaskMode(taskModeAnswer) ?? "manual";
   let backlogProactivity: ProactivityLevel = "medium";
   if (taskMode === "auto") {
     log("  Backlog proactivity controls how much evidence cortex needs before auto-writing tasks.");
-    log("  Change later: cortex config proactivity.backlog <high|medium|low>");
+    log("  Change later: npx cortex config proactivity.backlog <high|medium|low>");
     const backlogAnswer = (await ask(`Backlog proactivity [high/medium/low] (medium): `)).trim();
     backlogProactivity = parseProactivityAnswer(backlogAnswer, "medium");
   }
@@ -459,7 +463,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   if (detectedProject) {
     log("\n─── Current Project ───────────────────────────────────────────────────");
     log(`Current directory looks like a project: ${detectedProject}`);
-    log("You can skip this now and add it later with `cortex add` or by saying yes when cortex asks in-session.");
+    log("You can skip this now and add it later with `npx cortex add` or by saying yes when cortex asks in-session.");
     const bootstrapAnswer = (await ask(`Add this project to cortex now? [Y/n]: `)).trim().toLowerCase();
     bootstrapCurrentProject = !(bootstrapAnswer === "n" || bootstrapAnswer === "no");
     if (bootstrapCurrentProject) {
@@ -640,11 +644,11 @@ export async function runInit(opts: InitOptions = {}) {
     } else {
       log("\n─── Current Project ───────────────────────────────────────────────────");
       log(`Current directory looks like a project: ${pendingBootstrap.path}`);
-      log("You can skip this now and add it later with `cortex add`, or say yes when cortex asks in-session.");
+      log("You can skip this now and add it later with `npx cortex add`, or say yes when cortex asks in-session.");
       const shouldAdd = await confirmPrompt("Add this project to cortex now?");
       shouldBootstrapCurrentProject = shouldAdd;
       if (!shouldAdd) {
-        log(`  Skipped. Later: cd ${pendingBootstrap.path} && cortex add`);
+        log(`  Skipped. Later: cd ${pendingBootstrap.path} && npx cortex add`);
       } else {
         const readline = await import("readline");
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -704,12 +708,14 @@ export async function runInit(opts: InitOptions = {}) {
   if (hasExistingInstall) {
       ensureGovernanceFiles(cortexPath);
       applyOnboardingPreferences(cortexPath, opts);
+      const existingGitRepo = ensureLocalGitRepo(cortexPath);
       log(`\ncortex already exists at ${cortexPath}`);
       log(`Updating configuration...\n`);
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
       log(`  Default project ownership: ${ownershipDefault}`);
       log(`  Task mode: ${getWorkflowPolicy(cortexPath).taskMode}`);
+      log(`  Git repo: ${existingGitRepo.detail}`);
 
       // Confirmation prompt before writing config
       if (!opts.yes) {
@@ -769,14 +775,14 @@ export async function runInit(opts: InitOptions = {}) {
           if (hooked.length) log(`  Updated hooks: ${hooked.join(", ")}`);
         } catch (err: unknown) { debugLog(`configureAllHooks failed: ${errorMessage(err)}`); }
       } else {
-        log(`  Hooks are disabled by preference (run: npx @alaarab/cortex hooks-mode on)`);
+        log(`  Hooks are disabled by preference (run: npx cortex hooks-mode on)`);
       }
 
       const prefs = readInstallPreferences(cortexPath);
       const previousVersion = prefs.installedVersion;
       if (isVersionNewer(VERSION, previousVersion)) {
         log(`\n  Starter template update available: v${previousVersion} -> v${VERSION}`);
-        log(`  Run \`npx @alaarab/cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+        log(`  Run \`npx cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
       }
       if (opts.applyStarterUpdate) {
         const updated = applyStarterTemplateUpdates(cortexPath);
@@ -810,8 +816,8 @@ export async function runInit(opts: InitOptions = {}) {
       log(`\ncortex updated successfully`);
       log(`\nNext steps:`);
       log(`  1. Start a new Claude session in your project directory — cortex injects context automatically`);
-      log(`  2. Run \`cortex doctor\` to verify everything is wired correctly`);
-      log(`  3. Change defaults anytime: \`cortex config project-ownership\`, \`cortex config workflow\`, \`cortex config proactivity.findings\`, \`cortex config proactivity.backlog\``);
+      log(`  2. Run \`npx cortex doctor\` to verify everything is wired correctly`);
+      log(`  3. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.backlog\``);
       log(`  4. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
       log(`  5. After working across projects, run /cortex-consolidate to find cross-project patterns`);
       log(``);
@@ -846,6 +852,9 @@ export async function runInit(opts: InitOptions = {}) {
   function copyDir(src: string, dest: string) {
     fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      if (src === STARTER_DIR && entry.isDirectory() && ["my-api", "my-frontend", "my-first-project"].includes(entry.name)) {
+        continue;
+      }
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
       if (entry.isDirectory()) {
@@ -858,36 +867,26 @@ export async function runInit(opts: InitOptions = {}) {
 
   if (fs.existsSync(STARTER_DIR)) {
     copyDir(STARTER_DIR, cortexPath);
-    // Rename the default project dir if the user chose a custom name via walkthrough
-    if (walkthroughProject && walkthroughProject !== "my-first-project") {
-      const defaultDir = path.join(cortexPath, "my-first-project");
-      const customDir = path.join(cortexPath, walkthroughProject);
-      if (fs.existsSync(defaultDir) && !fs.existsSync(customDir)) {
-        fs.renameSync(defaultDir, customDir);
-        // Update profile to reference the new project name
-        updateStarterProfiles(cortexPath, (projects) => projects.map((project) => project === "my-first-project" ? walkthroughProject : project));
-      }
-    }
-    // When no walkthrough project was specified and no template requested,
-    // remove the dummy my-first-project that the starter ships with.
-    // If CWD is a project, we'll bootstrap from it later; otherwise the user
-    // starts with just global config and can `cortex add` projects explicitly.
-    if (!useTemplateProject) {
-      const defaultDir = path.join(cortexPath, "my-first-project");
-      if (fs.existsSync(defaultDir)) {
-        fs.rmSync(defaultDir, { recursive: true, force: true });
-      }
-      // Clean up profile yaml to not reference my-first-project
-      updateStarterProfiles(cortexPath, (projects) => projects.filter((project) => project !== "my-first-project"));
-    }
-    if (opts.template) {
+    if (useTemplateProject) {
       const targetProject = walkthroughProject || firstProjectName;
       const projectDir = path.join(cortexPath, targetProject);
-      if (applyTemplate(projectDir, opts.template, targetProject)) {
+      const templateApplied = Boolean(opts.template && applyTemplate(projectDir, opts.template, targetProject));
+      if (templateApplied) {
         log(`  Applied "${opts.template}" template to ${targetProject}`);
       } else {
+        ensureProjectScaffold(projectDir, targetProject);
+      }
+
+      const targetProfile = opts.profile || "default";
+      const addToProfile = addProjectToProfile(cortexPath, targetProfile, targetProject);
+      if (!addToProfile.ok) {
+        debugLog(`fresh init addProjectToProfile failed for ${targetProfile}/${targetProject}: ${addToProfile.error}`);
+      }
+
+      if (opts.template && !templateApplied) {
         log(`  Template "${opts.template}" not found. Available: ${listTemplates().join(", ") || "none"}`);
       }
+      log(`  Seeded project "${targetProject}"`);
     }
     log(`  Created cortex v${VERSION} \u2192 ${cortexPath}`);
   } else {
@@ -899,25 +898,14 @@ export async function runInit(opts: InitOptions = {}) {
       `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`
     );
     if (useTemplateProject) {
-      fs.mkdirSync(path.join(cortexPath, firstProjectName), { recursive: true });
-      atomicWriteText(
-        path.join(cortexPath, firstProjectName, "summary.md"),
-        `# ${firstProjectName}\n\n**What:** Replace this with one sentence about what the project does\n**Stack:** The key tech\n**Status:** active\n**Run:** the command you use most\n**Watch out:** the one thing that will bite you if you forget\n`
-      );
-      atomicWriteText(
-        path.join(cortexPath, firstProjectName, "CLAUDE.md"),
-        `# ${firstProjectName}\n\nOne paragraph about what this project is.\n\n## Commands\n\n\`\`\`bash\n# Install:\n# Run:\n# Test:\n\`\`\`\n`
-      );
-      atomicWriteText(
-        path.join(cortexPath, firstProjectName, "FINDINGS.md"),
-        `# ${firstProjectName} FINDINGS\n\n<!-- Findings are captured automatically during sessions and committed on exit -->\n`
-      );
-      atomicWriteText(
-        path.join(cortexPath, firstProjectName, "backlog.md"),
-        `# ${firstProjectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
-      );
+      const projectDir = path.join(cortexPath, firstProjectName);
+      if (opts.template && applyTemplate(projectDir, opts.template, firstProjectName)) {
+        log(`  Applied "${opts.template}" template to ${firstProjectName}`);
+      } else {
+        ensureProjectScaffold(projectDir, firstProjectName);
+      }
     }
-    const profileName = opts.profile || "personal";
+    const profileName = opts.profile || "default";
     const profileProjects = useTemplateProject
       ? `  - global\n  - ${firstProjectName}`
       : `  - global`;
@@ -948,11 +936,13 @@ export async function runInit(opts: InitOptions = {}) {
   updateMachinesYaml(cortexPath, effectiveMachine, opts.profile);
   ensureGovernanceFiles(cortexPath);
   applyOnboardingPreferences(cortexPath, opts);
+  const localGitRepo = ensureLocalGitRepo(cortexPath);
   log(`  Updated machines.yaml with machine "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
   log(`  Default project ownership: ${ownershipDefault}`);
   log(`  Task mode: ${getWorkflowPolicy(cortexPath).taskMode}`);
+  log(`  Git repo: ${localGitRepo.detail}`);
 
   // Confirmation prompt before writing agent config
   if (!opts.yes) {
@@ -1012,7 +1002,7 @@ export async function runInit(opts: InitOptions = {}) {
       if (hooked.length) log(`  Configured hooks: ${hooked.join(", ")}`);
     } catch (err: unknown) { debugLog(`configureAllHooks failed: ${errorMessage(err)}`); }
   } else {
-    log(`  Hooks are disabled by preference (run: npx @alaarab/cortex hooks-mode on)`);
+    log(`  Hooks are disabled by preference (run: npx cortex hooks-mode on)`);
   }
 
   writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, installedVersion: VERSION });
@@ -1100,8 +1090,8 @@ export async function runInit(opts: InitOptions = {}) {
   log(`\nNext steps:`);
   let step = 1;
   log(`  ${step++}. Start a new Claude session in your project directory — cortex injects context automatically`);
-  log(`  ${step++}. Run \`cortex doctor\` to verify everything is wired correctly`);
-  log(`  ${step++}. Change defaults anytime: \`cortex config project-ownership\`, \`cortex config workflow\`, \`cortex config proactivity.findings\`, \`cortex config proactivity.backlog\``);
+  log(`  ${step++}. Run \`npx cortex doctor\` to verify everything is wired correctly`);
+  log(`  ${step++}. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.backlog\``);
 
   const gh = opts._walkthroughGithub;
   if (gh) {
@@ -1110,7 +1100,7 @@ export async function runInit(opts: InitOptions = {}) {
       : `git@github.com:YOUR_USERNAME/${gh.repo}.git`;
     log(`  ${step++}. Push your cortex to GitHub (private repo recommended):`);
     log(`     cd ${cortexPath}`);
-    log(`     git init && git add . && git commit -m "Initial cortex setup"`);
+    log(`     git add . && git commit -m "Initial cortex setup"`);
     if (gh.username) {
       log(`     gh repo create ${gh.username}/${gh.repo} --private --source=. --push`);
       log(`     # or manually: git remote add origin ${remote} && git push -u origin main`);
@@ -1121,15 +1111,15 @@ export async function runInit(opts: InitOptions = {}) {
   } else {
     log(`  ${step++}. Push to GitHub for cross-machine sync (private repo recommended):`);
     log(`     cd ${cortexPath}`);
-    log(`     git init && git add . && git commit -m "Initial cortex setup"`);
+    log(`     git add . && git commit -m "Initial cortex setup"`);
     log(`     git remote add origin git@github.com:YOUR_USERNAME/my-cortex.git`);
     log(`     git push -u origin main`);
   }
 
-  log(`  ${step++}. Add more projects: cd ~/your-project && cortex add`);
+  log(`  ${step++}. Add more projects: cd ~/your-project && npx cortex add`);
 
   if (!mcpEnabled) {
-    log(`  ${step++}. Turn MCP on: npx @alaarab/cortex mcp-mode on`);
+    log(`  ${step++}. Turn MCP on: npx cortex mcp-mode on`);
   }
   log(`  ${step++}. After your first week, run /cortex-discover to surface gaps in your project knowledge`);
   log(`  ${step++}. After working across projects, run /cortex-consolidate to find cross-project patterns`);
@@ -1146,8 +1136,8 @@ export async function runMcpMode(modeArg?: string) {
     const hooks = getHooksEnabledPreference(cortexPath);
     log(`MCP mode: ${current ? "on (recommended)" : "off (hooks-only fallback)"}`);
     log(`Hooks mode: ${hooks ? "on (active)" : "off (disabled)"}`);
-    log(`Change mode: npx @alaarab/cortex mcp-mode on|off`);
-    log(`Hooks toggle: npx @alaarab/cortex hooks-mode on|off`);
+    log(`Change mode: npx cortex mcp-mode on|off`);
+    log(`Hooks toggle: npx cortex hooks-mode on|off`);
     return;
   }
   const mode = parseMcpMode(normalizedArg);
@@ -1185,7 +1175,7 @@ export async function runHooksMode(modeArg?: string) {
   if (!normalizedArg || normalizedArg === "status") {
     const current = getHooksEnabledPreference(cortexPath);
     log(`Hooks mode: ${current ? "on (active)" : "off (disabled)"}`);
-    log(`Change mode: npx @alaarab/cortex hooks-mode on|off`);
+    log(`Change mode: npx cortex hooks-mode on|off`);
     return;
   }
   const mode = parseMcpMode(normalizedArg);

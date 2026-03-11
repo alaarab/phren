@@ -52,5 +52,5 @@ Ship an interactive `cortex` shell that makes backlog/findings/memory operations
 ## Rollout Plan
 1. Ship shell as default TTY entrypoint + explicit `cortex shell`.
 2. Keep MCP mode unchanged for non-interactive execution.
-3. Document fallback (`npx @alaarab/cortex <cortex-path>` for MCP mode and `cortex mcp-mode` toggles).
+3. Document fallback (`npx cortex <cortex-path>` for MCP mode and `cortex mcp-mode` toggles).
 4. Capture user feedback for command ergonomics and pagination.

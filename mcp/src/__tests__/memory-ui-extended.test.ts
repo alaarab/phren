@@ -855,6 +855,160 @@ describe.sequential("review-ui project-content validation", () => {
   });
 });
 
+describe.sequential("review-ui project topics and reference APIs", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  const priorActor = process.env.CORTEX_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-project-topics-auth-"));
+    seedProject(tmpRoot);
+    write(
+      path.join(tmpRoot, "demo", "reference", "frontend.md"),
+      [
+        "# demo - frontend",
+        "",
+        "## Archived 2026-03-01",
+        "",
+        "- Shader compilation hitch on first frame",
+        "",
+      ].join("\n")
+    );
+    write(
+      path.join(tmpRoot, "demo", "reference", "rendering-notes.md"),
+      [
+        "# Rendering Notes",
+        "",
+        "This is hand-written prose and should not be migrated automatically.",
+      ].join("\n")
+    );
+    process.env.CORTEX_ACTOR = "review-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "project-topics-auth-token";
+    server = createReviewUiServer(tmpRoot, { authToken });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
+    else process.env.CORTEX_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("GET /api/project-topics returns starter topics when no custom config exists", async () => {
+    const res = await httpGet(
+      port,
+      "/api/project-topics?_auth=" + encodeURIComponent(authToken) + "&project=demo"
+    );
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.source).toBe("default");
+    expect(data.topics.some((topic: any) => topic.slug === "general")).toBe(true);
+  });
+
+  it("POST /api/project-topics/save writes custom topics and creates managed topic docs", async () => {
+    const res = await postForm(port, "/api/project-topics/save", {
+      _auth: authToken,
+      project: "demo",
+      topics: JSON.stringify([
+        { slug: "rendering", label: "Rendering", description: "Graphics and frames", keywords: ["shader", "frame", "render"] },
+        { slug: "gameplay", label: "Gameplay", description: "Combat and gameplay state", keywords: ["combat", "state"] },
+        { slug: "general", label: "General", description: "Fallback", keywords: [] },
+      ]),
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.source).toBe("custom");
+    expect(fs.existsSync(path.join(tmpRoot, "demo", "topic-config.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, "demo", "reference", "topics", "rendering.md"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, "demo", "reference", "topics", "gameplay.md"))).toBe(true);
+  });
+
+  it("GET /api/project-reference-list separates topic docs from other reference docs", async () => {
+    await postForm(port, "/api/project-topics/save", {
+      _auth: authToken,
+      project: "demo",
+      topics: JSON.stringify([
+        { slug: "rendering", label: "Rendering", description: "Graphics and frames", keywords: ["shader", "frame", "render"] },
+        { slug: "general", label: "General", description: "Fallback", keywords: [] },
+      ]),
+    });
+    const res = await httpGet(
+      port,
+      "/api/project-reference-list?_auth=" + encodeURIComponent(authToken) + "&project=demo"
+    );
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.topicDocs.some((doc: any) => doc.slug === "rendering")).toBe(true);
+    expect(data.otherDocs.some((doc: any) => doc.file === "reference/frontend.md")).toBe(true);
+  });
+
+  it("GET /api/project-reference-content rejects invalid paths and returns allowed reference docs", async () => {
+    await postForm(port, "/api/project-topics/save", {
+      _auth: authToken,
+      project: "demo",
+      topics: JSON.stringify([
+        { slug: "rendering", label: "Rendering", description: "Graphics and frames", keywords: ["shader", "frame", "render"] },
+        { slug: "general", label: "General", description: "Fallback", keywords: [] },
+      ]),
+    });
+    const denied = await httpGet(
+      port,
+      "/api/project-reference-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("../FINDINGS.md")
+    );
+    expect(denied.status).toBe(400);
+    expect(JSON.parse(denied.body).ok).toBe(false);
+
+    const allowed = await httpGet(
+      port,
+      "/api/project-reference-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("reference/topics/rendering.md")
+    );
+    expect(allowed.status).toBe(200);
+    const data = JSON.parse(allowed.body);
+    expect(data.ok).toBe(true);
+    expect(data.content).toContain("cortex:auto-topic");
+  });
+
+  it("POST /api/project-topics/reclassify migrates eligible legacy topic docs and reports skips", async () => {
+    await postForm(port, "/api/project-topics/save", {
+      _auth: authToken,
+      project: "demo",
+      topics: JSON.stringify([
+        { slug: "rendering", label: "Rendering", description: "Graphics and frames", keywords: ["shader", "frame", "render"] },
+        { slug: "general", label: "General", description: "Fallback", keywords: [] },
+      ]),
+    });
+    const res = await postForm(port, "/api/project-topics/reclassify", {
+      _auth: authToken,
+      project: "demo",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.movedFiles).toBe(1);
+    expect(data.movedEntries).toBe(1);
+    expect(data.skipped.some((item: any) => item.file === "reference/rendering-notes.md")).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, "demo", "reference", "frontend.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(tmpRoot, "demo", "reference", "topics", "rendering.md"), "utf8")).toContain("Shader compilation hitch");
+  });
+});
+
 describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;

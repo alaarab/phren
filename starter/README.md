@@ -32,7 +32,7 @@ New to cortex? Here's what each file does and when it matters.
 
 **FINDINGS.md** fills itself. As Claude discovers findings, patterns, and decisions during your sessions, it calls `add_finding()` and entries land here grouped by date. Old entries fade from retrieval over time. Wrong entries can be removed with `remove_finding()`.
 
-**backlog.md** is your task queue. Three sections: Active (working now), Queue (up next), Done (finished). Claude reads this to understand priorities and checks off tasks as it completes them. You can also manage it from `cortex shell`.
+**backlog.md** is your task board file. The filename is historical; the file now keeps Active (working now), Queue (up next), and Done (finished) in one place so the work history stays with the project. You can also manage it from `npx cortex shell`.
 
 **global/CLAUDE.md** applies everywhere. Your style preferences, tool choices, things Claude should always know regardless of which project you're in.
 
@@ -40,14 +40,14 @@ New to cortex? Here's what each file does and when it matters.
 
 ## Getting started
 
-If you got here via `npx @alaarab/cortex init`, you're already set up. Restart Claude Code and you're good.
+If you got here via `npx cortex init`, you're already set up. Restart Claude Code and you're good.
 
 If you cloned manually:
 
-1. Add the MCP server: `claude mcp add cortex -- npx @alaarab/cortex ~/.cortex`
+1. Add the MCP server: `claude mcp add cortex -- npx cortex ~/.cortex`
 2. Install skills: `/plugin marketplace add alaarab/cortex` then `/plugin install cortex@cortex`
 3. Restart Claude Code
-4. Add a project: run `/cortex-init my-project` or copy `my-first-project/` as a starting point
+4. Add a project: run `/cortex-init my-project` or scaffold one with a template such as `npx cortex init --template python-project`
 5. Push to a private GitHub repo to sync across machines
 
 ## Day-to-day workflow
@@ -56,7 +56,7 @@ If you cloned manually:
 2. **Work normally**: Claude reads your project docs and uses past findings
 3. **Findings accumulate**: insights get saved to FINDINGS.md automatically
 4. **Session ends**: cortex auto-commits and pushes changes
-5. **Review occasionally**: run `cortex shell` to triage queued memories, manage backlogs, and check health
+5. **Review occasionally**: run `npx cortex shell` to triage queued memories, manage backlogs, and check health
 
 ## Syncing across machines
 
@@ -71,4 +71,4 @@ Each profile in `profiles/` lists which projects that machine should see. After 
 
 ## Troubleshooting
 
-Run `cortex doctor --fix` to check and repair your setup. Run `cortex verify` to confirm hooks and MCP are wired correctly.
+Run `npx cortex doctor --fix` to check and repair your setup.

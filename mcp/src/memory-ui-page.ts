@@ -1,6 +1,134 @@
 import { REVIEW_UI_STYLES, renderReviewUiScript } from "./memory-ui-assets.js";
 import { readSyncSnapshot } from "./memory-ui-data.js";
 
+const PROJECT_REFERENCE_UI_STYLES = `
+  .project-reference-shell {
+    height: calc(100vh - 260px);
+    min-height: 520px;
+  }
+  .reference-sidebar-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .reference-banner {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+    color: var(--ink-secondary);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    font-size: var(--text-sm);
+    line-height: 1.55;
+  }
+  .reference-doc-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .reference-hint {
+    padding: 20px;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    line-height: 1.6;
+  }
+  .reference-status {
+    margin-left: auto;
+    font-size: var(--text-xs);
+    color: var(--muted);
+  }
+  .reference-status.ok { color: var(--success); }
+  .reference-status.err { color: var(--danger); }
+  .reference-sidebar-note {
+    padding: 12px 16px;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    border-bottom: 1px solid var(--border-light);
+  }
+  .reference-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .reference-item-title {
+    font-size: var(--text-base);
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .reference-item-meta {
+    font-size: var(--text-xs);
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .reference-item-action {
+    margin-left: 8px;
+    flex-shrink: 0;
+  }
+  .topic-editor {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 720px;
+  }
+  .topic-editor label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--ink-secondary);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .topic-editor input,
+  .topic-editor textarea {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-size: var(--text-base);
+    font-family: var(--font);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  .topic-editor textarea {
+    min-height: 90px;
+    resize: vertical;
+  }
+  .topic-editor-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .topic-empty {
+    padding: 24px 20px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .topic-keywords {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .topic-keyword {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: var(--surface-sunken);
+    color: var(--ink-secondary);
+    font-size: var(--text-xs);
+    font-weight: 600;
+  }
+`;
+
 function h(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -165,6 +293,435 @@ function renderSkillUiEnhancementScript(authToken: string): string {
   })();`;
 }
 
+function renderProjectReferenceEnhancementScript(authToken: string): string {
+  return `(function() {
+    var _referenceAuthToken = '${authToken}';
+    var _referenceState = {
+      project: '',
+      topicsData: null,
+      referenceData: null,
+      selectedType: '',
+      selectedKey: '',
+      editor: null
+    };
+
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function authUrl(base) {
+      return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(_referenceAuthToken);
+    }
+    function authBody(body) {
+      return body + (_referenceAuthToken ? '&_auth=' + encodeURIComponent(_referenceAuthToken) : '');
+    }
+    function fetchCsrfToken(cb) {
+      var url = '/api/csrf-token' + (_referenceAuthToken ? '?_auth=' + encodeURIComponent(_referenceAuthToken) : '');
+      fetch(url).then(function(r) { return r.json(); }).then(function(d) { cb(d.token || null); }).catch(function() { cb(null); });
+    }
+    function currentProject() {
+      var selected = document.querySelector('.project-card.selected');
+      return selected ? (selected.getAttribute('data-project') || '') : '';
+    }
+    function findTopic(slug) {
+      var topics = (_referenceState.topicsData && _referenceState.topicsData.topics) || [];
+      return topics.find(function(topic) { return topic.slug === slug; }) || null;
+    }
+    function findTopicDoc(slug) {
+      var docs = (_referenceState.referenceData && _referenceState.referenceData.topicDocs) || [];
+      return docs.find(function(doc) { return doc.slug === slug; }) || null;
+    }
+    function setStatus(message, type) {
+      var el = document.getElementById('reference-status');
+      if (!el) return;
+      el.textContent = message || '';
+      el.className = 'reference-status' + (type ? ' ' + type : '');
+      if (message) setTimeout(function() {
+        var live = document.getElementById('reference-status');
+        if (live) { live.textContent = ''; live.className = 'reference-status'; }
+      }, 3000);
+    }
+    function loadJson(url) {
+      return fetch(authUrl(url)).then(function(r) { return r.json(); });
+    }
+    function readerToolbar(title, pathLabel, actionsHtml) {
+      return '<div class="reader-toolbar">' +
+        '<span class="reader-title">' + esc(title) + '</span>' +
+        '<span class="reader-path">' + esc(pathLabel || '') + '</span>' +
+        '<span id="reference-status" class="reference-status"></span>' +
+        (actionsHtml || '') +
+      '</div>';
+    }
+    function renderReferenceHome() {
+      var reader = document.getElementById('reference-reader');
+      if (!reader) return;
+      var topicsData = _referenceState.topicsData || { source: 'default', topics: [], suggestions: [] };
+      var banner = topicsData.source === 'default'
+        ? '<div class="reference-banner">This project is using starter topics. Customize them so archived findings match the project domain instead of generic web-dev buckets.</div>'
+        : '';
+      reader.innerHTML = readerToolbar('Reference Topics', _referenceState.project, '<button class="btn btn-sm" onclick="cortexReferenceAddTopic()">Add topic</button><button class="btn btn-sm" onclick="cortexReferenceReclassify()">Reclassify archived findings</button>') +
+        '<div class="topic-empty">' +
+          banner +
+          '<p>Select a topic doc or a reference file from the sidebar. Topic definitions live in <code>topic-config.json</code> and archive docs live under <code>reference/topics/</code>.</p>' +
+        '</div>';
+    }
+    function renderTopicEditor(mode, topic, suggestion) {
+      var reader = document.getElementById('reference-reader');
+      if (!reader) return;
+      var source = topic || suggestion || { slug: '', label: '', description: '', keywords: [] };
+      var title = mode === 'edit' ? 'Edit topic' : 'Add topic';
+      reader.innerHTML = readerToolbar(title, _referenceState.project, '<button class="btn btn-sm" onclick="cortexReferenceCancelEditor()">Cancel</button>') +
+        '<div class="reader-content">' +
+          '<form class="topic-editor" onsubmit="cortexReferenceSaveTopic(event)">' +
+            '<label>Label<input id="topic-label-input" value="' + esc(source.label || '') + '" placeholder="Rendering" /></label>' +
+            '<label>Slug<input id="topic-slug-input" value="' + esc(source.slug || '') + '" placeholder="rendering" /></label>' +
+            '<label>Description<textarea id="topic-description-input" placeholder="What belongs in this topic?">' + esc(source.description || '') + '</textarea></label>' +
+            '<label>Keywords<input id="topic-keywords-input" value="' + esc((source.keywords || []).join(', ')) + '" placeholder="shader, frame, gpu, lighting" /></label>' +
+            '<div class="topic-editor-actions">' +
+              '<button class="btn btn-primary" type="submit">Save</button>' +
+              '<button class="btn btn-sm" type="button" onclick="cortexReferenceCancelEditor()">Cancel</button>' +
+            '</div>' +
+          '</form>' +
+        '</div>';
+    }
+    function renderTopicSummary(slug) {
+      var topic = findTopic(slug);
+      var doc = findTopicDoc(slug);
+      var reader = document.getElementById('reference-reader');
+      if (!topic || !reader) return;
+      var actions = '<button class="btn btn-sm" onclick="cortexReferenceAddTopic()">Add topic</button>' +
+        '<button class="btn btn-sm" onclick="cortexReferenceReclassify()">Reclassify archived findings</button>' +
+        '<button class="btn btn-sm" onclick="cortexReferenceEditTopic(\\'' + esc(topic.slug) + '\\')">Edit</button>';
+      if (topic.slug !== 'general') actions += '<button class="btn btn-sm" onclick="cortexReferenceDeleteTopic(\\'' + esc(topic.slug) + '\\')">Delete</button>';
+      if (!doc || !doc.exists) {
+        reader.innerHTML = readerToolbar(topic.label, 'reference/topics/' + topic.slug + '.md', actions) +
+          '<div class="topic-empty">' +
+            '<p>No archived entries have landed here yet. Saving the topic created the bucket, but it stays empty until findings are archived or legacy topic docs are reclassified.</p>' +
+            (topic.description ? '<p>' + esc(topic.description) + '</p>' : '') +
+            ((topic.keywords || []).length ? '<div class="topic-keywords">' + topic.keywords.map(function(keyword) { return '<span class="topic-keyword">' + esc(keyword) + '</span>'; }).join('') + '</div>' : '') +
+          '</div>';
+        return;
+      }
+      reader.innerHTML = readerToolbar(topic.label, doc.file, actions) + '<div class="reader-content"><div class="reader-empty">Loading...</div></div>';
+      loadJson('/api/project-reference-content?project=' + encodeURIComponent(_referenceState.project) + '&file=' + encodeURIComponent(doc.file)).then(function(data) {
+        var liveReader = document.getElementById('reference-reader');
+        if (!liveReader) return;
+        if (!data.ok) {
+          liveReader.innerHTML = readerToolbar(topic.label, doc.file, actions) + '<div class="reader-empty">' + esc(data.error || 'File not found') + '</div>';
+          return;
+        }
+        liveReader.innerHTML = readerToolbar(topic.label, doc.file, actions) + '<div class="reader-content"><pre>' + esc(data.content) + '</pre></div>';
+      });
+    }
+    function renderReferenceFile(file) {
+      var reader = document.getElementById('reference-reader');
+      if (!reader) return;
+      var actions = '<button class="btn btn-sm" onclick="cortexReferenceAddTopic()">Add topic</button><button class="btn btn-sm" onclick="cortexReferenceReclassify()">Reclassify archived findings</button>';
+      reader.innerHTML = readerToolbar(file.title || file.file, file.file, actions) + '<div class="reader-content"><div class="reader-empty">Loading...</div></div>';
+      loadJson('/api/project-reference-content?project=' + encodeURIComponent(_referenceState.project) + '&file=' + encodeURIComponent(file.file)).then(function(data) {
+        var liveReader = document.getElementById('reference-reader');
+        if (!liveReader) return;
+        if (!data.ok) {
+          liveReader.innerHTML = readerToolbar(file.title || file.file, file.file, actions) + '<div class="reader-empty">' + esc(data.error || 'File not found') + '</div>';
+          return;
+        }
+        liveReader.innerHTML = readerToolbar(file.title || file.file, file.file, actions) + '<div class="reader-content"><pre>' + esc(data.content) + '</pre></div>';
+      });
+    }
+    function renderReferenceSidebar() {
+      var container = document.getElementById('project-content');
+      if (!container || !_referenceState.topicsData || !_referenceState.referenceData) return;
+      var topicsData = _referenceState.topicsData;
+      var referenceData = _referenceState.referenceData;
+      var topicRows = (topicsData.topics || []).map(function(topic) {
+        var doc = findTopicDoc(topic.slug);
+        var selected = _referenceState.selectedType === 'topic' && _referenceState.selectedKey === topic.slug ? ' selected' : '';
+        var meta = (doc && doc.exists ? doc.entryCount + ' entries' : 'empty bucket') + (topicsData.source === 'default' ? ' · starter' : '');
+        return '<div class="split-item' + selected + '" onclick="cortexReferenceSelectTopic(\\'' + esc(topic.slug) + '\\')">' +
+          '<div class="reference-item-main"><span class="reference-item-title">' + esc(topic.label) + '</span><span class="reference-item-meta">' + esc(meta) + '</span></div>' +
+        '</div>';
+      }).join('');
+      var suggestionRows = (topicsData.suggestions || []).length
+        ? topicsData.suggestions.map(function(suggestion) {
+            return '<div class="split-item">' +
+              '<div class="reference-item-main"><span class="reference-item-title">' + esc(suggestion.label) + '</span><span class="reference-item-meta">' + esc(suggestion.reason) + '</span></div>' +
+              '<button class="btn btn-sm reference-item-action" onclick="event.stopPropagation(); cortexReferenceUseSuggestion(\\'' + esc(suggestion.slug) + '\\')">Use</button>' +
+            '</div>';
+          }).join('')
+        : '<div class="reference-sidebar-note">No topic suggestions right now.</div>';
+      var legacyByFile = {};
+      (topicsData.legacyDocs || []).forEach(function(doc) { legacyByFile[doc.file] = doc; });
+      var otherRows = (referenceData.otherDocs || []).length
+        ? referenceData.otherDocs.map(function(file) {
+            var selected = _referenceState.selectedType === 'file' && _referenceState.selectedKey === file.file ? ' selected' : '';
+            var legacy = legacyByFile[file.file];
+            var suffix = legacy ? (legacy.eligible ? ' · legacy topic doc' : ' · legacy skip: ' + legacy.reason) : '';
+            return '<div class="split-item' + selected + '" onclick="cortexReferenceSelectFile(\\'' + esc(file.file) + '\\')">' +
+              '<div class="reference-item-main"><span class="reference-item-title">' + esc(file.title || file.file) + '</span><span class="reference-item-meta">' + esc(file.file + suffix) + '</span></div>' +
+            '</div>';
+          }).join('')
+        : '<div class="reference-sidebar-note">No other reference docs.</div>';
+      var banner = topicsData.source === 'default'
+        ? '<div class="reference-banner">Starter topics are active for this project. Add project-owned topics to make archives match the actual domain.</div>'
+        : '';
+      container.innerHTML = banner +
+        '<div class="split-view project-reference-shell">' +
+          '<div class="split-sidebar">' +
+            '<div class="reference-sidebar-toolbar"><button class="btn btn-sm" onclick="cortexReferenceAddTopic()">Add topic</button><button class="btn btn-sm" onclick="cortexReferenceReclassify()">Reclassify</button></div>' +
+            '<div class="split-group-label">Topics</div>' +
+            topicRows +
+            '<div class="split-group-label">Suggested Topics</div>' +
+            suggestionRows +
+            '<div class="split-group-label">Other Reference Docs</div>' +
+            otherRows +
+          '</div>' +
+          '<div class="split-reader" id="reference-reader"></div>' +
+        '</div>';
+      if (_referenceState.editor) {
+        renderTopicEditor(_referenceState.editor.mode, _referenceState.editor.topic, _referenceState.editor.suggestion);
+        return;
+      }
+      if (_referenceState.selectedType === 'file') {
+        var selectedFile = (referenceData.otherDocs || []).find(function(file) { return file.file === _referenceState.selectedKey; });
+        if (selectedFile) {
+          renderReferenceFile(selectedFile);
+          return;
+        }
+      }
+      if (_referenceState.selectedType === 'topic' && findTopic(_referenceState.selectedKey)) {
+        renderTopicSummary(_referenceState.selectedKey);
+        return;
+      }
+      renderReferenceHome();
+    }
+    function loadReferenceState(nextType, nextKey) {
+      var project = currentProject();
+      if (!project) return;
+      _referenceState.project = project;
+      loadJson('/api/project-topics?project=' + encodeURIComponent(project)).then(function(topicsData) {
+        if (!topicsData.ok) throw new Error(topicsData.error || 'Failed to load topics');
+        return Promise.all([topicsData, loadJson('/api/project-reference-list?project=' + encodeURIComponent(project))]);
+      }).then(function(results) {
+        var topicsData = results[0];
+        var referenceData = results[1];
+        if (!referenceData.ok) throw new Error(referenceData.error || 'Failed to load reference docs');
+        _referenceState.topicsData = topicsData;
+        _referenceState.referenceData = referenceData;
+        if (nextType) _referenceState.selectedType = nextType;
+        if (nextKey !== undefined) _referenceState.selectedKey = nextKey;
+        renderReferenceSidebar();
+      }).catch(function(err) {
+        var container = document.getElementById('project-content');
+        if (container) container.innerHTML = '<div class="project-detail-empty">' + esc(err && err.message ? err.message : 'Failed to load reference data') + '</div>';
+      });
+    }
+    function saveTopics(nextTopics, onDone) {
+      fetchCsrfToken(function(csrfToken) {
+        var body = 'project=' + encodeURIComponent(_referenceState.project) + '&topics=' + encodeURIComponent(JSON.stringify(nextTopics));
+        if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
+        fetch('/api/project-topics/save', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: authBody(body)
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (!data.ok) {
+            setStatus(data.error || 'Save failed', 'err');
+            return;
+          }
+          _referenceState.topicsData = data;
+          _referenceState.editor = null;
+          loadReferenceState('topic', onDone || _referenceState.selectedKey || 'general');
+          setStatus('Saved', 'ok');
+        }).catch(function() { setStatus('Save failed', 'err'); });
+      });
+    }
+    function collectEditorTopic() {
+      var label = document.getElementById('topic-label-input');
+      var slug = document.getElementById('topic-slug-input');
+      var description = document.getElementById('topic-description-input');
+      var keywords = document.getElementById('topic-keywords-input');
+      return {
+        slug: slug ? slug.value : '',
+        label: label ? label.value : '',
+        description: description ? description.value : '',
+        keywords: keywords ? keywords.value.split(',').map(function(item) { return item.trim(); }).filter(Boolean) : []
+      };
+    }
+    window.cortexLoadProjectReference = function() {
+      _referenceState.editor = null;
+      loadReferenceState(_referenceState.selectedType || 'topic', _referenceState.selectedKey || 'general');
+    };
+    window.cortexReferenceSelectTopic = function(slug) {
+      _referenceState.editor = null;
+      _referenceState.selectedType = 'topic';
+      _referenceState.selectedKey = slug;
+      renderReferenceSidebar();
+    };
+    window.cortexReferenceSelectFile = function(file) {
+      _referenceState.editor = null;
+      _referenceState.selectedType = 'file';
+      _referenceState.selectedKey = file;
+      renderReferenceSidebar();
+    };
+    window.cortexReferenceAddTopic = function() {
+      _referenceState.editor = { mode: 'add', topic: null, suggestion: null };
+      _referenceState.selectedType = '';
+      _referenceState.selectedKey = '';
+      renderReferenceSidebar();
+    };
+    window.cortexReferenceEditTopic = function(slug) {
+      var topic = findTopic(slug);
+      if (!topic) return;
+      _referenceState.editor = { mode: 'edit', topic: topic, suggestion: null };
+      renderReferenceSidebar();
+    };
+    window.cortexReferenceCancelEditor = function() {
+      _referenceState.editor = null;
+      renderReferenceSidebar();
+    };
+    window.cortexReferenceSaveTopic = function(e) {
+      e.preventDefault();
+      if (!_referenceState.topicsData) return;
+      var topic = collectEditorTopic();
+      var topics = (_referenceState.topicsData.topics || []).slice();
+      if (_referenceState.editor && _referenceState.editor.mode === 'edit' && _referenceState.editor.topic) {
+        topics = topics.map(function(item) { return item.slug === _referenceState.editor.topic.slug ? topic : item; });
+      } else {
+        topics.push(topic);
+      }
+      saveTopics(topics, topic.slug || 'general');
+    };
+    window.cortexReferenceDeleteTopic = function(slug) {
+      if (slug === 'general' || !_referenceState.topicsData) return;
+      var topics = (_referenceState.topicsData.topics || []).filter(function(topic) { return topic.slug !== slug; });
+      saveTopics(topics, 'general');
+    };
+    window.cortexReferenceUseSuggestion = function(slug) {
+      if (!_referenceState.topicsData) return;
+      var suggestion = (_referenceState.topicsData.suggestions || []).find(function(item) { return item.slug === slug; });
+      if (!suggestion) return;
+      var topics = (_referenceState.topicsData.topics || []).slice();
+      topics.push({
+        slug: suggestion.slug,
+        label: suggestion.label,
+        description: suggestion.description,
+        keywords: suggestion.keywords || []
+      });
+      saveTopics(topics, suggestion.slug);
+    };
+    window.cortexReferenceReclassify = function() {
+      fetchCsrfToken(function(csrfToken) {
+        var body = 'project=' + encodeURIComponent(_referenceState.project);
+        if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
+        fetch('/api/project-topics/reclassify', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: authBody(body)
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (!data.ok) {
+            setStatus(data.error || 'Reclassify failed', 'err');
+            return;
+          }
+          loadReferenceState(_referenceState.selectedType || 'topic', _referenceState.selectedKey || 'general');
+          setStatus('Moved ' + (data.movedEntries || 0) + ' entries; skipped ' + ((data.skipped || []).length) + ' docs', 'ok');
+        }).catch(function() { setStatus('Reclassify failed', 'err'); });
+      });
+    };
+  })();`;
+}
+
+function renderReviewQueueEditSyncScript(): string {
+  return `(function() {
+    function normalizeQueueText(raw) {
+      return String(raw == null ? '' : raw)
+        .replace(/\\r\\n?/g, '\\n')
+        .replace(/\\0/g, ' ')
+        .replace(/<!--[\\s\\S]*?-->/g, ' ')
+        .replace(/\\\\[nrt]/g, ' ')
+        .replace(/\\\\\"/g, '"')
+        .replace(/\\\\\\\\/g, '\\\\')
+        .replace(/\\n+/g, ' ')
+        .replace(/\\s+/g, ' ')
+        .trim();
+    }
+
+    function rebuildEditedQueueLine(line, newText) {
+      var dateMatch = String(line || '').match(/^- \\[(\\d{4}-\\d{2}-\\d{2})\\]/);
+      var confidenceMatch = String(line || '').match(/\\[confidence\\s+([01](?:\\.\\d+)?)\\]/i);
+      var normalizedText = normalizeQueueText(newText);
+      var date = dateMatch ? dateMatch[1] : new Date().toISOString().slice(0, 10);
+      var confidencePart = confidenceMatch
+        ? ' [confidence ' + Number(confidenceMatch[1]).toFixed(2) + ']'
+        : '';
+      return {
+        text: normalizedText,
+        line: '- [' + date + '] ' + normalizedText + confidencePart
+      };
+    }
+
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function syncEditedCard(card, project, nextLine, nextText) {
+      if (!card || !project || !nextLine) return;
+      card.setAttribute('data-key', project + '\\\\x00' + nextLine);
+      card.setAttribute('data-project', project);
+      var approveBtn = card.querySelector('.btn-approve');
+      if (approveBtn) {
+        approveBtn.setAttribute('data-project', project);
+        approveBtn.setAttribute('data-line', nextLine);
+      }
+      var rejectBtn = card.querySelector('.btn-reject');
+      if (rejectBtn) {
+        rejectBtn.setAttribute('data-project', project);
+        rejectBtn.setAttribute('data-line', nextLine);
+      }
+      var editForm = card.querySelector('.review-card-edit form');
+      if (editForm) {
+        editForm.setAttribute('data-project', project);
+        editForm.setAttribute('data-line', nextLine);
+      }
+      var editTextarea = card.querySelector('textarea[name="new_text"]');
+      if (editTextarea) editTextarea.value = nextText;
+    }
+
+    function maybeSyncEditedCard(card, project, line, newText, attemptsLeft) {
+      if (!card || !project) return;
+      var rebuilt = rebuildEditedQueueLine(line, newText);
+      var textEl = card.querySelector('.review-card-text');
+      var editSection = card.querySelector('.review-card-edit');
+      if (editSection && editSection.style.display === 'none') {
+        if (textEl) textEl.innerHTML = escapeHtml(rebuilt.text);
+        syncEditedCard(card, project, rebuilt.line, rebuilt.text);
+        return;
+      }
+      if (attemptsLeft > 0) {
+        setTimeout(function() {
+          maybeSyncEditedCard(card, project, line, newText, attemptsLeft - 1);
+        }, 150);
+      }
+    }
+
+    document.addEventListener('submit', function(event) {
+      var form = event.target;
+      if (!form || typeof form.getAttribute !== 'function' || typeof form.querySelector !== 'function') return;
+      if (!form.closest || !form.closest('.review-card-edit')) return;
+      var project = form.getAttribute('data-project') || '';
+      var line = form.getAttribute('data-line') || '';
+      var textarea = form.querySelector('textarea[name="new_text"]');
+      var newText = textarea ? textarea.value : '';
+      var card = form.closest('.review-card');
+      setTimeout(function() {
+        maybeSyncEditedCard(card, project, line, newText, 20);
+      }, 0);
+    }, true);
+  })();`;
+}
+
 export function renderReviewUiPage(cortexPath: string, authToken?: string): string {
   const sync = readSyncSnapshot(cortexPath) as {
     autoSaveStatus?: string;
@@ -186,6 +743,7 @@ export function renderReviewUiPage(cortexPath: string, authToken?: string): stri
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <style>
 ${REVIEW_UI_STYLES}
+${PROJECT_REFERENCE_UI_STYLES}
   </style>
 </head>
 <body>
@@ -373,7 +931,13 @@ ${REVIEW_UI_STYLES}
 ${renderReviewUiScript(h(authToken || ""))}
 </script>
 <script>
+${renderReviewQueueEditSyncScript()}
+</script>
+<script>
 ${renderSkillUiEnhancementScript(h(authToken || ""))}
+</script>
+<script>
+${renderProjectReferenceEnhancementScript(h(authToken || ""))}
 </script>
 </body>
 </html>`;

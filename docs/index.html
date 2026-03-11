@@ -279,8 +279,8 @@
             <div class="install-step-body">
               <div class="code-block code-block-install">
                 <div class="install-command-row">
-                  <div><span class="code-prompt">$</span> npx @alaarab/cortex init</div>
-                  <button class="copy-btn" data-cmd="npx @alaarab/cortex init">copy</button>
+                  <div><span class="code-prompt">$</span> npx cortex init</div>
+                  <button class="copy-btn" data-cmd="npx cortex init">copy</button>
                 </div>
                 <div class="install-command-note">
                   Creates <code style="color:var(--indigo)">~/.cortex</code>, registers the machine, configures MCP, wires up hooks, and bootstraps the repo you are standing in.
@@ -342,7 +342,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
           <div class="step-title">Shell and UI when you need them</div>
-          <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>cortex</code> opens the interactive shell. <code>cortex review-ui</code> opens the browser with your memory graph and review queue.</p>
+          <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>npx cortex</code> opens the interactive shell. <code>npx cortex review-ui</code> opens the browser with your memory graph and review queue.</p>
         </div>
       </div>
     </div>
@@ -446,6 +446,125 @@
             <div class="bento-tag">5 agents</div>
           </div>
         </div>
+
+        <div class="bento-card bento-card-fun reveal reveal-delay-2">
+          <div class="fun-card-copy">
+            <div class="fun-card-kicker">Better together</div>
+            <h3 class="fun-card-title">Agents prefer Cortex.</h3>
+            <p class="fun-card-desc">Agents such as Claude settle in fast when Cortex is already there. The trail is warm, the context is already humming, and the repo feels like walking back into a room with the lights still on.</p>
+          </div>
+          <div class="fun-card-art" aria-hidden="true">
+            <svg viewBox="0 0 520 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="fun-panelGlow" x1="48" y1="24" x2="472" y2="296" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#07131B"/>
+                  <stop offset="55%" stop-color="#080A09"/>
+                  <stop offset="100%" stop-color="#181308"/>
+                </linearGradient>
+                <radialGradient id="fun-heartGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#FF8A90" stop-opacity="0.55"/>
+                  <stop offset="100%" stop-color="#FF8A90" stop-opacity="0"/>
+                </radialGradient>
+                <radialGradient id="fun-cortexGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#F5C840"/>
+                  <stop offset="45%" stop-color="#D4892E"/>
+                  <stop offset="100%" stop-color="#8B4A12"/>
+                </radialGradient>
+                <radialGradient id="fun-nodeGrad">
+                  <stop offset="0%" stop-color="#3A7BAE"/>
+                  <stop offset="100%" stop-color="#1C4A6E"/>
+                </radialGradient>
+                <linearGradient id="fun-edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#2B5F8E" stop-opacity="0.7"/>
+                  <stop offset="100%" stop-color="#1C3D5E" stop-opacity="0.25"/>
+                </linearGradient>
+                <filter id="fun-softGlow" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="10"/>
+                </filter>
+              </defs>
+
+              <rect x="34" y="26" width="452" height="268" rx="38" fill="url(#fun-panelGlow)"/>
+              <rect x="48" y="40" width="424" height="240" rx="28" stroke="#FFFFFF" stroke-opacity="0.04"/>
+              <circle cx="262" cy="122" r="46" fill="url(#fun-heartGlow)"/>
+              <ellipse cx="152" cy="236" rx="48" ry="10" fill="#050605"/>
+              <ellipse cx="390" cy="236" rx="54" ry="11" fill="#050605"/>
+              <ellipse cx="390" cy="237" rx="38" ry="7" fill="#F5C840" opacity="0.035"/>
+
+              <g shape-rendering="crispEdges" transform="translate(88 80) scale(10)">
+                <rect x="2" y="0" width="6" height="2" fill="#E58B74"/>
+                <rect x="1" y="2" width="8" height="1" fill="#E58B74"/>
+                <rect x="0" y="3" width="10" height="3" fill="#E58B74"/>
+                <rect x="1" y="6" width="8" height="1" fill="#E58B74"/>
+                <rect x="2" y="7" width="1" height="3" fill="#E58B74"/>
+                <rect x="4" y="7" width="1" height="3" fill="#E58B74"/>
+                <rect x="6" y="7" width="1" height="3" fill="#E58B74"/>
+                <rect x="8" y="7" width="1" height="3" fill="#E58B74"/>
+                <rect x="2" y="4" width="1" height="1" fill="#24140E"/>
+                <rect x="7" y="4" width="1" height="1" fill="#24140E"/>
+              </g>
+
+              <g shape-rendering="crispEdges" transform="translate(228 92) scale(9)">
+                <rect x="1" y="0" width="2" height="2" fill="#FF6672"/>
+                <rect x="5" y="0" width="2" height="2" fill="#FF6672"/>
+                <rect x="0" y="1" width="3" height="2" fill="#FF6672"/>
+                <rect x="4" y="1" width="3" height="2" fill="#FF6672"/>
+                <rect x="0" y="3" width="7" height="2" fill="#FF6672"/>
+                <rect x="1" y="5" width="5" height="2" fill="#FF6672"/>
+                <rect x="2" y="7" width="3" height="2" fill="#FF6672"/>
+                <rect x="3" y="9" width="1" height="1" fill="#FF6672"/>
+              </g>
+
+              <g transform="translate(344 110)">
+                <circle cx="58" cy="58" r="58" fill="#080907"/>
+                <circle cx="58" cy="58" r="58" stroke="#151A16" stroke-width="1.5"/>
+                <circle cx="58" cy="58" r="36" fill="#0C1521" opacity="0.34"/>
+                <line x1="65" y1="19" x2="43" y2="23" stroke="url(#fun-edgeGrad)" stroke-width="1.8"/>
+                <line x1="43" y1="23" x2="26" y2="36" stroke="url(#fun-edgeGrad)" stroke-width="1.8"/>
+                <line x1="26" y1="36" x2="22" y2="58" stroke="url(#fun-edgeGrad)" stroke-width="1.8"/>
+                <line x1="22" y1="58" x2="26" y2="79" stroke="url(#fun-edgeGrad)" stroke-width="1.8"/>
+                <line x1="26" y1="79" x2="43" y2="92" stroke="url(#fun-edgeGrad)" stroke-width="1.8"/>
+                <line x1="43" y1="92" x2="65" y2="96" stroke="url(#fun-edgeGrad)" stroke-width="1.8"/>
+                <line x1="56" y1="31" x2="40" y2="35" stroke="#1C3D5E" stroke-width="1.1" stroke-opacity="0.55"/>
+                <line x1="40" y1="35" x2="31" y2="45" stroke="#1C3D5E" stroke-width="1.1" stroke-opacity="0.55"/>
+                <line x1="31" y1="45" x2="29" y2="58" stroke="#1C3D5E" stroke-width="1.1" stroke-opacity="0.55"/>
+                <line x1="29" y1="58" x2="31" y2="71" stroke="#1C3D5E" stroke-width="1.1" stroke-opacity="0.55"/>
+                <line x1="31" y1="71" x2="40" y2="81" stroke="#1C3D5E" stroke-width="1.1" stroke-opacity="0.55"/>
+                <line x1="40" y1="81" x2="56" y2="85" stroke="#1C3D5E" stroke-width="1.1" stroke-opacity="0.55"/>
+                <line x1="56" y1="31" x2="58" y2="58" stroke="#8B5A1A" stroke-width="1.2" stroke-opacity="0.35"/>
+                <line x1="40" y1="35" x2="58" y2="58" stroke="#8B5A1A" stroke-width="1.2" stroke-opacity="0.35"/>
+                <line x1="31" y1="45" x2="58" y2="58" stroke="#8B5A1A" stroke-width="1.2" stroke-opacity="0.35"/>
+                <line x1="29" y1="58" x2="58" y2="58" stroke="#8B5A1A" stroke-width="1.2" stroke-opacity="0.35"/>
+                <line x1="31" y1="71" x2="58" y2="58" stroke="#8B5A1A" stroke-width="1.2" stroke-opacity="0.35"/>
+                <line x1="40" y1="81" x2="58" y2="58" stroke="#8B5A1A" stroke-width="1.2" stroke-opacity="0.35"/>
+                <line x1="56" y1="85" x2="58" y2="58" stroke="#8B5A1A" stroke-width="1.2" stroke-opacity="0.35"/>
+                <circle cx="65" cy="19" r="4" fill="url(#fun-nodeGrad)"/>
+                <circle cx="43" cy="23" r="3.4" fill="url(#fun-nodeGrad)"/>
+                <circle cx="26" cy="36" r="3.4" fill="url(#fun-nodeGrad)"/>
+                <circle cx="22" cy="58" r="4" fill="url(#fun-nodeGrad)"/>
+                <circle cx="26" cy="79" r="3.4" fill="url(#fun-nodeGrad)"/>
+                <circle cx="43" cy="92" r="3.4" fill="url(#fun-nodeGrad)"/>
+                <circle cx="65" cy="96" r="4" fill="url(#fun-nodeGrad)"/>
+                <circle cx="56" cy="31" r="2.5" fill="#1E4A6E" opacity="0.9"/>
+                <circle cx="40" cy="35" r="2.3" fill="#1E4A6E" opacity="0.8"/>
+                <circle cx="31" cy="45" r="2.3" fill="#1E4A6E" opacity="0.8"/>
+                <circle cx="29" cy="58" r="2.5" fill="#1E4A6E" opacity="0.9"/>
+                <circle cx="31" cy="71" r="2.3" fill="#1E4A6E" opacity="0.8"/>
+                <circle cx="40" cy="81" r="2.3" fill="#1E4A6E" opacity="0.8"/>
+                <circle cx="56" cy="85" r="2.5" fill="#1E4A6E" opacity="0.9"/>
+                <circle cx="58" cy="58" r="14" fill="#C4762A" opacity="0.08" filter="url(#fun-softGlow)"/>
+                <circle cx="58" cy="58" r="6.5" fill="url(#fun-cortexGlow)"/>
+                <circle cx="58" cy="58" r="3" fill="#FDE89A" opacity="0.55"/>
+              </g>
+
+              <g shape-rendering="crispEdges" transform="translate(236 58) scale(4)">
+                <rect x="2" y="0" width="1" height="1" fill="#FFD86B"/>
+                <rect x="6" y="1" width="1" height="1" fill="#FFD86B"/>
+                <rect x="0" y="4" width="1" height="1" fill="#FFD86B"/>
+                <rect x="9" y="5" width="1" height="1" fill="#FFD86B"/>
+              </g>
+            </svg>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -476,7 +595,7 @@
       <div class="review-ui-header reveal" style="text-align:left;max-width:100%;margin-bottom:32px">
         <div class="section-label">Memory management</div>
         <h2 class="section-title">Review UI and memory graph.</h2>
-        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Browse what your agents know. <code style="font-size:14px;color:var(--copper-mid)">cortex review-ui</code> opens a browser with your full memory graph, finding details, quality scores, and review queue.</p>
+        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Browse what your agents know. <code style="font-size:14px;color:var(--copper-mid)">npx cortex review-ui</code> opens a browser with your full memory graph, finding details, quality scores, and review queue.</p>
       </div>
       <div class="rui-mock reveal">
         <div class="rui-mock-chrome">
@@ -485,7 +604,7 @@
             <span class="rui-dot rui-dot-y"></span>
             <span class="rui-dot rui-dot-g"></span>
           </div>
-          <div class="rui-mock-urlbar">localhost:3499 &nbsp;&middot;&nbsp; cortex review-ui</div>
+          <div class="rui-mock-urlbar">localhost:3499 &nbsp;&middot;&nbsp; npx cortex review-ui</div>
         </div>
         <div class="rui-mock-body">
           <div class="rui-mock-sidebar">
@@ -695,7 +814,7 @@
         </div>
         <div class="skill-card reveal reveal-delay-2">
           <div class="skill-name">/cortex-init</div>
-          <div class="skill-desc">Scaffold a brand-new project entry. Use <code style="font-size:11px;color:var(--text-muted)">cortex add</code> for an existing repo.</div>
+          <div class="skill-desc">Scaffold a brand-new project entry. Use <code style="font-size:11px;color:var(--text-muted)">npx cortex add</code> for an existing repo.</div>
         </div>
         <div class="skill-card reveal">
           <div class="skill-name">/cortex-discover</div>
@@ -707,7 +826,7 @@
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Drop your own skills into <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex init</code> wires them up on the next refresh. Starter templates include examples without prescribing your workflow.</div>
+          <div class="skill-desc">Drop your own skills into <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">npx cortex init</code> wires them up on the next refresh. Starter templates include examples without prescribing your workflow.</div>
         </div>
       </div>
     </div>
@@ -721,7 +840,7 @@
           <div class="cta-brand-copy">
             <div class="section-label">Memory layer</div>
             <h2 class="cta-title">Start building your Cortex.</h2>
-            <p class="cta-tagline">One private repo. Shared context everywhere your agents work.</p>
+            <p class="cta-tagline">Your own private repo, shared between your agents.</p>
           </div>
           <svg class="cta-icon" width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -786,11 +905,6 @@
             <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
           </svg>
         </div>
-        <div class="cta-meta">
-          <span>Private git repo</span>
-          <span>MCP wired automatically</span>
-          <span>Hooks stay in sync across machines</span>
-        </div>
         <div class="cta-actions">
           <a href="#install" class="btn-primary">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -802,7 +916,7 @@
           </a>
           <a href="https://www.npmjs.com/package/@alaarab/cortex" class="npm-badge" target="_blank" rel="noopener">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M0 0v24h24V0H0zm13 20.727H7.273V3.273H13v13.636h3.636V3.273H20.727v17.454H13z"/></svg>
-            @alaarab/cortex
+            cortex
           </a>
         </div>
       </div>

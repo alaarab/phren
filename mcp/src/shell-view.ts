@@ -43,6 +43,7 @@ import {
   listProfiles,
 } from "./data-access.js";
 import { readInstallPreferences } from "./init-preferences.js";
+import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig } from "./project-config.js";
 import { getScopedSkills } from "./skill-registry.js";
 
 /** Shared rendering state passed from the orchestrator */
@@ -686,15 +687,19 @@ const LIFECYCLE_HOOKS: Array<{ event: string; description: string }> = [
   { event: "SessionStart",     description: "git pull at session start" },
 ];
 
-export function getHookEntries(cortexPath: string): HookEntry[] {
+export function getHookEntries(cortexPath: string, project?: string | null): HookEntry[] {
   const prefs = readInstallPreferences(cortexPath);
   const hooksEnabled = prefs.hooksEnabled !== false;
-  return LIFECYCLE_HOOKS.map((h) => ({ ...h, enabled: hooksEnabled }));
+  const projectConfig = project ? readProjectConfig(cortexPath, project) : undefined;
+  return LIFECYCLE_HOOKS.map((h) => ({
+    ...h,
+    enabled: hooksEnabled && isProjectHookEnabled(cortexPath, project, h.event as typeof PROJECT_HOOK_EVENTS[number], projectConfig),
+  }));
 }
 
 function renderHooksView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = renderWidth();
-  const entries = getHookEntries(ctx.cortexPath);
+  const entries = getHookEntries(ctx.cortexPath, ctx.state.project);
   const allEnabled = entries.every((e) => e.enabled);
   const allLines: string[] = [];
   let cursorFirstLine = 0;

@@ -2,9 +2,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
+import * as path from "path";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry } from "./hooks.js";
 import { hookConfigPath } from "./shared.js";
+import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig, writeProjectHookConfig } from "./project-config.js";
+import { isValidProjectName } from "./utils.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookTool = typeof HOOK_TOOLS[number];
@@ -39,6 +42,21 @@ function normalizeHookTool(input: string | undefined): HookTool | null {
   return HOOK_TOOLS.includes(lower) ? lower : null;
 }
 
+function normalizeProjectHookEvent(input: string | undefined): typeof PROJECT_HOOK_EVENTS[number] | null {
+  if (!input) return null;
+  const normalized = input.trim().toLowerCase();
+  const aliasMap: Record<string, typeof PROJECT_HOOK_EVENTS[number]> = {
+    userpromptsubmit: "UserPromptSubmit",
+    prompt: "UserPromptSubmit",
+    stop: "Stop",
+    sessionstart: "SessionStart",
+    start: "SessionStart",
+    posttooluse: "PostToolUse",
+    tool: "PostToolUse",
+  };
+  return aliasMap[normalized] ?? null;
+}
+
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath } = ctx;
 
@@ -51,9 +69,11 @@ export function register(server: McpServer, ctx: McpContext): void {
       description:
         "List hook status for all tools (claude, copilot, cursor, codex) with enable/disable state, " +
         "config file paths, and custom integration hooks.",
-      inputSchema: z.object({}),
+      inputSchema: z.object({
+        project: z.string().optional().describe("Optional project name to include project-level lifecycle hook overrides."),
+      }),
     },
-    async () => {
+    async ({ project }) => {
       const prefs = readInstallPreferences(cortexPath);
       const globalEnabled = prefs.hooksEnabled !== false;
       const toolPrefs = prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {};
@@ -64,6 +84,29 @@ export function register(server: McpServer, ctx: McpContext): void {
         codex: hookConfigPath("codex", cortexPath),
       };
       const customHooks = readCustomHooks(cortexPath);
+      let projectHooks: {
+        project: string;
+        baseEnabled: boolean | null;
+        configPath: string;
+        events: Array<{ event: typeof PROJECT_HOOK_EVENTS[number]; configured: boolean | null; enabled: boolean }>;
+      } | null = null;
+
+      if (project !== undefined) {
+        if (!isValidProjectName(project) || !fs.existsSync(path.join(cortexPath, project))) {
+          return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
+        }
+        const config = readProjectConfig(cortexPath, project);
+        projectHooks = {
+          project,
+          baseEnabled: typeof config.hooks?.enabled === "boolean" ? config.hooks.enabled : null,
+          configPath: path.join(cortexPath, project, "cortex.project.yaml"),
+          events: PROJECT_HOOK_EVENTS.map((event) => ({
+            event,
+            configured: typeof config.hooks?.[event] === "boolean" ? config.hooks[event]! : null,
+            enabled: isProjectHookEnabled(cortexPath, project, event, config),
+          })),
+        };
+      }
 
       const tools = HOOK_TOOLS.map(tool => ({
         tool,
@@ -80,6 +123,14 @@ export function register(server: McpServer, ctx: McpContext): void {
         ),
       ];
 
+      if (projectHooks) {
+        lines.push(
+          "",
+          `Project ${projectHooks.project}: base ${projectHooks.baseEnabled === null ? "inherit" : projectHooks.baseEnabled ? "enabled" : "disabled"} | config: ${projectHooks.configPath}`,
+          ...projectHooks.events.map((event) => `${event.event}: ${event.enabled ? "enabled" : "disabled"}${event.configured === null ? " (inherit)" : ` (explicit ${event.configured ? "on" : "off"})`}`),
+        );
+      }
+
       if (customHooks.length > 0) {
         lines.push("", `${customHooks.length} custom hook(s):`);
         for (const h of customHooks) {
@@ -88,7 +139,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
       }
 
-      return mcpResponse({ ok: true, message: lines.join("\n"), data: { globalEnabled, tools, customHooks } });
+      return mcpResponse({ ok: true, message: lines.join("\n"), data: { globalEnabled, tools, customHooks, projectHooks } });
     }
   );
 
@@ -99,13 +150,47 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ cortex · toggle hooks",
       description:
-        "Enable or disable hooks globally or for a specific tool (claude, copilot, cursor, codex).",
+        "Enable or disable hooks globally, for a specific tool, or for a tracked project.",
       inputSchema: z.object({
         enabled: z.boolean().describe("true to enable, false to disable."),
         tool: z.string().optional().describe("Specific tool. Omit to toggle globally."),
+        project: z.string().optional().describe("Tracked project name for project-level lifecycle hook overrides."),
+        event: z.string().optional().describe("Optional lifecycle event for project-level overrides: UserPromptSubmit, Stop, SessionStart, PostToolUse."),
       }),
     },
-    async ({ enabled, tool }) => {
+    async ({ enabled, tool, project, event }) => {
+      if (tool && project) {
+        return mcpResponse({ ok: false, error: "Pass either tool or project, not both." });
+      }
+
+      if (event && !project) {
+        return mcpResponse({ ok: false, error: "event requires project." });
+      }
+
+      if (project) {
+        if (!isValidProjectName(project) || !fs.existsSync(path.join(cortexPath, project))) {
+          return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
+        }
+        const normalizedEvent = normalizeProjectHookEvent(event);
+        if (event && !normalizedEvent) {
+          return mcpResponse({ ok: false, error: `Invalid event "${event}". Use: ${PROJECT_HOOK_EVENTS.join(", ")}` });
+        }
+        if (normalizedEvent) {
+          writeProjectHookConfig(cortexPath, project, { [normalizedEvent]: enabled });
+          return mcpResponse({
+            ok: true,
+            message: `${enabled ? "Enabled" : "Disabled"} ${normalizedEvent} hook for ${project}.`,
+            data: { project, event: normalizedEvent, enabled },
+          });
+        }
+        writeProjectHookConfig(cortexPath, project, { enabled });
+        return mcpResponse({
+          ok: true,
+          message: `${enabled ? "Enabled" : "Disabled"} hooks for project ${project}.`,
+          data: { project, enabled },
+        });
+      }
+
       if (tool) {
         const normalized = normalizeHookTool(tool);
         if (!normalized) {

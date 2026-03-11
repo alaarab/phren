@@ -83,7 +83,7 @@ describe("hooks", () => {
   describe("buildSharedLifecycleCommands", () => {
     it("uses versioned npx commands without embedding local cortex paths", () => {
       const cmds = buildSharedLifecycleCommands();
-      expect(cmds.sessionStart).toContain("npx -y @alaarab/cortex@");
+      expect(cmds.sessionStart).toContain("npx -y cortex@");
       expect(cmds.sessionStart).toContain("hook-session-start");
       expect(cmds.userPromptSubmit).toContain("hook-prompt");
       expect(cmds.stop).toContain("hook-stop");
@@ -460,7 +460,7 @@ describe("hooks", () => {
       expect(cmds.userPromptSubmit).toContain(" node ");
       expect(cmds.stop).toContain(" node ");
       expect(cmds.sessionStart).toContain("index.js");
-      expect(cmds.sessionStart).not.toContain("npx @alaarab/cortex");
+      expect(cmds.sessionStart).not.toContain("npx cortex");
     });
 
     it("configureAllHooks() ignores stale cursor config without a real cursor binary", () => {

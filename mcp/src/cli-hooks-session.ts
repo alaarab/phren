@@ -32,9 +32,10 @@ import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
 import { getHooksEnabledPreference } from "./init.js";
-import { detectProjectDir, isProjectTracked } from "./init-setup.js";
+import { detectProjectDir, ensureLocalGitRepo, isProjectTracked } from "./init-setup.js";
 import { isToolHookEnabled } from "./hooks.js";
 import { appendFindingJournal } from "./finding-journal.js";
+import { isProjectHookEnabled } from "./project-config.js";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import {
   buildIndex,
@@ -97,9 +98,9 @@ export function getUntrackedProjectNotice(cortexPath: string, cwd: string): stri
     "<cortex-notice>",
     "This project directory is not tracked by cortex.",
     "Ask the user whether they want to add it to cortex now.",
-    "If they say no, tell them they can always run `cortex add` later from this directory.",
+    "If they say no, tell them they can always run `npx cortex add` later from this directory.",
     "If they say yes, also ask whether Cortex should manage repo instruction files or leave their existing repo-owned CLAUDE/AGENTS files alone.",
-    `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="cortex-managed"|"detached"|"repo-managed", or run \`cortex add\` from that directory.`,
+    `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="cortex-managed"|"detached"|"repo-managed", or run \`npx cortex add\` from that directory.`,
     "</cortex-notice>",
     "",
   ].join("\n");
@@ -517,6 +518,8 @@ async function recoverPushConflict(cwd: string): Promise<{ ok: boolean; detail: 
 
 export async function handleHookSessionStart() {
   const startedAt = new Date().toISOString();
+  const cwd = process.cwd();
+  const activeProject = detectProject(getCortexPath(), cwd, getRuntimeProfile());
   if (!getHooksEnabledPreference(getCortexPath())) {
     updateRuntimeHealth(getCortexPath(), { lastSessionStartAt: startedAt });
     appendAuditLog(getCortexPath(), "hook_session_start", "status=disabled");
@@ -529,10 +532,28 @@ export async function handleHookSessionStart() {
     return;
   }
 
-  const pull = await runBestEffortGit(["pull", "--rebase", "--quiet"], getCortexPath());
+  if (!isProjectHookEnabled(getCortexPath(), activeProject, "SessionStart")) {
+    updateRuntimeHealth(getCortexPath(), { lastSessionStartAt: startedAt });
+    appendAuditLog(getCortexPath(), "hook_session_start", `status=project_disabled project=${activeProject}`);
+    return;
+  }
+
+  const gitRepo = ensureLocalGitRepo(getCortexPath());
+  const remotes = gitRepo.ok ? await runBestEffortGit(["remote"], getCortexPath()) : { ok: false, error: gitRepo.detail };
+  const hasRemote = Boolean(remotes.ok && remotes.output && remotes.output.trim());
+  const pull = !gitRepo.ok
+    ? { ok: false, error: gitRepo.detail }
+    : hasRemote
+      ? await runBestEffortGit(["pull", "--rebase", "--quiet"], getCortexPath())
+      : {
+          ok: true,
+          output: gitRepo.initialized
+            ? "initialized local git repo; no remote configured"
+            : "local-only repo; no remote configured",
+        };
   const doctor = await runDoctor(getCortexPath(), false);
   const maintenanceScheduled = scheduleBackgroundMaintenance(getCortexPath());
-  const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
+  const unsyncedCommits = hasRemote ? await countUnsyncedCommits(getCortexPath()) : 0;
 
   try { const { trackSession } = await import("./telemetry.js"); trackSession(getCortexPath()); } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookSessionStart trackSession: ${errorMessage(err)}\n`);
@@ -544,21 +565,20 @@ export async function handleHookSessionStart() {
       lastPullAt: startedAt,
       lastPullStatus: pull.ok ? "ok" : "error",
       lastPullDetail: pull.ok ? (pull.output || "pull ok") : (pull.error || "pull failed"),
-      lastSuccessfulPullAt: pull.ok ? startedAt : undefined,
+      lastSuccessfulPullAt: pull.ok && hasRemote ? startedAt : undefined,
       unsyncedCommits,
     },
   });
   appendAuditLog(
     getCortexPath(),
     "hook_session_start",
-    `pull=${pull.ok ? "ok" : "fail"} doctor=${doctor.ok ? "ok" : "issues"} maintenance=${maintenanceScheduled ? "scheduled" : "skipped"}`
+    `pull=${hasRemote ? (pull.ok ? "ok" : "fail") : "skipped-local"} doctor=${doctor.ok ? "ok" : "issues"} maintenance=${maintenanceScheduled ? "scheduled" : "skipped"}`
   );
 
   // Untracked project detection: suggest `cortex add` if CWD looks like a project but isn't tracked
   try {
     const cortexPath = getCortexPath();
     if (cortexPath) {
-      const cwd = process.cwd();
       const notice = getUntrackedProjectNotice(cortexPath, cwd);
       if (notice) {
         process.stdout.write(notice);
@@ -623,6 +643,8 @@ export function filterConversationInsightsForProactivity(
 export async function handleHookStop() {
   const now = new Date().toISOString();
   bootstrapCortexDotEnv(getCortexPath());
+  const cwd = process.cwd();
+  const activeProject = detectProject(getCortexPath(), cwd, getRuntimeProfile());
   if (!getHooksEnabledPreference(getCortexPath())) {
     updateRuntimeHealth(getCortexPath(), {
       lastStopAt: now,
@@ -635,6 +657,15 @@ export async function handleHookStop() {
   const hookTool = process.env.CORTEX_HOOK_TOOL || "claude";
   if (!isToolHookEnabled(getCortexPath(), hookTool)) {
     appendAuditLog(getCortexPath(), "hook_stop", `status=tool_disabled tool=${hookTool}`);
+    return;
+  }
+
+  if (!isProjectHookEnabled(getCortexPath(), activeProject, "Stop")) {
+    updateRuntimeHealth(getCortexPath(), {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "clean", detail: `hooks disabled for project ${activeProject}` },
+    });
+    appendAuditLog(getCortexPath(), "hook_stop", `status=project_disabled project=${activeProject}`);
     return;
   }
 
@@ -681,8 +712,6 @@ export async function handleHookStop() {
         }
       }
       if (captureInput) {
-        const cwd = process.cwd();
-        const activeProject = detectProject(getCortexPath(), cwd, getRuntimeProfile());
         if (activeProject) {
           const insights = filterConversationInsightsForProactivity(extractConversationInsights(captureInput), findingsLevel);
           for (const insight of insights) {
@@ -698,6 +727,27 @@ export async function handleHookStop() {
     }
   } else if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
     debugLog("auto-capture: skipped because findings proactivity is low");
+  }
+
+  const gitRepo = ensureLocalGitRepo(getCortexPath());
+  if (!gitRepo.ok) {
+    finalizeTaskSession({
+      cortexPath: getCortexPath(),
+      sessionId: taskSessionId,
+      status: "error",
+      detail: gitRepo.detail,
+    });
+    updateRuntimeHealth(getCortexPath(), {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "error", detail: gitRepo.detail },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "error",
+        lastPushDetail: gitRepo.detail,
+      },
+    });
+    appendAuditLog(getCortexPath(), "hook_stop", `status=error detail=${JSON.stringify(gitRepo.detail)}`);
+    return;
   }
 
   const status = await runBestEffortGit(["status", "--porcelain"], getCortexPath());
@@ -947,6 +997,9 @@ export async function handleHookContext() {
   if (ctxStdin?.cwd) cwd = ctxStdin.cwd;
 
   const project = detectProject(getCortexPath(), cwd, getRuntimeProfile());
+  if (!isProjectHookEnabled(getCortexPath(), project, "UserPromptSubmit")) {
+    process.exit(0);
+  }
 
   const db = await buildIndex(getCortexPath(), getRuntimeProfile());
   const contextLabel = project ? `\u25c6 cortex \u00b7 ${project} \u00b7 context` : `\u25c6 cortex \u00b7 context`;
@@ -1022,6 +1075,34 @@ interface ToolLogEntry {
   error?: string;
 }
 
+function flattenToolResponseText(value: unknown, maxChars = 4000): string {
+  if (typeof value === "string") return value;
+  const queue: unknown[] = [value];
+  const parts: string[] = [];
+  let length = 0;
+
+  while (queue.length > 0 && length < maxChars) {
+    const current = queue.shift();
+    if (typeof current === "string") {
+      const trimmed = current.trim();
+      if (!trimmed) continue;
+      parts.push(trimmed);
+      length += trimmed.length + 1;
+      continue;
+    }
+    if (Array.isArray(current)) {
+      queue.unshift(...current);
+      continue;
+    }
+    if (current && typeof current === "object") {
+      queue.unshift(...Object.values(current as Record<string, unknown>));
+    }
+  }
+
+  if (parts.length > 0) return parts.join("\n").slice(0, maxChars);
+  return JSON.stringify(value ?? "").slice(0, maxChars);
+}
+
 export async function handleHookTool() {
   if (!getHooksEnabledPreference(getCortexPath())) {
     process.exit(0);
@@ -1077,11 +1158,16 @@ export async function handleHookTool() {
       if (pattern) entry.command = `grep ${pattern}${searchPath ? ` in ${searchPath}` : ""}`.slice(0, 200);
     }
 
-    const responseStr = typeof data.tool_response === "string"
-      ? data.tool_response
-      : JSON.stringify(data.tool_response ?? "");
+    const responseStr = flattenToolResponseText(data.tool_response ?? "");
     if (/(error|exception|failed|no such file|ENOENT)/i.test(responseStr)) {
       entry.error = responseStr.slice(0, 300);
+    }
+
+    const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
+    let activeProject = cwd ? detectProject(getCortexPath(), cwd, getRuntimeProfile()) : null;
+    if (!isProjectHookEnabled(getCortexPath(), activeProject, "PostToolUse")) {
+      appendAuditLog(getCortexPath(), "hook_tool", `status=project_disabled project=${activeProject}`);
+      process.exit(0);
     }
 
     try {
@@ -1091,9 +1177,6 @@ export async function handleHookTool() {
     } catch (err: unknown) {
       if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool toolLog: ${errorMessage(err)}\n`);
     }
-
-    const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
-    let activeProject = cwd ? detectProject(getCortexPath(), cwd, getRuntimeProfile()) : null;
 
     const cooldownFile = runtimeFile(getCortexPath(), "hook-tool-cooldown");
     try {
@@ -1197,18 +1280,21 @@ export function extractToolFindings(
   responseStr: string
 ): LearningCandidate[] {
   const candidates: LearningCandidate[] = [];
+  const changedContent = (toolName === "Edit" || toolName === "Write")
+    ? String(input.new_string ?? input.content ?? "")
+    : "";
+  const explicitSource = changedContent || responseStr;
 
-  const tagMatches = responseStr.matchAll(new RegExp(EXPLICIT_TAG_PATTERN.source, "gi"));
+  const tagMatches = explicitSource.matchAll(new RegExp(EXPLICIT_TAG_PATTERN.source, "gi"));
   for (const m of tagMatches) {
     const tag = m[1].toLowerCase();
-    const content = m[2].trim().slice(0, 200);
+    const content = m[2].replace(/\s+/g, " ").trim().slice(0, 200);
     if (content) {
       candidates.push({ text: `[${tag}] ${content}`, confidence: 0.85, explicit: true });
     }
   }
 
   if (toolName === "Edit" || toolName === "Write") {
-    const changedContent = String(input.new_string ?? input.content ?? "");
     const filePath = String(input.file_path ?? input.path ?? "unknown");
     const filename = path.basename(filePath);
     if (/\b(TODO|FIXME)\b/.test(changedContent)) {

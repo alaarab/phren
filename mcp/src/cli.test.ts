@@ -214,6 +214,26 @@ describe("CLI integration: hooks", () => {
     expect(stdout).toContain("\"UserPromptSubmit\"");
     expect(stdout).toContain("echo prompt");
   });
+
+  it("lists project-level hook overrides when --project is provided", () => {
+    const projectDir = path.join(cortexDir, "demo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "cortex.project.yaml"),
+      ["hooks:", "  enabled: false", "  UserPromptSubmit: true", ""].join("\n"),
+    );
+
+    const { stdout, exitCode } = runCli(
+      ["hooks", "list", "--project", "demo"],
+      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Project demo");
+    expect(stdout).toContain("base: disabled");
+    expect(stdout).toContain("UserPromptSubmit: enabled");
+    expect(stdout).toContain("Stop: disabled");
+  });
 });
 
 describe("CLI integration: projects add", () => {
@@ -233,7 +253,7 @@ describe("CLI integration: projects add", () => {
     );
     expect(exitCode).toBe(1);
     expect(stderr).toContain("removed from the supported workflow");
-    expect(stderr).toContain("cortex add");
+    expect(stderr).toContain("npx cortex add");
     expect(fs.existsSync(path.join(cortexDir, "cortex"))).toBe(false);
   });
 });
@@ -289,6 +309,30 @@ describe("CLI integration: add project", () => {
     );
     expect(exitCode).toBe(1);
     expect(stdout).toContain("cortex is not set up yet");
+  });
+});
+
+describe("CLI integration: projects configure", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+    fs.mkdirSync(path.join(cortexDir, "demo"), { recursive: true });
+  });
+
+  afterEach(() => cleanup());
+
+  it("can persist a project-level hook toggle", () => {
+    const { stdout, exitCode } = runCli(
+      ["projects", "configure", "demo", "--hooks=off"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("hooks=off");
+    const config = fs.readFileSync(path.join(cortexDir, "demo", "cortex.project.yaml"), "utf8");
+    expect(config).toContain("enabled: false");
   });
 });
 
@@ -1847,7 +1891,7 @@ describe("CLI integration: uninstall", () => {
     fs.mkdirSync(vscodeDir, { recursive: true });
     fs.writeFileSync(
       path.join(vscodeDir, "mcp.json"),
-      JSON.stringify({ mcpServers: { cortex: { command: "npx", args: ["-y", "@alaarab/cortex"] } } }, null, 2)
+      JSON.stringify({ mcpServers: { cortex: { command: "npx", args: ["-y", "cortex"] } } }, null, 2)
     );
 
     const { stdout, exitCode } = runCli(
@@ -1866,7 +1910,7 @@ describe("CLI integration: uninstall", () => {
     fs.mkdirSync(cursorDir, { recursive: true });
     fs.writeFileSync(
       path.join(cursorDir, "mcp.json"),
-      JSON.stringify({ mcpServers: { cortex: { command: "npx", args: ["-y", "@alaarab/cortex"] } } }, null, 2)
+      JSON.stringify({ mcpServers: { cortex: { command: "npx", args: ["-y", "cortex"] } } }, null, 2)
     );
 
     const { stdout, exitCode } = runCli(

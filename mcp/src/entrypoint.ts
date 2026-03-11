@@ -21,6 +21,8 @@ Usage:
   cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--dry-run] [-y]
                                          Set up cortex and offer to add the current project directory
   cortex projects list                   List all tracked projects
+  cortex projects configure <name> [--ownership <mode>] [--hooks on|off]
+                                         Update per-project enrollment and hook settings
   cortex projects remove <name>          Remove a project (asks for confirmation)
   cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
   cortex skills list                     List installed skills
@@ -29,7 +31,7 @@ Usage:
   cortex skills doctor <project|global> Diagnose resolved skill visibility + mirror state
   cortex skills sync <project|global>   Regenerate the resolved mirror for one scope
   cortex skills remove <project> <name> Remove a project skill by name
-  cortex hooks list                      Show hook tool preferences
+  cortex hooks list [--project <name>]   Show hook tool preferences and optional project overrides
   cortex hooks enable <tool>             Enable hooks for one tool
   cortex hooks disable <tool>            Disable hooks for one tool
   cortex status                          Health, active project, stats
@@ -41,7 +43,7 @@ Usage:
   cortex skill-list                      List installed skills
   cortex doctor [--fix] [--check-data] [--agents]
                                          Health check and self-heal (--agents: show agent integrations only)
-  cortex review-ui [--port=3499]         Memory review web UI
+  cortex review-ui [--port=3499] [--no-open]  Memory review web UI
   cortex debug-injection --prompt "..."  Preview hook-prompt injection output
   cortex inspect-index [--project <n>]   Inspect FTS index contents for debugging
   cortex update [--refresh-starter]      Update to latest version
@@ -226,7 +228,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const cortexPath = defaultCortexPath();
     const profile = process.env.CORTEX_PROFILE || undefined;
     if (!fs.existsSync(cortexPath) || !fs.existsSync(path.join(cortexPath, ".governance"))) {
-      console.log("cortex is not set up yet. Run: npx @alaarab/cortex init");
+      console.log("cortex is not set up yet. Run: npx cortex init");
       return finish(1);
     }
     const ownership = ownershipArg
@@ -333,7 +335,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     if (!result.ok) {
       const note = getVerifyOutcomeNote(cortexPath, result.checks);
       if (note) console.log(`\nNote: ${note}`);
-      console.log(`\nRun \`npx @alaarab/cortex init\` to fix setup issues.`);
+      console.log(`\nRun \`npx cortex init\` to fix setup issues.`);
     }
     return finish(result.ok ? 0 : 1);
   }
@@ -361,7 +363,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "link") {
-    console.error("`cortex link` has been removed. Use `npx @alaarab/cortex init` instead.");
+    console.error("`cortex link` has been removed. Use `npx cortex init` instead.");
     return finish(1);
   }
 

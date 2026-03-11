@@ -205,10 +205,8 @@ describe("boundary and edge case inputs", () => {
     );
     const longText = "B".repeat(5000);
     const msg = editQueueItem(tmpDir, PROJECT, "Short item", longText);
-    expect(msg.ok).toBe(true);
-    const queue = readReviewQueue(tmpDir, PROJECT);
-    if (!queue.ok) return;
-    expect(queue.data[0].text).toContain("B".repeat(100));
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(CortexError.VALIDATION_ERROR);
   });
 });
 

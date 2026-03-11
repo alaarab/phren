@@ -8,6 +8,7 @@ import {
   autoArchiveToReference,
   addFindingToFile,
 } from "./shared-content.js";
+import { reclassifyLegacyTopicDocs, writeProjectTopics } from "./project-topics.js";
 import { makeTempDir, grantAdmin } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -107,7 +108,7 @@ describe("autoArchiveToReference", () => {
     expect(archived).toBe(3);
 
     // Check that reference/ dir was created
-    const referenceDir = path.join(cortex, "myapp", "reference");
+    const referenceDir = path.join(cortex, "myapp", "reference", "topics");
     expect(fs.existsSync(referenceDir)).toBe(true);
 
     // Check reference files exist
@@ -156,12 +157,12 @@ describe("autoArchiveToReference", () => {
 `;
     makeProject(cortex, "myapp", {
       "FINDINGS.md": findings,
-      "reference/architecture.md": "# myapp - architecture\n\n## Archived 2024-12-01\n\n- Previous architecture note\n",
+      "reference/topics/architecture.md": "# myapp - Architecture\n\n<!-- cortex:auto-topic slug=architecture -->\n\n## Archived 2024-12-01\n\n- Previous architecture note\n",
     });
 
     autoArchiveToReference(cortex, "myapp", 1);
 
-    const archFile = path.join(cortex, "myapp", "reference", "architecture.md");
+    const archFile = path.join(cortex, "myapp", "reference", "topics", "architecture.md");
     const content = fs.readFileSync(archFile, "utf8");
     expect(content).toContain("Previous architecture note");
     expect(content).toContain("microservices");
@@ -285,22 +286,86 @@ describe("topic classification", () => {
 
     autoArchiveToReference(cortex, "myapp", 1);
 
-    const referenceDir = path.join(cortex, "myapp", "reference");
+    const referenceDir = path.join(cortex, "myapp", "reference", "topics");
     const files = fs.readdirSync(referenceDir).sort();
 
     // Should have created topic-specific files
     expect(files.length).toBeGreaterThan(0);
 
-    // Architecture file should have the database entry
-    if (fs.existsSync(path.join(referenceDir, "architecture.md"))) {
-      const content = fs.readFileSync(path.join(referenceDir, "architecture.md"), "utf8");
+    if (fs.existsSync(path.join(referenceDir, "database.md"))) {
+      const content = fs.readFileSync(path.join(referenceDir, "database.md"), "utf8");
       expect(content).toContain("database schema");
     }
 
-    // Findings file should have the race condition entry
-    if (fs.existsSync(path.join(referenceDir, "findings.md"))) {
-      const content = fs.readFileSync(path.join(referenceDir, "findings.md"), "utf8");
-      expect(content).toContain("race condition");
+    if (fs.existsSync(path.join(referenceDir, "auth.md"))) {
+      const content = fs.readFileSync(path.join(referenceDir, "auth.md"), "utf8");
+      expect(content).toContain("auth");
     }
+  });
+
+  it("uses custom project topics for archive routing", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    const findings = `# game FINDINGS
+
+## 2025-01-20
+
+- Keep this one
+
+## 2025-01-05
+
+- Shader compilation hitch on first frame
+- Gameplay state desync when pausing during combat
+`;
+    makeProject(cortex, "game", { "FINDINGS.md": findings });
+    const saved = writeProjectTopics(cortex, "game", [
+      { slug: "rendering", label: "Rendering", description: "Frame rendering and shaders", keywords: ["shader", "frame", "render", "gpu"] },
+      { slug: "gameplay", label: "Gameplay", description: "Core gameplay state and combat systems", keywords: ["gameplay", "combat", "pause", "state"] },
+      { slug: "general", label: "General", description: "Fallback", keywords: [] },
+    ]);
+    expect(saved.ok).toBe(true);
+
+    autoArchiveToReference(cortex, "game", 1);
+
+    const renderingDoc = path.join(cortex, "game", "reference", "topics", "rendering.md");
+    const gameplayDoc = path.join(cortex, "game", "reference", "topics", "gameplay.md");
+    expect(fs.existsSync(renderingDoc)).toBe(true);
+    expect(fs.existsSync(gameplayDoc)).toBe(true);
+    expect(fs.readFileSync(renderingDoc, "utf8")).toContain("Shader compilation hitch");
+    expect(fs.readFileSync(gameplayDoc, "utf8")).toContain("Gameplay state desync");
+  });
+
+  it("reclassifies legacy auto-managed topic docs into reference/topics and skips hand-written docs", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "game", {
+      "FINDINGS.md": "# game FINDINGS\n",
+      "reference/frontend.md": [
+        "# game - frontend",
+        "",
+        "## Archived 2025-01-10",
+        "",
+        "- Shader compilation hitch on first frame",
+        "",
+      ].join("\n"),
+      "reference/rendering-notes.md": [
+        "# Rendering Notes",
+        "",
+        "This is hand-written prose and should not be rewritten.",
+      ].join("\n"),
+    });
+    const saved = writeProjectTopics(cortex, "game", [
+      { slug: "rendering", label: "Rendering", description: "Graphics and shaders", keywords: ["shader", "frame", "render"] },
+      { slug: "general", label: "General", description: "Fallback", keywords: [] },
+    ]);
+    expect(saved.ok).toBe(true);
+
+    const result = reclassifyLegacyTopicDocs(cortex, "game");
+    expect(result.movedFiles).toBe(1);
+    expect(result.movedEntries).toBe(1);
+    expect(result.skipped.some((item) => item.file === "reference/rendering-notes.md")).toBe(true);
+    expect(fs.existsSync(path.join(cortex, "game", "reference", "frontend.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(cortex, "game", "reference", "topics", "rendering.md"), "utf8")).toContain("Shader compilation hitch");
+    expect(fs.existsSync(path.join(cortex, "game", "reference", "rendering-notes.md"))).toBe(true);
   });
 });

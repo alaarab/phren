@@ -648,6 +648,33 @@ describe("memory queue helpers", () => {
     if (!queueAfter.ok) return;
     expect(queueAfter.data.some((i) => i.text.includes("updated stale memory"))).toBe(true);
   });
+
+  it("approveQueueItem promotes sanitized text from messy queue lines", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "MEMORY_QUEUE.md"),
+      [
+        "# testproject Review Queue",
+        "",
+        "## Review",
+        "",
+        "- [2026-03-05] [decision] Use \\\"quoted\\\" config values <!-- source: injected --> [confidence 0.80]",
+        "",
+        "## Stale",
+        "",
+        "## Conflicts",
+        "",
+      ].join("\n"),
+    );
+
+    const msg = approveQueueItem(tmpDir, PROJECT, "M1");
+    expect(resultMsg(msg)).toContain("Approved memory");
+
+    const findings = readFindings(tmpDir, PROJECT);
+    expect(findings.ok).toBe(true);
+    if (!findings.ok) return;
+    expect(findings.data.some((i) => i.text.includes('[decision] Use "quoted" config values'))).toBe(true);
+    expect(findings.data.some((i) => i.text.includes("source: injected"))).toBe(false);
+  });
 });
 
 describe("machines, profiles, and shell state", () => {
@@ -994,6 +1021,16 @@ describe("structured error codes in data-access", () => {
     const msg = editQueueItem(tmpDir, PROJECT, "anything", "");
     expect(msg.ok).toBe(false);
     if (!msg.ok) expect(msg.code).toBe(CortexError.EMPTY_INPUT);
+  });
+
+  it("editQueueItem rejects oversized queue text", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "MEMORY_QUEUE.md"),
+      "# testproject Review Queue\n\n## Review\n\n- [2026-03-05] anything\n\n## Stale\n\n## Conflicts\n",
+    );
+    const msg = editQueueItem(tmpDir, PROJECT, "anything", "X".repeat(5001));
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(CortexError.VALIDATION_ERROR);
   });
 
   it("listMachines returns FILE_NOT_FOUND when machines.yaml missing", () => {

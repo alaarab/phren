@@ -1,8 +1,8 @@
 {
   "name": "cortex-vscode",
   "displayName": "Cortex VS Code",
-  "description": "VS Code extension for browsing and searching Cortex projects from the editor.",
-  "version": "0.0.1",
+  "description": "Browse, search, and manage Cortex knowledge directly from VS Code.",
+  "version": "0.0.8",
   "publisher": "alaarab",
   "engines": {
     "vscode": "^1.85.0"
@@ -11,75 +11,54 @@
     "Other"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [
-    "onView:cortex.explorer",
-    "onCommand:cortex.search",
-    "onCommand:cortex.showGraph",
-    "onCommand:cortex.refresh",
-    "onCommand:cortex.getFindings",
-    "onCommand:cortex.getTasks",
-    "onCommand:cortex.addFinding",
-    "onCommand:cortex.setActiveProject",
-    "onCommand:cortex.listProjects",
-    "onCommand:cortex.getProjectSummary"
-  ],
   "contributes": {
     "commands": [
       {
         "command": "cortex.search",
         "title": "Cortex: Search Knowledge",
-        "icon": {
-          "light": "media/cortex.svg",
-          "dark": "media/cortex.svg"
-        }
+        "icon": "$(search)"
       },
       {
         "command": "cortex.showGraph",
         "title": "Cortex: Show Entity Graph",
-        "icon": {
-          "light": "media/cortex.svg",
-          "dark": "media/cortex.svg"
-        }
+        "icon": "$(type-hierarchy)"
       },
       {
         "command": "cortex.refresh",
         "title": "Cortex: Refresh",
-        "icon": {
-          "light": "media/cortex.svg",
-          "dark": "media/cortex.svg"
-        }
-      },
-      {
-        "command": "cortex.getFindings",
-        "title": "Cortex: Get Findings"
-      },
-      {
-        "command": "cortex.getTasks",
-        "title": "Cortex: Get Tasks"
+        "icon": "$(refresh)"
       },
       {
         "command": "cortex.addFinding",
-        "title": "Cortex: Add Finding",
-        "icon": {
-          "light": "media/cortex.svg",
-          "dark": "media/cortex.svg"
-        }
+        "title": "Cortex: Add Finding"
       },
       {
         "command": "cortex.setActiveProject",
-        "title": "Cortex: Set Active Project",
-        "icon": {
-          "light": "media/cortex.svg",
-          "dark": "media/cortex.svg"
-        }
+        "title": "Cortex: Set Active Project"
       },
       {
-        "command": "cortex.listProjects",
-        "title": "Cortex: List Projects"
+        "command": "cortex.openFinding",
+        "title": "Cortex: Open Finding"
       },
       {
-        "command": "cortex.getProjectSummary",
-        "title": "Cortex: Get Project Summary"
+        "command": "cortex.openProjectFile",
+        "title": "Cortex: Open Project File"
+      },
+      {
+        "command": "cortex.openSkill",
+        "title": "Cortex: Open Skill"
+      },
+      {
+        "command": "cortex.toggleSkill",
+        "title": "Cortex: Toggle Skill"
+      },
+      {
+        "command": "cortex.toggleHook",
+        "title": "Cortex: Toggle Hook"
+      },
+      {
+        "command": "cortex.openTask",
+        "title": "Cortex: Open Task"
       }
     ],
     "keybindings": [
@@ -94,6 +73,23 @@
         {
           "command": "cortex.addFinding",
           "when": "editorHasSelection"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "cortex.showGraph",
+          "when": "view == cortex.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "cortex.search",
+          "when": "view == cortex.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "cortex.refresh",
+          "when": "view == cortex.explorer",
+          "group": "navigation"
         }
       ]
     },
@@ -119,18 +115,18 @@
       "properties": {
         "cortex.mcpServerPath": {
           "type": "string",
-          "default": "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/@alaarab/cortex/mcp/dist/index.js",
+          "default": "",
           "description": "Absolute path to the cortex MCP server entrypoint JavaScript file."
         },
         "cortex.nodePath": {
           "type": "string",
           "default": "node",
-          "description": "Path to the Node.js binary used to run the cortex MCP server. Set this if VS Code can't find node on PATH (e.g. /home/alaarab/.nvm/versions/node/v24.13.0/bin/node)."
+          "description": "Path to the Node.js binary used to run the cortex MCP server."
         },
         "cortex.storePath": {
           "type": "string",
-          "default": "/home/alaarab/.cortex",
-          "description": "Path to cortex store directory"
+          "default": "",
+          "description": "Path to cortex store directory (e.g. /home/user/.cortex)."
         }
       }
     }

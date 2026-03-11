@@ -13,7 +13,15 @@ import { readInstallPreferences, writeInstallPreferences, type InstallPreference
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
-import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode, writeProjectConfig } from "./project-config.js";
+import {
+  PROJECT_HOOK_EVENTS,
+  PROJECT_OWNERSHIP_MODES,
+  isProjectHookEnabled,
+  parseProjectOwnershipMode,
+  readProjectConfig,
+  writeProjectConfig,
+  writeProjectHookConfig,
+} from "./project-config.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
@@ -34,7 +42,7 @@ function printSkillsUsage() {
 
 function printHooksUsage() {
   console.log("Usage:");
-  console.log("  cortex hooks list");
+  console.log("  cortex hooks list [--project <name>]");
   console.log("  cortex hooks show <tool>");
   console.log("  cortex hooks edit <tool>");
   console.log("  cortex hooks enable <tool>");
@@ -46,6 +54,21 @@ function normalizeHookTool(raw: string | undefined): HookToolName | null {
   if (!raw) return null;
   const tool = raw.toLowerCase();
   return HOOK_TOOLS.includes(tool as HookToolName) ? tool as HookToolName : null;
+}
+
+function getOptionValue(args: string[], name: string): string | undefined {
+  const exactIdx = args.indexOf(name);
+  if (exactIdx !== -1) return args[exactIdx + 1];
+  const prefixed = args.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : undefined;
+}
+
+function parseMcpToggle(raw: string | undefined): boolean | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "on" || normalized === "true" || normalized === "enabled") return true;
+  if (normalized === "off" || normalized === "false" || normalized === "disabled") return false;
+  return undefined;
 }
 
 function findSkillPath(name: string, profile: string, project?: string): string | null {
@@ -240,9 +263,15 @@ export function handleHooksNamespace(args: string[]) {
   }
 
   if (subcommand === "list") {
-    const prefs = readInstallPreferences(getCortexPath());
+    const cortexPath = getCortexPath();
+    const prefs = readInstallPreferences(cortexPath);
     const hooksEnabled = prefs.hooksEnabled !== false;
     const toolPrefs = prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {};
+    const project = getOptionValue(args.slice(1), "--project");
+    if (project && (!isValidProjectName(project) || !fs.existsSync(path.join(cortexPath, project)))) {
+      console.error(`Project "${project}" not found.`);
+      process.exit(1);
+    }
     const rows = HOOK_TOOLS.map((tool) => ({
       tool,
       hookType: "lifecycle",
@@ -253,6 +282,18 @@ export function handleHooksNamespace(args: string[]) {
     console.log("--------  ---------  --------");
     for (const row of rows) {
       console.log(`${row.tool.padEnd(8)}  ${row.hookType.padEnd(9)}  ${row.status}`);
+    }
+    if (project) {
+      const projectConfig = readProjectConfig(cortexPath, project);
+      const base = projectConfig.hooks?.enabled;
+      console.log("");
+      console.log(`Project ${project}`);
+      console.log(`  base: ${typeof base === "boolean" ? (base ? "enabled" : "disabled") : "inherit"}`);
+      for (const event of PROJECT_HOOK_EVENTS) {
+        const configured = projectConfig.hooks?.[event];
+        const effective = isProjectHookEnabled(cortexPath, project, event, projectConfig);
+        console.log(`  ${event}: ${effective ? "enabled" : "disabled"}${typeof configured === "boolean" ? ` (explicit ${configured ? "on" : "off"})` : " (inherit)"}`);
+      }
     }
     return;
   }
@@ -488,6 +529,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       console.log("Usage:");
       console.log("  cortex projects list               List all projects");
       console.log("  cortex projects configure <name>   Update per-project enrollment settings");
+      console.log("    flags: --ownership=<mode> --hooks=on|off");
       console.log("  cortex projects remove <name>      Remove a project (asks for confirmation)");
       return;
     }
@@ -496,7 +538,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
 
   if (subcommand === "add") {
     console.error("`cortex projects add` has been removed from the supported workflow.");
-    console.error("Use `cd ~/your-project && cortex add` so enrollment stays path-based.");
+    console.error("Use `cd ~/your-project && npx cortex add` so enrollment stays path-based.");
     process.exit(1);
   }
 
@@ -512,7 +554,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
   if (subcommand === "configure") {
     const name = args[1];
     if (!name) {
-      console.error(`Usage: cortex projects configure <name> --ownership=${PROJECT_OWNERSHIP_MODES.join("|")}`);
+      console.error(`Usage: cortex projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
       process.exit(1);
     }
     if (!isValidProjectName(name)) {
@@ -524,17 +566,32 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       process.exit(1);
     }
     const ownershipArg = args.find((arg) => arg.startsWith("--ownership="))?.slice("--ownership=".length);
-    if (!ownershipArg) {
-      console.error(`Usage: cortex projects configure <name> --ownership=${PROJECT_OWNERSHIP_MODES.join("|")}`);
+    const hooksArg = args.find((arg) => arg.startsWith("--hooks="))?.slice("--hooks=".length);
+    const ownership = ownershipArg ? parseProjectOwnershipMode(ownershipArg) : undefined;
+    const hooksEnabled = parseMcpToggle(hooksArg);
+    if (!ownershipArg && hooksArg === undefined) {
+      console.error(`Usage: cortex projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
       process.exit(1);
     }
-    const ownership = parseProjectOwnershipMode(ownershipArg);
-    if (!ownership) {
-      console.error(`Usage: cortex projects configure <name> --ownership=${PROJECT_OWNERSHIP_MODES.join("|")}`);
+    if (ownershipArg && !ownership) {
+      console.error(`Usage: cortex projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
       process.exit(1);
     }
-    writeProjectConfig(getCortexPath(), name, { ownership });
-    console.log(`Updated ${name}: ownership=${ownership}`);
+    if (hooksArg !== undefined && hooksEnabled === undefined) {
+      console.error(`Invalid --hooks value "${hooksArg}". Use on or off.`);
+      process.exit(1);
+    }
+
+    const updates: string[] = [];
+    if (ownership) {
+      writeProjectConfig(getCortexPath(), name, { ownership });
+      updates.push(`ownership=${ownership}`);
+    }
+    if (hooksEnabled !== undefined) {
+      writeProjectHookConfig(getCortexPath(), name, { enabled: hooksEnabled });
+      updates.push(`hooks=${hooksEnabled ? "on" : "off"}`);
+    }
+    console.log(`Updated ${name}: ${updates.join(", ")}`);
     return;
   }
 
@@ -552,7 +609,7 @@ function handleProjectsList(profile: string) {
     .sort();
 
   if (!projects.length) {
-    console.log("No projects found. Run: cd ~/your-project && cortex add");
+    console.log("No projects found. Run: cd ~/your-project && npx cortex add");
     return;
   }
 
@@ -573,7 +630,7 @@ function handleProjectsList(profile: string) {
     console.log(`  ${name}${tagStr}`);
   }
   console.log(`\n${projects.length} project(s) total.`);
-  console.log("Add another project: cd ~/your-project && cortex add");
+  console.log("Add another project: cd ~/your-project && npx cortex add");
 }
 
 async function handleProjectsRemove(name: string, profile: string) {

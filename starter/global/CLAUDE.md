@@ -37,6 +37,10 @@ Put personal workflow skills in `~/.cortex/global/skills/` and list them here. S
 <!-- If you use team agents, document your coordination pattern here. Example: -->
 <!-- "Never use fire-and-forget background agents. Always use TeamCreate/TaskCreate/SendMessage." -->
 
+- Team agents follow the same cortex rules as the primary agent.
+- Before handing work back or stopping, record non-obvious bugs, patterns, tradeoffs, or decisions with `add_finding(...)`.
+- Do not wait for the user to explicitly say "save this as a finding" if the insight will matter next session.
+
 ## Project store
 
 All skills and project config live in `~/.cortex` (or wherever `CORTEX_DIR` points). This is a git repo that syncs across machines using profiles.

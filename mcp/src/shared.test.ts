@@ -1638,7 +1638,7 @@ describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
   it("returns defaults when no file exists", () => {
     const cortex = makeCortex();
     const wp = getWorkflowPolicy(cortex);
-    expect(wp.requireMaintainerApproval).toBe(true);
+    expect(wp.requireMaintainerApproval).toBe(false);
     expect(wp.lowConfidenceThreshold).toBe(0.7);
     expect(wp.riskySections).toEqual(["Stale", "Conflicts"]);
     expect(wp.taskMode).toBe("manual");
@@ -1788,6 +1788,23 @@ describe("appendReviewQueue", () => {
     grantAdmin(cortex);
     const badResult = appendReviewQueue(cortex, "../bad", "Stale", ["entry"]);
     expect(badResult.ok).toBe(false);
+  });
+
+  it("normalizes multiline and comment-heavy queue entries into a safe single line", () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "sanitizequeue", { "summary.md": "# sanitizequeue\n" });
+
+    const result = appendReviewQueue(cortex, "sanitizequeue", "Review", [
+      "Line one\\nLine two <!-- source: injected --> \"quoted\" \0 text",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const content = fs.readFileSync(path.join(cortex, "sanitizequeue", "MEMORY_QUEUE.md"), "utf8");
+    expect(content).toContain('Line one Line two "quoted" text');
+    expect(content).not.toContain("<!-- source: injected -->");
+    expect(content).not.toContain("\0");
   });
 });
 

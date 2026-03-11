@@ -1,4 +1,4 @@
-# @alaarab/cortex MCP server
+# cortex MCP server
 
 MCP server that indexes your personal cortex and exposes it to AI agents via full-text search.
 
@@ -7,13 +7,13 @@ On startup it walks your cortex directory, reads all `.md` files, and builds an 
 ## Install
 
 ```bash
-npx @alaarab/cortex init
+npx cortex init
 ```
 
 Or add manually to Claude Code:
 
 ```bash
-claude mcp add cortex -- npx -y @alaarab/cortex ~/.cortex
+claude mcp add cortex -- npx -y cortex ~/.cortex
 ```
 
 ## Environment variables
