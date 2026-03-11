@@ -157,7 +157,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
 
   const TAB_DEFS = [
     { id: 'Projects',     icon: '◉' },
-    { id: 'Backlog',      icon: '▤' },
+    { id: 'Task',      icon: '▤' },
     { id: 'Findings',     icon: '✦' },
     { id: 'Review Queue', icon: '◈' },
     { id: 'Skills',       icon: '◆' },
@@ -180,14 +180,14 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     },
     {
       project: 'web-project-1',
-      activeTab: 'Backlog',
+      activeTab: 'Task',
       rows: [
         { kind: 'section', label: 'Active', tone: 'active' },
-        { kind: 'backlog', id: 'b1', tone: 'active', text: 'Eliminate Angular dev-server linker gap', priority: 'high' },
+        { kind: 'task', id: 'b1', tone: 'active', text: 'Eliminate Angular dev-server linker gap', priority: 'high' },
         { kind: 'section', label: 'Queue',  tone: 'queue' },
-        { kind: 'backlog', id: 'b4', tone: 'queue',  text: 'Add OpenTelemetry tracing layer', priority: 'low' },
+        { kind: 'task', id: 'b4', tone: 'queue',  text: 'Add OpenTelemetry tracing layer', priority: 'low' },
         { kind: 'section', label: 'Done',   tone: 'done' },
-        { kind: 'backlog', id: 'b7', tone: 'done',   text: 'Fix React hydration mismatch', priority: 'done' },
+        { kind: 'task', id: 'b7', tone: 'done',   text: 'Fix React hydration mismatch', priority: 'done' },
       ],
       status: 'a add · ↵ mark done · d toggle active/queue',
       nextCmd: 'findings',
@@ -299,7 +299,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
 
     const el = mkEl('div', `demo-shell-row demo-shell-row-${row.kind}`);
 
-    if (row.kind === 'backlog') {
+    if (row.kind === 'task') {
       el.appendChild(mkEl('span', 'demo-bl-id', row.id));
       el.appendChild(mkEl('span', 'demo-bl-check', row.tone === 'done' ? '[x] ' : '[ ] '));
       el.appendChild(mkEl('span', 'demo-shell-text', row.text));

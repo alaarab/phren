@@ -14,7 +14,7 @@ import { getPersistentVectorIndex } from "../mcp/src/shared-vector-index.js";
 
 const DEFAULT_QUERIES = [
   "duplicate uppercase project directories",
-  "live refresh backlog review ui while agents write",
+  "live refresh task review ui while agents write",
   "semantic search setup during init with ollama",
   "background sync push conflicts",
   "cursor install detection false positive",

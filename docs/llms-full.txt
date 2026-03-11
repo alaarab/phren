@@ -14,18 +14,18 @@ MCP Tools (51):
     get_project_summary(name) - project summary card and file list
     list_projects() - all projects in active profile
 
-  Backlog management:
-    get_backlog(project?, id?, item?) - read backlog, or fetch a single item by ID or text
-    add_backlog_item(project, item) - add task to Queue section
-    add_backlog_items(project, items[]) - bulk add multiple tasks
-    complete_backlog_item(project, item) - match by text, move to Done
-    complete_backlog_items(project, items[]) - bulk complete multiple items
-    update_backlog_item(project, item, updates) - change priority, context, section, or linked GitHub issue
-    link_backlog_item_issue(project, item, issue_number?, issue_url?, unlink?) - link or unlink an existing GitHub issue on a backlog item
-    promote_backlog_item_to_issue(project, item, repo?, title?, body?, mark_done?) - create a GitHub issue from a backlog item and link it back
+  Task management:
+    get_tasks(project?, id?, item?) - read task, or fetch a single item by ID or text
+    add_task(project, item) - add task to Queue section
+    add_tasks(project, items[]) - bulk add multiple tasks
+    complete_task(project, item) - match by text, move to Done
+    complete_tasks(project, items[]) - bulk complete multiple items
+    update_task(project, item, updates) - change priority, context, section, or linked GitHub issue
+    link_task_issue(project, item, issue_number?, issue_url?, unlink?) - link or unlink an existing GitHub issue on a task item
+    promote_task_to_issue(project, item, repo?, title?, body?, mark_done?) - create a GitHub issue from a task item and link it back
 
   Finding capture:
-    add_finding(project, finding, citation?: {file?, line?, repo?, commit?, backlog_item?}, findingType?, sessionId?) - append finding with optional citation and type tag
+    add_finding(project, finding, citation?: {file?, line?, repo?, commit?, task_item?}, findingType?, sessionId?) - append finding with optional citation and type tag
       findingType: "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug"
     add_findings(project, findings[], sessionId?) - bulk add multiple findings
     remove_finding(project, finding) - remove by matching text
@@ -78,7 +78,7 @@ CLI Commands:
   cortex search <query>                - FTS5 search with synonym expansion
   cortex add-finding <project> "..."   - append a finding from the terminal
   cortex pin <project> "..."           - promote canonical memory
-  cortex backlog                       - cross-project backlog view
+  cortex task                       - cross-project task view
   cortex skill-list                    - list installed skills
   cortex doctor [--fix] [--agents]     - health checks with optional self-heal
   cortex review-ui [--port=3499]       - lightweight memory review UI

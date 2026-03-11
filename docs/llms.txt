@@ -4,9 +4,9 @@ Install: npm install -g @alaarab/cortex && cortex init
 
 Key features:
 - Automatic context injection into every prompt via lifecycle hooks
-- 51 MCP tools for search, backlog management, finding capture, memory governance, entity graph, skills management, hooks management, bulk operations, data management, and session management
+- 51 MCP tools for search, task management, finding capture, memory governance, entity graph, skills management, hooks management, bulk operations, data management, and session management
 - Memory governance with confidence decay, trust filtering, and quality feedback
-- Interactive terminal shell with eight views (Projects, Backlog, Findings, Review Queue, Skills, Hooks, Machines/Profiles, Health)
+- Interactive terminal shell with eight views (Projects, Task, Findings, Review Queue, Skills, Hooks, Machines/Profiles, Health)
 - Multi-agent support: Claude Code, Copilot CLI, Cursor, OpenAI Codex
 
 Docs: https://alaarab.github.io/cortex/

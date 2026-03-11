@@ -21,7 +21,7 @@ These control how much context the UserPromptSubmit hook injects into each promp
 | `CORTEX_CONTEXT_SNIPPET_LINES` | integer | `6` | Maximum lines per injected snippet. |
 | `CORTEX_CONTEXT_SNIPPET_CHARS` | integer | `520` | Maximum characters per injected snippet. |
 | `CORTEX_MAX_INJECT_TOKENS` | integer | `2000` | Maximum tokens injected per prompt (overrides token budget). Range: 200-20000. |
-| `CORTEX_BACKLOG_PRIORITY` | string | `high,medium` | Comma-separated list of backlog priorities to inject. Set to `high` to inject only high-priority items. |
+| `CORTEX_TASK_PRIORITY` | string | `high,medium` | Comma-separated list of task priorities to inject. Set to `high` to inject only high-priority items. |
 
 ## Memory Governance
 

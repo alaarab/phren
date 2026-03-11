@@ -82,7 +82,7 @@ The terminal shell (`cortex`, then press `m`) covers the same workflow if you pr
 
 **Automatic:**
 - Findings added via `add_finding` MCP tool (agents call this when they discover something worth saving)
-- Backlog items via `add_backlog_item`
+- Task items via `add_task`
 - Session state committed and pushed by the Stop hook after every response
 
 **Manual:**
@@ -114,7 +114,7 @@ Project setup note:
 - Platform-specific behavior is documented in `docs/platform-matrix.md`.
 - Best-effort vs fail-closed behavior is documented in `docs/error-reporting.md`.
 - Package/update behavior is documented in `docs/versioning.md`.
-- The local backlog is still the primary planning surface. GitHub issue links are optional metadata on backlog items, and promotion is one-way by default to avoid issue spam.
+- The local task is still the primary planning surface. GitHub issue links are optional metadata on task items, and promotion is one-way by default to avoid issue spam.
 
 ## Does cortex require MCP?
 
@@ -166,7 +166,7 @@ Opens the interactive shell. Single-key navigation:
 | Key | View |
 |-----|------|
 | `p` | Projects |
-| `b` | Backlog |
+| `b` | Task |
 | `l` | Findings |
 | `m` | Review Queue |
 | `s` | Skills |

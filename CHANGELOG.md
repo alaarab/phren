@@ -8,11 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.29.0] - 2026-03-11
 
 ### Changed
-- `tasks.md` is now the canonical task file across the runtime, starter projects, review UI, and docs. The legacy `backlog.md` starter files were removed and task-file guidance now points at `tasks.md`.
+- `tasks.md` is now the canonical task file across the runtime, starter projects, review UI, and docs. The legacy `tasks.md` starter files were removed and task-file guidance now points at `tasks.md`.
 - Install and onboarding guidance now treats `cortex` as the real user-facing command after `npm install -g @alaarab/cortex`, instead of steering people toward `npx cortex`.
+- Projects can now define their own archive topics via `topic-config.json`, with managed topic docs under `reference/topics/` instead of relying only on generic starter buckets.
+- The review UI now surfaces suggested project topics inferred from project language, with flows to adopt, edit, and reclassify managed topic archives.
 
 ### Fixed
-- Public docs, post-init verification messages, and the bundled review UI template no longer leak `backlog.md` file references or `npx cortex` examples in the normal install path.
+- Public docs, post-init verification messages, and the bundled review UI template no longer leak `tasks.md` file references or `npx cortex` examples in the normal install path.
 - Packaging metadata and release docs now reflect the scoped npm package (`@alaarab/cortex`) while preserving `cortex` as the executable users run.
 
 ## [1.28.0] - 2026-03-10
@@ -36,7 +38,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - Retrieval now retries zero-hit lexical searches with a relaxed FTS query that matches any two salient clauses, then uses bounded lexical rescue before opening the vector gate.
-- Overlap scoring no longer truncates long document tokenization to the query-token cap, which fixes false negatives when the relevant terms appear later in large backlog or findings files.
+- Overlap scoring no longer truncates long document tokenization to the query-token cap, which fixes false negatives when the relevant terms appear later in large task or findings files.
 - Session lifecycle tools now require an explicit `sessionId` or a `connectionId` bound at `session_start`; implicit process-global session fallback has been removed.
 - `add_finding` and `add_findings` accept an optional `sessionId` so session metrics can still be updated without relying on global process state.
 
@@ -69,7 +71,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Queue approval race**: uses content-based matching instead of unstable positional IDs (M1, M2...).
 - **Shared/org docs retention**: `rankResults()` now keeps up to 2 shared/org docs per type even when local docs of the same type exist.
 - **TF-IDF cache invalidation**: incremental index updates now invalidate the fallback search cache.
-- **Backlog priority sort**: `work_next_backlog_item` now correctly returns highest-priority item (High > Medium > Low > none). `pin_backlog_item` now reorders the item to the top of its section.
+- **Task priority sort**: `work_next_task` now correctly returns highest-priority item (High > Medium > Low > none). `pin_task` now reorders the item to the top of its section.
 - **MCP search project synonyms**: `search_knowledge` now passes `project` to `buildRobustFtsQuery()` so project-specific synonyms apply.
 - **Per-tool hook disable**: `toggle_hooks(tool=...)` now respected at runtime; disabled tools no longer fire hooks.
 - **ESM version fix**: `cortex status` now correctly reports version in ESM builds.
@@ -83,10 +85,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.15.6] - 2026-03-08
 
 ### Added
-- `pin_backlog_item` MCP tool: pin a task to the top of its section
-- `work_next_backlog_item` MCP tool: promote highest-priority Queue item to Active
-- `tidy_backlog_done` MCP tool: archive old Done items beyond a configurable keep limit
-- `get_backlog` now supports `summary:true` for counts-only responses, `limit`/`offset` for pagination, and single-item lookup by ID
+- `pin_task` MCP tool: pin a task to the top of its section
+- `work_next_task` MCP tool: promote highest-priority Queue item to Active
+- `tidy_done_tasks` MCP tool: archive old Done items beyond a configurable keep limit
+- `get_tasks` now supports `summary:true` for counts-only responses, `limit`/`offset` for pagination, and single-item lookup by ID
 - Skills MCP tools: `list_skills`, `read_skill`, `write_skill`, `remove_skill`
 - Hooks MCP tools: `list_hooks`, `toggle_hooks`, `add_custom_hook`, `remove_custom_hook`
 - Operations MCP tools: `health_check`, `get_consolidation_status`, `list_hook_errors`, `approve_queue_item`, `reject_queue_item`, `edit_queue_item`
@@ -95,19 +97,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - Race condition in session start/index rebuild when multiple agents start simultaneously
 - Content and archive file writes now use atomic tmp-then-rename pattern to prevent partial reads
-- Backlog item IDs (bid hashes) now exposed in API responses for stable cross-session references
-- `get_backlog` pagination offset applied before limit cap, preventing off-by-one on later pages
+- Task item IDs (bid hashes) now exposed in API responses for stable cross-session references
+- `get_tasks` pagination offset applied before limit cap, preventing off-by-one on later pages
 
 ### Docs
 - README: documented all 46 MCP tools across 10 categories (was missing skills, hooks, and operations sections)
-- README: `get_backlog` entry updated with summary, pagination, and ID lookup features
-- global/CLAUDE.md: added backlog triage guidance (work_next, pin, tidy)
+- README: `get_tasks` entry updated with summary, pagination, and ID lookup features
+- global/CLAUDE.md: added task triage guidance (work_next, pin, tidy)
 - Architecture diagram updated with skills, hooks, and operations tool categories
 
 ## [1.15.5] - 2026-03-08
 
 ### Added
-- `global` project appears at the top of the Projects view in the shell. Select it to manage global skills, findings, backlog, and synonyms just like any other project.
+- `global` project appears at the top of the Projects view in the shell. Select it to manage global skills, findings, task, and synonyms just like any other project.
 
 ## [1.15.4] - 2026-03-08
 
@@ -177,11 +179,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Entity graph: `search_entities`, `get_related_docs`, `read_graph`, `link_findings`, `cross_project_entities` (29 tools total)
 - Session management: `session_start`, `session_end`, `session_context` for agents without lifecycle hooks
 - `get_memory_detail` for progressive disclosure (Layer 3)
-- `add_backlog_items` bulk MCP tool
+- `add_tasks` bulk MCP tool
 - Consolidation lock file to prevent concurrent runs
 - `@import` path traversal security check
 - CI workflow with `npm publish --dry-run` gate
-- TUI shell: confirmation step for Memory Queue approve/reject, toggle backlog items between Active/Queue
+- TUI shell: confirmation step for Memory Queue approve/reject, toggle task items between Active/Queue
 - Porter stemming for FTS5 tokenizer
 - Hybrid search (cosine fallback) enabled by default
 - Local ONNX embedding via @xenova/transformers (no API key required)
@@ -198,7 +200,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `buildIndex` timeout timer leak (cleared on success)
 - `remove_findings` missing project name validation
 - Redundant file re-read after writing FINDINGS.md
-- Scroll percentage using wrong denominator in Backlog view
+- Scroll percentage using wrong denominator in Task view
 - Race condition in upsertCanonical (content read outside lock)
 - Conflict annotation write uses .tmp-then-rename pattern
 - writeQueue counter decrement happens before promise resolves
@@ -221,10 +223,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.11.1] - 2026-03-06
 
 ### Added
-- Bulk MCP operations: `complete_backlog_items`, `add_learnings`, `remove_learnings` accept arrays and process all items in one call. FTS index rebuilds once at the end instead of per-item.
+- Bulk MCP operations: `complete_tasks`, `add_learnings`, `remove_learnings` accept arrays and process all items in one call. FTS index rebuilds once at the end instead of per-item.
 - Tiered knowledge system: auto-archival moves old LEARNINGS.md entries into `knowledge/{topic}.md` when cap exceeded (default 20 entries).
 - Injection budget: `CORTEX_MAX_INJECT_TOKENS` env var (default 2000) with priority ordering (learnings > search results > knowledge).
-- Backlog priority filtering: only HIGH/MEDIUM items injected by default, configurable via `CORTEX_BACKLOG_PRIORITY`.
+- Task priority filtering: only HIGH/MEDIUM items injected by default, configurable via `CORTEX_TASK_PRIORITY`.
 - Duplicate learning detection: >60% word overlap check before appending to LEARNINGS.md.
 
 ### Fixed
@@ -241,11 +243,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.11.0] - 2026-03-06
 
 ### Added
-- Project templates for `init`: four built-in templates (python-project, monorepo, library, frontend), each with CLAUDE.md, LEARNINGS.md, summary.md, and backlog.md. Use `--template <name>` during init.
+- Project templates for `init`: four built-in templates (python-project, monorepo, library, frontend), each with CLAUDE.md, LEARNINGS.md, summary.md, and tasks.md. Use `--template <name>` during init.
 - `--from-existing <path>` flag on init: bootstrap a cortex project from an existing directory that already has a CLAUDE.md.
 - `@import` syntax in indexed documents: `@import shared/file.md` resolves relative to the cortex global directory, with cycle detection and depth cap.
 - `knowledge/` directory support: files in a project's `knowledge/` subdirectory are classified as `knowledge` type in the FTS index.
-- Backlog done-section stripping: completed backlog items (under `## Done`) are excluded from the FTS index to reduce noise.
+- Task done-section stripping: completed task items (under `## Done`) are excluded from the FTS index to reduce noise.
 - Search history: `cortex search --history` shows recent searches, `--from-history <n>` re-runs a previous query. History stored in `.runtime/search-history.jsonl`.
 - Opt-in telemetry: local-only usage stats (tool call counts, CLI command counts, sessions, errors) stored in `.runtime/telemetry.json`. Disabled by default, enable with `cortex config telemetry on`.
 - Data portability MCP tools: `export_project` (export as JSON), `import_project` (import from JSON), `manage_project` (archive/unarchive).
@@ -262,7 +264,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - MCP tool count: 14 to 16 (added `export_project`, `import_project`, `manage_project`; moved governance tools to CLI-only).
 - `search_cortex` renamed to `search_knowledge` (old name still works as alias).
-- Starter template rewritten with guided tour, day-to-day workflow, and P0/P1/P2 backlog examples.
+- Starter template rewritten with guided tour, day-to-day workflow, and P0/P1/P2 task examples.
 - Init success output now mentions agent restart and points to README for a guided tour.
 - Shared module split: `shared.ts` split into `shared.ts`, `shared-content.ts`, `shared-governance.ts`, and `shared-index.ts` for maintainability.
 - Test count: 296 to 686 tests across 14 test files.
@@ -343,13 +345,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Search UX hardening:
   - Added FTS query builder that quotes terms and neutralizes syntax surprises.
   - Search paths now use safe query construction by default.
-- `get_backlog` MCP now reads backlog files directly from disk at call time (no stale startup snapshot behavior).
-- `complete_backlog_item` now marks moved entries as checked (`[x]`) in `## Done`.
+- `get_tasks` MCP now reads task files directly from disk at call time (no stale startup snapshot behavior).
+- `complete_task` now marks moved entries as checked (`[x]`) in `## Done`.
 - `init`/`link` now detect newer package versions and offer starter template refresh (`--apply-starter-update`).
 
 ### Fixed
-- MCP backlog completion now correctly marks moved tasks as complete (`[x]`) instead of leaving unchecked entries in `## Done`.
-- `get_backlog` results now stay consistent immediately after updates because they no longer rely on stale startup index snapshots.
+- MCP task completion now correctly marks moved tasks as complete (`[x]`) instead of leaving unchecked entries in `## Done`.
+- `get_tasks` results now stay consistent immediately after updates because they no longer rely on stale startup index snapshots.
 
 ## [1.8.6] - 2026-03-06
 
@@ -469,7 +471,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Auto-inject context**: UserPromptSubmit hook automatically injects relevant cortex context into every prompt. Claude gets project context without needing to call MCP tools first.
-- **Post-compaction context**: hook-context CLI subcommand re-injects project summary, learnings, and backlog after context compaction so Claude stays oriented.
+- **Post-compaction context**: hook-context CLI subcommand re-injects project summary, learnings, and task after context compaction so Claude stays oriented.
 - **Synonym search**: FTS5 queries now expand synonyms automatically. Searching "throttling" also finds "rate limit", "429", and related terms. Works in both MCP tools and CLI.
 - **CLI subcommands**: `cortex search`, `cortex hook-prompt`, `cortex hook-context`, `cortex add-learning` for use by hooks and scripts.
 - `npx cortex init` now registers UserPromptSubmit and Stop hooks in `~/.claude/settings.json` alongside the MCP server.
@@ -497,7 +499,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - README: removed duplicate JSON config blocks, fixed skill count (5 not 6), updated `/cortex:learn` references to `/cortex-update`
-- README: added `update_backlog_item` tool and `search_cortex` type filter to MCP docs
+- README: added `update_task` tool and `search_cortex` type filter to MCP docs
 - README: replaced outdated `cd mcp && npm run build` instructions with `npx cortex init`
 - Site: fixed `MEMORY.md` reference to `CLAUDE.md` in bento card, `/cortex-learn` to `/cortex-update`
 - Site: updated "Clones the starter" to "Creates" (bundled since v1.6.0)
@@ -556,7 +558,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Merged `/cortex-learn` into `/cortex-update`: one skill for saving session learnings, works standalone or with full cortex setup
 - Simplified from 6 skills to 5: update, sync, init, discover, consolidate
 - MCP tool descriptions now tell Claude when to call them proactively
-- global CLAUDE.md instructs Claude to use MCP tools and backlog without being asked
+- global CLAUDE.md instructs Claude to use MCP tools and task without being asked
 - Landing page: replaced misleading token savings card with honest "search not load" framing
 - Skill names consistent everywhere with dashes (not colons)
 - Framework boilerplate no longer lists personal workflow skills
@@ -574,7 +576,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.1.4] - 2026-03-04
 
 ### Added
-- MCP tools for backlog management: `get_backlog`, `add_backlog_item`, `complete_backlog_item`
+- MCP tools for task management: `get_tasks`, `add_task`, `complete_task`
 - Conventional Commits format added to `/humanize` as an AI tell
 - README documents all six MCP tools
 
@@ -603,7 +605,7 @@ Initial release.
 - MCP server with SQLite FTS5 full-text search
 - Tools: `search_cortex`, `get_project_summary`, `list_projects`
 - Profile-aware project indexing via `profiles/*.yaml`
-- 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, backlog, pipeline, release, creative
+- 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `cortex` on npm
 
 [Unreleased]: https://github.com/alaarab/cortex/compare/v1.25.0...HEAD

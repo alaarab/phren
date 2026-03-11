@@ -36,10 +36,19 @@ interface McpToolCallResult {
   [key: string]: unknown;
 }
 
+interface CortexToolResponse {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+  data?: unknown;
+  [key: string]: unknown;
+}
+
 export interface CortexClientOptions {
   mcpServerPath: string;
   storePath: string;
   nodePath?: string;
+  clientVersion?: string;
   requestTimeoutMs?: number;
 }
 
@@ -147,7 +156,7 @@ export class CortexClient {
   }
 
   async updateTask(project: string, item: string, updates: Record<string, unknown>): Promise<unknown> {
-    return this.callTool("update_task", { project, item, ...updates });
+    return this.callTool("update_task", { project, item, updates });
   }
 
   async completeTask(project: string, item: string): Promise<unknown> {
@@ -155,7 +164,7 @@ export class CortexClient {
   }
 
   async removeFinding(project: string, text: string): Promise<unknown> {
-    return this.callTool("remove_finding", { project, text });
+    return this.callTool("remove_finding", { project, finding: text });
   }
 
   async dispose(): Promise<void> {
@@ -203,7 +212,7 @@ export class CortexClient {
           capabilities: {},
           clientInfo: {
             name: "cortex-vscode",
-            version: "0.0.1",
+            version: this.options.clientVersion ?? "0.0.0",
           },
         });
         this.sendNotification("notifications/initialized", {});
@@ -333,10 +342,18 @@ export class CortexClient {
     }
 
     try {
-      return JSON.parse(textBlock.text) as unknown;
+      return this.unwrapToolResponse(JSON.parse(textBlock.text) as unknown);
     } catch {
       return textBlock.text;
     }
+  }
+
+  private unwrapToolResponse(value: unknown): unknown {
+    const response = asRecord(value) as CortexToolResponse | undefined;
+    if (response?.ok === false) {
+      throw new Error(response.error ?? response.message ?? "Cortex tool call failed.");
+    }
+    return value;
   }
 
   private rejectPending(error: Error): void {
@@ -346,4 +363,8 @@ export class CortexClient {
     }
     this.pending.clear();
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
 }

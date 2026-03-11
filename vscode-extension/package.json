@@ -2,13 +2,31 @@
   "name": "cortex-vscode",
   "displayName": "Cortex VS Code",
   "description": "Browse, search, and manage Cortex knowledge directly from VS Code.",
-  "version": "0.0.8",
+  "version": "0.1.0",
   "publisher": "alaarab",
+  "author": "Ala Arab",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alaarab/cortex.git",
+    "directory": "vscode-extension"
+  },
+  "homepage": "https://github.com/alaarab/cortex/tree/main/vscode-extension",
+  "bugs": {
+    "url": "https://github.com/alaarab/cortex/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "cortex",
+    "knowledge",
+    "memory",
+    "mcp",
+    "agent"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -116,7 +134,7 @@
         "cortex.mcpServerPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the cortex MCP server entrypoint JavaScript file."
+          "description": "Absolute path to the Cortex MCP server entrypoint JavaScript file. Leave blank to auto-detect a global install."
         },
         "cortex.nodePath": {
           "type": "string",
@@ -126,7 +144,7 @@
         "cortex.storePath": {
           "type": "string",
           "default": "",
-          "description": "Path to cortex store directory (e.g. /home/user/.cortex)."
+          "description": "Path to the Cortex store directory. Leave blank to use ~/.cortex."
         }
       }
     }
@@ -134,9 +152,12 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish:extension": "vsce publish"
   },
   "devDependencies": {
+    "@vscode/vsce": "^3.6.2",
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.5.4",

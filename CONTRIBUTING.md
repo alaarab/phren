@@ -29,7 +29,7 @@ The build compiles TypeScript from `mcp/src/` into `mcp/dist/` and marks the ent
 | `mcp/src/utils.ts` | FTS5 sanitization, synonym expansion, keyword extraction |
 | `mcp/src/init.ts` | `npx cortex init`: configures MCP + hooks |
 | `mcp/src/link.ts` | Profile sync, symlinks, hooks, context |
-| `mcp/src/data-access.ts` | Backlog CRUD, machine/profile listing, learning management |
+| `mcp/src/data-access.ts` | Task CRUD, machine/profile listing, learning management |
 | `starter/` | Template files copied to `~/.cortex` on init |
 | `docs/` | GitHub Pages site and documentation |
 | `skills/` | Cortex slash command definitions |

@@ -5,7 +5,7 @@
 - [x] `npm test` passes including `shell.test.ts`.
 - [x] `cortex` no-arg TTY opens shell.
 - [x] Non-TTY invocation still works for MCP mode.
-- [x] Backlog/findings/memory queue writes are parity-checked with MCP tools.
+- [x] Task/findings/memory queue writes are parity-checked with MCP tools.
 - [x] Session persistence survives restart and stale-state migration.
 - [x] Health remediation commands run without shell crash.
 - [x] `cortex update` and `:update` flows are documented.
@@ -28,4 +28,4 @@
 ## Rollback Path
 - Pin previous release from npm if required.
 - Re-run `npx cortex init` after rollback to restore expected hook/script references.
-- Keep markdown docs/backlog files unchanged; no migration lock-in.
+- Keep markdown docs/tasks files unchanged; no migration lock-in.

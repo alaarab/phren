@@ -71,7 +71,7 @@ This is the core runtime loop from one prompt to the next:
 In practice:
 1. A user prompt triggers `UserPromptSubmit`, which runs fast retrieval against the cached FTS5 index.
 2. Matching memories are filtered by governance rules before any context injection.
-3. During the turn, MCP tools can add or update memory/task files in `~/.cortex/<project>/`.
+3. During the turn, MCP tools can add or update memory/tasks files in `~/.cortex/<project>/`.
 4. `Stop` persists those file changes locally through git, then queues background sync work if a remote is configured.
 
 The loop is deliberately asymmetric: project memory can keep accumulating as repo state, while each prompt only pays for the small slice that survives retrieval and trust filtering. Because that retrieval stays local in the default path, the same design also avoids a hosted round trip and keeps the hot path responsive.
@@ -151,7 +151,7 @@ Claude Code <--stdio--> cortex-mcp
           +---------------+---------------+
           |               |               |
      Search/Browse   Task CRUD          Finding Capture
-     - search_knowledge - get_backlog   - add_finding(s)
+     - search_knowledge - get_tasks   - add_finding(s)
      - get_project_summary      - add_item     - remove_finding(s)
      - list_projects    - complete(s)  - push_changes
      - get_findings     - update
@@ -269,12 +269,12 @@ Query:
 
 MCP tool responses consume context tokens. Cortex provides progressive disclosure patterns to minimize overhead. See [Context Optimization](context-optimization.md) for the full guide.
 
-**Task progressive disclosure (`backlog` tools):**
+**Task progressive disclosure (`task` tools):**
 
 ```
-Tier 1: get_backlog(summary:true)        ~200 tokens   planning/status
-Tier 2: get_backlog(limit:10, offset:0)  ~1,000 tokens  reviewing details
-Tier 3: get_backlog(id:"bid:a3f9c2e1")   ~100 tokens   single item execution
+Tier 1: get_tasks(summary:true)        ~200 tokens   planning/status
+Tier 2: get_tasks(limit:10, offset:0)  ~1,000 tokens  reviewing details
+Tier 3: get_tasks(id:"bid:a3f9c2e1")   ~100 tokens   single item execution
 ```
 
 **Search progressive disclosure** (when `CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1`):

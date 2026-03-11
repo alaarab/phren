@@ -14,7 +14,7 @@ cortex init            # add or fix any missing agent configurations
 |---------|:-----------:|:------:|:---------------:|:-----:|
 | FTS5 search | yes | yes | yes | yes |
 | Lifecycle hooks | yes | no | no | no |
-| Backlog management | yes | yes | yes | yes |
+| Task management | yes | yes | yes | yes |
 | Finding capture | yes | yes | yes | yes |
 | Auto-extract (hooks) | yes | no | no | no |
 | Session-start sync | yes | no | no | no |

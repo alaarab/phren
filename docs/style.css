@@ -1214,7 +1214,7 @@ section {
 .demo-shell-tabbar-tab  { color: var(--text-dim); padding: 0 1px; }
 .demo-shell-tabbar-tab.active { color: #c084fc; font-weight: 600; }
 
-/* Backlog section headers */
+/* Task section headers */
 .demo-shell-sec-hdr {
   display: flex;
   align-items: center;
@@ -1247,7 +1247,7 @@ section {
   font-size: 11px;
 }
 
-/* Backlog items */
+/* Task items */
 .demo-bl-id    { color: var(--text-dim); font-size: 11px; width: 22px; flex-shrink: 0; margin-right: 2px; }
 .demo-bl-check { color: var(--text-dim); font-size: 11px; flex-shrink: 0; margin-right: 4px; }
 .demo-bl-pri   { margin-left: auto; font-size: 10px; flex-shrink: 0; }

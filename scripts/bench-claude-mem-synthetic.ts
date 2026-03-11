@@ -39,7 +39,7 @@ const COMPONENTS = [
 const ISSUES = [
   "stale-lock-recovery",
   "incremental-index-rebuild",
-  "backlog-token-budget",
+  "task-token-budget",
   "semantic-candidate-pruning",
   "citation-validity-check",
   "review-queue-triage",

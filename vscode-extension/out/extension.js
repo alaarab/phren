@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
+const path = __importStar(require("path"));
 const cortexClient_1 = require("./cortexClient");
 const CortexTreeProvider_1 = require("./providers/CortexTreeProvider");
 const searchQuickPick_1 = require("./searchQuickPick");
@@ -45,6 +46,7 @@ const findingViewer_1 = require("./findingViewer");
 const projectFileViewer_1 = require("./projectFileViewer");
 const skillEditor_1 = require("./skillEditor");
 const taskViewer_1 = require("./taskViewer");
+const runtimeConfig_1 = require("./runtimeConfig");
 let client;
 let outputChannel;
 async function activate(context) {
@@ -52,13 +54,30 @@ async function activate(context) {
     context.subscriptions.push(outputChannel);
     outputChannel.appendLine("Cortex extension activating...");
     const config = vscode.workspace.getConfiguration("cortex");
-    const mcpServerPath = config.get("mcpServerPath", "/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modulescortex/mcp/dist/index.js");
-    const storePath = config.get("storePath", "/home/alaarab/.cortex");
-    const nodePath = config.get("nodePath", "node");
+    const runtimeConfig = (0, runtimeConfig_1.resolveRuntimeConfig)(config);
+    outputChannel.appendLine(`Cortex store path: ${runtimeConfig.storePath}`);
+    outputChannel.appendLine(`Node path: ${runtimeConfig.nodePath}`);
+    outputChannel.appendLine(`MCP server path: ${runtimeConfig.mcpServerPath ?? "(not found; configure cortex.mcpServerPath or install Cortex globally)"}`);
+    if (!runtimeConfig.mcpServerPath) {
+        const choice = await vscode.window.showErrorMessage("Cortex MCP server entrypoint could not be auto-detected. Set cortex.mcpServerPath or install Cortex globally.", "Open Settings");
+        if (choice === "Open Settings") {
+            await vscode.commands.executeCommand("workbench.action.openSettings", "cortex.mcpServerPath");
+        }
+        return;
+    }
+    if (!(0, runtimeConfig_1.pathExists)(runtimeConfig.mcpServerPath)) {
+        const basename = path.basename(runtimeConfig.mcpServerPath);
+        const choice = await vscode.window.showErrorMessage(`Configured Cortex MCP server entrypoint does not exist: ${basename}`, "Open Settings");
+        if (choice === "Open Settings") {
+            await vscode.commands.executeCommand("workbench.action.openSettings", "cortex.mcpServerPath");
+        }
+        return;
+    }
     const cortexClient = new cortexClient_1.CortexClient({
-        mcpServerPath,
-        storePath,
-        nodePath,
+        mcpServerPath: runtimeConfig.mcpServerPath,
+        storePath: runtimeConfig.storePath,
+        nodePath: runtimeConfig.nodePath,
+        clientVersion: context.extension.packageJSON.version,
     });
     client = cortexClient;
     const treeDataProvider = new CortexTreeProvider_1.CortexTreeProvider(cortexClient);

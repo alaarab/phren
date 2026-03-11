@@ -45,16 +45,13 @@ function showPreview(opts) {
         messageDisposable = undefined;
     }
     if (panel) {
-        if (currentKey === opts.key) {
-            panel.reveal(vscode.ViewColumn.Beside, true);
-            return;
-        }
         currentKey = opts.key;
         panel.title = opts.title;
         panel.webview.html = opts.html;
         if (opts.onMessage) {
             messageDisposable = panel.webview.onDidReceiveMessage(opts.onMessage);
         }
+        panel.reveal(vscode.ViewColumn.Beside, true);
         return;
     }
     currentKey = opts.key;

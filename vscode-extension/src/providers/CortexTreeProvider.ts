@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import { CortexClient } from "../cortexClient";
 
-type BacklogSection = "Active" | "Queue" | "Done";
-type CortexCategory = "findings" | "backlog" | "reference";
+type TaskSection = "Active" | "Queue" | "Done";
+type CortexCategory = "findings" | "task" | "reference";
 
 interface RootSectionNode {
   kind: "rootSection";
@@ -34,7 +34,7 @@ interface TaskNode {
   projectName: string;
   id: string;
   line: string;
-  section: BacklogSection;
+  section: TaskSection;
   checked: boolean;
 }
 
@@ -96,7 +96,7 @@ interface FindingSummary {
 interface TaskSummary {
   id: string;
   line: string;
-  section: BacklogSection;
+  section: TaskSection;
   checked: boolean;
 }
 
@@ -157,7 +157,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     if (element.kind === "project") {
       return [
         { kind: "category", projectName: element.projectName, category: "findings" },
-        { kind: "category", projectName: element.projectName, category: "backlog" },
+        { kind: "category", projectName: element.projectName, category: "task" },
         { kind: "category", projectName: element.projectName, category: "reference" },
       ];
     }
@@ -166,8 +166,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       if (element.category === "findings") {
         return this.getFindingNodes(element.projectName);
       }
-      if (element.category === "backlog") {
-        return this.getBacklogNodes(element.projectName);
+      if (element.category === "task") {
+        return this.getTaskNodes(element.projectName);
       }
       if (element.category === "reference") {
         return this.getReferenceNodes(element.projectName);
@@ -351,11 +351,11 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getBacklogNodes(projectName: string): Promise<CortexNode[]> {
+  private async getTaskNodes(projectName: string): Promise<CortexNode[]> {
     try {
       const tasks = await this.fetchTasks(projectName);
       if (tasks.length === 0) {
-        return [{ kind: "message", label: "No backlog items", iconId: "checklist" }];
+        return [{ kind: "message", label: "No task items", iconId: "checklist" }];
       }
       return tasks.map((task) => ({
         kind: "task" as const,
@@ -366,7 +366,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         checked: task.checked,
       }));
     } catch (error) {
-      return [this.errorNode("Failed to load backlog", error)];
+      return [this.errorNode("Failed to load task", error)];
     }
   }
 
@@ -519,7 +519,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     const raw = await this.client.getTasks(projectName);
     const data = responseData(raw);
     const items = asRecord(data?.items);
-    const sections: BacklogSection[] = ["Active", "Queue", "Done"];
+    const sections: TaskSection[] = ["Active", "Queue", "Done"];
     const tasks: TaskSummary[] = [];
 
     for (const section of sections) {
@@ -578,7 +578,7 @@ function categoryIconId(category: CortexCategory): string {
   if (category === "findings") {
     return "list-flat";
   }
-  if (category === "backlog") {
+  if (category === "task") {
     return "checklist";
   }
   return "book";

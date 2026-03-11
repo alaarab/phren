@@ -4,18 +4,18 @@ How to use cortex MCP tools without flooding your agent's context window.
 
 ## The problem
 
-A full backlog fetch (`get_backlog(project:"my-app")`) can return 10k+ tokens. At a 200k context window, that is 5% of context spent on a single tool call. For agents running multi-step workflows with many tool calls, this adds up fast.
+A full task fetch (`get_tasks(project:"my-app")`) can return 10k+ tokens. At a 200k context window, that is 5% of context spent on a single tool call. For agents running multi-step workflows with many tool calls, this adds up fast.
 
 The same applies to search results, findings, and any tool that returns variable-length content. The pattern is always the same: fetch the minimum you need for the current step, then drill down.
 
-## Progressive disclosure for backlogs
+## Progressive disclosure for tasks
 
-The `get_backlog` tool supports three tiers of detail. Use the lightest tier that gives you what you need.
+The `get_tasks` tool supports three tiers of detail. Use the lightest tier that gives you what you need.
 
 ### Tier 1: Summary (planning)
 
 ```
-get_backlog(project: "my-app", summary: true)
+get_tasks(project: "my-app", summary: true)
 ```
 
 Returns counts and titles only. About 200 tokens for a typical project. Use this when you need to understand what work exists, pick what to do next, or report status.
@@ -33,26 +33,26 @@ Response shape:
 ### Tier 2: Paginated content (reviewing details)
 
 ```
-get_backlog(project: "my-app", limit: 10, offset: 0)
+get_tasks(project: "my-app", limit: 10, offset: 0)
 ```
 
-Returns full item content with pagination. Use this when you need to read item descriptions, context lines, or priority tags. Page through large backlogs with offset.
+Returns full item content with pagination. Use this when you need to read item descriptions, context lines, or priority tags. Page through large tasks with offset.
 
 ```
-get_backlog(project: "my-app", limit: 10, offset: 10)  # page 2
+get_tasks(project: "my-app", limit: 10, offset: 10)  # page 2
 ```
 
 ### Tier 3: Single item by stable ID (execution)
 
 ```
-get_backlog(project: "my-app", id: "bid:a3f9c2e1")
+get_tasks(project: "my-app", id: "bid:a3f9c2e1")
 ```
 
 Returns one item by its content-addressed hash. Use this during execution when you know exactly which item you are working on.
 
 ## Stable bid hashes
 
-Every backlog item gets an 8-character hex hash embedded as an HTML comment: `<!-- bid:a3f9c2e1 -->`. These hashes are content-addressed and stable across sessions. They survive reordering, completions, and edits to other items.
+Every task item gets an 8-character hex hash embedded as an HTML comment: `<!-- bid:a3f9c2e1 -->`. These hashes are content-addressed and stable across sessions. They survive reordering, completions, and edits to other items.
 
 **Why this matters:** Positional IDs like A1, Q3, D2 shift when items complete or move between sections. If you store "work on Q3" in a task description, Q3 might be a different item by the time the agent reads it. Stable bid hashes do not have this problem.
 
@@ -69,20 +69,20 @@ Every backlog item gets an 8-character hex hash embedded as an HTML comment: `<!
 **In agent task descriptions:**
 
 ```
-Work on backlog item bid:a3f9c2e1 from the my-app project.
-Fetch it with: get_backlog(project:"my-app", id:"bid:a3f9c2e1")
+Work on task item bid:a3f9c2e1 from the my-app project.
+Fetch it with: get_tasks(project:"my-app", id:"bid:a3f9c2e1")
 ```
 
-This gives the agent a direct path to the exact item without fetching the full backlog.
+This gives the agent a direct path to the exact item without fetching the full task.
 
 ## Token budget guidance
 
 | Operation | Typical tokens | When to use |
 |-----------|---------------|-------------|
-| `get_backlog(summary:true)` | ~200 | Planning, status checks, picking work |
-| `get_backlog(limit:10)` | ~1,000 | Reviewing item details, discovering bid hashes |
-| `get_backlog()` (full) | ~10,000 | Rarely. Only when you need everything at once. |
-| `get_backlog(id:"bid:xxx")` | ~100 | Execution. Fetching the one item you are working on. |
+| `get_tasks(summary:true)` | ~200 | Planning, status checks, picking work |
+| `get_tasks(limit:10)` | ~1,000 | Reviewing item details, discovering bid hashes |
+| `get_tasks()` (full) | ~10,000 | Rarely. Only when you need everything at once. |
+| `get_tasks(id:"bid:xxx")` | ~100 | Execution. Fetching the one item you are working on. |
 
 For agents coordinating work across a team:
 1. Start with `summary:true` to see what exists

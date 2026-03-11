@@ -20,7 +20,7 @@ Source lives at `~cortex`. Published to npm. Starter templates are bundled in th
 | `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
 | `mcp/src/init.ts` | `npx cortex init`: configures MCP + hooks for all detected agents |
 | `mcp/src/link.ts` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
-| `mcp/src/data-access.ts` | Data layer: backlog CRUD, machine/profile listing, finding management |
+| `mcp/src/data-access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
 | `mcp/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
 | `mcp/src/status.ts` | `cortex status`: health, project, stats overview |
 | `skills/` | Cortex slash commands: sync, init, discover, consolidate |
@@ -53,15 +53,15 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `list_projects()` : all projects in active profile
 - `get_findings(project, limit?)` : read recent findings without a search query
 
-**Backlog management:**
-- `get_backlog(project?, id?, item?)` : read backlogs, or fetch a single item by ID or text
-- `add_backlog_item(project, item)` : add task to queue
-- `add_backlog_items(project, items[])` : bulk add multiple tasks in one call
-- `complete_backlog_item(project, item)` : move task to done by text match
-- `complete_backlog_items(project, items[])` : bulk complete multiple items in one call
-- `update_backlog_item(project, item, updates)` : update priority, context, section, or linked GitHub issue
-- `link_backlog_item_issue(project, item, issue_number?, issue_url?, unlink?)` : link or unlink an existing GitHub issue on a backlog item
-- `promote_backlog_item_to_issue(project, item, repo?, title?, body?, mark_done?)` : create a GitHub issue from a backlog item and link it back
+**Task management:**
+- `get_tasks(project?, id?, item?)` : read tasks, or fetch a single item by ID or text
+- `add_task(project, item)` : add task to queue
+- `add_tasks(project, items[])` : bulk add multiple tasks in one call
+- `complete_task(project, item)` : move task to done by text match
+- `complete_tasks(project, items[])` : bulk complete multiple items in one call
+- `update_task(project, item, updates)` : update priority, context, section, or linked GitHub issue
+- `link_task_issue(project, item, issue_number?, issue_url?, unlink?)` : link or unlink an existing GitHub issue on a task item
+- `promote_task_to_issue(project, item, repo?, title?, body?, mark_done?)` : create a GitHub issue from a task item and link it back
 
 **Finding capture:**
 - `add_finding(project, finding, citation?: { file?, line?, repo?, commit? })` : append finding with optional citation
@@ -87,7 +87,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `cross_project_entities()` : find entities shared across multiple projects
 
 **Session management:**
-- `session_start(project?)` : mark session start, returns prior summary + recent findings + active backlog
+- `session_start(project?)` : mark session start, returns prior summary + recent findings + active task
 - `session_end(summary?)` : mark session end, save summary for next session
 - `session_context()` : get current session state: project, duration, findings added so far
 
@@ -114,7 +114,7 @@ cortex search --history                Show recent searches
 cortex search --from-history <n>       Re-run search #n from history
 cortex add-finding <project> "..."     Save an insight
 cortex pin <project> "..."             Pin canonical memory
-cortex backlog                         Cross-project backlog view
+cortex task                         Cross-project task view
 cortex skill-list                      List installed skills (alias for skills list)
 cortex doctor [--fix]                  Health check and self-heal
 cortex review-ui [--port=3499]         Memory review web UI
@@ -174,7 +174,7 @@ Full data flow documentation lives at `~cortex/docs/architecture.md`. Key diagra
 User Prompt -> SessionStart (git pull) -> UserPromptSubmit (FTS5 search, inject context)
      |                                            |
      v                                            v
- MCP Tools (add_finding, backlog, etc.)    Governance (trust filter, confidence decay)
+ MCP Tools (add_finding, task, etc.)    Governance (trust filter, confidence decay)
      |                                            |
      v                                            v
  ~/.cortex/<project>/ files              Stop hook (git add, commit, push)
@@ -209,7 +209,7 @@ Use `runtimeFile(cortexPath, name)` and `sessionMarker(cortexPath, name)` helper
 - Stop hook fires after every response including subagents, so consolidation never runs from Stop
 - `@import shared/file.md` in indexed docs resolves to global/ dir, with cycle detection and depth cap
 - `reference/` subdirectories in projects are classified as reference type in FTS index
-- Backlog done sections stripped from FTS index to reduce noise
+- Task done sections stripped from FTS index to reduce noise
 - Init supports `--template` (python-project, monorepo, library, frontend)
 
 ## Environment Variables
@@ -248,7 +248,7 @@ Use `runtimeFile(cortexPath, name)` and `sessionMarker(cortexPath, name)` helper
 | `CORTEX_CONTEXT_SNIPPET_LINES` | `6` | Max lines per snippet in injected context. Range: 2–100. |
 | `CORTEX_CONTEXT_SNIPPET_CHARS` | `520` | Max characters per snippet in injected context. Range: 120–10000. |
 | `CORTEX_MAX_INJECT_TOKENS` | `2000` | Hard cap on total injected tokens across all content. Range: 200–20000. |
-| `CORTEX_BACKLOG_PRIORITY` | `high,medium` | Comma-separated priorities to include in hook context backlog injection (`high`, `medium`, `low`). |
+| `CORTEX_TASK_PRIORITY` | `high,medium` | Comma-separated priorities to include in hook context task injection (`high`, `medium`, `low`). |
 | `CORTEX_LOW_VALUE_PATTERNS` | built-in list | Comma-separated substrings; findings matching these patterns are penalised in ranking. |
 | `CORTEX_CROSS_PROJECT_DECAY_DAYS` | `30` | Days over which cross-project findings decay in relevance score. |
 | `CORTEX_MEMORY_TTL_DAYS` | policy value | Override memory TTL (days) for hook-prompt trust filtering. |

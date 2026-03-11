@@ -1,7 +1,7 @@
 # Interactive Cortex Shell Spec
 
 ## Goal
-Ship an interactive `cortex` shell that makes backlog/findings/memory operations fast without replacing markdown as the source of truth.
+Ship an interactive `cortex` shell that makes task/findings/memory operations fast without replacing markdown as the source of truth.
 
 ## Non-goals
 - Replace MCP tools or file-based workflows.
@@ -10,7 +10,7 @@ Ship an interactive `cortex` shell that makes backlog/findings/memory operations
 
 ## Personas
 - Solo engineer managing multiple projects in `~/.cortex`.
-- Team maintainer triaging memory quality and backlog hygiene.
+- Team maintainer triaging memory quality and task hygiene.
 - New user validating setup health and machine/profile mappings.
 
 ## MVP Scope
@@ -18,12 +18,12 @@ Ship an interactive `cortex` shell that makes backlog/findings/memory operations
   - `cortex` (no args, TTY): interactive shell.
   - `cortex shell`: explicit interactive mode.
 - Views:
-  - `Projects`, `Backlog`, `Findings`, `Review Queue`, `Skills`, `Hooks`, `Machines/Profiles`, `Health`.
+  - `Projects`, `Task`, `Findings`, `Review Queue`, `Skills`, `Hooks`, `Machines/Profiles`, `Health`.
 - Command model:
   - `:command` palette for actions.
   - `q` to quit.
   - global shortcuts: `p b l m h / :`.
-- Backlog writes:
+- Task writes:
   - add, move, complete, reprioritize, context edit.
   - helpers: `work next`, `tidy`.
 - Findings writes:
@@ -37,8 +37,8 @@ Ship an interactive `cortex` shell that makes backlog/findings/memory operations
 
 ## Architecture Contract
 - `mcp/src/shell.ts`: runtime loop, render pipeline, input dispatch.
-- `mcp/src/data-access.ts`: shared readers/writers for backlog, findings, queue, machines/profiles, shell state.
-- Existing MCP backlog/findings/machine/profile tools call the same data-access paths.
+- `mcp/src/data-access.ts`: shared readers/writers for task, findings, queue, machines/profiles, shell state.
+- Existing MCP task/findings/machine/profile tools call the same data-access paths.
 
 ## Acceptance Criteria
 - Shell starts with `cortex` in terminal and with `cortex shell`.

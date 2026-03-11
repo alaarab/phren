@@ -45,7 +45,7 @@ const COMPONENTS = [
 const ISSUES = [
   "stale-lock-recovery",
   "incremental-index-rebuild",
-  "backlog-token-budget",
+  "task-token-budget",
   "semantic-candidate-pruning",
   "citation-validity-check",
   "review-queue-triage",
@@ -178,7 +178,7 @@ function createSyntheticCortex(rootDir: string, size: number): { cortexPath: str
   fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "CLAUDE.md"), `# ${PROJECT_NAME}\n\nSynthetic benchmark project.\n`);
   fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "summary.md"), `Synthetic corpus with ${size} generated memory files.\n`);
   fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "FINDINGS.md"), "# Findings\n\n");
-  fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "backlog.md"), "# Backlog\n\n## Active\n\n");
+  fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "tasks.md"), "# Task\n\n## Active\n\n");
 
   for (let index = 0; index < size; index++) {
     const fullPath = memoryPath(cortexPath, index);

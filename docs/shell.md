@@ -14,11 +14,11 @@ The shell has eight views. Switch between them with single-key shortcuts or pale
 
 Projects is the shell landing screen. It opens as a dashboard first, then lists all indexed projects in the active profile underneath.
 
-The dashboard shows profile-wide counts for projects, active backlog, queued backlog, findings, review queue, sync state, and intro mode. The project list below that includes per-project workload counts so you can stay global until you actually want to open a project.
+The dashboard shows profile-wide counts for projects, active task, queued task, findings, review queue, sync state, and intro mode. The project list below that includes per-project workload counts so you can stay global until you actually want to open a project.
 
 The currently selected project is marked with a green dot. Use `↵` or `:open <project>` to change the active project context, which persists across all views.
 
-### Backlog (`b`)
+### Task (`b`)
 
 Shows the selected project's `tasks.md` file parsed into three sections: Active, Queue, and Done. Each item has an auto-generated ID for easy reference in commands.
 
@@ -56,7 +56,7 @@ Runs doctor checks and shows results alongside runtime health data: last hook ru
 | Key | Action |
 |-----|--------|
 | `p` | Switch to Projects view |
-| `b` | Switch to Backlog view |
+| `b` | Switch to Task view |
 | `l` | Switch to Findings view |
 | `m` | Switch to Review Queue view |
 | `s` | Switch to Skills view |
@@ -80,15 +80,15 @@ All palette commands start with `:`. You can also type them without the colon pr
 | `:open <project>` | Set the active project context across all views |
 | `:intro always\|once-per-version\|off` | Tune the startup intro behavior |
 
-### Backlog
+### Task
 
 | Command | Description |
 |---------|-------------|
-| `:add <task>` | Add a new item to the backlog Queue section |
-| `:complete <id\|match>` | Mark a backlog item as done |
-| `:move <id\|match> <active\|queue\|done>` | Move a backlog item between sections |
+| `:add <task>` | Add a new item to the task Queue section |
+| `:complete <id\|match>` | Mark a task item as done |
+| `:move <id\|match> <active\|queue\|done>` | Move a task item between sections |
 | `:reprioritize <id\|match> <high\|medium\|low>` | Set an item's priority |
-| `:context <id\|match> <text>` | Append or update context on a backlog item |
+| `:context <id\|match> <text>` | Append or update context on a task item |
 | `:work next` | Move the top Queue item to Active |
 | `:tidy [keep]` | Archive old Done items (default: keep last 30) |
 

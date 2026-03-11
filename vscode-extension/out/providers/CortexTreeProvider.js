@@ -80,7 +80,7 @@ class CortexTreeProvider {
         if (element.kind === "project") {
             return [
                 { kind: "category", projectName: element.projectName, category: "findings" },
-                { kind: "category", projectName: element.projectName, category: "backlog" },
+                { kind: "category", projectName: element.projectName, category: "task" },
                 { kind: "category", projectName: element.projectName, category: "reference" },
             ];
         }
@@ -88,8 +88,8 @@ class CortexTreeProvider {
             if (element.category === "findings") {
                 return this.getFindingNodes(element.projectName);
             }
-            if (element.category === "backlog") {
-                return this.getBacklogNodes(element.projectName);
+            if (element.category === "task") {
+                return this.getTaskNodes(element.projectName);
             }
             if (element.category === "reference") {
                 return this.getReferenceNodes(element.projectName);
@@ -266,11 +266,11 @@ class CortexTreeProvider {
             return [this.errorNode("Failed to load findings", error)];
         }
     }
-    async getBacklogNodes(projectName) {
+    async getTaskNodes(projectName) {
         try {
             const tasks = await this.fetchTasks(projectName);
             if (tasks.length === 0) {
-                return [{ kind: "message", label: "No backlog items", iconId: "checklist" }];
+                return [{ kind: "message", label: "No task items", iconId: "checklist" }];
             }
             return tasks.map((task) => ({
                 kind: "task",
@@ -282,7 +282,7 @@ class CortexTreeProvider {
             }));
         }
         catch (error) {
-            return [this.errorNode("Failed to load backlog", error)];
+            return [this.errorNode("Failed to load task", error)];
         }
     }
     async getReferenceNodes(projectName) {
@@ -472,7 +472,7 @@ function categoryIconId(category) {
     if (category === "findings") {
         return "list-flat";
     }
-    if (category === "backlog") {
+    if (category === "task") {
         return "checklist";
     }
     return "book";

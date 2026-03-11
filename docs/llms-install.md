@@ -50,23 +50,23 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `list_projects` | (none) | Lists all projects in the active profile with doc badges and brief descriptions. |
 | `get_findings` | `project`, `limit?` | Read recent findings without a search query. |
 
-### Task Management (`backlog` tools)
+### Task Management (`task` tools)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_backlog` | `project?`, `id?`, `item?` | Read the task list for one project, or all projects if omitted. Fetch a single item by ID or text. |
-| `add_backlog_item` | `project`, `item` | Append a task to a project's Queue section in `tasks.md`. |
-| `complete_backlog_item` | `project`, `item` | Move a task to Done by text match. |
-| `complete_backlog_items` | `project`, `items[]` | Bulk complete multiple items in one call. |
-| `update_backlog_item` | `project`, `item`, `updates` | Update an item's priority, context, section, or linked GitHub issue. |
-| `link_backlog_item_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a task item. |
-| `promote_backlog_item_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a task item and write the link back. |
+| `get_tasks` | `project?`, `id?`, `item?` | Read the task list for one project, or all projects if omitted. Fetch a single item by ID or text. |
+| `add_task` | `project`, `item` | Append a task to a project's Queue section in `tasks.md`. |
+| `complete_task` | `project`, `item` | Move a task to Done by text match. |
+| `complete_tasks` | `project`, `items[]` | Bulk complete multiple items in one call. |
+| `update_task` | `project`, `item`, `updates` | Update an item's priority, context, section, or linked GitHub issue. |
+| `link_task_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a task item. |
+| `promote_task_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a task item and write the link back. |
 
 ### Finding Capture
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `add_finding` | `project`, `finding`, `citation?: { file?, line?, repo?, commit?, backlog_item? }`, `sessionId?` | Append an insight to FINDINGS.md with optional source citation. Pass `sessionId` to update session metrics. |
+| `add_finding` | `project`, `finding`, `citation?: { file?, line?, repo?, commit?, task_item? }`, `sessionId?` | Append an insight to FINDINGS.md with optional source citation. Pass `sessionId` to update session metrics. |
 | `add_findings` | `project`, `findings[]`, `sessionId?` | Bulk add multiple findings in one call. Pass `sessionId` to update session metrics. |
 | `remove_finding` | `project`, `finding` | Remove a finding by text match. Use when an insight is wrong or outdated. |
 | `remove_findings` | `project`, `findings[]` | Bulk remove multiple findings in one call. |

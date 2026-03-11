@@ -2,7 +2,7 @@
 
 ## Top-level Sections
 - `Projects`
-- `Backlog`
+- `Task`
 - `Findings`
 - `Review Queue`
 - `Skills`
@@ -18,14 +18,14 @@
 
 ## State Transitions
 - `Projects -> *`: `:open <project>` establishes selected project then transition by shortcut/palette.
-- `* -> Backlog/Findings/Review Queue`: retains selected project and filter.
+- `* -> Task/Findings/Review Queue`: retains selected project and filter.
 - `* -> Health`: refreshable health dashboard with remediation commands.
 - `reset`: clears persisted shell state and rehydrates defaults.
 
 ## Keyboard Map
 - Navigation:
   - `p` projects
-  - `b` backlog
+  - `b` task
   - `l` findings
   - `m` review queue
   - `s` skills
@@ -41,7 +41,7 @@
 ## Empty / Error / Loading States
 - Empty:
   - no projects
-  - no backlog items in section
+  - no task items in section
   - no findings
   - no review queue entries
 - Error:
@@ -54,7 +54,7 @@
 
 ## View Notes
 - `Projects`: list projects, doc badges, summary snippet; `:open` pins project context.
-- `Backlog`: `Active | Queue | Done` read board with IDs, paging/filtering, and writes.
+- `Task`: `Active | Queue | Done` read board with IDs, paging/filtering, and writes.
 - `Findings`: browse by date + citation line visibility; write/remove commands.
 - `Review Queue`: triage with risk/confidence indicators and audit-backed actions.
 - `Machines/Profiles`: inspect mappings and safe edit workflows with backup files.

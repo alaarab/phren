@@ -31,14 +31,14 @@
         "sim-000000 payments-api file-lock stale-lock-recovery",
         "needle-000083-review-ui-incremental-index-rebuild",
         "sim-000083 review-ui trust-decay incremental-index-rebuild",
-        "needle-000166-queue-processor-backlog-token-budget",
-        "sim-000166 queue-processor citation-check backlog-token-budget",
+        "needle-000166-queue-processor-task-token-budget",
+        "sim-000166 queue-processor citation-check task-token-budget",
         "needle-000250-payments-api-stale-lock-recovery",
         "sim-000250 payments-api file-lock stale-lock-recovery",
         "needle-000333-review-ui-incremental-index-rebuild",
         "sim-000333 review-ui trust-decay incremental-index-rebuild",
-        "needle-000416-queue-processor-backlog-token-budget",
-        "sim-000416 queue-processor citation-check backlog-token-budget"
+        "needle-000416-queue-processor-task-token-budget",
+        "sim-000416 queue-processor citation-check task-token-budget"
       ],
       "coldBuildMs": 340.85,
       "warmBuildMs": 29.5,
@@ -188,7 +188,7 @@
         },
         {
           "mode": "lexical",
-          "query": "needle-000166-queue-processor-backlog-token-budget",
+          "query": "needle-000166-queue-processor-task-token-budget",
           "searchMs": 3.01,
           "totalMs": 3.69,
           "resultCount": 1,
@@ -199,7 +199,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "needle-000166-queue-processor-backlog-token-budget",
+          "query": "needle-000166-queue-processor-task-token-budget",
           "searchMs": 2.58,
           "totalMs": 3.15,
           "resultCount": 1,
@@ -210,7 +210,7 @@
         },
         {
           "mode": "lexical",
-          "query": "sim-000166 queue-processor citation-check backlog-token-budget",
+          "query": "sim-000166 queue-processor citation-check task-token-budget",
           "searchMs": 2.83,
           "totalMs": 3.98,
           "resultCount": 8,
@@ -221,7 +221,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "sim-000166 queue-processor citation-check backlog-token-budget",
+          "query": "sim-000166 queue-processor citation-check task-token-budget",
           "searchMs": 3.38,
           "totalMs": 4.48,
           "resultCount": 8,
@@ -320,7 +320,7 @@
         },
         {
           "mode": "lexical",
-          "query": "needle-000416-queue-processor-backlog-token-budget",
+          "query": "needle-000416-queue-processor-task-token-budget",
           "searchMs": 4.31,
           "totalMs": 5.63,
           "resultCount": 1,
@@ -331,7 +331,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "needle-000416-queue-processor-backlog-token-budget",
+          "query": "needle-000416-queue-processor-task-token-budget",
           "searchMs": 2.62,
           "totalMs": 3.27,
           "resultCount": 1,
@@ -342,7 +342,7 @@
         },
         {
           "mode": "lexical",
-          "query": "sim-000416 queue-processor citation-check backlog-token-budget",
+          "query": "sim-000416 queue-processor citation-check task-token-budget",
           "searchMs": 3.03,
           "totalMs": 4.01,
           "resultCount": 8,
@@ -353,7 +353,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "sim-000416 queue-processor citation-check backlog-token-budget",
+          "query": "sim-000416 queue-processor citation-check task-token-budget",
           "searchMs": 3.33,
           "totalMs": 4.33,
           "resultCount": 8,
@@ -374,14 +374,14 @@
         "sim-000000 payments-api file-lock stale-lock-recovery",
         "needle-000833-review-ui-incremental-index-rebuild",
         "sim-000833 review-ui trust-decay incremental-index-rebuild",
-        "needle-001666-queue-processor-backlog-token-budget",
-        "sim-001666 queue-processor citation-check backlog-token-budget",
+        "needle-001666-queue-processor-task-token-budget",
+        "sim-001666 queue-processor citation-check task-token-budget",
         "needle-002500-payments-api-stale-lock-recovery",
         "sim-002500 payments-api file-lock stale-lock-recovery",
         "needle-003333-review-ui-incremental-index-rebuild",
         "sim-003333 review-ui trust-decay incremental-index-rebuild",
-        "needle-004166-queue-processor-backlog-token-budget",
-        "sim-004166 queue-processor citation-check backlog-token-budget"
+        "needle-004166-queue-processor-task-token-budget",
+        "sim-004166 queue-processor citation-check task-token-budget"
       ],
       "coldBuildMs": 2074.71,
       "warmBuildMs": 243.94,
@@ -531,7 +531,7 @@
         },
         {
           "mode": "lexical",
-          "query": "needle-001666-queue-processor-backlog-token-budget",
+          "query": "needle-001666-queue-processor-task-token-budget",
           "searchMs": 8.45,
           "totalMs": 12.98,
           "resultCount": 1,
@@ -542,7 +542,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "needle-001666-queue-processor-backlog-token-budget",
+          "query": "needle-001666-queue-processor-task-token-budget",
           "searchMs": 8.74,
           "totalMs": 13.25,
           "resultCount": 1,
@@ -553,7 +553,7 @@
         },
         {
           "mode": "lexical",
-          "query": "sim-001666 queue-processor citation-check backlog-token-budget",
+          "query": "sim-001666 queue-processor citation-check task-token-budget",
           "searchMs": 10.14,
           "totalMs": 15.35,
           "resultCount": 8,
@@ -564,7 +564,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "sim-001666 queue-processor citation-check backlog-token-budget",
+          "query": "sim-001666 queue-processor citation-check task-token-budget",
           "searchMs": 10.12,
           "totalMs": 15.12,
           "resultCount": 8,
@@ -663,7 +663,7 @@
         },
         {
           "mode": "lexical",
-          "query": "needle-004166-queue-processor-backlog-token-budget",
+          "query": "needle-004166-queue-processor-task-token-budget",
           "searchMs": 6.93,
           "totalMs": 14.62,
           "resultCount": 1,
@@ -674,7 +674,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "needle-004166-queue-processor-backlog-token-budget",
+          "query": "needle-004166-queue-processor-task-token-budget",
           "searchMs": 7.1,
           "totalMs": 11.32,
           "resultCount": 1,
@@ -685,7 +685,7 @@
         },
         {
           "mode": "lexical",
-          "query": "sim-004166 queue-processor citation-check backlog-token-budget",
+          "query": "sim-004166 queue-processor citation-check task-token-budget",
           "searchMs": 11.79,
           "totalMs": 16.77,
           "resultCount": 8,
@@ -696,7 +696,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "sim-004166 queue-processor citation-check backlog-token-budget",
+          "query": "sim-004166 queue-processor citation-check task-token-budget",
           "searchMs": 10.26,
           "totalMs": 15.41,
           "resultCount": 8,
@@ -717,14 +717,14 @@
         "sim-000000 payments-api file-lock stale-lock-recovery",
         "needle-008333-review-ui-incremental-index-rebuild",
         "sim-008333 review-ui trust-decay incremental-index-rebuild",
-        "needle-016666-queue-processor-backlog-token-budget",
-        "sim-016666 queue-processor citation-check backlog-token-budget",
+        "needle-016666-queue-processor-task-token-budget",
+        "sim-016666 queue-processor citation-check task-token-budget",
         "needle-025000-payments-api-stale-lock-recovery",
         "sim-025000 payments-api file-lock stale-lock-recovery",
         "needle-033333-review-ui-incremental-index-rebuild",
         "sim-033333 review-ui trust-decay incremental-index-rebuild",
-        "needle-041666-queue-processor-backlog-token-budget",
-        "sim-041666 queue-processor citation-check backlog-token-budget"
+        "needle-041666-queue-processor-task-token-budget",
+        "sim-041666 queue-processor citation-check task-token-budget"
       ],
       "coldBuildMs": 19454.2,
       "warmBuildMs": 2256.15,
@@ -874,7 +874,7 @@
         },
         {
           "mode": "lexical",
-          "query": "needle-016666-queue-processor-backlog-token-budget",
+          "query": "needle-016666-queue-processor-task-token-budget",
           "searchMs": 47.93,
           "totalMs": 87.05,
           "resultCount": 1,
@@ -885,7 +885,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "needle-016666-queue-processor-backlog-token-budget",
+          "query": "needle-016666-queue-processor-task-token-budget",
           "searchMs": 40.51,
           "totalMs": 78.44,
           "resultCount": 1,
@@ -896,7 +896,7 @@
         },
         {
           "mode": "lexical",
-          "query": "sim-016666 queue-processor citation-check backlog-token-budget",
+          "query": "sim-016666 queue-processor citation-check task-token-budget",
           "searchMs": 57.04,
           "totalMs": 97.78,
           "resultCount": 8,
@@ -907,7 +907,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "sim-016666 queue-processor citation-check backlog-token-budget",
+          "query": "sim-016666 queue-processor citation-check task-token-budget",
           "searchMs": 59.56,
           "totalMs": 96.19,
           "resultCount": 8,
@@ -1006,7 +1006,7 @@
         },
         {
           "mode": "lexical",
-          "query": "needle-041666-queue-processor-backlog-token-budget",
+          "query": "needle-041666-queue-processor-task-token-budget",
           "searchMs": 46.24,
           "totalMs": 85.13,
           "resultCount": 1,
@@ -1017,7 +1017,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "needle-041666-queue-processor-backlog-token-budget",
+          "query": "needle-041666-queue-processor-task-token-budget",
           "searchMs": 43.58,
           "totalMs": 82.96,
           "resultCount": 1,
@@ -1028,7 +1028,7 @@
         },
         {
           "mode": "lexical",
-          "query": "sim-041666 queue-processor citation-check backlog-token-budget",
+          "query": "sim-041666 queue-processor citation-check task-token-budget",
           "searchMs": 62.46,
           "totalMs": 101.71,
           "resultCount": 8,
@@ -1039,7 +1039,7 @@
         },
         {
           "mode": "hybrid_gated",
-          "query": "sim-041666 queue-processor citation-check backlog-token-budget",
+          "query": "sim-041666 queue-processor citation-check task-token-budget",
           "searchMs": 60.26,
           "totalMs": 99.05,
           "resultCount": 8,

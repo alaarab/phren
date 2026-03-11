@@ -78,13 +78,13 @@ class CortexClient {
         return this.callTool("memory_feedback", { key, feedback });
     }
     async updateTask(project, item, updates) {
-        return this.callTool("update_task", { project, item, ...updates });
+        return this.callTool("update_task", { project, item, updates });
     }
     async completeTask(project, item) {
         return this.callTool("complete_task", { project, item });
     }
     async removeFinding(project, text) {
-        return this.callTool("remove_finding", { project, text });
+        return this.callTool("remove_finding", { project, finding: text });
     }
     async dispose() {
         if (this.disposed) {
@@ -123,7 +123,7 @@ class CortexClient {
                     capabilities: {},
                     clientInfo: {
                         name: "cortex-vscode",
-                        version: "0.0.1",
+                        version: this.options.clientVersion ?? "0.0.0",
                     },
                 });
                 this.sendNotification("notifications/initialized", {});
@@ -229,11 +229,18 @@ class CortexClient {
             return result;
         }
         try {
-            return JSON.parse(textBlock.text);
+            return this.unwrapToolResponse(JSON.parse(textBlock.text));
         }
         catch {
             return textBlock.text;
         }
+    }
+    unwrapToolResponse(value) {
+        const response = asRecord(value);
+        if (response?.ok === false) {
+            throw new Error(response.error ?? response.message ?? "Cortex tool call failed.");
+        }
+        return value;
     }
     rejectPending(error) {
         for (const [, pending] of this.pending) {
@@ -244,4 +251,7 @@ class CortexClient {
     }
 }
 exports.CortexClient = CortexClient;
+function asRecord(value) {
+    return typeof value === "object" && value !== null ? value : undefined;
+}
 //# sourceMappingURL=cortexClient.js.map

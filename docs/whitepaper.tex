@@ -171,7 +171,7 @@ The architectural point of hooks is that memory capture and retrieval stay insid
 
 \subsection{Token Budget and Progressive Disclosure}
 \label{sec:context-opt}
-MCP tool responses consume context tokens, so retrieval quality is only half the problem; the other half is how much context the system spends to expose that memory. Cortex uses progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Backlogs support summary-only, paginated, and single-item fetch modes.
+MCP tool responses consume context tokens, so retrieval quality is only half the problem; the other half is how much context the system spends to expose that memory. Cortex uses progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Tasks support summary-only, paginated, and single-item fetch modes.
 
 This matters most in multi-tool coding sessions where search, task lookup, review notes, and shell output all compete for the same window. The design goal is to let project memory compound over time without turning long-lived context into prompt bloat. The same bounded path also keeps retrieval work small enough to stay responsive in daily use. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
 

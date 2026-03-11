@@ -27,7 +27,7 @@ Search the user's personal project store using FTS5 full-text search with synony
 | `query` | string | yes | Search query. Supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes. |
 | `limit` | number | no | Max results to return (1-20, default 5). |
 | `project` | string | no | Filter results to a specific project. |
-| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `reference`, `skills`, `summary`, `backlog`, `changelog`, `canonical`, `memory-queue`, `skill`, `other`. |
+| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `reference`, `skills`, `summary`, `task`, `changelog`, `canonical`, `memory-queue`, `skill`, `other`. |
 
 ### `get_project_summary`
 
@@ -54,67 +54,67 @@ List recent findings for a project without requiring a search query.
 
 ---
 
-## Backlog Management
+## Task Management
 
-### `get_backlog`
+### `get_tasks`
 
-Get the backlog for a project, or all projects if no name is given. Supports progressive disclosure: use `summary:true` for lightweight planning views (~200 tokens), pagination for browsing, or `id` with a stable `bid:` hash for single-item fetches during execution. See [Context Optimization](context-optimization.md) for the full pattern.
+Get the task for a project, or all projects if no name is given. Supports progressive disclosure: use `summary:true` for lightweight planning views (~200 tokens), pagination for browsing, or `id` with a stable `bid:` hash for single-item fetches during execution. See [Context Optimization](context-optimization.md) for the full pattern.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Project name. Omit to get all projects. |
-| `id` | string | no | Backlog item ID. Accepts positional IDs (A1, Q3, D2) or stable `bid:XXXXXXXX` hashes. Requires project. Stable hashes are preferred for cross-session references because positional IDs shift when items complete. |
-| `item` | string | no | Exact backlog item text. Requires project. |
+| `id` | string | no | Task item ID. Accepts positional IDs (A1, Q3, D2) or stable `bid:XXXXXXXX` hashes. Requires project. Stable hashes are preferred for cross-session references because positional IDs shift when items complete. |
+| `item` | string | no | Exact task item text. Requires project. |
 | `summary` | boolean | no | If true, return counts and titles only (no full content). Reduces token usage to ~200 tokens. Use for planning and status checks. |
 | `limit` | number | no | Max items per Active/Queue section to return (1-200, default 20). Use with `offset` for pagination. |
 | `done_limit` | number | no | Max Done items to return, most recent first (1-200, default 5). Done sections are capped tightly by default to avoid large responses. |
 | `offset` | number | no | Skip the first N items in each section before applying limit. Use with `limit` for pagination (e.g. offset:20, limit:20 for page 2). |
 | `status` | enum | no | Filter by section: `all`, `active`, `queue`, `done`, `active+queue` (default). |
 
-### `add_backlog_item`
+### `add_task`
 
-Append a task to a project's backlog. Adds to the Queue section.
+Append a task to a project's task. Adds to the Queue section.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name (must match a directory in your cortex). |
 | `item` | string | yes | The task to add. |
 
-### `add_backlog_items`
+### `add_tasks`
 
-Append multiple tasks to a project's backlog in one call. Adds to the Queue section.
+Append multiple tasks to a project's task in one call. Adds to the Queue section.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `items` | string[] | yes | List of tasks to add. |
 
-### `complete_backlog_item`
+### `complete_task`
 
-Move a backlog item to the Done section by matching text.
+Move a task item to the Done section by matching text.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `item` | string | yes | Exact or partial text of the item to complete. |
 
-### `complete_backlog_items`
+### `complete_tasks`
 
-Move multiple backlog items to Done in one call.
+Move multiple task items to Done in one call.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `items` | string[] | yes | List of partial item texts to complete. |
 
-### `update_backlog_item`
+### `update_task`
 
-Update a backlog item's priority, context, section, or linked GitHub issue.
+Update a task item's priority, context, section, or linked GitHub issue.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `item` | string | yes | Partial text to match against existing backlog items. |
+| `item` | string | yes | Partial text to match against existing task items. |
 | `updates` | object | yes | Fields to update (all optional inside the object). |
 
 The `updates` object accepts:
@@ -128,30 +128,30 @@ The `updates` object accepts:
 | `github_url` | string | GitHub issue URL to associate with the item. |
 | `unlink_github` | boolean | Remove any linked issue metadata from the item. |
 
-### `link_backlog_item_issue`
+### `link_task_issue`
 
-Link or unlink an existing GitHub issue on a backlog item.
+Link or unlink an existing GitHub issue on a task item.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `item` | string | yes | Backlog item text, ID, or stable `bid:` hash. |
+| `item` | string | yes | Task item text, ID, or stable `bid:` hash. |
 | `issue_number` | number or string | no | Existing GitHub issue number (for example `14` or `#14`). |
 | `issue_url` | string | no | Existing GitHub issue URL. |
-| `unlink` | boolean | no | If true, remove any linked issue metadata from the backlog item. |
+| `unlink` | boolean | no | If true, remove any linked issue metadata from the task item. |
 
-### `promote_backlog_item_to_issue`
+### `promote_task_to_issue`
 
-Create a GitHub issue from a backlog item and link it back into the backlog.
+Create a GitHub issue from a task item and link it back into the task.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `item` | string | yes | Backlog item text, ID, or stable `bid:` hash. |
+| `item` | string | yes | Task item text, ID, or stable `bid:` hash. |
 | `repo` | string | no | Target GitHub repo in `owner/name` form. If omitted, cortex tries to infer it from the project's `CLAUDE.md` or `summary.md`. |
-| `title` | string | no | Optional GitHub issue title. Defaults to the backlog item text. |
-| `body` | string | no | Optional GitHub issue body. Defaults to a body built from the backlog item plus any `Context:` line. |
-| `mark_done` | boolean | no | If true, mark the backlog item Done after creating and linking the issue. |
+| `title` | string | no | Optional GitHub issue title. Defaults to the task item text. |
+| `body` | string | no | Optional GitHub issue body. Defaults to a body built from the task item plus any `Context:` line. |
+| `mark_done` | boolean | no | If true, mark the task item Done after creating and linking the issue. |
 
 ---
 
@@ -165,7 +165,7 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding` | string | yes | The insight, as a single bullet point. Be specific enough to act on without extra context. |
-| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, backlog_item? }`. |
+| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, task_item? }`. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
 
@@ -243,7 +243,7 @@ Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under
 
 ### `export_project`
 
-Export a project's data (findings, backlog, summary, CLAUDE.md) as portable JSON.
+Export a project's data (findings, task, summary, CLAUDE.md) as portable JSON.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -317,7 +317,7 @@ No parameters.
 
 ### `session_start`
 
-Mark the start of a session. Returns the prior session summary, recent findings, and active backlog. Designed for agents without lifecycle hooks.
+Mark the start of a session. Returns the prior session summary, recent findings, and active task. Designed for agents without lifecycle hooks.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

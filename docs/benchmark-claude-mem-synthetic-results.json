@@ -22,8 +22,8 @@
       "queries": [
         "needle-000000-payments-api-stale-lock-recovery",
         "sim-000000 payments-api file-lock stale-lock-recovery",
-        "needle-000016-queue-processor-backlog-token-budget",
-        "sim-000016 queue-processor citation-check backlog-token-budget",
+        "needle-000016-queue-processor-task-token-budget",
+        "sim-000016 queue-processor citation-check task-token-budget",
         "needle-000033-review-ui-incremental-index-rebuild",
         "sim-000033 review-ui trust-decay incremental-index-rebuild"
       ],
@@ -56,14 +56,14 @@
           "exactTopHit": true
         },
         {
-          "query": "needle-000016-queue-processor-backlog-token-budget",
+          "query": "needle-000016-queue-processor-task-token-budget",
           "searchMs": 177.83,
           "totalResults": 10,
           "topTitle": "Synthetic Memory 000000",
           "exactTopHit": false
         },
         {
-          "query": "sim-000016 queue-processor citation-check backlog-token-budget",
+          "query": "sim-000016 queue-processor citation-check task-token-budget",
           "searchMs": 169.07,
           "totalResults": 10,
           "topTitle": "Synthetic Memory 000000",

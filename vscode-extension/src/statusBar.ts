@@ -28,7 +28,9 @@ export class CortexStatusBar implements vscode.Disposable {
 
   async initialize(): Promise<void> {
     const projectNames = await this.fetchProjectNames();
-    this.activeProjectName = projectNames[0];
+    this.activeProjectName = this.activeProjectName && projectNames.includes(this.activeProjectName)
+      ? this.activeProjectName
+      : projectNames[0];
     this.render();
   }
 

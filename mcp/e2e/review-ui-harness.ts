@@ -139,9 +139,9 @@ function seedProjectFixtures(cortexDir: string): void {
     ].join("\n"),
   );
   writeFile(
-    path.join(cortexDir, "repo-a", "backlog.md"),
+    path.join(cortexDir, "repo-a", "tasks.md"),
     [
-      "# repo-a backlog",
+      "# repo-a task",
       "",
       "## Queue",
       "",
