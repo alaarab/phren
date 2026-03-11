@@ -86,6 +86,15 @@ class CortexClient {
     async removeFinding(project, text) {
         return this.callTool("remove_finding", { project, finding: text });
     }
+    async readGraph(project) {
+        const args = {};
+        if (project)
+            args.project = project;
+        return this.callTool("read_graph", args);
+    }
+    async crossProjectEntities() {
+        return this.callTool("cross_project_entities", {});
+    }
     async dispose() {
         if (this.disposed) {
             return;

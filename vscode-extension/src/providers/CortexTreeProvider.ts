@@ -21,12 +21,26 @@ interface CategoryNode {
   category: CortexCategory;
 }
 
+interface FindingDateGroupNode {
+  kind: "findingDateGroup";
+  projectName: string;
+  date: string;
+  count: number;
+}
+
 interface FindingNode {
   kind: "finding";
   projectName: string;
   id: string;
   date: string;
   text: string;
+}
+
+interface TaskSectionGroupNode {
+  kind: "taskSectionGroup";
+  projectName: string;
+  section: TaskSection;
+  count: number;
 }
 
 interface TaskNode {
@@ -74,7 +88,9 @@ type CortexNode =
   | RootSectionNode
   | ProjectNode
   | CategoryNode
+  | FindingDateGroupNode
   | FindingNode
+  | TaskSectionGroupNode
   | TaskNode
   | SkillGroupNode
   | SkillNode
@@ -164,15 +180,23 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
 
     if (element.kind === "category") {
       if (element.category === "findings") {
-        return this.getFindingNodes(element.projectName);
+        return this.getFindingDateGroups(element.projectName);
       }
       if (element.category === "task") {
-        return this.getTaskNodes(element.projectName);
+        return this.getTaskSectionGroups(element.projectName);
       }
       if (element.category === "reference") {
         return this.getReferenceNodes(element.projectName);
       }
       return [];
+    }
+
+    if (element.kind === "findingDateGroup") {
+      return this.getFindingsForDate(element.projectName, element.date);
+    }
+
+    if (element.kind === "taskSectionGroup") {
+      return this.getTasksForSection(element.projectName, element.section);
     }
 
     if (element.kind === "skillGroup") {
@@ -232,12 +256,18 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         item.id = `cortex.category.${element.projectName}.${cat}`;
         return item;
       }
+      case "findingDateGroup": {
+        const label = formatDateLabel(element.date);
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+        item.description = `${element.count}`;
+        item.iconPath = themeIcon("calendar");
+        item.id = `cortex.findingDateGroup.${element.projectName}.${element.date}`;
+        return item;
+      }
       case "finding": {
-        const title = `${element.id} ${element.date}`;
-        const item = new vscode.TreeItem(title, vscode.TreeItemCollapsibleState.None);
-        item.description = truncate(element.text, 96);
-        item.tooltip = `${element.date}\n${element.text}`;
-        item.iconPath = themeIcon("file");
+        const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
+        item.tooltip = element.text;
+        item.iconPath = themeIcon("lightbulb");
         item.id = `cortex.finding.${element.projectName}.${element.id}`;
         item.command = {
           command: "cortex.openFinding",
@@ -246,10 +276,16 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         };
         return item;
       }
+      case "taskSectionGroup": {
+        const sectionIcons: Record<string, string> = { Active: "play", Queue: "clock", Done: "check" };
+        const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
+        item.description = `${element.count}`;
+        item.iconPath = themeIcon(sectionIcons[element.section] ?? "list-flat");
+        item.id = `cortex.taskSectionGroup.${element.projectName}.${element.section}`;
+        return item;
+      }
       case "task": {
-        const sectionTag = element.section === "Done" ? "[Done]" : element.section === "Active" ? "[Active]" : "[Queue]";
-        const item = new vscode.TreeItem(`${sectionTag} ${element.line}`, vscode.TreeItemCollapsibleState.None);
-        item.description = element.id;
+        const item = new vscode.TreeItem(truncate(element.line, 120), vscode.TreeItemCollapsibleState.None);
         item.tooltip = `${element.section} (${element.id})\n${element.line}`;
         item.iconPath = themeIcon(taskIconId(element));
         item.id = `cortex.task.${element.projectName}.${element.id}`;
@@ -333,40 +369,95 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getFindingNodes(projectName: string): Promise<CortexNode[]> {
+  private async getFindingDateGroups(projectName: string): Promise<CortexNode[]> {
     try {
       const findings = await this.fetchFindings(projectName);
       if (findings.length === 0) {
         return [{ kind: "message", label: "No findings", iconId: "list-flat" }];
       }
-      return findings.map((finding) => ({
-        kind: "finding" as const,
+
+      // Group by date, preserve order (most recent first)
+      const dateOrder: string[] = [];
+      const byDate = new Map<string, number>();
+      for (const f of findings) {
+        const d = f.date || "unknown";
+        if (!byDate.has(d)) {
+          dateOrder.push(d);
+          byDate.set(d, 0);
+        }
+        byDate.set(d, (byDate.get(d) ?? 0) + 1);
+      }
+
+      return dateOrder.map((date) => ({
+        kind: "findingDateGroup" as const,
         projectName,
-        id: finding.id,
-        date: finding.date,
-        text: finding.text,
+        date,
+        count: byDate.get(date) ?? 0,
       }));
     } catch (error) {
       return [this.errorNode("Failed to load findings", error)];
     }
   }
 
-  private async getTaskNodes(projectName: string): Promise<CortexNode[]> {
+  private async getFindingsForDate(projectName: string, date: string): Promise<CortexNode[]> {
+    try {
+      const findings = await this.fetchFindings(projectName);
+      return findings
+        .filter((f) => (f.date || "unknown") === date)
+        .map((finding) => ({
+          kind: "finding" as const,
+          projectName,
+          id: finding.id,
+          date: finding.date,
+          text: finding.text,
+        }));
+    } catch (error) {
+      return [this.errorNode("Failed to load findings", error)];
+    }
+  }
+
+  private async getTaskSectionGroups(projectName: string): Promise<CortexNode[]> {
     try {
       const tasks = await this.fetchTasks(projectName);
       if (tasks.length === 0) {
         return [{ kind: "message", label: "No task items", iconId: "checklist" }];
       }
-      return tasks.map((task) => ({
-        kind: "task" as const,
-        projectName,
-        id: task.id,
-        line: task.line,
-        section: task.section,
-        checked: task.checked,
-      }));
+
+      const sections: TaskSection[] = ["Active", "Queue", "Done"];
+      const groups: CortexNode[] = [];
+      for (const section of sections) {
+        const count = tasks.filter((t) => t.section === section).length;
+        if (count > 0) {
+          groups.push({
+            kind: "taskSectionGroup" as const,
+            projectName,
+            section,
+            count,
+          });
+        }
+      }
+
+      return groups.length > 0 ? groups : [{ kind: "message", label: "No task items", iconId: "checklist" }];
     } catch (error) {
       return [this.errorNode("Failed to load task", error)];
+    }
+  }
+
+  private async getTasksForSection(projectName: string, section: TaskSection): Promise<CortexNode[]> {
+    try {
+      const tasks = await this.fetchTasks(projectName);
+      return tasks
+        .filter((t) => t.section === section)
+        .map((task) => ({
+          kind: "task" as const,
+          projectName,
+          id: task.id,
+          line: task.line,
+          section: task.section,
+          checked: task.checked,
+        }));
+    } catch (error) {
+      return [this.errorNode("Failed to load tasks", error)];
     }
   }
 
@@ -624,6 +715,23 @@ function asBoolean(value: unknown): boolean | undefined {
 function responseData(value: unknown): Record<string, unknown> | undefined {
   const response = asRecord(value);
   return asRecord(response?.data);
+}
+
+function formatDateLabel(dateStr: string): string {
+  if (dateStr === "unknown") { return "Unknown date"; }
+  const parsed = new Date(dateStr + "T00:00:00");
+  if (isNaN(parsed.getTime())) { return dateStr; }
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  const diffDays = Math.round((today.getTime() - target.getTime()) / 86400000);
+
+  if (diffDays === 0) { return "Today"; }
+  if (diffDays === 1) { return "Yesterday"; }
+  if (diffDays < 7) { return `${diffDays} days ago`; }
+
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: parsed.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
 }
 
 function themeIcon(id: string): vscode.ThemeIcon {

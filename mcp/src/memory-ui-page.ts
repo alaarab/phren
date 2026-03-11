@@ -1,4 +1,5 @@
 import { REVIEW_UI_STYLES, renderReviewUiScript } from "./memory-ui-assets.js";
+import { renderGraphScript } from "./memory-ui-graph.js";
 import { readSyncSnapshot } from "./memory-ui-data.js";
 
 const PROJECT_REFERENCE_UI_STYLES = `
@@ -929,6 +930,9 @@ ${PROJECT_REFERENCE_UI_STYLES}
 
 <script>
 ${renderReviewUiScript(h(authToken || ""))}
+</script>
+<script>
+${renderGraphScript()}
 </script>
 <script>
 ${renderReviewQueueEditSyncScript()}
