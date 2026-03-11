@@ -10,7 +10,7 @@ import {
   hookConfigPath,
   homeDir,
 } from "./shared.js";
-import { detectProject, findFtsCacheForPath, listIndexedDocumentPaths } from "./shared-index.js";
+import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared-index.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
@@ -121,15 +121,25 @@ export async function runStatus() {
   // FTS index health
   let ftsIndexOk = false;
   let ftsIndexSize = 0;
+  let ftsDocCount: number | null = null;
   try {
     const cache = findFtsCacheForPath(cortexPath, profile);
     ftsIndexOk = cache.exists;
     ftsIndexSize = cache.sizeBytes ?? 0;
+    if (!ftsIndexOk) {
+      const db = await buildIndex(cortexPath, profile || undefined);
+      const healthRow = queryRows(db, "SELECT count(*) FROM docs", []);
+      const count = Number((healthRow?.[0]?.[0] as number | string | undefined) ?? 0);
+      if (Number.isFinite(count) && count >= 0) {
+        ftsIndexOk = true;
+        ftsDocCount = count;
+      }
+    }
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusFtsIndex: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   const ftsLabel = ftsIndexOk
-    ? `${GREEN}ok${RESET} ${DIM}(${(ftsIndexSize / 1024).toFixed(0)} KB)${RESET}`
+    ? `${GREEN}ok${RESET} ${DIM}(${ftsIndexSize > 0 ? `${(ftsIndexSize / 1024).toFixed(0)} KB` : `${ftsDocCount ?? 0} docs`})${RESET}`
     : `${YELLOW}not built${RESET} ${DIM}(run a search to build)${RESET}`;
   console.log(`  ${BOLD}FTS index:${RESET} ${ftsLabel}`);
 
