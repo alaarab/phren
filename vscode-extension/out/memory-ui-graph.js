@@ -13,9 +13,8 @@
  * Self-contained: defines its own esc() helper and accepts data via
  * window.cortexGraph.mount(data) — no external dependencies.
  */
-
-export function renderGraphScript(): string {
-  return `
+export function renderGraphScript() {
+    return `
 /* ── Knowledge Graph (Canvas2D + Barnes-Hut) ─────────────────────────── */
 (function() {
   'use strict';

@@ -15,6 +15,7 @@ import { getAllSkills } from "./skill-registry.js";
 import { resolveTaskFilePath, readTasks } from "./data-tasks.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
+import { readProjectTopics, classifyTopicForText, type ProjectTopic } from "./project-topics.js";
 
 interface EntryScore {
   impressions: number;
@@ -28,7 +29,7 @@ interface GraphNode {
   id: string;
   label: string;
   fullLabel: string;
-  group: "project" | "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug" | "task-active" | "task-queue" | "entity" | "reference";
+  group: string;
   refCount: number;
   project: string;
   tagged: boolean;
@@ -36,6 +37,13 @@ interface GraphNode {
   section?: string;
   entityType?: string;
   refDocs?: string[];
+  topicSlug?: string;
+  topicLabel?: string;
+}
+
+interface GraphTopicMeta {
+  slug: string;
+  label: string;
 }
 
 interface GraphLink {
@@ -147,21 +155,24 @@ export function getHooksData(cortexPath: string) {
   return { globalEnabled, tools, customHooks: readCustomHooks(cortexPath) };
 }
 
-export async function buildGraph(cortexPath: string, profile?: string, focusProject?: string): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore> }> {
+export async function buildGraph(cortexPath: string, profile?: string, focusProject?: string): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {
   const projects = getProjectDirs(cortexPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];
-  const typeMap: Record<string, "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug"> = {
-    decision: "decision",
-    pitfall: "pitfall",
-    pattern: "pattern",
-    tradeoff: "tradeoff",
-    architecture: "architecture",
-    bug: "bug",
-  };
   const projectSet = new Set(projects);
 
+  // Collect all unique topics across projects for the UI
+  const topicMetaMap = new Map<string, GraphTopicMeta>();
+
   for (const project of projects) {
+    // Load dynamic topics for this project
+    const { topics: projectTopics } = readProjectTopics(cortexPath, project);
+    for (const topic of projectTopics) {
+      if (!topicMetaMap.has(topic.slug)) {
+        topicMetaMap.set(topic.slug, { slug: topic.slug, label: topic.label });
+      }
+    }
+
     const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
     if (!fs.existsSync(findingsPath)) {
       nodes.push({
@@ -196,22 +207,27 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
     let untaggedAdded = 0;
 
     for (const line of lines) {
-      const tagMatch = line.match(/^-\s+\[(decision|pitfall|pattern|tradeoff|architecture|bug)\]\s+(.+?)(?:\s*<!--.*-->)?$/);
+      // Support legacy tagged findings like [decision], [pitfall], etc.
+      const tagMatch = line.match(/^-\s+\[([a-z_-]+)\]\s+(.+?)(?:\s*<!--.*-->)?$/);
       if (tagMatch) {
         if (taggedCount >= MAX_TAGGED) continue;
-        const tag = tagMatch[1] as "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug";
+        const tag = tagMatch[1];
         const text = tagMatch[2].trim();
         const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
+        // Classify the finding using the project's topic system
+        const topic = classifyTopicForText(`[${tag}] ${text}`, projectTopics);
         const nodeId = `${project}:${tag}:${nodes.length}`;
         taggedCount++;
         nodes.push({
           id: nodeId,
           label,
           fullLabel: text,
-          group: typeMap[tag],
+          group: `topic:${topic.slug}`,
           refCount: taggedCount,
           project,
           tagged: true,
+          topicSlug: topic.slug,
+          topicLabel: topic.label,
         });
         links.push({ source: project, target: nodeId });
         for (const other of projectSet) {
@@ -228,16 +244,20 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
       const text = plainMatch[1].trim();
       if (text.length < 10) continue;
       const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
+      // Classify using dynamic topics
+      const topic = classifyTopicForText(text, projectTopics);
       const nodeId = `${project}:finding:${nodes.length}`;
       untaggedAdded++;
       nodes.push({
         id: nodeId,
         label,
         fullLabel: text,
-        group: "pattern",
+        group: `topic:${topic.slug}`,
         refCount: untaggedAdded,
         project,
         tagged: false,
+        topicSlug: topic.slug,
+        topicLabel: topic.label,
       });
       links.push({ source: project, target: nodeId });
     }
@@ -383,7 +403,8 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
   const filteredNodes = nodes.filter((n) => n.group !== "project" || connectedIds.has(n.id));
 
   const total = filteredNodes.length;
-  return { nodes: filteredNodes, links: dedupedLinks, total, scores };
+  const topics = Array.from(topicMetaMap.values());
+  return { nodes: filteredNodes, links: dedupedLinks, total, scores, topics };
 }
 
 export function recentUsage(cortexPath: string): string[] {

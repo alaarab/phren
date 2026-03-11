@@ -261,10 +261,12 @@ describe.sequential("review-ui graph API", () => {
     const data = JSON.parse(res.body);
     const groups = new Set(data.nodes.map((n: any) => n.group));
     expect(groups.has("project")).toBe(true);
-    // demo has decision, pitfall, and pattern findings
-    expect(groups.has("decision")).toBe(true);
-    expect(groups.has("pitfall")).toBe(true);
-    expect(groups.has("pattern")).toBe(true);
+    // Finding nodes now use dynamic topic classification: group is 'topic:<slug>'
+    const topicGroups = [...groups].filter((g: any) => typeof g === "string" && g.startsWith("topic:"));
+    expect(topicGroups.length).toBeGreaterThan(0);
+    // All non-structural groups should be topic-prefixed
+    const nonStructural = [...groups].filter((g: any) => g !== "project" && g !== "entity" && g !== "reference" && !g.startsWith("task-"));
+    expect(nonStructural.every((g: any) => g.startsWith("topic:"))).toBe(true);
   });
 
   it("graph nodes expose source metadata for richer filtering", async () => {
@@ -302,8 +304,9 @@ describe.sequential("review-ui graph API", () => {
     );
     const res = await httpGet(port, "/api/graph");
     const data = JSON.parse(res.body);
-    const decisionNodes = data.nodes.filter((n: any) => n.group === "decision");
-    for (const node of decisionNodes) {
+    const taggedNodes = data.nodes.filter((n: any) => n.tagged === true && n.project === "demo");
+    expect(taggedNodes.length).toBeGreaterThan(0);
+    for (const node of taggedNodes) {
       expect(node.label.length).toBeLessThanOrEqual(60);
       expect(node.fullLabel.length).toBeGreaterThanOrEqual(node.label.length);
       expect(node.project).toBe("demo");

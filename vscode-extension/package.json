@@ -2,7 +2,7 @@
   "name": "cortex-vscode",
   "displayName": "Cortex VS Code",
   "description": "Browse, search, and manage Cortex knowledge directly from VS Code.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -167,7 +167,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "tsc -p ./ && node -e \"try{require('fs').copyFileSync(require('path').resolve(__dirname,'..','mcp','dist','memory-ui-graph.js'),require('path').resolve(__dirname,'out','memory-ui-graph.js'));console.log('Copied memory-ui-graph.js to out/')}catch(e){console.warn('Note: mcp/dist/memory-ui-graph.js not found, graph engine will use repo-relative path')}\"",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
     "publish:extension": "vsce publish"
