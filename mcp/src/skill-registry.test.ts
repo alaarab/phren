@@ -28,7 +28,7 @@ describe("skill-registry", () => {
       expect(humanize?.command).toBe("/humanize-local");
       expect(humanize?.overrides).toHaveLength(1);
       expect(humanize?.overrides[0]?.source).toBe("global");
-      expect(humanize?.mirrorTargets[0]).toContain(".claude/skills");
+      expect(path.normalize(humanize?.mirrorTargets[0] || "")).toContain(path.normalize(".claude/skills"));
       expect(verify?.source).toBe("demo");
     } finally {
       tmp.cleanup();
