@@ -12,16 +12,30 @@ import { readInstallPreferences } from "./init-preferences.js";
 import { readCustomHooks } from "./hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "./provider-adapters.js";
 import { getAllSkills } from "./skill-registry.js";
-import { resolveTaskFilePath } from "./data-tasks.js";
+import { resolveTaskFilePath, readTasks } from "./data-tasks.js";
+import { buildIndex, queryRows } from "./shared-index.js";
+import type { SqlJsDatabase } from "./shared-index.js";
+
+interface EntryScore {
+  impressions: number;
+  helpful: number;
+  repromptPenalty: number;
+  regressionPenalty: number;
+  lastUsedAt: string;
+}
 
 interface GraphNode {
   id: string;
   label: string;
   fullLabel: string;
-  group: "project" | "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug";
+  group: "project" | "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug" | "task-active" | "task-queue" | "entity" | "reference";
   refCount: number;
   project: string;
   tagged: boolean;
+  priority?: string;
+  section?: string;
+  entityType?: string;
+  refDocs?: string[];
 }
 
 interface GraphLink {
@@ -133,7 +147,7 @@ export function getHooksData(cortexPath: string) {
   return { globalEnabled, tools, customHooks: readCustomHooks(cortexPath) };
 }
 
-export function buildGraph(cortexPath: string, profile?: string, focusProject?: string): { nodes: GraphNode[]; links: GraphLink[]; total: number } {
+export async function buildGraph(cortexPath: string, profile?: string, focusProject?: string): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore> }> {
   const projects = getProjectDirs(cortexPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];
@@ -229,19 +243,147 @@ export function buildGraph(cortexPath: string, profile?: string, focusProject?: 
     }
   }
 
+  // ── Tasks ──────────────────────────────────────────────────────────
+  try {
+    for (const project of projects) {
+      const taskResult = readTasks(cortexPath, project);
+      if (!taskResult.ok) continue;
+      const doc = taskResult.data;
+      let taskCount = 0;
+      const MAX_TASKS = 50;
+      for (const section of ["Active", "Queue"] as const) {
+        const group = section === "Active" ? "task-active" : "task-queue";
+        for (const item of doc.items[section]) {
+          if (taskCount >= MAX_TASKS) break;
+          const nodeId = `${project}:task:${item.id}`;
+          const label = item.line.length > 55 ? `${item.line.slice(0, 52)}...` : item.line;
+          nodes.push({
+            id: nodeId,
+            label,
+            fullLabel: item.line,
+            group,
+            project,
+            tagged: false,
+            refCount: 0,
+            priority: item.priority,
+            section: item.section,
+          });
+          links.push({ source: project, target: nodeId });
+          taskCount++;
+        }
+      }
+    }
+  } catch {
+    // task loading failed — continue with other data sources
+  }
+
+  // ── Entities ──────────────────────────────────────────────────────
+  let db: SqlJsDatabase | null = null;
+  try {
+    db = await buildIndex(cortexPath, profile);
+    const rows = queryRows(
+      db,
+      `SELECT e.name, e.type, COUNT(el.source_id) as ref_count, GROUP_CONCAT(DISTINCT el.source_doc) as docs
+       FROM entities e JOIN entity_links el ON el.target_id = e.id WHERE e.type != 'document'
+       GROUP BY e.id, e.name, e.type ORDER BY ref_count DESC LIMIT 500`,
+      [],
+    );
+    if (rows) {
+      for (const row of rows) {
+        const name = String(row[0] ?? "");
+        const type = String(row[1] ?? "");
+        const refCount = typeof row[2] === "number" ? row[2] : 0;
+        const docsStr = String(row[3] ?? "");
+        const docs = docsStr ? docsStr.split(",") : [];
+        const nodeId = `entity:${name}:${type}`;
+        nodes.push({
+          id: nodeId,
+          label: name.length > 55 ? `${name.slice(0, 52)}...` : name,
+          fullLabel: name,
+          group: "entity",
+          project: "",
+          tagged: false,
+          refCount,
+          entityType: type,
+          refDocs: docs,
+        });
+        // Link entity to each project it appears in
+        const linkedProjects = new Set<string>();
+        for (const doc of docs) {
+          const projMatch = doc.match(/^([^/]+)\//);
+          if (projMatch && projectSet.has(projMatch[1])) {
+            linkedProjects.add(projMatch[1]);
+          }
+        }
+        for (const proj of linkedProjects) {
+          links.push({ source: nodeId, target: proj });
+        }
+      }
+    }
+  } catch {
+    // entity loading failed — continue with other data sources
+  }
+
+  // ── Reference docs ────────────────────────────────────────────────
+  try {
+    for (const project of projects) {
+      const refDir = path.join(cortexPath, project, "reference");
+      if (!fs.existsSync(refDir) || !fs.statSync(refDir).isDirectory()) continue;
+      const files = fs.readdirSync(refDir);
+      const MAX_REFS = 20;
+      let refCount = 0;
+      for (const file of files) {
+        if (refCount >= MAX_REFS) break;
+        const nodeId = `${project}:ref:${file}`;
+        nodes.push({
+          id: nodeId,
+          label: file.length > 55 ? `${file.slice(0, 52)}...` : file,
+          fullLabel: file,
+          group: "reference",
+          project,
+          tagged: false,
+          refCount: 0,
+        });
+        links.push({ source: project, target: nodeId });
+        refCount++;
+      }
+    }
+  } catch {
+    // reference doc loading failed — continue
+  }
+
+  // ── Memory scores ────────────────────────────────────────────────
+  let scores: Record<string, EntryScore> = {};
+  try {
+    const scoresPath = path.join(cortexPath, ".runtime", "memory-scores.json");
+    if (fs.existsSync(scoresPath)) {
+      const parsed = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
+      if (parsed && typeof parsed.entries === "object") {
+        scores = parsed.entries;
+      }
+    }
+  } catch {
+    // scores loading failed — return empty
+  }
+
   const seen = new Set<string>();
-  const total = nodes.length;
-  const result: { nodes: GraphNode[]; links: GraphLink[]; total: number } = {
-    nodes,
-    links: links.filter((link) => {
-      const key = [link.source, link.target].sort().join("||");
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }),
-    total,
-  };
-  return result;
+  const dedupedLinks = links.filter((link) => {
+    const key = [link.source, link.target].sort().join("||");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // Remove orphan project nodes (0 edges) to avoid scattered floaters
+  const connectedIds = new Set<string>();
+  for (const link of dedupedLinks) {
+    connectedIds.add(link.source);
+    connectedIds.add(link.target);
+  }
+  const filteredNodes = nodes.filter((n) => n.group !== "project" || connectedIds.has(n.id));
+
+  const total = filteredNodes.length;
+  return { nodes: filteredNodes, links: dedupedLinks, total, scores };
 }
 
 export function recentUsage(cortexPath: string): string[] {

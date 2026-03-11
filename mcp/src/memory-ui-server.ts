@@ -321,7 +321,7 @@ export function createReviewUiHttpServer(
   const authToken = opts?.authToken;
   const csrfTokens = opts?.csrfTokens;
 
-  return http.createServer((req, res) => {
+  return http.createServer(async (req, res) => {
     setCommonHeaders(res);
     const url = req.url || "/";
     const pathname = url.includes("?") ? url.slice(0, url.indexOf("?")) : url;
@@ -604,7 +604,23 @@ export function createReviewUiHttpServer(
       const graphParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
       const focusProject = graphParams.get("project") || undefined;
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(buildGraph(cortexPath, profile, focusProject)));
+      res.end(JSON.stringify(await buildGraph(cortexPath, profile, focusProject)));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/scores") {
+      let entries: Record<string, unknown> = {};
+      try {
+        const raw = fs.readFileSync(path.join(cortexPath, ".runtime", "memory-scores.json"), "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && parsed.entries) {
+          entries = parsed.entries;
+        }
+      } catch {
+        // file missing or unparseable – return empty
+      }
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(entries));
       return;
     }
 
