@@ -136,12 +136,94 @@ export async function showGraphWebview(client: CortexClient, context: vscode.Ext
   panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "cortex.svg"));
   panel.webview.html = renderLoadingHtml(panel.webview);
 
+  let graphData: GraphPayload | undefined;
+
   try {
-    const graphData = await loadGraphData(client);
+    graphData = await loadGraphData(client);
     panel.webview.html = renderGraphHtml(panel.webview, graphData);
   } catch (error) {
     panel.webview.html = renderErrorHtml(panel.webview, toErrorMessage(error));
+    return;
   }
+
+  // Handle messages from the webview
+  panel.webview.onDidReceiveMessage(async (msg: unknown) => {
+    const message = asRecord(msg);
+    if (!message) return;
+    const command = asString(message.command);
+
+    if (command === "nodeClick") {
+      // Webview clicked a node — send back detail for findings
+      const nodeId = asString(message.nodeId);
+      const kind = asString(message.kind);
+      if (!nodeId || kind !== "finding" || !graphData) return;
+
+      // Find the node in the loaded payload
+      const node = graphData.nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+
+      panel.webview.postMessage({
+        command: "nodeDetail",
+        nodeId,
+        kind: "finding",
+        projectName: node.projectName,
+        text: node.text,
+        date: node.date ?? "",
+        topicLabel: node.topicLabel ?? "",
+        stableId: node.stableId ?? "",
+      });
+    }
+
+    if (command === "editFinding") {
+      const projectName = asString(message.projectName);
+      const originalText = asString(message.text);
+      if (!projectName || !originalText) return;
+
+      const edited = await vscode.window.showInputBox({
+        title: "Edit Finding",
+        value: originalText,
+        prompt: "Edit the finding text. Save to replace the existing entry.",
+        validateInput: (v) => (v.trim().length === 0 ? "Finding text cannot be empty." : undefined),
+      });
+
+      if (!edited || edited.trim() === originalText.trim()) return;
+
+      try {
+        await client.removeFinding(projectName, originalText);
+        await client.addFinding(projectName, edited.trim());
+        vscode.window.showInformationMessage("Finding updated.");
+
+        // Reload graph data so the panel reflects the change
+        graphData = await loadGraphData(client);
+        panel.webview.html = renderGraphHtml(panel.webview, graphData);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to update finding: ${toErrorMessage(err)}`);
+      }
+    }
+
+    if (command === "deleteFinding") {
+      const projectName = asString(message.projectName);
+      const text = asString(message.text);
+      if (!projectName || !text) return;
+
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete this finding from "${projectName}"?`,
+        { modal: true },
+        "Delete",
+      );
+      if (confirm !== "Delete") return;
+
+      try {
+        await client.removeFinding(projectName, text);
+        vscode.window.showInformationMessage("Finding deleted.");
+
+        graphData = await loadGraphData(client);
+        panel.webview.html = renderGraphHtml(panel.webview, graphData);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to delete finding: ${toErrorMessage(err)}`);
+      }
+    }
+  });
 }
 
 /* ── Data loading ────────────────────────────────────────── */
@@ -565,6 +647,13 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     .btn.active, .btn:hover { background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
     .btn-sm { font-size:11px; padding:3px 8px; }
     .text-muted { color:var(--muted); }
+    #node-overlay { display:none; position:absolute; z-index:20; min-width:220px; max-width:320px; background:var(--vscode-editorWidget-background); border:1px solid var(--border); border-radius:8px; padding:12px; box-shadow:0 4px 16px rgba(0,0,0,0.4); font-size:13px; }
+    #node-overlay h3 { margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; opacity:0.6; }
+    #node-overlay-text { margin:0 0 10px; line-height:1.5; word-break:break-word; }
+    #node-overlay-meta { font-size:11px; opacity:0.65; margin-bottom:10px; }
+    #node-overlay-actions { display:flex; gap:6px; }
+    #node-overlay-close { position:absolute; top:6px; right:8px; background:none; border:none; color:var(--ink); font-size:16px; cursor:pointer; opacity:0.5; line-height:1; padding:0; }
+    #node-overlay-close:hover { opacity:1; }
     @media (max-width:700px) {
       .graph-layout { grid-template-columns:1fr; grid-template-rows:55vh 1fr; }
       .graph-detail-panel { border-left:none; border-top:1px solid var(--border); }
@@ -586,6 +675,16 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
         <button id="btn-zoom-out" title="Zoom out">&minus;</button>
         <button id="btn-zoom-reset" title="Reset view">R</button>
       </div>
+      <div id="node-overlay" role="dialog" aria-label="Finding detail">
+        <button id="node-overlay-close" title="Close" aria-label="Close">&times;</button>
+        <h3>Finding</h3>
+        <div id="node-overlay-text"></div>
+        <div id="node-overlay-meta"></div>
+        <div id="node-overlay-actions">
+          <button class="btn btn-sm" id="node-overlay-edit">Edit</button>
+          <button class="btn btn-sm" id="node-overlay-delete" style="border-color:var(--vscode-errorForeground,#f44);color:var(--vscode-errorForeground,#f44)">Delete</button>
+        </div>
+      </div>
     </section>
     <aside class="graph-detail-panel" id="graph-detail-panel">
       <h2>Details</h2>
@@ -594,7 +693,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     </aside>
   </main>
   <script nonce="${nonce}">
-// ── Review-UI graph engine (Barnes-Hut + relevance gravity) ──
+// ── Web UI graph engine (Barnes-Hut + relevance gravity) ──
 ${graphScript}
 
 // ── Data adapter: transform extension payload to web-ui format ──
@@ -694,6 +793,93 @@ ${graphScript}
     skipLink.addEventListener('focus', function() { skipLink.style.position = 'static'; skipLink.style.width = 'auto'; skipLink.style.height = 'auto'; });
     skipLink.addEventListener('blur', function() { skipLink.style.position = 'absolute'; skipLink.style.left = '-9999px'; skipLink.style.width = '1px'; skipLink.style.height = '1px'; });
   }
+
+  // ── Node click → detail overlay ──
+  var vscode = acquireVsCodeApi();
+  var overlay = document.getElementById('node-overlay');
+  var overlayText = document.getElementById('node-overlay-text');
+  var overlayMeta = document.getElementById('node-overlay-meta');
+  var overlayEdit = document.getElementById('node-overlay-edit');
+  var overlayDelete = document.getElementById('node-overlay-delete');
+  var overlayClose = document.getElementById('node-overlay-close');
+
+  // Track current finding for action buttons
+  var currentDetail = null;
+
+  function hideOverlay() {
+    if (overlay) overlay.style.display = 'none';
+    currentDetail = null;
+  }
+
+  if (overlayClose) overlayClose.addEventListener('click', hideOverlay);
+
+  if (overlayEdit) overlayEdit.addEventListener('click', function() {
+    if (!currentDetail) return;
+    vscode.postMessage({ command: 'editFinding', projectName: currentDetail.projectName, text: currentDetail.text });
+  });
+
+  if (overlayDelete) overlayDelete.addEventListener('click', function() {
+    if (!currentDetail) return;
+    vscode.postMessage({ command: 'deleteFinding', projectName: currentDetail.projectName, text: currentDetail.text });
+    hideOverlay();
+  });
+
+  // Hook into the graph engine's node-select event (fired when the user clicks a bubble)
+  // cortexGraph exposes window.cortexGraph.onNodeSelect(callback)
+  if (window.cortexGraph && window.cortexGraph.onNodeSelect) {
+    window.cortexGraph.onNodeSelect(function(node, canvasX, canvasY) {
+      if (!node || node.group === 'project' || node.group === 'entity' || node.group === 'reference') {
+        hideOverlay();
+        return;
+      }
+      // Notify extension — it will send back full detail via postMessage
+      vscode.postMessage({ command: 'nodeClick', nodeId: node.id, kind: node.id.startsWith('finding:') ? 'finding' : node.id.startsWith('task:') ? 'task' : 'other' });
+
+      // Position overlay near the click point
+      if (overlay) {
+        var container = document.querySelector('.graph-container');
+        var rect = container ? container.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
+        var ox = Math.min(canvasX + 16, rect.width - 340);
+        var oy = Math.min(canvasY + 16, rect.height - 200);
+        overlay.style.left = Math.max(8, ox) + 'px';
+        overlay.style.top = Math.max(8, oy) + 'px';
+        overlay.style.display = 'none'; // hidden until extension responds
+      }
+    });
+  } else {
+    // Fallback: listen for canvas clicks directly and derive node from payload
+    var canvas = document.getElementById('graph-canvas');
+    if (canvas) {
+      canvas.addEventListener('click', function(evt) {
+        // If the graph engine doesn't have onNodeSelect, fall back to a manual hit test
+        // against a simple node-position map if window.cortexGraph.getNodeAt is available
+        if (window.cortexGraph && window.cortexGraph.getNodeAt) {
+          var node = window.cortexGraph.getNodeAt(evt.offsetX, evt.offsetY);
+          if (node && node.id.startsWith('finding:')) {
+            vscode.postMessage({ command: 'nodeClick', nodeId: node.id, kind: 'finding' });
+          }
+        }
+      });
+    }
+  }
+
+  // Listen for messages back from the extension
+  window.addEventListener('message', function(event) {
+    var msg = event.data;
+    if (!msg || msg.command !== 'nodeDetail') return;
+    if (msg.kind !== 'finding') return;
+
+    currentDetail = { projectName: msg.projectName, text: msg.text, nodeId: msg.nodeId };
+
+    if (overlayText) overlayText.textContent = msg.text || '';
+    if (overlayMeta) {
+      var meta = '';
+      if (msg.date) meta += msg.date;
+      if (msg.topicLabel) meta += (meta ? ' · ' : '') + msg.topicLabel;
+      overlayMeta.textContent = meta;
+    }
+    if (overlay) overlay.style.display = 'block';
+  });
 })();
   </script>
 </body>

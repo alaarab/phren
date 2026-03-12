@@ -15,7 +15,9 @@ import {
   getQualityMultiplier,
   updateRuntimeHealth,
   withFileLock,
+  getWorkflowPolicy,
 } from "./shared-governance.js";
+import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
 import {
   detectProject,
 } from "./shared-index.js";
@@ -1065,7 +1067,19 @@ export async function handleHookContext() {
 
 const INTERESTING_TOOLS = new Set(["Read", "Write", "Edit", "Bash", "Glob", "Grep"]);
 const COOLDOWN_MS = parseInt(process.env.CORTEX_AUTOCAPTURE_COOLDOWN_MS ?? "30000", 10);
-const SESSION_CAP = parseInt(process.env.CORTEX_AUTOCAPTURE_SESSION_CAP ?? "10", 10);
+
+function getSessionCap(): number {
+  if (process.env.CORTEX_AUTOCAPTURE_SESSION_CAP) {
+    return parseInt(process.env.CORTEX_AUTOCAPTURE_SESSION_CAP, 10);
+  }
+  try {
+    const policy = getWorkflowPolicy(getCortexPath());
+    const sensitivity = policy.findingSensitivity ?? "balanced";
+    return FINDING_SENSITIVITY_CONFIG[sensitivity]?.sessionCap ?? 10;
+  } catch {
+    return 10;
+  }
+}
 
 interface ToolLogEntry {
   at: string;
@@ -1199,8 +1213,9 @@ export async function handleHookTool() {
         if (fs.existsSync(capFile)) {
           count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
         }
-        if (count >= SESSION_CAP) {
-          debugLog(`hook-tool: session cap reached (${count}/${SESSION_CAP}), skipping extraction`);
+        const sessionCap = getSessionCap();
+        if (count >= sessionCap) {
+          debugLog(`hook-tool: session cap reached (${count}/${sessionCap}), skipping extraction`);
           activeProject = null;
         }
       } catch (err: unknown) {

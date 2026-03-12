@@ -840,10 +840,29 @@ export function renderGraphScript(): string {
     } else if (isFindingGroup(node.group)) {
       var findingTopicLabel = node.topicLabel || (typeof node.group === 'string' && node.group.indexOf('topic:') === 0 ? node.group.slice(6) : node.group);
       metaEl.innerHTML = 'Finding ' + badge(findingTopicLabel, topicGroupColor(node.group)) +
-        (node.project ? ' ' + badge(node.project, COLORS.project) : '');
-      html += '<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.6">' + esc(node.fullLabel || node.label) + '</div>';
+        (node.project ? ' ' + badge(node.project, COLORS.project) : '') +
+        (node.supersededBy ? ' ' + badge('superseded', '#6b7280') : '') +
+        (node.contradicts ? ' ' + badge('contradicts', '#ef4444') : '');
+      var findingText = node.fullLabel || node.label;
+      html += '<div id="graph-finding-text" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.6">' + esc(findingText) + '</div>';
+      if (node.supersededBy) {
+        html += '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(107,114,128,0.12);border:1px solid rgba(107,114,128,0.25);font-size:12px">';
+        html += '<span style="font-weight:600;color:#9ca3af">Superseded by:</span> <span style="color:#d1d5db">' + esc(node.supersededBy) + '</span>';
+        html += '</div>';
+      }
+      if (node.contradicts) {
+        html += '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.25);font-size:12px">';
+        html += '<span style="font-weight:600;color:#ef4444">Contradicts:</span> <span style="color:#fca5a5">' + esc(node.contradicts) + '</span>';
+        html += '</div>';
+      }
       html += qualityBar;
       if (healthText) html += '<div style="margin-top:4px">' + healthText + '</div>';
+      if (node.project) {
+        html += '<div style="display:flex;gap:8px;margin-top:12px">';
+        html += '<button class="btn btn-sm" onclick="window.graphNodeEdit(' + JSON.stringify(node.project) + ',' + JSON.stringify(findingText) + ')" style="padding:5px 14px;font-size:12px">Edit</button>';
+        html += '<button class="btn btn-sm" onclick="window.graphNodeDelete(' + JSON.stringify(node.project) + ',' + JSON.stringify(findingText) + ')" style="padding:5px 14px;font-size:12px;color:#ef4444;border-color:#ef4444">Delete</button>';
+        html += '</div>';
+      }
 
     } else if (TASK_GROUPS[node.group]) {
       var secColor = node.group === 'task-active' ? '#10b981' : '#eab308';
@@ -859,12 +878,15 @@ export function renderGraphScript(): string {
       html += '<div style="font-size:13px;color:#9ca3af">References: ' + (node.refCount || 0) + '</div>';
       /* connected projects */
       var projs = {};
+      var linkedFindings = [];
       for (var i = 0; i < allLinks.length; i++) {
         var lk = allLinks[i];
         var other = null;
         if (lk.source === node.id) other = findNodeById(lk.target);
         else if (lk.target === node.id) other = findNodeById(lk.source);
-        if (other && other.group === 'project') projs[other.label] = 1;
+        if (!other) continue;
+        if (other.group === 'project') projs[other.label] = 1;
+        if (isFindingGroup(other.group) && other.project) linkedFindings.push(other);
       }
       var projNames = Object.keys(projs);
       if (projNames.length > 0) {
@@ -872,6 +894,19 @@ export function renderGraphScript(): string {
       }
       if (node.refDocs && node.refDocs.length > 0) {
         html += '<div style="margin-top:6px;font-size:12px;color:#9ca3af">Docs: ' + node.refDocs.map(function(d) { return esc(d); }).join(', ') + '</div>';
+      }
+      if (linkedFindings.length > 0) {
+        html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">Linked Findings</div>';
+        for (var fi = 0; fi < linkedFindings.length; fi++) {
+          var lf = linkedFindings[fi];
+          var lfText = lf.fullLabel || lf.label;
+          html += '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface-alt,var(--surface))">';
+          html += '<div style="font-size:12px;line-height:1.5;color:var(--ink)">' + esc(lfText) + '</div>';
+          html += '<div style="display:flex;gap:6px;margin-top:6px">';
+          html += '<button class="btn btn-sm" onclick="window.graphNodeEdit(' + JSON.stringify(lf.project) + ',' + JSON.stringify(lfText) + ')" style="padding:3px 10px;font-size:11px">Edit</button>';
+          html += '<button class="btn btn-sm" onclick="window.graphNodeDelete(' + JSON.stringify(lf.project) + ',' + JSON.stringify(lfText) + ')" style="padding:3px 10px;font-size:11px;color:#ef4444;border-color:#ef4444">Delete</button>';
+          html += '</div></div>';
+        }
       }
       html += qualityBar;
 
@@ -1332,6 +1367,87 @@ export function renderGraphScript(): string {
     renderGraphDetails(null);
   };
 
+  /* ── node edit/delete actions ────────────────────────────────────────── */
+
+  function fetchCsrfToken(cb) {
+    fetch('/api/csrf-token').then(function(r) { return r.json(); }).then(function(d) { cb(d.token || ''); }).catch(function() { cb(''); });
+  }
+
+  window.graphNodeEdit = function(project, findingText) {
+    var panel = document.getElementById('graph-detail-panel');
+    var bodyEl = document.getElementById('graph-detail-body');
+    if (!bodyEl) return;
+    /* show inline editor */
+    var textEl = document.getElementById('graph-finding-text');
+    var current = textEl ? textEl.textContent || findingText : findingText;
+    var editorId = 'graph-inline-editor-' + Date.now();
+    var html = '<div style="margin-top:12px">';
+    html += '<textarea id="' + editorId + '" style="width:100%;min-height:80px;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink);font-size:13px;line-height:1.5;resize:vertical;box-sizing:border-box">' + esc(current) + '</textarea>';
+    html += '<div style="display:flex;gap:8px;margin-top:8px">';
+    html += '<button class="btn btn-sm btn-primary" id="' + editorId + '-save" style="padding:5px 14px;font-size:12px">Save</button>';
+    html += '<button class="btn btn-sm" id="' + editorId + '-cancel" style="padding:5px 14px;font-size:12px">Cancel</button>';
+    html += '</div><div id="' + editorId + '-status" style="margin-top:6px;font-size:12px;color:#ef4444"></div>';
+    html += '</div>';
+    /* append editor after existing body */
+    var editorEl = document.createElement('div');
+    editorEl.innerHTML = html;
+    bodyEl.appendChild(editorEl);
+    var ta = document.getElementById(editorId);
+    if (ta) ta.focus();
+
+    document.getElementById(editorId + '-cancel').addEventListener('click', function() {
+      editorEl.remove();
+    });
+
+    document.getElementById(editorId + '-save').addEventListener('click', function() {
+      var newText = document.getElementById(editorId).value.trim();
+      if (!newText) { document.getElementById(editorId + '-status').textContent = 'Text cannot be empty.'; return; }
+      fetchCsrfToken(function(csrf) {
+        var body = new URLSearchParams();
+        body.set('old_text', findingText);
+        body.set('new_text', newText);
+        if (csrf) body.set('_csrf', csrf);
+        fetch('/api/findings/' + encodeURIComponent(project), { method: 'PUT', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.ok) {
+              editorEl.remove();
+              if (textEl) textEl.textContent = newText;
+              document.getElementById(editorId + '-status') && (document.getElementById(editorId + '-status').textContent = '');
+            } else {
+              var st = document.getElementById(editorId + '-status');
+              if (st) st.textContent = d.error || 'Save failed.';
+            }
+          })
+          .catch(function(err) {
+            var st = document.getElementById(editorId + '-status');
+            if (st) st.textContent = 'Request failed: ' + err.message;
+          });
+      });
+    });
+  };
+
+  window.graphNodeDelete = function(project, findingText) {
+    if (!confirm('Delete this finding from "' + project + '"?\\n\\n' + findingText.slice(0, 120))) return;
+    fetchCsrfToken(function(csrf) {
+      var body = new URLSearchParams();
+      body.set('text', findingText);
+      if (csrf) body.set('_csrf', csrf);
+      fetch('/api/findings/' + encodeURIComponent(project), { method: 'DELETE', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.ok) {
+            /* clear selection and refresh graph data */
+            renderGraphDetails(null);
+            if (typeof window.loadGraph === 'function') window.loadGraph();
+          } else {
+            alert('Delete failed: ' + (d.error || 'unknown error'));
+          }
+        })
+        .catch(function(err) { alert('Request failed: ' + err.message); });
+    });
+  };
+
   window.applyGraphLimit = function(n) {
     if (typeof n !== 'number' || isNaN(n)) return;
     nodeLimit = clamp(n, 10, 10000);
@@ -1358,7 +1474,6 @@ export function renderGraphScript(): string {
       allNodes = data.nodes || [];
       allLinks = data.links || [];
       allScores = data.scores || {};
-      /* topics: populated by new graph API; absent in VS Code extension (backward compat) */
       allTopics = data.topics || [];
       buildScoreLookup();
 

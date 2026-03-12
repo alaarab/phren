@@ -48,7 +48,7 @@ describe("add_task MCP tool", () => {
     fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
     const msg = addTask(tmpDir, PROJECT, "Set up monitoring dashboard");
     expect(msg.ok).toBe(true);
-    expect(resultMsg(msg)).toContain("Added");
+    if (msg.ok) expect(msg.data.line).toContain("Set up monitoring dashboard");
 
     const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);

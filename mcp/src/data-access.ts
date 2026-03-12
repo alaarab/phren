@@ -40,11 +40,14 @@ export {
   workNextTask,
   tidyDoneTasks,
   taskMarkdown,
+  appendChildFinding,
+  promoteTask,
   TASKS_FILENAME,
   TASK_FILE_ALIASES,
   canonicalTaskFilePath,
   resolveTaskFilePath,
   isTaskFileName,
+  type AddTaskOptions,
 } from "./data-tasks.js";
 export {
   addProjectToProfile,
@@ -101,6 +104,12 @@ export interface FindingItem {
   tool?: string;
   model?: string;
   sessionId?: string;
+  /** First 60 chars of the newer finding that supersedes this one. Set when this finding is stale. */
+  supersededBy?: string;
+  /** First 60 chars of the older finding this one replaces. */
+  supersedes?: string;
+  /** Snippets of findings this one contradicts. */
+  contradicts?: string[];
 }
 
 export interface QueueItem {
@@ -160,6 +169,12 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
     const text = confMatch
       ? textWithoutComments.slice(0, textWithoutComments.length - confMatch[0].length).trim()
       : textWithoutComments;
+
+    // Parse lifecycle annotations
+    const supersededByMatch = line.match(/<!--\s*cortex:superseded_by\s+"([^"]+)"\s+[\d-]+\s*-->/);
+    const supersedesMatch = line.match(/<!--\s*cortex:supersedes\s+"([^"]+)"\s*-->/);
+    const contradictsMatches = [...line.matchAll(/<!--\s*cortex:contradicts\s+"([^"]+)"\s*-->/g)];
+
     items.push({
       id: `L${index}`,
       stableId: fidMatch ? fidMatch[1] : undefined,
@@ -174,6 +189,9 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
       tool: source?.tool,
       model: source?.model,
       sessionId: source?.session_id,
+      supersededBy: supersededByMatch ? supersededByMatch[1] : undefined,
+      supersedes: supersedesMatch ? supersedesMatch[1] : undefined,
+      contradicts: contradictsMatches.length > 0 ? contradictsMatches.map(m => m[1]) : undefined,
     });
     if (citation) i += 1;
     index++;
@@ -239,6 +257,58 @@ export function removeFinding(cortexPath: string, project: string, match: string
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     fs.writeFileSync(filePath, normalized);
     return cortexOk(`Removed from ${project}: ${matched}`);
+  });
+}
+
+export function editFinding(cortexPath: string, project: string, oldText: string, newText: string): CortexResult<string> {
+  const ensured = ensureProject(cortexPath, project);
+  if (!ensured.ok) return forwardErr(ensured);
+
+  const newTextTrimmed = newText.trim();
+  if (!newTextTrimmed) return cortexErr("New finding text cannot be empty.", CortexError.EMPTY_INPUT);
+
+  const findingsPath = path.join(ensured.data, "FINDINGS.md");
+  if (!fs.existsSync(findingsPath)) return cortexErr(`No FINDINGS.md file found for "${project}".`, CortexError.FILE_NOT_FOUND);
+
+  return withSafeLock(findingsPath, () => {
+    const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
+    const needle = oldText.trim().toLowerCase();
+    const bulletLines = lines.map((line, i) => ({ line, i })).filter(({ line }) => line.startsWith("- "));
+
+    // Stable finding ID match
+    const fidNeedle = needle.replace(/^fid:/, "");
+    const fidMatch = /^[a-z0-9]{8}$/.test(fidNeedle)
+      ? bulletLines.filter(({ line }) => new RegExp(`<!--\\s*fid:${fidNeedle}\\s*-->`).test(line))
+      : [];
+
+    const exactMatches = bulletLines.filter(({ line }) =>
+      line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().toLowerCase() === needle
+    );
+    const partialMatches = bulletLines.filter(({ line }) => line.toLowerCase().includes(needle));
+
+    let idx: number;
+    if (fidMatch.length === 1) {
+      idx = fidMatch[0].i;
+    } else if (exactMatches.length === 1) {
+      idx = exactMatches[0].i;
+    } else if (exactMatches.length > 1) {
+      return cortexErr(`"${oldText}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, CortexError.AMBIGUOUS_MATCH);
+    } else if (partialMatches.length === 1) {
+      idx = partialMatches[0].i;
+    } else if (partialMatches.length > 1) {
+      return cortexErr(`"${oldText}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.`, CortexError.AMBIGUOUS_MATCH);
+    } else {
+      return cortexErr(`No finding matching "${oldText}" in project "${project}".`, CortexError.NOT_FOUND);
+    }
+
+    // Preserve existing metadata comment (fid, citations, etc.)
+    const existing = lines[idx];
+    const metaMatch = existing.match(/(<!--.*?-->)/g);
+    const metaSuffix = metaMatch ? " " + metaMatch.join(" ") : "";
+    lines[idx] = `- ${newTextTrimmed}${metaSuffix}`;
+    const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+    fs.writeFileSync(findingsPath, normalized);
+    return cortexOk(`Updated finding in ${project}`);
   });
 }
 

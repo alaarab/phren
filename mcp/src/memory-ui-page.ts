@@ -850,6 +850,27 @@ function renderTasksAndSettingsScript(authToken: string): string {
           html += '</div>';
           hooksEl.innerHTML = html;
         }
+        var fsEl = document.getElementById('settings-finding-sensitivity');
+        if (fsEl) {
+          var fsDescriptions = {
+            minimal: 'Only capture explicitly flagged findings',
+            conservative: 'Capture findings when clearly significant',
+            balanced: 'Capture findings that are likely useful (default)',
+            aggressive: 'Capture findings proactively, including minor observations'
+          };
+          var currentFs = data.findingSensitivity || 'balanced';
+          var fsLevels = ['minimal', 'conservative', 'balanced', 'aggressive'];
+          var fsHtml = '<div style="display:flex;flex-direction:column;gap:10px">';
+          fsHtml += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+          fsLevels.forEach(function(level) {
+            var active = level === currentFs;
+            fsHtml += '<button onclick="setFindingSensitivity(\'' + esc(level) + '\')" style="padding:6px 14px;border:1px solid ' + (active ? 'var(--accent)' : 'var(--border)') + ';border-radius:var(--radius-sm);background:' + (active ? 'var(--accent)' : 'transparent') + ';color:' + (active ? '#fff' : 'inherit') + ';cursor:pointer;font-size:var(--text-sm)">' + esc(level) + '</button>';
+          });
+          fsHtml += '</div>';
+          fsHtml += '<div class="text-muted" id="settings-fs-desc" style="font-size:var(--text-sm)">' + esc(fsDescriptions[currentFs] || currentFs) + '</div>';
+          fsHtml += '</div>';
+          fsEl.innerHTML = fsHtml;
+        }
         var mcpEl = document.getElementById('settings-mcp');
         if (mcpEl) {
           mcpEl.innerHTML = '<strong>MCP server: </strong><span class="badge ' + (data.mcpEnabled ? 'badge-on' : 'badge-off') + '">' + (data.mcpEnabled ? 'enabled' : 'disabled') + '</span>';
@@ -868,6 +889,33 @@ function renderTasksAndSettingsScript(authToken: string): string {
       if (typeof _origSwitchTab === 'function') _origSwitchTab(tab);
       if (tab === 'tasks' && !_tasksLoaded) { _tasksLoaded = true; loadTasks(); }
       if (tab === 'settings' && !_settingsLoaded) { _settingsLoaded = true; loadSettings(); }
+    };
+
+    window.setFindingSensitivity = function(level) {
+      var descriptions = {
+        minimal: 'Only capture explicitly flagged findings',
+        conservative: 'Capture findings when clearly significant',
+        balanced: 'Capture findings that are likely useful (default)',
+        aggressive: 'Capture findings proactively, including minor observations'
+      };
+      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
+      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
+        var body = new URLSearchParams({ value: level });
+        if (csrfData.token) body.set('_csrf', csrfData.token);
+        var postUrl = _tsAuthToken ? tsAuthUrl('/api/settings/finding-sensitivity') : '/api/settings/finding-sensitivity';
+        return fetch(postUrl, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.ok) {
+          _settingsLoaded = false;
+          loadSettings();
+          var desc = document.getElementById('settings-fs-desc');
+          if (desc) desc.textContent = descriptions[level] || level;
+        } else {
+          alert('Failed to update finding sensitivity: ' + (data.error || 'Unknown error'));
+        }
+      }).catch(function(err) {
+        alert('Error: ' + String(err));
+      });
     };
   })();`;
 }
@@ -964,6 +1012,8 @@ ${PROJECT_REFERENCE_UI_STYLES}
 
     <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Memories flagged for review. Approve to keep, reject to discard.</p>
 
+    <div id="review-summary-banner" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center"></div>
+
     <div class="review-filters" id="review-filters" style="display:none">
       <select id="review-filter-project" onchange="filterReviewCards()">
         <option value="">All projects</option>
@@ -975,6 +1025,7 @@ ${PROJECT_REFERENCE_UI_STYLES}
         <option value="">All models</option>
       </select>
       <span id="review-filter-count" class="text-muted" style="font-size:var(--text-sm);margin-left:8px"></span>
+      <button class="btn btn-sm" id="highlight-only-btn" onclick="toggleHighlightOnly(this)" style="margin-left:auto">Flagged only</button>
     </div>
 
     <div id="review-kbd-hints" style="font-size:var(--text-xs);color:var(--muted);margin-bottom:12px;display:none;gap:16px;flex-wrap:wrap">
@@ -1102,6 +1153,12 @@ ${PROJECT_REFERENCE_UI_STYLES}
         <div id="settings-hooks" style="color:var(--muted)">Loading...</div>
       </div>
     </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>Finding Sensitivity</h2></div>
+      <div class="card-body">
+        <div id="settings-finding-sensitivity" style="color:var(--muted)">Loading...</div>
+      </div>
+    </div>
     <div class="card">
       <div class="card-header"><h2>MCP</h2></div>
       <div class="card-body">
@@ -1115,6 +1172,14 @@ ${PROJECT_REFERENCE_UI_STYLES}
   <span class="batch-bar-count" id="batch-count">0 selected</span>
   <button class="btn btn-sm btn-approve" onclick="batchAction('approve')">Approve All</button>
   <button class="btn btn-sm btn-reject" onclick="batchAction('reject')">Reject All</button>
+  <select class="btn btn-sm" id="batch-tag-select" style="cursor:pointer" onchange="if(this.value){batchActionByTag(this.value,'approve');this.value=''}">
+    <option value="">Approve by tag...</option>
+    <option value="decision">[decision]</option>
+    <option value="pitfall">[pitfall]</option>
+    <option value="pattern">[pattern]</option>
+    <option value="fix">[fix]</option>
+    <option value="warning">[warning]</option>
+  </select>
   <button class="btn btn-sm" onclick="clearBatchSelection()">Cancel</button>
 </div>
 

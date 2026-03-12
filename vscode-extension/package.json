@@ -254,6 +254,60 @@
           "type": "boolean",
           "default": false,
           "description": "Extract insights from conversation transcripts at session end."
+        },
+        "cortex.taskMode": {
+          "type": "string",
+          "enum": ["off", "manual", "suggest", "auto"],
+          "default": "auto",
+          "description": "Task automation mode. Off: tasks disabled. Manual: only when explicitly requested. Suggest: Claude suggests but waits for confirmation. Auto: Claude adds tasks automatically."
+        },
+        "cortex.hooksEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable cortex hooks globally. When disabled, no hooks fire on prompts or session events."
+        },
+        "cortex.findingSensitivity": {
+          "type": "string",
+          "enum": ["minimal", "conservative", "balanced", "aggressive"],
+          "default": "balanced",
+          "enumDescriptions": [
+            "Only save findings when explicitly asked. No auto-capture.",
+            "Save decisions and pitfalls only. Auto-capture: 3/session max.",
+            "Save non-obvious patterns and decisions. Auto-capture: 10/session.",
+            "Save everything worth remembering. Auto-capture: 20/session."
+          ],
+          "description": "Controls how aggressively Cortex captures findings and auto-captures insights from sessions."
+        },
+        "cortex.semanticDedup": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable semantic duplicate detection for **offline maintenance commands** (`cortex maintain consolidate`, `cortex maintain extract`) when no agent session is active. Live dedup during `add_finding` uses the active agent (Claude/GPT) instead — no extra API call needed. Batch mode uses a separate LLM call per finding group. Results cached 24h. Cost scales with `cortex.llmModel` (~$0.01/batch-session with Haiku)."
+        },
+        "cortex.semanticConflict": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable semantic conflict detection for **offline maintenance commands** (`cortex maintain consolidate`, `cortex maintain extract`) when no agent session is active. Live conflict detection during `add_finding` uses the active agent instead. Batch mode uses a separate LLM call per finding group. Results cached 24h. Cost scales with `cortex.llmModel` (~$0.01/batch-session with Haiku)."
+        },
+        "cortex.llmModel": {
+          "type": "string",
+          "default": "",
+          "enum": [
+            "",
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "gpt-4o-mini",
+            "gpt-4o"
+          ],
+          "enumDescriptions": [
+            "Use server default (Haiku)",
+            "Claude Haiku 4.5 — recommended for offline batch operations (~$0.01/session)",
+            "Claude Sonnet 4.6 — higher quality, ~10x more expensive than Haiku",
+            "Claude Opus 4.6 — expensive for batch operations; not recommended",
+            "GPT-4o mini — cost-effective alternative for batch operations",
+            "GPT-4o — expensive for batch operations; not recommended"
+          ],
+          "markdownDescription": "Model for **offline cortex operations** (`consolidate`, `extract`). Sets `CORTEX_LLM_MODEL`. **Live dedup uses the active agent instead** — this setting only applies when running maintenance commands without an active session. Haiku is recommended for batch operations."
         }
       }
     }

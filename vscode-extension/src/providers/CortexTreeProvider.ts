@@ -56,6 +56,10 @@ interface FindingNode {
   id: string;
   date: string;
   text: string;
+  supersededBy?: string;
+  supersedes?: string;
+  contradicts?: string[];
+  potentialDuplicates?: string[];
 }
 
 interface TaskSectionGroupNode {
@@ -157,6 +161,10 @@ interface FindingSummary {
   id: string;
   date: string;
   text: string;
+  supersededBy?: string;
+  supersedes?: string;
+  contradicts?: string[];
+  potentialDuplicates?: string[];
 }
 
 interface TaskSummary {
@@ -372,10 +380,35 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       }
       case "finding": {
         const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
-        item.tooltip = element.text;
-        item.iconPath = themeIcon("lightbulb");
+        const tooltipLines = [element.text];
+        let iconId = "lightbulb";
+        if (element.supersededBy) {
+          iconId = "lightbulb-autofix";
+          tooltipLines.push(`Superseded by: "${element.supersededBy}"`);
+        } else if (element.contradicts?.length) {
+          iconId = "warning";
+          tooltipLines.push(`Contradicts: "${element.contradicts[0]}"`);
+        } else if (element.potentialDuplicates?.length) {
+          iconId = "issue-opened";
+          tooltipLines.push(`Potential duplicate of: "${element.potentialDuplicates[0]}"`);
+          if (element.potentialDuplicates.length > 1) {
+            tooltipLines.push(`(and ${element.potentialDuplicates.length - 1} more)`);
+          }
+        }
+        if (element.supersedes) {
+          tooltipLines.push(`Supersedes: "${element.supersedes}"`);
+        }
+        item.tooltip = tooltipLines.join("\n");
+        item.iconPath = themeIcon(iconId);
         item.id = `cortex.finding.${element.projectName}.${element.id}`;
         item.contextValue = "cortex.finding";
+        if (element.supersededBy) {
+          item.description = "(superseded)";
+        } else if (element.contradicts?.length) {
+          item.description = "(conflict)";
+        } else if (element.potentialDuplicates?.length) {
+          item.description = "(possible duplicate)";
+        }
         item.command = {
           command: "cortex.openFinding",
           title: "Open Finding",
@@ -588,6 +621,10 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
           id: finding.id,
           date: finding.date,
           text: finding.text,
+          supersededBy: finding.supersededBy,
+          supersedes: finding.supersedes,
+          contradicts: finding.contradicts,
+          potentialDuplicates: finding.potentialDuplicates,
         }));
     } catch (error) {
       return [this.errorNode("Failed to load findings", error)];
@@ -939,10 +976,22 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         continue;
       }
 
+      const contradictsRaw = record?.contradicts;
+      const contradicts = Array.isArray(contradictsRaw)
+        ? contradictsRaw.filter((v): v is string => typeof v === "string")
+        : undefined;
+      const potentialDuplicatesRaw = record?.potentialDuplicates;
+      const potentialDuplicates = Array.isArray(potentialDuplicatesRaw)
+        ? potentialDuplicatesRaw.filter((v): v is string => typeof v === "string")
+        : undefined;
       parsed.push({
         id,
         date: asString(record?.date) ?? "unknown",
         text,
+        supersededBy: asString(record?.supersededBy),
+        supersedes: asString(record?.supersedes),
+        contradicts: contradicts?.length ? contradicts : undefined,
+        potentialDuplicates: potentialDuplicates?.length ? potentialDuplicates : undefined,
       });
     }
 

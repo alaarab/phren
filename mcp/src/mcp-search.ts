@@ -243,11 +243,11 @@ export function register(server: McpServer, ctx: McpContext): void {
           rows = rows.slice(0, maxResults);
         }
 
-        // Filter out superseded entries from results
+        // Filter out superseded entries from results (both legacy <!-- superseded_by: and new <!-- cortex:superseded_by formats)
         if (rows) {
           rows = rows.map(row => {
-            if (!row.content.includes("<!-- superseded_by:")) return row;
-            const filteredLines = row.content.split("\n").filter(line => !line.includes("<!-- superseded_by:"));
+            if (!row.content.includes("superseded_by")) return row;
+            const filteredLines = row.content.split("\n").filter(line => !line.includes("superseded_by"));
             return { ...row, content: filteredLines.join("\n") };
           });
         }
@@ -460,15 +460,23 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         limit: z.number().int().min(1).max(200).optional().describe("Max rows to return (default 50)."),
+        include_superseded: z.boolean().optional().describe("If true, include findings that have been superseded by a newer finding (hidden by default)."),
       }),
     },
-    async ({ project, limit }) => {
+    async ({ project, limit, include_superseded }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const result = readFindings(cortexPath, project);
       if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-      const items = result.data;
-      if (!items.length) return mcpResponse({ ok: true, message: `No findings found for "${project}".`, data: { project, findings: [], total: 0 } });
-      const capped = items.slice(0, limit ?? 50);
+      const allItems = result.data;
+      const activeItems = include_superseded ? allItems : allItems.filter(f => !f.supersededBy);
+      const supersededCount = allItems.length - activeItems.length;
+      if (!activeItems.length) {
+        const msg = supersededCount > 0
+          ? `No active findings for "${project}". ${supersededCount} superseded finding(s) hidden. Pass include_superseded=true to show them.`
+          : `No findings found for "${project}".`;
+        return mcpResponse({ ok: true, message: msg, data: { project, findings: [], total: 0, supersededCount } });
+      }
+      const capped = activeItems.slice(0, limit ?? 50);
       const lines = capped.map((entry) => {
         const metadata: string[] = [];
         if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
@@ -476,13 +484,17 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (entry.actor) metadata.push(`actor=${entry.actor}`);
         if (entry.tool) metadata.push(`tool=${entry.tool}`);
         if (entry.model) metadata.push(`model=${entry.model}`);
+        if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
+        if (entry.supersededBy) metadata.push(`superseded_by="${entry.supersededBy.slice(0, 30)}"`);
+        if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);
         const idLabel = entry.stableId ? `${entry.id}|fid:${entry.stableId}` : entry.id;
         return `- [${idLabel}] ${entry.date}: ${entry.text}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
       });
+      const supersededNote = supersededCount > 0 ? ` (${supersededCount} superseded hidden)` : "";
       return mcpResponse({
         ok: true,
-        message: `Findings for ${project} (${capped.length}/${items.length}):\n` + lines.join("\n"),
-        data: { project, findings: capped, total: items.length },
+        message: `Findings for ${project} (${capped.length}/${activeItems.length})${supersededNote}:\n` + lines.join("\n"),
+        data: { project, findings: capped, total: activeItems.length, supersededCount },
       });
     }
   );

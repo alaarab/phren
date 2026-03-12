@@ -2,6 +2,7 @@ import { decodeStringRow } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
 import { runtimeFile } from "./shared.js";
+import { UNIVERSAL_TECH_TERMS_RE } from "./cortex-core.js";
 
 export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -39,8 +40,9 @@ export function logEntityMiss(cortexPath: string, name: string, context: string,
   }
 }
 
-const PROSE_ENTITY_PATTERN =
-  /\b(React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Koa|Hapi|NestJS|Django|Flask|FastAPI|Rails|Spring|Laravel|Redis|Postgres|PostgreSQL|MySQL|MariaDB|SQLite|MongoDB|DynamoDB|Cassandra|Elasticsearch|Docker|Kubernetes|Terraform|Ansible|AWS|GCP|Azure|Vercel|Netlify|Cloudflare|Prisma|TypeORM|Sequelize|Drizzle|Mongoose|Jest|Vitest|Mocha|Cypress|Playwright|Puppeteer|Webpack|Vite|Rollup|esbuild|Turbopack|ESLint|Prettier|Babel|SWC|GraphQL|REST|gRPC|WebSocket|Kafka|RabbitMQ|NATS|Nginx|Caddy|Traefik|Node\.js|Deno|Bun|Python|Rust|Go|Java|Kotlin|Swift|TypeScript|JavaScript)\b/gi;
+// Use the shared universal starter set. Framework/tool specifics are learned
+// dynamically per project via extractDynamicEntities() in content-dedup.ts.
+const PROSE_ENTITY_PATTERN = UNIVERSAL_TECH_TERMS_RE;
 
 const ENTITY_PATTERNS = [
   // import/require patterns: import X from 'pkg' or require('pkg')

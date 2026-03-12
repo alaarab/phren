@@ -23,6 +23,7 @@ export {
   resolveCoref,
   isDuplicateFinding,
   detectConflicts,
+  extractDynamicEntities,
   checkSemanticDedup,
   checkSemanticConflicts,
 } from "./content-dedup.js";

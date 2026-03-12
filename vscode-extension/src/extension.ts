@@ -628,6 +628,74 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     pinMemoryDisposable,
   );
 
+  // --- Sync VS Code settings to cortex preference files ---
+  syncSettingsToPreferences(runtimeConfig.storePath, config);
+  const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {
+    if (
+      e.affectsConfiguration("cortex.proactivity") ||
+      e.affectsConfiguration("cortex.proactivityFindings") ||
+      e.affectsConfiguration("cortex.proactivityTasks") ||
+      e.affectsConfiguration("cortex.autoExtract") ||
+      e.affectsConfiguration("cortex.autoCapture") ||
+      e.affectsConfiguration("cortex.taskMode") ||
+      e.affectsConfiguration("cortex.hooksEnabled") ||
+      e.affectsConfiguration("cortex.semanticDedup") ||
+      e.affectsConfiguration("cortex.semanticConflict") ||
+      e.affectsConfiguration("cortex.llmModel") ||
+      e.affectsConfiguration("cortex.findingSensitivity")
+    ) {
+      const updated = vscode.workspace.getConfiguration("cortex");
+      syncSettingsToPreferences(runtimeConfig.storePath, updated);
+      outputChannel.appendLine("Cortex settings synced to preference files.");
+
+      // Notify when semantic features are toggled on
+      const semanticDedup = updated.get<boolean>("semanticDedup", false);
+      const semanticConflict = updated.get<boolean>("semanticConflict", false);
+      const llmModel = updated.get<string>("llmModel", "") || "claude-haiku-4-5-20251001 (default)";
+      const expensiveModels = ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-4o"];
+      const isExpensive = expensiveModels.some(m => llmModel.includes(m));
+
+      if (e.affectsConfiguration("cortex.semanticDedup") && semanticDedup) {
+        const msg = `Cortex: Semantic dedup enabled for offline batch operations (consolidate, extract). Model: ${llmModel}. ~$0.01/batch-session with Haiku. Live dedup uses the active agent — no extra cost.`;
+        if (isExpensive) {
+          await vscode.window.showWarningMessage(`${msg} Warning: expensive model selected — Haiku recommended for batch operations.`);
+        } else {
+          await vscode.window.showInformationMessage(msg);
+        }
+      }
+      if (e.affectsConfiguration("cortex.semanticConflict") && semanticConflict) {
+        const msg = `Cortex: Semantic conflict detection enabled for offline batch operations (consolidate, extract). Model: ${llmModel}. ~$0.01/batch-session with Haiku. Live conflict detection uses the active agent — no extra cost.`;
+        if (isExpensive) {
+          await vscode.window.showWarningMessage(`${msg} Warning: expensive model selected — Haiku recommended for batch operations.`);
+        } else {
+          await vscode.window.showInformationMessage(msg);
+        }
+      }
+      if (e.affectsConfiguration("cortex.llmModel") && isExpensive && (semanticDedup || semanticConflict)) {
+        await vscode.window.showWarningMessage(
+          `Cortex: "${llmModel}" is expensive for offline batch operations. Haiku is recommended and costs ~10x less.`,
+          "Switch to Haiku",
+        ).then(async (choice) => {
+          if (choice === "Switch to Haiku") {
+            await updated.update("llmModel", "claude-haiku-4-5-20251001", vscode.ConfigurationTarget.Global);
+          }
+        });
+      }
+      if (e.affectsConfiguration("cortex.findingSensitivity")) {
+        const sensitivity = updated.get<string>("findingSensitivity", "balanced");
+        const descriptions: Record<string, string> = {
+          minimal: "Only save findings when explicitly asked. No auto-capture.",
+          conservative: "Save decisions and pitfalls only. Auto-capture: 3/session max.",
+          balanced: "Save non-obvious patterns and decisions. Auto-capture: 10/session.",
+          aggressive: "Save everything worth remembering. Auto-capture: 20/session.",
+        };
+        const desc = descriptions[sensitivity] ?? "";
+        await vscode.window.showInformationMessage(`Cortex: Finding sensitivity set to "${sensitivity}". ${desc}`);
+      }
+    }
+  });
+  context.subscriptions.push(configChangeDisposable);
+
   try {
     await statusBar.initialize();
     outputChannel.appendLine("Status bar initialized successfully");
@@ -659,4 +727,146 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asArraySafe(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+// ── Settings → cortex preference file sync ──────────────────────────────────
+
+interface ConfigSource {
+  get<T>(section: string, defaultValue: T): T;
+}
+
+/**
+ * Synchronous file lock matching the protocol used by the cortex MCP server
+ * (governance-locks.ts). Lock file is `filePath + ".lock"`, created with the
+ * O_EXCL flag. Both processes must use this convention for mutual exclusion to work.
+ */
+function withFileLockSync<T>(filePath: string, fn: () => T): T {
+  const lockPath = filePath + ".lock";
+  const maxWait = 5000;
+  const pollInterval = 100;
+  const staleThreshold = 30000;
+
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  let waited = 0;
+  let hasLock = false;
+
+  // Use Atomics.wait for cross-platform sleep without busy-spin
+  const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
+  const sleep = (ms: number) => Atomics.wait(sleepBuf, 0, 0, ms);
+
+  while (waited < maxWait) {
+    try {
+      fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
+      hasLock = true;
+      break;
+    } catch {
+      // Lock held — check for staleness
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > staleThreshold) {
+          try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+          continue;
+        }
+      } catch { /* lock file may have been released between checks */ }
+      sleep(pollInterval);
+      waited += pollInterval;
+    }
+  }
+
+  if (!hasLock) {
+    // Best-effort: proceed without lock rather than silently dropping the write
+    try { return fn(); } catch { return {} as T; }
+  }
+
+  try {
+    return fn();
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+  }
+}
+
+function readJsonFileSafe(filePath: string): Record<string, unknown> {
+  try {
+    if (fs.existsSync(filePath)) {
+      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    }
+  } catch {
+    // Corrupt or missing file — start fresh
+  }
+  return {};
+}
+
+function writeJsonFileAtomic(filePath: string, data: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp-${Date.now()}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n");
+  fs.renameSync(tmpPath, filePath);
+}
+
+function patchJsonFile(filePath: string, patch: Record<string, unknown>): void {
+  withFileLockSync(filePath, () => {
+    const current = readJsonFileSafe(filePath);
+    writeJsonFileAtomic(filePath, { ...current, ...patch, updatedAt: new Date().toISOString() });
+  });
+}
+
+function syncSettingsToPreferences(storePath: string, config: ConfigSource): void {
+  try {
+    const governancePrefsPath = path.join(storePath, ".governance", "install-preferences.json");
+    const runtimePrefsPath = path.join(storePath, ".runtime", "install-preferences.json");
+    const workflowPolicyPath = path.join(storePath, ".governance", "workflow-policy.json");
+
+    // Proactivity → governance install-preferences.json
+    const proactivity = config.get<string>("proactivity", "");
+    const proactivityFindings = config.get<string>("proactivityFindings", "");
+    const proactivityTasks = config.get<string>("proactivityTasks", "");
+    const governancePatch: Record<string, unknown> = {};
+    if (proactivity && ["high", "medium", "low"].includes(proactivity)) {
+      governancePatch.proactivity = proactivity;
+    }
+    if (proactivityFindings && ["high", "medium", "low"].includes(proactivityFindings)) {
+      governancePatch.proactivityFindings = proactivityFindings;
+    }
+    if (proactivityTasks && ["high", "medium", "low"].includes(proactivityTasks)) {
+      governancePatch.proactivityTask = proactivityTasks;
+    }
+    if (Object.keys(governancePatch).length > 0) {
+      patchJsonFile(governancePrefsPath, governancePatch);
+    }
+
+    // Hooks enabled → runtime install-preferences.json
+    const hooksEnabled = config.get<boolean>("hooksEnabled", true);
+    patchJsonFile(runtimePrefsPath, { hooksEnabled });
+
+    // Auto-extract / auto-capture → runtime install-preferences.json
+    const autoExtract = config.get<boolean>("autoExtract", true);
+    const autoCapture = config.get<boolean>("autoCapture", false);
+    patchJsonFile(runtimePrefsPath, { autoExtract, autoCapture });
+
+    // Task mode → governance workflow-policy.json
+    const taskMode = config.get<string>("taskMode", "");
+    if (taskMode && ["off", "manual", "suggest", "auto"].includes(taskMode)) {
+      patchJsonFile(workflowPolicyPath, { taskMode });
+    }
+
+    // Semantic dedup/conflict + LLM model → runtime install-preferences.json
+    const semanticDedup = config.get<boolean>("semanticDedup", false);
+    const semanticConflict = config.get<boolean>("semanticConflict", false);
+    const llmModel = config.get<string>("llmModel", "");
+    const semanticPatch: Record<string, unknown> = { semanticDedup, semanticConflict };
+    if (llmModel) semanticPatch.llmModel = llmModel;
+    patchJsonFile(runtimePrefsPath, semanticPatch);
+
+    // Finding sensitivity → governance policy.json
+    const findingSensitivity = config.get<string>("findingSensitivity", "");
+    if (findingSensitivity && ["minimal", "conservative", "balanced", "aggressive"].includes(findingSensitivity)) {
+      const policyPath = path.join(storePath, ".governance", "policy.json");
+      patchJsonFile(policyPath, { findingSensitivity });
+    }
+  } catch {
+    // Best-effort: don't crash the extension if preference files can't be written
+  }
 }

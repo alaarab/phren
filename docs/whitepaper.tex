@@ -278,7 +278,7 @@ The systems differ less in whether they can retrieve a relevant memory and more 
   \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed systems expose different audit primitives rather than equivalent git-native transparency.
   \item \textbf{Policy and access governance}: role-based access control, approval workflows, TTL and retention policy, and canonical locks are first-class features.
   \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection.
-  \item \textbf{Human review surfaces}: \texttt{cortex shell} and \texttt{cortex review-ui} let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
+  \item \textbf{Human review surfaces}: \texttt{cortex shell} and \texttt{cortex web-ui} let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
 \end{itemize}
 
 Any memory system can add a vector index. Governance, auditability, and review tooling require deliberate architectural choices that are harder to retrofit.
@@ -334,7 +334,7 @@ The March 10 shared-corpus rerun against claude-mem reached the same practical c
 
 \textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure. Initial setup is guided, but advanced policy configuration still requires direct CLI commands.
 
-\textbf{Web UI is opt-in.} \texttt{cortex review-ui} is not started automatically; memory triage requires an explicit invocation. This is intentional---triage is a deliberate act, not an ambient background process.
+\textbf{Web UI is opt-in.} \texttt{cortex web-ui} is not started automatically; memory triage requires an explicit invocation. This is intentional---triage is a deliberate act, not an ambient background process.
 
 \textbf{Uni-directional portability.} Export/import works for project data; migrating governance configuration to another memory system is manual.
 

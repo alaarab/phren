@@ -57,6 +57,51 @@ export async function handleDoctor(args: string[]) {
   const fix = args.includes("--fix");
   const checkData = args.includes("--check-data");
   const agentsOnly = args.includes("--agents");
+  const parityCheck = args.includes("--parity");
+
+  if (parityCheck) {
+    const { ALL_MANIFESTS, ACTION_KEYS } = await import("./capabilities/index.js");
+    const gaps: Array<{ action: string; surface: string; reason: string }> = [];
+    for (const key of ACTION_KEYS) {
+      for (const manifest of ALL_MANIFESTS) {
+        const entry = manifest.actions[key];
+        if (!entry.implemented) {
+          gaps.push({ action: key, surface: manifest.surface, reason: entry.reason || "unknown" });
+        }
+      }
+    }
+    const byAction = new Map<string, Array<{ surface: string; reason: string }>>();
+    for (const gap of gaps) {
+      const arr = byAction.get(gap.action) || [];
+      arr.push({ surface: gap.surface, reason: gap.reason });
+      byAction.set(gap.action, arr);
+    }
+    const total = ACTION_KEYS.length;
+    const implemented = new Map<string, number>();
+    for (const manifest of ALL_MANIFESTS) {
+      let count = 0;
+      for (const key of ACTION_KEYS) {
+        if (manifest.actions[key].implemented) count++;
+      }
+      implemented.set(manifest.surface, count);
+    }
+    console.log(`cortex doctor --parity: ${total} actions across ${ALL_MANIFESTS.length} surfaces\n`);
+    for (const manifest of ALL_MANIFESTS) {
+      const count = implemented.get(manifest.surface) || 0;
+      console.log(`  ${manifest.surface}: ${count}/${total} implemented (${Math.round(100 * count / total)}%)`);
+    }
+    if (byAction.size > 0) {
+      console.log(`\nGaps (${gaps.length} total):`);
+      for (const [action, entries] of byAction) {
+        const surfaces = entries.map((e) => e.surface).join(", ");
+        console.log(`  ${action}: missing in ${surfaces}`);
+      }
+    } else {
+      console.log("\nNo gaps — full parity across all surfaces.");
+    }
+    process.exit(0);
+  }
+
   const result = await runDoctor(getCortexPath(), fix, checkData);
   if (agentsOnly) {
     const agentChecks = result.checks.filter((check) =>

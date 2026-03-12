@@ -147,3 +147,21 @@ export function hasDiscoveryIntent(...texts: Array<string | undefined | null>): 
     return DISCOVERY_INTENT_PATTERN.test(text);
   });
 }
+
+const SUPPRESS_TASK_PATTERN = /\b(?:don(?:'|\u2019)t\s+(?:create|add|track|make)\s+(?:a\s+)?task|no\s+task|skip\s+(?:the\s+)?task|don(?:'|\u2019)t\s+add\s+(?:that|this|those)\s+to\s+task|do\s+not\s+add|not\s+a\s+task|just\s+(?:a\s+)?question|just\s+asking|hypothetically|just\s+curious|ignore\s+(?:this|that))\b/i;
+
+export function hasSuppressTaskIntent(...texts: Array<string | undefined | null>): boolean {
+  return texts.some((text) => {
+    if (!text) return false;
+    return SUPPRESS_TASK_PATTERN.test(text);
+  });
+}
+
+const CODE_CHANGE_PATTERN = /\b(?:git\s+(?:diff|status|add|commit|log)|npm\s+(?:run|test|build)|(?:edit|fix|change|update|modify)\s+(?:the\s+)?(?:file|code|function|method|class)|diff|patch|pull\s+request|pr\s+#?\d+|changed\s+file|modified\s+file|deleted\s+file|added\s+file|renamed\s+file)\b/i;
+
+export function hasCodeChangeContext(...texts: Array<string | undefined | null>): boolean {
+  return texts.some((text) => {
+    if (!text) return false;
+    return CODE_CHANGE_PATTERN.test(text);
+  });
+}

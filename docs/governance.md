@@ -98,7 +98,7 @@ A human can inspect every finding, see its confidence score, view its git histor
 | Citation validation | File:line + penalty | Not surfaced in reviewed materials | Not surfaced in reviewed materials | File:line, no penalty |
 | RBAC | 4 roles, built-in | Enterprise only | Enterprise only | GitHub permissions |
 | Approval workflows | Built-in | Not surfaced in reviewed materials | Not surfaced in reviewed materials | Not surfaced in reviewed materials |
-| Human review UI | CLI shell (offline) | Cloud dashboard | Not surfaced in reviewed materials | Not surfaced in reviewed materials |
+| Human web UI | CLI shell (offline) | Cloud dashboard | Not surfaced in reviewed materials | Not surfaced in reviewed materials |
 | Data location | Your git repo | Cloud or Docker | Cloud only | GitHub cloud |
 | Cost for governance | $0 | $249+/mo | $475+/mo | Copilot subscription |
 

@@ -1357,7 +1357,6 @@ export function renderGraphScript() {
       allNodes = data.nodes || [];
       allLinks = data.links || [];
       allScores = data.scores || {};
-      /* topics: populated by new graph API; absent in VS Code extension (backward compat) */
       allTopics = data.topics || [];
       buildScoreLookup();
 

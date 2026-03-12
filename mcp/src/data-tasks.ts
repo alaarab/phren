@@ -47,6 +47,13 @@ export interface TaskItem {
   pinned?: boolean;
   githubIssue?: number;
   githubUrl?: string;
+  rank?: number;
+  lastActivity?: string;
+  createdAt?: string;
+  sessionId?: string;
+  childFindings?: string[];
+  speculative?: boolean;
+  parentFinding?: string;
 }
 
 export interface TaskDoc {
@@ -160,19 +167,66 @@ function ensureProject(cortexPath: string, project: string): CortexResult<string
   return cortexOk(dir);
 }
 
-/** Pattern that matches the stable-ID comment embedded in task item lines. */
-const BID_PATTERN = /\s*<!--\s*bid:([a-z0-9]{8})\s*-->/;
+/** Pattern that matches the task metadata comment embedded in task item lines.
+ *  Format: <!-- bid:HASH [rank:N] [lastActivity:ISO] -->
+ */
+const METADATA_PATTERN = /\s*<!--\s*bid:([a-z0-9]{8})(?:\s+rank:(\d+))?(?:\s+lastActivity:([^\s>]+))?(?:\s+created:([^\s>]+))?(?:\s+session:([^\s>]+))?(?:\s+findings:((?:[a-z0-9]{8}(?::[a-z0-9]{8})?|fid:[a-z0-9]{8})(?:,[a-z0-9a-z:]{3,})*))?(?:\s+parentFinding:([^\s>]+))?(\s+speculative)?\s*-->/;
 
 /** Generate a new 8-character random stable ID. */
 function newBid(): string {
   return randomBytes(4).toString("hex");
 }
 
-/** Strip the stable-ID comment from a raw line, returning the clean text and any extracted bid. */
-function stripBid(text: string): { clean: string; bid?: string } {
-  const m = text.match(BID_PATTERN);
+/** Strip the metadata comment from a raw line, returning the clean text and any extracted fields. */
+function stripBid(text: string): { clean: string; bid?: string; rank?: number; lastActivity?: string; createdAt?: string; sessionId?: string; childFindings?: string[]; parentFinding?: string; speculative?: boolean } {
+  const m = text.match(METADATA_PATTERN);
   if (!m) return { clean: text };
-  return { clean: text.replace(BID_PATTERN, "").trimEnd(), bid: m[1] };
+  const rankNum = m[2] ? Number.parseInt(m[2], 10) : undefined;
+  const childFindings = m[6] ? m[6].split(",").filter(Boolean) : undefined;
+  return {
+    clean: text.replace(METADATA_PATTERN, "").trimEnd(),
+    bid: m[1],
+    rank: Number.isFinite(rankNum) ? rankNum : undefined,
+    lastActivity: m[3] || undefined,
+    createdAt: m[4] || undefined,
+    sessionId: m[5] || undefined,
+    childFindings: childFindings && childFindings.length > 0 ? childFindings : undefined,
+    parentFinding: m[7] || undefined,
+    speculative: m[8] ? true : undefined,
+  };
+}
+
+/**
+ * Auto-assign numeric ranks to items without a rank.
+ * high-priority items get lowest numbers, then medium, then low, then unranked.
+ */
+function assignMissingRanks(items: TaskItem[]): void {
+  const unranked = items.filter((item) => item.rank === undefined);
+  if (!unranked.length) return;
+  const maxExisting = items.reduce((max, item) => (item.rank !== undefined && item.rank > max ? item.rank : max), 0);
+  const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  unranked.sort((a, b) => (priorityOrder[a.priority ?? ""] ?? 3) - (priorityOrder[b.priority ?? ""] ?? 3));
+  let next = maxExisting + 1;
+  for (const item of unranked) {
+    item.rank = next++;
+  }
+}
+
+/**
+ * Apply gravity to tasks: items with stale lastActivity drift toward higher rank numbers.
+ * Only affects display order — does not mutate the file.
+ */
+export function applyGravity(items: TaskItem[]): TaskItem[] {
+  const now = Date.now();
+  const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+  const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  return items.map((item) => {
+    if (!item.lastActivity || item.rank === undefined) return item;
+    const age = now - new Date(item.lastActivity).getTime();
+    if (age <= TWO_WEEKS_MS) return item;
+    const weeksStale = Math.floor((age - TWO_WEEKS_MS) / ONE_WEEK_MS);
+    return { ...item, rank: item.rank + Math.min(weeksStale, 10) };
+  });
 }
 
 export function canonicalTaskFilePath(cortexPath: string, project: string): string | null {
@@ -194,9 +248,15 @@ function normalizeTaskItemLine(item: TaskItem): string {
   if (item.priority) text = `${text} [${item.priority}]`;
   if (item.pinned) text = `${text} [pinned]`;
   const prefix = item.checked || item.section === "Done" ? "- [x] " : "- [ ] ";
-  // Embed a stable ID so LLMs can reference this item persistently across mutations.
   const bid = item.stableId ?? newBid();
-  return `${prefix}${text} <!-- bid:${bid} -->`;
+  const rankPart = item.rank !== undefined ? ` rank:${item.rank}` : "";
+  const activityPart = item.lastActivity ? ` lastActivity:${item.lastActivity}` : "";
+  const createdPart = item.createdAt ? ` created:${item.createdAt}` : "";
+  const sessionPart = item.sessionId ? ` session:${item.sessionId}` : "";
+  const findingsPart = item.childFindings && item.childFindings.length > 0 ? ` findings:${item.childFindings.join(",")}` : "";
+  const parentFindingPart = item.parentFinding ? ` parentFinding:${item.parentFinding}` : "";
+  const speculativePart = item.speculative ? " speculative" : "";
+  return `${prefix}${text} <!-- bid:${bid}${rankPart}${activityPart}${createdPart}${sessionPart}${findingsPart}${parentFindingPart}${speculativePart} -->`;
 }
 
 function parseTaskContent(project: string, taskPath: string, content: string): TaskDoc {
@@ -227,8 +287,8 @@ function parseTaskContent(project: string, taskPath: string, content: string): T
     if (!line.startsWith("- ")) continue;
 
     const parsed = stripBulletPrefix(line);
-    // Extract and strip the stable-ID comment before further parsing.
-    const { clean: cleanBody, bid } = stripBid(parsed.body);
+    // Extract and strip the metadata comment before further parsing.
+    const { clean: cleanBody, bid, rank, lastActivity, createdAt, sessionId, childFindings, parentFinding, speculative } = stripBid(parsed.body);
     const pinned = detectPinned(cleanBody);
     const priority = normalizePriority(cleanBody);
     const continuation = parseContinuation(lines, i);
@@ -241,12 +301,24 @@ function parseTaskContent(project: string, taskPath: string, content: string): T
       line: cleanBody,
       checked: parsed.checked || section === "Done",
       priority,
+      rank,
+      lastActivity,
+      createdAt,
+      sessionId,
+      childFindings,
+      parentFinding,
+      speculative,
       context: continuation.context,
       pinned: pinned || undefined,
       githubIssue: continuation.githubIssue,
       githubUrl: continuation.githubUrl,
     });
     i += continuation.linesToSkip;
+  }
+
+  // Assign ranks to items that don't have one yet (migration from priority-only files)
+  for (const section of TASK_SECTIONS) {
+    assignMissingRanks(items[section]);
   }
 
   return {
@@ -381,7 +453,14 @@ export function resolveTaskItem(cortexPath: string, project: string, match: stri
   return cortexOk(parsed.data.items[found.match.section][found.match.index]);
 }
 
-export function addTask(cortexPath: string, project: string, item: string): CortexResult<string> {
+export interface AddTaskOptions {
+  createdAt?: string;
+  sessionId?: string;
+  speculative?: boolean;
+  parentFinding?: string;
+}
+
+export function addTask(cortexPath: string, project: string, item: string, opts?: AddTaskOptions): CortexResult<TaskItem> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
   // Validate project exists before acquiring the lock — withFileLock creates the parent
@@ -394,15 +473,21 @@ export function addTask(cortexPath: string, project: string, item: string): Cort
     if (!parsed.ok) return forwardErr(parsed);
 
     const line = item.replace(/^-\s*/, "").trim();
-    parsed.data.items.Queue.push({
+    const newItem: TaskItem = {
       id: `Q${parsed.data.items.Queue.length + 1}`,
+      stableId: newBid(),
       section: "Queue",
       line,
       checked: false,
       priority: normalizePriority(line),
-    });
+      createdAt: opts?.createdAt,
+      sessionId: opts?.sessionId,
+      parentFinding: opts?.parentFinding,
+      speculative: opts?.speculative || undefined,
+    };
+    parsed.data.items.Queue.push(newItem);
     writeTaskDoc(parsed.data);
-    return cortexOk(`Added task in ${project}: ${line}`);
+    return cortexOk(newItem);
   });
 }
 
@@ -609,6 +694,90 @@ export function unpinTask(cortexPath: string, project: string, match: string): C
   });
 }
 
+export function reorderTask(cortexPath: string, project: string, match: string, targetRank: number): CortexResult<string> {
+  const bPath = canonicalTaskFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+
+  return withSafeLock(bPath, () => {
+    const parsed = readTasks(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return taskItemNotFound(project, match);
+
+    const section = found.match.section;
+    const items = parsed.data.items[section];
+    const item = items[found.match.index];
+    const oldRank = item.rank ?? found.match.index + 1;
+    const clampedTarget = Math.max(1, Math.min(targetRank, items.length));
+
+    for (const other of items) {
+      if (other === item || other.rank === undefined) continue;
+      if (clampedTarget <= oldRank) {
+        if (other.rank >= clampedTarget && other.rank < oldRank) other.rank++;
+      } else {
+        if (other.rank > oldRank && other.rank <= clampedTarget) other.rank--;
+      }
+    }
+    item.rank = clampedTarget;
+
+    // Re-sort by rank so file order reflects new priority order
+    items.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+
+    writeTaskDoc(parsed.data);
+    return cortexOk(`Reordered in ${project}: "${item.line}" moved to rank ${clampedTarget}`);
+  });
+}
+
+export function appendChildFinding(cortexPath: string, project: string, match: string, findingId: string): CortexResult<string> {
+  const bPath = canonicalTaskFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+
+  return withSafeLock(bPath, () => {
+    const parsed = readTasks(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return taskItemNotFound(project, match);
+
+    const item = parsed.data.items[found.match.section][found.match.index];
+    item.childFindings = [...(item.childFindings ?? []), findingId];
+    item.lastActivity = new Date().toISOString();
+
+    writeTaskDoc(parsed.data);
+    return cortexOk(`Linked finding ${findingId} to task in ${project}: ${item.line}`);
+  });
+}
+
+export function promoteTask(cortexPath: string, project: string, match: string, moveToActive: boolean): CortexResult<TaskItem> {
+  const bPath = canonicalTaskFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+
+  return withSafeLock(bPath, () => {
+    const parsed = readTasks(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return taskItemNotFound(project, match);
+
+    const item = parsed.data.items[found.match.section][found.match.index];
+    item.speculative = undefined;
+
+    if (moveToActive && item.section !== "Active") {
+      parsed.data.items[found.match.section].splice(found.match.index, 1);
+      item.section = "Active";
+      item.checked = false;
+      parsed.data.items.Active.unshift(item);
+    }
+
+    writeTaskDoc(parsed.data);
+    return cortexOk(item);
+  });
+}
+
 export function workNextTask(cortexPath: string, project: string): CortexResult<string> {
   const bPath = canonicalTaskFilePath(cortexPath, project);
   if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
@@ -718,3 +887,4 @@ export function linkTaskIssue(
     return cortexOk(item);
   });
 }
+
