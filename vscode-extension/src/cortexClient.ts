@@ -52,6 +52,18 @@ export interface CortexClientOptions {
   requestTimeoutMs?: number;
 }
 
+export interface GetTasksOptions {
+  status?: "all" | "active" | "queue" | "done" | "active+queue";
+  limit?: number;
+  done_limit?: number;
+}
+
+export interface SessionHistoryOptions {
+  limit?: number;
+  sessionId?: string;
+  project?: string;
+}
+
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class CortexClient {
@@ -107,8 +119,12 @@ export class CortexClient {
     return this.callTool("get_findings", { project });
   }
 
-  async getTasks(project: string): Promise<unknown> {
-    return this.callTool("get_tasks", { project });
+  async getTasks(project: string, options: GetTasksOptions = {}): Promise<unknown> {
+    return this.callTool("get_tasks", { project, ...options });
+  }
+
+  async sessionHistory(options: SessionHistoryOptions = {}): Promise<unknown> {
+    return this.callTool("session_history", { ...options });
   }
 
   async addFinding(project: string, insight: string): Promise<unknown> {
@@ -167,6 +183,10 @@ export class CortexClient {
     return this.callTool("complete_task", { project, item });
   }
 
+  async removeTask(project: string, item: string): Promise<unknown> {
+    return this.callTool("remove_task", { project, item });
+  }
+
   async pinMemory(project: string, text: string): Promise<unknown> {
     return this.callTool("pin_memory", { project, text });
   }
@@ -175,8 +195,8 @@ export class CortexClient {
     return this.callTool("remove_finding", { project, finding: text });
   }
 
-  async getReviewQueue(project: string): Promise<unknown> {
-    return this.callTool("get_review_queue", { project });
+  async getReviewQueue(project?: string): Promise<unknown> {
+    return this.callTool("get_review_queue", project ? { project } : {});
   }
 
   async approveQueueItem(project: string, item: string): Promise<unknown> {

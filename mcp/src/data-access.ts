@@ -8,6 +8,7 @@ import {
   cortexOk,
   type CortexResult,
   forwardErr,
+  getProjectDirs,
 } from "./shared.js";
 import {
   checkPermission,
@@ -33,6 +34,7 @@ export {
   addTasks,
   completeTasks,
   completeTask,
+  removeTask,
   updateTask,
   linkTaskIssue,
   pinTask,
@@ -122,6 +124,10 @@ export interface QueueItem {
   risky: boolean;
   machine?: string;
   model?: string;
+}
+
+export interface ProjectQueueItem extends QueueItem {
+  project: string;
 }
 
 export function readFindings(cortexPath: string, project: string): CortexResult<FindingItem[]> {
@@ -375,6 +381,39 @@ export function readReviewQueue(cortexPath: string, project: string): CortexResu
     });
     index++;
   }
+
+  return cortexOk(items);
+}
+
+export function readReviewQueueAcrossProjects(cortexPath: string, profile?: string): CortexResult<ProjectQueueItem[]> {
+  const projects = getProjectDirs(cortexPath, profile)
+    .map((dir) => path.basename(dir))
+    .filter((project) => project !== "global")
+    .sort();
+  const sectionOrder: Record<ProjectQueueItem["section"], number> = {
+    Review: 0,
+    Stale: 1,
+    Conflicts: 2,
+  };
+
+  const items: ProjectQueueItem[] = [];
+  for (const project of projects) {
+    const result = readReviewQueue(cortexPath, project);
+    if (!result.ok) continue;
+    for (const item of result.data) {
+      items.push({ project, ...item });
+    }
+  }
+
+  items.sort((a, b) => {
+    const aDate = a.date === "unknown" ? "" : a.date;
+    const bDate = b.date === "unknown" ? "" : b.date;
+    if (a.section !== b.section) return sectionOrder[a.section] - sectionOrder[b.section];
+    if (aDate !== bDate) return bDate.localeCompare(aDate);
+    const projectCmp = a.project.localeCompare(b.project);
+    if (projectCmp !== 0) return projectCmp;
+    return a.id.localeCompare(b.id);
+  });
 
   return cortexOk(items);
 }

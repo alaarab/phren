@@ -11,6 +11,7 @@ import {
   unpinTask,
   tidyDoneTasks,
   readReviewQueue,
+  readReviewQueueAcrossProjects,
   approveQueueItem,
   rejectQueueItem,
   editQueueItem,
@@ -617,6 +618,36 @@ describe("memory queue helpers", () => {
     expect(result.data).toHaveLength(3);
     expect(result.data[0].section).toBe("Review");
     expect(result.data[0].confidence).toBe(0.4);
+  });
+
+  it("readReviewQueueAcrossProjects aggregates items with project metadata", () => {
+    const secondProjectDir = path.join(tmpDir, "bravo");
+    fs.mkdirSync(secondProjectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(secondProjectDir, "MEMORY_QUEUE.md"),
+      [
+        "# bravo Review Queue",
+        "",
+        "## Review",
+        "",
+        "- [2026-03-04] bravo review",
+        "",
+        "## Stale",
+        "",
+        "## Conflicts",
+        "",
+        "- [2026-03-05] bravo conflict",
+        "",
+      ].join("\n"),
+    );
+
+    const result = readReviewQueueAcrossProjects(tmpDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toHaveLength(5);
+    expect(result.data.every((item) => item.project === PROJECT || item.project === "bravo")).toBe(true);
+    expect(result.data.filter((item) => item.section === "Review")).toHaveLength(2);
+    expect(result.data.some((item) => item.project === "bravo" && item.section === "Conflicts")).toBe(true);
   });
 
   it("approveQueueItem adds finding and removes queue item", () => {

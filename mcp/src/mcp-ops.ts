@@ -6,7 +6,7 @@ import * as path from "path";
 import { runtimeFile, getProjectDirs } from "./shared.js";
 import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
-import { approveQueueItem, rejectQueueItem, editQueueItem, readReviewQueue } from "./data-access.js";
+import { approveQueueItem, rejectQueueItem, editQueueItem, readReviewQueue, readReviewQueueAcrossProjects } from "./data-access.js";
 import { addProjectFromPath } from "./core-project.js";
 import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "./project-config.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
@@ -319,19 +319,36 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ cortex · get review queue",
       description:
-        "List all items in a project's memory review queue (MEMORY_QUEUE.md). " +
+        "List all items in a project's memory review queue (MEMORY_QUEUE.md), or across all projects when omitted. " +
         "Returns items with their id, section (Review/Stale/Conflicts), date, text, confidence, and risky flag.",
       inputSchema: z.object({
-        project: z.string().describe("Project name."),
+        project: z.string().optional().describe("Project name. Omit to read the review queue across all projects in the active profile."),
       }),
     },
     async ({ project }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      const result = readReviewQueue(cortexPath, project);
-      if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+      if (project && !isValidProjectName(project)) {
+        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+      }
+      if (project) {
+        const result = readReviewQueue(cortexPath, project);
+        if (!result.ok) {
+          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+        }
+        const items = result.data.map((item) => ({ ...item, project }));
+        return mcpResponse({
+          ok: true,
+          message: `${items.length} queue item(s) for "${project}".`,
+          data: { items },
+        });
+      }
+
+      const result = readReviewQueueAcrossProjects(cortexPath, profile);
+      if (!result.ok) {
+        return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+      }
       return mcpResponse({
         ok: true,
-        message: `${result.data.length} queue item(s) for "${project}".`,
+        message: `${result.data.length} queue item(s) across all projects.`,
         data: { items: result.data },
       });
     }

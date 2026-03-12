@@ -129,6 +129,101 @@ describe("mcp-ops: get_consolidation_status", () => {
   });
 });
 
+// ── get_review_queue ─────────────────────────────────────────────────────────
+
+describe("mcp-ops: get_review_queue", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-ops-queue-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      cortexPath: tmp.path,
+      profile: "",
+      db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("returns queue items for a single project with project metadata", async () => {
+    const alphaDir = path.join(tmp.path, "alpha");
+    fs.mkdirSync(alphaDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(alphaDir, "MEMORY_QUEUE.md"),
+      [
+        "# alpha Review Queue",
+        "",
+        "## Review",
+        "",
+        "- [2026-03-10] alpha item [confidence 0.82]",
+        "",
+        "## Stale",
+        "",
+        "## Conflicts",
+        "",
+      ].join("\n"),
+    );
+
+    const res = parseResult(await server.call("get_review_queue", { project: "alpha" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.items).toHaveLength(1);
+    expect(res.data.items[0].project).toBe("alpha");
+    expect(res.data.items[0].text).toContain("alpha item");
+  });
+
+  it("aggregates review queue items across all projects when project is omitted", async () => {
+    const alphaDir = path.join(tmp.path, "alpha");
+    const bravoDir = path.join(tmp.path, "bravo");
+    fs.mkdirSync(alphaDir, { recursive: true });
+    fs.mkdirSync(bravoDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(alphaDir, "MEMORY_QUEUE.md"),
+      [
+        "# alpha Review Queue",
+        "",
+        "## Review",
+        "",
+        "- [2026-03-10] alpha review",
+        "",
+        "## Stale",
+        "",
+        "## Conflicts",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(bravoDir, "MEMORY_QUEUE.md"),
+      [
+        "# bravo Review Queue",
+        "",
+        "## Review",
+        "",
+        "## Stale",
+        "",
+        "- [2026-03-11] bravo stale",
+        "",
+        "## Conflicts",
+        "",
+      ].join("\n"),
+    );
+
+    const res = parseResult(await server.call("get_review_queue", {}));
+    expect(res.ok).toBe(true);
+    expect(res.data.items).toHaveLength(2);
+    expect(res.data.items.map((item: { project: string }) => item.project).sort()).toEqual(["alpha", "bravo"]);
+  });
+});
+
 // ── health_check ─────────────────────────────────────────────────────────────
 
 describe("mcp-ops: health_check", () => {
