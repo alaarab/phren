@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.31.1] - 2026-03-12
+
+### Added
+- **CLI task commands**: `cortex task add`, `cortex task complete`, `cortex task update` for managing tasks from the terminal.
+- **CLI finding commands**: `cortex finding add`, `cortex finding remove`, `cortex finding list` for managing findings from the terminal.
+- **CLI config command**: `cortex config task-mode` to set the task workflow mode.
+- **`cortex web-ui`**: new primary CLI command for the web UI (replaces `review-ui`; kept as backward-compatible alias).
+- **`cortex task list`** and **`cortex finding list`** subcommands.
+- **VS Code extension commands**: Add Task, Complete Task, Remove Finding, Pin Memory, and Search History added to the command palette.
+- **Web UI Tasks tab**: full task browser with project and section filters.
+- **Web UI Settings dashboard**: proactivity level, task mode, and hooks status visible and configurable from the web UI.
+- **`health_check` MCP tool** now returns `proactivityLevel` and `taskMode` in its response.
+
+### Changed
+- Renamed "Review UI" to "Web UI" across all surfaces: types, functions, filenames, docs, and tests. `review-ui` is retained as a backward-compatible CLI alias.
+
+### Fixed
+- `task` and `finding` CLI namespaces were registered in `CLI_COMMANDS` — they were reachable by name but not listed, so help output and shell tab-completion missed them.
+
 ## [1.29.1] - 2026-03-11
 
 ### Changed
@@ -608,7 +627,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `cortex` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.29.1...HEAD
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.31.1...HEAD
+[1.31.1]: https://github.com/alaarab/cortex/compare/v1.29.1...v1.31.1
 [1.29.1]: https://github.com/alaarab/cortex/compare/v1.28.0...v1.29.1
 [1.25.0]: https://github.com/alaarab/cortex/compare/v1.20.0...v1.25.0
 [1.16.0]: https://github.com/alaarab/cortex/compare/v1.15.6...v1.16.0
