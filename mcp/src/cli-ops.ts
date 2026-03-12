@@ -12,6 +12,7 @@ import { readTasksAcrossProjects, TASKS_FILENAME } from "./data-access.js";
 import { applyGravity } from "./data-tasks.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import { resolveSubprocessArgs } from "./cli-hooks.js";
+import { listAllSessions, getSessionArtifacts } from "./mcp-session.js";
 
 export function handleTaskView(profile: string) {
   const docs = readTasksAcrossProjects(getCortexPath(), profile);
@@ -58,6 +59,57 @@ export function handleTaskView(profile: string) {
   }
 
   console.log(`\n${totalActive} active, ${totalQueue} queued across ${docs.length} project(s).`);
+}
+
+export function handleSessionsView(args: string[]) {
+  const cortexPath = getCortexPath();
+  const sessionId = args[0];
+
+  if (sessionId) {
+    // Drill into a specific session
+    const sessions = listAllSessions(cortexPath, 200);
+    const session = sessions.find(s => s.sessionId === sessionId || s.sessionId.startsWith(sessionId));
+    if (!session) {
+      console.error(`Session "${sessionId}" not found.`);
+      process.exit(1);
+    }
+    const artifacts = getSessionArtifacts(cortexPath, session.sessionId);
+    console.log(`Session: ${session.sessionId.slice(0, 8)}`);
+    console.log(`Project: ${session.project ?? "—"}`);
+    console.log(`Started: ${session.startedAt.slice(0, 16).replace("T", " ")}`);
+    console.log(`Duration: ${session.durationMins ?? 0} min`);
+    console.log(`Status: ${session.status}`);
+    if (session.summary) console.log(`Summary: ${session.summary}`);
+    if (artifacts.findings.length > 0) {
+      console.log(`\nFindings (${artifacts.findings.length}):`);
+      for (const f of artifacts.findings) console.log(`  - [${f.project}] ${f.text}`);
+    }
+    if (artifacts.tasks.length > 0) {
+      console.log(`\nTasks (${artifacts.tasks.length}):`);
+      for (const t of artifacts.tasks) console.log(`  - [${t.project}/${t.section}] ${t.text}`);
+    }
+    return;
+  }
+
+  // List all sessions
+  const sessions = listAllSessions(cortexPath, 50);
+  if (sessions.length === 0) {
+    console.log("No sessions found.");
+    return;
+  }
+
+  console.log("Sessions (newest first):\n");
+  for (const s of sessions) {
+    const id = s.sessionId.slice(0, 8);
+    const proj = s.project ?? "—";
+    const dur = s.durationMins != null ? `${s.durationMins}m` : "?";
+    const status = s.status === "active" ? " ●" : "";
+    const findings = s.findingsAdded > 0 ? ` ${s.findingsAdded}f` : "";
+    const date = s.startedAt.slice(0, 16).replace("T", " ");
+    const summary = s.summary ? `  ${s.summary.slice(0, 50)}` : "";
+    console.log(`  ${id}${status}  ${date}  ${dur}${findings}  ${proj}${summary}`);
+  }
+  console.log(`\n${sessions.length} session(s). Use \`cortex sessions <id>\` to drill into one.`);
 }
 
 export async function handleQuickstart() {

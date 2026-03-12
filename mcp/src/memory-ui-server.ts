@@ -37,6 +37,7 @@ import { ensureTopicReferenceDoc, getProjectTopicsResponse, listProjectReference
 import { getWorkflowPolicy, updateWorkflowPolicy } from "./governance-policy.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
+import { listAllSessions, getSessionArtifacts } from "./mcp-session.js";
 
 export interface WebUiOptions {
   authToken?: string;
@@ -656,6 +657,37 @@ export function createWebUiHttpServer(
       } catch (err: unknown) {
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: errorMessage(err), tasks: [] }));
+      }
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/sessions") {
+      if (!requireGetAuth(req, res, url, authToken, true)) return;
+      try {
+        const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
+        const sessionId = typeof qs.sessionId === "string" ? qs.sessionId : undefined;
+        const project = typeof qs.project === "string" ? qs.project : undefined;
+        const limit = parseInt(typeof qs.limit === "string" ? qs.limit : "50", 10) || 50;
+        if (sessionId) {
+          const sessions = listAllSessions(cortexPath, 200);
+          const session = sessions.find(s => s.sessionId === sessionId || s.sessionId.startsWith(sessionId));
+          if (!session) {
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "Session not found" }));
+            return;
+          }
+          const artifacts = getSessionArtifacts(cortexPath, session.sessionId, project);
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true, session, ...artifacts }));
+        } else {
+          const sessions = listAllSessions(cortexPath, limit);
+          const filtered = project ? sessions.filter(s => s.project === project) : sessions;
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true, sessions: filtered }));
+        }
+      } catch (err: unknown) {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: errorMessage(err), sessions: [] }));
       }
       return;
     }

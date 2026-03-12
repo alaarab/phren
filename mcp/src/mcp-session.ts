@@ -6,11 +6,13 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { resolveFindingsPath, debugLog } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
-import { isValidProjectName } from "./utils.js";
+import { isValidProjectName, errorMessage } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
 import { readExtractedFacts } from "./mcp-extract-facts.js";
 import { resolveFindingSessionId } from "./finding-context.js";
-import { resolveTaskFilePath } from "./data-tasks.js";
+import { resolveTaskFilePath, readTasks } from "./data-tasks.js";
+import { readFindings } from "./data-access.js";
+import { getProjectDirs } from "./shared.js";
 
 interface SessionState {
   sessionId: string;
@@ -225,6 +227,100 @@ export function incrementSessionFindings(cortexPath: string, count = 1, sessionI
   }
 }
 
+/** Summary of a session for history listing. */
+export interface SessionHistoryEntry {
+  sessionId: string;
+  project?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMins?: number;
+  summary?: string;
+  findingsAdded: number;
+  status: "active" | "ended";
+}
+
+/** List all sessions (both active and ended) from the sessions directory, sorted newest first. */
+export function listAllSessions(cortexPath: string, limit = 50): SessionHistoryEntry[] {
+  const dir = sessionsDir(cortexPath);
+  const entries: SessionHistoryEntry[] = [];
+  let files: fs.Dirent[];
+  try {
+    files = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  for (const entry of files) {
+    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
+    const fullPath = path.join(dir, entry.name);
+    try {
+      const state = readSessionStateFile(fullPath);
+      if (!state) continue;
+      const durationMs = state.endedAt
+        ? new Date(state.endedAt).getTime() - new Date(state.startedAt).getTime()
+        : Date.now() - new Date(state.startedAt).getTime();
+      entries.push({
+        sessionId: state.sessionId,
+        project: state.project,
+        startedAt: state.startedAt,
+        endedAt: state.endedAt,
+        durationMins: Math.round(durationMs / 60000),
+        summary: state.summary,
+        findingsAdded: state.findingsAdded,
+        status: state.endedAt ? "ended" : "active",
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  // Sort newest first
+  entries.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+  return entries.slice(0, limit);
+}
+
+/** Get findings and tasks that belong to a specific session. */
+export function getSessionArtifacts(
+  cortexPath: string,
+  sessionId: string,
+  project?: string,
+): { findings: Array<{ project: string; text: string }>; tasks: Array<{ project: string; text: string; section: string }> } {
+  const findings: Array<{ project: string; text: string }> = [];
+  const tasks: Array<{ project: string; text: string; section: string }> = [];
+  const shortId = sessionId.slice(0, 8);
+
+  try {
+    const projectDirs = getProjectDirs(cortexPath);
+    const targetProjects = project ? [project] : projectDirs;
+    for (const proj of targetProjects) {
+      // Findings with matching sessionId
+      const findingsResult = readFindings(cortexPath, proj);
+      if (findingsResult.ok) {
+        for (const f of findingsResult.data) {
+          if (f.sessionId && (f.sessionId === sessionId || f.sessionId.startsWith(shortId))) {
+            findings.push({ project: proj, text: f.text });
+          }
+        }
+      }
+      // Tasks with matching sessionId
+      const tasksResult = readTasks(cortexPath, proj);
+      if (tasksResult.ok) {
+        for (const section of ["Active", "Queue", "Done"] as const) {
+          for (const t of tasksResult.data.items[section]) {
+            if (t.sessionId && (t.sessionId === sessionId || t.sessionId.startsWith(shortId))) {
+              tasks.push({ project: proj, text: t.line, section });
+            }
+          }
+        }
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`getSessionArtifacts error: ${errorMessage(err)}`);
+  }
+
+  return { findings, tasks };
+}
+
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath } = ctx;
 
@@ -404,5 +500,68 @@ export function register(server: McpServer, ctx: McpContext): void {
     if (state.summary) parts.push(`Prior summary: ${state.summary}`);
 
     return mcpResponse({ ok: true, message: parts.join("\n"), data: state });
+  });
+
+  server.registerTool("session_history", {
+    title: "◆ cortex · session history",
+    description: "List past sessions with their duration, findings count, and summary. Optionally drill into a specific session to see all findings and tasks created during it.",
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max sessions to return (default 20)."),
+      sessionId: z.string().optional().describe("If provided, return full artifacts (findings + tasks) for this session instead of listing all sessions."),
+      project: z.string().optional().describe("Filter sessions and artifacts by project."),
+    }),
+  }, async ({ limit, sessionId: targetSessionId, project }) => {
+    if (targetSessionId) {
+      // Drill into a specific session
+      const sessions = listAllSessions(cortexPath, 200);
+      const session = sessions.find(s => s.sessionId === targetSessionId || s.sessionId.startsWith(targetSessionId));
+      if (!session) return mcpResponse({ ok: false, error: `Session ${targetSessionId} not found.` });
+
+      const artifacts = getSessionArtifacts(cortexPath, session.sessionId, project);
+      const parts = [
+        `Session: ${session.sessionId.slice(0, 8)}`,
+        `Project: ${session.project ?? "none"}`,
+        `Started: ${session.startedAt}`,
+        `Status: ${session.status}`,
+        `Duration: ~${session.durationMins ?? 0} min`,
+        `Findings: ${artifacts.findings.length}`,
+        `Tasks: ${artifacts.tasks.length}`,
+      ];
+      if (session.summary) parts.push(`\nSummary: ${session.summary}`);
+      if (artifacts.findings.length > 0) {
+        parts.push("\n## Findings");
+        for (const f of artifacts.findings) {
+          parts.push(`- [${f.project}] ${f.text}`);
+        }
+      }
+      if (artifacts.tasks.length > 0) {
+        parts.push("\n## Tasks");
+        for (const t of artifacts.tasks) {
+          parts.push(`- [${t.project}/${t.section}] ${t.text}`);
+        }
+      }
+      return mcpResponse({ ok: true, message: parts.join("\n"), data: { session, ...artifacts } });
+    }
+
+    // List sessions
+    const sessions = listAllSessions(cortexPath, limit ?? 20);
+    const filtered = project ? sessions.filter(s => s.project === project) : sessions;
+    if (filtered.length === 0) return mcpResponse({ ok: true, message: "No sessions found.", data: [] });
+
+    const lines = filtered.map(s => {
+      const id = s.sessionId.slice(0, 8);
+      const proj = s.project ?? "—";
+      const dur = s.durationMins != null ? `${s.durationMins}m` : "?";
+      const status = s.status === "active" ? " ●" : "";
+      const findings = s.findingsAdded > 0 ? ` ${s.findingsAdded}f` : "";
+      const date = s.startedAt.slice(0, 16).replace("T", " ");
+      return `${id}${status}  ${date}  ${dur}${findings}  ${proj}${s.summary ? "  " + s.summary.slice(0, 60) : ""}`;
+    });
+
+    return mcpResponse({
+      ok: true,
+      message: `${filtered.length} session(s):\n\n${lines.join("\n")}`,
+      data: filtered,
+    });
   });
 }

@@ -885,10 +885,119 @@ function renderTasksAndSettingsScript(authToken: string): string {
     var _origSwitchTab = window.switchTab;
     var _tasksLoaded = false;
     var _settingsLoaded = false;
+    var _sessionsLoaded = false;
     window.switchTab = function(tab) {
       if (typeof _origSwitchTab === 'function') _origSwitchTab(tab);
       if (tab === 'tasks' && !_tasksLoaded) { _tasksLoaded = true; loadTasks(); }
       if (tab === 'settings' && !_settingsLoaded) { _settingsLoaded = true; loadSettings(); }
+      if (tab === 'sessions' && !_sessionsLoaded) { _sessionsLoaded = true; loadSessions(); }
+    };
+
+    var _sessionsData = [];
+    window.loadSessions = function() {
+      var projectFilter = document.getElementById('sessions-filter-project');
+      var project = projectFilter ? projectFilter.value : '';
+      var apiUrl = _tsAuthToken ? tsAuthUrl('/api/sessions') : '/api/sessions';
+      if (project) apiUrl += (apiUrl.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(project);
+      loadJson(apiUrl).then(function(data) {
+        if (!data.ok) throw new Error(data.error || 'Failed to load sessions');
+        _sessionsData = data.sessions || [];
+        renderSessionsList(_sessionsData);
+        // Populate project filter
+        if (projectFilter && projectFilter.options.length <= 1) {
+          var projects = {};
+          _sessionsData.forEach(function(s) { if (s.project) projects[s.project] = true; });
+          Object.keys(projects).sort().forEach(function(p) {
+            var opt = document.createElement('option');
+            opt.value = p; opt.textContent = p;
+            projectFilter.appendChild(opt);
+          });
+        }
+      }).catch(function(err) {
+        var list = document.getElementById('sessions-list');
+        if (list) list.innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center">' + esc(err.message) + '</div>';
+      });
+    };
+
+    function renderSessionsList(sessions) {
+      var list = document.getElementById('sessions-list');
+      var detail = document.getElementById('session-detail');
+      var countEl = document.getElementById('sessions-count');
+      if (detail) detail.style.display = 'none';
+      if (countEl) countEl.textContent = sessions.length + ' session(s)';
+      if (!list) return;
+      if (sessions.length === 0) {
+        list.innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center">No sessions found.</div>';
+        return;
+      }
+      list.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">' +
+        '<thead><tr style="border-bottom:1px solid var(--border);text-align:left">' +
+        '<th style="padding:8px">Session</th><th style="padding:8px">Project</th><th style="padding:8px">Date</th>' +
+        '<th style="padding:8px">Duration</th><th style="padding:8px">Findings</th><th style="padding:8px">Status</th></tr></thead><tbody>' +
+        sessions.map(function(s) {
+          var id = s.sessionId.slice(0, 8);
+          var date = (s.startedAt || '').slice(0, 16).replace('T', ' ');
+          var dur = s.durationMins != null ? s.durationMins + 'm' : '—';
+          var status = s.status === 'active' ? '<span style="color:var(--green)">● active</span>' : 'ended';
+          var summarySnip = s.summary ? '<div class="text-muted" style="font-size:var(--text-xs);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.summary.slice(0, 80)) + '</div>' : '';
+          return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="showSessionDetail(\\'' + esc(s.sessionId) + '\\')">' +
+            '<td style="padding:8px;font-family:monospace">' + esc(id) + summarySnip + '</td>' +
+            '<td style="padding:8px">' + esc(s.project || '—') + '</td>' +
+            '<td style="padding:8px">' + esc(date) + '</td>' +
+            '<td style="padding:8px">' + esc(dur) + '</td>' +
+            '<td style="padding:8px">' + (s.findingsAdded || 0) + '</td>' +
+            '<td style="padding:8px">' + status + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+
+    window.showSessionDetail = function(sessionId) {
+      var apiUrl = _tsAuthToken ? tsAuthUrl('/api/sessions') : '/api/sessions';
+      apiUrl += (apiUrl.includes('?') ? '&' : '?') + 'sessionId=' + encodeURIComponent(sessionId);
+      var list = document.getElementById('sessions-list');
+      var detail = document.getElementById('session-detail');
+      if (list) list.style.display = 'none';
+      if (detail) { detail.style.display = 'block'; detail.innerHTML = '<div style="padding:20px;color:var(--muted)">Loading session...</div>'; }
+      loadJson(apiUrl).then(function(data) {
+        if (!data.ok) throw new Error(data.error || 'Session not found');
+        var s = data.session;
+        var findings = data.findings || [];
+        var tasks = data.tasks || [];
+        var date = (s.startedAt || '').slice(0, 16).replace('T', ' ');
+        var dur = s.durationMins != null ? s.durationMins + ' min' : '—';
+        var html = '<div style="margin-bottom:12px"><button class="btn btn-sm" onclick="backToSessionsList()">← Back</button></div>' +
+          '<div class="card" style="margin-bottom:16px"><div class="card-body">' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">' +
+          '<div><strong>Session</strong><div class="text-muted" style="font-family:monospace">' + esc(s.sessionId.slice(0, 8)) + '</div></div>' +
+          '<div><strong>Project</strong><div class="text-muted">' + esc(s.project || '—') + '</div></div>' +
+          '<div><strong>Date</strong><div class="text-muted">' + esc(date) + '</div></div>' +
+          '<div><strong>Duration</strong><div class="text-muted">' + esc(dur) + '</div></div>' +
+          '<div><strong>Findings</strong><div class="text-muted">' + findings.length + '</div></div>' +
+          '<div><strong>Tasks</strong><div class="text-muted">' + tasks.length + '</div></div>' +
+          '<div><strong>Status</strong><div class="text-muted">' + esc(s.status) + '</div></div>' +
+          '</div>' +
+          (s.summary ? '<div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:var(--radius-sm)"><strong>Summary</strong><div style="margin-top:4px">' + esc(s.summary) + '</div></div>' : '') +
+          '</div></div>';
+        if (findings.length > 0) {
+          html += '<div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Findings (' + findings.length + ')</h3></div><div class="card-body"><ul style="margin:0;padding-left:20px">';
+          findings.forEach(function(f) { html += '<li style="margin-bottom:4px"><span class="text-muted">[' + esc(f.project) + ']</span> ' + esc(f.text) + '</li>'; });
+          html += '</ul></div></div>';
+        }
+        if (tasks.length > 0) {
+          html += '<div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Tasks (' + tasks.length + ')</h3></div><div class="card-body"><ul style="margin:0;padding-left:20px">';
+          tasks.forEach(function(t) { html += '<li style="margin-bottom:4px"><span class="text-muted">[' + esc(t.project) + '/' + esc(t.section) + ']</span> ' + esc(t.text) + '</li>'; });
+          html += '</ul></div></div>';
+        }
+        if (detail) detail.innerHTML = html;
+      }).catch(function(err) {
+        if (detail) detail.innerHTML = '<div style="padding:20px;color:var(--muted)">' + esc(err.message) + '</div>';
+      });
+    };
+
+    window.backToSessionsList = function() {
+      var list = document.getElementById('sessions-list');
+      var detail = document.getElementById('session-detail');
+      if (list) list.style.display = 'block';
+      if (detail) detail.style.display = 'none';
     };
 
     window.setFindingSensitivity = function(level) {
@@ -960,6 +1069,7 @@ ${PROJECT_REFERENCE_UI_STYLES}
     <button class="nav-item" onclick="switchTab('review')">Review</button>
     <button class="nav-item" onclick="switchTab('graph')">Graph</button>
     <button class="nav-item" onclick="switchTab('tasks')">Tasks</button>
+    <button class="nav-item" onclick="switchTab('sessions')">Sessions</button>
     <button class="nav-item" onclick="switchTab('skills')">Skills</button>
     <button class="nav-item" onclick="switchTab('hooks')">Hooks</button>
     <button class="nav-item" onclick="switchTab('settings')">Settings</button>
@@ -1129,6 +1239,20 @@ ${PROJECT_REFERENCE_UI_STYLES}
     <div id="tasks-list">
       <div style="padding:40px;color:var(--muted);text-align:center">Loading tasks...</div>
     </div>
+  </div>
+
+  <!-- ── Sessions Tab ──────────────────────────────────────── -->
+  <div id="tab-sessions" class="tab-content">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <select id="sessions-filter-project" onchange="loadSessions()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
+        <option value="">All projects</option>
+      </select>
+      <span id="sessions-count" class="text-muted" style="font-size:var(--text-sm);margin-left:auto"></span>
+    </div>
+    <div id="sessions-list">
+      <div style="padding:40px;color:var(--muted);text-align:center">Loading sessions...</div>
+    </div>
+    <div id="session-detail" style="display:none"></div>
   </div>
 
   <!-- ── Settings Tab ───────────────────────────────────────── -->
