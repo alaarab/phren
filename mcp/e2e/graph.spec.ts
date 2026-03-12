@@ -1,7 +1,7 @@
 import { test, expect, type Page, type ConsoleMessage } from "@playwright/test";
-import { createReviewUiHarness, type ReviewUiHarness } from "./review-ui-harness";
+import { createWebUiHarness, type WebUiHarness } from "./web-ui-harness";
 
-let harness: ReviewUiHarness;
+let harness: WebUiHarness;
 
 async function stubExternalAssets(page: Page): Promise<void> {
   await page.route("https://cdn.jsdelivr.net/npm/marked@12/marked.min.js", async (route) => {
@@ -111,7 +111,7 @@ function collectConsoleErrors(page: Page): ConsoleMessage[] {
 
 test.describe.serial("graph visualization e2e", () => {
   test.beforeAll(async () => {
-    harness = await createReviewUiHarness();
+    harness = await createWebUiHarness();
   });
 
   test.afterAll(async () => {

@@ -16,14 +16,39 @@ interface SearchQuickPickItem extends vscode.QuickPickItem {
 }
 
 const SEARCH_DEBOUNCE_MS = 300;
+const MAX_HISTORY = 20;
+
+const searchHistory: string[] = [];
+
+interface HistoryQuickPickItem extends vscode.QuickPickItem {
+  isHistory: true;
+  query: string;
+}
+
+type AnyQuickPickItem = SearchQuickPickItem | HistoryQuickPickItem;
 
 export async function showSearchQuickPick(client: CortexClient): Promise<void> {
-  const quickPick = vscode.window.createQuickPick<SearchQuickPickItem>();
+  const quickPick = vscode.window.createQuickPick<AnyQuickPickItem>();
   quickPick.placeholder = "Search cortex knowledge...";
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
 
   let requestToken = 0;
+
+  const showHistory = (): void => {
+    if (searchHistory.length === 0) {
+      quickPick.items = [];
+      quickPick.title = "Type to search";
+      return;
+    }
+    quickPick.items = searchHistory.map((q) => ({
+      label: q,
+      description: "Recent search",
+      isHistory: true as const,
+      query: q,
+    }));
+    quickPick.title = "Recent searches — type to search";
+  };
 
   const runSearch = async (query: string): Promise<void> => {
     const currentToken = ++requestToken;
@@ -31,8 +56,8 @@ export async function showSearchQuickPick(client: CortexClient): Promise<void> {
 
     const trimmedQuery = query.trim();
     if (!trimmedQuery) {
-      quickPick.items = [];
       quickPick.busy = false;
+      showHistory();
       return;
     }
 
@@ -41,7 +66,7 @@ export async function showSearchQuickPick(client: CortexClient): Promise<void> {
     try {
       const rawResponse = await client.searchKnowledge(trimmedQuery);
       const searchResults = parseSearchResults(rawResponse);
-      const items = await Promise.all(
+      const items: SearchQuickPickItem[] = await Promise.all(
         searchResults.map(async (result) => {
           const fullContent = await resolveFullContent(client, result);
           const labelSource = firstNonEmpty(
@@ -68,6 +93,14 @@ export async function showSearchQuickPick(client: CortexClient): Promise<void> {
 
       quickPick.items = items;
       quickPick.title = items.length === 0 ? "No results" : undefined;
+
+      // Record in history on successful search with results
+      if (items.length > 0) {
+        const idx = searchHistory.indexOf(trimmedQuery);
+        if (idx !== -1) searchHistory.splice(idx, 1);
+        searchHistory.unshift(trimmedQuery);
+        if (searchHistory.length > MAX_HISTORY) searchHistory.length = MAX_HISTORY;
+      }
     } catch (error) {
       if (currentToken !== requestToken) {
         return;
@@ -96,16 +129,24 @@ export async function showSearchQuickPick(client: CortexClient): Promise<void> {
       return;
     }
 
-    const panelTitle = selected.result.filename
-      ? `${selected.result.project}/${selected.result.filename}`
-      : selected.label;
+    // If a history item is selected, re-run that search
+    if ("isHistory" in selected && selected.isHistory) {
+      quickPick.value = selected.query;
+      void runSearch(selected.query);
+      return;
+    }
+
+    const resultItem = selected as SearchQuickPickItem;
+    const panelTitle = resultItem.result.filename
+      ? `${resultItem.result.project}/${resultItem.result.filename}`
+      : resultItem.label;
     const panel = vscode.window.createWebviewPanel(
       "cortex.searchResult",
       panelTitle,
       vscode.ViewColumn.Beside,
       {},
     );
-    panel.webview.html = renderSearchResultHtml(panelTitle, selected.result.project, selected.fullContent);
+    panel.webview.html = renderSearchResultHtml(panelTitle, resultItem.result.project, resultItem.fullContent);
     quickPick.hide();
   });
 
@@ -117,7 +158,7 @@ export async function showSearchQuickPick(client: CortexClient): Promise<void> {
   });
 
   quickPick.show();
-  debouncedSearch("");
+  showHistory();
 }
 
 async function resolveFullContent(client: CortexClient, result: SearchResult): Promise<string> {

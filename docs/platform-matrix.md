@@ -20,7 +20,7 @@ This is the current support and validation matrix for Cortex runtime surfaces.
 | Hook config writing | expected | expected | expected |
 | Wrapper fallback install | expected | expected | expected with platform-specific command wrappers |
 | GitHub CLI issue creation / mining | expected | expected | expected with resolved `gh.exe` / `gh.cmd` launch path |
-| Review UI | expected | expected | expected |
+| Web UI | expected | expected | expected |
 | Interactive shell raw-mode UX | expected | expected | best-effort; verify before release |
 
 ## Existing regression coverage

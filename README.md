@@ -443,7 +443,7 @@ cortex tasks [project]                 # cross-project task view
 cortex status                            # health, active project, stats
 cortex doctor [--fix]                    # health checks + optional self-heal
 cortex verify                            # check init completed correctly
-cortex review-ui [--port=3499]           # lightweight review UI in the browser
+cortex review-ui [--port=3499]           # lightweight web UI in the browser
 cortex update [--refresh-starter]        # update package; optionally refresh starter globals too
 cortex uninstall                         # remove cortex config and hooks
 

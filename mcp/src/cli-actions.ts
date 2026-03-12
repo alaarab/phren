@@ -9,7 +9,7 @@ import { upsertCanonical } from "./shared-content.js";
 import { errorMessage } from "./utils.js";
 import { addFinding as addFindingCore } from "./core-finding.js";
 import { runDoctor } from "./link.js";
-import { startReviewUi } from "./memory-ui.js";
+import { startWebUi } from "./memory-ui.js";
 import { startShell } from "./shell.js";
 import { runCortexUpdate } from "./update.js";
 import { readRuntimeHealth } from "./data-access.js";
@@ -201,7 +201,7 @@ export async function handleMemoryUi(args: string[]) {
   const noOpen = args.includes("--no-open");
   const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
   const safePort = Number.isNaN(port) ? 3499 : port;
-  await startReviewUi(getCortexPath(), safePort, resolveRuntimeProfile(getCortexPath()), {
+  await startWebUi(getCortexPath(), safePort, resolveRuntimeProfile(getCortexPath()), {
     autoOpen: !noOpen,
     allowPortFallback: !portArg,
   });

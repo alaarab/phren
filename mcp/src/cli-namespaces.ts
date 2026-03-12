@@ -13,7 +13,7 @@ import { readInstallPreferences, writeInstallPreferences, type InstallPreference
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
-import { TASK_FILE_ALIASES } from "./data-tasks.js";
+import { TASK_FILE_ALIASES, addTask, completeTask, updateTask } from "./data-tasks.js";
 import {
   PROJECT_HOOK_EVENTS,
   PROJECT_OWNERSHIP_MODES,
@@ -23,6 +23,7 @@ import {
   writeProjectConfig,
   writeProjectHookConfig,
 } from "./project-config.js";
+import { addFinding, removeFinding } from "./core-finding.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
@@ -682,4 +683,172 @@ async function handleProjectsRemove(name: string, profile: string) {
   fs.rmSync(projectDir, { recursive: true, force: true });
   console.log(`Removed project "${name}".`);
   console.log(`If this project was in a profile, remove it from profiles/${profile || "personal"}.yaml manually.`);
+}
+
+// ── Task namespace ────────────────────────────────────────────────────────────
+
+function printTaskUsage() {
+  console.log("Usage:");
+  console.log('  cortex task add <project> "<text>"');
+  console.log('  cortex task complete <project> "<text>"');
+  console.log('  cortex task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."]');
+}
+
+export async function handleTaskNamespace(args: string[]) {
+  const subcommand = args[0];
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    printTaskUsage();
+    return;
+  }
+
+  if (subcommand === "list") {
+    // Delegate to the cross-project task view (same as `cortex tasks`)
+    const { handleTaskView } = await import("./cli-ops.js");
+    return handleTaskView(args[1] || "default");
+  }
+
+  if (subcommand === "add") {
+    const project = args[1];
+    const text = args.slice(2).join(" ");
+    if (!project || !text) {
+      console.error('Usage: cortex task add <project> "<text>"');
+      process.exit(1);
+    }
+    const result = addTask(getCortexPath(), project, text);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    console.log(result.data);
+    return;
+  }
+
+  if (subcommand === "complete") {
+    const project = args[1];
+    const match = args.slice(2).join(" ");
+    if (!project || !match) {
+      console.error('Usage: cortex task complete <project> "<text>"');
+      process.exit(1);
+    }
+    const result = completeTask(getCortexPath(), project, match);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    console.log(result.data);
+    return;
+  }
+
+  if (subcommand === "update") {
+    const project = args[1];
+    if (!project) {
+      printTaskUsage();
+      process.exit(1);
+    }
+    // Collect non-flag args as the match text, flags as updates
+    const positional: string[] = [];
+    const updates: { priority?: string; context?: string; section?: string } = {};
+    for (const arg of args.slice(2)) {
+      if (arg.startsWith("--priority=")) {
+        updates.priority = arg.slice("--priority=".length);
+      } else if (arg.startsWith("--section=")) {
+        updates.section = arg.slice("--section=".length);
+      } else if (arg.startsWith("--context=")) {
+        updates.context = arg.slice("--context=".length);
+      } else if (!arg.startsWith("--")) {
+        positional.push(arg);
+      }
+    }
+    const match = positional.join(" ");
+    if (!match) {
+      printTaskUsage();
+      process.exit(1);
+    }
+    const result = updateTask(getCortexPath(), project, match, updates);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    console.log(result.data);
+    return;
+  }
+
+  console.error(`Unknown task subcommand: ${subcommand}`);
+  printTaskUsage();
+  process.exit(1);
+}
+
+// ── Finding namespace ─────────────────────────────────────────────────────────
+
+function printFindingUsage() {
+  console.log("Usage:");
+  console.log('  cortex finding add <project> "<text>"');
+  console.log('  cortex finding remove <project> "<text>"');
+}
+
+export async function handleFindingNamespace(args: string[]) {
+  const subcommand = args[0];
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    printFindingUsage();
+    return;
+  }
+
+  if (subcommand === "list") {
+    const project = args[1];
+    if (!project) {
+      console.error("Usage: cortex finding list <project>");
+      process.exit(1);
+    }
+    const { readFindings } = await import("./data-access.js");
+    const result = readFindings(getCortexPath(), project);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    const items = result.data;
+    if (!items.length) {
+      console.log(`No findings found for "${project}".`);
+      return;
+    }
+    for (const entry of items.slice(0, 50)) {
+      console.log(`- [${entry.id}] ${entry.date}: ${entry.text}`);
+    }
+    return;
+  }
+
+  if (subcommand === "add") {
+    const project = args[1];
+    const text = args.slice(2).join(" ");
+    if (!project || !text) {
+      console.error('Usage: cortex finding add <project> "<text>"');
+      process.exit(1);
+    }
+    const result = addFinding(getCortexPath(), project, text);
+    if (!result.ok) {
+      console.error(result.message);
+      process.exit(1);
+    }
+    console.log(result.message);
+    return;
+  }
+
+  if (subcommand === "remove") {
+    const project = args[1];
+    const text = args.slice(2).join(" ");
+    if (!project || !text) {
+      console.error('Usage: cortex finding remove <project> "<text>"');
+      process.exit(1);
+    }
+    const result = removeFinding(getCortexPath(), project, text);
+    if (!result.ok) {
+      console.error(result.message);
+      process.exit(1);
+    }
+    console.log(result.message);
+    return;
+  }
+
+  console.error(`Unknown finding subcommand: ${subcommand}`);
+  printFindingUsage();
+  process.exit(1);
 }

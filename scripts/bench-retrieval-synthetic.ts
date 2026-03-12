@@ -20,7 +20,7 @@ const SERVICES = [
   "payments-api",
   "auth-gateway",
   "billing-worker",
-  "review-ui",
+  "web-ui",
   "sync-daemon",
   "project-indexer",
   "queue-processor",

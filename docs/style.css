@@ -1282,9 +1282,9 @@ section {
 .demo-shell-btmbar-hint { color: var(--text-dim); }
 .demo-shell-btmbar-dot  { color: rgba(255,255,255,0.18); }
 
-/* --- REVIEW UI SECTION --- */
-.review-ui-section { padding: 100px 0; border-top: 1px solid var(--border); }
-.review-ui-header  { max-width: 680px; margin: 0 auto 48px; text-align: center; }
+/* --- WEB UI SECTION --- */
+.web-ui-section { padding: 100px 0; border-top: 1px solid var(--border); }
+.web-ui-header  { max-width: 680px; margin: 0 auto 48px; text-align: center; }
 
 /* Browser mock */
 .rui-mock          { border-radius: 14px; overflow: hidden; border: 1px solid var(--border); background: #0c0d0b; }

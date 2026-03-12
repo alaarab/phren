@@ -43,7 +43,7 @@ Usage:
   cortex skill-list                      List installed skills
   cortex doctor [--fix] [--check-data] [--agents]
                                          Health check and self-heal (--agents: show agent integrations only)
-  cortex review-ui [--port=3499] [--no-open]  Memory review web UI
+  cortex web-ui [--port=3499] [--no-open]     Memory web UI (alias: review-ui)
   cortex debug-injection --prompt "..."  Preview hook-prompt injection output
   cortex inspect-index [--project <n>]   Inspect FTS index contents for debugging
   cortex update [--refresh-starter]      Update to latest version
@@ -126,12 +126,15 @@ const CLI_COMMANDS = [
   "debug-injection",
   "inspect-index",
   "review-ui",
+  "web-ui",
   "quality-feedback",
   "skill-list",
   "skills",
   "hooks",
   "detect-skills",
+  "task",
   "tasks",
+  "finding",
   "quickstart",
   "background-maintenance",
   "background-sync",

@@ -307,5 +307,5 @@ cortex maintain govern
   |
   +-> enforce canonical locks (pinned entries stay)
 
-approve/reject/edit queue items via MCP tools or review-ui
+approve/reject/edit queue items via MCP tools or web-ui
 ```

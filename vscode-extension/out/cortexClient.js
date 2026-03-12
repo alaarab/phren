@@ -80,8 +80,14 @@ class CortexClient {
     async updateTask(project, item, updates) {
         return this.callTool("update_task", { project, item, updates });
     }
+    async addTask(project, item) {
+        return this.callTool("add_task", { project, item });
+    }
     async completeTask(project, item) {
         return this.callTool("complete_task", { project, item });
+    }
+    async pinMemory(project, text) {
+        return this.callTool("pin_memory", { project, text });
     }
     async removeFinding(project, text) {
         return this.callTool("remove_finding", { project, finding: text });

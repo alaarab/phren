@@ -1,4 +1,4 @@
-import { REVIEW_UI_STYLES, renderReviewUiScript } from "./memory-ui-assets.js";
+import { WEB_UI_STYLES, renderWebUiScript } from "./memory-ui-assets.js";
 import { renderGraphScript } from "./memory-ui-graph.js";
 import { readSyncSnapshot } from "./memory-ui-data.js";
 
@@ -723,7 +723,156 @@ function renderReviewQueueEditSyncScript(): string {
   })();`;
 }
 
-export function renderReviewUiPage(cortexPath: string, authToken?: string): string {
+function renderTasksAndSettingsScript(authToken: string): string {
+  return `(function() {
+    var _tsAuthToken = '${authToken}';
+    var _allTasks = [];
+
+    function tsAuthUrl(base) {
+      return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(_tsAuthToken);
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function priorityBadge(p) {
+      if (!p) return '';
+      var colors = { high: '#ef4444', medium: '#f59e0b', low: '#6b7280' };
+      var color = colors[p] || '#6b7280';
+      return '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:11px;font-weight:600;background:' + color + '22;color:' + color + ';margin-left:6px">' + esc(p) + '</span>';
+    }
+
+    function loadTasks() {
+      var url = _tsAuthToken ? tsAuthUrl('/api/tasks') : '/api/tasks';
+      fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+        _allTasks = data.tasks || [];
+        populateTaskProjectFilter();
+        filterTasks();
+      }).catch(function(err) {
+        document.getElementById('tasks-list').innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center">Failed to load tasks: ' + esc(String(err)) + '</div>';
+      });
+    }
+
+    function populateTaskProjectFilter() {
+      var projects = Array.from(new Set(_allTasks.map(function(t) { return t.project; }))).sort();
+      var sel = document.getElementById('tasks-filter-project');
+      if (!sel) return;
+      var html = '<option value="">All projects</option>';
+      projects.forEach(function(p) { html += '<option value="' + esc(p) + '">' + esc(p) + '</option>'; });
+      sel.innerHTML = html;
+    }
+
+    window.filterTasks = function() {
+      var projectFilter = (document.getElementById('tasks-filter-project') || {}).value || '';
+      var sectionFilter = (document.getElementById('tasks-filter-section') || {}).value || '';
+      var tasks = _allTasks.filter(function(t) {
+        if (projectFilter && t.project !== projectFilter) return false;
+        if (sectionFilter && t.section !== sectionFilter) return false;
+        if (!sectionFilter && t.section !== 'Active' && t.section !== 'Queue') return false;
+        return true;
+      });
+
+      var countEl = document.getElementById('tasks-count');
+      if (countEl) countEl.textContent = tasks.length + ' task' + (tasks.length !== 1 ? 's' : '');
+
+      var container = document.getElementById('tasks-list');
+      if (!container) return;
+      if (!tasks.length) {
+        container.innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center">No tasks found.</div>';
+        return;
+      }
+
+      // Group by project
+      var byProject = {};
+      tasks.forEach(function(t) {
+        (byProject[t.project] = byProject[t.project] || { Active: [], Queue: [] })[t.section].push(t);
+      });
+
+      var html = '';
+      Object.keys(byProject).sort().forEach(function(proj) {
+        var group = byProject[proj];
+        html += '<div class="card" style="margin-bottom:16px">';
+        html += '<div class="card-header"><h2>' + esc(proj) + '</h2></div>';
+        html += '<div class="card-body" style="padding:0">';
+
+        ['Active', 'Queue'].forEach(function(section) {
+          var items = group[section];
+          if (!items || !items.length) return;
+          html += '<div style="padding:8px 16px 4px;font-size:var(--text-xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">' + esc(section) + '</div>';
+          html += '<ul style="margin:0;padding:0 0 8px;list-style:none">';
+          items.forEach(function(t) {
+            html += '<li style="padding:8px 16px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:8px;min-width:0">';
+            if (t.pinned) html += '<span title="Pinned" style="color:var(--accent);font-size:12px;flex-shrink:0">&#9650;</span>';
+            html += '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-base)">' + esc(t.line) + '</span>';
+            html += priorityBadge(t.priority);
+            if (t.githubIssue && t.githubUrl) {
+              html += '<a href="' + esc(t.githubUrl) + '" target="_blank" rel="noopener noreferrer" style="font-size:var(--text-xs);color:var(--accent);flex-shrink:0;text-decoration:none">#' + esc(String(t.githubIssue)) + '</a>';
+            }
+            html += '</li>';
+          });
+          html += '</ul>';
+        });
+
+        html += '</div></div>';
+      });
+      container.innerHTML = html;
+    };
+
+    function loadSettings() {
+      var url = _tsAuthToken ? tsAuthUrl('/api/settings') : '/api/settings';
+      fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) return;
+        var proactEl = document.getElementById('settings-proactivity');
+        if (proactEl) {
+          proactEl.innerHTML =
+            '<div><strong>Findings</strong><div class="text-muted">' + esc(data.proactivityFindings || data.proactivity || 'high') + '</div></div>' +
+            '<div><strong>Tasks</strong><div class="text-muted">' + esc(data.proactivityTask || data.proactivity || 'high') + '</div></div>' +
+            '<div><strong>Default</strong><div class="text-muted">' + esc(data.proactivity || 'high') + '</div></div>';
+        }
+        var tmEl = document.getElementById('settings-task-mode');
+        if (tmEl) {
+          var modeDescriptions = { off: 'Tasks are disabled', manual: 'Tasks are added only when explicitly requested', suggest: 'Claude suggests tasks but waits for confirmation', auto: 'Claude adds tasks automatically' };
+          var mode = data.taskMode || 'auto';
+          tmEl.innerHTML = '<strong>' + esc(mode) + '</strong> &mdash; <span class="text-muted">' + esc(modeDescriptions[mode] || mode) + '</span>';
+        }
+        var hooksEl = document.getElementById('settings-hooks');
+        if (hooksEl && data.hookTools) {
+          var globalEnabled = data.hooksEnabled;
+          var html = '<div style="margin-bottom:8px"><strong>Global hooks: </strong><span class="badge ' + (globalEnabled ? 'badge-on' : 'badge-off') + '">' + (globalEnabled ? 'enabled' : 'disabled') + '</span></div>';
+          html += '<div style="display:flex;flex-wrap:wrap;gap:8px">';
+          data.hookTools.forEach(function(tool) {
+            html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm)">';
+            html += '<span>' + esc(tool.tool) + '</span>';
+            html += '<span class="badge ' + (tool.enabled ? 'badge-on' : 'badge-off') + '">' + (tool.enabled ? 'on' : 'off') + '</span>';
+            html += '</div>';
+          });
+          html += '</div>';
+          hooksEl.innerHTML = html;
+        }
+        var mcpEl = document.getElementById('settings-mcp');
+        if (mcpEl) {
+          mcpEl.innerHTML = '<strong>MCP server: </strong><span class="badge ' + (data.mcpEnabled ? 'badge-on' : 'badge-off') + '">' + (data.mcpEnabled ? 'enabled' : 'disabled') + '</span>';
+        }
+      }).catch(function(err) {
+        var el = document.getElementById('settings-proactivity');
+        if (el) el.innerHTML = '<div style="color:var(--muted)">Failed to load settings: ' + esc(String(err)) + '</div>';
+      });
+    }
+
+    // Hook into switchTab to lazy-load
+    var _origSwitchTab = window.switchTab;
+    var _tasksLoaded = false;
+    var _settingsLoaded = false;
+    window.switchTab = function(tab) {
+      if (typeof _origSwitchTab === 'function') _origSwitchTab(tab);
+      if (tab === 'tasks' && !_tasksLoaded) { _tasksLoaded = true; loadTasks(); }
+      if (tab === 'settings' && !_settingsLoaded) { _settingsLoaded = true; loadSettings(); }
+    };
+  })();`;
+}
+
+export function renderWebUiPage(cortexPath: string, authToken?: string): string {
   const sync = readSyncSnapshot(cortexPath) as {
     autoSaveStatus?: string;
     lastPullAt?: string;
@@ -743,7 +892,7 @@ export function renderReviewUiPage(cortexPath: string, authToken?: string): stri
   <title>Cortex Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <style>
-${REVIEW_UI_STYLES}
+${WEB_UI_STYLES}
 ${PROJECT_REFERENCE_UI_STYLES}
   </style>
 </head>
@@ -762,8 +911,10 @@ ${PROJECT_REFERENCE_UI_STYLES}
     <button class="nav-item active" onclick="switchTab('projects')">Projects</button>
     <button class="nav-item" onclick="switchTab('review')">Review</button>
     <button class="nav-item" onclick="switchTab('graph')">Graph</button>
+    <button class="nav-item" onclick="switchTab('tasks')">Tasks</button>
     <button class="nav-item" onclick="switchTab('skills')">Skills</button>
     <button class="nav-item" onclick="switchTab('hooks')">Hooks</button>
+    <button class="nav-item" onclick="switchTab('settings')">Settings</button>
   </nav>
   <span class="status-led status-led-ok" id="sync-led" title="Synced"></span>
   <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" style="margin-left:auto;background:none;border:none;cursor:pointer;padding:8px;border-radius:6px;color:var(--muted);font-size:var(--text-md);line-height:1;transition:color .15s" aria-label="Toggle dark mode">☀️</button>
@@ -910,6 +1061,54 @@ ${PROJECT_REFERENCE_UI_STYLES}
       </div>
     </div>
   </div>
+
+  <!-- ── Tasks Tab ─────────────────────────────────────────── -->
+  <div id="tab-tasks" class="tab-content">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <select id="tasks-filter-project" onchange="filterTasks()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
+        <option value="">All projects</option>
+      </select>
+      <select id="tasks-filter-section" onchange="filterTasks()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
+        <option value="">Active + Queue</option>
+        <option value="Active">Active only</option>
+        <option value="Queue">Queue only</option>
+      </select>
+      <span id="tasks-count" class="text-muted" style="font-size:var(--text-sm);margin-left:auto"></span>
+    </div>
+    <div id="tasks-list">
+      <div style="padding:40px;color:var(--muted);text-align:center">Loading tasks...</div>
+    </div>
+  </div>
+
+  <!-- ── Settings Tab ───────────────────────────────────────── -->
+  <div id="tab-settings" class="tab-content">
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>Proactivity</h2></div>
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px" id="settings-proactivity">
+          <div style="color:var(--muted)">Loading...</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>Task Mode</h2></div>
+      <div class="card-body">
+        <div id="settings-task-mode" style="color:var(--muted)">Loading...</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>Hooks</h2></div>
+      <div class="card-body">
+        <div id="settings-hooks" style="color:var(--muted)">Loading...</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h2>MCP</h2></div>
+      <div class="card-body">
+        <div id="settings-mcp" style="color:var(--muted)">Loading...</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="batch-bar" id="batch-bar">
@@ -929,7 +1128,7 @@ ${PROJECT_REFERENCE_UI_STYLES}
 </div>
 
 <script>
-${renderReviewUiScript(h(authToken || ""))}
+${renderWebUiScript(h(authToken || ""))}
 </script>
 <script>
 ${renderGraphScript()}
@@ -943,10 +1142,13 @@ ${renderSkillUiEnhancementScript(h(authToken || ""))}
 <script>
 ${renderProjectReferenceEnhancementScript(h(authToken || ""))}
 </script>
+<script>
+${renderTasksAndSettingsScript(h(authToken || ""))}
+</script>
 </body>
 </html>`;
 }
 
 export function renderPageForTests(cortexPath: string, _csrfToken?: string, authToken?: string): string {
-  return renderReviewUiPage(cortexPath, authToken);
+  return renderWebUiPage(cortexPath, authToken);
 }

@@ -36,19 +36,35 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.showSearchQuickPick = showSearchQuickPick;
 const vscode = __importStar(require("vscode"));
 const SEARCH_DEBOUNCE_MS = 300;
+const MAX_HISTORY = 20;
+const searchHistory = [];
 async function showSearchQuickPick(client) {
     const quickPick = vscode.window.createQuickPick();
     quickPick.placeholder = "Search cortex knowledge...";
     quickPick.matchOnDescription = true;
     quickPick.matchOnDetail = true;
     let requestToken = 0;
+    const showHistory = () => {
+        if (searchHistory.length === 0) {
+            quickPick.items = [];
+            quickPick.title = "Type to search";
+            return;
+        }
+        quickPick.items = searchHistory.map((q) => ({
+            label: q,
+            description: "Recent search",
+            isHistory: true,
+            query: q,
+        }));
+        quickPick.title = "Recent searches — type to search";
+    };
     const runSearch = async (query) => {
         const currentToken = ++requestToken;
         quickPick.title = undefined;
         const trimmedQuery = query.trim();
         if (!trimmedQuery) {
-            quickPick.items = [];
             quickPick.busy = false;
+            showHistory();
             return;
         }
         quickPick.busy = true;
@@ -71,6 +87,15 @@ async function showSearchQuickPick(client) {
             }
             quickPick.items = items;
             quickPick.title = items.length === 0 ? "No results" : undefined;
+            // Record in history on successful search with results
+            if (items.length > 0) {
+                const idx = searchHistory.indexOf(trimmedQuery);
+                if (idx !== -1)
+                    searchHistory.splice(idx, 1);
+                searchHistory.unshift(trimmedQuery);
+                if (searchHistory.length > MAX_HISTORY)
+                    searchHistory.length = MAX_HISTORY;
+            }
         }
         catch (error) {
             if (currentToken !== requestToken) {
@@ -96,11 +121,18 @@ async function showSearchQuickPick(client) {
         if (!selected) {
             return;
         }
-        const panelTitle = selected.result.filename
-            ? `${selected.result.project}/${selected.result.filename}`
-            : selected.label;
+        // If a history item is selected, re-run that search
+        if ("isHistory" in selected && selected.isHistory) {
+            quickPick.value = selected.query;
+            void runSearch(selected.query);
+            return;
+        }
+        const resultItem = selected;
+        const panelTitle = resultItem.result.filename
+            ? `${resultItem.result.project}/${resultItem.result.filename}`
+            : resultItem.label;
         const panel = vscode.window.createWebviewPanel("cortex.searchResult", panelTitle, vscode.ViewColumn.Beside, {});
-        panel.webview.html = renderSearchResultHtml(panelTitle, selected.result.project, selected.fullContent);
+        panel.webview.html = renderSearchResultHtml(panelTitle, resultItem.result.project, resultItem.fullContent);
         quickPick.hide();
     });
     const hideDisposable = quickPick.onDidHide(() => {
@@ -110,7 +142,7 @@ async function showSearchQuickPick(client) {
         quickPick.dispose();
     });
     quickPick.show();
-    debouncedSearch("");
+    showHistory();
 }
 async function resolveFullContent(client, result) {
     const providedContent = asNonEmptyString(result.content);

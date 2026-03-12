@@ -5,7 +5,7 @@ import * as os from "os";
 import { CortexClient } from "./cortexClient";
 
 /**
- * Load the review-ui graph script from the MCP dist.
+ * Load the web-ui graph script from the MCP dist.
  * This gives us the Barnes-Hut force simulation, relevance gravity, a11y, etc.
  *
  * Resolution order:
@@ -525,7 +525,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   const nonce = getNonce();
   const safePayload = JSON.stringify(payload).replace(/</g, "\\u003c");
 
-  // Load the review-ui graph script (Barnes-Hut force sim, relevance gravity, a11y, etc.)
+  // Load the web-ui graph script (Barnes-Hut force sim, relevance gravity, a11y, etc.)
   const graphScript = loadGraphScript();
 
   return `<!DOCTYPE html>
@@ -597,7 +597,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
 // ── Review-UI graph engine (Barnes-Hut + relevance gravity) ──
 ${graphScript}
 
-// ── Data adapter: transform extension payload to review-ui format ──
+// ── Data adapter: transform extension payload to web-ui format ──
 (function() {
   var payload = ${safePayload};
 
@@ -648,7 +648,7 @@ ${graphScript}
     });
   }
 
-  // Build scores in review-ui format (flat entries map)
+  // Build scores in web-ui format (flat entries map)
   var scores = {};
   if (payload.scores && payload.scores.entries) {
     scores = payload.scores.entries;
@@ -666,7 +666,7 @@ ${graphScript}
   }
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
 
-  // Mount the review-ui graph
+  // Mount the web-ui graph
   if (window.cortexGraph && window.cortexGraph.mount) {
     window.cortexGraph.mount({
       nodes: graphNodes,

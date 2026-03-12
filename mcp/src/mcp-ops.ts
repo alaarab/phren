@@ -196,6 +196,24 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const projectCount = getProjectDirs(cortexPath, activeProfile).length;
 
+      // Proactivity and taskMode
+      let proactivity: string = "high";
+      let taskMode: string = "auto";
+      try {
+        const { getWorkflowPolicy } = await import("./governance-policy.js");
+        const workflowPolicy = getWorkflowPolicy(cortexPath);
+        taskMode = workflowPolicy.taskMode;
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck taskMode: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+      try {
+        const { readInstallPreferences } = await import("./init-preferences.js");
+        const prefs = readInstallPreferences(cortexPath);
+        proactivity = prefs.proactivity || "high";
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck proactivity: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+
       const lines = [
         `Cortex v${version}`,
         `Profile: ${activeProfile || "(default)"}`,
@@ -204,6 +222,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         `FTS index: ${indexStatus.exists ? `ok (${Math.round((indexStatus.sizeBytes ?? 0) / 1024)} KB)` : "missing"}`,
         `MCP: ${mcpEnabled ? "enabled" : "disabled"}`,
         `Hooks: ${hooksEnabled ? "enabled" : "disabled"}`,
+        `Proactivity: ${proactivity}`,
+        `Task mode: ${taskMode}`,
         `Path: ${cortexPath}`,
       ].filter(Boolean);
 
@@ -218,6 +238,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           index: indexStatus,
           mcpEnabled,
           hooksEnabled,
+          proactivity,
+          taskMode,
           cortexPath,
         },
       });

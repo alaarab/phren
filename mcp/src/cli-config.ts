@@ -57,6 +57,8 @@ export async function handleConfig(args: string[]) {
       return handleConfigProactivity(sub, rest);
     case "project-ownership":
       return handleConfigProjectOwnership(rest);
+    case "task-mode":
+      return handleConfigTaskMode(rest);
     default:
       console.log(`cortex config - manage settings and policies
 
@@ -70,6 +72,8 @@ Subcommands:
                                         Findings-specific auto-capture level override
   cortex config proactivity.tasks [level]
                                         Task-specific auto-capture level override
+  cortex config task-mode [get|set <mode>]
+                                        Task automation mode (off|manual|suggest|auto)
   cortex config project-ownership [mode]
                                         Default ownership for future project enrollments
   cortex config machines                 Registered machines and profiles
@@ -181,6 +185,66 @@ function handleConfigProjectOwnership(args: string[]) {
 
   writeInstallPreferences(cortexPath, { projectOwnershipDefault: ownership });
   console.log(JSON.stringify(projectOwnershipConfigSnapshot(cortexPath), null, 2));
+}
+
+// ── Task mode ─────────────────────────────────────────────────────────────────
+
+const TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
+type TaskMode = typeof TASK_MODES[number];
+
+function normalizeTaskMode(raw: string | undefined): TaskMode | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  return TASK_MODES.includes(normalized as TaskMode) ? normalized as TaskMode : undefined;
+}
+
+function taskModeConfigSnapshot(cortexPath: string) {
+  const policy = getWorkflowPolicy(cortexPath);
+  return {
+    taskMode: policy.taskMode,
+  };
+}
+
+function handleConfigTaskMode(args: string[]) {
+  const cortexPath = getCortexPath();
+  const action = args[0];
+
+  if (!action || action === "get") {
+    console.log(JSON.stringify(taskModeConfigSnapshot(cortexPath), null, 2));
+    return;
+  }
+
+  if (action === "set") {
+    const mode = normalizeTaskMode(args[1]);
+    if (!mode) {
+      console.error(`Usage: cortex config task-mode set [${TASK_MODES.join("|")}]`);
+      process.exit(1);
+    }
+    const result = updateWorkflowPolicy(cortexPath, { taskMode: mode });
+    if (!result.ok) {
+      console.error(result.error);
+      if (result.code === "PERMISSION_DENIED") process.exit(1);
+      return;
+    }
+    console.log(JSON.stringify(taskModeConfigSnapshot(cortexPath), null, 2));
+    return;
+  }
+
+  // Bare value: cortex config task-mode auto
+  const mode = normalizeTaskMode(action);
+  if (mode) {
+    const result = updateWorkflowPolicy(cortexPath, { taskMode: mode });
+    if (!result.ok) {
+      console.error(result.error);
+      if (result.code === "PERMISSION_DENIED") process.exit(1);
+      return;
+    }
+    console.log(JSON.stringify(taskModeConfigSnapshot(cortexPath), null, 2));
+    return;
+  }
+
+  console.error(`Usage: cortex config task-mode [get|set <mode>|<mode>]  — modes: ${TASK_MODES.join("|")}`);
+  process.exit(1);
 }
 
 // ── Index policy ─────────────────────────────────────────────────────────────

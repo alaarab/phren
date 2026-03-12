@@ -1,5 +1,5 @@
 /**
- * Canvas2D knowledge graph renderer for the review-ui.
+ * Canvas2D knowledge graph renderer for the web-ui.
  *
  * Returns raw JavaScript (no <script> tags) that expects these DOM elements
  * to exist in the host page:

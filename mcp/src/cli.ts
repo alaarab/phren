@@ -50,10 +50,12 @@ import {
 import { parseSearchArgs } from "./cli-search.js";
 import {
   handleDetectSkills,
+  handleFindingNamespace,
   handleHooksNamespace,
   handleProjectsNamespace,
   handleSkillsNamespace,
   handleSkillList,
+  handleTaskNamespace,
 } from "./cli-namespaces.js";
 import {
   handleTaskView,
@@ -123,7 +125,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleWorkflowPolicy(args);
     case "access":
       return handleAccessControl(args);
-    case "review-ui":
+    case "web-ui":
+    case "review-ui": // backward-compat alias
       return handleMemoryUi(args);
     case "shell":
       return handleShell(args, profile);
@@ -141,6 +144,10 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleHooksNamespace(args);
     case "tasks":
       return handleTaskView(profile);
+    case "task":
+      return handleTaskNamespace(args);
+    case "finding":
+      return handleFindingNamespace(args);
     case "projects":
       return handleProjectsNamespace(args, profile);
     case "quickstart":

@@ -197,6 +197,134 @@ async function activate(context) {
     const openQueueItemDisposable = vscode.commands.registerCommand("cortex.openQueueItem", (item) => {
         (0, queueViewer_1.showQueueItemDetail)(cortexClient, item, refreshTree);
     });
+    // --- Add Task command ---
+    const addTaskDisposable = vscode.commands.registerCommand("cortex.addTask", async () => {
+        let project = statusBar.getActiveProjectName();
+        if (!project) {
+            const projectsRaw = await cortexClient.listProjects();
+            const projectsData = asRecord(asRecord(projectsRaw)?.data);
+            const projects = asArraySafe(projectsData?.projects);
+            const projectNames = [];
+            for (const p of projects) {
+                const rec = asRecord(p);
+                const name = typeof rec?.name === "string" ? rec.name : undefined;
+                if (name)
+                    projectNames.push(name);
+            }
+            if (projectNames.length === 0) {
+                await vscode.window.showWarningMessage("No Cortex projects found.");
+                return;
+            }
+            project = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project" });
+            if (!project)
+                return;
+        }
+        const taskText = await vscode.window.showInputBox({ prompt: "Enter task text" });
+        const trimmedTaskText = taskText?.trim();
+        if (!trimmedTaskText)
+            return;
+        try {
+            await cortexClient.addTask(project, trimmedTaskText);
+            treeDataProvider.refresh();
+            await vscode.window.showInformationMessage(`Task added to ${project}`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to add task: ${toErrorMessage(error)}`);
+        }
+    });
+    // --- Complete Task command (from tree view context menu) ---
+    const completeTaskDisposable = vscode.commands.registerCommand("cortex.completeTask", async (task) => {
+        try {
+            await cortexClient.completeTask(task.projectName, task.line);
+            treeDataProvider.refresh();
+            await vscode.window.showInformationMessage(`Task "${task.id}" marked complete.`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to complete task: ${toErrorMessage(error)}`);
+        }
+    });
+    // --- Remove Finding command ---
+    const removeFindingDisposable = vscode.commands.registerCommand("cortex.removeFinding", async (finding) => {
+        if (finding) {
+            // Called from tree view context menu
+            const confirmed = await vscode.window.showWarningMessage(`Remove finding "${finding.id}"?`, { modal: true }, "Remove");
+            if (confirmed !== "Remove")
+                return;
+            try {
+                await cortexClient.removeFinding(finding.projectName, finding.text);
+                treeDataProvider.refresh();
+                await vscode.window.showInformationMessage(`Finding "${finding.id}" removed.`);
+            }
+            catch (error) {
+                await vscode.window.showErrorMessage(`Failed to remove finding: ${toErrorMessage(error)}`);
+            }
+        }
+        else {
+            // Called from command palette — prompt for project and text
+            const activeProject = statusBar.getActiveProjectName();
+            let project = activeProject;
+            if (!project) {
+                const projectsRaw = await cortexClient.listProjects();
+                const projectsData = asRecord(asRecord(projectsRaw)?.data);
+                const projects = asArraySafe(projectsData?.projects);
+                const projectNames = [];
+                for (const p of projects) {
+                    const rec = asRecord(p);
+                    const name = typeof rec?.name === "string" ? rec.name : undefined;
+                    if (name)
+                        projectNames.push(name);
+                }
+                project = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project" });
+                if (!project)
+                    return;
+            }
+            const findingText = await vscode.window.showInputBox({ prompt: "Enter exact finding text to remove" });
+            if (!findingText?.trim())
+                return;
+            try {
+                await cortexClient.removeFinding(project, findingText.trim());
+                treeDataProvider.refresh();
+                await vscode.window.showInformationMessage("Finding removed.");
+            }
+            catch (error) {
+                await vscode.window.showErrorMessage(`Failed to remove finding: ${toErrorMessage(error)}`);
+            }
+        }
+    });
+    // --- Pin Memory command ---
+    const pinMemoryDisposable = vscode.commands.registerCommand("cortex.pinMemory", async () => {
+        let project = statusBar.getActiveProjectName();
+        if (!project) {
+            const projectsRaw = await cortexClient.listProjects();
+            const projectsData = asRecord(asRecord(projectsRaw)?.data);
+            const projects = asArraySafe(projectsData?.projects);
+            const projectNames = [];
+            for (const p of projects) {
+                const rec = asRecord(p);
+                const name = typeof rec?.name === "string" ? rec.name : undefined;
+                if (name)
+                    projectNames.push(name);
+            }
+            if (projectNames.length === 0) {
+                await vscode.window.showWarningMessage("No Cortex projects found.");
+                return;
+            }
+            project = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project" });
+            if (!project)
+                return;
+        }
+        const memoryText = await vscode.window.showInputBox({ prompt: "Enter memory text to pin" });
+        const trimmedMemoryText = memoryText?.trim();
+        if (!trimmedMemoryText)
+            return;
+        try {
+            await cortexClient.pinMemory(project, trimmedMemoryText);
+            await vscode.window.showInformationMessage(`Memory pinned to ${project}`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to pin memory: ${toErrorMessage(error)}`);
+        }
+    });
     const syncDisposable = vscode.commands.registerCommand("cortex.sync", async () => {
         try {
             await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Cortex: Syncing...", cancellable: false }, async () => {
@@ -473,7 +601,7 @@ async function activate(context) {
             treeDataProvider.setDateFilter({ from: fromStr, to: toStr, label: `${fromStr} to ${toStr}` });
         }
     });
-    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, filterFindingsByDateDisposable, switchProfileDisposable, syncDisposable, doctorDisposable, hooksStatusDisposable, toggleHooksCommandDisposable, manageProjectDisposable);
+    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, filterFindingsByDateDisposable, switchProfileDisposable, syncDisposable, doctorDisposable, hooksStatusDisposable, toggleHooksCommandDisposable, manageProjectDisposable, addTaskDisposable, completeTaskDisposable, removeFindingDisposable, pinMemoryDisposable);
     try {
         await statusBar.initialize();
         outputChannel.appendLine("Status bar initialized successfully");

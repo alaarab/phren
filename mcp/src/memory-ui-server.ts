@@ -16,6 +16,7 @@ import {
   editQueueItem,
   readReviewQueue,
   rejectQueueItem,
+  readTasksAcrossProjects,
   TASKS_FILENAME,
 } from "./data-access.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
@@ -31,15 +32,16 @@ import {
   recentUsage,
 } from "./memory-ui-data.js";
 import { ensureTopicReferenceDoc, getProjectTopicsResponse, listProjectReferenceDocs, readReferenceContent, reclassifyLegacyTopicDocs, writeProjectTopics } from "./project-topics.js";
+import { getWorkflowPolicy } from "./governance-policy.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
 
-export interface ReviewUiOptions {
+export interface WebUiOptions {
   authToken?: string;
   csrfTokens?: Map<string, number>;
 }
 
-export interface ReviewUiStartOptions {
+export interface WebUiStartOptions {
   autoOpen?: boolean;
   allowPortFallback?: boolean;
   browserLauncher?: (url: string) => Promise<void> | void;
@@ -47,17 +49,17 @@ export interface ReviewUiStartOptions {
 
 const CSRF_TOKEN_TTL_MS = 15 * 60 * 1000;
 const MAX_FORM_BODY_BYTES = 1_048_576;
-const REVIEW_UI_READY_ATTEMPTS = 12;
-const REVIEW_UI_READY_DELAY_MS = 75;
+const WEB_UI_READY_ATTEMPTS = 12;
+const WEB_UI_READY_DELAY_MS = 75;
 
-export function getReviewUiBrowserCommand(url: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
+export function getWebUiBrowserCommand(url: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
   if (platform === "darwin") return { command: "open", args: [url] };
   if (platform === "win32") return { command: process.env.ComSpec || "cmd.exe", args: ["/c", "start", "", url] };
   return { command: "xdg-open", args: [url] };
 }
 
-export async function launchReviewUiBrowser(url: string): Promise<void> {
-  const { command, args } = getReviewUiBrowserCommand(url);
+export async function launchWebUiBrowser(url: string): Promise<void> {
+  const { command, args } = getWebUiBrowserCommand(url);
   await new Promise<void>((resolve, reject) => {
     try {
       const child = spawn(command, args, { detached: true, stdio: "ignore" });
@@ -73,10 +75,10 @@ export async function launchReviewUiBrowser(url: string): Promise<void> {
   });
 }
 
-export async function waitForReviewUiReady(
+export async function waitForWebUiReady(
   url: string,
-  attempts: number = REVIEW_UI_READY_ATTEMPTS,
-  delayMs: number = REVIEW_UI_READY_DELAY_MS,
+  attempts: number = WEB_UI_READY_ATTEMPTS,
+  delayMs: number = WEB_UI_READY_DELAY_MS,
 ): Promise<boolean> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     const ready = await new Promise<boolean>((resolve) => {
@@ -112,7 +114,7 @@ async function listenOnLoopback(server: http.Server, port: number): Promise<numb
       server.off("error", onError);
       const address = server.address();
       if (!address || typeof address === "string") {
-        reject(new Error("failed to determine review-ui port"));
+        reject(new Error("failed to determine web-ui port"));
         return;
       }
       resolve(address.port);
@@ -312,11 +314,11 @@ function parseTopicsPayload(raw: string): Array<{ slug: string; label: string; d
   }
 }
 
-export function createReviewUiHttpServer(
+export function createWebUiHttpServer(
   cortexPath: string,
   renderPage: (cortexPath: string, authToken?: string) => string,
   profile?: string,
-  opts?: ReviewUiOptions,
+  opts?: WebUiOptions,
 ): http.Server {
   const authToken = opts?.authToken;
   const csrfTokens = opts?.csrfTokens;
@@ -624,6 +626,59 @@ export function createReviewUiHttpServer(
       return;
     }
 
+    if (req.method === "GET" && pathname === "/api/tasks") {
+      if (!requireGetAuth(req, res, url, authToken, true)) return;
+      try {
+        const docs = readTasksAcrossProjects(cortexPath, profile);
+        const tasks: Array<{ project: string; section: string; line: string; priority?: string; pinned?: boolean; githubIssue?: number; githubUrl?: string }> = [];
+        for (const doc of docs) {
+          for (const section of ["Active", "Queue"] as const) {
+            for (const item of doc.items[section]) {
+              tasks.push({
+                project: doc.project,
+                section: item.section,
+                line: item.line,
+                priority: item.priority,
+                pinned: item.pinned,
+                githubIssue: item.githubIssue,
+                githubUrl: item.githubUrl,
+              });
+            }
+          }
+        }
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, tasks }));
+      } catch (err: unknown) {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: errorMessage(err), tasks: [] }));
+      }
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/settings") {
+      if (!requireGetAuth(req, res, url, authToken, true)) return;
+      try {
+        const prefs = readInstallPreferences(cortexPath);
+        const workflowPolicy = getWorkflowPolicy(cortexPath);
+        const hooksData = getHooksData(cortexPath);
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({
+          ok: true,
+          proactivity: prefs.proactivity || "high",
+          proactivityFindings: prefs.proactivityFindings || prefs.proactivity || "high",
+          proactivityTask: prefs.proactivityTask || prefs.proactivity || "high",
+          taskMode: workflowPolicy.taskMode,
+          hooksEnabled: hooksData.globalEnabled,
+          mcpEnabled: prefs.mcpEnabled !== false,
+          hookTools: hooksData.tools,
+        }));
+      } catch (err: unknown) {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
+      }
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/csrf-token") {
       if (!requireGetAuth(req, res, url, authToken, true)) return;
       if (!csrfTokens) {
@@ -687,42 +742,42 @@ export function createReviewUiHttpServer(
   });
 }
 
-export async function startReviewUiServer(
+export async function startWebUiServer(
   cortexPath: string,
   port: number,
   renderPage: (cortexPath: string, authToken?: string) => string,
   profile?: string,
-  opts: ReviewUiStartOptions = {},
+  opts: WebUiStartOptions = {},
 ): Promise<void> {
   const authToken = crypto.randomUUID();
   const csrfTokens = new Map<string, number>();
-  const server = createReviewUiHttpServer(cortexPath, renderPage, profile, { authToken, csrfTokens });
+  const server = createWebUiHttpServer(cortexPath, renderPage, profile, { authToken, csrfTokens });
   let boundPort: number;
   try {
     boundPort = await listenOnLoopback(server, port);
   } catch (err: unknown) {
     if (!opts.allowPortFallback || port === 0 || !isAddressInUse(err)) throw err;
-    process.stderr.write(`[cortex] review-ui port ${port} is busy, using a random local port instead\n`);
+    process.stderr.write(`[cortex] web-ui port ${port} is busy, using a random local port instead\n`);
     boundPort = await listenOnLoopback(server, 0);
   }
 
   const publicUrl = `http://127.0.0.1:${boundPort}`;
   const reviewUrl = `${publicUrl}/?_auth=${encodeURIComponent(authToken)}`;
-  const ready = await waitForReviewUiReady(reviewUrl);
+  const ready = await waitForWebUiReady(reviewUrl);
 
-  process.stdout.write(`cortex review-ui running at ${publicUrl}\n`);
+  process.stdout.write(`cortex web-ui running at ${publicUrl}\n`);
   process.stderr.write(`open: ${reviewUrl}\n`);
   if (!ready) {
-    process.stderr.write("[cortex] review-ui health check did not confirm readiness before launch\n");
+    process.stderr.write("[cortex] web-ui health check did not confirm readiness before launch\n");
   }
 
   const shouldAutoOpen = opts.autoOpen ?? Boolean(process.stdout.isTTY);
   if (shouldAutoOpen) {
     try {
       if (opts.browserLauncher) await opts.browserLauncher(reviewUrl);
-      else await launchReviewUiBrowser(reviewUrl);
+      else await launchWebUiBrowser(reviewUrl);
     } catch (err: unknown) {
-      process.stderr.write(`[cortex] review-ui browser launch failed: ${errorMessage(err)}\n`);
+      process.stderr.write(`[cortex] web-ui browser launch failed: ${errorMessage(err)}\n`);
       process.stdout.write(`secure session URL: ${reviewUrl}\n`);
     }
   } else {

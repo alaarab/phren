@@ -56,7 +56,7 @@ The current model is also too implicit for UI and archive flows. Hidden HTML com
 
 - stale and invalid-citation issues can be queued for review.
 - contradiction handling is mostly metadata, not a visible lifecycle.
-- review-ui and extension surfaces do not present “current truth vs history” as a first-class concept.
+- web-ui and extension surfaces do not present “current truth vs history” as a first-class concept.
 
 ## Proposed Lifecycle Model
 
@@ -130,7 +130,7 @@ Add a lifecycle mutation tool rather than forcing users to patch markdown manual
 
 - `update_finding_status(project, finding_id, status, reason, ref?)`
 
-This is the core action behind review-ui, shell, and VS Code controls.
+This is the core action behind web-ui, shell, and VS Code controls.
 
 ## Retrieval Behavior
 
@@ -158,7 +158,7 @@ When a historical result is returned, the payload should explain why:
 
 ## UI and Product Surface
 
-### Review UI
+### Web UI
 
 Add a dedicated invalidation surface:
 
@@ -217,7 +217,7 @@ If a finding is archived after being superseded or retracted, that status must r
 
 ### Phase 3: UI resolution
 
-- add review-ui badges, history details, and contradiction resolution actions.
+- add web-ui badges, history details, and contradiction resolution actions.
 - add VS Code finding lifecycle actions.
 - add shell affordances for resolving contradictions without manual file edits.
 

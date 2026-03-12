@@ -5,8 +5,8 @@ import * as os from "os";
 import * as path from "path";
 import * as http from "http";
 import * as querystring from "querystring";
-import { createReviewUiServer, renderPageForTests } from "./memory-ui.js";
-import { getReviewUiBrowserCommand, waitForReviewUiReady } from "./memory-ui-server.js";
+import { createWebUiServer, renderPageForTests } from "./memory-ui.js";
+import { getWebUiBrowserCommand, waitForWebUiReady } from "./memory-ui-server.js";
 
 function seedProject(root: string): void {
   write(
@@ -76,7 +76,7 @@ async function postForm(
   });
 }
 
-describe.sequential("review-ui server", () => {
+describe.sequential("web-ui server", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -84,19 +84,19 @@ describe.sequential("review-ui server", () => {
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-review-ui-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-test-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     write(
       path.join(tmpRoot, ".governance", "access-control.json"),
       JSON.stringify({
-        admins: ["review-ui-admin"],
+        admins: ["web-ui-admin"],
         maintainers: [],
         contributors: [],
         viewers: [],
       }, null, 2) + "\n"
     );
-    server = createReviewUiServer(tmpRoot);
+    server = createWebUiServer(tmpRoot);
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -152,13 +152,13 @@ describe.sequential("review-ui server", () => {
   });
 
   it("returns 403 when contributor tries to approve risky queue item", async () => {
-    process.env.CORTEX_ACTOR = "review-ui-contributor";
+    process.env.CORTEX_ACTOR = "web-ui-contributor";
     write(
       path.join(tmpRoot, ".governance", "access-control.json"),
       JSON.stringify({
         admins: [],
         maintainers: [],
-        contributors: ["review-ui-contributor"],
+        contributors: ["web-ui-contributor"],
         viewers: [],
       }, null, 2) + "\n"
     );
@@ -295,7 +295,7 @@ describe.sequential("review-ui server", () => {
   });
 });
 
-describe.sequential("review-ui CSRF protection", () => {
+describe.sequential("web-ui CSRF protection", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -306,18 +306,18 @@ describe.sequential("review-ui CSRF protection", () => {
   beforeEach(async () => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-csrf-test-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     write(
       path.join(tmpRoot, ".governance", "access-control.json"),
       JSON.stringify({
-        admins: ["review-ui-admin"],
+        admins: ["web-ui-admin"],
         maintainers: [],
         contributors: [],
         viewers: [],
       }, null, 2) + "\n"
     );
     csrfTokens = new Map<string, number>();
-    server = createReviewUiServer(tmpRoot, { csrfTokens });
+    server = createWebUiServer(tmpRoot, { csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -414,9 +414,9 @@ describe.sequential("review-ui CSRF protection", () => {
   });
 });
 
-describe("review-ui HTML rendering", () => {
+describe("web-ui HTML rendering", () => {
   it("uses element-based handlers for skills and hooks instead of inline quoted values", () => {
-    const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-html-");
+    const { path: tmpRoot, cleanup } = makeTempDir("cortex-web-ui-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
@@ -432,7 +432,7 @@ describe("review-ui HTML rendering", () => {
   });
 
   it("uses safe review-queue handlers and escaped plain-text rendering for queue items", () => {
-    const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-review-html-");
+    const { path: tmpRoot, cleanup } = makeTempDir("cortex-web-ui-review-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
@@ -452,7 +452,7 @@ describe("review-ui HTML rendering", () => {
   });
 
   it("renders graph detail scaffolding and enhanced graph controls", () => {
-    const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-graph-html-");
+    const { path: tmpRoot, cleanup } = makeTempDir("cortex-web-ui-graph-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
@@ -466,32 +466,32 @@ describe("review-ui HTML rendering", () => {
   });
 });
 
-describe("review-ui launch helpers", () => {
+describe("web-ui launch helpers", () => {
   it("builds browser launch commands for each supported platform", () => {
-    expect(getReviewUiBrowserCommand("http://127.0.0.1:3499", "darwin")).toEqual({
+    expect(getWebUiBrowserCommand("http://127.0.0.1:3499", "darwin")).toEqual({
       command: "open",
       args: ["http://127.0.0.1:3499"],
     });
-    expect(getReviewUiBrowserCommand("http://127.0.0.1:3499", "win32")).toEqual({
+    expect(getWebUiBrowserCommand("http://127.0.0.1:3499", "win32")).toEqual({
       command: process.env.ComSpec || "cmd.exe",
       args: ["/c", "start", "", "http://127.0.0.1:3499"],
     });
-    expect(getReviewUiBrowserCommand("http://127.0.0.1:3499", "linux")).toEqual({
+    expect(getWebUiBrowserCommand("http://127.0.0.1:3499", "linux")).toEqual({
       command: "xdg-open",
       args: ["http://127.0.0.1:3499"],
     });
   });
 
-  it("waits for the review-ui server to answer before launch", async () => {
-    const { path: tmpRoot, cleanup } = makeTempDir("cortex-review-ui-ready-");
-    const server = createReviewUiServer(tmpRoot);
+  it("waits for the web-ui server to answer before launch", async () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("cortex-web-ui-ready-");
+    const server = createWebUiServer(tmpRoot);
     seedProject(tmpRoot);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
 
     try {
       const address = server.address();
       if (!address || typeof address === "string") throw new Error("failed to bind test server");
-      const ready = await waitForReviewUiReady(`http://127.0.0.1:${address.port}/`);
+      const ready = await waitForWebUiReady(`http://127.0.0.1:${address.port}/`);
       expect(ready).toBe(true);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));

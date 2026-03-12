@@ -159,8 +159,16 @@ export class CortexClient {
     return this.callTool("update_task", { project, item, updates });
   }
 
+  async addTask(project: string, item: string): Promise<unknown> {
+    return this.callTool("add_task", { project, item });
+  }
+
   async completeTask(project: string, item: string): Promise<unknown> {
     return this.callTool("complete_task", { project, item });
+  }
+
+  async pinMemory(project: string, text: string): Promise<unknown> {
+    return this.callTool("pin_memory", { project, text });
   }
 
   async removeFinding(project: string, text: string): Promise<unknown> {

@@ -52,7 +52,7 @@ Behavior:
 |---|---|
 | CLI command execution | user-visible failure |
 | MCP tool writes | user-visible failure |
-| Review UI auth / mutation routes | user-visible failure |
+| Web UI auth / mutation routes | user-visible failure |
 | Hook/config opportunistic cleanup | debug-log only best-effort |
 | Telemetry / analytics | debug-log only best-effort |
 | Terminal restore / temp cleanup | explicitly silent cleanup |

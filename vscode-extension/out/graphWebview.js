@@ -39,7 +39,7 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 /**
- * Load the review-ui graph script from the MCP dist.
+ * Load the web-ui graph script from the MCP dist.
  * This gives us the Barnes-Hut force simulation, relevance gravity, a11y, etc.
  *
  * Resolution order:
@@ -440,7 +440,7 @@ function renderErrorHtml(webview, errorMessage) {
 function renderGraphHtml(webview, payload) {
     const nonce = getNonce();
     const safePayload = JSON.stringify(payload).replace(/</g, "\\u003c");
-    // Load the review-ui graph script (Barnes-Hut force sim, relevance gravity, a11y, etc.)
+    // Load the web-ui graph script (Barnes-Hut force sim, relevance gravity, a11y, etc.)
     const graphScript = loadGraphScript();
     return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -511,7 +511,7 @@ function renderGraphHtml(webview, payload) {
 // ── Review-UI graph engine (Barnes-Hut + relevance gravity) ──
 ${graphScript}
 
-// ── Data adapter: transform extension payload to review-ui format ──
+// ── Data adapter: transform extension payload to web-ui format ──
 (function() {
   var payload = ${safePayload};
 
@@ -562,7 +562,7 @@ ${graphScript}
     });
   }
 
-  // Build scores in review-ui format (flat entries map)
+  // Build scores in web-ui format (flat entries map)
   var scores = {};
   if (payload.scores && payload.scores.entries) {
     scores = payload.scores.entries;
@@ -580,7 +580,7 @@ ${graphScript}
   }
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
 
-  // Mount the review-ui graph
+  // Mount the web-ui graph
   if (window.cortexGraph && window.cortexGraph.mount) {
     window.cortexGraph.mount({
       nodes: graphNodes,

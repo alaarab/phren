@@ -81,7 +81,7 @@ CLI Commands:
   cortex task                       - cross-project task view
   cortex skill-list                    - list installed skills
   cortex doctor [--fix] [--agents]     - health checks with optional self-heal
-  cortex review-ui [--port=3499]       - lightweight memory review UI
+  cortex review-ui [--port=3499]       - lightweight memory web UI
   cortex status                        - health, active project, stats
   cortex update [--refresh-starter]    - update package; optionally refresh starter globals
   cortex verify                        - post-init verification

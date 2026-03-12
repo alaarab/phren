@@ -51,7 +51,7 @@ You can pin a memory with `pin_memory` to make it never decay. Pinned entries li
 
 All thresholds are configurable via `cortex config policy`.
 
-## How do I use the review UI?
+## How do I use the web UI?
 
 ```bash
 cortex review-ui

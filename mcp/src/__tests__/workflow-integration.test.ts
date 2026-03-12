@@ -7,7 +7,7 @@ import { runInit } from "../init.js";
 import { runPostInitVerify } from "../init-setup.js";
 import { runTopLevelCommand } from "../entrypoint.js";
 import { getUntrackedProjectNotice } from "../cli-hooks-session.js";
-import { createReviewUiServer } from "../memory-ui.js";
+import { createWebUiServer } from "../memory-ui.js";
 import { register as registerMcpOps } from "../mcp-ops.js";
 import { register as registerSearch } from "../mcp-search.js";
 import { register as registerFinding } from "../mcp-finding.js";
@@ -105,7 +105,7 @@ describe.sequential("workflow integration", () => {
     tmp.cleanup();
   });
 
-  it("covers init, add, session-start notice, MCP round-trips, and review-ui workflows", async () => {
+  it("covers init, add, session-start notice, MCP round-trips, and web-ui workflows", async () => {
     const cortexPath = process.env.CORTEX_PATH as string;
     const repoA = path.join(tmp.path, "repo-a");
     const repoB = path.join(tmp.path, "repo-b");
@@ -192,11 +192,11 @@ describe.sequential("workflow integration", () => {
 
     const authToken = "workflow-auth-token";
     const csrfTokens = new Map<string, number>();
-    const reviewUi = createReviewUiServer(cortexPath, { authToken, csrfTokens }, "work");
-    await new Promise<void>((resolve) => reviewUi.listen(0, "127.0.0.1", () => resolve()));
+    const webUi = createWebUiServer(cortexPath, { authToken, csrfTokens }, "work");
+    await new Promise<void>((resolve) => webUi.listen(0, "127.0.0.1", () => resolve()));
     try {
-      const address = reviewUi.address();
-      if (!address || typeof address === "string") throw new Error("failed to bind review-ui test server");
+      const address = webUi.address();
+      if (!address || typeof address === "string") throw new Error("failed to bind web-ui test server");
       const projectsRes = await httpGet(address.port, "/api/projects?_auth=" + encodeURIComponent(authToken));
       expect(projectsRes.status).toBe(200);
       expect(projectsRes.body).toContain("\"name\":\"repo-a\"");
@@ -220,7 +220,7 @@ describe.sequential("workflow integration", () => {
       expect(queueRes.status).toBe(200);
       expect(queueRes.body).not.toContain("Approve this integrated workflow memory");
     } finally {
-      await new Promise<void>((resolve) => reviewUi.close(() => resolve()));
+      await new Promise<void>((resolve) => webUi.close(() => resolve()));
       db?.close();
     }
   }, 20000);

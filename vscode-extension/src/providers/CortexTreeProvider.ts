@@ -375,6 +375,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         item.tooltip = element.text;
         item.iconPath = themeIcon("lightbulb");
         item.id = `cortex.finding.${element.projectName}.${element.id}`;
+        item.contextValue = "cortex.finding";
         item.command = {
           command: "cortex.openFinding",
           title: "Open Finding",
@@ -395,6 +396,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         item.tooltip = `${element.section} (${element.id})\n${element.line}`;
         item.iconPath = themeIcon(taskIconId(element));
         item.id = `cortex.task.${element.projectName}.${element.id}`;
+        item.contextValue = element.section !== "Done" ? "cortex.task.active" : "cortex.task.done";
         item.command = {
           command: "cortex.openTask",
           title: "Open Task",

@@ -5,7 +5,7 @@ import * as path from "path";
 import * as http from "http";
 import * as os from "os";
 import * as querystring from "querystring";
-import { createReviewUiServer } from "../memory-ui.js";
+import { createWebUiServer } from "../memory-ui.js";
 
 function seedProject(root: string): void {
   write(
@@ -98,7 +98,7 @@ async function httpGet(port: number, path: string): Promise<{ status: number; bo
   });
 }
 
-describe.sequential("review-ui auth token protection", () => {
+describe.sequential("web-ui auth token protection", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -107,12 +107,12 @@ describe.sequential("review-ui auth token protection", () => {
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-review-ui-auth-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "test-auth-token-secret";
-    server = createReviewUiServer(tmpRoot, { authToken });
+    server = createWebUiServer(tmpRoot, { authToken });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -203,7 +203,7 @@ describe.sequential("review-ui auth token protection", () => {
   });
 });
 
-describe.sequential("review-ui graph API", () => {
+describe.sequential("web-ui graph API", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -211,12 +211,12 @@ describe.sequential("review-ui graph API", () => {
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-review-ui-graph-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-graph-"));
     seedProject(tmpRoot);
     seedSecondProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
-    server = createReviewUiServer(tmpRoot);
+    server = createWebUiServer(tmpRoot);
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -340,7 +340,7 @@ describe.sequential("review-ui graph API", () => {
   });
 });
 
-describe.sequential("review-ui profile scoping", () => {
+describe.sequential("web-ui profile scoping", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -349,13 +349,13 @@ describe.sequential("review-ui profile scoping", () => {
   const priorUserProfile = process.env.USERPROFILE;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-review-ui-profile-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-profile-"));
     process.env.HOME = tmpRoot;
     process.env.USERPROFILE = tmpRoot;
     seedProject(tmpRoot);
     seedSecondProject(tmpRoot);
     write(path.join(tmpRoot, "profiles", "work.yaml"), "name: work\nprojects:\n  - demo\n");
-    server = createReviewUiServer(tmpRoot, undefined, "work");
+    server = createWebUiServer(tmpRoot, undefined, "work");
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -390,7 +390,7 @@ describe.sequential("review-ui profile scoping", () => {
   });
 });
 
-describe.sequential("review-ui HTML escaping", () => {
+describe.sequential("web-ui HTML escaping", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -398,8 +398,8 @@ describe.sequential("review-ui HTML escaping", () => {
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-review-ui-xss-"));
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-xss-"));
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     // Seed with XSS-like content in queue
     write(
@@ -421,7 +421,7 @@ describe.sequential("review-ui HTML escaping", () => {
         "",
       ].join("\n")
     );
-    server = createReviewUiServer(tmpRoot);
+    server = createWebUiServer(tmpRoot);
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -456,7 +456,7 @@ describe.sequential("review-ui HTML escaping", () => {
   });
 });
 
-describe.sequential("review-ui combined CSRF + auth", () => {
+describe.sequential("web-ui combined CSRF + auth", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -468,11 +468,11 @@ describe.sequential("review-ui combined CSRF + auth", () => {
   beforeEach(async () => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-csrf-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     csrfTokens = new Map<string, number>();
     authToken = "combined-auth-token";
-    server = createReviewUiServer(tmpRoot, { authToken, csrfTokens });
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -529,7 +529,7 @@ describe.sequential("review-ui combined CSRF + auth", () => {
   });
 });
 
-describe.sequential("review-ui missing project/line validation", () => {
+describe.sequential("web-ui missing project/line validation", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -537,11 +537,11 @@ describe.sequential("review-ui missing project/line validation", () => {
   const priorActor = process.env.CORTEX_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-review-ui-val-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-val-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
-    server = createReviewUiServer(tmpRoot);
+    server = createWebUiServer(tmpRoot);
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -604,7 +604,7 @@ describe.sequential("review-ui missing project/line validation", () => {
   });
 });
 
-describe.sequential("review-ui skill-save auth protection (Q13)", () => {
+describe.sequential("web-ui skill-save auth protection (Q13)", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -616,11 +616,11 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
   beforeEach(async () => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-skill-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "skill-auth-token";
     csrfTokens = new Map<string, number>();
-    server = createReviewUiServer(tmpRoot, { authToken, csrfTokens });
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -801,7 +801,7 @@ describe.sequential("review-ui skill-save auth protection (Q13)", () => {
 
 });
 
-describe.sequential("review-ui project-content validation", () => {
+describe.sequential("web-ui project-content validation", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -812,10 +812,10 @@ describe.sequential("review-ui project-content validation", () => {
   beforeEach(async () => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-project-content-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "project-content-auth-token";
-    server = createReviewUiServer(tmpRoot, { authToken });
+    server = createWebUiServer(tmpRoot, { authToken });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -858,7 +858,7 @@ describe.sequential("review-ui project-content validation", () => {
   });
 });
 
-describe.sequential("review-ui project topics and reference APIs", () => {
+describe.sequential("web-ui project topics and reference APIs", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -888,10 +888,10 @@ describe.sequential("review-ui project topics and reference APIs", () => {
         "This is hand-written prose and should not be migrated automatically.",
       ].join("\n")
     );
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "project-topics-auth-token";
-    server = createReviewUiServer(tmpRoot, { authToken });
+    server = createWebUiServer(tmpRoot, { authToken });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -1012,7 +1012,7 @@ describe.sequential("review-ui project topics and reference APIs", () => {
   });
 });
 
-describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
+describe.sequential("web-ui hook-toggle auth protection (Q13)", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -1024,11 +1024,11 @@ describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
   beforeEach(async () => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hook-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "hook-auth-token";
     csrfTokens = new Map<string, number>();
-    server = createReviewUiServer(tmpRoot, { authToken, csrfTokens });
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });
@@ -1090,7 +1090,7 @@ describe.sequential("review-ui hook-toggle auth protection (Q13)", () => {
   });
 });
 
-describe.sequential("review-ui JSON API auth for approve/reject/edit (Q13)", () => {
+describe.sequential("web-ui JSON API auth for approve/reject/edit (Q13)", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -1102,11 +1102,11 @@ describe.sequential("review-ui JSON API auth for approve/reject/edit (Q13)", () 
   beforeEach(async () => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-json-api-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "review-ui-admin";
+    process.env.CORTEX_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "json-api-auth-token";
     csrfTokens = new Map<string, number>();
-    server = createReviewUiServer(tmpRoot, { authToken, csrfTokens });
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
     await new Promise<void>((resolve) => {
       server!.listen(0, "127.0.0.1", () => resolve());
     });

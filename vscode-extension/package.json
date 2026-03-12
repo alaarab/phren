@@ -112,6 +112,25 @@
       {
         "command": "cortex.switchProfile",
         "title": "Cortex: Switch Profile"
+      },
+      {
+        "command": "cortex.addTask",
+        "title": "Cortex: Add Task",
+        "icon": "$(add)"
+      },
+      {
+        "command": "cortex.completeTask",
+        "title": "Cortex: Complete Task",
+        "icon": "$(check)"
+      },
+      {
+        "command": "cortex.removeFinding",
+        "title": "Cortex: Remove Finding",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "cortex.pinMemory",
+        "title": "Cortex: Pin Memory"
       }
     ],
     "keybindings": [
@@ -137,6 +156,16 @@
         {
           "command": "cortex.toggleHook",
           "when": "viewItem == cortex.hookItem",
+          "group": "inline"
+        },
+        {
+          "command": "cortex.completeTask",
+          "when": "viewItem == cortex.task.active",
+          "group": "inline"
+        },
+        {
+          "command": "cortex.removeFinding",
+          "when": "viewItem == cortex.finding",
           "group": "inline"
         }
       ],
@@ -197,6 +226,34 @@
           "type": "string",
           "default": "",
           "description": "Path to the Cortex store directory. Leave blank to use ~/.cortex."
+        },
+        "cortex.proactivity": {
+          "type": "string",
+          "enum": ["high", "medium", "low"],
+          "default": "high",
+          "description": "How proactively Cortex captures findings and tasks. High: always auto-capture. Medium: only when explicit signals detected. Low: never auto-capture."
+        },
+        "cortex.proactivityFindings": {
+          "type": "string",
+          "enum": ["high", "medium", "low"],
+          "default": "high",
+          "description": "Override proactivity level specifically for findings capture."
+        },
+        "cortex.proactivityTasks": {
+          "type": "string",
+          "enum": ["high", "medium", "low"],
+          "default": "high",
+          "description": "Override proactivity level specifically for task capture."
+        },
+        "cortex.autoExtract": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically extract insights from project context on each prompt."
+        },
+        "cortex.autoCapture": {
+          "type": "boolean",
+          "default": false,
+          "description": "Extract insights from conversation transcripts at session end."
         }
       }
     }
