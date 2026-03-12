@@ -417,7 +417,8 @@ export function renderGraphScript(): string {
       var rel = nodeRelevance(nd);
       // relevance modulates gravity: high relevance → 3x base, low → 0.3x base
       // this creates a natural center-to-edge gradient by importance
-      var grav = GRAVITY * (0.3 + rel * 2.7) * gravScale;
+      // floor at 0.15 prevents outlier nodes from drifting to infinity in large graphs
+      var grav = GRAVITY * Math.max(0.15, (0.3 + rel * 2.7) * gravScale);
       nd.vx += (cx - nd.x) * grav * alpha;
       nd.vy += (cy - nd.y) * grav * alpha;
     }
