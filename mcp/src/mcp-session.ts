@@ -242,7 +242,6 @@ export interface SessionHistoryEntry {
 /** List all sessions (both active and ended) from the sessions directory, sorted newest first. */
 export function listAllSessions(cortexPath: string, limit = 50): SessionHistoryEntry[] {
   const dir = sessionsDir(cortexPath);
-  const entries: SessionHistoryEntry[] = [];
   let files: fs.Dirent[];
   try {
     files = fs.readdirSync(dir, { withFileTypes: true });
@@ -250,9 +249,20 @@ export function listAllSessions(cortexPath: string, limit = 50): SessionHistoryE
     return [];
   }
 
-  for (const entry of files) {
-    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
-    const fullPath = path.join(dir, entry.name);
+  // Sort files by mtime (newest first) BEFORE parsing, then stop after `limit`
+  const sessionFiles = files
+    .filter((entry) => entry.isFile() && entry.name.startsWith("session-") && entry.name.endsWith(".json"))
+    .map((entry) => {
+      const fullPath = path.join(dir, entry.name);
+      let mtimeMs = 0;
+      try { mtimeMs = fs.statSync(fullPath).mtimeMs; } catch { /* use 0 */ }
+      return { fullPath, mtimeMs };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  const entries: SessionHistoryEntry[] = [];
+  for (const { fullPath } of sessionFiles) {
+    if (entries.length >= limit) break;
     try {
       const state = readSessionStateFile(fullPath);
       if (!state) continue;
@@ -274,9 +284,9 @@ export function listAllSessions(cortexPath: string, limit = 50): SessionHistoryE
     }
   }
 
-  // Sort newest first
+  // Already sorted by mtime, but re-sort by startedAt for accuracy
   entries.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-  return entries.slice(0, limit);
+  return entries;
 }
 
 /** Get findings and tasks that belong to a specific session. */

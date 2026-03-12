@@ -752,6 +752,10 @@ export async function handleHookStop() {
     debugLog("auto-capture: skipped because findings proactivity is low");
   }
 
+  // Wrap git operations in a file lock to prevent concurrent agents from fighting
+  const gitOpLockPath = path.join(getCortexPath(), ".runtime", "git-op");
+  await withFileLock(gitOpLockPath, async () => {
+
   const gitRepo = ensureLocalGitRepo(getCortexPath());
   if (!gitRepo.ok) {
     finalizeTaskSession({
@@ -911,6 +915,8 @@ export async function handleHookStop() {
     },
   });
   appendAuditLog(getCortexPath(), "hook_stop", `status=saved-local detail=${JSON.stringify(syncDetail)}`);
+
+  }); // end withFileLock(gitOpLockPath)
 
   // Auto governance scheduling (non-blocking)
   scheduleWeeklyGovernance();

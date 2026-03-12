@@ -22,9 +22,9 @@ import {
   normalizeMemoryId,
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
-import { entryScoreKey, getQualityMultiplier } from "./shared-governance.js";
+import { entryScoreKey, getQualityMultiplier, getRetentionPolicy } from "./shared-governance.js";
 import { callLlm } from "./content-dedup.js";
-import { rankResults, searchKnowledgeRows } from "./shared-retrieval.js";
+import { rankResults, searchKnowledgeRows, applyTrustFilter } from "./shared-retrieval.js";
 
 /**
  * Q30: Log zero-result queries to .runtime/search-misses.jsonl.
@@ -243,11 +243,11 @@ export function register(server: McpServer, ctx: McpContext): void {
           rows = rows.slice(0, maxResults);
         }
 
-        // Filter out superseded entries from results (both legacy <!-- superseded_by: and new <!-- cortex:superseded_by formats)
+        // Filter out superseded entries — standardized on cortex:superseded_by format
         if (rows) {
           rows = rows.map(row => {
-            if (!row.content.includes("superseded_by")) return row;
-            const filteredLines = row.content.split("\n").filter(line => !line.includes("superseded_by"));
+            if (!row.content.includes("cortex:superseded_by")) return row;
+            const filteredLines = row.content.split("\n").filter(line => !line.includes("cortex:superseded_by"));
             return { ...row, content: filteredLines.join("\n") };
           });
         }
@@ -263,6 +263,15 @@ export function register(server: McpServer, ctx: McpContext): void {
           query,
           { skipTaskFilter: true, filterType: filterType ?? null }
         ).slice(0, maxResults);
+
+        // Apply trust filter — same as hook-prompt uses — to strip stale/low-confidence findings
+        try {
+          const policy = getRetentionPolicy(cortexPath);
+          const trustResult = applyTrustFilter(rows, policy.ttlDays, policy.minInjectConfidence, policy.decay);
+          rows = trustResult.rows;
+        } catch (err: unknown) {
+          debugLog(`search_knowledge trustFilter: ${errorMessage(err)}`);
+        }
 
         const results = rows.map((row) => {
           const snippet = extractSnippet(row.content, query);

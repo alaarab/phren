@@ -23,6 +23,7 @@ import {
   updateTask as updateTaskStore,
   promoteTask,
 } from "./data-access.js";
+import { applyGravity } from "./data-tasks.js";
 import {
   buildTaskIssueBody,
   createGithubIssueForTask,
@@ -70,7 +71,9 @@ function buildTaskView(doc: TaskDoc, status?: TaskStatus, limit?: number, doneLi
   let totalUnpaged = 0;
 
   for (const section of includedSections) {
-    const sectionItems = doc.items[section];
+    // Apply gravity to Active and Queue items so stale tasks drift down
+    const rawItems = doc.items[section];
+    const sectionItems = (section === "Active" || section === "Queue") ? applyGravity(rawItems) : rawItems;
     const cap = section === "Done" ? effectiveDoneLimit : effectiveLimit;
     const sliced = effectiveOffset > 0 ? sectionItems.slice(effectiveOffset) : sectionItems;
     totalUnpaged += sectionItems.length;

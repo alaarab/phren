@@ -23,8 +23,26 @@ function acquireFileLock(lockPath: string): void {
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleThreshold) {
-          fs.unlinkSync(lockPath);
-          continue;
+          // Verify lock owner PID is dead before removing stale lock
+          let ownerDead = true;
+          try {
+            const lockContent = fs.readFileSync(lockPath, "utf8");
+            const lockPid = Number.parseInt(lockContent.split("\n")[0], 10);
+            if (Number.isFinite(lockPid) && lockPid > 0) {
+              try {
+                process.kill(lockPid, 0); // signal 0 = check if alive
+                ownerDead = false; // PID is still alive, don't steal the lock
+              } catch {
+                ownerDead = true; // PID is dead, safe to remove
+              }
+            }
+          } catch {
+            ownerDead = true; // Can't read lock file, treat as dead
+          }
+          if (ownerDead) {
+            fs.unlinkSync(lockPath);
+            continue;
+          }
         }
       } catch (statErr: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] acquireFileLock staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}\n`);
