@@ -107,6 +107,18 @@ class CortexClient {
     async crossProjectEntities() {
         return this.callTool("cross_project_entities", {});
     }
+    async pushChanges(message) {
+        const args = {};
+        if (message)
+            args.message = message;
+        return this.callTool("push_changes", args);
+    }
+    async manageProject(project, action) {
+        return this.callTool("manage_project", { project, action });
+    }
+    async healthCheck() {
+        return this.callTool("health_check", {});
+    }
     async dispose() {
         if (this.disposed) {
             return;

@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { CortexClient } from "../cortexClient";
 
 type TaskSection = "Active" | "Queue" | "Done";
@@ -6,7 +9,26 @@ type CortexCategory = "findings" | "task" | "queue" | "reference";
 
 interface RootSectionNode {
   kind: "rootSection";
-  section: "projects" | "skills" | "hooks" | "graph";
+  section: "projects" | "skills" | "hooks" | "graph" | "manage";
+}
+
+interface ProjectGroupNode {
+  kind: "projectGroup";
+  group: "device" | "other";
+  count: number;
+}
+
+interface ManageItemNode {
+  kind: "manageItem";
+  item: "health" | "profile" | "machine" | "lastSync" | "hooks";
+  label: string;
+  value: string;
+}
+
+interface ManageHookNode {
+  kind: "manageHook";
+  tool: string;
+  enabled: boolean;
 }
 
 interface ProjectNode {
@@ -109,6 +131,9 @@ interface MessageNode {
 
 type CortexNode =
   | RootSectionNode
+  | ProjectGroupNode
+  | ManageItemNode
+  | ManageHookNode
   | ProjectNode
   | CategoryNode
   | FindingDateGroupNode
@@ -208,6 +233,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         { kind: "rootSection", section: "skills" },
         { kind: "rootSection", section: "hooks" },
         { kind: "rootSection", section: "graph" },
+        { kind: "rootSection", section: "manage" },
       ];
     }
 
@@ -221,7 +247,14 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       if (element.section === "hooks") {
         return this.getHookNodes();
       }
+      if (element.section === "manage") {
+        return this.getManageNodes();
+      }
       return [];
+    }
+
+    if (element.kind === "projectGroup") {
+      return this.getProjectNodesForGroup(element.group);
     }
 
     if (element.kind === "project") {
@@ -265,6 +298,10 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       return this.getSkillsForGroup(element.source);
     }
 
+    if (element.kind === "manageItem" && element.item === "hooks") {
+      return this.getManageHookNodes();
+    }
+
     return [];
   }
 
@@ -285,8 +322,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
     switch (element.kind) {
       case "rootSection": {
-        const labels: Record<string, string> = { projects: "Projects", skills: "Skills", hooks: "Hooks", graph: "Entity Graph" };
-        const icons: Record<string, string> = { projects: "folder-library", skills: "extensions", hooks: "plug", graph: "type-hierarchy" };
+        const labels: Record<string, string> = { projects: "Projects", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
+        const icons: Record<string, string> = { projects: "folder-library", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
         const label = labels[element.section] ?? element.section;
 
         if (element.section === "graph") {
@@ -432,6 +469,48 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         };
         return item;
       }
+      case "projectGroup": {
+        const groupLabels: Record<string, string> = { device: "This Device", other: "Other" };
+        const groupIcons: Record<string, string> = { device: "vm", other: "globe" };
+        const item = new vscode.TreeItem(groupLabels[element.group] ?? element.group, vscode.TreeItemCollapsibleState.Expanded);
+        item.description = `${element.count}`;
+        item.iconPath = themeIcon(groupIcons[element.group] ?? "folder");
+        item.id = `cortex.projectGroup.${element.group}`;
+        return item;
+      }
+      case "manageItem": {
+        const manageIcons: Record<string, string> = { health: "heart", profile: "account", machine: "vm", lastSync: "cloud", hooks: "plug" };
+        const isCollapsible = element.item === "hooks";
+        const item = new vscode.TreeItem(element.label, isCollapsible ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+        item.description = element.value;
+        item.iconPath = themeIcon(manageIcons[element.item] ?? "info");
+        item.id = `cortex.manage.${element.item}`;
+        if (element.item === "health") {
+          item.command = { command: "cortex.doctor", title: "Run Doctor" };
+          item.tooltip = "Click to run Cortex Doctor";
+        } else if (element.item === "profile") {
+          item.command = { command: "cortex.switchProfile", title: "Switch Profile" };
+          item.tooltip = "Click to switch Cortex profile";
+        } else if (element.item === "lastSync") {
+          item.command = { command: "cortex.sync", title: "Sync Now" };
+          item.tooltip = "Click to sync Cortex";
+        }
+        return item;
+      }
+      case "manageHook": {
+        const item = new vscode.TreeItem(element.tool, vscode.TreeItemCollapsibleState.None);
+        item.description = element.enabled ? "enabled" : "disabled";
+        item.tooltip = `${element.tool}: ${element.enabled ? "hooks enabled" : "hooks disabled"}\nClick to toggle`;
+        item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
+        item.id = `cortex.manageHook.${element.tool}`;
+        item.contextValue = "cortex.hookItem";
+        item.command = {
+          command: "cortex.toggleHook",
+          title: "Toggle Hook",
+          arguments: [element.tool, element.enabled],
+        };
+        return item;
+      }
       case "message": {
         const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
         item.description = element.description;
@@ -442,22 +521,6 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
   }
 
   // --- Data fetchers ---
-
-  private async getProjectNodes(): Promise<CortexNode[]> {
-    try {
-      const projects = await this.fetchProjects();
-      if (projects.length === 0) {
-        return [{ kind: "message", label: "No projects found", description: "Index projects to populate Cortex.", iconId: "info" }];
-      }
-      return projects.map((project) => ({
-        kind: "project" as const,
-        projectName: project.name,
-        brief: project.brief,
-      }));
-    } catch (error) {
-      return [this.errorNode("Failed to load projects", error)];
-    }
-  }
 
   private async getFindingDateGroups(projectName: string): Promise<CortexNode[]> {
     try {
@@ -721,6 +784,121 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     } catch (error) {
       return [this.errorNode("Failed to load hooks", error)];
     }
+  }
+
+  private readDeviceContext(): { profile: string; activeProjects: Set<string>; machine: string; lastSync: string } {
+    const result = { profile: "", activeProjects: new Set<string>(), machine: os.hostname(), lastSync: "" };
+    try {
+      const contextPath = path.join(os.homedir(), ".cortex-context.md");
+      if (!fs.existsSync(contextPath)) return result;
+      const content = fs.readFileSync(contextPath, "utf8");
+      const profileMatch = content.match(/^Profile:\s*(.+)/m);
+      if (profileMatch) result.profile = profileMatch[1].trim();
+      const machineMatch = content.match(/^Machine:\s*(.+)/m);
+      if (machineMatch) result.machine = machineMatch[1].trim();
+      const activeMatch = content.match(/^Active projects?:\s*(.+)/mi);
+      if (activeMatch) {
+        for (const name of activeMatch[1].split(",").map((s) => s.trim()).filter(Boolean)) {
+          result.activeProjects.add(name.toLowerCase());
+        }
+      }
+      const syncMatch = content.match(/^Last synced?:\s*(.+)/mi);
+      if (syncMatch) result.lastSync = syncMatch[1].trim();
+    } catch {
+      // Context file unavailable
+    }
+    return result;
+  }
+
+  private async getProjectNodes(): Promise<CortexNode[]> {
+    try {
+      const projects = await this.fetchProjects();
+      if (projects.length === 0) {
+        return [{ kind: "message", label: "No projects found", description: "Index projects to populate Cortex.", iconId: "info" }];
+      }
+      const ctx = this.readDeviceContext();
+      if (ctx.activeProjects.size === 0) {
+        // No device context -- show flat list
+        return projects.map((project) => ({
+          kind: "project" as const,
+          projectName: project.name,
+          brief: project.brief,
+        }));
+      }
+      const deviceProjects = projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()));
+      const otherProjects = projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()));
+      const groups: CortexNode[] = [];
+      if (deviceProjects.length > 0) {
+        groups.push({ kind: "projectGroup", group: "device", count: deviceProjects.length });
+      }
+      if (otherProjects.length > 0) {
+        groups.push({ kind: "projectGroup", group: "other", count: otherProjects.length });
+      }
+      return groups;
+    } catch (error) {
+      return [this.errorNode("Failed to load projects", error)];
+    }
+  }
+
+  private async getProjectNodesForGroup(group: "device" | "other"): Promise<CortexNode[]> {
+    try {
+      const projects = await this.fetchProjects();
+      const ctx = this.readDeviceContext();
+      const filtered = group === "device"
+        ? projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()))
+        : projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()));
+      return filtered.map((project) => ({
+        kind: "project" as const,
+        projectName: project.name,
+        brief: project.brief,
+      }));
+    } catch (error) {
+      return [this.errorNode("Failed to load projects", error)];
+    }
+  }
+
+  private getManageNodes(): CortexNode[] {
+    const ctx = this.readDeviceContext();
+    const nodes: CortexNode[] = [];
+    nodes.push({ kind: "manageItem", item: "health", label: "Health", value: this.lastHealthOk === true ? "ok" : this.lastHealthOk === false ? "error" : "unknown" });
+    nodes.push({ kind: "manageItem", item: "profile", label: "Profile", value: ctx.profile || "(none)" });
+    nodes.push({ kind: "manageItem", item: "machine", label: "Machine", value: ctx.machine });
+    nodes.push({ kind: "manageItem", item: "lastSync", label: "Last Sync", value: ctx.lastSync || "(never)" });
+    nodes.push({ kind: "manageItem", item: "hooks", label: "Hooks", value: "" });
+    return nodes;
+  }
+
+  private async getManageHookNodes(): Promise<CortexNode[]> {
+    try {
+      const raw = await this.client.listHooks();
+      const data = responseData(raw);
+      const tools = asArray(data?.tools);
+
+      if (tools.length === 0) {
+        return [{ kind: "message", label: "No hooks configured", iconId: "plug" }];
+      }
+
+      const nodes: CortexNode[] = [];
+      for (const entry of tools) {
+        const record = asRecord(entry);
+        const tool = asString(record?.tool);
+        if (!tool) { continue; }
+        const enabled = asBoolean(record?.enabled) ?? false;
+        nodes.push({ kind: "manageHook", tool, enabled });
+      }
+      return nodes;
+    } catch (error) {
+      return [this.errorNode("Failed to load hooks", error)];
+    }
+  }
+
+  /** Updated by the status bar health check; controls the Health row value. */
+  private lastHealthOk: boolean | undefined;
+
+  setHealthStatus(ok: boolean): void {
+    if (this.lastHealthOk === ok) return;
+    this.lastHealthOk = ok;
+    this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
   // --- Raw fetch helpers ---

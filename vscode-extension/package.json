@@ -86,6 +86,32 @@
         "command": "cortex.filterFindingsByDate",
         "title": "Cortex: Filter Findings by Date",
         "icon": "$(calendar)"
+      },
+      {
+        "command": "cortex.sync",
+        "title": "Cortex: Sync",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "cortex.doctor",
+        "title": "Cortex: Doctor",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "cortex.hooksStatus",
+        "title": "Cortex: Hooks Status"
+      },
+      {
+        "command": "cortex.toggleHooksCommand",
+        "title": "Cortex: Toggle Hooks"
+      },
+      {
+        "command": "cortex.manageProject",
+        "title": "Cortex: Manage Project"
+      },
+      {
+        "command": "cortex.switchProfile",
+        "title": "Cortex: Switch Profile"
       }
     ],
     "keybindings": [
@@ -107,6 +133,11 @@
           "command": "cortex.filterFindingsByDate",
           "when": "viewItem == cortex.category.findings",
           "group": "inline"
+        },
+        {
+          "command": "cortex.toggleHook",
+          "when": "viewItem == cortex.hookItem",
+          "group": "inline"
         }
       ],
       "view/title": [
@@ -122,6 +153,11 @@
         },
         {
           "command": "cortex.refresh",
+          "when": "view == cortex.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "cortex.sync",
           "when": "view == cortex.explorer",
           "group": "navigation"
         }
