@@ -132,8 +132,18 @@
         "icon": "$(check)"
       },
       {
+        "command": "cortex.removeTask",
+        "title": "Cortex: Delete Task",
+        "icon": "$(trash)"
+      },
+      {
         "command": "cortex.removeFinding",
         "title": "Cortex: Remove Finding",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "cortex.rejectQueueItem",
+        "title": "Cortex: Reject Queue Item",
         "icon": "$(trash)"
       },
       {
@@ -172,8 +182,18 @@
           "group": "inline"
         },
         {
+          "command": "cortex.removeTask",
+          "when": "viewItem == cortex.task.active || viewItem == cortex.task.done",
+          "group": "inline"
+        },
+        {
           "command": "cortex.removeFinding",
           "when": "viewItem == cortex.finding",
+          "group": "inline"
+        },
+        {
+          "command": "cortex.rejectQueueItem",
+          "when": "viewItem == cortex.queue.item",
           "group": "inline"
         }
       ],

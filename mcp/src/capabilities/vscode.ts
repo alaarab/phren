@@ -14,6 +14,7 @@ export const vscodeManifest: CapabilityManifest = {
     // Task management
     "task.add": { implemented: true, handler: "extension.ts:cortex.addTask" },
     "task.complete": { implemented: true, handler: "extension.ts:cortex.completeTask" },
+    "task.remove": { implemented: true, handler: "extension.ts:cortex.removeTask" },
     "task.update": { implemented: false, reason: "No VS Code command for task field updates" },
     "task.list": { implemented: true, handler: "CortexTreeProvider.ts:tasks section" },
     "task.pin": { implemented: false, reason: "No VS Code command for task pinning" },

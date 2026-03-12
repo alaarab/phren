@@ -266,6 +266,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
+  const removeTaskDisposable = vscode.commands.registerCommand(
+    "cortex.removeTask",
+    async (task?: { projectName: string; id: string; line: string; section: string; checked: boolean }) => {
+      if (!task) {
+        await vscode.window.showWarningMessage("Remove Task is available from the Cortex explorer context menu.");
+        return;
+      }
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete task "${task.id}"?`,
+        { modal: true, detail: task.line },
+        "Delete",
+      );
+      if (confirmed !== "Delete") return;
+
+      try {
+        await cortexClient.removeTask(task.projectName, task.line);
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage(`Task "${task.id}" deleted.`);
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to delete task: ${toErrorMessage(error)}`);
+      }
+    },
+  );
+
   // --- Remove Finding command ---
   const removeFindingDisposable = vscode.commands.registerCommand(
     "cortex.removeFinding",
@@ -311,6 +336,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         } catch (error) {
           await vscode.window.showErrorMessage(`Failed to remove finding: ${toErrorMessage(error)}`);
         }
+      }
+    },
+  );
+
+  const rejectQueueItemDisposable = vscode.commands.registerCommand(
+    "cortex.rejectQueueItem",
+    async (item?: QueueItemData) => {
+      if (!item) {
+        await vscode.window.showWarningMessage("Reject Queue Item is available from the Cortex explorer context menu.");
+        return;
+      }
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Reject queue item "${item.id}"?`,
+        { modal: true, detail: item.text },
+        "Reject",
+      );
+      if (confirmed !== "Reject") return;
+
+      try {
+        await cortexClient.rejectQueueItem(item.projectName, item.text);
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage(`Queue item "${item.id}" rejected.`);
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to reject queue item: ${toErrorMessage(error)}`);
       }
     },
   );
@@ -712,7 +762,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     manageProjectDisposable,
     addTaskDisposable,
     completeTaskDisposable,
+    removeTaskDisposable,
     removeFindingDisposable,
+    rejectQueueItemDisposable,
     pinMemoryDisposable,
   );
 

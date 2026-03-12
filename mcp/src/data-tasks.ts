@@ -571,6 +571,24 @@ export function completeTask(cortexPath: string, project: string, match: string)
   });
 }
 
+export function removeTask(cortexPath: string, project: string, match: string): CortexResult<string> {
+  const bPath = canonicalTaskFilePath(cortexPath, project);
+  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+
+  return withSafeLock(bPath, () => {
+    const parsed = readTasks(cortexPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (!found.match) return taskItemNotFound(project, match);
+
+    const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
+    writeTaskDoc(parsed.data);
+    return cortexOk(`Removed task from ${project}: ${item.line}`);
+  });
+}
+
 export function updateTask(
   cortexPath: string,
   project: string,
@@ -887,4 +905,3 @@ export function linkTaskIssue(
     return cortexOk(item);
   });
 }
-

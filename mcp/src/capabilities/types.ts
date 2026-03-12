@@ -9,6 +9,7 @@ export const ACTION_KEYS = [
   // Task management
   "task.add",
   "task.complete",
+  "task.remove",
   "task.update",
   "task.list",
   "task.pin",

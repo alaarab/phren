@@ -14,6 +14,7 @@ export const mcpManifest: CapabilityManifest = {
     // Task management
     "task.add": { implemented: true, handler: "index.ts:add_task" },
     "task.complete": { implemented: true, handler: "index.ts:complete_task" },
+    "task.remove": { implemented: true, handler: "index.ts:remove_task" },
     "task.update": { implemented: true, handler: "index.ts:update_task" },
     "task.list": { implemented: true, handler: "index.ts:get_tasks" },
     "task.pin": { implemented: true, handler: "index.ts:pin_task" },

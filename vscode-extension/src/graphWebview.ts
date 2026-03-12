@@ -290,9 +290,8 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
       edges.push({ source: projectNodeId, target: findingId });
     }
 
-    // Task nodes (active + queue only)
+    // Task nodes
     for (const task of tasks) {
-      if (task.section === "Done") continue;
       const taskId = `task:${projectName}:${task.id}`;
       const sectionLower = task.section.toLowerCase();
       const taskColorMap: Record<string, string> = { active: "#10b981", queue: "#eab308", done: "#6b7280" };
@@ -461,7 +460,7 @@ async function fetchFindings(client: CortexClient, project: string): Promise<Fin
 }
 
 async function fetchTasks(client: CortexClient, project: string): Promise<TaskData[]> {
-  const raw = await client.getTasks(project);
+  const raw = await client.getTasks(project, { status: "all", done_limit: 10 });
   const data = responseData(raw);
   const items = asRecord(data?.items);
   const parsed: TaskData[] = [];
