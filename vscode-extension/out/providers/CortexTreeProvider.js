@@ -35,12 +35,11 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CortexTreeProvider = void 0;
 const vscode = __importStar(require("vscode"));
-const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
-const path = __importStar(require("path"));
+const profileConfig_1 = require("../profileConfig");
 class CortexTreeProvider {
-    constructor(client) {
+    constructor(client, storePath) {
         this.client = client;
+        this.storePath = storePath;
         this.onDidChangeTreeDataEmitter = new vscode.EventEmitter();
         this.onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
     }
@@ -68,13 +67,7 @@ class CortexTreeProvider {
     }
     async getChildrenInner(element) {
         if (!element) {
-            return [
-                { kind: "rootSection", section: "projects" },
-                { kind: "rootSection", section: "skills" },
-                { kind: "rootSection", section: "hooks" },
-                { kind: "rootSection", section: "graph" },
-                { kind: "rootSection", section: "manage" },
-            ];
+            return this.getRootSections();
         }
         if (element.kind === "rootSection") {
             if (element.section === "projects") {
@@ -129,9 +122,6 @@ class CortexTreeProvider {
         if (element.kind === "skillGroup") {
             return this.getSkillsForGroup(element.source);
         }
-        if (element.kind === "manageItem" && element.item === "hooks") {
-            return this.getManageHookNodes();
-        }
         return [];
     }
     getTreeItem(element) {
@@ -163,6 +153,7 @@ class CortexTreeProvider {
                     return item;
                 }
                 const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+                item.description = element.description;
                 item.iconPath = themeIcon(icons[element.section] ?? "symbol-misc");
                 item.id = `cortex.root.${element.section}`;
                 return item;
@@ -308,7 +299,7 @@ class CortexTreeProvider {
                 item.tooltip = `${element.tool}: ${element.enabled ? "hooks enabled" : "hooks disabled"}\nClick to toggle`;
                 item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
                 item.id = `cortex.hook.${element.tool}`;
-                item.contextValue = element.enabled ? "cortex.hook.enabled" : "cortex.hook.disabled";
+                item.contextValue = "cortex.hookItem";
                 item.command = {
                     command: "cortex.toggleHook",
                     title: "Toggle Hook",
@@ -337,9 +328,8 @@ class CortexTreeProvider {
                 return item;
             }
             case "manageItem": {
-                const manageIcons = { health: "heart", profile: "account", machine: "vm", lastSync: "cloud", hooks: "plug" };
-                const isCollapsible = element.item === "hooks";
-                const item = new vscode.TreeItem(element.label, isCollapsible ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+                const manageIcons = { health: "heart", profile: "account", machine: "vm", lastSync: "cloud" };
+                const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
                 item.description = element.value;
                 item.iconPath = themeIcon(manageIcons[element.item] ?? "info");
                 item.id = `cortex.manage.${element.item}`;
@@ -348,27 +338,17 @@ class CortexTreeProvider {
                     item.tooltip = "Click to run Cortex Doctor";
                 }
                 else if (element.item === "profile") {
-                    item.command = { command: "cortex.switchProfile", title: "Switch Profile" };
-                    item.tooltip = "Click to switch Cortex profile";
+                    item.command = { command: "cortex.switchProfile", title: "Configure Profile" };
+                    item.tooltip = "Click to update this machine's profile mapping in machines.yaml";
+                }
+                else if (element.item === "machine") {
+                    item.command = { command: "cortex.configureMachine", title: "Configure Machine" };
+                    item.tooltip = "Click to edit the machine alias stored in ~/.cortex/.machine-id";
                 }
                 else if (element.item === "lastSync") {
                     item.command = { command: "cortex.sync", title: "Sync Now" };
                     item.tooltip = "Click to sync Cortex";
                 }
-                return item;
-            }
-            case "manageHook": {
-                const item = new vscode.TreeItem(element.tool, vscode.TreeItemCollapsibleState.None);
-                item.description = element.enabled ? "enabled" : "disabled";
-                item.tooltip = `${element.tool}: ${element.enabled ? "hooks enabled" : "hooks disabled"}\nClick to toggle`;
-                item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
-                item.id = `cortex.manageHook.${element.tool}`;
-                item.contextValue = "cortex.hookItem";
-                item.command = {
-                    command: "cortex.toggleHook",
-                    title: "Toggle Hook",
-                    arguments: [element.tool, element.enabled],
-                };
                 return item;
             }
             case "message": {
@@ -380,6 +360,40 @@ class CortexTreeProvider {
         }
     }
     // --- Data fetchers ---
+    async getRootSections() {
+        return [
+            { kind: "rootSection", section: "projects" },
+            { kind: "rootSection", section: "skills" },
+            { kind: "rootSection", section: "hooks", description: await this.getHookSectionDescription() },
+            { kind: "rootSection", section: "graph" },
+            { kind: "rootSection", section: "manage" },
+        ];
+    }
+    async getHookSectionDescription() {
+        try {
+            const raw = await this.client.listHooks();
+            const data = responseData(raw);
+            const tools = asArray(data?.tools);
+            const globalEnabled = asBoolean(data?.globalEnabled) ?? true;
+            if (!globalEnabled) {
+                return "off";
+            }
+            if (tools.length === 0) {
+                return "none";
+            }
+            let enabledCount = 0;
+            for (const entry of tools) {
+                const record = asRecord(entry);
+                if ((asBoolean(record?.enabled) ?? false) === true) {
+                    enabledCount += 1;
+                }
+            }
+            return `${enabledCount}/${tools.length} on`;
+        }
+        catch {
+            return undefined;
+        }
+    }
     async getFindingDateGroups(projectName) {
         try {
             let findings = await this.fetchFindings(projectName);
@@ -641,32 +655,7 @@ class CortexTreeProvider {
         }
     }
     readDeviceContext() {
-        const result = { profile: "", activeProjects: new Set(), machine: os.hostname(), lastSync: "" };
-        try {
-            const contextPath = path.join(os.homedir(), ".cortex-context.md");
-            if (!fs.existsSync(contextPath))
-                return result;
-            const content = fs.readFileSync(contextPath, "utf8");
-            const profileMatch = content.match(/^Profile:\s*(.+)/m);
-            if (profileMatch)
-                result.profile = profileMatch[1].trim();
-            const machineMatch = content.match(/^Machine:\s*(.+)/m);
-            if (machineMatch)
-                result.machine = machineMatch[1].trim();
-            const activeMatch = content.match(/^Active projects?:\s*(.+)/mi);
-            if (activeMatch) {
-                for (const name of activeMatch[1].split(",").map((s) => s.trim()).filter(Boolean)) {
-                    result.activeProjects.add(name.toLowerCase());
-                }
-            }
-            const syncMatch = content.match(/^Last synced?:\s*(.+)/mi);
-            if (syncMatch)
-                result.lastSync = syncMatch[1].trim();
-        }
-        catch {
-            // Context file unavailable
-        }
-        return result;
+        return (0, profileConfig_1.readDeviceContext)(this.storePath);
     }
     async getProjectNodes() {
         try {
@@ -722,32 +711,7 @@ class CortexTreeProvider {
         nodes.push({ kind: "manageItem", item: "profile", label: "Profile", value: ctx.profile || "(none)" });
         nodes.push({ kind: "manageItem", item: "machine", label: "Machine", value: ctx.machine });
         nodes.push({ kind: "manageItem", item: "lastSync", label: "Last Sync", value: ctx.lastSync || "(never)" });
-        nodes.push({ kind: "manageItem", item: "hooks", label: "Hooks", value: "" });
         return nodes;
-    }
-    async getManageHookNodes() {
-        try {
-            const raw = await this.client.listHooks();
-            const data = responseData(raw);
-            const tools = asArray(data?.tools);
-            if (tools.length === 0) {
-                return [{ kind: "message", label: "No hooks configured", iconId: "plug" }];
-            }
-            const nodes = [];
-            for (const entry of tools) {
-                const record = asRecord(entry);
-                const tool = asString(record?.tool);
-                if (!tool) {
-                    continue;
-                }
-                const enabled = asBoolean(record?.enabled) ?? false;
-                nodes.push({ kind: "manageHook", tool, enabled });
-            }
-            return nodes;
-        }
-        catch (error) {
-            return [this.errorNode("Failed to load hooks", error)];
-        }
     }
     setHealthStatus(ok) {
         if (this.lastHealthOk === ok)

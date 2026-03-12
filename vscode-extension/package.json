@@ -111,7 +111,15 @@
       },
       {
         "command": "cortex.switchProfile",
-        "title": "Cortex: Switch Profile"
+        "title": "Cortex: Set This Machine's Profile"
+      },
+      {
+        "command": "cortex.configureMachine",
+        "title": "Cortex: Set Machine Alias"
+      },
+      {
+        "command": "cortex.openMachinesConfig",
+        "title": "Cortex: Open machines.yaml"
       },
       {
         "command": "cortex.addTask",
