@@ -18,7 +18,7 @@ export interface QueueItemData {
 export function showQueueItemDetail(client: CortexClient, item: QueueItemData, onRefresh: () => void): void {
   showPreview({
     key: `queue:${item.projectName}:${item.id}`,
-    title: `Queue: ${item.id}`,
+    title: `Queue: ${item.projectName} · ${item.id}`,
     html: renderQueueItemHtml(item),
     onMessage: async (msg: Record<string, unknown>) => {
       if (msg.type === "approve") {

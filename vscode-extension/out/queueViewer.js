@@ -39,7 +39,7 @@ const previewPanel_1 = require("./previewPanel");
 function showQueueItemDetail(client, item, onRefresh) {
     (0, previewPanel_1.showPreview)({
         key: `queue:${item.projectName}:${item.id}`,
-        title: `Queue: ${item.id}`,
+        title: `Queue: ${item.projectName} · ${item.id}`,
         html: renderQueueItemHtml(item),
         onMessage: async (msg) => {
             if (msg.type === "approve") {

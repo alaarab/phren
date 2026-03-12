@@ -41,8 +41,11 @@ class CortexClient {
     async getFindings(project) {
         return this.callTool("get_findings", { project });
     }
-    async getTasks(project) {
-        return this.callTool("get_tasks", { project });
+    async getTasks(project, options = {}) {
+        return this.callTool("get_tasks", { project, ...options });
+    }
+    async sessionHistory(options = {}) {
+        return this.callTool("session_history", { ...options });
     }
     async addFinding(project, insight) {
         return this.callTool("add_finding", { project, finding: insight });
@@ -86,6 +89,9 @@ class CortexClient {
     async completeTask(project, item) {
         return this.callTool("complete_task", { project, item });
     }
+    async removeTask(project, item) {
+        return this.callTool("remove_task", { project, item });
+    }
     async pinMemory(project, text) {
         return this.callTool("pin_memory", { project, text });
     }
@@ -93,7 +99,7 @@ class CortexClient {
         return this.callTool("remove_finding", { project, finding: text });
     }
     async getReviewQueue(project) {
-        return this.callTool("get_review_queue", { project });
+        return this.callTool("get_review_queue", project ? { project } : {});
     }
     async approveQueueItem(project, item) {
         return this.callTool("approve_queue_item", { project, item });
