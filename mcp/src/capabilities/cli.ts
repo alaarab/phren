@@ -14,6 +14,7 @@ export const cliManifest: CapabilityManifest = {
     // Task management
     "task.add": { implemented: true, handler: "cli-namespaces.ts:handleTaskNamespace add" },
     "task.complete": { implemented: true, handler: "cli-namespaces.ts:handleTaskNamespace complete" },
+    "task.remove": { implemented: false, reason: "No dedicated CLI task remove command" },
     "task.update": { implemented: true, handler: "cli-namespaces.ts:handleTaskNamespace update" },
     "task.list": { implemented: true, handler: "cli-actions.ts:handleTasks" },
     "task.pin": { implemented: false, reason: "Pin task is MCP-only" },

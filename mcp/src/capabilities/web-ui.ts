@@ -14,6 +14,7 @@ export const webUiManifest: CapabilityManifest = {
     // Task management
     "task.add": { implemented: false, reason: "No task creation in web UI" },
     "task.complete": { implemented: false, reason: "No task completion in web UI" },
+    "task.remove": { implemented: false, reason: "No task deletion in web UI" },
     "task.update": { implemented: false, reason: "No task update in web UI" },
     "task.list": { implemented: true, handler: "memory-ui-server.ts:/api/tasks" },
     "task.pin": { implemented: false, reason: "No task pinning in web UI" },

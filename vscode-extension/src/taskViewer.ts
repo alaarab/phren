@@ -25,6 +25,21 @@ export function showTaskDetail(client: CortexClient, task: TaskData, onRefresh: 
           vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
+      if (msg.type === "delete") {
+        try {
+          const confirmed = await vscode.window.showWarningMessage(
+            `Delete task "${task.id}"?`,
+            { modal: true, detail: task.line },
+            "Delete",
+          );
+          if (confirmed !== "Delete") return;
+          await client.removeTask(task.projectName, task.line);
+          vscode.window.showInformationMessage(`Task "${task.id}" deleted.`);
+          onRefresh();
+        } catch (e) {
+          vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
       if (msg.type === "save" && typeof msg.text === "string") {
         try {
           await client.updateTask(task.projectName, task.line, { item: msg.text as string });
@@ -73,6 +88,7 @@ function renderTaskHtml(task: TaskData): string {
     <button id="btnSave" class="btn-primary hidden" onclick="save()">Save</button>
     <button id="btnCancel" class="btn-secondary hidden" onclick="cancelEdit()">Cancel</button>
     ${task.section !== "Done" ? '<button class="btn-secondary" onclick="complete()">Mark Done</button>' : ""}
+    <button class="btn-secondary" onclick="removeTask()">Delete</button>
   </div>
   <div id="viewMode" class="content-view">${esc(task.line)}</div>
   <textarea id="editMode" class="hidden">${esc(task.line)}</textarea>
@@ -101,6 +117,9 @@ function renderTaskHtml(task: TaskData): string {
     }
     function complete() {
       vscode.postMessage({ type: "complete" });
+    }
+    function removeTask() {
+      vscode.postMessage({ type: "delete" });
     }
   </script>
 </body>

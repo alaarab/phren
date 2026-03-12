@@ -12,6 +12,7 @@ import {
   type TaskSection,
   completeTask as completeTaskStore,
   completeTasks as completeTasksBatch,
+  removeTask as removeTaskStore,
   linkTaskIssue,
   pinTask,
   workNextTask,
@@ -305,6 +306,27 @@ export function register(server: McpServer, ctx: McpContext): void {
         const { completed, errors } = result.data;
         if (completed.length > 0) refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "remove_task",
+    {
+      title: "◆ cortex · remove task",
+      description: "Remove a task from a project's tasks.md file by matching text or ID.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Exact or partial text of the task, or a task ID like A1/Q3/D2."),
+      }),
+    },
+    async ({ project, item }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = removeTaskStore(cortexPath, project, item);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
   );

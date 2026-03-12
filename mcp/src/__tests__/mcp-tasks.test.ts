@@ -5,6 +5,7 @@ import { makeTempDir, grantAdmin, resultMsg } from "../test-helpers.js";
 import {
   addTask,
   completeTask,
+  removeTask,
   readTasks,
   TASKS_FILENAME,
 } from "../data-access.js";
@@ -116,6 +117,43 @@ describe("complete_task MCP tool", () => {
   it("invalid project returns error", () => {
     const msg = completeTask(tmpDir, "../escape", "anything");
     expect(msg.ok).toBe(false);
+  });
+});
+
+describe("remove_task MCP tool", () => {
+  it("removes a queue item by partial match", () => {
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
+    const msg = removeTask(tmpDir, PROJECT, "rate limiting");
+    expect(msg.ok).toBe(true);
+    expect(resultMsg(msg)).toContain("Removed task");
+
+    const after = readTasks(tmpDir, PROJECT);
+    if (!after.ok) return;
+    expect(after.data.items.Queue.map((item) => item.line)).not.toContain("Add rate limiting");
+    expect(after.data.items.Queue).toHaveLength(1);
+  });
+
+  it("removes a done item by ID", () => {
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
+    const before = readTasks(tmpDir, PROJECT);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    const doneId = before.data.items.Done[0]?.id;
+    expect(doneId).toBe("D1");
+
+    const msg = removeTask(tmpDir, PROJECT, doneId!);
+    expect(msg.ok).toBe(true);
+
+    const after = readTasks(tmpDir, PROJECT);
+    if (!after.ok) return;
+    expect(after.data.items.Done).toHaveLength(0);
+  });
+
+  it("returns an error for unmatched items", () => {
+    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASK);
+    const msg = removeTask(tmpDir, PROJECT, "nonexistent item xyz123");
+    expect(msg.ok).toBe(false);
+    expect(resultMsg(msg)).toContain("Item not found");
   });
 });
 
