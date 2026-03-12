@@ -75,10 +75,10 @@ describe("mcp-search vector fallback", () => {
     vi.mocked(vectorFallback).mockResolvedValue([
       {
         project: "proj",
-        filename: "FINDINGS.md",
-        type: "findings",
+        filename: "summary.md",
+        type: "summary",
         content: "Webhook delivery for monitor alerts can post to an external URL instead of Discord.",
-        path: `${tmp.path}/proj/FINDINGS.md`,
+        path: `${tmp.path}/proj/summary.md`,
       },
     ]);
 
@@ -98,10 +98,10 @@ describe("mcp-search vector fallback", () => {
         columns: ["project", "filename", "type", "content", "path"],
         values: [[
           "cortex",
-          "FINDINGS.md",
-          "findings",
+          "summary.md",
+          "summary",
           "Semantic opt-in during init should finish at the dependency level",
-          `${tmp.path}cortex/FINDINGS.md`,
+          `${tmp.path}/cortex/summary.md`,
         ]],
       }];
     };

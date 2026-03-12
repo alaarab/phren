@@ -1,6 +1,11 @@
 # Cross-Agent Setup Guide
 
-cortex works across all major AI agents. One memory layer, one command to install. `cortex init` auto-detects and configures every agent it finds.
+cortex supports two install modes:
+
+- `shared`: user-scoped personal memory rooted at `~/.cortex`
+- `project-local`: repo-scoped memory rooted at `<repo>/.cortex`
+
+`cortex init` configures integrations differently depending on that mode.
 
 ```bash
 cortex status          # see which agents are active on this machine
@@ -10,15 +15,13 @@ cortex init            # add or fix any missing agent configurations
 
 ## Feature Matrix
 
-| Feature | Claude Code | Cursor | VS Code Copilot | Codex |
-|---------|:-----------:|:------:|:---------------:|:-----:|
-| FTS5 search | yes | yes | yes | yes |
-| Lifecycle hooks | yes | no | no | no |
-| Task management | yes | yes | yes | yes |
-| Finding capture | yes | yes | yes | yes |
-| Auto-extract (hooks) | yes | no | no | no |
-| Session-start sync | yes | no | no | no |
-| Memory feedback | yes | yes | yes | yes |
+| Tool | Shared mode | Project-local mode |
+|------|-------------|--------------------|
+| Claude Code | user MCP + hooks | not supported |
+| Cursor | user MCP | not supported |
+| VS Code Copilot | user MCP | workspace MCP |
+| Codex | user MCP/TOML | not supported |
+| GitHub Copilot CLI | user MCP | not supported |
 
 Hooks (UserPromptSubmit, Stop, SessionStart, PostToolUse) are only supported by Claude Code. Other IDEs get full MCP tool access but no automatic context injection.
 
@@ -107,7 +110,7 @@ Cursor supports MCP servers via `mcp.json`. Hooks are not supported.
 
 VS Code with GitHub Copilot extension supports MCP servers.
 
-**Config location:** VS Code User settings directory
+**Shared-mode config location:** VS Code User settings directory
 - Linux: `~/.config/Code/User/mcp.json`
 - macOS: `~/Library/Application Support/Code/User/mcp.json`
 - Windows: `%APPDATA%\Code\User\mcp.json`
@@ -128,6 +131,29 @@ VS Code with GitHub Copilot extension supports MCP servers.
 - VS Code uses `servers` (not `mcpServers`) as the root key.
 - Copilot MCP support requires the GitHub Copilot extension with MCP enabled in settings.
 - Without hooks, no automatic memory injection occurs on prompt submit.
+
+### VS Code in project-local mode
+
+Project-local mode writes workspace MCP instead of user MCP:
+
+- config file: `<repo>/.vscode/mcp.json`
+- server root key: `servers`
+- cortex path: `${workspaceFolder}/.cortex`
+
+Example:
+
+```json
+{
+  "servers": {
+    "cortex": {
+      "command": "node",
+      "args": ["/path/to/cortex/mcp/dist/index.js", "${workspaceFolder}/.cortex"]
+    }
+  }
+}
+```
+
+That keeps the install repo-local and avoids any home-directory writes.
 
 ## Codex (OpenAI)
 

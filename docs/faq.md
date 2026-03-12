@@ -141,7 +141,11 @@ Prints what would be created or updated and exits without touching anything.
 
 ## Which agents are supported?
 
-Claude Code, GitHub Copilot CLI, Cursor, and OpenAI Codex. `cortex init` detects which ones are installed and configures them automatically. All four share the same knowledge base — a finding saved by any one of them is available to all the others on the next pull.
+Claude Code, GitHub Copilot CLI, Cursor, VS Code Copilot, and OpenAI Codex.
+
+- Shared mode configures user-scoped integrations for Claude Code, VS Code, Copilot CLI, Cursor, and Codex.
+- Project-local mode configures VS Code workspace MCP only.
+- Claude Code is still the only tool with lifecycle hooks and automatic prompt injection.
 
 ## Which platforms are supported?
 
@@ -149,11 +153,29 @@ Linux is the primary validation path. macOS and Windows are supported, with expl
 
 ## Where does cortex store data?
 
-By default in `~/.cortex`. Set `CORTEX_PATH` to use a custom location.
+Shared mode stores data in `~/.cortex` by default. Set `CORTEX_PATH` to use a custom shared root.
 
 ```bash
 CORTEX_PATH=/path/to/my-cortex cortex init
 ```
+
+Project-local mode stores data inside the repo:
+
+```bash
+cd /path/to/repo
+cortex init --mode project-local
+```
+
+That creates `<repo>/.cortex` and keeps the install repo-local.
+
+## What does uninstall remove?
+
+`cortex uninstall` now removes the active install, not just the agent config.
+
+- Shared mode: removes Cortex MCP/hooks/config plus the active Cortex root and machine alias.
+- Project-local mode: removes `<repo>/.cortex` and the workspace MCP entry from `.vscode/mcp.json`.
+
+If you want to preserve data, export or back up the root before uninstalling.
 
 ## How do I navigate the shell?
 

@@ -11,6 +11,7 @@ import {
   findProjectNameCaseInsensitive,
   hookConfigPath,
   EXEC_TIMEOUT_QUICK_MS,
+  readRootManifest,
   runtimeHealthFile,
 } from "./shared.js";
 import { addProjectToProfile, listProfiles, resolveActiveProfile, setMachineProfile } from "./profile-store.js";
@@ -415,11 +416,20 @@ export function bootstrapFromExisting(
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(`Path does not exist: ${resolvedPath}`);
   }
+  const manifest = readRootManifest(cortexPath);
+  const isProjectLocal = manifest?.installMode === "project-local";
+  const sourceRoot = isProjectLocal ? path.resolve(manifest.workspaceRoot || resolvedPath) : resolvedPath;
+  if (isProjectLocal) {
+    const matchesWorkspace = resolvedPath === sourceRoot || resolvedPath.startsWith(sourceRoot + path.sep);
+    if (!matchesWorkspace) {
+      throw new Error(`Project-local cortex can only enroll the owning workspace: ${sourceRoot}`);
+    }
+  }
 
   let claudeMdPath: string | null = null;
   const candidates = [
-    path.join(resolvedPath, "CLAUDE.md"),
-    path.join(resolvedPath, ".claude", "CLAUDE.md"),
+    path.join(sourceRoot, "CLAUDE.md"),
+    path.join(sourceRoot, ".claude", "CLAUDE.md"),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) {
@@ -429,7 +439,9 @@ export function bootstrapFromExisting(
   }
 
   const claudeContent = claudeMdPath ? fs.readFileSync(claudeMdPath, "utf8") : null;
-  const projectName = path.basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const projectName = isProjectLocal
+    ? String(manifest?.primaryProject)
+    : path.basename(sourceRoot).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
   const existingProject = findProjectNameCaseInsensitive(cortexPath, projectName);
   if (existingProject && existingProject !== projectName) {
     throw new Error(
@@ -480,19 +492,19 @@ export function bootstrapFromExisting(
     }
   }
 
-  const sourceInfo = claudeMdPath ? `**Source CLAUDE.md:** ${claudeMdPath}` : `**Source:** ${resolvedPath}`;
+  const sourceInfo = claudeMdPath ? `**Source CLAUDE.md:** ${claudeMdPath}` : `**Source:** ${sourceRoot}`;
   const summaryPath = path.join(projDir, "summary.md");
   if (!fs.existsSync(summaryPath)) {
     atomicWriteText(
       summaryPath,
-      `# ${projectName}\n\n**What:** Bootstrapped from ${resolvedPath}\n${sourceInfo}\n\n${summaryLines.length > 1 ? summaryLines.slice(1).join("\n") : ""}\n`
+      `# ${projectName}\n\n**What:** Bootstrapped from ${sourceRoot}\n${sourceInfo}\n\n${summaryLines.length > 1 ? summaryLines.slice(1).join("\n") : ""}\n`
     );
   }
 
   if (!fs.existsSync(path.join(projDir, "FINDINGS.md"))) {
     atomicWriteText(
       path.join(projDir, "FINDINGS.md"),
-      `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${resolvedPath} -->\n`
+      `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${sourceRoot} -->\n`
     );
   }
   if (!fs.existsSync(path.join(projDir, TASKS_FILENAME))) {
@@ -512,7 +524,7 @@ export function bootstrapFromExisting(
     throw new Error(activeProfile.error);
   }
 
-  writeProjectConfig(cortexPath, projectName, { ownership });
+  writeProjectConfig(cortexPath, projectName, { ownership, sourcePath: sourceRoot });
 
   return {
     project: projectName,
@@ -593,6 +605,7 @@ export function isProjectTracked(cortexPath: string, projectName: string, profil
 export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: PostInitCheck[] } {
   const checks: PostInitCheck[] = [];
   const prefs = readInstallPreferences(cortexPath);
+  const manifest = readRootManifest(cortexPath);
   const gitVersion = commandVersion("git");
   const nodeVersion = commandVersion("node");
   checks.push({
@@ -608,66 +621,102 @@ export function runPostInitVerify(cortexPath: string): { ok: boolean; checks: Po
     fix: versionAtLeast(nodeVersion, 20) ? undefined : "Install Node.js 20+ before using cortex.",
   });
 
-  const gitRemote = gitRemoteStatus(cortexPath);
-  const gitRemoteDetail = gitRemote.ok
-    ? gitRemote.detail
-    : `${gitRemote.detail} (optional unless you want cross-machine sync)`;
-  checks.push({
-    name: "git-remote",
-    ok: gitRemote.ok,
-    detail: gitRemoteDetail,
-    fix: gitRemote.ok ? undefined : "Optional: initialize a repo and add an origin remote for cross-machine sync.",
-  });
+  if (manifest?.installMode === "project-local") {
+    checks.push({
+      name: "workspace-root",
+      ok: Boolean(manifest.workspaceRoot && fs.existsSync(manifest.workspaceRoot)),
+      detail: manifest.workspaceRoot ? `workspace root: ${manifest.workspaceRoot}` : "workspaceRoot missing from cortex.root.yaml",
+      fix: manifest.workspaceRoot ? undefined : "Re-run `cortex init --mode project-local` to repair the root manifest.",
+    });
+    checks.push({
+      name: "hooks-registered",
+      ok: prefs.hooksEnabled === false,
+      detail: "hooks are unsupported in project-local mode",
+      fix: prefs.hooksEnabled === false ? undefined : "Run `cortex hooks-mode off` and keep hooks disabled in project-local mode.",
+    });
+    const workspaceMcp = manifest.workspaceRoot ? path.join(manifest.workspaceRoot, ".vscode", "mcp.json") : "";
+    let workspaceMcpOk = false;
+    try {
+      if (workspaceMcp && fs.existsSync(workspaceMcp)) {
+        const cfg = JSON.parse(fs.readFileSync(workspaceMcp, "utf8"));
+        workspaceMcpOk = Boolean(cfg.servers?.cortex);
+      }
+    } catch (err: unknown) {
+      debugLog(`doctor local workspace mcp parse failed: ${errorMessage(err)}`);
+    }
+    checks.push({
+      name: "mcp-config",
+      ok: prefs.mcpEnabled === false ? true : workspaceMcpOk,
+      detail: prefs.mcpEnabled === false
+        ? "workspace MCP disabled by preference"
+        : workspaceMcpOk
+          ? "VS Code workspace MCP registered"
+          : "VS Code workspace MCP not found in .vscode/mcp.json",
+      fix: prefs.mcpEnabled === false ? undefined : "Run `cortex mcp-mode on` to register the VS Code workspace server.",
+    });
+  } else {
 
-  const settingsPath = hookConfigPath("claude");
-  const configWritable = nearestWritableTarget(settingsPath);
-  checks.push({
-    name: "config-writable",
-    ok: configWritable,
-    detail: configWritable ? `writable: ${settingsPath}` : `not writable: ${settingsPath}`,
-    fix: configWritable ? undefined : "Fix permissions for ~/.claude or its settings.json before enabling hooks/MCP.",
-  });
-  let mcpOk = false;
-  let hooksOk = false;
-  try {
-    const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    mcpOk = Boolean(cfg.mcpServers?.cortex);
-    const hooks = cfg.hooks || {};
-    const hasPrompt = JSON.stringify(hooks.UserPromptSubmit || []).includes("hook-prompt");
-    const hasStop = JSON.stringify(hooks.Stop || []).includes("hook-stop");
-    const hasStart = JSON.stringify(hooks.SessionStart || []).includes("hook-session-start");
-    hooksOk = hasPrompt && hasStop && hasStart;
-  } catch (err: unknown) {
-    debugLog(`doctor: settings.json missing or unreadable: ${errorMessage(err)}`);
+    const gitRemote = gitRemoteStatus(cortexPath);
+    const gitRemoteDetail = gitRemote.ok
+      ? gitRemote.detail
+      : `${gitRemote.detail} (optional unless you want cross-machine sync)`;
+    checks.push({
+      name: "git-remote",
+      ok: gitRemote.ok,
+      detail: gitRemoteDetail,
+      fix: gitRemote.ok ? undefined : "Optional: initialize a repo and add an origin remote for cross-machine sync.",
+    });
+
+    const settingsPath = hookConfigPath("claude");
+    const configWritable = nearestWritableTarget(settingsPath);
+    checks.push({
+      name: "config-writable",
+      ok: configWritable,
+      detail: configWritable ? `writable: ${settingsPath}` : `not writable: ${settingsPath}`,
+      fix: configWritable ? undefined : "Fix permissions for ~/.claude or its settings.json before enabling hooks/MCP.",
+    });
+    let mcpOk = false;
+    let hooksOk = false;
+    try {
+      const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      mcpOk = Boolean(cfg.mcpServers?.cortex);
+      const hooks = cfg.hooks || {};
+      const hasPrompt = JSON.stringify(hooks.UserPromptSubmit || []).includes("hook-prompt");
+      const hasStop = JSON.stringify(hooks.Stop || []).includes("hook-stop");
+      const hasStart = JSON.stringify(hooks.SessionStart || []).includes("hook-session-start");
+      hooksOk = hasPrompt && hasStop && hasStart;
+    } catch (err: unknown) {
+      debugLog(`doctor: settings.json missing or unreadable: ${errorMessage(err)}`);
+    }
+    checks.push({
+      name: "mcp-config",
+      ok: mcpOk,
+      detail: mcpOk
+        ? "MCP server registered in Claude settings"
+        : prefs.mcpEnabled === false
+          ? "MCP server not found in ~/.claude/settings.json (expected while MCP mode is OFF)"
+          : "MCP server not found in ~/.claude/settings.json",
+      fix: mcpOk
+        ? undefined
+        : prefs.mcpEnabled === false
+          ? "Optional: run `cortex mcp-mode on` or `cortex init` if you want MCP enabled."
+          : "Run `cortex init` to register the MCP server",
+    });
+    checks.push({
+      name: "hooks-registered",
+      ok: hooksOk,
+      detail: hooksOk
+        ? "All lifecycle hooks registered"
+        : prefs.hooksEnabled === false
+          ? "One or more hooks missing from ~/.claude/settings.json (expected while hooks mode is OFF)"
+          : "One or more hooks missing from ~/.claude/settings.json",
+      fix: hooksOk
+        ? undefined
+        : prefs.hooksEnabled === false
+          ? "Optional: run `cortex hooks-mode on` or `cortex init` if you want hooks enabled."
+          : "Run `cortex init` to install or refresh hooks",
+    });
   }
-  checks.push({
-    name: "mcp-config",
-    ok: mcpOk,
-    detail: mcpOk
-      ? "MCP server registered in Claude settings"
-      : prefs.mcpEnabled === false
-        ? "MCP server not found in ~/.claude/settings.json (expected while MCP mode is OFF)"
-        : "MCP server not found in ~/.claude/settings.json",
-    fix: mcpOk
-      ? undefined
-      : prefs.mcpEnabled === false
-        ? "Optional: run `cortex mcp-mode on` or `cortex init` if you want MCP enabled."
-        : "Run `cortex init` to register the MCP server",
-  });
-  checks.push({
-    name: "hooks-registered",
-    ok: hooksOk,
-    detail: hooksOk
-      ? "All lifecycle hooks registered"
-      : prefs.hooksEnabled === false
-        ? "One or more hooks missing from ~/.claude/settings.json (expected while hooks mode is OFF)"
-        : "One or more hooks missing from ~/.claude/settings.json",
-    fix: hooksOk
-      ? undefined
-      : prefs.hooksEnabled === false
-        ? "Optional: run `cortex hooks-mode on` or `cortex init` if you want hooks enabled."
-        : "Run `cortex init` to install or refresh hooks",
-  });
 
   const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
   const globalOk = fs.existsSync(globalClaude);

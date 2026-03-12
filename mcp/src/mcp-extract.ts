@@ -69,7 +69,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         text = text.slice(0, 10000);
       }
 
-      const findingsLevel = getProactivityLevelForFindings();
+      const findingsLevel = getProactivityLevelForFindings(ctx.cortexPath);
       if (!dryRun && !shouldAutoCaptureFindingsForLevel(findingsLevel, text)) {
         const error = findingsLevel === "low"
           ? 'Findings auto-extraction is disabled when CORTEX_PROACTIVITY_FINDINGS is "low". Use add_finding for manual saves.'

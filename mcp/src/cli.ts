@@ -80,13 +80,13 @@ import { resolveRuntimeProfile } from "./runtime-profile.js";
 // ── CLI router ───────────────────────────────────────────────────────────────
 
 export async function runCliCommand(command: string, args: string[]) {
-  const profile = resolveRuntimeProfile(getCortexPath());
+  const getProfile = () => resolveRuntimeProfile(getCortexPath());
   switch (command) {
     case "search":
       {
         const opts = parseSearchArgs(getCortexPath(), args);
         if (!opts) return;
-        return handleSearch(opts, profile);
+        return handleSearch(opts, getProfile());
       }
     case "hook-prompt":
       return handleHookPrompt();
@@ -129,7 +129,7 @@ export async function runCliCommand(command: string, args: string[]) {
     case "web-ui":
       return handleMemoryUi(args);
     case "shell":
-      return handleShell(args, profile);
+      return handleShell(args, getProfile());
     case "update":
       return handleUpdate(args);
     case "config":
@@ -137,13 +137,13 @@ export async function runCliCommand(command: string, args: string[]) {
     case "maintain":
       return handleMaintain(args);
     case "skill-list":
-      return handleSkillList(profile);
+      return handleSkillList(getProfile());
     case "skills":
-      return handleSkillsNamespace(args, profile);
+      return handleSkillsNamespace(args, getProfile());
     case "hooks":
       return handleHooksNamespace(args);
     case "tasks":
-      return handleTaskView(profile);
+      return handleTaskView(getProfile());
     case "sessions":
       return handleSessionsView(args);
     case "task":
@@ -151,17 +151,20 @@ export async function runCliCommand(command: string, args: string[]) {
     case "finding":
       return handleFindingNamespace(args);
     case "projects":
-      return handleProjectsNamespace(args, profile);
+      return handleProjectsNamespace(
+        args,
+        args[0] === "--help" || args[0] === "-h" ? "" : getProfile()
+      );
     case "quickstart":
       return handleQuickstart();
     case "background-maintenance":
       return handleBackgroundMaintenance(args[0]);
     case "debug-injection":
-      return handleDebugInjection(args, profile);
+      return handleDebugInjection(args, getProfile());
     case "inspect-index":
-      return handleInspectIndex(args, profile);
+      return handleInspectIndex(args, getProfile());
     case "detect-skills":
-      return handleDetectSkills(args, profile);
+      return handleDetectSkills(args, getProfile());
     default:
       console.error(`Unknown command: ${command}`);
       process.exit(1);

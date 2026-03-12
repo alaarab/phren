@@ -1858,23 +1858,27 @@ describe("CLI integration: uninstall", () => {
     }
   });
 
-  it("preserves cortex data directory", () => {
+  it("removes the shared cortex root and machine alias", () => {
     const projDir = path.join(cortexDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n- test insight");
+    const machineFile = path.join(homeDir, ".cortex", ".machine-id");
 
     runCli(
-      ["init", "-y"],
+      ["init", "-y", "--machine", "uninstall-box"],
       { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
     );
+    fs.mkdirSync(path.dirname(machineFile), { recursive: true });
+    fs.writeFileSync(machineFile, "uninstall-box\n");
 
     const { exitCode, stdout } = runCli(
       ["uninstall"],
       { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("NOT deleted");
-    expect(fs.existsSync(path.join(projDir, "FINDINGS.md"))).toBe(true);
+    expect(stdout).toContain("installed data removed");
+    expect(fs.existsSync(cortexDir)).toBe(false);
+    expect(fs.existsSync(machineFile)).toBe(false);
   });
 
   it("handles missing settings file gracefully", () => {

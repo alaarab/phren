@@ -147,7 +147,7 @@ describe.sequential("mcp mode configuration", () => {
       settingsPath,
       JSON.stringify(
         {
-          mcpServers: {
+          servers: {
             cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
           },
         },
@@ -212,13 +212,13 @@ describe.sequential("mcp mode configuration", () => {
     const offStatus = configureVSCode(cortexPath, { mcpEnabled: false });
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(offCfg.mcpServers?.cortex).toBeUndefined();
+    expect(offCfg.servers?.cortex).toBeUndefined();
 
     const onStatus = configureVSCode(cortexPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+    expect(onCfg.servers?.cortex?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.servers?.cortex?.args).toContain(cortexPath);
   });
 
   it("detects VS Code in USERPROFILE/AppData/Roaming path", () => {
@@ -230,8 +230,8 @@ describe.sequential("mcp mode configuration", () => {
     expect(onStatus).toBe("installed");
 
     const cfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(cfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(cfg.mcpServers?.cortex?.args).toContain(cortexPath);
+    expect(cfg.servers?.cortex?.command).toMatch(/^(node|npx)$/);
+    expect(cfg.servers?.cortex?.args).toContain(cortexPath);
   });
 
   it("toggles Cursor MCP config on and off", () => {

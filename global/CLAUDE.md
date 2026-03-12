@@ -44,7 +44,9 @@ Put personal workflow skills in `~/.cortex/global/skills/` and list them here. S
 
 ## Project store
 
-All skills and project config live in `~/.cortex` (or wherever `CORTEX_DIR` points). This is a git repo that syncs across machines using profiles.
+In shared mode, skills and project config live in `~/.cortex` (or wherever `CORTEX_DIR` points). This is a git repo that syncs across machines using profiles.
+
+If you're using `cortex init --mode project-local`, the root is `<repo>/.cortex` instead. Project-local mode does not use profiles, machine mappings, or global hooks.
 
 - `~/.cortex/global/`: skills and config that apply everywhere
 - `~/.cortex/<project>/`: per-project CLAUDE.md, skills, task, findings

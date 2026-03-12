@@ -7,6 +7,7 @@ import {
   getProjectDirs,
   homePath,
   hookConfigPath,
+  readRootManifest,
 } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
@@ -545,6 +546,11 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
   }
 
   if (subcommand === "remove") {
+    const manifest = readRootManifest(getCortexPath());
+    if (manifest?.installMode === "project-local") {
+      console.error("projects remove is unsupported in project-local mode. Use `cortex uninstall`.");
+      process.exit(1);
+    }
     const name = args[1];
     if (!name) {
       console.error("Usage: cortex projects remove <name>");

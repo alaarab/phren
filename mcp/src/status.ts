@@ -9,6 +9,7 @@ import {
   isRecord,
   hookConfigPath,
   homeDir,
+  readRootManifest,
 } from "./shared.js";
 import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared-index.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
@@ -73,6 +74,7 @@ export async function runStatus() {
   }
 
   const cwd = process.cwd();
+  const manifest = readRootManifest(cortexPath);
   const profile = resolveRuntimeProfile(cortexPath);
   const activeProject = detectProject(cortexPath, cwd, profile);
 
@@ -88,6 +90,13 @@ export async function runStatus() {
 
   // Cortex path
   console.log(`  ${BOLD}Path:${RESET}     ${cortexPath}`);
+  console.log(`  ${BOLD}Mode:${RESET}     ${manifest?.installMode || "unknown"}`);
+  if (manifest?.workspaceRoot) {
+    console.log(`  ${BOLD}Workspace:${RESET} ${manifest.workspaceRoot}`);
+  }
+  if (manifest?.syncMode) {
+    console.log(`  ${BOLD}Sync mode:${RESET} ${manifest.syncMode}`);
+  }
   if (profile) {
     console.log(`  ${BOLD}Profile:${RESET}  ${profile}`);
   }
@@ -99,24 +108,42 @@ export async function runStatus() {
   console.log(`  ${BOLD}Hooks:${RESET}    ${hooksEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
 
   // Hook health: check ~/.claude/settings.json
-  const settingsPath = hookConfigPath("claude");
   let hooksInstalled = false;
   let mcpConfigured = false;
-  if (fs.existsSync(settingsPath)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as unknown;
-      const settings = isRecord(parsed) ? parsed : {};
-      const mcpServers = isRecord(settings.mcpServers) ? settings.mcpServers : undefined;
-      const hooks = isRecord(settings.hooks) ? settings.hooks : undefined;
-      mcpConfigured = Boolean(mcpServers?.cortex);
-      const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
-      hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
+  if (manifest?.installMode === "project-local" && manifest.workspaceRoot) {
+    const workspaceMcp = path.join(manifest.workspaceRoot, ".vscode", "mcp.json");
+    if (fs.existsSync(workspaceMcp)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(workspaceMcp, "utf8")) as unknown;
+        const settings = isRecord(parsed) ? parsed : {};
+        const servers = isRecord(settings.servers) ? settings.servers : undefined;
+        mcpConfigured = Boolean(servers?.cortex);
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusWorkspaceMcp parse: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+    }
+  } else {
+    const settingsPath = hookConfigPath("claude");
+    if (fs.existsSync(settingsPath)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as unknown;
+        const settings = isRecord(parsed) ? parsed : {};
+        const mcpServers = isRecord(settings.mcpServers) ? settings.mcpServers : undefined;
+        const hooks = isRecord(settings.hooks) ? settings.hooks : undefined;
+        mcpConfigured = Boolean(mcpServers?.cortex);
+        const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
+        hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
   }
-  console.log(`  ${BOLD}MCP cfg:${RESET}  ${check(mcpConfigured)} ${DIM}(in settings.json)${RESET}`);
-  console.log(`  ${BOLD}Hooks cfg:${RESET} ${check(hooksInstalled)} ${DIM}(in settings.json)${RESET}`);
+  console.log(`  ${BOLD}MCP cfg:${RESET}  ${check(mcpConfigured)} ${DIM}(${manifest?.installMode === "project-local" ? "in .vscode/mcp.json" : "in settings.json"})${RESET}`);
+  if (manifest?.installMode === "project-local") {
+    console.log(`  ${BOLD}Hooks cfg:${RESET} ${DIM}unsupported in project-local mode${RESET}`);
+  } else {
+    console.log(`  ${BOLD}Hooks cfg:${RESET} ${check(hooksInstalled)} ${DIM}(in settings.json)${RESET}`);
+  }
 
   // FTS index health
   let ftsIndexOk = false;
@@ -185,7 +212,12 @@ export async function runStatus() {
     return candidates.some(hasCortexEntry);
   }
   const home = homeDir();
-  const agentChecks: { name: string; configured: boolean }[] = [
+  const agentChecks: { name: string; configured: boolean }[] = manifest?.installMode === "project-local" && manifest.workspaceRoot ? [
+    {
+      name: "VS Code (workspace)",
+      configured: fs.existsSync(path.join(manifest.workspaceRoot, ".vscode", "mcp.json")),
+    },
+  ] : [
     {
       name: "Claude Code",
       configured: agentConfigured([
@@ -252,31 +284,37 @@ export async function runStatus() {
   console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalTask} tasks, ${totalQueue} queued`);
 
   const runtime = readRuntimeHealth(cortexPath);
-  console.log(`\n  ${BOLD}Sync:${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
-  console.log(`             last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
-  console.log(`             last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
-  console.log(`             unsynced commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
-  if (runtime.lastSync?.lastPushDetail) {
-    console.log(`             push detail: ${runtime.lastSync.lastPushDetail}`);
+  if (manifest?.installMode === "project-local") {
+    console.log(`\n  ${BOLD}Sync:${RESET}     workspace-managed`);
+    console.log(`             auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+  } else {
+    console.log(`\n  ${BOLD}Sync:${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+    console.log(`             last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
+    console.log(`             last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
+    console.log(`             unsynced commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+    if (runtime.lastSync?.lastPushDetail) {
+      console.log(`             push detail: ${runtime.lastSync.lastPushDetail}`);
+    }
   }
 
   // Recent changes (git log)
-  const isGitRepo = runGit(cortexPath, ["rev-parse", "--is-inside-work-tree"]);
+  const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : cortexPath;
+  const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"]);
   if (isGitRepo === "true") {
-    const log = runGit(cortexPath, ["log", "--oneline", "-5", "--no-decorate"]);
+    const log = runGit(gitTarget, ["log", "--oneline", "-5", "--no-decorate"]);
     if (log) {
       console.log(`\n  ${BOLD}Recent changes:${RESET}`);
       for (const line of log.split("\n")) {
         console.log(`    ${DIM}${line}${RESET}`);
       }
     }
-    const dirty = runGit(cortexPath, ["status", "--porcelain"]);
+    const dirty = runGit(gitTarget, ["status", "--porcelain"]);
     if (dirty) {
       const count = dirty.split("\n").filter(Boolean).length;
       console.log(`    ${YELLOW}${count} uncommitted change(s)${RESET}`);
     }
   } else {
-    console.log(`\n  ${DIM}~/.cortex is not a git repo${RESET}`);
+    console.log(`\n  ${DIM}${gitTarget} is not a git repo${RESET}`);
   }
 
   // Telemetry

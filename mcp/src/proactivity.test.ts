@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir } from "./test-helpers.js";
+import { initTestCortexRoot, makeTempDir } from "./test-helpers.js";
 import {
   getProactivityLevel,
   getProactivityLevelForTask,
@@ -42,6 +42,7 @@ describe("proactivity config", () => {
     tmpCleanup = tmp.cleanup;
     homeDir = path.join(tmp.path, "home");
     fs.mkdirSync(homeDir, { recursive: true });
+    initTestCortexRoot(path.join(homeDir, ".cortex"));
 
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;

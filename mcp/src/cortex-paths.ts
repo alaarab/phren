@@ -8,6 +8,23 @@ import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 
 bootstrapCortexDotEnv();
 
+export type InstallMode = "shared" | "project-local";
+export type SyncMode = "managed-git" | "workspace-git";
+
+export interface CortexRootManifest {
+  version: 1;
+  installMode: InstallMode;
+  syncMode: SyncMode;
+  workspaceRoot?: string;
+  primaryProject?: string;
+}
+
+export interface InstallContext extends CortexRootManifest {
+  cortexPath: string;
+}
+
+export const ROOT_MANIFEST_FILENAME = "cortex.root.yaml";
+
 export function homeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || os.homedir();
 }
@@ -23,7 +40,185 @@ export function expandHomePath(input: string): string {
 }
 
 export function defaultCortexPath(): string {
-  return process.env.CORTEX_PATH || homePath(".cortex");
+  return expandHomePath(process.env.CORTEX_PATH || homePath(".cortex"));
+}
+
+export function rootManifestPath(cortexPath: string): string {
+  return path.join(cortexPath, ROOT_MANIFEST_FILENAME);
+}
+
+function atomicWriteText(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, filePath);
+}
+
+function isInstallMode(value: unknown): value is InstallMode {
+  return value === "shared" || value === "project-local";
+}
+
+function isSyncMode(value: unknown): value is SyncMode {
+  return value === "managed-git" || value === "workspace-git";
+}
+
+function normalizeManifest(raw: unknown): CortexRootManifest | null {
+  if (!isRecord(raw)) return null;
+  const version = Number(raw.version);
+  const installMode = raw.installMode;
+  const syncMode = raw.syncMode;
+  if (version !== 1 || !isInstallMode(installMode) || !isSyncMode(syncMode)) return null;
+
+  const workspaceRoot = typeof raw.workspaceRoot === "string" && raw.workspaceRoot.trim()
+    ? path.resolve(expandHomePath(raw.workspaceRoot))
+    : undefined;
+  const primaryProject = typeof raw.primaryProject === "string" && raw.primaryProject.trim()
+    ? raw.primaryProject.trim()
+    : undefined;
+
+  if (installMode === "project-local") {
+    if (!workspaceRoot || !primaryProject || !isValidProjectName(primaryProject)) return null;
+  }
+
+  return {
+    version: 1,
+    installMode,
+    syncMode,
+    workspaceRoot,
+    primaryProject,
+  };
+}
+
+export function readRootManifest(cortexPath: string): CortexRootManifest | null {
+  const manifestFile = rootManifestPath(cortexPath);
+  if (!fs.existsSync(manifestFile)) return null;
+  try {
+    const parsed = yaml.load(fs.readFileSync(manifestFile, "utf8"), { schema: yaml.CORE_SCHEMA });
+    return normalizeManifest(parsed);
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readRootManifest: ${errorMessage(err)}\n`);
+    return null;
+  }
+}
+
+export function writeRootManifest(cortexPath: string, manifest: CortexRootManifest): void {
+  const normalized = normalizeManifest(manifest);
+  if (!normalized) {
+    throw new Error(`${CortexError.VALIDATION_ERROR}: invalid cortex root manifest for ${cortexPath}`);
+  }
+  atomicWriteText(rootManifestPath(cortexPath), yaml.dump(normalized, { lineWidth: 1000 }));
+}
+
+export function resolveInstallContext(cortexPath: string): InstallContext {
+  const resolvedPath = path.resolve(cortexPath);
+  const manifest = readRootManifest(resolvedPath);
+  if (!manifest) {
+    throw new Error(`${CortexError.NOT_FOUND}: cortex root manifest not found: ${rootManifestPath(resolvedPath)}`);
+  }
+  return { cortexPath: resolvedPath, ...manifest };
+}
+
+function requireDirectory(resolved: string, label: string): string {
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`${CortexError.NOT_FOUND}: ${label} not found: ${resolved}`);
+  }
+  if (!fs.statSync(resolved).isDirectory()) {
+    throw new Error(`${CortexError.VALIDATION_ERROR}: ${label} is not a directory: ${resolved}`);
+  }
+  return resolved;
+}
+
+function hasRootManifest(candidate: string): boolean {
+  return fs.existsSync(rootManifestPath(candidate));
+}
+
+export function findNearestCortexPath(startDir: string = process.cwd()): string | null {
+  let current = path.resolve(startDir);
+  while (true) {
+    if (hasRootManifest(current)) return current;
+    const localCandidate = path.join(current, ".cortex");
+    if (hasRootManifest(localCandidate)) return localCandidate;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
+function sharedRootCandidate(): string {
+  return homePath(".cortex");
+}
+
+let cachedCortexPath: string | null | undefined;
+let cachedCortexPathKey: string | undefined;
+
+export function findCortexPath(): string | null {
+  const cacheKey = [
+    process.env.CORTEX_PATH ?? "",
+    process.env.HOME ?? "",
+    process.env.USERPROFILE ?? "",
+    process.cwd(),
+  ].join("|");
+  if (cachedCortexPath !== undefined && cachedCortexPathKey === cacheKey) return cachedCortexPath;
+  cachedCortexPathKey = cacheKey;
+
+  const envVal = process.env.CORTEX_PATH?.trim();
+  if (envVal) {
+    const resolved = path.resolve(expandHomePath(envVal));
+    cachedCortexPath = hasRootManifest(resolved) ? resolved : null;
+    return cachedCortexPath;
+  }
+
+  const nearest = findNearestCortexPath();
+  if (nearest) {
+    cachedCortexPath = nearest;
+    return nearest;
+  }
+
+  const shared = sharedRootCandidate();
+  cachedCortexPath = hasRootManifest(shared) ? shared : null;
+  return cachedCortexPath;
+}
+
+export function ensureCortexPath(): string {
+  const existing = findCortexPath();
+  if (existing) return existing;
+  const defaultPath = sharedRootCandidate();
+  fs.mkdirSync(defaultPath, { recursive: true });
+  writeRootManifest(defaultPath, {
+    version: 1,
+    installMode: "shared",
+    syncMode: "managed-git",
+  });
+  cachedCortexPath = defaultPath;
+  cachedCortexPathKey = [
+    process.env.CORTEX_PATH ?? "",
+    process.env.HOME ?? "",
+    process.env.USERPROFILE ?? "",
+    process.cwd(),
+  ].join("|");
+  return defaultPath;
+}
+
+export function findCortexPathWithArg(arg?: string): string {
+  if (arg) {
+    const resolved = requireDirectory(path.resolve(expandHomePath(arg)), "cortex path");
+    if (!hasRootManifest(resolved)) {
+      throw new Error(`${CortexError.NOT_FOUND}: cortex root manifest not found: ${rootManifestPath(resolved)}`);
+    }
+    return resolved;
+  }
+  const existing = findCortexPath();
+  if (existing) return existing;
+  throw new Error(`${CortexError.NOT_FOUND}: cortex root not found. Run 'npx cortex init'.`);
+}
+
+export function isProjectLocalMode(cortexPath: string): boolean {
+  try {
+    return resolveInstallContext(cortexPath).installMode === "project-local";
+  } catch {
+    return false;
+  }
 }
 
 // Centralized runtime path helpers. All ephemeral/runtime files go in
@@ -89,10 +284,11 @@ export function sessionMarker(cortexPath: string, name: string): string {
   return path.join(dir, name);
 }
 
-// Debug logger - writes to ~/.cortex/.runtime/debug.log when CORTEX_DEBUG=1
+// Debug logging is best-effort and only writes when a cortex root already exists.
 export function debugLog(msg: string): void {
   if (!process.env.CORTEX_DEBUG) return;
-  const cortexPath = defaultCortexPath();
+  const cortexPath = findCortexPath();
+  if (!cortexPath) return;
   const logFile = runtimeFile(cortexPath, "debug.log");
   try {
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
@@ -106,7 +302,6 @@ export function appendIndexEvent(cortexPath: string, event: Record<string, unkno
     const file = runtimeFile(cortexPath, "index-events.jsonl");
     fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
   } catch (err: unknown) {
-    // Observability should not break the indexer.
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendIndexEvent: ${errorMessage(err)}\n`);
   }
 }
@@ -116,72 +311,6 @@ export function resolveFindingsPath(projectDir: string): string | undefined {
   const findingsPath = path.join(projectDir, "FINDINGS.md");
   if (fs.existsSync(findingsPath)) return findingsPath;
   return undefined;
-}
-
-// Validate that a path is a safe, existing directory
-function requireDirectory(resolved: string, label: string): string {
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`${CortexError.NOT_FOUND}: ${label} not found: ${resolved}`);
-  }
-  if (!fs.statSync(resolved).isDirectory()) {
-    throw new Error(`${CortexError.VALIDATION_ERROR}: ${label} is not a directory: ${resolved}`);
-  }
-  return resolved;
-}
-
-// Pure lookup: find an existing cortex root directory, returns null if none found
-// Priority: CORTEX_PATH env > ~/.cortex > ~cortex
-// Memoized: keyed on CORTEX_PATH+HOME so test overrides are respected.
-let cachedCortexPath: string | null | undefined;
-let cachedCortexPathKey: string | undefined;
-export function findCortexPath(): string | null {
-  const envVal = process.env.CORTEX_PATH;
-  const cacheKey = `${envVal ?? ""}|${process.env.HOME ?? ""}|${process.env.USERPROFILE ?? ""}`;
-  if (cachedCortexPath !== undefined && cachedCortexPathKey === cacheKey) return cachedCortexPath;
-  cachedCortexPathKey = cacheKey;
-  if (envVal) {
-    try {
-      cachedCortexPath = fs.statSync(envVal).isDirectory() ? envVal : null;
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findCortexPath stat: ${errorMessage(err)}\n`);
-      cachedCortexPath = null;
-    }
-    return cachedCortexPath;
-  }
-  for (const name of [".cortex", "cortex"]) {
-    const candidate = homePath(name);
-    if (fs.existsSync(candidate)) {
-      cachedCortexPath = candidate;
-      return candidate;
-    }
-  }
-  cachedCortexPath = null;
-  return null;
-}
-
-// Find or create the cortex root directory (creates ~/.cortex on first run)
-export function ensureCortexPath(): string {
-  const existing = findCortexPath();
-  if (existing) return existing;
-  const defaultPath = homePath(".cortex");
-  fs.mkdirSync(defaultPath, { recursive: true });
-  fs.writeFileSync(
-    path.join(defaultPath, "README.md"),
-    `# My Cortex\n\nThis is your personal project store. Each subdirectory is a project.\n\nGet started:\n\n\`\`\`bash\nmkdir my-project\ncd my-project\ntouch CLAUDE.md summary.md FINDINGS.md tasks.md\n\`\`\`\n\nOr run \`cortex:init my-project\` in Claude Code to scaffold one.\n\nPush this directory to a private GitHub repo to sync across machines.\n`
-  );
-  cachedCortexPathKey = `${process.env.CORTEX_PATH ?? ""}|${process.env.HOME ?? ""}|${process.env.USERPROFILE ?? ""}`;
-  cachedCortexPath = defaultPath;
-  console.error("Created ~/.cortex");
-  return defaultPath;
-}
-
-// Resolve the cortex path from an explicit argument (used by MCP mode)
-export function findCortexPathWithArg(arg?: string): string {
-  if (arg) {
-    const resolved = expandHomePath(arg);
-    return requireDirectory(resolved, "cortex path");
-  }
-  return ensureCortexPath();
 }
 
 const RESERVED_PROJECT_DIR_NAMES = new Set(["profiles", "templates", "global"]);
@@ -210,12 +339,24 @@ export function findProjectNameCaseInsensitive(cortexPath: string, name: string)
   return null;
 }
 
-// Figure out which project directories to index
+function getLocalProjectDirs(cortexPath: string, manifest: CortexRootManifest): string[] {
+  const primaryProject = manifest.primaryProject;
+  if (!primaryProject || !isValidProjectName(primaryProject)) return [];
+  const projectPath = safeProjectPath(cortexPath, primaryProject);
+  if (!projectPath || !fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory()) return [];
+  const visible = fs.readdirSync(cortexPath, { withFileTypes: true }).filter(isProjectDirEntry).map((entry) => entry.name);
+  if (visible.length !== 1 || visible[0] !== primaryProject) return [];
+  return [projectPath];
+}
+
+// Figure out which project directories to index.
 export function getProjectDirs(cortexPath: string, profile?: string): string[] {
+  const manifest = readRootManifest(cortexPath);
+  if (manifest?.installMode === "project-local") {
+    return getLocalProjectDirs(cortexPath, manifest);
+  }
+
   if (profile) {
-    // Q18: when a profile is explicitly set, fail closed — never widen to all projects.
-    // If the profile file is missing or malformed we return [] rather than leaking
-    // unrelated projects into the caller's view.
     if (!isValidProjectName(profile)) {
       console.error(`${CortexError.VALIDATION_ERROR}: Invalid CORTEX_PROFILE value: ${profile}`);
       return [];
@@ -243,7 +384,6 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
         })
         .filter((p): p is string => p !== null && fs.existsSync(p));
 
-      // Shared spaces are always visible when present.
       const sharedDirs = ["shared", "org"]
         .map((name) => safeProjectPath(cortexPath, name))
         .filter((p): p is string => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
@@ -256,9 +396,14 @@ export function getProjectDirs(cortexPath: string, profile?: string): string[] {
     }
   }
 
-  return fs.readdirSync(cortexPath, { withFileTypes: true })
-    .filter(isProjectDirEntry)
-    .map((entry) => path.join(cortexPath, entry.name));
+  try {
+    return fs.readdirSync(cortexPath, { withFileTypes: true })
+      .filter(isProjectDirEntry)
+      .map((entry) => path.join(cortexPath, entry.name));
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] getProjectDirs: ${errorMessage(err)}\n`);
+    return [];
+  }
 }
 
 // Collect MEMORY*.md files from native agent memory locations (~/.claude/projects/*/memory/)
@@ -272,8 +417,7 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
       const memDir = path.join(claudeProjectsDir, entry, "memory");
       if (!fs.existsSync(memDir)) continue;
       for (const file of fs.readdirSync(memDir)) {
-        if (!file.endsWith(".md")) continue;
-        if (file === "MEMORY.md") continue;
+        if (!file.endsWith(".md") || file === "MEMORY.md") continue;
         const fullPath = path.join(memDir, file);
         const match = file.match(/^MEMORY-(.+)\.md$/);
         const project = match ? match[1] : `native:${entry}`;
@@ -314,11 +458,12 @@ function pushDirTokens(parts: string[], dirPath: string): void {
 export function computeCortexLiveStateToken(cortexPath: string): string {
   const parts: string[] = [];
   const projectDirs = getProjectDirs(cortexPath).sort();
+  const manifest = readRootManifest(cortexPath);
 
   for (const projectDir of projectDirs) {
     const project = path.basename(projectDir);
     parts.push(`project:${project}`);
-    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "tasks.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md", "topic-config.json"]) {
+    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "tasks.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md", "topic-config.json", "cortex.project.yaml"]) {
       pushFileToken(parts, path.join(projectDir, file));
     }
     pushDirTokens(parts, path.join(projectDir, "reference"));
@@ -326,16 +471,21 @@ export function computeCortexLiveStateToken(cortexPath: string): string {
     pushDirTokens(parts, path.join(projectDir, ".claude", "skills"));
   }
 
-  pushDirTokens(parts, path.join(cortexPath, "profiles"));
+  if (manifest?.installMode === "shared") {
+    pushDirTokens(parts, path.join(cortexPath, "profiles"));
+  }
   pushDirTokens(parts, path.join(cortexPath, "global", "skills"));
   pushFileToken(parts, path.join(cortexPath, ".governance", "access-control.json"));
+  pushFileToken(parts, rootManifestPath(cortexPath));
   pushFileToken(parts, runtimeHealthFile(cortexPath));
   pushFileToken(parts, runtimeFile(cortexPath, "audit.log"));
   pushFileToken(parts, memoryUsageLogFile(cortexPath));
   pushFileToken(parts, installPreferencesFile(cortexPath));
 
-  pushDirTokens(parts, homePath(".github", "hooks"));
-  pushFileToken(parts, homePath(".cursor", "hooks.json"));
+  if (manifest?.installMode === "shared") {
+    pushDirTokens(parts, homePath(".github", "hooks"));
+    pushFileToken(parts, homePath(".cursor", "hooks.json"));
+  }
 
   return parts.sort().join("|");
 }
@@ -343,7 +493,11 @@ export function computeCortexLiveStateToken(cortexPath: string): string {
 // Lazy singleton for getCortexPath — shared across all CLI modules.
 let lazyCortexPath: string | undefined;
 export function getCortexPath(): string {
-  if (!lazyCortexPath) lazyCortexPath = ensureCortexPath();
+  if (!lazyCortexPath) {
+    const existing = findCortexPath();
+    if (!existing) throw new Error(`${CortexError.NOT_FOUND}: cortex root not found. Run 'npx cortex init'.`);
+    lazyCortexPath = existing;
+  }
   return lazyCortexPath;
 }
 

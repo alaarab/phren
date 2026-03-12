@@ -18,7 +18,7 @@ import {
   addFindingToFile,
   extractConflictVersions,
 } from "./shared-content.js";
-import { grantAdmin, makeTempDir, runCliExec } from "./test-helpers.js";
+import { grantAdmin, initTestCortexRoot, makeTempDir, runCliExec } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -684,6 +684,7 @@ describe("debugLog", () => {
     ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-debug-test-"));
     process.env.HOME = tmpDir;
     fs.mkdirSync(path.join(tmpDir, ".cortex"), { recursive: true });
+    initTestCortexRoot(path.join(tmpDir, ".cortex"));
   });
 
   afterEach(() => {

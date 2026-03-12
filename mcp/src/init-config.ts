@@ -12,6 +12,7 @@ import {
   isRecord,
   hookConfigPath,
   homePath,
+  readRootManifest,
 } from "./shared.js";
 import { isFeatureEnabled, errorMessage } from "./utils.js";
 import {
@@ -25,7 +26,7 @@ import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init-prefe
 import { resolveEntryScript, VERSION } from "./init-shared.js";
 
 export type McpConfigStatus = "installed" | "already_configured" | "disabled" | "already_disabled";
-export type McpRootKey = "mcpServers";
+export type McpRootKey = "mcpServers" | "servers";
 export type ToolStatus = McpConfigStatus | "no_settings" | "no_vscode" | "no_cursor" | "no_copilot" | "no_codex";
 
 interface HookEntry {
@@ -38,6 +39,7 @@ type HookMap = Partial<Record<HookEventName, HookEntry[]>> & Record<string, unkn
 type JsonObject = Record<string, unknown> & {
   hooks?: HookMap;
   mcpServers?: Record<string, unknown>;
+  servers?: Record<string, unknown>;
 };
 
 function log(msg: string) {
@@ -103,8 +105,8 @@ function upsertMcpServer(
   preferredRoot: McpRootKey,
   cortexPath: string
 ): McpConfigStatus {
-  const mcpServers = getObjectProp(data, "mcpServers");
-  const hadMcp = Boolean(mcpServers?.cortex);
+  const knownRoots = ["mcpServers", "servers"] as const;
+  const hadMcp = knownRoots.some((key) => Boolean(getObjectProp(data, key)?.cortex));
   if (mcpEnabled) {
     let preferredRootValue = getObjectProp(data, preferredRoot);
     if (!preferredRootValue) {
@@ -115,7 +117,10 @@ function upsertMcpServer(
     return hadMcp ? "already_configured" : "installed";
   }
 
-  if (mcpServers?.cortex) delete mcpServers.cortex;
+  for (const key of knownRoots) {
+    const root = getObjectProp(data, key);
+    if (root?.cortex) delete root.cortex;
+  }
   return hadMcp ? "disabled" : "already_disabled";
 }
 
@@ -194,9 +199,12 @@ export function removeMcpServerAtPath(filePath: string): boolean {
   if (!fs.existsSync(filePath)) return false;
   let removed = false;
   patchJsonFile(filePath, (data) => {
-    if (data.mcpServers?.cortex) {
-      delete data.mcpServers.cortex;
-      removed = true;
+    for (const key of ["mcpServers", "servers"] as const) {
+      const root = data[key];
+      if (isRecord(root) && root.cortex) {
+        delete root.cortex;
+        removed = true;
+      }
     }
   });
   return removed;
@@ -329,12 +337,21 @@ function probeVSCodePath(): { targetDir: string | null; installed: boolean } {
   return _vscodeProbeCache;
 }
 
-export function configureVSCode(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): McpConfigStatus | "no_vscode" {
+export function configureVSCode(
+  cortexPath: string,
+  opts: { mcpEnabled?: boolean; scope?: "user" | "workspace" } = {}
+): McpConfigStatus | "no_vscode" {
   const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  if (opts.scope === "workspace") {
+    const manifest = readRootManifest(cortexPath);
+    if (manifest?.installMode !== "project-local" || !manifest.workspaceRoot) return "no_vscode";
+    const mcpFile = path.join(manifest.workspaceRoot, ".vscode", "mcp.json");
+    return configureMcpAtPath(mcpFile, mcpEnabled, "servers", "${workspaceFolder}/.cortex");
+  }
   const probe = probeVSCodePath();
   if (!probe.installed || !probe.targetDir) return "no_vscode";
   const mcpFile = path.join(probe.targetDir, "mcp.json");
-  return configureMcpAtPath(mcpFile, mcpEnabled, "mcpServers", cortexPath);
+  return configureMcpAtPath(mcpFile, mcpEnabled, "servers", cortexPath);
 }
 
 export function configureCursorMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {

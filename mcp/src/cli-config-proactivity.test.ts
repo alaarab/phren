@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir } from "./test-helpers.js";
+import { initTestCortexRoot, makeTempDir } from "./test-helpers.js";
 
 const originalEnv = {
   HOME: process.env.HOME,
@@ -55,6 +55,7 @@ describe("handleConfig proactivity", () => {
     homeDir = path.join(tmp.path, "home");
     fs.mkdirSync(cortexDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
+    initTestCortexRoot(cortexDir);
 
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
@@ -155,6 +156,7 @@ describe("handleConfig project ownership", () => {
     homeDir = path.join(tmp.path, "home");
     fs.mkdirSync(cortexDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
+    initTestCortexRoot(cortexDir);
 
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;

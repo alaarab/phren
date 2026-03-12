@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { commandExists, detectInstalledTools, buildLifecycleCommands, buildSharedLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks } from "./hooks.js";
-import { makeTempDir } from "./test-helpers.js";
+import { initTestCortexRoot, makeTempDir } from "./test-helpers.js";
 import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import { CortexError, type CortexErrorCode } from "./shared.js";
 import { selectSnippets, approximateTokens } from "./shared-retrieval.js";
@@ -109,6 +109,7 @@ describe("hooks", () => {
       cortexPath = path.join(tmpRoot, "cortex");
       fs.mkdirSync(homeDir, { recursive: true });
       fs.mkdirSync(cortexPath, { recursive: true });
+      initTestCortexRoot(cortexPath);
       process.env.HOME = homeDir;
       process.env.USERPROFILE = homeDir;
     });
@@ -514,6 +515,7 @@ describe("hooks", () => {
       ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-custom-hooks-test-"));
       cortexPath = path.join(tmpRoot, "cortex");
       fs.mkdirSync(path.join(cortexPath, ".runtime"), { recursive: true });
+      initTestCortexRoot(cortexPath);
     });
 
     afterEach(() => {
@@ -653,6 +655,7 @@ describe("hooks", () => {
       ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hooks-error-structure-test-"));
       cortexPath = path.join(tmpRoot, "cortex");
       fs.mkdirSync(path.join(cortexPath, ".runtime"), { recursive: true });
+      initTestCortexRoot(cortexPath);
     });
 
     afterEach(() => {

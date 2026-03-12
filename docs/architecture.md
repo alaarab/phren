@@ -32,6 +32,22 @@ How project memory flows through the system, from user prompt to repo-backed sta
  +--------------------+     +-------------------+
 ```
 
+## Install Modes
+
+Cortex now has two explicit install modes, both rooted by `cortex.root.yaml`:
+
+- `shared`: default personal memory at `~/.cortex`, with profiles, machine mappings, user-scoped MCP config, and Claude lifecycle hooks
+- `project-local`: repo-owned memory at `<repo>/.cortex`, with one primary project, workspace-managed git, and VS Code workspace MCP only
+
+The runtime pathing layer resolves an install context first, then everything else keys off that root:
+
+1. explicit arg
+2. `CORTEX_PATH`
+3. nearest ancestor `.cortex` containing `cortex.root.yaml`
+4. shared root at `~/.cortex` only if it contains `cortex.root.yaml`
+
+There is no implicit “bare directory becomes a cortex root” fallback anymore.
+
 ## End-to-End Data Flow Loop (Practical View)
 
 This is the core runtime loop from one prompt to the next:
@@ -85,7 +101,8 @@ Runs once when a Claude Code session begins.
 ```
 SessionStart
   |
-  +-> git pull --rebase ~/.cortex
+  +-> shared mode: git pull --rebase ~/.cortex
+  +-> project-local: skip git sync
   |     (sync latest from remote)
   |
   +-> hook-context
@@ -132,13 +149,18 @@ Runs after every Claude response (including subagent responses).
 ```
 Stop
   |
-  +-> git add -A ~/.cortex
-  +-> git commit (if changes exist)
-  +-> record saved-local runtime state
-  +-> schedule background sync worker (if remote configured)
-        push in detached step
-        pull --rebase on conflict
-        auto-merge FINDINGS.md / tasks.md if possible
+  +-> shared mode:
+  |     git add -A ~/.cortex
+  |     git commit (if changes exist)
+  |     record saved-local runtime state
+  |     schedule background sync worker (if remote configured)
+  |       push in detached step
+  |       pull --rebase on conflict
+  |       auto-merge FINDINGS.md / tasks.md if possible
+  |
+  +-> project-local mode:
+        write runtime/session state only
+        never pull/rebase/commit/push automatically
 ```
 
 ## MCP Server

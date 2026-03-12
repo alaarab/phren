@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as yaml from "js-yaml";
 import { makeTempDir, writeFile, grantAdmin } from "./test-helpers.js";
 import {
   buildIndex,
@@ -23,6 +24,10 @@ let tmpCleanup: (() => void) | undefined;
 
 function makeCortex(): string {
   ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-index-test-"));
+  writeFile(
+    path.join(tmpDir, "cortex.root.yaml"),
+    yaml.dump({ version: 1, installMode: "shared", syncMode: "managed-git" }, { lineWidth: 1000 })
+  );
   return tmpDir;
 }
 
@@ -31,6 +36,9 @@ function makeProject(cortexDir: string, name: string, files: Record<string, stri
   fs.mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     writeFile(path.join(dir, file), content);
+  }
+  if (!Object.prototype.hasOwnProperty.call(files, "cortex.project.yaml")) {
+    writeFile(path.join(dir, "cortex.project.yaml"), yaml.dump({ sourcePath: `/home/user/${name}` }, { lineWidth: 1000 }));
   }
 }
 
@@ -249,7 +257,7 @@ describe("extractSnippet", () => {
 // ── detectProject ────────────────────────────────────────────────────────────
 
 describe("detectProject", () => {
-  it("detects project from cwd segment", () => {
+  it("detects project from sourcePath prefix", () => {
     const cortex = makeCortex();
     makeProject(cortex, "myproject", { "SUMMARY.md": "# Summary" });
     const result = detectProject(cortex, "/home/user/myproject/src");
@@ -263,26 +271,24 @@ describe("detectProject", () => {
     expect(result).toBeNull();
   });
 
-  it("matches short names (<=3 chars) only on last segment", () => {
+  it("uses exact sourcePath matching for short names too", () => {
     const cortex = makeCortex();
     makeProject(cortex, "abc", { "SUMMARY.md": "# Summary" });
-    // "abc" is 3 chars: only matches if it's the last segment
-    const match = detectProject(cortex, "/home/user/abc");
-    expect(match).toBe("abc");
-    const noMatch = detectProject(cortex, "/home/user/abc/src");
-    expect(noMatch).toBeNull();
+    expect(detectProject(cortex, "/home/user/abc")).toBe("abc");
+    expect(detectProject(cortex, "/home/user/abc/src")).toBe("abc");
   });
 
-  it("matches long names anywhere in path", () => {
+  it("matches long names by sourcePath prefix", () => {
     const cortex = makeCortex();
     makeProject(cortex, "myapp", { "SUMMARY.md": "# Summary" });
     const result = detectProject(cortex, "/home/user/myapp/deep/nested");
     expect(result).toBe("myapp");
   });
 
-  it("is case insensitive", () => {
+  it("uses the stored project name when sourcePath matches", () => {
     const cortex = makeCortex();
     makeProject(cortex, "MyProject", { "SUMMARY.md": "# Summary" });
+    writeFile(path.join(cortex, "MyProject", "cortex.project.yaml"), yaml.dump({ sourcePath: "/home/user/myproject" }, { lineWidth: 1000 }));
     const result = detectProject(cortex, "/home/user/myproject/src");
     expect(result).toBe("MyProject");
   });
@@ -395,7 +401,7 @@ describe("buildIndex", () => {
     makeProject(cortex, "proj", {
       "CLAUDE.md": "# Cortex Instructions\ncortexcopytoken",
       "FINDINGS.md": "- searchable finding",
-      "cortex.project.yaml": "ownership: repo-managed\n",
+      "cortex.project.yaml": yaml.dump({ ownership: "repo-managed", sourcePath: path.join(projectsDir, "proj") }, { lineWidth: 1000 }),
     });
 
     const db = await buildIndex(cortex);

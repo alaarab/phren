@@ -2,7 +2,25 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { execFileSync, spawnSync, spawn } from "child_process";
-import { CortexResult } from "./shared.js";
+import { CortexResult, writeRootManifest } from "./shared.js";
+
+export function initTestCortexRoot(
+  cortexDir: string,
+  options: {
+    installMode?: "shared" | "project-local";
+    syncMode?: "managed-git" | "workspace-git";
+    workspaceRoot?: string;
+    primaryProject?: string;
+  } = {},
+): void {
+  writeRootManifest(cortexDir, {
+    version: 1,
+    installMode: options.installMode ?? "shared",
+    syncMode: options.syncMode ?? "managed-git",
+    workspaceRoot: options.workspaceRoot,
+    primaryProject: options.primaryProject,
+  });
+}
 
 /**
  * Create a temp directory and return its path + cleanup function.
@@ -58,6 +76,9 @@ export function setupIsolatedCliEnv(prefix: string): IsolatedCliEnv {
  * and set CORTEX_ACTOR in process.env. Returns the actor name.
  */
 export function grantAdmin(cortexDir: string, actor = "vitest-admin"): string {
+  if (!fs.existsSync(path.join(cortexDir, "cortex.root.yaml"))) {
+    initTestCortexRoot(cortexDir);
+  }
   const govDir = path.join(cortexDir, ".governance");
   fs.mkdirSync(govDir, { recursive: true });
   fs.writeFileSync(

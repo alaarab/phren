@@ -249,7 +249,7 @@ export function handleTaskPromptLifecycle(args: {
   if (!isActionablePrompt(args.prompt, args.intent)) {
     return { mode, noticeLines: [] };
   }
-  const taskLevel = args.taskLevel ?? getProactivityLevelForTask();
+  const taskLevel = args.taskLevel ?? getProactivityLevelForTask(args.cortexPath);
   if (mode === "auto" && !shouldAutoCaptureTaskForLevel(taskLevel, args.prompt)) {
     debugLog(`task lifecycle skipped ${args.project}: task proactivity=${taskLevel}`);
     return { mode, noticeLines: [] };

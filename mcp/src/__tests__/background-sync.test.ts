@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir } from "../test-helpers.js";
+import { initTestCortexRoot, makeTempDir } from "../test-helpers.js";
 
 describe("handleBackgroundSync", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -12,6 +12,7 @@ describe("handleBackgroundSync", () => {
     tmp = makeTempDir("cortex-bg-sync-");
     execFileSync("git", ["init"], { cwd: tmp.path, stdio: "ignore" });
     fs.mkdirSync(path.join(tmp.path, ".governance"), { recursive: true });
+    initTestCortexRoot(tmp.path);
     process.env.CORTEX_PATH = tmp.path;
   });
 

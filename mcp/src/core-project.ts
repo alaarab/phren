@@ -1,5 +1,5 @@
 import * as path from "path";
-import { cortexErr, cortexOk, type CortexResult } from "./shared.js";
+import { cortexErr, cortexOk, readRootManifest, type CortexResult } from "./shared.js";
 import { bootstrapFromExisting } from "./init-setup.js";
 import { resolveActiveProfile } from "./profile-store.js";
 import type { ProjectOwnershipMode } from "./project-config.js";
@@ -31,7 +31,15 @@ export function addProjectFromPath(
   const activeProfile = resolveActiveProfile(cortexPath, requestedProfile);
   if (!activeProfile.ok) return activeProfile;
 
+  const manifest = readRootManifest(cortexPath);
   const resolvedPath = path.resolve(targetPath);
+  if (manifest?.installMode === "project-local") {
+    const workspaceRoot = path.resolve(manifest.workspaceRoot || "");
+    const matchesWorkspace = resolvedPath === workspaceRoot || resolvedPath.startsWith(workspaceRoot + path.sep);
+    if (!matchesWorkspace) {
+      return cortexErr(`Project-local cortex can only add the owning workspace: ${workspaceRoot}`);
+    }
+  }
   const selectedProfile = activeProfile.data;
   const added = bootstrapFromExisting(cortexPath, resolvedPath, { profile: selectedProfile, ownership });
 
