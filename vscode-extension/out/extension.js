@@ -38,7 +38,6 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
 const cortexClient_1 = require("./cortexClient");
 const CortexTreeProvider_1 = require("./providers/CortexTreeProvider");
 const searchQuickPick_1 = require("./searchQuickPick");
@@ -50,6 +49,7 @@ const skillEditor_1 = require("./skillEditor");
 const taskViewer_1 = require("./taskViewer");
 const queueViewer_1 = require("./queueViewer");
 const runtimeConfig_1 = require("./runtimeConfig");
+const profileConfig_1 = require("./profileConfig");
 let client;
 let outputChannel;
 async function activate(context) {
@@ -83,7 +83,7 @@ async function activate(context) {
         clientVersion: context.extension.packageJSON.version,
     });
     client = cortexClient;
-    const treeDataProvider = new CortexTreeProvider_1.CortexTreeProvider(cortexClient);
+    const treeDataProvider = new CortexTreeProvider_1.CortexTreeProvider(cortexClient, runtimeConfig.storePath);
     const treeView = vscode.window.createTreeView("cortex.explorer", {
         treeDataProvider,
     });
@@ -514,40 +514,103 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to manage project: ${toErrorMessage(error)}`);
         }
     });
-    // --- Switch Profile command ---
-    const switchProfileDisposable = vscode.commands.registerCommand("cortex.switchProfile", async () => {
+    const openMachinesConfigDisposable = vscode.commands.registerCommand("cortex.openMachinesConfig", async () => {
         try {
-            const profilesDir = path.join(os.homedir(), ".cortex", "profiles");
-            let profileNames = [];
-            if (fs.existsSync(profilesDir)) {
-                const entries = fs.readdirSync(profilesDir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
-                profileNames = entries.map((f) => f.replace(/\.ya?ml$/, ""));
+            const machinesPath = (0, profileConfig_1.machinesConfigPath)(runtimeConfig.storePath);
+            if (!fs.existsSync(machinesPath)) {
+                fs.mkdirSync(path.dirname(machinesPath), { recursive: true });
+                fs.writeFileSync(machinesPath, "# machine-name: profile-name\n", "utf8");
             }
-            if (profileNames.length === 0) {
-                await vscode.window.showInformationMessage("No profiles found in ~/.cortex/profiles/");
-                return;
-            }
-            const choice = await vscode.window.showQuickPick(profileNames, { placeHolder: "Select a profile to activate" });
-            if (!choice)
-                return;
-            // Write the chosen profile to cortex-context.md
-            const contextPath = path.join(os.homedir(), ".cortex-context.md");
-            let content = "";
-            if (fs.existsSync(contextPath)) {
-                content = fs.readFileSync(contextPath, "utf8");
-            }
-            if (/^Profile:\s*.+/m.test(content)) {
-                content = content.replace(/^Profile:\s*.+/m, `Profile: ${choice}`);
-            }
-            else {
-                content = `Profile: ${choice}\n${content}`;
-            }
-            fs.writeFileSync(contextPath, content, "utf8");
-            treeDataProvider.refresh();
-            await vscode.window.showInformationMessage(`Profile switched to "${choice}".`);
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(machinesPath));
+            await vscode.window.showTextDocument(document, { preview: false });
         }
         catch (error) {
-            await vscode.window.showErrorMessage(`Failed to switch profile: ${toErrorMessage(error)}`);
+            await vscode.window.showErrorMessage(`Failed to open machines.yaml: ${toErrorMessage(error)}`);
+        }
+    });
+    const promptForReload = async (message, extraAction) => {
+        const choices = extraAction ? ["Reload Window", extraAction.label, "Later"] : ["Reload Window", "Later"];
+        const choice = await vscode.window.showInformationMessage(message, ...choices);
+        if (choice === "Reload Window") {
+            await vscode.commands.executeCommand("workbench.action.reloadWindow");
+            return;
+        }
+        if (extraAction && choice === extraAction.label) {
+            await extraAction.run();
+        }
+    };
+    // --- Set this machine's profile mapping ---
+    const switchProfileDisposable = vscode.commands.registerCommand("cortex.switchProfile", async () => {
+        try {
+            const machine = (0, profileConfig_1.readMachineName)();
+            const current = (0, profileConfig_1.readDeviceContext)(runtimeConfig.storePath);
+            const profiles = (0, profileConfig_1.listProfileConfigs)(runtimeConfig.storePath);
+            if (profiles.length === 0) {
+                await vscode.window.showInformationMessage("No profiles found in the Cortex store.", "Open machines.yaml")
+                    .then(async (choice) => {
+                    if (choice === "Open machines.yaml") {
+                        await vscode.commands.executeCommand("cortex.openMachinesConfig");
+                    }
+                });
+                return;
+            }
+            const picks = profiles.map((profile) => ({
+                label: profile.name,
+                description: profile.name === current.profile ? "current" : undefined,
+                detail: `${profile.projects.length} project${profile.projects.length === 1 ? "" : "s"}${profile.description ? ` • ${profile.description}` : ""}`,
+            }));
+            const choice = await vscode.window.showQuickPick(picks, {
+                title: `Set profile for machine "${machine}"`,
+                placeHolder: "This writes the real machine -> profile mapping in machines.yaml",
+            });
+            if (!choice)
+                return;
+            if (choice.label === current.profile) {
+                await vscode.window.showInformationMessage(`Machine "${machine}" already uses profile "${choice.label}".`);
+                return;
+            }
+            const machinesPath = (0, profileConfig_1.setMachineProfile)(runtimeConfig.storePath, machine, choice.label);
+            treeDataProvider.refresh();
+            await promptForReload(`Mapped machine "${machine}" to profile "${choice.label}" in machines.yaml. Reload VS Code to restart the Cortex backend on the new profile.`, {
+                label: "Open machines.yaml",
+                run: async () => {
+                    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(machinesPath));
+                    await vscode.window.showTextDocument(document, { preview: false });
+                },
+            });
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to update machine profile mapping: ${toErrorMessage(error)}`);
+        }
+    });
+    const configureMachineDisposable = vscode.commands.registerCommand("cortex.configureMachine", async () => {
+        try {
+            const currentMachine = (0, profileConfig_1.readMachineName)();
+            const nextMachine = await vscode.window.showInputBox({
+                title: "Set machine alias",
+                prompt: "Stored in ~/.cortex/.machine-id and used to look up this machine in machines.yaml",
+                value: currentMachine,
+                validateInput: (value) => value.trim() ? null : "Machine name cannot be empty",
+            });
+            if (!nextMachine) {
+                return;
+            }
+            const normalized = nextMachine.trim();
+            if (normalized === currentMachine) {
+                await vscode.window.showInformationMessage(`Machine alias is already "${normalized}".`);
+                return;
+            }
+            (0, profileConfig_1.writeMachineName)(normalized);
+            treeDataProvider.refresh();
+            await promptForReload(`Saved machine alias "${normalized}" to ${(0, profileConfig_1.machineIdPath)()}. Reload VS Code so Cortex resolves the new machine identity.`, {
+                label: "Open machines.yaml",
+                run: async () => {
+                    await vscode.commands.executeCommand("cortex.openMachinesConfig");
+                },
+            });
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to update machine alias: ${toErrorMessage(error)}`);
         }
     });
     const filterFindingsByDateDisposable = vscode.commands.registerCommand("cortex.filterFindingsByDate", async () => {
@@ -601,7 +664,7 @@ async function activate(context) {
             treeDataProvider.setDateFilter({ from: fromStr, to: toStr, label: `${fromStr} to ${toStr}` });
         }
     });
-    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, filterFindingsByDateDisposable, switchProfileDisposable, syncDisposable, doctorDisposable, hooksStatusDisposable, toggleHooksCommandDisposable, manageProjectDisposable, addTaskDisposable, completeTaskDisposable, removeFindingDisposable, pinMemoryDisposable);
+    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, filterFindingsByDateDisposable, switchProfileDisposable, configureMachineDisposable, openMachinesConfigDisposable, syncDisposable, doctorDisposable, hooksStatusDisposable, toggleHooksCommandDisposable, manageProjectDisposable, addTaskDisposable, completeTaskDisposable, removeFindingDisposable, pinMemoryDisposable);
     // --- Sync VS Code settings to cortex preference files ---
     syncSettingsToPreferences(runtimeConfig.storePath, config);
     const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {
