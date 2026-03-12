@@ -3,7 +3,37 @@
 All notable changes to cortex are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.32.0] - 2026-03-11
+
+### Added
+- **Finding sensitivity levels**: four-level knob (`minimal`, `conservative`, `balanced`, `aggressive`) controls how aggressively Cortex captures findings and auto-captures session insights. Configurable via `cortex config finding-sensitivity`, VS Code settings (`cortex.findingSensitivity`), and written to `.governance/policy.json` for the MCP server to read.
+- **Dedup via response**: `add_finding` now returns Jaccard similarity candidates alongside the saved finding instead of making a separate LLM call. Zero extra API cost for live duplicate detection — the active agent evaluates candidates directly.
+- **Domain-neutral entity detection**: entity extraction now learns entity patterns adaptively from each project's own findings instead of matching against a hardcoded web-dev vocabulary. Reduces false positives on non-web projects.
+- **Stack-ranked task priorities with gravity**: tasks now carry a numeric rank instead of `high`/`medium`/`low`. Inactive tasks sink over time via a gravity function so the top of the list stays actionable without manual triage.
+- **Progressive task model**: tasks are created as execution happens rather than planned upfront. Findings auto-link to the currently active task so context is preserved without extra MCP calls.
+- **`cortex task reorder`** CLI command for manually adjusting task rank.
+- **`cortex config proactivity`** CLI command to get/set the proactivity level from the terminal.
+- **Intent-aware auto task mode**: task-mode `auto` now reads code-change context (modified files, branch name) to infer intent and suppress task creation when the user is in a maintenance or review flow. Suppression patterns are configurable.
+- **Finding supersession annotations**: `add_finding` appends `<!-- cortex:superseded_by "..." DATE -->` to the old finding and `<!-- cortex:supersedes "..." -->` to the new one when a near-duplicate is replaced. Contradicting findings get `<!-- cortex:contradicts "..." -->`. `get_findings` filters superseded entries by default; pass `include_superseded: true` to include them. VS Code tree view shows distinct icons for superseded (`lightbulb-autofix`), conflicting (`warning`), and potential-duplicate (`issue-opened`) findings.
+- **VS Code `cortex.findingSensitivity` setting**: dropdown with per-level descriptions; writes `findingSensitivity` to `.governance/policy.json` on change and shows an info notification.
+- **VS Code `potentialDuplicates` tree indicator**: findings returned with potential-duplicate candidates from `add_finding` show an `issue-opened` icon and `"(possible duplicate)"` description in the explorer tree, with the first candidate in the tooltip.
+- **Capability registry**: internal registry documents which features are implemented across all four surfaces (CLI, MCP, VS Code, web UI) with handler cross-references.
+- **Task negation pattern detection**: phrases like "don't add a task" or "no task needed" suppress automatic task creation in `auto` mode.
+
+### Changed
+- **Semantic dedup and conflict settings are batch-only**: `cortex.semanticDedup` and `cortex.semanticConflict` now explicitly apply only to offline maintenance commands (`cortex maintain consolidate`, `cortex maintain extract`). Live dedup during `add_finding` uses the active agent — no extra API call. VS Code notifications and setting descriptions updated to reflect this.
+- **`cortex.llmModel` description clarified**: model selector now says "Model for offline cortex operations. Live dedup uses the active agent instead."
+- VS Code cost-warning notifications for expensive models now say "for offline batch operations" instead of "for yes/no dedup."
+
+### Fixed
+- **Renamed `review-ui` to `web-ui`** in all user-facing docs, source comments, and CLI references. No backward-compat alias. Affected files: `AGENTS.md`, `docs/faq.md`, `README.md`, `docs/governance.md`, `mcp/src/memory-ui-assets.ts`, `vscode-extension/src/graphWebview.ts`.
+- Removed all remaining backward-compatibility aliases from prior renames.
+- Fixed test suite race condition via vitest `globalSetup` — parallel test files no longer share mutable global state across workers.
+- VS Code: dead settings (`proactivity`, `autoExtract`, `autoCapture`, `taskMode`, `hooksEnabled`, `semanticDedup`, `semanticConflict`, `llmModel`) now correctly write to preference files via `syncSettingsToPreferences` on every change.
+
+### Internal
+- `childFindings` serialization fix (pending integration with mcp-dev branch).
+- Code-change context detection feeds intent signals to the proactivity engine without requiring explicit user annotation.
 
 ## [1.31.1] - 2026-03-12
 
@@ -11,7 +41,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **CLI task commands**: `cortex task add`, `cortex task complete`, `cortex task update` for managing tasks from the terminal.
 - **CLI finding commands**: `cortex finding add`, `cortex finding remove`, `cortex finding list` for managing findings from the terminal.
 - **CLI config command**: `cortex config task-mode` to set the task workflow mode.
-- **`cortex web-ui`**: new primary CLI command for the web UI (replaces `review-ui`; kept as backward-compatible alias).
+- **`cortex web-ui`**: renamed CLI command for the web UI (was `review-ui`).
 - **`cortex task list`** and **`cortex finding list`** subcommands.
 - **VS Code extension commands**: Add Task, Complete Task, Remove Finding, Pin Memory, and Search History added to the command palette.
 - **Web UI Tasks tab**: full task browser with project and section filters.
@@ -19,7 +49,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`health_check` MCP tool** now returns `proactivityLevel` and `taskMode` in its response.
 
 ### Changed
-- Renamed "Review UI" to "Web UI" across all surfaces: types, functions, filenames, docs, and tests. `review-ui` is retained as a backward-compatible CLI alias.
+- Renamed "Review UI" to "Web UI" across all surfaces: types, functions, filenames, docs, and tests.
 
 ### Fixed
 - `task` and `finding` CLI namespaces were registered in `CLI_COMMANDS` — they were reachable by name but not listed, so help output and shell tab-completion missed them.

@@ -13,6 +13,7 @@ import {
 } from "./shared.js";
 import {
   getRetentionPolicy,
+  getWorkflowPolicy,
 } from "./shared-governance.js";
 import {
   buildIndex,
@@ -29,6 +30,7 @@ import { handleExtractMemories } from "./cli-extract.js";
 import { appendAuditLog } from "./shared.js";
 import { updateRuntimeHealth } from "./shared-governance.js";
 import { getProactivityLevelForTask, getProactivityLevelForFindings } from "./proactivity.js";
+import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
 import * as fs from "fs";
 
 // ── Re-exports from focused modules ─────────────────────────────────────────
@@ -266,6 +268,20 @@ export async function handleHookPrompt() {
       parts.push("");
       parts.push(...taskLifecycle.noticeLines);
     }
+
+    // Inject finding sensitivity agent instruction
+    try {
+      const workflowPolicy = getWorkflowPolicy(getCortexPath());
+      const sensitivity = workflowPolicy.findingSensitivity ?? "balanced";
+      const sensitivityConfig = FINDING_SENSITIVITY_CONFIG[sensitivity];
+      if (sensitivityConfig) {
+        parts.push("");
+        parts.push(`[cortex finding-sensitivity=${sensitivity}] ${sensitivityConfig.agentInstruction}`);
+      }
+    } catch {
+      // ignore — non-fatal
+    }
+
     // Add budget info to trace
     if (parts.length > 0) {
       const traceIdx = parts.findIndex(p => p.includes("trace:"));

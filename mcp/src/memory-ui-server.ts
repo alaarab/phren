@@ -14,8 +14,10 @@ import {
 import {
   approveQueueItem,
   editQueueItem,
+  editFinding,
   readReviewQueue,
   rejectQueueItem,
+  removeFinding,
   readTasksAcrossProjects,
   TASKS_FILENAME,
 } from "./data-access.js";
@@ -32,7 +34,7 @@ import {
   recentUsage,
 } from "./memory-ui-data.js";
 import { ensureTopicReferenceDoc, getProjectTopicsResponse, listProjectReferenceDocs, readReferenceContent, reclassifyLegacyTopicDocs, writeProjectTopics } from "./project-topics.js";
-import { getWorkflowPolicy } from "./governance-policy.js";
+import { getWorkflowPolicy, updateWorkflowPolicy } from "./governance-policy.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
 
@@ -136,6 +138,9 @@ function pruneExpiredCsrfTokens(csrfTokens?: Map<string, number>): void {
 
 function setCommonHeaders(res: http.ServerResponse): void {
   res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
 }
 
 function getSubmittedAuthToken(req: http.IncomingMessage, url: string, parsedBody?: querystring.ParsedUrlQuery): string {
@@ -668,6 +673,7 @@ export function createWebUiHttpServer(
           proactivityFindings: prefs.proactivityFindings || prefs.proactivity || "high",
           proactivityTask: prefs.proactivityTask || prefs.proactivity || "high",
           taskMode: workflowPolicy.taskMode,
+          findingSensitivity: workflowPolicy.findingSensitivity || "balanced",
           hooksEnabled: hooksData.globalEnabled,
           mcpEnabled: prefs.mcpEnabled !== false,
           hookTools: hooksData.tools,
@@ -676,6 +682,25 @@ export function createWebUiHttpServer(
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
       }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/settings/finding-sensitivity") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const value = String(parsed.value || "");
+        const valid = ["minimal", "conservative", "balanced", "aggressive"];
+        if (!valid.includes(value)) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: `Invalid finding sensitivity: "${value}". Must be one of: ${valid.join(", ")}` }));
+          return;
+        }
+        const result = updateWorkflowPolicy(cortexPath, { findingSensitivity: value as "minimal" | "conservative" | "balanced" | "aggressive" });
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(result.ok ? { ok: true, findingSensitivity: result.data.findingSensitivity } : { ok: false, error: result.error }));
+      });
       return;
     }
 
@@ -733,6 +758,57 @@ export function createWebUiHttpServer(
           return;
         }
         handleLegacyQueueActionResult(res, runQueueAction(cortexPath, pathname, project, line, newText));
+      });
+      return;
+    }
+
+    // PUT /api/findings/:project — edit a finding (old_text → new_text)
+    if (req.method === "PUT" && pathname.startsWith("/api/findings/")) {
+      const project = decodeURIComponent(pathname.slice("/api/findings/".length));
+      if (!project || !isValidProjectName(project)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
+        return;
+      }
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const oldText = String(parsed.old_text || "");
+        const newText = String(parsed.new_text || "");
+        if (!oldText || !newText) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "old_text and new_text are required" }));
+          return;
+        }
+        const result = editFinding(cortexPath, project, oldText, newText);
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
+      });
+      return;
+    }
+
+    // DELETE /api/findings/:project — remove a finding by text match
+    if (req.method === "DELETE" && pathname.startsWith("/api/findings/")) {
+      const project = decodeURIComponent(pathname.slice("/api/findings/".length));
+      if (!project || !isValidProjectName(project)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
+        return;
+      }
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const text = String(parsed.text || "");
+        if (!text) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "text is required" }));
+          return;
+        }
+        const result = removeFinding(cortexPath, project, text);
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
       });
       return;
     }

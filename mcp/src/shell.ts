@@ -256,8 +256,6 @@ export class CortexShell {
     await executePalette(this.asNavigationHost(), input);
   }
 
-  // ── Backward-compat handleInput (used by tests) ────────────────────────
-
   async handleInput(raw: string): Promise<boolean> {
     const input = raw.trim();
     if (this.pendingConfirm) {

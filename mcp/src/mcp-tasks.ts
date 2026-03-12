@@ -21,6 +21,7 @@ import {
   resolveTaskItem,
   TASKS_FILENAME,
   updateTask as updateTaskStore,
+  promoteTask,
 } from "./data-access.js";
 import {
   buildTaskIssueBody,
@@ -235,7 +236,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = addTaskStore(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
-        return mcpResponse({ ok: true, message: result.data, data: { project, item } });
+        return mcpResponse({ ok: true, message: `Task added: ${result.data.line}`, data: { project, item } });
       });
     }
   );
@@ -489,6 +490,35 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "promote_task",
+    {
+      title: "◆ cortex · promote task",
+      description:
+        "Promote a speculative task to committed by clearing the speculative flag. " +
+        "Use this when the user says 'yes do it', 'let's work on that', or otherwise confirms " +
+        "they want to commit to a suggested task. Optionally moves it to Active.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial text, stable ID (bid:XXXX), or positional ID of the speculative task."),
+        move_to_active: z.boolean().optional().describe("If true, also move the task to the Active section. Default false."),
+      }),
+    },
+    async ({ project, item, move_to_active }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = promoteTask(cortexPath, project, item, move_to_active ?? false);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        return mcpResponse({
+          ok: true,
+          message: `Promoted task "${result.data.line}" in ${project}${move_to_active ? " (moved to Active)" : ""}.`,
+          data: { project, item: result.data },
+        });
       });
     }
   );

@@ -1,6 +1,6 @@
 {
   "name": "@alaarab/cortex",
-  "version": "1.31.1",
+  "version": "1.32.0",
   "description": "Long-term memory for AI agents. Stored as markdown in a git repo you own.",
   "type": "module",
   "bin": {
@@ -36,7 +36,7 @@
     "lint": "eslint mcp/src/ --ignore-pattern '*.test.ts'",
     "validate-docs": "bash scripts/validate-docs.sh",
     "pretest": "npm run build",
-    "test": "vitest run --pool forks --fileParallelism=false --testTimeout=15000 mcp/src",
+    "test": "vitest run",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:install": "playwright install chromium",
     "bench": "tsx mcp/bench/locomo-runner.ts --sessions 3",

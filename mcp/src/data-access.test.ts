@@ -212,8 +212,8 @@ describe("addTask", () => {
   it("adds an item to the Queue section", () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
     const msg = addTask(tmpDir, PROJECT, "Add WebSocket support");
-    expect(resultMsg(msg)).toContain("Added");
-    expect(resultMsg(msg)).toContain("Add WebSocket support");
+    expect(msg.ok).toBe(true);
+    if (msg.ok) expect(msg.data.line).toContain("Add WebSocket support");
 
     const after = readTasks(tmpDir, PROJECT);
     expect(after.ok).toBe(true);
@@ -233,7 +233,7 @@ describe("addTask", () => {
 
   it("creates a task file when none exists", () => {
     const msg = addTask(tmpDir, PROJECT, "First item");
-    expect(resultMsg(msg)).toContain("Added");
+    expect(msg.ok).toBe(true);
 
     const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
@@ -828,7 +828,7 @@ describe("file locking", () => {
     fs.utimesSync(lockPath, past, past);
 
     const msg = addTask(tmpDir, PROJECT, "After stale lock");
-    expect(resultMsg(msg)).toContain("Added");
+    expect(msg.ok).toBe(true);
 
     const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;

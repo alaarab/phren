@@ -9,8 +9,9 @@ import {
   EXEC_TIMEOUT_MS,
 } from "./shared.js";
 
-export function resultMsg(r: CortexResult<string>): string {
-  return r.ok ? r.data : r.error;
+export function resultMsg(r: CortexResult<unknown>): string {
+  if (!r.ok) return r.error;
+  return typeof r.data === "string" ? r.data : JSON.stringify(r.data);
 }
 
 export function editDistance(a: string, b: string): number {

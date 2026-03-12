@@ -126,7 +126,6 @@ export async function runCliCommand(command: string, args: string[]) {
     case "access":
       return handleAccessControl(args);
     case "web-ui":
-    case "review-ui": // backward-compat alias
       return handleMemoryUi(args);
     case "shell":
       return handleShell(args, profile);

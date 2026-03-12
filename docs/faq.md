@@ -20,14 +20,14 @@ They all read and write the same `~/.cortex` directory. Concurrent reads are saf
 
 In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing — it's just a shared git repo.
 
-The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Cortex retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and review UI. Under extreme parallelism, think of Cortex as eventually consistent rather than strongly coordinated.
+The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Cortex retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and web UI. Under extreme parallelism, think of Cortex as eventually consistent rather than strongly coordinated.
 
 ## What failure modes should I expect?
 
 The common ones are boring infrastructure issues, not mystery behavior:
 
 - No remote configured: auto-save still commits locally, but nothing syncs across machines until you add a remote.
-- Push failed: the commit stays local and Cortex records the last sync error so `cortex status`, shell, and review UI can show it.
+- Push failed: the commit stays local and Cortex records the last sync error so `cortex status`, shell, and web UI can show it.
 - Hooks disabled or stale: retrieval stops, but your files are still there; rerun `cortex init` or `cortex hooks enable <tool>`.
 - Stale index: search quality drops until the next rebuild; `cortex doctor` and `cortex status` will flag index trouble.
 - Review queue growth: trust filtering is catching too much low-signal or stale content, which usually means your findings need pruning or governance thresholds need adjustment.
@@ -54,7 +54,7 @@ All thresholds are configurable via `cortex config policy`.
 ## How do I use the web UI?
 
 ```bash
-cortex review-ui
+cortex web-ui
 ```
 
 Opens a browser-based interface at `localhost:3499` (configurable with `--port`). From there you can approve, reject, or edit entries in the memory queue and inspect project memory without starting an agent session.

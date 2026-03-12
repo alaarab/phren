@@ -47,6 +47,7 @@ export interface WorkflowPolicy {
   lowConfidenceThreshold: number;
   riskySections: Array<"Review" | "Stale" | "Conflicts">;
   taskMode: "off" | "manual" | "suggest" | "auto";
+  findingSensitivity: "minimal" | "conservative" | "balanced" | "aggressive";
 }
 
 export interface IndexPolicy {
@@ -116,6 +117,7 @@ const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
   taskMode: "auto",
+  findingSensitivity: "balanced",
 };
 
 const DEFAULT_INDEX_POLICY: IndexPolicy = {
@@ -361,12 +363,16 @@ function normalizeWorkflowPolicy(data: Record<string, unknown>): WorkflowPolicy 
   const riskySections = Array.isArray(data.riskySections)
     ? data.riskySections.filter((section): section is "Review" | "Stale" | "Conflicts" => validSections.has(String(section)))
     : [];
+  const findingSensitivity = ["minimal", "conservative", "balanced", "aggressive"].includes(String(data.findingSensitivity))
+    ? String(data.findingSensitivity) as WorkflowPolicy["findingSensitivity"]
+    : DEFAULT_WORKFLOW_POLICY.findingSensitivity;
   return {
     schemaVersion: GOVERNANCE_SCHEMA_VERSION,
     requireMaintainerApproval: pickBoolean(data.requireMaintainerApproval, DEFAULT_WORKFLOW_POLICY.requireMaintainerApproval),
     lowConfidenceThreshold: pickNumber(data.lowConfidenceThreshold, DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold),
     riskySections: riskySections.length ? riskySections : [...DEFAULT_WORKFLOW_POLICY.riskySections],
     taskMode,
+    findingSensitivity,
   };
 }
 
@@ -588,6 +594,9 @@ export function getWorkflowPolicy(cortexPath: string): WorkflowPolicy {
   if (!["off", "manual", "suggest", "auto"].includes(merged.taskMode)) {
     merged.taskMode = DEFAULT_WORKFLOW_POLICY.taskMode;
   }
+  if (!["minimal", "conservative", "balanced", "aggressive"].includes(merged.findingSensitivity)) {
+    merged.findingSensitivity = DEFAULT_WORKFLOW_POLICY.findingSensitivity;
+  }
   return merged;
 }
 
@@ -601,12 +610,16 @@ export function updateWorkflowPolicy(cortexPath: string, patch: Partial<Workflow
   const taskMode = patch.taskMode && ["off", "manual", "suggest", "auto"].includes(String(patch.taskMode))
     ? patch.taskMode
     : current.taskMode;
+  const findingSensitivity = patch.findingSensitivity && ["minimal", "conservative", "balanced", "aggressive"].includes(String(patch.findingSensitivity))
+    ? patch.findingSensitivity
+    : current.findingSensitivity;
   const next: WorkflowPolicy = {
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     requireMaintainerApproval: patch.requireMaintainerApproval ?? current.requireMaintainerApproval,
     lowConfidenceThreshold: patch.lowConfidenceThreshold ?? current.lowConfidenceThreshold,
     riskySections: riskySections.length ? riskySections : current.riskySections,
     taskMode,
+    findingSensitivity,
   };
   writeJsonFile(govFile(cortexPath, "workflow-policy"), next);
   appendAuditLog(cortexPath, "update_workflow_policy", JSON.stringify(next));

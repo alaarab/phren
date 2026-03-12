@@ -13,7 +13,7 @@ import { readInstallPreferences, writeInstallPreferences, type InstallPreference
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
-import { TASK_FILE_ALIASES, addTask, completeTask, updateTask } from "./data-tasks.js";
+import { TASK_FILE_ALIASES, addTask, completeTask, updateTask, reorderTask } from "./data-tasks.js";
 import {
   PROJECT_HOOK_EVENTS,
   PROJECT_OWNERSHIP_MODES,
@@ -692,6 +692,7 @@ function printTaskUsage() {
   console.log('  cortex task add <project> "<text>"');
   console.log('  cortex task complete <project> "<text>"');
   console.log('  cortex task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."]');
+  console.log('  cortex task reorder <project> "<text>" --rank=<n>');
 }
 
 export async function handleTaskNamespace(args: string[]) {
@@ -719,7 +720,7 @@ export async function handleTaskNamespace(args: string[]) {
       console.error(result.error);
       process.exit(1);
     }
-    console.log(result.data);
+    console.log(`Task added: ${result.data.line}`);
     return;
   }
 
@@ -765,6 +766,36 @@ export async function handleTaskNamespace(args: string[]) {
       process.exit(1);
     }
     const result = updateTask(getCortexPath(), project, match, updates);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    console.log(result.data);
+    return;
+  }
+
+  if (subcommand === "reorder") {
+    const project = args[1];
+    if (!project) {
+      printTaskUsage();
+      process.exit(1);
+    }
+    const positional: string[] = [];
+    let rankArg: string | undefined;
+    for (const arg of args.slice(2)) {
+      if (arg.startsWith("--rank=")) {
+        rankArg = arg.slice("--rank=".length);
+      } else if (!arg.startsWith("--")) {
+        positional.push(arg);
+      }
+    }
+    const match = positional.join(" ");
+    const rank = rankArg ? Number.parseInt(rankArg, 10) : Number.NaN;
+    if (!match || !rankArg || !Number.isFinite(rank) || rank < 1) {
+      console.error('Usage: cortex task reorder <project> "<text>" --rank=<n>');
+      process.exit(1);
+    }
+    const result = reorderTask(getCortexPath(), project, match, rank);
     if (!result.ok) {
       console.error(result.error);
       process.exit(1);

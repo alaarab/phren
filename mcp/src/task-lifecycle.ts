@@ -8,7 +8,7 @@ import {
   type TaskItem,
 } from "./data-access.js";
 import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./tasks-github.js";
-import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, type ProactivityLevel } from "./proactivity.js";
+import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, hasSuppressTaskIntent, hasCodeChangeContext, type ProactivityLevel } from "./proactivity.js";
 import { getWorkflowPolicy } from "./shared-governance.js";
 import { debugLog, sessionMarker } from "./shared.js";
 import { errorMessage } from "./utils.js";
@@ -241,6 +241,11 @@ export function handleTaskPromptLifecycle(args: {
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
     return { mode, noticeLines: [] };
   }
+  // Suppression takes absolute priority — user explicitly said not to create a task.
+  if (hasSuppressTaskIntent(args.prompt)) {
+    debugLog(`task lifecycle suppressed ${args.project}: suppress-task intent detected`);
+    return { mode, noticeLines: [] };
+  }
   if (!isActionablePrompt(args.prompt, args.intent)) {
     return { mode, noticeLines: [] };
   }
@@ -273,11 +278,18 @@ export function handleTaskPromptLifecycle(args: {
   }
 
   // Intent-aware auto mode: if the user is in discovery mode (brainstorming,
-  // exploring ideas) and NOT in execution mode (approving, committing to work),
-  // fall back to a suggestion instead of writing the task immediately.
-  if (mode === "auto" && !hasExecutionIntent(args.prompt) && hasDiscoveryIntent(args.prompt)) {
+  // exploring ideas) and NOT in execution mode (approving, committing to work,
+  // or performing code changes), create a speculative task and surface a suggestion.
+  if (mode === "auto" && !hasExecutionIntent(args.prompt) && !hasCodeChangeContext(args.prompt) && hasDiscoveryIntent(args.prompt)) {
     const line = reusable?.line || summary;
-    debugLog(`task lifecycle auto→suggest ${args.project}: discovery intent detected`);
+    debugLog(`task lifecycle auto→speculative ${args.project}: discovery intent detected`);
+    if (!reusable) {
+      addTask(args.cortexPath, args.project, summary, {
+        createdAt: new Date().toISOString(),
+        sessionId: args.sessionId,
+        speculative: true,
+      });
+    }
     return {
       mode: "auto",
       noticeLines: buildSuggestionNotice(args.project, line, issueMeta),
@@ -286,7 +298,10 @@ export function handleTaskPromptLifecycle(args: {
 
   const targetMatch = reusable?.stableId ? `bid:${reusable.stableId}` : reusable?.id;
   if (!reusable) {
-    const add = addTask(args.cortexPath, args.project, summary);
+    const add = addTask(args.cortexPath, args.project, summary, {
+      createdAt: new Date().toISOString(),
+      sessionId: args.sessionId,
+    });
     if (!add.ok) {
       debugLog(`task lifecycle add ${args.project}: ${add.error}`);
       return { mode, noticeLines: [] };
@@ -364,4 +379,14 @@ export function finalizeTaskSession(args: {
 export function clearTaskSession(cortexPath: string, sessionId?: string): void {
   if (!sessionId) return;
   clearTaskSessionState(cortexPath, sessionId);
+}
+
+/**
+ * Return the active TaskItem tracked for a session+project, if any.
+ * Used by mcp-finding.ts to link findings to active tasks.
+ */
+export function getActiveTaskForSession(cortexPath: string, sessionId: string, project: string): import("./data-tasks.js").TaskItem | null {
+  const state = readTaskSessionState(cortexPath, sessionId);
+  if (!state || state.project !== project) return null;
+  return resolveTrackedSessionTask(cortexPath, state);
 }

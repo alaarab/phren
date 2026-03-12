@@ -443,7 +443,7 @@ cortex tasks [project]                 # cross-project task view
 cortex status                            # health, active project, stats
 cortex doctor [--fix]                    # health checks + optional self-heal
 cortex verify                            # check init completed correctly
-cortex review-ui [--port=3499]           # lightweight web UI in the browser
+cortex web-ui [--port=3499]              # lightweight web UI in the browser
 cortex update [--refresh-starter]        # update package; optionally refresh starter globals too
 cortex uninstall                         # remove cortex config and hooks
 
@@ -547,7 +547,7 @@ Project directory probably moved or symlinks are stale. Run `cortex doctor --fix
 
 **Push failed or sync looks stuck**
 
-Run `cortex status` first. If the store says `saved-local`, your data is committed locally and waiting on sync. The shell health view and review UI also show the last push error and unsynced commit count. Fix the remote or network issue, then let the background worker retry or run a normal git push yourself.
+Run `cortex status` first. If the store says `saved-local`, your data is committed locally and waiting on sync. The shell health view and web UI also show the last push error and unsynced commit count. Fix the remote or network issue, then let the background worker retry or run a normal git push yourself.
 
 **Hooks disabled or stale**
 

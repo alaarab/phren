@@ -3,6 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "./shared.js";
 import { isFeatureEnabled, safeProjectPath } from "./utils.js";
+import { UNIVERSAL_TECH_TERMS_RE } from "./cortex-core.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
 
@@ -153,7 +154,7 @@ function stripHtmlComments(s: string): string {
  * - "migrated from" annotations: (migrated from ...)
  * - Leading bullet dash: "- " at the start of the string
  */
-function stripMetadata(s: string): string {
+export function stripMetadata(s: string): string {
   return s
     .replace(/<!--.*?-->/gs, "")
     .replace(/\(migrated from [^)]+\)/gi, "")
@@ -167,7 +168,7 @@ const DEDUP_STOP_WORDS = new Set([
   "this", "that", "be", "has", "have", "had", "will", "would", "can", "could", "should",
 ]);
 
-function jaccardTokenize(text: string): Set<string> {
+export function jaccardTokenize(text: string): Set<string> {
   return new Set(
     text.toLowerCase()
       .split(/[\s\W]+/)
@@ -175,7 +176,7 @@ function jaccardTokenize(text: string): Set<string> {
   );
 }
 
-function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 && b.size === 0) return 1;
   let intersection = 0;
   for (const w of a) {
@@ -187,17 +188,106 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 
 // ── Contradiction detection ───────────────────────────────────────────────────
 
-const PROSE_ENTITY_RE =
-  /\b(React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Django|Flask|Rails|Spring|Redis|Postgres|MySQL|MongoDB|SQLite|Docker|Kubernetes|Terraform|AWS|GCP|Azure|Vercel|Netlify|Prisma|TypeORM|Sequelize|Jest|Vitest|Cypress|Playwright|Webpack|Vite|ESLint|Prettier|GraphQL|gRPC|Kafka|RabbitMQ|Elasticsearch|Nginx|Caddy|Node\.js|Deno|Bun|Python|Rust|Go|Java|TypeScript)\b/gi;
+// Use the shared universal starter set. Framework/tool specifics are learned
+// dynamically per project via extractDynamicEntities().
+const PROSE_ENTITY_RE = UNIVERSAL_TECH_TERMS_RE;
 
 const POSITIVE_RE = /\b(always|prefer|should|must|works|recommend|enable)\b/i;
 const NEGATIVE_RE = /\b(never|avoid|don't|do not|shouldn't|must not|broken|deprecated|disable)\b/i;
 
-function extractProseEntities(text: string): string[] {
+// ── Dynamic entity extraction ─────────────────────────────────────────────────
+
+const ENTITY_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+// Patterns that suggest a token is a proper noun / tool name:
+//   - CamelCase word (at least one interior uppercase): PhotonMappingEngine, GameKit
+//   - All-caps acronym of 2–8 letters: AWS, GPU, API
+//   - Known suffix patterns: *.js, *Engine, *API, *SDK, *DB, *UI, *ML
+const DYNAMIC_ENTITY_RE =
+  /\b(?:[A-Z][a-z]+(?:[A-Z][a-z]*)+|[A-Z]{2,8}|[A-Z][a-z]+(?:Engine|API|SDK|DB|UI|ML|IO|OS|JS|TS|CLI|MCP|GL|VR|AR|AI|NN|GAN))\b/g;
+
+interface ProjectEntityCache {
+  entities: string[];
+  builtAt: number;
+  findingsMtimeMs: number;
+}
+
+/**
+ * Scan existing findings for proper nouns / tool names that appear in 2+ bullets.
+ * Results are cached in .runtime/project-entities-{project}.json (1h TTL or
+ * invalidated when FINDINGS.md changes).
+ */
+export function extractDynamicEntities(cortexPath: string, project: string): Set<string> {
+  try {
+    const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
+    if (!fs.existsSync(findingsPath)) return new Set();
+
+    const findingsStat = fs.statSync(findingsPath);
+    const findingsMtime = findingsStat.mtimeMs;
+    const cachePath = runtimeFile(cortexPath, `project-entities-${project}.json`);
+
+    // Try reading existing cache
+    if (fs.existsSync(cachePath)) {
+      try {
+        const cached = JSON.parse(fs.readFileSync(cachePath, "utf8")) as ProjectEntityCache;
+        const age = Date.now() - (cached.builtAt ?? 0);
+        if (age < ENTITY_CACHE_TTL_MS && cached.findingsMtimeMs === findingsMtime) {
+          return new Set(cached.entities);
+        }
+      } catch {
+        // fall through to rebuild
+      }
+    }
+
+    // Rebuild: scan bullets for candidate tokens
+    const content = fs.readFileSync(findingsPath, "utf8");
+    const bullets = content.split("\n").filter(l => l.startsWith("- ") && !l.includes("superseded_by"));
+
+    // Count occurrences of each candidate across bullets
+    const counts = new Map<string, number>();
+    for (const bullet of bullets) {
+      const stripped = bullet.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "");
+      const seen = new Set<string>();
+      let m: RegExpExecArray | null;
+      const re = new RegExp(DYNAMIC_ENTITY_RE.source, DYNAMIC_ENTITY_RE.flags);
+      while ((m = re.exec(stripped)) !== null) {
+        const token = m[0];
+        if (!seen.has(token)) {
+          seen.add(token);
+          counts.set(token, (counts.get(token) ?? 0) + 1);
+        }
+      }
+    }
+
+    // Keep tokens that appear in 2+ distinct bullets
+    const entities = [...counts.entries()]
+      .filter(([, n]) => n >= 2)
+      .map(([token]) => token.toLowerCase());
+
+    // Write cache
+    const cacheEntry: ProjectEntityCache = { entities, builtAt: Date.now(), findingsMtimeMs: findingsMtime };
+    fs.writeFileSync(cachePath, JSON.stringify(cacheEntry));
+
+    return new Set(entities);
+  } catch {
+    return new Set();
+  }
+}
+
+function extractProseEntities(text: string, dynamicEntities?: Set<string>): string[] {
   const found = new Set<string>();
   const re = new RegExp(PROSE_ENTITY_RE.source, PROSE_ENTITY_RE.flags);
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) found.add(m[0].toLowerCase());
+  if (dynamicEntities) {
+    // Also check whether any dynamic entity appears (case-insensitive word match)
+    for (const entity of dynamicEntities) {
+      const escaped = entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`\\b${escaped}\\b`, "i").test(text)) {
+        found.add(entity);
+      }
+    }
+  }
   return [...found];
 }
 
@@ -210,8 +300,8 @@ function learningPolarity(text: string): "positive" | "negative" | "neutral" {
 }
 
 /** Returns existing learning lines that appear to conflict with newFinding. */
-export function detectConflicts(newFinding: string, existingLines: string[]): string[] {
-  const newEntities = extractProseEntities(newFinding);
+export function detectConflicts(newFinding: string, existingLines: string[], dynamicEntities?: Set<string>): string[] {
+  const newEntities = extractProseEntities(newFinding, dynamicEntities);
   if (newEntities.length === 0) return [];
   const newPol = learningPolarity(newFinding);
   if (newPol === "neutral") return [];
@@ -219,7 +309,7 @@ export function detectConflicts(newFinding: string, existingLines: string[]): st
   const conflicts: string[] = [];
   for (const line of existingLines) {
     if (!line.startsWith("- ")) continue;
-    const lineEntities = extractProseEntities(line);
+    const lineEntities = extractProseEntities(line, dynamicEntities);
     const shared = lineEntities.filter((e) => newEntities.includes(e));
     if (shared.length === 0) continue;
     const linePol = learningPolarity(line);
@@ -245,8 +335,8 @@ export function isDuplicateFinding(existingContent: string, newLearning: string,
 
   const bullets = existingContent.split("\n").filter(l => l.startsWith("- "));
   for (const bullet of bullets) {
-    // Skip superseded entries
-    if (bullet.includes("<!-- superseded_by:")) continue;
+    // Skip superseded entries (both legacy <!-- superseded_by: and new <!-- cortex:superseded_by formats)
+    if (bullet.includes("superseded_by")) continue;
 
     const existingWords = normalize(bullet);
     if (existingWords.length === 0) continue;
@@ -404,7 +494,7 @@ export async function checkSemanticDedup(
   if (!fs.existsSync(findingsPath)) return false;
 
   const existingContent = fs.readFileSync(findingsPath, "utf8");
-  const bullets = existingContent.split("\n").filter((l) => l.startsWith("- ") && !l.includes("<!-- superseded_by:"));
+  const bullets = existingContent.split("\n").filter((l) => l.startsWith("- ") && !l.includes("superseded_by"));
 
   for (const bullet of bullets) {
     const a = stripMetadata(newLearning).trim();

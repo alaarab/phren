@@ -14,7 +14,7 @@ import {
   getRepoRoot,
   inferCitationLocation,
 } from "./content-citation.js";
-import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts } from "./content-dedup.js";
+import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts, extractDynamicEntities } from "./content-dedup.js";
 import { validateFindingsFormat, validateFinding } from "./content-validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./content-archive.js";
 import {
@@ -162,6 +162,7 @@ function prepareFinding(
   nowIso?: string,
   inferredRepo?: string,
   headCommit?: string,
+  cortexPath?: string,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
   const secretType = scanForSecrets(learning);
   if (secretType) {
@@ -186,10 +187,11 @@ function prepareFinding(
   }
 
   const existingBullets = fullHistory.split("\n").filter((l) => l.startsWith("- "));
-  const conflicts = detectConflicts(normalizedLearning, existingBullets);
+  const dynamicEntities = cortexPath ? extractDynamicEntities(cortexPath, project) : undefined;
+  const conflicts = detectConflicts(normalizedLearning, existingBullets, dynamicEntities);
   if (conflicts.length > 0) {
     const snippet = conflicts[0].replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
-    bullet += ` <!-- conflicts_with: "${snippet}" -->`;
+    bullet += ` <!-- conflicts_with: "${snippet}" --> <!-- cortex:contradicts "${snippet}" -->`;
     debugLog(`add_finding: conflict detected for "${project}": ${snippet}`);
   }
   if (extraAnnotations && extraAnnotations.length > 0) {
@@ -332,7 +334,7 @@ export function addFindingToFile(
   if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" does not exist.`, CortexError.INVALID_PROJECT_NAME);
 
   const result: CortexResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
-    const preparedForNewFile = prepareFinding(learning, project, "", opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit);
+    const preparedForNewFile = prepareFinding(learning, project, "", opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, cortexPath);
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
         return cortexErr(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
@@ -361,7 +363,7 @@ export function addFindingToFile(
           .filter(line => !line.startsWith("- ") || !line.toLowerCase().includes(supersedesText.slice(0, 40).toLowerCase()))
           .join("\n")
       : content;
-    const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit);
+    const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, cortexPath);
     if (prepared.status === "rejected") {
       return cortexErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
     }
@@ -383,9 +385,24 @@ export function addFindingToFile(
         if (!lines[i].startsWith("- ")) continue;
         const lineText = lines[i].replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").replace(/^\[[^\]]+\]\s+/, "").slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
         if (lineText === needle) {
+          // Remove any legacy superseded_by annotation before adding the new format
+          lines[i] = lines[i].replace(/\s*<!--\s*superseded_by:.*?-->/g, "");
           const newFirst60 = normalizedForSupersedes.replace(/^-\s+/, "").slice(0, 60);
-          lines[i] = `${lines[i]} <!-- superseded_by: ${newFirst60} -->`;
+          lines[i] = `${lines[i]} <!-- cortex:superseded_by "${newFirst60}" ${today} -->`;
           updated = lines.join("\n");
+          break;
+        }
+      }
+      // Also annotate the new finding bullet with cortex:supersedes
+      const newLines = updated.split("\n");
+      for (let i = 0; i < newLines.length; i++) {
+        if (!newLines[i].startsWith("- ")) continue;
+        if (newLines[i].includes(prepared.finding.bullet.slice(0, 40))) {
+          if (!newLines[i].includes("cortex:supersedes")) {
+            const supersedesFirst60 = supersedesText.slice(0, 60);
+            newLines[i] = `${newLines[i]} <!-- cortex:supersedes "${supersedesFirst60}" -->`;
+          }
+          updated = newLines.join("\n");
           break;
         }
       }
@@ -470,7 +487,7 @@ export function addFindingsToFile(
           rejected.push({ text: learning, reason: lengthError });
           continue;
         }
-        const prepared = prepareFinding(learning, project, content, extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit);
+        const prepared = prepareFinding(learning, project, content, extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, cortexPath);
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
           continue;
@@ -510,6 +527,7 @@ export function addFindingsToFile(
         nowIso,
         inferredRepo,
         headCommit,
+        cortexPath,
       );
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });

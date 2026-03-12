@@ -19,19 +19,19 @@ describe("manual-links.json persistence", () => {
   afterEach(() => tmp.cleanup());
 
   it("manual-links.json is merged into index on rebuild", async () => {
-    seedFindings(tmp.path, "myapp", "# myapp\n\n- Redis needs explicit close in finally blocks\n");
+    seedFindings(tmp.path, "myapp", "# myapp\n\n- Docker needs explicit network cleanup in finally blocks\n");
     const manualLinksPath = runtimeFile(tmp.path, "manual-links.json");
     fs.mkdirSync(path.dirname(manualLinksPath), { recursive: true });
     fs.writeFileSync(manualLinksPath, JSON.stringify([
-      { entity: "redis", entityType: "library", sourceDoc: "myapp/FINDINGS.md", relType: "mentions" }
+      { entity: "docker", entityType: "library", sourceDoc: "myapp/FINDINGS.md", relType: "mentions" }
     ]));
 
     const db = await buildIndex(tmp.path);
 
-    const entityRows = db.exec("SELECT name FROM entities WHERE name = 'redis'");
+    const entityRows = db.exec("SELECT name FROM entities WHERE name = 'docker'");
     expect(entityRows[0]?.values?.length).toBeGreaterThan(0);
 
-    const linkRows = db.exec("SELECT rel_type FROM entity_links JOIN entities ON entity_links.target_id = entities.id WHERE entities.name = 'redis'");
+    const linkRows = db.exec("SELECT rel_type FROM entity_links JOIN entities ON entity_links.target_id = entities.id WHERE entities.name = 'docker'");
     expect(linkRows[0]?.values?.[0]?.[0]).toBe("mentions");
   });
 

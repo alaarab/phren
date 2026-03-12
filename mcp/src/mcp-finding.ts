@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
+import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import {
@@ -19,12 +20,48 @@ import {
   checkSemanticConflicts,
   autoMergeConflicts,
 } from "./shared-content.js";
+import { jaccardTokenize, jaccardSimilarity, stripMetadata } from "./content-dedup.js";
 import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings } from "./mcp-session.js";
 import { extractEntityNames } from "./shared-entity-graph.js";
 import { extractFactFromFinding } from "./mcp-extract-facts.js";
+import { appendChildFinding } from "./data-access.js";
+import { getActiveTaskForSession } from "./task-lifecycle.js";
 
 
+
+const JACCARD_MAYBE_LOW = 0.30;
+const JACCARD_MAYBE_HIGH = 0.55; // above this isDuplicateFinding already catches it
+
+interface PotentialDuplicate {
+  existing: string;
+  similarity: number;
+}
+
+function findJaccardCandidates(cortexPath: string, project: string, finding: string): PotentialDuplicate[] {
+  try {
+    const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
+    if (!fs.existsSync(findingsPath)) return [];
+    const content = fs.readFileSync(findingsPath, "utf8");
+    const newClean = stripMetadata(finding).trim();
+    const newTokens = jaccardTokenize(newClean);
+    if (newTokens.size < 3) return [];
+    const candidates: PotentialDuplicate[] = [];
+    for (const line of content.split("\n")) {
+      if (!line.startsWith("- ") || line.includes("superseded_by")) continue;
+      const existingClean = stripMetadata(line).replace(/^-\s+/, "").trim();
+      const existingTokens = jaccardTokenize(existingClean);
+      if (existingTokens.size < 3) continue;
+      const sim = jaccardSimilarity(newTokens, existingTokens);
+      if (sim >= JACCARD_MAYBE_LOW && sim < JACCARD_MAYBE_HIGH) {
+        candidates.push({ existing: existingClean, similarity: Math.round(sim * 100) / 100 });
+      }
+    }
+    return candidates;
+  } catch {
+    return [];
+  }
+}
 
 function extractConflictsWith(annotations: string[]): string[] {
   return annotations
@@ -67,10 +104,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         try {
           const taggedFinding = findingType ? `[${findingType}] ${finding}` : finding;
-          // Semantic dedup pre-check (async, feature-flagged)
-          if (await checkSemanticDedup(cortexPath, project, taggedFinding)) {
-            return mcpResponse({ ok: true, message: `Skipped semantic duplicate finding for "${project}".` });
-          }
+          // Jaccard "maybe zone" scan — free, no LLM call. Return candidates so the agent decides.
+          const potentialDuplicates = findJaccardCandidates(cortexPath, project, taggedFinding);
           const semanticConflicts = await checkSemanticConflicts(cortexPath, project, taggedFinding);
           runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
           const result = addFindingToFile(cortexPath, project, taggedFinding, citation, {
@@ -93,6 +128,34 @@ export function register(server: McpServer, ctx: McpContext): void {
             runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
             incrementSessionFindings(cortexPath, 1, sessionId, project);
             extractFactFromFinding(cortexPath, project, taggedFinding);
+            // Bidirectional link: if there's an active task in this session, append this finding to it.
+            if (sessionId) {
+              const activeTask = getActiveTaskForSession(cortexPath, sessionId, project);
+              if (activeTask) {
+                const taskMatch = activeTask.stableId ? `bid:${activeTask.stableId}` : activeTask.line;
+                // Extract fid from the last written line in FINDINGS.md
+                try {
+                  const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
+                  const findingsContent = fs.readFileSync(findingsPath, "utf8");
+                  const lines = findingsContent.split("\n");
+                  const taggedText = taggedFinding.replace(/^-\s+/, "").trim().slice(0, 60).toLowerCase();
+                  for (let li = lines.length - 1; li >= 0; li--) {
+                    const l = lines[li];
+                    if (!l.startsWith("- ")) continue;
+                    const lineText = l.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().slice(0, 60).toLowerCase();
+                    if (lineText === taggedText || l.toLowerCase().includes(taggedText.slice(0, 30))) {
+                      const fidMatch = l.match(/<!--\s*fid:([a-z0-9]{8})\s*-->/);
+                      if (fidMatch) {
+                        appendChildFinding(cortexPath, project, taskMatch, `fid:${fidMatch[1]}`);
+                      }
+                      break;
+                    }
+                  }
+                } catch {
+                  // Non-fatal: task-finding linkage is best-effort
+                }
+              }
+            }
           }
           const conflictsWithList = semanticConflicts.checked
             ? extractConflictsWith(semanticConflicts.annotations)
@@ -114,6 +177,7 @@ export function register(server: McpServer, ctx: McpContext): void {
               ...(conflictsWith ? { conflictsWith } : {}),
               ...(conflictsWithList.length > 0 ? { conflicts: conflictsWithList } : {}),
               ...(detectedEntities.length > 0 ? { detectedEntities } : {}),
+              ...(potentialDuplicates.length > 0 ? { potentialDuplicates } : {}),
             }
           });
         } catch (err: unknown) {
@@ -144,65 +208,46 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
 
-        // Run semantic quality gates (dedup + conflict) per finding before writing.
-        // Use a per-item timeout so one slow LLM call doesn't stall the whole batch.
-        const PER_ITEM_TIMEOUT_MS = 5_000;
-        const semanticSkipped: string[] = [];
-        const semanticConflicts: Array<{ finding: string; conflictsWith: string[] }> = [];
-        const filteredFindings: string[] = [];
+        // Jaccard "maybe zone" scan per finding — free, no LLM. Agent sees candidates and decides.
+        const allPotentialDuplicates: Array<{ finding: string; candidates: PotentialDuplicate[] }> = [];
         const extraAnnotationsByFinding: string[][] = [];
 
         for (const f of findings) {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), PER_ITEM_TIMEOUT_MS);
+          const candidates = findJaccardCandidates(cortexPath, project, f);
+          if (candidates.length > 0) allPotentialDuplicates.push({ finding: f, candidates });
           try {
-            const isDup = await checkSemanticDedup(cortexPath, project, f, controller.signal);
-            if (isDup) {
-              clearTimeout(timeoutId);
-              semanticSkipped.push(f);
-              continue;
-            }
+            const conflicts = await checkSemanticConflicts(cortexPath, project, f);
+            extraAnnotationsByFinding.push(conflicts.checked && conflicts.annotations.length > 0 ? conflicts.annotations : []);
           } catch (err: unknown) {
-            // Semantic dedup failure is non-fatal — proceed with the finding
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] add_findings semanticDedup: ${errorMessage(err)}\n`);
-          }
-
-          try {
-            const conflicts = await checkSemanticConflicts(cortexPath, project, f, controller.signal);
-            if (conflicts.checked && conflicts.annotations.length > 0) {
-              semanticConflicts.push({ finding: f, conflictsWith: extractConflictsWith(conflicts.annotations) });
-              extraAnnotationsByFinding.push(conflicts.annotations);
-            } else {
-              extraAnnotationsByFinding.push([]);
-            }
-          } catch (err: unknown) {
-            // Semantic conflict failure is non-fatal
             if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] add_findings semanticConflict: ${errorMessage(err)}\n`);
             extraAnnotationsByFinding.push([]);
           }
-          clearTimeout(timeoutId);
-
-          filteredFindings.push(f);
         }
 
-        const result = addFindingsToFile(cortexPath, project, filteredFindings, {
+        const result = addFindingsToFile(cortexPath, project, findings, {
           extraAnnotationsByFinding,
           sessionId,
         });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, skipped, rejected } = result.data;
-        // Include semantic skips in the total skipped count
-        const allSkipped = [...skipped, ...semanticSkipped];
         if (added.length > 0) {
           runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
           incrementSessionFindings(cortexPath, added.length, sessionId, project);
           updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
         }
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
-        const conflictMsg = semanticConflicts.length > 0 ? `, ${semanticConflicts.length} with conflicts` : "";
         // ok:true whenever the operation completed without error — use counts to distinguish outcomes.
-        // Returning ok:false when all items are duplicates confuses callers into thinking a write failed.
-        return mcpResponse({ ok: true, message: `Added ${added.length}/${findings.length} findings (${allSkipped.length} duplicates skipped${rejectedMsg}${conflictMsg})`, data: { project, added, skipped: allSkipped, rejected, ...(semanticConflicts.length > 0 ? { conflicts: semanticConflicts } : {}) } });
+        return mcpResponse({
+          ok: true,
+          message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`,
+          data: {
+            project,
+            added,
+            skipped,
+            rejected,
+            ...(allPotentialDuplicates.length > 0 ? { potentialDuplicates: allPotentialDuplicates } : {}),
+          },
+        });
       });
     }
   );

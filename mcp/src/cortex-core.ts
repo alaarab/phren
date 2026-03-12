@@ -1,5 +1,16 @@
 // Shared Cortex result types, validation tags, and low-level helpers.
 
+/**
+ * Minimal cross-domain starter set for entity/conflict detection.
+ *
+ * Kept intentionally small: only terms that are genuinely universal across
+ * disciplines (languages, infra primitives, version control). Framework-specific
+ * tools (React, Django, Unity, JUCE, Ansible, ...) are learned dynamically from
+ * each project's FINDINGS.md via extractDynamicEntities().
+ */
+export const UNIVERSAL_TECH_TERMS_RE =
+  /\b(Python|Rust|Go|Java|TypeScript|JavaScript|Docker|Kubernetes|AWS|GCP|Azure|SQL|Git)\b/gi;
+
 // Default timeout for execFileSync calls (30s for most operations, 10s for quick probes like `which`)
 export const EXEC_TIMEOUT_MS = 30_000;
 export const EXEC_TIMEOUT_QUICK_MS = 10_000;

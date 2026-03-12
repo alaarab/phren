@@ -175,6 +175,7 @@ export interface InitOptions {
   findingsProactivity?: ProactivityLevel;
   taskProactivity?: ProactivityLevel;
   taskMode?: "off" | "manual" | "suggest" | "auto";
+  findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
   applyStarterUpdate?: boolean;
   dryRun?: boolean;
   yes?: boolean;
@@ -264,6 +265,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   autoCaptureEnabled: boolean;
   semanticDedupEnabled: boolean;
   semanticConflictEnabled: boolean;
+  findingSensitivity: "minimal" | "conservative" | "balanced" | "aggressive";
   githubUsername?: string;
   githubRepo?: string;
   cloneUrl?: string;
@@ -295,6 +297,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
       autoCaptureEnabled: false,
       semanticDedupEnabled: false,
       semanticConflictEnabled: false,
+      findingSensitivity: "balanced",
       cloneUrl: cloneAnswer,
     };
   }
@@ -445,7 +448,35 @@ async function runWalkthrough(cortexPath: string): Promise<{
     log("existing one (e.g. \"always use X\" vs \"never use X\"). Adds an inline annotation.");
     const conflictAnswer = (await ask(`Enable LLM-powered conflict detection? [y/N]: `)).trim().toLowerCase();
     semanticConflictEnabled = conflictAnswer === "y" || conflictAnswer === "yes";
+
+    if (semanticDedupEnabled || semanticConflictEnabled) {
+      const currentModel = process.env.CORTEX_LLM_MODEL || "gpt-4o-mini / claude-haiku-4-5-20251001 (default)";
+      log("");
+      log("  Cost note: each semantic check is ~80 input + ~5 output tokens, cached 24h.");
+      log(`  Current model: ${currentModel}`);
+      const isExpensive = process.env.CORTEX_LLM_MODEL && /opus|sonnet|gpt-4(?!o-mini)/i.test(process.env.CORTEX_LLM_MODEL);
+      if (isExpensive) {
+        log(`  Warning: ${process.env.CORTEX_LLM_MODEL} is 20x more expensive than Haiku for yes/no checks.`);
+        log("  Consider: CORTEX_LLM_MODEL=claude-haiku-4-5-20251001");
+      } else {
+        log("  With Haiku: fractions of a cent/session. With Opus: ~$0.20/session for heavy use.");
+        log("  Tip: set CORTEX_LLM_MODEL=claude-haiku-4-5-20251001 to keep costs low.");
+      }
+    }
   }
+
+  log("\n─── Finding sensitivity ─────────────────────────────────────────────────");
+  log("Controls how eagerly agents save findings to memory.");
+  log("  minimal      — only when you explicitly ask");
+  log("  conservative — decisions and pitfalls only");
+  log("  balanced     — non-obvious patterns, decisions, pitfalls, bugs (recommended)");
+  log("  aggressive   — everything worth remembering, err on the side of capturing");
+  log("  Change later: npx cortex config finding-sensitivity <level>");
+  const sensitivityAnswer = (await ask(`Finding sensitivity [minimal/conservative/balanced/aggressive] (balanced): `)).trim().toLowerCase();
+  const findingSensitivity: "minimal" | "conservative" | "balanced" | "aggressive" =
+    (["minimal", "conservative", "balanced", "aggressive"].includes(sensitivityAnswer)
+      ? sensitivityAnswer
+      : "balanced") as "minimal" | "conservative" | "balanced" | "aggressive";
 
   log("\n─── GitHub sync ────────────────────────────────────────────────────────");
   log("Cortex stores memory as plain Markdown files in a git repo (~/.cortex).");
@@ -493,6 +524,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
     autoCaptureEnabled,
     semanticDedupEnabled,
     semanticConflictEnabled,
+    findingSensitivity,
     githubUsername,
     githubRepo,
   };
@@ -555,8 +587,11 @@ function applyOnboardingPreferences(cortexPath: string, opts: InitOptions): void
   if (Object.keys(governancePatch).length > 0) {
     writeGovernanceInstallPreferences(cortexPath, governancePatch);
   }
-  if (opts.taskMode) {
-    updateWorkflowPolicy(cortexPath, { taskMode: opts.taskMode });
+  const workflowPatch: { taskMode?: "off" | "manual" | "suggest" | "auto"; findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive" } = {};
+  if (opts.taskMode) workflowPatch.taskMode = opts.taskMode;
+  if (opts.findingSensitivity) workflowPatch.findingSensitivity = opts.findingSensitivity;
+  if (Object.keys(workflowPatch).length > 0) {
+    updateWorkflowPolicy(cortexPath, workflowPatch);
   }
 }
 
@@ -605,6 +640,9 @@ export async function runInit(opts: InitOptions = {}) {
     }
     if (answers.semanticConflictEnabled) {
       opts._walkthroughSemanticConflict = true;
+    }
+    if (answers.findingSensitivity && answers.findingSensitivity !== "balanced") {
+      opts.findingSensitivity = answers.findingSensitivity;
     }
     opts._walkthroughBootstrapCurrentProject = answers.bootstrapCurrentProject;
     opts._walkthroughBootstrapOwnership = answers.bootstrapOwnership;

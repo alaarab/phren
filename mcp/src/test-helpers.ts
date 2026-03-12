@@ -84,8 +84,9 @@ export function writeFile(filePath: string, content: string): void {
 /**
  * Extract the user-facing message from a CortexResult<string>.
  */
-export function resultMsg(r: CortexResult<string>): string {
-  return r.ok ? r.data : r.error;
+export function resultMsg(r: CortexResult<unknown>): string {
+  if (!r.ok) return r.error;
+  return typeof r.data === "string" ? r.data : JSON.stringify(r.data);
 }
 
 // ── Shared CLI subprocess helpers ────────────────────────────────────────────
@@ -93,25 +94,16 @@ export function resultMsg(r: CortexResult<string>): string {
 export const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
 export const REPO_ROOT = path.resolve(__dirname, "../..");
 
-let _cliBuilt = false;
-
 /**
- * Build the CLI once per process if the dist artifact is missing.
- * Subsequent calls are no-ops once the binary exists.
+ * Formerly built the CLI on first call. Now a no-op: the vitest globalSetup
+ * (`test-global-setup.ts`) ensures mcp/dist is present before any fork starts,
+ * eliminating the race where one fork's `rm -rf mcp/dist` would cause another
+ * fork's fs.existsSync check to fail and trigger a redundant concurrent build.
+ *
+ * Kept as a function so call sites don't need to change.
  */
 export function ensureCliBuilt(): void {
-  if (fs.existsSync(CLI_PATH)) {
-    _cliBuilt = true;
-    return;
-  }
-  if (_cliBuilt) return;
-  execFileSync("npm", ["run", "build"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30000,
-  });
-  _cliBuilt = true;
+  // no-op — build is guaranteed by globalSetup before any worker spawns
 }
 
 export interface CliResult {

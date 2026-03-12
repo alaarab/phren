@@ -9,6 +9,7 @@ import {
 } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { readTasksAcrossProjects, TASKS_FILENAME } from "./data-access.js";
+import { applyGravity } from "./data-tasks.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import { resolveSubprocessArgs } from "./cli-hooks.js";
 
@@ -33,18 +34,20 @@ export function handleTaskView(profile: string) {
     console.log(`\n## ${doc.project}`);
     if (activeCount > 0) {
       console.log("  Active:");
-      for (const item of doc.items.Active) {
-        const tag = item.priority ? ` [${item.priority}]` : "";
+      const activeWithGravity = applyGravity(doc.items.Active).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+      for (const item of activeWithGravity) {
+        const rankTag = item.rank !== undefined ? ` [#${item.rank}]` : "";
         const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        console.log(`    - ${item.line}${tag}${github}`);
+        console.log(`    - ${item.line}${rankTag}${github}`);
       }
     }
     if (queueCount > 0) {
       console.log("  Queue:");
-      for (const item of doc.items.Queue) {
-        const tag = item.priority ? ` [${item.priority}]` : "";
+      const queueWithGravity = applyGravity(doc.items.Queue).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+      for (const item of queueWithGravity) {
+        const rankTag = item.rank !== undefined ? ` [#${item.rank}]` : "";
         const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        console.log(`    - ${item.line}${tag}${github}`);
+        console.log(`    - ${item.line}${rankTag}${github}`);
       }
     }
   }

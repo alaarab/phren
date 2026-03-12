@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "./test-helpers.js";
 import { handleTaskPromptLifecycle, finalizeTaskSession } from "./task-lifecycle.js";
-import { readTasks } from "./data-access.js";
+import { readTasks, addTask, appendChildFinding } from "./data-access.js";
 
 describe("task lifecycle", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -49,6 +49,7 @@ describe("task lifecycle", () => {
     expect(result.mode).toBe("suggest");
     expect(result.noticeLines.join("\n")).toContain("Task suggestion");
     const after = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+    // Suggest mode never writes to the task file - it only proposes.
     expect(after).toBe(before);
   });
 
@@ -102,7 +103,8 @@ describe("task lifecycle", () => {
     expect(result.mode).toBe("auto");
     expect(result.noticeLines.join("\n")).toContain("Task suggestion");
     const after = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
-    expect(after).toBe(before);
+    // Discovery mode (auto) writes a speculative task but surfaces it as a suggestion.
+    expect(after).toContain("Explore different caching strategies");
   });
 
   it("auto mode writes task when execution intent detected", () => {
@@ -202,5 +204,66 @@ describe("task lifecycle", () => {
     if (!task.ok) return;
     expect(task.data.items.Active).toHaveLength(0);
     expect(task.data.items.Done[0].line).toContain("Fix narrow terminal task rendering");
+  });
+});
+
+describe("progressive task model", () => {
+  let tmp: { path: string; cleanup: () => void };
+  const project = "demo";
+
+  beforeEach(() => {
+    tmp = makeTempDir("progressive-task-");
+    grantAdmin(tmp.path);
+    writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("addTask stores createdAt and sessionId provenance in the task item", () => {
+    const now = new Date().toISOString();
+    const result = addTask(tmp.path, project, "Implement rate limiting", {
+      createdAt: now,
+      sessionId: "sess-abc123",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.createdAt).toBe(now);
+    expect(result.data.sessionId).toBe("sess-abc123");
+    expect(result.data.line).toBe("Implement rate limiting");
+  });
+
+  it("addTask with speculative:true marks the task as speculative", () => {
+    const result = addTask(tmp.path, project, "Explore event sourcing", {
+      speculative: true,
+      sessionId: "sess-explore",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.speculative).toBe(true);
+
+    // Verify it was written to the file
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok).toBe(true);
+    if (!tasks.ok) return;
+    const queued = tasks.data.items.Queue;
+    expect(queued.some((t: any) => t.line.includes("Explore event sourcing"))).toBe(true);
+  });
+
+  it("appendChildFinding links a finding ID to an existing task", () => {
+    const add = addTask(tmp.path, project, "Migrate to Postgres");
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+
+    const stableId = `bid:${add.data.stableId}`;
+    const link = appendChildFinding(tmp.path, project, stableId, "fid:aabbccdd");
+    expect(link.ok).toBe(true);
+
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok).toBe(true);
+    if (!tasks.ok) return;
+    const item = tasks.data.items.Queue.find((t: any) => t.line.includes("Migrate to Postgres"));
+    expect(item?.childFindings).toContain("fid:aabbccdd");
   });
 });
