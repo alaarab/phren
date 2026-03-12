@@ -35,18 +35,23 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CortexStatusBar = void 0;
 const vscode = __importStar(require("vscode"));
+const HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 class CortexStatusBar {
     constructor(client) {
         this.client = client;
         this.disposables = [];
         this.statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-        this.statusItem.command = "cortex.setActiveProject";
-        this.statusItem.tooltip = "Set active Cortex project";
+        this.statusItem.command = "cortex.doctor";
+        this.statusItem.tooltip = "Cortex health — click for Doctor";
         this.disposables.push(this.statusItem, vscode.window.onDidChangeActiveTextEditor(() => {
             this.render();
         }));
         this.render();
         this.statusItem.show();
+    }
+    /** Register a callback invoked whenever health status changes. */
+    setOnHealthChanged(cb) {
+        this.onHealthChanged = cb;
     }
     async initialize() {
         const projectNames = await this.fetchProjectNames();
@@ -54,6 +59,9 @@ class CortexStatusBar {
             ? this.activeProjectName
             : projectNames[0];
         this.render();
+        // Start health polling
+        await this.pollHealth();
+        this.healthTimer = setInterval(() => { this.pollHealth().catch(() => { }); }, HEALTH_POLL_INTERVAL_MS);
     }
     getActiveProjectName() {
         return this.activeProjectName;
@@ -80,9 +88,34 @@ class CortexStatusBar {
         return selected;
     }
     dispose() {
+        if (this.healthTimer) {
+            clearInterval(this.healthTimer);
+            this.healthTimer = undefined;
+        }
         while (this.disposables.length > 0) {
             const disposable = this.disposables.pop();
             disposable?.dispose();
+        }
+    }
+    async pollHealth() {
+        try {
+            const raw = await this.client.healthCheck();
+            const data = asRecord(asRecord(raw)?.data);
+            const ok = data !== undefined;
+            const changed = this.healthOk !== ok;
+            this.healthOk = ok;
+            this.render();
+            if (changed && this.onHealthChanged) {
+                this.onHealthChanged(ok);
+            }
+        }
+        catch {
+            const changed = this.healthOk !== false;
+            this.healthOk = false;
+            this.render();
+            if (changed && this.onHealthChanged) {
+                this.onHealthChanged(false);
+            }
         }
     }
     async fetchProjectNames() {
@@ -106,7 +139,8 @@ class CortexStatusBar {
     }
     render() {
         const projectName = this.activeProjectName ?? "No project";
-        this.statusItem.text = `$(database) Cortex: ${projectName}`;
+        const badge = this.healthOk === true ? " [ok]" : this.healthOk === false ? " [!]" : "";
+        this.statusItem.text = `$(database) Cortex: ${projectName}${badge}`;
     }
 }
 exports.CortexStatusBar = CortexStatusBar;

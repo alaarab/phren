@@ -5,15 +5,20 @@ interface ProjectSummary {
   name: string;
 }
 
+const HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
 export class CortexStatusBar implements vscode.Disposable {
   private readonly statusItem: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
   private activeProjectName?: string;
+  private healthOk: boolean | undefined;
+  private healthTimer?: ReturnType<typeof setInterval>;
+  private onHealthChanged?: (ok: boolean) => void;
 
   constructor(private readonly client: CortexClient) {
     this.statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.statusItem.command = "cortex.setActiveProject";
-    this.statusItem.tooltip = "Set active Cortex project";
+    this.statusItem.command = "cortex.doctor";
+    this.statusItem.tooltip = "Cortex health — click for Doctor";
 
     this.disposables.push(
       this.statusItem,
@@ -26,12 +31,21 @@ export class CortexStatusBar implements vscode.Disposable {
     this.statusItem.show();
   }
 
+  /** Register a callback invoked whenever health status changes. */
+  setOnHealthChanged(cb: (ok: boolean) => void): void {
+    this.onHealthChanged = cb;
+  }
+
   async initialize(): Promise<void> {
     const projectNames = await this.fetchProjectNames();
     this.activeProjectName = this.activeProjectName && projectNames.includes(this.activeProjectName)
       ? this.activeProjectName
       : projectNames[0];
     this.render();
+
+    // Start health polling
+    await this.pollHealth();
+    this.healthTimer = setInterval(() => { this.pollHealth().catch(() => {}); }, HEALTH_POLL_INTERVAL_MS);
   }
 
   getActiveProjectName(): string | undefined {
@@ -64,9 +78,34 @@ export class CortexStatusBar implements vscode.Disposable {
   }
 
   dispose(): void {
+    if (this.healthTimer) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = undefined;
+    }
     while (this.disposables.length > 0) {
       const disposable = this.disposables.pop();
       disposable?.dispose();
+    }
+  }
+
+  private async pollHealth(): Promise<void> {
+    try {
+      const raw = await this.client.healthCheck();
+      const data = asRecord(asRecord(raw)?.data);
+      const ok = data !== undefined;
+      const changed = this.healthOk !== ok;
+      this.healthOk = ok;
+      this.render();
+      if (changed && this.onHealthChanged) {
+        this.onHealthChanged(ok);
+      }
+    } catch {
+      const changed = this.healthOk !== false;
+      this.healthOk = false;
+      this.render();
+      if (changed && this.onHealthChanged) {
+        this.onHealthChanged(false);
+      }
     }
   }
 
@@ -96,7 +135,8 @@ export class CortexStatusBar implements vscode.Disposable {
 
   private render(): void {
     const projectName = this.activeProjectName ?? "No project";
-    this.statusItem.text = `$(database) Cortex: ${projectName}`;
+    const badge = this.healthOk === true ? " [ok]" : this.healthOk === false ? " [!]" : "";
+    this.statusItem.text = `$(database) Cortex: ${projectName}${badge}`;
   }
 }
 

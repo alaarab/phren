@@ -37,6 +37,8 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
+const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
 const cortexClient_1 = require("./cortexClient");
 const CortexTreeProvider_1 = require("./providers/CortexTreeProvider");
 const searchQuickPick_1 = require("./searchQuickPick");
@@ -86,6 +88,7 @@ async function activate(context) {
         treeDataProvider,
     });
     const statusBar = new statusBar_1.CortexStatusBar(cortexClient);
+    statusBar.setOnHealthChanged((ok) => treeDataProvider.setHealthStatus(ok));
     context.subscriptions.push(treeDataProvider, treeView, statusBar);
     const setActiveProjectDisposable = vscode.commands.registerCommand("cortex.setActiveProject", async () => {
         try {
@@ -176,11 +179,13 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to toggle skill: ${toErrorMessage(error)}`);
         }
     });
-    const toggleHookDisposable = vscode.commands.registerCommand("cortex.toggleHook", async (tool, currentlyEnabled) => {
+    const toggleHookDisposable = vscode.commands.registerCommand("cortex.toggleHook", async (toolOrNode, currentlyEnabled) => {
         try {
-            await cortexClient.toggleHooks(!currentlyEnabled, tool);
+            const tool = typeof toolOrNode === "string" ? toolOrNode : toolOrNode.tool;
+            const enabled = typeof toolOrNode === "string" ? currentlyEnabled : toolOrNode.enabled;
+            await cortexClient.toggleHooks(!enabled, tool);
             treeDataProvider.refresh();
-            await vscode.window.showInformationMessage(`Hooks for "${tool}" ${currentlyEnabled ? "disabled" : "enabled"}.`);
+            await vscode.window.showInformationMessage(`Hooks for "${tool}" ${enabled ? "disabled" : "enabled"}.`);
         }
         catch (error) {
             await vscode.window.showErrorMessage(`Failed to toggle hook: ${toErrorMessage(error)}`);
@@ -191,6 +196,231 @@ async function activate(context) {
     });
     const openQueueItemDisposable = vscode.commands.registerCommand("cortex.openQueueItem", (item) => {
         (0, queueViewer_1.showQueueItemDetail)(cortexClient, item, refreshTree);
+    });
+    const syncDisposable = vscode.commands.registerCommand("cortex.sync", async () => {
+        try {
+            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Cortex: Syncing...", cancellable: false }, async () => {
+                await cortexClient.pushChanges();
+            });
+            treeDataProvider.refresh();
+            await vscode.window.showInformationMessage("Cortex: Sync complete.");
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Cortex sync failed: ${toErrorMessage(error)}`);
+        }
+    });
+    // --- Doctor command ---
+    const doctorDisposable = vscode.commands.registerCommand("cortex.doctor", async () => {
+        try {
+            const raw = await cortexClient.healthCheck();
+            const data = asRecord(asRecord(raw)?.data);
+            outputChannel.clear();
+            outputChannel.appendLine("=== Cortex Doctor ===");
+            outputChannel.appendLine("");
+            if (data) {
+                if (data.version)
+                    outputChannel.appendLine(`Version: ${data.version}`);
+                if (data.profile)
+                    outputChannel.appendLine(`Profile: ${data.profile}`);
+                if (data.machine)
+                    outputChannel.appendLine(`Machine: ${data.machine}`);
+                if (data.projectCount !== undefined)
+                    outputChannel.appendLine(`Projects: ${data.projectCount}`);
+                if (data.storePath)
+                    outputChannel.appendLine(`Store: ${data.storePath}`);
+                const index = asRecord(data.index);
+                if (index) {
+                    outputChannel.appendLine("");
+                    outputChannel.appendLine("FTS Index:");
+                    if (index.docCount !== undefined)
+                        outputChannel.appendLine(`  Documents: ${index.docCount}`);
+                    if (index.entityCount !== undefined)
+                        outputChannel.appendLine(`  Entities: ${index.entityCount}`);
+                    if (index.stale !== undefined)
+                        outputChannel.appendLine(`  Stale: ${index.stale}`);
+                }
+                const hooks = asRecord(data.hooks);
+                if (hooks) {
+                    outputChannel.appendLine("");
+                    outputChannel.appendLine("Hooks:");
+                    if (hooks.globalEnabled !== undefined)
+                        outputChannel.appendLine(`  Global: ${hooks.globalEnabled ? "enabled" : "disabled"}`);
+                    const tools = asArraySafe(hooks.tools);
+                    for (const t of tools) {
+                        const rec = asRecord(t);
+                        if (rec?.tool)
+                            outputChannel.appendLine(`  ${rec.tool}: ${rec.enabled ? "enabled" : "disabled"}`);
+                    }
+                }
+                // Print any remaining top-level keys as-is
+                for (const key of Object.keys(data)) {
+                    if (["version", "profile", "machine", "projectCount", "storePath", "index", "hooks"].includes(key))
+                        continue;
+                    outputChannel.appendLine(`${key}: ${JSON.stringify(data[key])}`);
+                }
+            }
+            else {
+                outputChannel.appendLine(JSON.stringify(raw, null, 2));
+            }
+            outputChannel.appendLine("");
+            outputChannel.appendLine("=== End ===");
+            outputChannel.show(true);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Cortex doctor failed: ${toErrorMessage(error)}`);
+        }
+    });
+    // --- Hooks Status command ---
+    const hooksStatusDisposable = vscode.commands.registerCommand("cortex.hooksStatus", async () => {
+        try {
+            const raw = await cortexClient.listHooks();
+            const data = asRecord(asRecord(raw)?.data);
+            outputChannel.clear();
+            outputChannel.appendLine("=== Cortex Hooks Status ===");
+            outputChannel.appendLine("");
+            if (data) {
+                if (data.globalEnabled !== undefined) {
+                    outputChannel.appendLine(`Global: ${data.globalEnabled ? "enabled" : "disabled"}`);
+                }
+                outputChannel.appendLine("");
+                const tools = asArraySafe(data.tools);
+                for (const t of tools) {
+                    const rec = asRecord(t);
+                    if (!rec?.tool)
+                        continue;
+                    const status = rec.enabled ? "enabled" : "disabled";
+                    const exists = rec.exists ? "" : " (config not found)";
+                    outputChannel.appendLine(`  ${rec.tool}: ${status}${exists}`);
+                    if (rec.configPath)
+                        outputChannel.appendLine(`    Path: ${rec.configPath}`);
+                }
+                const customHooks = asArraySafe(data.customHooks);
+                if (customHooks.length > 0) {
+                    outputChannel.appendLine("");
+                    outputChannel.appendLine("Custom Hooks:");
+                    for (const h of customHooks) {
+                        const rec = asRecord(h);
+                        if (rec)
+                            outputChannel.appendLine(`  ${rec.event}: ${rec.command}`);
+                    }
+                }
+            }
+            else {
+                outputChannel.appendLine(JSON.stringify(raw, null, 2));
+            }
+            outputChannel.appendLine("");
+            outputChannel.appendLine("=== End ===");
+            outputChannel.show(true);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to get hooks status: ${toErrorMessage(error)}`);
+        }
+    });
+    // --- Toggle Hooks command ---
+    const toggleHooksCommandDisposable = vscode.commands.registerCommand("cortex.toggleHooksCommand", async () => {
+        try {
+            const raw = await cortexClient.listHooks();
+            const data = asRecord(asRecord(raw)?.data);
+            const tools = asArraySafe(data?.tools);
+            const picks = [];
+            for (const t of tools) {
+                const rec = asRecord(t);
+                if (!rec?.tool)
+                    continue;
+                const toolName = String(rec.tool);
+                const enabled = rec.enabled === true;
+                picks.push({
+                    label: toolName,
+                    description: enabled ? "enabled" : "disabled",
+                    detail: `Click to ${enabled ? "disable" : "enable"} hooks for ${toolName}`,
+                });
+            }
+            if (picks.length === 0) {
+                await vscode.window.showInformationMessage("No hook tools configured.");
+                return;
+            }
+            const choice = await vscode.window.showQuickPick(picks, { placeHolder: "Select a tool to toggle hooks" });
+            if (!choice)
+                return;
+            const currentlyEnabled = choice.description === "enabled";
+            await cortexClient.toggleHooks(!currentlyEnabled, choice.label);
+            treeDataProvider.refresh();
+            await vscode.window.showInformationMessage(`Hooks for "${choice.label}" ${currentlyEnabled ? "disabled" : "enabled"}.`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to toggle hooks: ${toErrorMessage(error)}`);
+        }
+    });
+    // --- Manage Project command ---
+    const manageProjectDisposable = vscode.commands.registerCommand("cortex.manageProject", async () => {
+        try {
+            const projectsRaw = await cortexClient.listProjects();
+            const projectsData = asRecord(asRecord(projectsRaw)?.data);
+            const projects = asArraySafe(projectsData?.projects);
+            const projectNames = [];
+            for (const p of projects) {
+                const rec = asRecord(p);
+                const name = typeof rec?.name === "string" ? rec.name : undefined;
+                if (name)
+                    projectNames.push(name);
+            }
+            if (projectNames.length === 0) {
+                await vscode.window.showInformationMessage("No projects found.");
+                return;
+            }
+            const projectChoice = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project to manage" });
+            if (!projectChoice)
+                return;
+            const actionChoice = await vscode.window.showQuickPick([
+                { label: "Archive", description: "Archive this project" },
+                { label: "Unarchive", description: "Restore this project" },
+            ], { placeHolder: `Action for "${projectChoice}"` });
+            if (!actionChoice)
+                return;
+            const action = actionChoice.label.toLowerCase();
+            await cortexClient.manageProject(projectChoice, action);
+            treeDataProvider.refresh();
+            await vscode.window.showInformationMessage(`Project "${projectChoice}" ${action}d.`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to manage project: ${toErrorMessage(error)}`);
+        }
+    });
+    // --- Switch Profile command ---
+    const switchProfileDisposable = vscode.commands.registerCommand("cortex.switchProfile", async () => {
+        try {
+            const profilesDir = path.join(os.homedir(), ".cortex", "profiles");
+            let profileNames = [];
+            if (fs.existsSync(profilesDir)) {
+                const entries = fs.readdirSync(profilesDir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
+                profileNames = entries.map((f) => f.replace(/\.ya?ml$/, ""));
+            }
+            if (profileNames.length === 0) {
+                await vscode.window.showInformationMessage("No profiles found in ~/.cortex/profiles/");
+                return;
+            }
+            const choice = await vscode.window.showQuickPick(profileNames, { placeHolder: "Select a profile to activate" });
+            if (!choice)
+                return;
+            // Write the chosen profile to cortex-context.md
+            const contextPath = path.join(os.homedir(), ".cortex-context.md");
+            let content = "";
+            if (fs.existsSync(contextPath)) {
+                content = fs.readFileSync(contextPath, "utf8");
+            }
+            if (/^Profile:\s*.+/m.test(content)) {
+                content = content.replace(/^Profile:\s*.+/m, `Profile: ${choice}`);
+            }
+            else {
+                content = `Profile: ${choice}\n${content}`;
+            }
+            fs.writeFileSync(contextPath, content, "utf8");
+            treeDataProvider.refresh();
+            await vscode.window.showInformationMessage(`Profile switched to "${choice}".`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to switch profile: ${toErrorMessage(error)}`);
+        }
     });
     const filterFindingsByDateDisposable = vscode.commands.registerCommand("cortex.filterFindingsByDate", async () => {
         const current = treeDataProvider.getDateFilter();
@@ -243,7 +473,7 @@ async function activate(context) {
             treeDataProvider.setDateFilter({ from: fromStr, to: toStr, label: `${fromStr} to ${toStr}` });
         }
     });
-    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, filterFindingsByDateDisposable);
+    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, filterFindingsByDateDisposable, switchProfileDisposable, syncDisposable, doctorDisposable, hooksStatusDisposable, toggleHooksCommandDisposable, manageProjectDisposable);
     try {
         await statusBar.initialize();
         outputChannel.appendLine("Status bar initialized successfully");
@@ -265,5 +495,11 @@ function toErrorMessage(error) {
         return error.message;
     }
     return String(error);
+}
+function asRecord(value) {
+    return typeof value === "object" && value !== null ? value : undefined;
+}
+function asArraySafe(value) {
+    return Array.isArray(value) ? value : [];
 }
 //# sourceMappingURL=extension.js.map

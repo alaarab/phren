@@ -193,6 +193,20 @@ export class CortexClient {
     return this.callTool("cross_project_entities", {});
   }
 
+  async pushChanges(message?: string): Promise<unknown> {
+    const args: Record<string, unknown> = {};
+    if (message) args.message = message;
+    return this.callTool("push_changes", args);
+  }
+
+  async manageProject(project: string, action: "archive" | "unarchive"): Promise<unknown> {
+    return this.callTool("manage_project", { project, action });
+  }
+
+  async healthCheck(): Promise<unknown> {
+    return this.callTool("health_check", {});
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) {
       return;
