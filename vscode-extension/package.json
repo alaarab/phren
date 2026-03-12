@@ -83,6 +83,16 @@
         "title": "Cortex: Open Queue Item"
       },
       {
+        "command": "cortex.openSessionOverview",
+        "title": "Cortex: Open Session Overview",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "cortex.copySessionId",
+        "title": "Cortex: Copy Session ID",
+        "icon": "$(copy)"
+      },
+      {
         "command": "cortex.filterFindingsByDate",
         "title": "Cortex: Filter Findings by Date",
         "icon": "$(calendar)"
@@ -195,6 +205,16 @@
           "command": "cortex.rejectQueueItem",
           "when": "viewItem == cortex.queue.item",
           "group": "inline"
+        },
+        {
+          "command": "cortex.openSessionOverview",
+          "when": "viewItem == cortex.session",
+          "group": "inline"
+        },
+        {
+          "command": "cortex.copySessionId",
+          "when": "viewItem == cortex.session",
+          "group": "navigation"
         }
       ],
       "view/title": [

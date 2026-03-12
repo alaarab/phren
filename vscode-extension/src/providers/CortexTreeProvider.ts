@@ -3,12 +3,12 @@ import { CortexClient } from "../cortexClient";
 import { readDeviceContext } from "../profileConfig";
 
 type TaskSection = "Active" | "Queue" | "Done";
-type CortexCategory = "findings" | "task" | "queue" | "reference";
+type CortexCategory = "findings" | "sessions" | "task" | "queue" | "reference";
 type SessionBucket = "findings" | "tasks";
 
 interface RootSectionNode {
   kind: "rootSection";
-  section: "projects" | "sessions" | "review" | "skills" | "hooks" | "graph" | "manage";
+  section: "projects" | "review" | "skills" | "hooks" | "graph" | "manage";
   description?: string;
 }
 
@@ -127,10 +127,18 @@ interface ReferenceFileNode {
   fileName: string;
 }
 
+interface SessionDateGroupNode {
+  kind: "sessionDateGroup";
+  projectName: string;
+  date: string;
+  count: number;
+}
+
 interface SessionNode {
   kind: "session";
+  projectName: string;
+  date: string;
   sessionId: string;
-  projectName?: string;
   startedAt: string;
   durationMins?: number;
   summary?: string;
@@ -140,22 +148,10 @@ interface SessionNode {
 
 interface SessionBucketNode {
   kind: "sessionBucket";
+  projectName: string;
   sessionId: string;
   bucket: SessionBucket;
   count: number;
-}
-
-interface SessionFindingNode {
-  kind: "sessionFinding";
-  projectName: string;
-  text: string;
-}
-
-interface SessionTaskNode {
-  kind: "sessionTask";
-  projectName: string;
-  text: string;
-  section: TaskSection;
 }
 
 interface MessageNode {
@@ -182,10 +178,9 @@ type CortexNode =
   | SkillNode
   | HookNode
   | ReferenceFileNode
+  | SessionDateGroupNode
   | SessionNode
   | SessionBucketNode
-  | SessionFindingNode
-  | SessionTaskNode
   | MessageNode;
 
 interface ProjectSummary {
@@ -231,8 +226,9 @@ interface SkillSummary {
 }
 
 interface SessionSummary {
+  projectName: string;
+  date: string;
   sessionId: string;
-  projectName?: string;
   startedAt: string;
   durationMins?: number;
   summary?: string;
@@ -241,8 +237,8 @@ interface SessionSummary {
 }
 
 interface SessionArtifactSummary {
-  findings: Array<{ projectName: string; text: string }>;
-  tasks: Array<{ projectName: string; text: string; section: TaskSection }>;
+  findings: FindingSummary[];
+  tasks: TaskSummary[];
 }
 
 export interface DateFilter {
@@ -298,9 +294,6 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       if (element.section === "projects") {
         return this.getProjectNodes();
       }
-      if (element.section === "sessions") {
-        return this.getSessionNodes();
-      }
       if (element.section === "review") {
         return this.getAggregateQueueSectionGroups();
       }
@@ -323,6 +316,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     if (element.kind === "project") {
       return [
         { kind: "category", projectName: element.projectName, category: "findings" },
+        { kind: "category", projectName: element.projectName, category: "sessions" },
         { kind: "category", projectName: element.projectName, category: "task" },
         { kind: "category", projectName: element.projectName, category: "queue" },
         { kind: "category", projectName: element.projectName, category: "reference" },
@@ -332,6 +326,9 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     if (element.kind === "category") {
       if (element.category === "findings") {
         return this.getFindingDateGroups(element.projectName);
+      }
+      if (element.category === "sessions") {
+        return this.getSessionDateGroups(element.projectName);
       }
       if (element.category === "task") {
         return this.getTaskSectionGroups(element.projectName);
@@ -351,6 +348,10 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
 
     if (element.kind === "aggregateQueueSectionGroup") {
       return this.getAggregateQueueItemsForSection(element.section);
+    }
+
+    if (element.kind === "sessionDateGroup") {
+      return this.getSessionsForDate(element.projectName, element.date);
     }
 
     if (element.kind === "session") {
@@ -393,8 +394,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
     switch (element.kind) {
       case "rootSection": {
-        const labels: Record<string, string> = { projects: "Projects", sessions: "Sessions", review: "Review", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
-        const icons: Record<string, string> = { projects: "folder-library", sessions: "history", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
+        const labels: Record<string, string> = { projects: "Projects", review: "Review", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
+        const icons: Record<string, string> = { projects: "folder-library", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
         const label = labels[element.section] ?? element.section;
 
         if (element.section === "graph") {
@@ -421,7 +422,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       }
       case "category": {
         const cat = element.category ?? "unknown";
-        const categoryLabels: Record<string, string> = { findings: "Findings", task: "Task", queue: "Review Queue", reference: "Reference" };
+        const categoryLabels: Record<string, string> = { findings: "Findings", sessions: "Sessions", task: "Tasks", queue: "Review Queue", reference: "Reference" };
         let categoryLabel = categoryLabels[cat] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
         if (cat === "findings" && this.dateFilter) {
           categoryLabel += ` [${this.dateFilter.label}]`;
@@ -440,6 +441,14 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         item.description = `${element.count}`;
         item.iconPath = themeIcon("calendar");
         item.id = `cortex.findingDateGroup.${element.projectName}.${element.date}`;
+        return item;
+      }
+      case "sessionDateGroup": {
+        const label = formatDateLabel(element.date);
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+        item.description = `${element.count}`;
+        item.iconPath = themeIcon("calendar");
+        item.id = `cortex.sessionDateGroup.${element.projectName}.${element.date}`;
         return item;
       }
       case "finding": {
@@ -579,22 +588,21 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         return item;
       }
       case "session": {
-        const item = new vscode.TreeItem(formatSessionLabel(element.startedAt), vscode.TreeItemCollapsibleState.Collapsed);
-        const descriptionParts = [
-          element.projectName ?? "—",
-          `${element.durationMins ?? 0}m`,
-        ];
+        const item = new vscode.TreeItem(formatSessionTimeLabel(element.startedAt), vscode.TreeItemCollapsibleState.Collapsed);
+        const descriptionParts = [`${element.durationMins ?? 0}m`];
         if (element.findingsAdded > 0) {
           descriptionParts.push(`${element.findingsAdded}f`);
         }
-        descriptionParts.push(element.sessionId.slice(0, 8));
         if (element.status === "active") {
           descriptionParts.push("active");
+        }
+        if (element.summary) {
+          descriptionParts.push(truncate(element.summary, 40));
         }
         item.description = descriptionParts.join(" · ");
         item.tooltip = [
           `Session ${element.sessionId.slice(0, 8)}`,
-          `Project: ${element.projectName ?? "—"}`,
+          `Project: ${element.projectName}`,
           `Started: ${element.startedAt}`,
           `Duration: ~${element.durationMins ?? 0} min`,
           `Findings added: ${element.findingsAdded}`,
@@ -603,6 +611,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         ].join("\n");
         item.iconPath = themeIcon(element.status === "active" ? "play-circle" : "history");
         item.id = `cortex.session.${element.sessionId}`;
+        item.contextValue = "cortex.session";
         return item;
       }
       case "sessionBucket": {
@@ -611,31 +620,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const item = new vscode.TreeItem(labels[element.bucket], vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon(icons[element.bucket]);
-        item.id = `cortex.sessionBucket.${element.sessionId}.${element.bucket}`;
-        return item;
-      }
-      case "sessionFinding": {
-        const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
-        item.description = element.projectName;
-        item.tooltip = `${element.projectName}\n${element.text}`;
-        item.iconPath = themeIcon("lightbulb");
-        item.id = `cortex.sessionFinding.${element.projectName}.${truncate(element.text, 40)}`;
-        return item;
-      }
-      case "sessionTask": {
-        const taskNode: TaskNode = {
-          kind: "task",
-          projectName: element.projectName,
-          id: `${element.projectName}:${element.section}`,
-          line: element.text,
-          section: element.section,
-          checked: element.section === "Done",
-        };
-        const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
-        item.description = `${element.projectName} · ${element.section}`;
-        item.tooltip = `${element.projectName}/${element.section}\n${element.text}`;
-        item.iconPath = themeIcon(taskIconId(taskNode));
-        item.id = `cortex.sessionTask.${element.projectName}.${element.section}.${truncate(element.text, 40)}`;
+        item.id = `cortex.sessionBucket.${element.projectName}.${element.sessionId}.${element.bucket}`;
         return item;
       }
       case "projectGroup": {
@@ -682,7 +667,6 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
   private async getRootSections(): Promise<CortexNode[]> {
     return [
       { kind: "rootSection", section: "projects" },
-      { kind: "rootSection", section: "sessions" },
       { kind: "rootSection", section: "review" },
       { kind: "rootSection", section: "skills" },
       { kind: "rootSection", section: "hooks", description: await this.getHookSectionDescription() },
@@ -932,23 +916,51 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getSessionNodes(): Promise<CortexNode[]> {
+  private async getSessionDateGroups(projectName: string): Promise<CortexNode[]> {
     try {
-      const sessions = await this.fetchSessions();
+      const sessions = await this.fetchSessions(projectName);
       if (sessions.length === 0) {
         return [{ kind: "message", label: "No sessions found", iconId: "history" }];
       }
 
-      return sessions.map((session) => ({
-        kind: "session" as const,
-        sessionId: session.sessionId,
-        projectName: session.projectName,
-        startedAt: session.startedAt,
-        durationMins: session.durationMins,
-        summary: session.summary,
-        findingsAdded: session.findingsAdded,
-        status: session.status,
+      const dateOrder: string[] = [];
+      const byDate = new Map<string, number>();
+      for (const session of sessions) {
+        const date = session.date || "unknown";
+        if (!byDate.has(date)) {
+          dateOrder.push(date);
+          byDate.set(date, 0);
+        }
+        byDate.set(date, (byDate.get(date) ?? 0) + 1);
+      }
+
+      return dateOrder.map((date) => ({
+        kind: "sessionDateGroup" as const,
+        projectName,
+        date,
+        count: byDate.get(date) ?? 0,
       }));
+    } catch (error) {
+      return [this.errorNode("Failed to load sessions", error)];
+    }
+  }
+
+  private async getSessionsForDate(projectName: string, date: string): Promise<CortexNode[]> {
+    try {
+      const sessions = await this.fetchSessions(projectName);
+      return sessions
+        .filter((session) => session.date === date)
+        .map((session) => ({
+          kind: "session" as const,
+          projectName,
+          date: session.date,
+          sessionId: session.sessionId,
+          startedAt: session.startedAt,
+          durationMins: session.durationMins,
+          summary: session.summary,
+          findingsAdded: session.findingsAdded,
+          status: session.status,
+        }));
     } catch (error) {
       return [this.errorNode("Failed to load sessions", error)];
     }
@@ -956,12 +968,13 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
 
   private async getSessionChildren(session: SessionNode): Promise<CortexNode[]> {
     try {
-      const artifacts = await this.fetchSessionArtifacts(session.sessionId);
+      const artifacts = await this.fetchSessionArtifacts(session.projectName, session.sessionId);
       const children: CortexNode[] = [];
 
       if (artifacts.findings.length > 0) {
         children.push({
           kind: "sessionBucket" as const,
+          projectName: session.projectName,
           sessionId: session.sessionId,
           bucket: "findings",
           count: artifacts.findings.length,
@@ -970,6 +983,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       if (artifacts.tasks.length > 0) {
         children.push({
           kind: "sessionBucket" as const,
+          projectName: session.projectName,
           sessionId: session.sessionId,
           bucket: "tasks",
           count: artifacts.tasks.length,
@@ -988,15 +1002,21 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
 
   private async getSessionBucketChildren(bucket: SessionBucketNode): Promise<CortexNode[]> {
     try {
-      const artifacts = await this.fetchSessionArtifacts(bucket.sessionId);
+      const artifacts = await this.fetchSessionArtifacts(bucket.projectName, bucket.sessionId);
       if (bucket.bucket === "findings") {
         if (artifacts.findings.length === 0) {
           return [{ kind: "message", label: "No findings", iconId: "list-flat" }];
         }
         return artifacts.findings.map((finding) => ({
-          kind: "sessionFinding" as const,
-          projectName: finding.projectName,
+          kind: "finding" as const,
+          projectName: bucket.projectName,
+          id: finding.id,
+          date: finding.date,
           text: finding.text,
+          supersededBy: finding.supersededBy,
+          supersedes: finding.supersedes,
+          contradicts: finding.contradicts,
+          potentialDuplicates: finding.potentialDuplicates,
         }));
       }
 
@@ -1004,10 +1024,12 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         return [{ kind: "message", label: "No tasks", iconId: "checklist" }];
       }
       return artifacts.tasks.map((task) => ({
-        kind: "sessionTask" as const,
-        projectName: task.projectName,
-        text: task.text,
+        kind: "task" as const,
+        projectName: bucket.projectName,
+        id: task.id,
+        line: task.line,
         section: task.section,
+        checked: task.checked,
       }));
     } catch (error) {
       return [this.errorNode("Failed to load session artifacts", error)];
@@ -1329,8 +1351,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     return parsed;
   }
 
-  private async fetchSessions(): Promise<SessionSummary[]> {
-    const raw = await this.client.sessionHistory({ limit: 50 });
+  private async fetchSessions(projectName: string): Promise<SessionSummary[]> {
+    const raw = await this.client.sessionHistory({ limit: 50, project: projectName });
     const response = asRecord(raw);
     const sessions = asArray(response?.data);
     const parsed: SessionSummary[] = [];
@@ -1345,8 +1367,9 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       }
 
       parsed.push({
+        projectName,
+        date: startedAt.includes("T") ? startedAt.slice(0, 10) : "unknown",
         sessionId,
-        projectName: asString(record?.project),
         startedAt,
         durationMins: asNumber(record?.durationMins),
         summary: asString(record?.summary),
@@ -1358,8 +1381,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     return parsed;
   }
 
-  private async fetchSessionArtifacts(sessionId: string): Promise<SessionArtifactSummary> {
-    const raw = await this.client.sessionHistory({ sessionId });
+  private async fetchSessionArtifacts(projectName: string, sessionId: string): Promise<SessionArtifactSummary> {
+    const raw = await this.client.sessionHistory({ sessionId, project: projectName });
     const data = responseData(raw);
     const findingsRaw = asArray(data?.findings);
     const tasksRaw = asArray(data?.tasks);
@@ -1367,24 +1390,38 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     const findings: SessionArtifactSummary["findings"] = [];
     for (const entry of findingsRaw) {
       const record = asRecord(entry);
-      const projectName = asString(record?.project);
+      const id = asString(record?.id);
+      const date = asString(record?.date) ?? "unknown";
       const text = asString(record?.text);
-      if (!projectName || !text) {
+      if (!id || !text) {
         continue;
       }
-      findings.push({ projectName, text });
+      findings.push({
+        id,
+        date,
+        text,
+        supersededBy: asString(record?.supersededBy),
+        supersedes: asString(record?.supersedes),
+        contradicts: asStringArray(record?.contradicts),
+        potentialDuplicates: asStringArray(record?.potentialDuplicates),
+      });
     }
 
     const tasks: SessionArtifactSummary["tasks"] = [];
     for (const entry of tasksRaw) {
       const record = asRecord(entry);
-      const projectName = asString(record?.project);
-      const text = asString(record?.text);
+      const id = asString(record?.id);
+      const line = asString(record?.text);
       const section = asTaskSection(record?.section);
-      if (!projectName || !text || !section) {
+      if (!id || !line || !section) {
         continue;
       }
-      tasks.push({ projectName, text, section });
+      tasks.push({
+        id,
+        line,
+        section,
+        checked: asBoolean(record?.checked) ?? section === "Done",
+      });
     }
 
     return { findings, tasks };
@@ -1399,6 +1436,9 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
 function categoryIconId(category: CortexCategory): string {
   if (category === "findings") {
     return "list-flat";
+  }
+  if (category === "sessions") {
+    return "history";
   }
   if (category === "task") {
     return "checklist";
@@ -1442,6 +1482,14 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const parsed = value.filter((entry): entry is string => typeof entry === "string");
+  return parsed.length > 0 ? parsed : undefined;
+}
+
 function asBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
@@ -1480,18 +1528,13 @@ function formatDateLabel(dateStr: string): string {
   return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: parsed.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
 }
 
-function formatSessionLabel(startedAt: string): string {
+function formatSessionTimeLabel(startedAt: string): string {
   const parsed = new Date(startedAt);
   if (isNaN(parsed.getTime())) {
     return startedAt;
   }
 
-  const now = new Date();
-  const sameYear = parsed.getFullYear() === now.getFullYear();
-  return parsed.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
+  return parsed.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
   });

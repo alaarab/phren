@@ -48,6 +48,7 @@ const projectFileViewer_1 = require("./projectFileViewer");
 const skillEditor_1 = require("./skillEditor");
 const taskViewer_1 = require("./taskViewer");
 const queueViewer_1 = require("./queueViewer");
+const sessionViewer_1 = require("./sessionViewer");
 const runtimeConfig_1 = require("./runtimeConfig");
 const profileConfig_1 = require("./profileConfig");
 let client;
@@ -196,6 +197,23 @@ async function activate(context) {
     });
     const openQueueItemDisposable = vscode.commands.registerCommand("cortex.openQueueItem", (item) => {
         (0, queueViewer_1.showQueueItemDetail)(cortexClient, item, refreshTree);
+    });
+    const openSessionOverviewDisposable = vscode.commands.registerCommand("cortex.openSessionOverview", async (session) => {
+        try {
+            await (0, sessionViewer_1.showSessionOverview)(cortexClient, session);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to open session overview: ${toErrorMessage(error)}`);
+        }
+    });
+    const copySessionIdDisposable = vscode.commands.registerCommand("cortex.copySessionId", async (session) => {
+        try {
+            await vscode.env.clipboard.writeText(session.sessionId);
+            await vscode.window.showInformationMessage(`Copied session ID ${session.sessionId.slice(0, 8)}.`);
+        }
+        catch (error) {
+            await vscode.window.showErrorMessage(`Failed to copy session ID: ${toErrorMessage(error)}`);
+        }
     });
     // --- Add Task command ---
     const addTaskDisposable = vscode.commands.registerCommand("cortex.addTask", async () => {
@@ -698,7 +716,7 @@ async function activate(context) {
             treeDataProvider.setDateFilter({ from: fromStr, to: toStr, label: `${fromStr} to ${toStr}` });
         }
     });
-    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, filterFindingsByDateDisposable, switchProfileDisposable, configureMachineDisposable, openMachinesConfigDisposable, syncDisposable, doctorDisposable, hooksStatusDisposable, toggleHooksCommandDisposable, manageProjectDisposable, addTaskDisposable, completeTaskDisposable, removeTaskDisposable, removeFindingDisposable, rejectQueueItemDisposable, pinMemoryDisposable);
+    context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, openSessionOverviewDisposable, copySessionIdDisposable, filterFindingsByDateDisposable, switchProfileDisposable, configureMachineDisposable, openMachinesConfigDisposable, syncDisposable, doctorDisposable, hooksStatusDisposable, toggleHooksCommandDisposable, manageProjectDisposable, addTaskDisposable, completeTaskDisposable, removeTaskDisposable, removeFindingDisposable, rejectQueueItemDisposable, pinMemoryDisposable);
     // --- Sync VS Code settings to cortex preference files ---
     syncSettingsToPreferences(runtimeConfig.storePath, config);
     const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {

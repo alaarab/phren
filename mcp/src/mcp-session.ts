@@ -290,13 +290,28 @@ export function listAllSessions(cortexPath: string, limit = 50): SessionHistoryE
 }
 
 /** Get findings and tasks that belong to a specific session. */
+export interface SessionArtifactFinding {
+  project: string;
+  id: string;
+  date: string;
+  text: string;
+}
+
+export interface SessionArtifactTask {
+  project: string;
+  id: string;
+  text: string;
+  section: string;
+  checked: boolean;
+}
+
 export function getSessionArtifacts(
   cortexPath: string,
   sessionId: string,
   project?: string,
-): { findings: Array<{ project: string; text: string }>; tasks: Array<{ project: string; text: string; section: string }> } {
-  const findings: Array<{ project: string; text: string }> = [];
-  const tasks: Array<{ project: string; text: string; section: string }> = [];
+): { findings: SessionArtifactFinding[]; tasks: SessionArtifactTask[] } {
+  const findings: SessionArtifactFinding[] = [];
+  const tasks: SessionArtifactTask[] = [];
   const shortId = sessionId.slice(0, 8);
 
   try {
@@ -308,7 +323,12 @@ export function getSessionArtifacts(
       if (findingsResult.ok) {
         for (const f of findingsResult.data) {
           if (f.sessionId && (f.sessionId === sessionId || f.sessionId.startsWith(shortId))) {
-            findings.push({ project: proj, text: f.text });
+            findings.push({
+              project: proj,
+              id: f.id,
+              date: f.date,
+              text: f.text,
+            });
           }
         }
       }
@@ -318,7 +338,13 @@ export function getSessionArtifacts(
         for (const section of ["Active", "Queue", "Done"] as const) {
           for (const t of tasksResult.data.items[section]) {
             if (t.sessionId && (t.sessionId === sessionId || t.sessionId.startsWith(shortId))) {
-              tasks.push({ project: proj, text: t.line, section });
+              tasks.push({
+                project: proj,
+                id: t.id,
+                text: t.line,
+                section,
+                checked: t.checked,
+              });
             }
           }
         }
