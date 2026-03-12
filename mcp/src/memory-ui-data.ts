@@ -342,6 +342,10 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
     }
   } catch {
     // entity loading failed — continue with other data sources
+  } finally {
+    if (db) {
+      try { db.close(); } catch { /* already closed or failed — ignore */ }
+    }
   }
 
   // ── Reference docs ────────────────────────────────────────────────

@@ -716,12 +716,32 @@ export async function handleHookStop() {
       }
       if (captureInput) {
         if (activeProject) {
-          const insights = filterConversationInsightsForProactivity(extractConversationInsights(captureInput), findingsLevel);
-          for (const insight of insights) {
-            appendFindingJournal(getCortexPath(), activeProject, `[pattern] ${insight}`, {
-              sessionId: `hook-stop-${Date.now()}`,
-            });
-            debugLog(`auto-capture: saved insight for ${activeProject}: ${insight.slice(0, 60)}`);
+          // Check session cap before extracting — same guard as PostToolUse hook
+          let capReached = false;
+          if (taskSessionId) {
+            try {
+              const capFile = sessionMarker(getCortexPath(), `tool-findings-${taskSessionId}`);
+              let count = 0;
+              if (fs.existsSync(capFile)) {
+                count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
+              }
+              const sessionCap = getSessionCap();
+              if (count >= sessionCap) {
+                debugLog(`hook-stop: session cap reached (${count}/${sessionCap}), skipping extraction`);
+                capReached = true;
+              }
+            } catch (err: unknown) {
+              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookStop sessionCapCheck: ${errorMessage(err)}\n`);
+            }
+          }
+          if (!capReached) {
+            const insights = filterConversationInsightsForProactivity(extractConversationInsights(captureInput), findingsLevel);
+            for (const insight of insights) {
+              appendFindingJournal(getCortexPath(), activeProject, `[pattern] ${insight}`, {
+                sessionId: `hook-stop-${Date.now()}`,
+              });
+              debugLog(`auto-capture: saved insight for ${activeProject}: ${insight.slice(0, 60)}`);
+            }
           }
         }
       }

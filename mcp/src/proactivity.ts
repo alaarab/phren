@@ -3,6 +3,7 @@ import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import { debugLog, defaultCortexPath, homePath } from "./cortex-paths.js";
 import { governanceInstallPreferencesFile, readInstallPreferences } from "./init-preferences.js";
 import { errorMessage } from "./utils.js";
+import { getWorkflowPolicy } from "./governance-policy.js";
 
 export const PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
 export type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
@@ -63,9 +64,33 @@ function getConfiguredProactivityDefault(): ProactivityLevel {
   return DEFAULT_PROACTIVITY_LEVEL;
 }
 
+/** Map findingSensitivity from workflow-policy.json to a ProactivityLevel. */
+function sensitivityToProactivity(sensitivity: string | undefined): ProactivityLevel | undefined {
+  switch (sensitivity) {
+    case "minimal": return "low";
+    case "conservative": return "medium";
+    case "balanced": return "high";
+    case "aggressive": return "high";
+    default: return undefined;
+  }
+}
+
+function getWorkflowPolicySensitivityLevel(): ProactivityLevel | undefined {
+  try {
+    const policy = getWorkflowPolicy(defaultCortexPath());
+    return sensitivityToProactivity(policy.findingSensitivity);
+  } catch {
+    return undefined;
+  }
+}
+
 function getConfiguredProactivityLevelForFindingsDefault(): ProactivityLevel {
   const sharedEnvPreference = parseProactivityLevel(process.env.CORTEX_PROACTIVITY);
   if (sharedEnvPreference) return sharedEnvPreference;
+
+  // Check workflow-policy.json findingSensitivity FIRST
+  const sensitivityLevel = getWorkflowPolicySensitivityLevel();
+  if (sensitivityLevel) return sensitivityLevel;
 
   return readGovernanceProactivityPreferences().proactivityFindings ?? getConfiguredProactivityDefault();
 }
@@ -73,6 +98,10 @@ function getConfiguredProactivityLevelForFindingsDefault(): ProactivityLevel {
 function getConfiguredProactivityLevelForTaskDefault(): ProactivityLevel {
   const sharedEnvPreference = parseProactivityLevel(process.env.CORTEX_PROACTIVITY);
   if (sharedEnvPreference) return sharedEnvPreference;
+
+  // Check workflow-policy.json findingSensitivity FIRST
+  const sensitivityLevel = getWorkflowPolicySensitivityLevel();
+  if (sensitivityLevel) return sensitivityLevel;
 
   return readGovernanceProactivityPreferences().proactivityTask ?? getConfiguredProactivityDefault();
 }

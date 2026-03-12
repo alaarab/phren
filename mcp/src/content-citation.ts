@@ -248,7 +248,9 @@ const DEFAULT_DECAY = {
   d120: 0.45,
 };
 
-const DEFAULT_UNDATED_CONFIDENCE = 0.7;
+// Treat undated findings as oldest decay tier so they eventually get filtered.
+// Previously 0.7 which meant undated findings never decayed.
+const DEFAULT_UNDATED_CONFIDENCE = DEFAULT_DECAY.d120;
 
 function confidenceForAge(ageDays: number, decay: RetentionPolicy["decay"]): number {
   const { d30 = 1.0, d60 = 0.85, d90 = 0.65, d120 = 0.45 } = decay;
