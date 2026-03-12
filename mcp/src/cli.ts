@@ -59,6 +59,7 @@ import {
 } from "./cli-namespaces.js";
 import {
   handleTaskView,
+  handleSessionsView,
   handleQuickstart,
   handleDebugInjection,
   handleInspectIndex,
@@ -143,6 +144,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleHooksNamespace(args);
     case "tasks":
       return handleTaskView(profile);
+    case "sessions":
+      return handleSessionsView(args);
     case "task":
       return handleTaskNamespace(args);
     case "finding":

@@ -3,6 +3,12 @@
 All notable changes to cortex are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.32.1] - 2026-03-11
+
+### Added
+- **Session history**: `session_history` MCP tool lists past sessions and drills into a specific session to see all findings and tasks created during it. `cortex sessions [id]` CLI command and a Sessions tab in the web UI provide the same browsing capability.
+- **`GET /api/sessions`** web UI endpoint for session listing and detail with project filtering.
+
 ## [1.32.0] - 2026-03-11
 
 ### Added
