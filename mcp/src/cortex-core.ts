@@ -11,6 +11,23 @@
 export const UNIVERSAL_TECH_TERMS_RE =
   /\b(Python|Rust|Go|Java|TypeScript|JavaScript|Docker|Kubernetes|AWS|GCP|Azure|SQL|Git)\b/gi;
 
+/**
+ * Additional entity patterns beyond CamelCase and acronyms.
+ * Each pattern has a named group so callers can identify the entity type.
+ */
+export const EXTRA_ENTITY_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  // Semantic version numbers: v1.2.3, 2.0.0-beta.1
+  { re: /\bv?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\b/g, label: "version" },
+  // Environment variable keys: CORTEX_*, NODE_ENV, etc. (2+ uppercase segments separated by _)
+  { re: /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, label: "env_key" },
+  // File paths: at least one slash with an extension or known dir prefix
+  { re: /(?:~\/|\.\/|\/)[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+/g, label: "file_path" },
+  // Error codes: E0001, ERR_MODULE_NOT_FOUND, TS2345, etc.
+  { re: /\b(?:ERR_[A-Z0-9_]{3,}|(?:TS|RS|PY|E)\d{3,})\b/g, label: "error_code" },
+  // ISO date references: 2025-03-11, 2025/03/11
+  { re: /\b\d{4}[-/]\d{2}[-/]\d{2}\b/g, label: "date" },
+];
+
 // Default timeout for execFileSync calls (30s for most operations, 10s for quick probes like `which`)
 export const EXEC_TIMEOUT_MS = 30_000;
 export const EXEC_TIMEOUT_QUICK_MS = 10_000;

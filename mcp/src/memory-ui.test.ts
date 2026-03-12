@@ -420,9 +420,9 @@ describe("web-ui HTML rendering", () => {
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
-      expect(body).toContain("selectSkillFromEl(this)");
-      expect(body).toContain("selectHookFromEl(this)");
-      expect(body).toContain("toggleHookToolFromEl(this)");
+      expect(body).toContain('data-ui-action="selectSkillFromEl"');
+      expect(body).toContain('data-ui-action="selectHookFromEl"');
+      expect(body).toContain('data-ui-action="toggleHookToolFromEl"');
       expect(body).not.toContain('JSON.stringify(s.path).replace(/"/g, "\'")');
       expect(body).not.toContain('JSON.stringify(t.configPath).replace(/"/g,"\'")');
       expect(body).not.toContain('JSON.stringify(toolName).replace(/"/g,"\'")');
@@ -438,9 +438,9 @@ describe("web-ui HTML rendering", () => {
       const body = renderPageForTests(tmpRoot, "csrf-token");
       expect(body).toContain("window.reviewActionFromEl = function(btn, action)");
       expect(body).toContain("window.reviewEditSubmitFromEl = function(e, form)");
-      expect(body).toContain("reviewActionFromEl(this,\\'approve\\')");
-      expect(body).toContain("reviewActionFromEl(this,\\'reject\\')");
-      expect(body).toContain("reviewEditSubmitFromEl(event,this)");
+      expect(body).toContain('data-ui-action="reviewAction" data-review-type="approve"');
+      expect(body).toContain('data-ui-action="reviewAction" data-review-type="reject"');
+      expect(body).toContain('data-ui-action="reviewEditSubmit"');
       expect(body).toContain("var cardText = esc(item.text);");
       expect(body).toContain("'<div class=\"review-card-text\">' + cardText + '</div>'");
       expect(body).toContain("textEl.innerHTML = esc(newText).replace(/\\n/g, '<br>');");

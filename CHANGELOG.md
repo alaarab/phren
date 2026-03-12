@@ -3,6 +3,19 @@
 All notable changes to cortex are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.32.2] - 2026-03-11
+
+### Fixed
+- **CSP hardening**: Migrated 50+ inline event handlers to `addEventListener` with data attributes; added per-request nonce-based `Content-Security-Policy` header (no more `unsafe-inline`).
+- **FTS index debounce**: Skip expensive index rebuilds if rebuilt within last 5s (configurable via `CORTEX_INDEX_DEBOUNCE_MS`).
+- **Circular dependency**: Broke `utils.ts` ↔ `shared.ts` import cycle by importing directly from `cortex-paths.ts`.
+- **Path traversal defense**: `safeProjectPath` now walks up to deepest existing ancestor for symlink resolution, catches escapes even for non-existent leaf paths. Null byte and separator checks added.
+- **Entity detection expansion**: 5 new patterns (versions, env vars, file paths, error codes, ISO dates) in `EXTRA_ENTITY_PATTERNS`.
+- **Error code regex tightened**: Now requires numeric suffix (TS2345, E0001) to avoid false positives on common words.
+
+### Added
+- **93 new tests**: `cortex-core.test.ts` (41 tests) and `content-dedup.test.ts` (52 tests) covering entity extraction, dedup logic, secret scanning, coref resolution.
+
 ## [1.32.1] - 2026-03-11
 
 ### Added

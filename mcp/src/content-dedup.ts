@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "./shared.js";
 import { isFeatureEnabled, safeProjectPath } from "./utils.js";
-import { UNIVERSAL_TECH_TERMS_RE } from "./cortex-core.js";
+import { UNIVERSAL_TECH_TERMS_RE, EXTRA_ENTITY_PATTERNS } from "./cortex-core.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
 
@@ -279,6 +279,14 @@ function extractProseEntities(text: string, dynamicEntities?: Set<string>): stri
   const re = new RegExp(PROSE_ENTITY_RE.source, PROSE_ENTITY_RE.flags);
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) found.add(m[0].toLowerCase());
+
+  // Match additional entity patterns (versions, env keys, file paths, error codes, dates)
+  for (const { re: pattern } of EXTRA_ENTITY_PATTERNS) {
+    const pRe = new RegExp(pattern.source, pattern.flags);
+    let pm: RegExpExecArray | null;
+    while ((pm = pRe.exec(text)) !== null) found.add(pm[0].toLowerCase());
+  }
+
   if (dynamicEntities) {
     // Also check whether any dynamic entity appears (case-insensitive word match)
     for (const entity of dynamicEntities) {

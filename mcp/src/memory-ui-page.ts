@@ -168,8 +168,8 @@ function renderSkillUiEnhancementScript(authToken: string): string {
           '<span class="reader-path">' + esc(_skillCurrent.path) + '</span>' +
           statusBadge +
           '<span id="skill-status"></span>' +
-          '<button class="btn btn-sm" onclick="cortexToggleSkill()">' + toggleLabel + '</button>' +
-          '<button class="btn btn-sm" onclick="cortexEditSkill()">Edit</button>' +
+          '<button class="btn btn-sm" data-action="cortexToggleSkill">' + toggleLabel + '</button>' +
+          '<button class="btn btn-sm" data-action="cortexEditSkill">Edit</button>' +
         '</div>' +
         '<div class="reader-content"><pre id="skill-pre">' + esc(content) + '</pre></div>';
     }
@@ -187,7 +187,7 @@ function renderSkillUiEnhancementScript(authToken: string): string {
         Object.keys(bySource).sort().forEach(function(src) {
           html += '<div class="split-group-label">' + esc(src) + '</div>';
           bySource[src].forEach(function(s) {
-            html += '<div class="split-item" data-path="' + esc(s.path) + '" data-name="' + esc(s.name) + '" data-source="' + esc(s.source) + '" data-enabled="' + (s.enabled ? 'true' : 'false') + '" onclick="cortexSelectSkillFromEl(this)">' +
+            html += '<div class="split-item" data-path="' + esc(s.path) + '" data-name="' + esc(s.name) + '" data-source="' + esc(s.source) + '" data-enabled="' + (s.enabled ? 'true' : 'false') + '" data-action="cortexSelectSkillFromEl">' +
               '<span>' + esc(s.name) + '</span>' +
               '<span class="badge ' + (s.enabled ? 'badge-on' : 'badge-off') + '">' + (s.enabled ? 'enabled' : 'disabled') + '</span>' +
             '</div>';
@@ -234,7 +234,7 @@ function renderSkillUiEnhancementScript(authToken: string): string {
       var toolbar = document.querySelector('#skills-reader .reader-toolbar');
       if (!toolbar) return;
       Array.from(toolbar.querySelectorAll('.btn')).forEach(function(btn) { btn.remove(); });
-      toolbar.insertAdjacentHTML('beforeend', '<button class="btn btn-sm btn-primary" onclick="cortexSaveSkill()">Save</button><button class="btn btn-sm" onclick="cortexCancelSkillEdit()">Cancel</button>');
+      toolbar.insertAdjacentHTML('beforeend', '<button class="btn btn-sm btn-primary" data-action="cortexSaveSkill">Save</button><button class="btn btn-sm" data-action="cortexCancelSkillEdit">Cancel</button>');
       var ta = document.createElement('textarea');
       ta.id = 'skill-textarea';
       ta.value = content;
@@ -291,6 +291,19 @@ function renderSkillUiEnhancementScript(authToken: string): string {
         if (tab === 'skills') setTimeout(function() { loadSkills(_skillCurrent && _skillCurrent.path); }, 0);
       };
     }
+    // Event delegation for dynamically generated skill UI buttons
+    document.addEventListener('click', function(e) {
+      var target = e.target;
+      if (!target || typeof target.closest !== 'function') return;
+      var actionEl = target.closest('[data-action]');
+      if (!actionEl) return;
+      var action = actionEl.getAttribute('data-action');
+      if (action === 'cortexToggleSkill') { cortexToggleSkill(); }
+      else if (action === 'cortexEditSkill') { cortexEditSkill(); }
+      else if (action === 'cortexSaveSkill') { cortexSaveSkill(); }
+      else if (action === 'cortexCancelSkillEdit') { cortexCancelSkillEdit(); }
+      else if (action === 'cortexSelectSkillFromEl') { cortexSelectSkillFromEl(actionEl); }
+    });
   })();`;
 }
 
@@ -359,7 +372,7 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
       var banner = topicsData.source === 'default'
         ? '<div class="reference-banner">This project is using starter topics. Customize them so archived findings match the project domain instead of generic web-dev buckets.</div>'
         : '';
-      reader.innerHTML = readerToolbar('Reference Topics', _referenceState.project, '<button class="btn btn-sm" onclick="cortexReferenceAddTopic()">Add topic</button><button class="btn btn-sm" onclick="cortexReferenceReclassify()">Reclassify archived findings</button>') +
+      reader.innerHTML = readerToolbar('Reference Topics', _referenceState.project, '<button class="btn btn-sm" data-ref-action="addTopic">Add topic</button><button class="btn btn-sm" data-ref-action="reclassify">Reclassify archived findings</button>') +
         '<div class="topic-empty">' +
           banner +
           '<p>Select a topic doc or a reference file from the sidebar. Topic definitions live in <code>topic-config.json</code> and archive docs live under <code>reference/topics/</code>.</p>' +
@@ -370,16 +383,16 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
       if (!reader) return;
       var source = topic || suggestion || { slug: '', label: '', description: '', keywords: [] };
       var title = mode === 'edit' ? 'Edit topic' : 'Add topic';
-      reader.innerHTML = readerToolbar(title, _referenceState.project, '<button class="btn btn-sm" onclick="cortexReferenceCancelEditor()">Cancel</button>') +
+      reader.innerHTML = readerToolbar(title, _referenceState.project, '<button class="btn btn-sm" data-ref-action="cancelEditor">Cancel</button>') +
         '<div class="reader-content">' +
-          '<form class="topic-editor" onsubmit="cortexReferenceSaveTopic(event)">' +
+          '<form class="topic-editor" id="topic-editor-form">' +
             '<label>Label<input id="topic-label-input" value="' + esc(source.label || '') + '" placeholder="Rendering" /></label>' +
             '<label>Slug<input id="topic-slug-input" value="' + esc(source.slug || '') + '" placeholder="rendering" /></label>' +
             '<label>Description<textarea id="topic-description-input" placeholder="What belongs in this topic?">' + esc(source.description || '') + '</textarea></label>' +
             '<label>Keywords<input id="topic-keywords-input" value="' + esc((source.keywords || []).join(', ')) + '" placeholder="shader, frame, gpu, lighting" /></label>' +
             '<div class="topic-editor-actions">' +
               '<button class="btn btn-primary" type="submit">Save</button>' +
-              '<button class="btn btn-sm" type="button" onclick="cortexReferenceCancelEditor()">Cancel</button>' +
+              '<button class="btn btn-sm" type="button" data-ref-action="cancelEditor">Cancel</button>' +
             '</div>' +
           '</form>' +
         '</div>';
@@ -389,10 +402,10 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
       var doc = findTopicDoc(slug);
       var reader = document.getElementById('reference-reader');
       if (!topic || !reader) return;
-      var actions = '<button class="btn btn-sm" onclick="cortexReferenceAddTopic()">Add topic</button>' +
-        '<button class="btn btn-sm" onclick="cortexReferenceReclassify()">Reclassify archived findings</button>' +
-        '<button class="btn btn-sm" onclick="cortexReferenceEditTopic(\\'' + esc(topic.slug) + '\\')">Edit</button>';
-      if (topic.slug !== 'general') actions += '<button class="btn btn-sm" onclick="cortexReferenceDeleteTopic(\\'' + esc(topic.slug) + '\\')">Delete</button>';
+      var actions = '<button class="btn btn-sm" data-ref-action="addTopic">Add topic</button>' +
+        '<button class="btn btn-sm" data-ref-action="reclassify">Reclassify archived findings</button>' +
+        '<button class="btn btn-sm" data-ref-action="editTopic" data-slug="' + esc(topic.slug) + '">Edit</button>';
+      if (topic.slug !== 'general') actions += '<button class="btn btn-sm" data-ref-action="deleteTopic" data-slug="' + esc(topic.slug) + '">Delete</button>';
       if (!doc || !doc.exists) {
         reader.innerHTML = readerToolbar(topic.label, 'reference/topics/' + topic.slug + '.md', actions) +
           '<div class="topic-empty">' +
@@ -416,7 +429,7 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
     function renderReferenceFile(file) {
       var reader = document.getElementById('reference-reader');
       if (!reader) return;
-      var actions = '<button class="btn btn-sm" onclick="cortexReferenceAddTopic()">Add topic</button><button class="btn btn-sm" onclick="cortexReferenceReclassify()">Reclassify archived findings</button>';
+      var actions = '<button class="btn btn-sm" data-ref-action="addTopic">Add topic</button><button class="btn btn-sm" data-ref-action="reclassify">Reclassify archived findings</button>';
       reader.innerHTML = readerToolbar(file.title || file.file, file.file, actions) + '<div class="reader-content"><div class="reader-empty">Loading...</div></div>';
       loadJson('/api/project-reference-content?project=' + encodeURIComponent(_referenceState.project) + '&file=' + encodeURIComponent(file.file)).then(function(data) {
         var liveReader = document.getElementById('reference-reader');
@@ -437,7 +450,7 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
         var doc = findTopicDoc(topic.slug);
         var selected = _referenceState.selectedType === 'topic' && _referenceState.selectedKey === topic.slug ? ' selected' : '';
         var meta = (doc && doc.exists ? doc.entryCount + ' entries' : 'empty bucket') + (topicsData.source === 'default' ? ' · starter' : '');
-        return '<div class="split-item' + selected + '" onclick="cortexReferenceSelectTopic(\\'' + esc(topic.slug) + '\\')">' +
+        return '<div class="split-item' + selected + '" data-ref-action="selectTopic" data-slug="' + esc(topic.slug) + '">' +
           '<div class="reference-item-main"><span class="reference-item-title">' + esc(topic.label) + '</span><span class="reference-item-meta">' + esc(meta) + '</span></div>' +
         '</div>';
       }).join('');
@@ -445,7 +458,7 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
         ? topicsData.suggestions.map(function(suggestion) {
             return '<div class="split-item">' +
               '<div class="reference-item-main"><span class="reference-item-title">' + esc(suggestion.label) + '</span><span class="reference-item-meta">' + esc(suggestion.reason) + '</span></div>' +
-              '<button class="btn btn-sm reference-item-action" onclick="event.stopPropagation(); cortexReferenceUseSuggestion(\\'' + esc(suggestion.slug) + '\\')">Use</button>' +
+              '<button class="btn btn-sm reference-item-action" data-ref-action="useSuggestion" data-slug="' + esc(suggestion.slug) + '">Use</button>' +
             '</div>';
           }).join('')
         : '<div class="reference-sidebar-note">No topic suggestions right now.</div>';
@@ -456,7 +469,7 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
             var selected = _referenceState.selectedType === 'file' && _referenceState.selectedKey === file.file ? ' selected' : '';
             var legacy = legacyByFile[file.file];
             var suffix = legacy ? (legacy.eligible ? ' · legacy topic doc' : ' · legacy skip: ' + legacy.reason) : '';
-            return '<div class="split-item' + selected + '" onclick="cortexReferenceSelectFile(\\'' + esc(file.file) + '\\')">' +
+            return '<div class="split-item' + selected + '" data-ref-action="selectFile" data-file="' + esc(file.file) + '">' +
               '<div class="reference-item-main"><span class="reference-item-title">' + esc(file.title || file.file) + '</span><span class="reference-item-meta">' + esc(file.file + suffix) + '</span></div>' +
             '</div>';
           }).join('')
@@ -467,7 +480,7 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
       container.innerHTML = banner +
         '<div class="split-view project-reference-shell">' +
           '<div class="split-sidebar">' +
-            '<div class="reference-sidebar-toolbar"><button class="btn btn-sm" onclick="cortexReferenceAddTopic()">Add topic</button><button class="btn btn-sm" onclick="cortexReferenceReclassify()">Reclassify</button></div>' +
+            '<div class="reference-sidebar-toolbar"><button class="btn btn-sm" data-ref-action="addTopic">Add topic</button><button class="btn btn-sm" data-ref-action="reclassify">Reclassify</button></div>' +
             '<div class="split-group-label">Topics</div>' +
             topicRows +
             '<div class="split-group-label">Suggested Topics</div>' +
@@ -627,6 +640,29 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
         }).catch(function() { setStatus('Reclassify failed', 'err'); });
       });
     };
+    // Event delegation for dynamically generated reference UI
+    document.addEventListener('click', function(e) {
+      var target = e.target;
+      if (!target || typeof target.closest !== 'function') return;
+      var actionEl = target.closest('[data-ref-action]');
+      if (!actionEl) return;
+      var action = actionEl.getAttribute('data-ref-action');
+      if (action === 'addTopic') { cortexReferenceAddTopic(); }
+      else if (action === 'reclassify') { cortexReferenceReclassify(); }
+      else if (action === 'cancelEditor') { cortexReferenceCancelEditor(); }
+      else if (action === 'editTopic') { cortexReferenceEditTopic(actionEl.getAttribute('data-slug')); }
+      else if (action === 'deleteTopic') { cortexReferenceDeleteTopic(actionEl.getAttribute('data-slug')); }
+      else if (action === 'selectTopic') { cortexReferenceSelectTopic(actionEl.getAttribute('data-slug')); }
+      else if (action === 'selectFile') { cortexReferenceSelectFile(actionEl.getAttribute('data-file')); }
+      else if (action === 'useSuggestion') { e.stopPropagation(); cortexReferenceUseSuggestion(actionEl.getAttribute('data-slug')); }
+    });
+    document.addEventListener('submit', function(e) {
+      var form = e.target;
+      if (form && form.id === 'topic-editor-form') {
+        e.preventDefault();
+        cortexReferenceSaveTopic(e);
+      }
+    });
   })();`;
 }
 
@@ -864,7 +900,7 @@ function renderTasksAndSettingsScript(authToken: string): string {
           fsHtml += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
           fsLevels.forEach(function(level) {
             var active = level === currentFs;
-            fsHtml += '<button onclick="setFindingSensitivity(\'' + esc(level) + '\')" style="padding:6px 14px;border:1px solid ' + (active ? 'var(--accent)' : 'var(--border)') + ';border-radius:var(--radius-sm);background:' + (active ? 'var(--accent)' : 'transparent') + ';color:' + (active ? '#fff' : 'inherit') + ';cursor:pointer;font-size:var(--text-sm)">' + esc(level) + '</button>';
+            fsHtml += '<button data-ts-action="setFindingSensitivity" data-level="' + esc(level) + '" style="padding:6px 14px;border:1px solid ' + (active ? 'var(--accent)' : 'var(--border)') + ';border-radius:var(--radius-sm);background:' + (active ? 'var(--accent)' : 'transparent') + ';color:' + (active ? '#fff' : 'inherit') + ';cursor:pointer;font-size:var(--text-sm)">' + esc(level) + '</button>';
           });
           fsHtml += '</div>';
           fsHtml += '<div class="text-muted" id="settings-fs-desc" style="font-size:var(--text-sm)">' + esc(fsDescriptions[currentFs] || currentFs) + '</div>';
@@ -940,7 +976,7 @@ function renderTasksAndSettingsScript(authToken: string): string {
           var dur = s.durationMins != null ? s.durationMins + 'm' : '—';
           var status = s.status === 'active' ? '<span style="color:var(--green)">● active</span>' : 'ended';
           var summarySnip = s.summary ? '<div class="text-muted" style="font-size:var(--text-xs);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.summary.slice(0, 80)) + '</div>' : '';
-          return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="showSessionDetail(\\'' + esc(s.sessionId) + '\\')">' +
+          return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" data-ts-action="showSessionDetail" data-session-id="' + esc(s.sessionId) + '">' +
             '<td style="padding:8px;font-family:monospace">' + esc(id) + summarySnip + '</td>' +
             '<td style="padding:8px">' + esc(s.project || '—') + '</td>' +
             '<td style="padding:8px">' + esc(date) + '</td>' +
@@ -964,7 +1000,7 @@ function renderTasksAndSettingsScript(authToken: string): string {
         var tasks = data.tasks || [];
         var date = (s.startedAt || '').slice(0, 16).replace('T', ' ');
         var dur = s.durationMins != null ? s.durationMins + ' min' : '—';
-        var html = '<div style="margin-bottom:12px"><button class="btn btn-sm" onclick="backToSessionsList()">← Back</button></div>' +
+        var html = '<div style="margin-bottom:12px"><button class="btn btn-sm" data-ts-action="backToSessionsList">← Back</button></div>' +
           '<div class="card" style="margin-bottom:16px"><div class="card-body">' +
           '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">' +
           '<div><strong>Session</strong><div class="text-muted" style="font-family:monospace">' + esc(s.sessionId.slice(0, 8)) + '</div></div>' +
@@ -1000,6 +1036,18 @@ function renderTasksAndSettingsScript(authToken: string): string {
       if (detail) detail.style.display = 'none';
     };
 
+    // Event delegation for dynamically generated tasks/settings/sessions UI
+    document.addEventListener('click', function(e) {
+      var target = e.target;
+      if (!target || typeof target.closest !== 'function') return;
+      var actionEl = target.closest('[data-ts-action]');
+      if (!actionEl) return;
+      var action = actionEl.getAttribute('data-ts-action');
+      if (action === 'setFindingSensitivity') { setFindingSensitivity(actionEl.getAttribute('data-level')); }
+      else if (action === 'showSessionDetail') { showSessionDetail(actionEl.getAttribute('data-session-id')); }
+      else if (action === 'backToSessionsList') { backToSessionsList(); }
+    });
+
     window.setFindingSensitivity = function(level) {
       var descriptions = {
         minimal: 'Only capture explicitly flagged findings',
@@ -1029,7 +1077,84 @@ function renderTasksAndSettingsScript(authToken: string): string {
   })();`;
 }
 
-export function renderWebUiPage(cortexPath: string, authToken?: string): string {
+function renderEventWiringScript(): string {
+  return `(function() {
+  // --- Navigation tabs ---
+  document.querySelectorAll('.nav-item[data-tab]').forEach(function(btn) {
+    btn.addEventListener('click', function() { switchTab(btn.getAttribute('data-tab')); });
+  });
+
+  // --- Header buttons ---
+  var themeBtn = document.getElementById('theme-toggle');
+  if (themeBtn) themeBtn.addEventListener('click', function() { toggleTheme(); });
+
+  var cmdpalOpenBtn = document.getElementById('cmdpal-open-btn');
+  if (cmdpalOpenBtn) {
+    cmdpalOpenBtn.addEventListener('click', function() { openCmdPal(); });
+    cmdpalOpenBtn.addEventListener('mouseover', function() { this.style.color='var(--ink)'; this.style.borderColor='var(--muted)'; });
+    cmdpalOpenBtn.addEventListener('mouseout', function() { this.style.color='var(--muted)'; this.style.borderColor='var(--border)'; });
+  }
+
+  // --- Projects search ---
+  var projectsSearch = document.getElementById('projects-search');
+  if (projectsSearch) projectsSearch.addEventListener('input', function() { filterProjects(this.value); });
+
+  // --- Review filters ---
+  var reviewFilterProject = document.getElementById('review-filter-project');
+  if (reviewFilterProject) reviewFilterProject.addEventListener('change', function() { filterReviewCards(); });
+  var reviewFilterMachine = document.getElementById('review-filter-machine');
+  if (reviewFilterMachine) reviewFilterMachine.addEventListener('change', function() { filterReviewCards(); });
+  var reviewFilterModel = document.getElementById('review-filter-model');
+  if (reviewFilterModel) reviewFilterModel.addEventListener('change', function() { filterReviewCards(); });
+
+  var highlightBtn = document.getElementById('highlight-only-btn');
+  if (highlightBtn) highlightBtn.addEventListener('click', function() { toggleHighlightOnly(this); });
+
+  var selectAllCheckbox = document.getElementById('review-select-all-checkbox');
+  if (selectAllCheckbox) selectAllCheckbox.addEventListener('change', function() { toggleSelectAll(this.checked); });
+
+  // --- Graph controls ---
+  var graphZoomIn = document.getElementById('graph-zoom-in');
+  if (graphZoomIn) graphZoomIn.addEventListener('click', function() { graphZoom(1.2); });
+  var graphZoomOut = document.getElementById('graph-zoom-out');
+  if (graphZoomOut) graphZoomOut.addEventListener('click', function() { graphZoom(0.8); });
+  var graphResetBtn = document.getElementById('graph-reset');
+  if (graphResetBtn) graphResetBtn.addEventListener('click', function() { graphReset(); });
+
+  // --- Tasks filters ---
+  var tasksFilterProject = document.getElementById('tasks-filter-project');
+  if (tasksFilterProject) tasksFilterProject.addEventListener('change', function() { filterTasks(); });
+  var tasksFilterSection = document.getElementById('tasks-filter-section');
+  if (tasksFilterSection) tasksFilterSection.addEventListener('change', function() { filterTasks(); });
+
+  // --- Sessions filter ---
+  var sessionsFilterProject = document.getElementById('sessions-filter-project');
+  if (sessionsFilterProject) sessionsFilterProject.addEventListener('change', function() { loadSessions(); });
+
+  // --- Batch bar ---
+  var batchApproveBtn = document.getElementById('batch-approve-btn');
+  if (batchApproveBtn) batchApproveBtn.addEventListener('click', function() { batchAction('approve'); });
+  var batchRejectBtn = document.getElementById('batch-reject-btn');
+  if (batchRejectBtn) batchRejectBtn.addEventListener('click', function() { batchAction('reject'); });
+  var batchTagSelect = document.getElementById('batch-tag-select');
+  if (batchTagSelect) batchTagSelect.addEventListener('change', function() { if(this.value){batchActionByTag(this.value,'approve');this.value='';} });
+  var batchCancelBtn = document.getElementById('batch-cancel-btn');
+  if (batchCancelBtn) batchCancelBtn.addEventListener('click', function() { clearBatchSelection(); });
+
+  // --- Command palette ---
+  var cmdpal = document.getElementById('cmdpal');
+  if (cmdpal) cmdpal.addEventListener('click', function(e) { closeCmdPal(e); });
+  var cmdpalBox = document.getElementById('cmdpal-box');
+  if (cmdpalBox) cmdpalBox.addEventListener('click', function(e) { e.stopPropagation(); });
+  var cmdpalInput = document.getElementById('cmdpal-input');
+  if (cmdpalInput) {
+    cmdpalInput.addEventListener('input', function() { cmdpalSearch(this.value); });
+    cmdpalInput.addEventListener('keydown', function(e) { cmdpalKey(e); });
+  }
+})();`;
+}
+
+export function renderWebUiPage(cortexPath: string, authToken?: string, nonce?: string): string {
   const sync = readSyncSnapshot(cortexPath) as {
     autoSaveStatus?: string;
     lastPullAt?: string;
@@ -1039,6 +1164,8 @@ export function renderWebUiPage(cortexPath: string, authToken?: string): string 
     unsyncedCommits?: number;
   };
 
+  const nonceAttr = nonce ? ` nonce="${h(nonce)}"` : "";
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1047,7 +1174,7 @@ export function renderWebUiPage(cortexPath: string, authToken?: string): string 
   <link rel="preconnect" href="https://fonts.bunny.net" />
   <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
   <title>Cortex Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script${nonceAttr} src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <style>
 ${WEB_UI_STYLES}
 ${PROJECT_REFERENCE_UI_STYLES}
@@ -1065,24 +1192,24 @@ ${PROJECT_REFERENCE_UI_STYLES}
     Cortex
   </div>
   <nav class="nav">
-    <button class="nav-item active" onclick="switchTab('projects')">Projects</button>
-    <button class="nav-item" onclick="switchTab('review')">Review</button>
-    <button class="nav-item" onclick="switchTab('graph')">Graph</button>
-    <button class="nav-item" onclick="switchTab('tasks')">Tasks</button>
-    <button class="nav-item" onclick="switchTab('sessions')">Sessions</button>
-    <button class="nav-item" onclick="switchTab('skills')">Skills</button>
-    <button class="nav-item" onclick="switchTab('hooks')">Hooks</button>
-    <button class="nav-item" onclick="switchTab('settings')">Settings</button>
+    <button class="nav-item active" data-tab="projects">Projects</button>
+    <button class="nav-item" data-tab="review">Review</button>
+    <button class="nav-item" data-tab="graph">Graph</button>
+    <button class="nav-item" data-tab="tasks">Tasks</button>
+    <button class="nav-item" data-tab="sessions">Sessions</button>
+    <button class="nav-item" data-tab="skills">Skills</button>
+    <button class="nav-item" data-tab="hooks">Hooks</button>
+    <button class="nav-item" data-tab="settings">Settings</button>
   </nav>
   <span class="status-led status-led-ok" id="sync-led" title="Synced"></span>
-  <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" style="margin-left:auto;background:none;border:none;cursor:pointer;padding:8px;border-radius:6px;color:var(--muted);font-size:var(--text-md);line-height:1;transition:color .15s" aria-label="Toggle dark mode">☀️</button>
-  <button onclick="openCmdPal()" title="Search projects (⌘K)" style="background:none;border:1px solid var(--border);cursor:pointer;padding:4px 12px;border-radius:6px;color:var(--muted);font-size:var(--text-sm);font-family:var(--font);transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--ink)';this.style.borderColor='var(--muted)'" onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">⌘K</button>
+  <button id="theme-toggle" title="Toggle dark mode" style="margin-left:auto;background:none;border:none;cursor:pointer;padding:8px;border-radius:6px;color:var(--muted);font-size:var(--text-md);line-height:1;transition:color .15s" aria-label="Toggle dark mode">☀️</button>
+  <button id="cmdpal-open-btn" title="Search projects (⌘K)" style="background:none;border:1px solid var(--border);cursor:pointer;padding:4px 12px;border-radius:6px;color:var(--muted);font-size:var(--text-sm);font-family:var(--font);transition:color .15s,border-color .15s" class="cmdpal-trigger">⌘K</button>
 </div>
 
 <div class="main">
   <!-- ── Projects Tab ──────────────────────────────────────── -->
   <div id="tab-projects" class="tab-content active">
-    <input type="text" id="projects-search" placeholder="Search projects..." oninput="filterProjects(this.value)" class="projects-search" />
+    <input type="text" id="projects-search" placeholder="Search projects..." class="projects-search" />
     <div class="projects-grid" id="projects-grid">
       <div style="padding:40px;color:var(--muted);grid-column:1/-1;text-align:center">Loading projects...</div>
     </div>
@@ -1125,17 +1252,17 @@ ${PROJECT_REFERENCE_UI_STYLES}
     <div id="review-summary-banner" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center"></div>
 
     <div class="review-filters" id="review-filters" style="display:none">
-      <select id="review-filter-project" onchange="filterReviewCards()">
+      <select id="review-filter-project">
         <option value="">All projects</option>
       </select>
-      <select id="review-filter-machine" onchange="filterReviewCards()">
+      <select id="review-filter-machine">
         <option value="">All machines</option>
       </select>
-      <select id="review-filter-model" onchange="filterReviewCards()">
+      <select id="review-filter-model">
         <option value="">All models</option>
       </select>
       <span id="review-filter-count" class="text-muted" style="font-size:var(--text-sm);margin-left:8px"></span>
-      <button class="btn btn-sm" id="highlight-only-btn" onclick="toggleHighlightOnly(this)" style="margin-left:auto">Flagged only</button>
+      <button class="btn btn-sm" id="highlight-only-btn" style="margin-left:auto">Flagged only</button>
     </div>
 
     <div id="review-kbd-hints" style="font-size:var(--text-xs);color:var(--muted);margin-bottom:12px;display:none;gap:16px;flex-wrap:wrap">
@@ -1146,7 +1273,7 @@ ${PROJECT_REFERENCE_UI_STYLES}
     </div>
 
     <label class="review-select-all" id="review-select-all" style="display:none">
-      <input type="checkbox" onchange="toggleSelectAll(this.checked)" />
+      <input type="checkbox" id="review-select-all-checkbox" />
       Select all
     </label>
 
@@ -1172,9 +1299,9 @@ ${PROJECT_REFERENCE_UI_STYLES}
       <canvas id="graph-canvas"></canvas>
       <div class="graph-tooltip" id="graph-tooltip"></div>
       <div class="graph-controls">
-        <button onclick="graphZoom(1.2)" title="Zoom in">+</button>
-        <button onclick="graphZoom(0.8)" title="Zoom out">-</button>
-        <button onclick="graphReset()" title="Reset view">R</button>
+        <button id="graph-zoom-in" title="Zoom in">+</button>
+        <button id="graph-zoom-out" title="Zoom out">-</button>
+        <button id="graph-reset" title="Reset view">R</button>
       </div>
       <div class="graph-filters">
         <div class="graph-filter" id="graph-filter"></div>
@@ -1226,10 +1353,10 @@ ${PROJECT_REFERENCE_UI_STYLES}
   <!-- ── Tasks Tab ─────────────────────────────────────────── -->
   <div id="tab-tasks" class="tab-content">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <select id="tasks-filter-project" onchange="filterTasks()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
+      <select id="tasks-filter-project" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
         <option value="">All projects</option>
       </select>
-      <select id="tasks-filter-section" onchange="filterTasks()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
+      <select id="tasks-filter-section" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
         <option value="">Active + Queue</option>
         <option value="Active">Active only</option>
         <option value="Queue">Queue only</option>
@@ -1244,7 +1371,7 @@ ${PROJECT_REFERENCE_UI_STYLES}
   <!-- ── Sessions Tab ──────────────────────────────────────── -->
   <div id="tab-sessions" class="tab-content">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <select id="sessions-filter-project" onchange="loadSessions()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
+      <select id="sessions-filter-project" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
         <option value="">All projects</option>
       </select>
       <span id="sessions-count" class="text-muted" style="font-size:var(--text-sm);margin-left:auto"></span>
@@ -1294,9 +1421,9 @@ ${PROJECT_REFERENCE_UI_STYLES}
 
 <div class="batch-bar" id="batch-bar">
   <span class="batch-bar-count" id="batch-count">0 selected</span>
-  <button class="btn btn-sm btn-approve" onclick="batchAction('approve')">Approve All</button>
-  <button class="btn btn-sm btn-reject" onclick="batchAction('reject')">Reject All</button>
-  <select class="btn btn-sm" id="batch-tag-select" style="cursor:pointer" onchange="if(this.value){batchActionByTag(this.value,'approve');this.value=''}">
+  <button class="btn btn-sm btn-approve" id="batch-approve-btn">Approve All</button>
+  <button class="btn btn-sm btn-reject" id="batch-reject-btn">Reject All</button>
+  <select class="btn btn-sm" id="batch-tag-select" style="cursor:pointer">
     <option value="">Approve by tag...</option>
     <option value="decision">[decision]</option>
     <option value="pitfall">[pitfall]</option>
@@ -1304,40 +1431,43 @@ ${PROJECT_REFERENCE_UI_STYLES}
     <option value="fix">[fix]</option>
     <option value="warning">[warning]</option>
   </select>
-  <button class="btn btn-sm" onclick="clearBatchSelection()">Cancel</button>
+  <button class="btn btn-sm" id="batch-cancel-btn">Cancel</button>
 </div>
 
 <div class="toast-container" id="toast-container"></div>
 
-<div class="cmdpal-overlay" id="cmdpal" onclick="closeCmdPal(event)">
-  <div class="cmdpal-box" onclick="event.stopPropagation()">
-    <input class="cmdpal-input" id="cmdpal-input" placeholder="Search projects..." oninput="cmdpalSearch(this.value)" onkeydown="cmdpalKey(event)" autocomplete="off" />
+<div class="cmdpal-overlay" id="cmdpal">
+  <div class="cmdpal-box" id="cmdpal-box">
+    <input class="cmdpal-input" id="cmdpal-input" placeholder="Search projects..." autocomplete="off" />
     <div class="cmdpal-results" id="cmdpal-results"></div>
   </div>
 </div>
 
-<script>
+<script${nonceAttr}>
 ${renderWebUiScript(h(authToken || ""))}
 </script>
-<script>
+<script${nonceAttr}>
 ${renderGraphScript()}
 </script>
-<script>
+<script${nonceAttr}>
 ${renderReviewQueueEditSyncScript()}
 </script>
-<script>
+<script${nonceAttr}>
 ${renderSkillUiEnhancementScript(h(authToken || ""))}
 </script>
-<script>
+<script${nonceAttr}>
 ${renderProjectReferenceEnhancementScript(h(authToken || ""))}
 </script>
-<script>
+<script${nonceAttr}>
 ${renderTasksAndSettingsScript(h(authToken || ""))}
+</script>
+<script${nonceAttr}>
+${renderEventWiringScript()}
 </script>
 </body>
 </html>`;
 }
 
 export function renderPageForTests(cortexPath: string, _csrfToken?: string, authToken?: string): string {
-  return renderWebUiPage(cortexPath, authToken);
+  return renderWebUiPage(cortexPath, authToken, "test-nonce");
 }

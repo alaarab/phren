@@ -1103,11 +1103,53 @@ async function loadIndexSnapshotOrEmpty(cortexPath: string, profile?: string): P
 // Serialize concurrent in-process buildIndex calls to prevent SQLite corruption
 let buildLock: Promise<SqlJsDatabase> = Promise.resolve(null as unknown as SqlJsDatabase);
 
+// Staleness debounce: if the index was rebuilt within this window, return the
+// cached DB immediately without re-running the expensive glob + hash pipeline.
+// Configurable via CORTEX_INDEX_DEBOUNCE_MS (default 5000ms).
+const INDEX_DEBOUNCE_DEFAULT_MS = 5000;
+let _lastBuiltDb: SqlJsDatabase | null = null;
+let _lastBuildTimestamp = 0;
+let _lastBuildKey = "";
+
+function getIndexDebounceMs(): number {
+  const raw = process.env.CORTEX_INDEX_DEBOUNCE_MS;
+  if (!raw) return INDEX_DEBOUNCE_DEFAULT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed < 0) return INDEX_DEBOUNCE_DEFAULT_MS;
+  return Math.min(parsed, 60000);
+}
+
+function isDbOpen(db: SqlJsDatabase): boolean {
+  try {
+    db.exec("SELECT 1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function buildIndex(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
+  const debounceMs = getIndexDebounceMs();
+  const buildKey = `${cortexPath}|${profile ?? ""}`;
+  if (
+    debounceMs > 0 &&
+    _lastBuiltDb !== null &&
+    _lastBuildKey === buildKey &&
+    Date.now() - _lastBuildTimestamp < debounceMs &&
+    isDbOpen(_lastBuiltDb)
+  ) {
+    debugLog(`buildIndex debounce hit (${Date.now() - _lastBuildTimestamp}ms < ${debounceMs}ms)`);
+    return _lastBuiltDb;
+  }
+
   const result = buildLock.then(() => _buildIndexGuarded(cortexPath, profile));
   // Update the lock chain; swallow rejections so the chain doesn't stall
   buildLock = result.catch(() => null as unknown as SqlJsDatabase);
-  return result;
+  const db = await result;
+  _lastBuiltDb = db;
+  _lastBuildTimestamp = Date.now();
+  _lastBuildKey = buildKey;
+  return db;
 }
 
 async function _buildIndexGuarded(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {

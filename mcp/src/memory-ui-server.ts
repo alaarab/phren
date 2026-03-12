@@ -137,9 +137,15 @@ function pruneExpiredCsrfTokens(csrfTokens?: Map<string, number>): void {
   }
 }
 
-function setCommonHeaders(res: http.ServerResponse): void {
+function setCommonHeaders(res: http.ServerResponse, nonce?: string): void {
   res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
+  if (nonce) {
+    // Page responses: allow nonce-gated inline scripts but disallow inline event handlers
+    res.setHeader("Content-Security-Policy", `default-src 'self'; script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.bunny.net; font-src https://fonts.bunny.net; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'`);
+  } else {
+    // API responses: no inline scripts needed
+    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
+  }
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
 }
@@ -322,7 +328,7 @@ function parseTopicsPayload(raw: string): Array<{ slug: string; label: string; d
 
 export function createWebUiHttpServer(
   cortexPath: string,
-  renderPage: (cortexPath: string, authToken?: string) => string,
+  renderPage: (cortexPath: string, authToken?: string, nonce?: string) => string,
   profile?: string,
   opts?: WebUiOptions,
 ): http.Server {
@@ -330,7 +336,6 @@ export function createWebUiHttpServer(
   const csrfTokens = opts?.csrfTokens;
 
   return http.createServer(async (req, res) => {
-    setCommonHeaders(res);
     const url = req.url || "/";
     const pathname = url.includes("?") ? url.slice(0, url.indexOf("?")) : url;
 
@@ -338,11 +343,15 @@ export function createWebUiHttpServer(
       if (!requireGetAuth(req, res, url, authToken)) return;
       pruneExpiredCsrfTokens(csrfTokens);
       if (csrfTokens) csrfTokens.set(crypto.randomUUID(), Date.now());
-      const html = renderPage(cortexPath, authToken);
+      const nonce = crypto.randomBytes(16).toString("base64");
+      setCommonHeaders(res, nonce);
+      const html = renderPage(cortexPath, authToken, nonce);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(html);
       return;
     }
+
+    setCommonHeaders(res);
 
     if (pathname.startsWith("/api/") && req.method === "GET" && !requireGetAuth(req, res, url, authToken)) {
       return;
@@ -853,7 +862,7 @@ export function createWebUiHttpServer(
 export async function startWebUiServer(
   cortexPath: string,
   port: number,
-  renderPage: (cortexPath: string, authToken?: string) => string,
+  renderPage: (cortexPath: string, authToken?: string, nonce?: string) => string,
   profile?: string,
   opts: WebUiStartOptions = {},
 ): Promise<void> {
