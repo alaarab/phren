@@ -12,6 +12,7 @@ import { showProjectFile } from "./projectFileViewer";
 import { showSkillEditor } from "./skillEditor";
 import { showTaskDetail } from "./taskViewer";
 import { showQueueItemDetail, type QueueItemData } from "./queueViewer";
+import { showSessionOverview } from "./sessionViewer";
 import { pathExists, resolveRuntimeConfig } from "./runtimeConfig";
 import {
   listProfileConfigs,
@@ -215,6 +216,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     "cortex.openQueueItem",
     (item: QueueItemData) => {
       showQueueItemDetail(cortexClient, item, refreshTree);
+    },
+  );
+
+  const openSessionOverviewDisposable = vscode.commands.registerCommand(
+    "cortex.openSessionOverview",
+    async (session: {
+      projectName: string;
+      sessionId: string;
+      startedAt: string;
+      durationMins?: number;
+      summary?: string;
+      findingsAdded: number;
+      status: "active" | "ended";
+    }) => {
+      try {
+        await showSessionOverview(cortexClient, session);
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to open session overview: ${toErrorMessage(error)}`);
+      }
+    },
+  );
+
+  const copySessionIdDisposable = vscode.commands.registerCommand(
+    "cortex.copySessionId",
+    async (session: { sessionId: string }) => {
+      try {
+        await vscode.env.clipboard.writeText(session.sessionId);
+        await vscode.window.showInformationMessage(`Copied session ID ${session.sessionId.slice(0, 8)}.`);
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to copy session ID: ${toErrorMessage(error)}`);
+      }
     },
   );
 
@@ -751,6 +783,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     toggleHookDisposable,
     openTaskDisposable,
     openQueueItemDisposable,
+    openSessionOverviewDisposable,
+    copySessionIdDisposable,
     filterFindingsByDateDisposable,
     switchProfileDisposable,
     configureMachineDisposable,

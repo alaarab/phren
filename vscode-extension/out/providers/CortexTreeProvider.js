@@ -73,9 +73,6 @@ class CortexTreeProvider {
             if (element.section === "projects") {
                 return this.getProjectNodes();
             }
-            if (element.section === "sessions") {
-                return this.getSessionNodes();
-            }
             if (element.section === "review") {
                 return this.getAggregateQueueSectionGroups();
             }
@@ -96,6 +93,7 @@ class CortexTreeProvider {
         if (element.kind === "project") {
             return [
                 { kind: "category", projectName: element.projectName, category: "findings" },
+                { kind: "category", projectName: element.projectName, category: "sessions" },
                 { kind: "category", projectName: element.projectName, category: "task" },
                 { kind: "category", projectName: element.projectName, category: "queue" },
                 { kind: "category", projectName: element.projectName, category: "reference" },
@@ -104,6 +102,9 @@ class CortexTreeProvider {
         if (element.kind === "category") {
             if (element.category === "findings") {
                 return this.getFindingDateGroups(element.projectName);
+            }
+            if (element.category === "sessions") {
+                return this.getSessionDateGroups(element.projectName);
             }
             if (element.category === "task") {
                 return this.getTaskSectionGroups(element.projectName);
@@ -121,6 +122,9 @@ class CortexTreeProvider {
         }
         if (element.kind === "aggregateQueueSectionGroup") {
             return this.getAggregateQueueItemsForSection(element.section);
+        }
+        if (element.kind === "sessionDateGroup") {
+            return this.getSessionsForDate(element.projectName, element.date);
         }
         if (element.kind === "session") {
             return this.getSessionChildren(element);
@@ -156,8 +160,8 @@ class CortexTreeProvider {
         }
         switch (element.kind) {
             case "rootSection": {
-                const labels = { projects: "Projects", sessions: "Sessions", review: "Review", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
-                const icons = { projects: "folder-library", sessions: "history", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
+                const labels = { projects: "Projects", review: "Review", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
+                const icons = { projects: "folder-library", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
                 const label = labels[element.section] ?? element.section;
                 if (element.section === "graph") {
                     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
@@ -182,7 +186,7 @@ class CortexTreeProvider {
             }
             case "category": {
                 const cat = element.category ?? "unknown";
-                const categoryLabels = { findings: "Findings", task: "Task", queue: "Review Queue", reference: "Reference" };
+                const categoryLabels = { findings: "Findings", sessions: "Sessions", task: "Tasks", queue: "Review Queue", reference: "Reference" };
                 let categoryLabel = categoryLabels[cat] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
                 if (cat === "findings" && this.dateFilter) {
                     categoryLabel += ` [${this.dateFilter.label}]`;
@@ -201,6 +205,14 @@ class CortexTreeProvider {
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon("calendar");
                 item.id = `cortex.findingDateGroup.${element.projectName}.${element.date}`;
+                return item;
+            }
+            case "sessionDateGroup": {
+                const label = formatDateLabel(element.date);
+                const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+                item.description = `${element.count}`;
+                item.iconPath = themeIcon("calendar");
+                item.id = `cortex.sessionDateGroup.${element.projectName}.${element.date}`;
                 return item;
             }
             case "finding": {
@@ -344,22 +356,21 @@ class CortexTreeProvider {
                 return item;
             }
             case "session": {
-                const item = new vscode.TreeItem(formatSessionLabel(element.startedAt), vscode.TreeItemCollapsibleState.Collapsed);
-                const descriptionParts = [
-                    element.projectName ?? "—",
-                    `${element.durationMins ?? 0}m`,
-                ];
+                const item = new vscode.TreeItem(formatSessionTimeLabel(element.startedAt), vscode.TreeItemCollapsibleState.Collapsed);
+                const descriptionParts = [`${element.durationMins ?? 0}m`];
                 if (element.findingsAdded > 0) {
                     descriptionParts.push(`${element.findingsAdded}f`);
                 }
-                descriptionParts.push(element.sessionId.slice(0, 8));
                 if (element.status === "active") {
                     descriptionParts.push("active");
+                }
+                if (element.summary) {
+                    descriptionParts.push(truncate(element.summary, 40));
                 }
                 item.description = descriptionParts.join(" · ");
                 item.tooltip = [
                     `Session ${element.sessionId.slice(0, 8)}`,
-                    `Project: ${element.projectName ?? "—"}`,
+                    `Project: ${element.projectName}`,
                     `Started: ${element.startedAt}`,
                     `Duration: ~${element.durationMins ?? 0} min`,
                     `Findings added: ${element.findingsAdded}`,
@@ -368,6 +379,7 @@ class CortexTreeProvider {
                 ].join("\n");
                 item.iconPath = themeIcon(element.status === "active" ? "play-circle" : "history");
                 item.id = `cortex.session.${element.sessionId}`;
+                item.contextValue = "cortex.session";
                 return item;
             }
             case "sessionBucket": {
@@ -376,31 +388,7 @@ class CortexTreeProvider {
                 const item = new vscode.TreeItem(labels[element.bucket], vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon(icons[element.bucket]);
-                item.id = `cortex.sessionBucket.${element.sessionId}.${element.bucket}`;
-                return item;
-            }
-            case "sessionFinding": {
-                const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
-                item.description = element.projectName;
-                item.tooltip = `${element.projectName}\n${element.text}`;
-                item.iconPath = themeIcon("lightbulb");
-                item.id = `cortex.sessionFinding.${element.projectName}.${truncate(element.text, 40)}`;
-                return item;
-            }
-            case "sessionTask": {
-                const taskNode = {
-                    kind: "task",
-                    projectName: element.projectName,
-                    id: `${element.projectName}:${element.section}`,
-                    line: element.text,
-                    section: element.section,
-                    checked: element.section === "Done",
-                };
-                const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
-                item.description = `${element.projectName} · ${element.section}`;
-                item.tooltip = `${element.projectName}/${element.section}\n${element.text}`;
-                item.iconPath = themeIcon(taskIconId(taskNode));
-                item.id = `cortex.sessionTask.${element.projectName}.${element.section}.${truncate(element.text, 40)}`;
+                item.id = `cortex.sessionBucket.${element.projectName}.${element.sessionId}.${element.bucket}`;
                 return item;
             }
             case "projectGroup": {
@@ -448,7 +436,6 @@ class CortexTreeProvider {
     async getRootSections() {
         return [
             { kind: "rootSection", section: "projects" },
-            { kind: "rootSection", section: "sessions" },
             { kind: "rootSection", section: "review" },
             { kind: "rootSection", section: "skills" },
             { kind: "rootSection", section: "hooks", description: await this.getHookSectionDescription() },
@@ -690,16 +677,43 @@ class CortexTreeProvider {
             return [this.errorNode("Failed to load queue items", error)];
         }
     }
-    async getSessionNodes() {
+    async getSessionDateGroups(projectName) {
         try {
-            const sessions = await this.fetchSessions();
+            const sessions = await this.fetchSessions(projectName);
             if (sessions.length === 0) {
                 return [{ kind: "message", label: "No sessions found", iconId: "history" }];
             }
-            return sessions.map((session) => ({
+            const dateOrder = [];
+            const byDate = new Map();
+            for (const session of sessions) {
+                const date = session.date || "unknown";
+                if (!byDate.has(date)) {
+                    dateOrder.push(date);
+                    byDate.set(date, 0);
+                }
+                byDate.set(date, (byDate.get(date) ?? 0) + 1);
+            }
+            return dateOrder.map((date) => ({
+                kind: "sessionDateGroup",
+                projectName,
+                date,
+                count: byDate.get(date) ?? 0,
+            }));
+        }
+        catch (error) {
+            return [this.errorNode("Failed to load sessions", error)];
+        }
+    }
+    async getSessionsForDate(projectName, date) {
+        try {
+            const sessions = await this.fetchSessions(projectName);
+            return sessions
+                .filter((session) => session.date === date)
+                .map((session) => ({
                 kind: "session",
+                projectName,
+                date: session.date,
                 sessionId: session.sessionId,
-                projectName: session.projectName,
                 startedAt: session.startedAt,
                 durationMins: session.durationMins,
                 summary: session.summary,
@@ -713,11 +727,12 @@ class CortexTreeProvider {
     }
     async getSessionChildren(session) {
         try {
-            const artifacts = await this.fetchSessionArtifacts(session.sessionId);
+            const artifacts = await this.fetchSessionArtifacts(session.projectName, session.sessionId);
             const children = [];
             if (artifacts.findings.length > 0) {
                 children.push({
                     kind: "sessionBucket",
+                    projectName: session.projectName,
                     sessionId: session.sessionId,
                     bucket: "findings",
                     count: artifacts.findings.length,
@@ -726,6 +741,7 @@ class CortexTreeProvider {
             if (artifacts.tasks.length > 0) {
                 children.push({
                     kind: "sessionBucket",
+                    projectName: session.projectName,
                     sessionId: session.sessionId,
                     bucket: "tasks",
                     count: artifacts.tasks.length,
@@ -742,25 +758,33 @@ class CortexTreeProvider {
     }
     async getSessionBucketChildren(bucket) {
         try {
-            const artifacts = await this.fetchSessionArtifacts(bucket.sessionId);
+            const artifacts = await this.fetchSessionArtifacts(bucket.projectName, bucket.sessionId);
             if (bucket.bucket === "findings") {
                 if (artifacts.findings.length === 0) {
                     return [{ kind: "message", label: "No findings", iconId: "list-flat" }];
                 }
                 return artifacts.findings.map((finding) => ({
-                    kind: "sessionFinding",
-                    projectName: finding.projectName,
+                    kind: "finding",
+                    projectName: bucket.projectName,
+                    id: finding.id,
+                    date: finding.date,
                     text: finding.text,
+                    supersededBy: finding.supersededBy,
+                    supersedes: finding.supersedes,
+                    contradicts: finding.contradicts,
+                    potentialDuplicates: finding.potentialDuplicates,
                 }));
             }
             if (artifacts.tasks.length === 0) {
                 return [{ kind: "message", label: "No tasks", iconId: "checklist" }];
             }
             return artifacts.tasks.map((task) => ({
-                kind: "sessionTask",
-                projectName: task.projectName,
-                text: task.text,
+                kind: "task",
+                projectName: bucket.projectName,
+                id: task.id,
+                line: task.line,
                 section: task.section,
+                checked: task.checked,
             }));
         }
         catch (error) {
@@ -1051,8 +1075,8 @@ class CortexTreeProvider {
         }
         return parsed;
     }
-    async fetchSessions() {
-        const raw = await this.client.sessionHistory({ limit: 50 });
+    async fetchSessions(projectName) {
+        const raw = await this.client.sessionHistory({ limit: 50, project: projectName });
         const response = asRecord(raw);
         const sessions = asArray(response?.data);
         const parsed = [];
@@ -1065,8 +1089,9 @@ class CortexTreeProvider {
                 continue;
             }
             parsed.push({
+                projectName,
+                date: startedAt.includes("T") ? startedAt.slice(0, 10) : "unknown",
                 sessionId,
-                projectName: asString(record?.project),
                 startedAt,
                 durationMins: asNumber(record?.durationMins),
                 summary: asString(record?.summary),
@@ -1076,31 +1101,45 @@ class CortexTreeProvider {
         }
         return parsed;
     }
-    async fetchSessionArtifacts(sessionId) {
-        const raw = await this.client.sessionHistory({ sessionId });
+    async fetchSessionArtifacts(projectName, sessionId) {
+        const raw = await this.client.sessionHistory({ sessionId, project: projectName });
         const data = responseData(raw);
         const findingsRaw = asArray(data?.findings);
         const tasksRaw = asArray(data?.tasks);
         const findings = [];
         for (const entry of findingsRaw) {
             const record = asRecord(entry);
-            const projectName = asString(record?.project);
+            const id = asString(record?.id);
+            const date = asString(record?.date) ?? "unknown";
             const text = asString(record?.text);
-            if (!projectName || !text) {
+            if (!id || !text) {
                 continue;
             }
-            findings.push({ projectName, text });
+            findings.push({
+                id,
+                date,
+                text,
+                supersededBy: asString(record?.supersededBy),
+                supersedes: asString(record?.supersedes),
+                contradicts: asStringArray(record?.contradicts),
+                potentialDuplicates: asStringArray(record?.potentialDuplicates),
+            });
         }
         const tasks = [];
         for (const entry of tasksRaw) {
             const record = asRecord(entry);
-            const projectName = asString(record?.project);
-            const text = asString(record?.text);
+            const id = asString(record?.id);
+            const line = asString(record?.text);
             const section = asTaskSection(record?.section);
-            if (!projectName || !text || !section) {
+            if (!id || !line || !section) {
                 continue;
             }
-            tasks.push({ projectName, text, section });
+            tasks.push({
+                id,
+                line,
+                section,
+                checked: asBoolean(record?.checked) ?? section === "Done",
+            });
         }
         return { findings, tasks };
     }
@@ -1113,6 +1152,9 @@ exports.CortexTreeProvider = CortexTreeProvider;
 function categoryIconId(category) {
     if (category === "findings") {
         return "list-flat";
+    }
+    if (category === "sessions") {
+        return "history";
     }
     if (category === "task") {
         return "checklist";
@@ -1149,6 +1191,13 @@ function asArray(value) {
 }
 function asString(value) {
     return typeof value === "string" ? value : undefined;
+}
+function asStringArray(value) {
+    if (!Array.isArray(value)) {
+        return undefined;
+    }
+    const parsed = value.filter((entry) => typeof entry === "string");
+    return parsed.length > 0 ? parsed : undefined;
 }
 function asBoolean(value) {
     return typeof value === "boolean" ? value : undefined;
@@ -1189,17 +1238,12 @@ function formatDateLabel(dateStr) {
     }
     return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: parsed.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
 }
-function formatSessionLabel(startedAt) {
+function formatSessionTimeLabel(startedAt) {
     const parsed = new Date(startedAt);
     if (isNaN(parsed.getTime())) {
         return startedAt;
     }
-    const now = new Date();
-    const sameYear = parsed.getFullYear() === now.getFullYear();
-    return parsed.toLocaleString("en-US", {
-        month: "short",
-        day: "numeric",
-        ...(sameYear ? {} : { year: "numeric" }),
+    return parsed.toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
     });
