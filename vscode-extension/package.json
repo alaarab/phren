@@ -2,7 +2,7 @@
   "name": "cortex-vscode",
   "displayName": "Cortex VS Code",
   "description": "Browse, search, and manage Cortex knowledge directly from VS Code.",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",

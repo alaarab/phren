@@ -212,6 +212,43 @@ function setupSparseCheckout(cortexPath: string, projects: string[]) {
 
 // ── Symlink helpers ─────────────────────────────────────────────────────────
 
+/** Add entries to .git/info/exclude so cortex-managed symlinks don't pollute git status.
+ *  Skips files already tracked by git to avoid hiding user-owned content. */
+function addGitExcludes(projectDir: string, entries: string[]): void {
+  const gitDir = path.join(projectDir, ".git");
+  if (!fs.existsSync(gitDir)) return;
+  try {
+    // Filter out files already tracked by git — exclude only affects untracked files,
+    // and adding tracked files could confuse users who version-control their own CLAUDE.md
+    let tracked: Set<string>;
+    try {
+      const out = execFileSync("git", ["ls-files", "--", ...entries], {
+        cwd: projectDir,
+        timeout: EXEC_TIMEOUT_QUICK_MS,
+        encoding: "utf8",
+      });
+      tracked = new Set(out.split("\n").map((l) => l.trim()).filter(Boolean));
+    } catch {
+      tracked = new Set();
+    }
+    const safe = entries.filter((e) => !tracked.has(e));
+    if (safe.length === 0) return;
+
+    const excludePath = path.join(gitDir, "info", "exclude");
+    fs.mkdirSync(path.join(gitDir, "info"), { recursive: true });
+    const existing = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, "utf8") : "";
+    const existingLines = new Set(existing.split("\n").map((l) => l.trim()));
+    const toAdd = safe.filter((e) => !existingLines.has(e));
+    if (toAdd.length === 0) return;
+    const marker = "# cortex-managed";
+    const needsMarker = !existingLines.has(marker);
+    const suffix = (needsMarker ? `\n${marker}\n` : "\n") + toAdd.join("\n") + "\n";
+    fs.appendFileSync(excludePath, suffix);
+  } catch {
+    // git not available or fs issue — silently skip
+  }
+}
+
 function symlinkFile(src: string, dest: string, managedRoot: string): boolean {
   try {
     const stat = fs.lstatSync(dest);
@@ -257,12 +294,12 @@ function addTokenAnnotation(filePath: string) {
 
 const GENERATED_AGENTS_MARKER = "<!-- cortex:generated-agents -->";
 
-function writeManagedAgentsFile(src: string, dest: string, content: string, managedRoot: string): void {
+function writeManagedAgentsFile(src: string, dest: string, content: string, managedRoot: string): boolean {
   try {
     const stat = fs.lstatSync(dest);
     if (stat.isDirectory()) {
       log(`  preserve existing directory: ${dest}`);
-      return;
+      return false;
     }
     if (stat.isSymbolicLink()) {
       const currentTarget = fs.readlinkSync(dest);
@@ -272,13 +309,13 @@ function writeManagedAgentsFile(src: string, dest: string, content: string, mana
         fs.unlinkSync(dest);
       } else {
         log(`  preserve existing file: ${dest}`);
-        return;
+        return false;
       }
     } else {
       const existing = fs.readFileSync(dest, "utf8");
       if (!existing.includes(GENERATED_AGENTS_MARKER)) {
         log(`  preserve existing file: ${dest}`);
-        return;
+        return false;
       }
       fs.unlinkSync(dest);
     }
@@ -286,6 +323,7 @@ function writeManagedAgentsFile(src: string, dest: string, content: string, mana
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   atomicWriteText(dest, `${content.trimEnd()}\n`);
+  return true;
 }
 
 // ── Linking operations ──────────────────────────────────────────────────────
@@ -335,10 +373,12 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   if (!target) return;
   log(`  ${project} -> ${target}`);
 
+  const excludeEntries: string[] = [];
+
   for (const f of ["CLAUDE.md", "REFERENCE.md", "FINDINGS.md"]) {
     const src = path.join(cortexPath, project, f);
     if (fs.existsSync(src)) {
-      symlinkFile(src, path.join(target, f), cortexPath);
+      if (symlinkFile(src, path.join(target, f), cortexPath)) excludeEntries.push(f);
       if (f === "CLAUDE.md") {
         if (tools.has("copilot")) {
           try {
@@ -357,7 +397,9 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   const projectDir = path.join(cortexPath, project);
   if (fs.existsSync(projectDir)) {
     for (const f of fs.readdirSync(projectDir)) {
-      if (/^CLAUDE-.+\.md$/.test(f)) symlinkFile(path.join(projectDir, f), path.join(target, f), cortexPath);
+      if (/^CLAUDE-.+\.md$/.test(f)) {
+        if (symlinkFile(path.join(projectDir, f), path.join(target, f), cortexPath)) excludeEntries.push(f);
+      }
     }
   }
 
@@ -379,11 +421,14 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
     try {
       const manifest = skillManifest || syncScopeSkillsToDir(cortexPath, project, targetSkills);
       const agentsContent = `${fs.readFileSync(claudeFile, "utf8").trimEnd()}\n\n${GENERATED_AGENTS_MARKER}\n${renderSkillInstructionsSection(manifest)}\n`;
-      writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, cortexPath);
+      if (writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, cortexPath)) excludeEntries.push("AGENTS.md");
     } catch (err: unknown) {
       if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject agentsMd: ${errorMessage(err)}\n`);
     }
   }
+
+  // Auto-exclude cortex-managed files from git status
+  if (excludeEntries.length > 0) addGitExcludes(target, excludeEntries);
 
   // Per-project MCP servers
   if (isRecord(config.mcpServers)) {
