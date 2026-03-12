@@ -127,3 +127,23 @@ export function shouldAutoCaptureTaskForLevel(
   if (level === "low") return false;
   return hasExplicitTaskSignal(...texts);
 }
+
+// ── Intent-aware auto task signals ──────────────────────────────────────────
+
+const EXECUTION_INTENT_PATTERN = /\b(?:yes\s+do\s+it|do\s+it|go\s+ahead|work\s+on\s+(?:these|this|that|it)|let(?:'|')s\s+(?:build|ship|implement|start|do|go)|approve(?:d)?|ship\s+it|merge\s+it|commit|proceed|execute|deploy|push\s+it|make\s+it\s+happen|get\s+(?:it|this|that)\s+done)\b/i;
+
+const DISCOVERY_INTENT_PATTERN = /\b(?:brainstorm|explore|what\s+if|ideas?\b|review\s+findings|think\s+about|consider|hypothetical|might\s+we|could\s+we\s+try|what\s+are\s+(?:the|some)\s+(?:options|alternatives|possibilities)|pros?\s+(?:and|&)\s+cons?|compare|evaluate|assess|weigh)\b/i;
+
+export function hasExecutionIntent(...texts: Array<string | undefined | null>): boolean {
+  return texts.some((text) => {
+    if (!text) return false;
+    return EXECUTION_INTENT_PATTERN.test(text);
+  });
+}
+
+export function hasDiscoveryIntent(...texts: Array<string | undefined | null>): boolean {
+  return texts.some((text) => {
+    if (!text) return false;
+    return DISCOVERY_INTENT_PATTERN.test(text);
+  });
+}

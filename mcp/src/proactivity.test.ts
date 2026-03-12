@@ -7,6 +7,8 @@ import {
   getProactivityLevelForTask,
   getProactivityLevelForFindings,
   hasExplicitFindingSignal,
+  hasExecutionIntent,
+  hasDiscoveryIntent,
   shouldAutoCaptureFindingsForLevel,
 } from "./shared.js";
 
@@ -132,5 +134,34 @@ describe("proactivity config", () => {
 
   it("disables findings auto-capture at low", () => {
     expect(shouldAutoCaptureFindingsForLevel("low", 'Please add finding about the migration order.')).toBe(false);
+  });
+
+  it("detects execution intent signals", () => {
+    expect(hasExecutionIntent("yes do it")).toBe(true);
+    expect(hasExecutionIntent("go ahead and implement it")).toBe(true);
+    expect(hasExecutionIntent("work on these items")).toBe(true);
+    expect(hasExecutionIntent("let's build the API")).toBe(true);
+    expect(hasExecutionIntent("approved, ship it")).toBe(true);
+    expect(hasExecutionIntent("proceed with the migration")).toBe(true);
+    expect(hasExecutionIntent("what if we tried a different approach")).toBe(false);
+    expect(hasExecutionIntent("brainstorm some ideas")).toBe(false);
+  });
+
+  it("detects discovery intent signals", () => {
+    expect(hasDiscoveryIntent("brainstorm some ideas for the API")).toBe(true);
+    expect(hasDiscoveryIntent("explore different caching strategies")).toBe(true);
+    expect(hasDiscoveryIntent("what if we used Redis instead")).toBe(true);
+    expect(hasDiscoveryIntent("review findings from last week")).toBe(true);
+    expect(hasDiscoveryIntent("what are the alternatives to SQLite")).toBe(true);
+    expect(hasDiscoveryIntent("let's evaluate the pros and cons")).toBe(true);
+    expect(hasDiscoveryIntent("implement the caching layer")).toBe(false);
+    expect(hasDiscoveryIntent("fix the login bug")).toBe(false);
+  });
+
+  it("execution intent takes priority when both signals present", () => {
+    const text = "let's build on these ideas and ship it";
+    expect(hasExecutionIntent(text)).toBe(true);
+    expect(hasDiscoveryIntent(text)).toBe(true);
+    // The task lifecycle checks execution first, so both being true means execute
   });
 });

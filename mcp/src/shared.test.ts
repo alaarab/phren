@@ -1641,7 +1641,7 @@ describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
     expect(wp.requireMaintainerApproval).toBe(false);
     expect(wp.lowConfidenceThreshold).toBe(0.7);
     expect(wp.riskySections).toEqual(["Stale", "Conflicts"]);
-    expect(wp.taskMode).toBe("manual");
+    expect(wp.taskMode).toBe("auto");
   });
 
   it("filters invalid riskySections values", () => {

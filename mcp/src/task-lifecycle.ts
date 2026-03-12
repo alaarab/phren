@@ -8,7 +8,7 @@ import {
   type TaskItem,
 } from "./data-access.js";
 import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./tasks-github.js";
-import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, type ProactivityLevel } from "./proactivity.js";
+import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, type ProactivityLevel } from "./proactivity.js";
 import { getWorkflowPolicy } from "./shared-governance.js";
 import { debugLog, sessionMarker } from "./shared.js";
 import { errorMessage } from "./utils.js";
@@ -268,6 +268,18 @@ export function handleTaskPromptLifecycle(args: {
     const line = reusable?.line || summary;
     return {
       mode,
+      noticeLines: buildSuggestionNotice(args.project, line, issueMeta),
+    };
+  }
+
+  // Intent-aware auto mode: if the user is in discovery mode (brainstorming,
+  // exploring ideas) and NOT in execution mode (approving, committing to work),
+  // fall back to a suggestion instead of writing the task immediately.
+  if (mode === "auto" && !hasExecutionIntent(args.prompt) && hasDiscoveryIntent(args.prompt)) {
+    const line = reusable?.line || summary;
+    debugLog(`task lifecycle auto→suggest ${args.project}: discovery intent detected`);
+    return {
+      mode: "auto",
       noticeLines: buildSuggestionNotice(args.project, line, issueMeta),
     };
   }

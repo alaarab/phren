@@ -266,7 +266,7 @@ export function ensureGovernanceFiles(cortexPath: string) {
         requireMaintainerApproval: false,
         lowConfidenceThreshold: 0.7,
         riskySections: ["Stale", "Conflicts"],
-        taskMode: "manual",
+        taskMode: "auto",
       }, null, 2) + "\n"
     );
   }

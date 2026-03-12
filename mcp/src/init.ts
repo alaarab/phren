@@ -288,8 +288,8 @@ async function runWalkthrough(cortexPath: string): Promise<{
       hooks: "on",
       projectOwnershipDefault: "cortex-managed",
       findingsProactivity: "high",
-      taskProactivity: "medium",
-      taskMode: "manual",
+      taskProactivity: "high",
+      taskMode: "auto",
       bootstrapCurrentProject: false,
       ollamaEnabled: false,
       autoCaptureEnabled: false,
@@ -396,20 +396,23 @@ async function runWalkthrough(cortexPath: string): Promise<{
   }
 
   log("\n─── Task Management ────────────────────────────────────────────────────");
-  log("Choose how far cortex should go when it sees actionable work in your prompts.");
-  log("  off: never touch task automatically");
-  log("  manual: task stays fully manual");
-  log("  suggest: propose tasks, but do not write them");
-  log("  auto: write/update active tasks when intent is clear");
+  log("Choose how cortex handles tasks as you work.");
+  log("  auto (recommended): captures tasks naturally as you work, links findings to tasks");
+  log("  suggest: proposes tasks but waits for approval before writing");
+  log("  manual: tasks are fully manual — you add them yourself");
+  log("  off: never touch tasks automatically");
   log("  Change later: npx cortex config workflow set --taskMode=<mode>");
-  const taskModeAnswer = (await ask(`Task mode [off/manual/suggest/auto] (manual): `)).trim();
-  const taskMode = parseTaskMode(taskModeAnswer) ?? "manual";
-  let taskProactivity: ProactivityLevel = "medium";
-  if (taskMode === "auto") {
-    log("  Task proactivity controls how much evidence cortex needs before auto-writing tasks.");
+  const taskModeAnswer = (await ask(`Task mode [auto/suggest/manual/off] (auto): `)).trim();
+  const taskMode = parseTaskMode(taskModeAnswer) ?? "auto";
+  let taskProactivity: ProactivityLevel = "high";
+  if (taskMode === "auto" || taskMode === "suggest") {
+    log("  Task proactivity controls how much evidence cortex needs before capturing tasks.");
+    log("  high (recommended): captures tasks as they come up naturally");
+    log("  medium: only when you explicitly mention a task");
+    log("  low: minimal auto-capture");
     log("  Change later: npx cortex config proactivity.tasks <high|medium|low>");
-    const taskAnswer = (await ask(`Task proactivity [high/medium/low] (medium): `)).trim();
-    taskProactivity = parseProactivityAnswer(taskAnswer, "medium");
+    const taskAnswer = (await ask(`Task proactivity [high/medium/low] (high): `)).trim();
+    taskProactivity = parseProactivityAnswer(taskAnswer, "high");
   }
 
   // Only offer semantic dedup/conflict when an LLM endpoint is explicitly configured.

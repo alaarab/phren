@@ -81,6 +81,98 @@ describe("task lifecycle", () => {
     expect(task.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
   });
 
+  it("auto mode suggests instead of writing when discovery intent detected", () => {
+    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+      requireMaintainerApproval: true,
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+    const result = handleTaskPromptLifecycle({
+      cortexPath: tmp.path,
+      prompt: "Explore different caching strategies and evaluate the pros and cons",
+      project,
+      sessionId: "session-discovery",
+      intent: "build",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Task suggestion");
+    const after = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+    expect(after).toBe(before);
+  });
+
+  it("auto mode writes task when execution intent detected", () => {
+    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+      requireMaintainerApproval: true,
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const result = handleTaskPromptLifecycle({
+      cortexPath: tmp.path,
+      prompt: "Yes do it, implement the new caching layer",
+      project,
+      sessionId: "session-execution",
+      intent: "build",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Active task");
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Active).toHaveLength(1);
+  });
+
+  it("auto mode writes task when both execution and discovery signals present", () => {
+    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+      requireMaintainerApproval: true,
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const result = handleTaskPromptLifecycle({
+      cortexPath: tmp.path,
+      prompt: "Go ahead and explore the caching alternatives then ship it",
+      project,
+      sessionId: "session-both",
+      intent: "build",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Active task");
+  });
+
+  it("auto mode writes task when no discovery signal present (default behavior)", () => {
+    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+      requireMaintainerApproval: true,
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const result = handleTaskPromptLifecycle({
+      cortexPath: tmp.path,
+      prompt: "Fix the authentication middleware",
+      project,
+      sessionId: "session-default",
+      intent: "debug",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Active task");
+  });
+
   it("auto mode completes the tracked task after a successful stop", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,

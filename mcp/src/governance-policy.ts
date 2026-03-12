@@ -115,7 +115,7 @@ const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   requireMaintainerApproval: false,
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
-  taskMode: "manual",
+  taskMode: "auto",
 };
 
 const DEFAULT_INDEX_POLICY: IndexPolicy = {

@@ -70,6 +70,8 @@ export {
   getProactivityLevelForTask,
   hasExplicitFindingSignal,
   hasExplicitTaskSignal,
+  hasExecutionIntent,
+  hasDiscoveryIntent,
   shouldAutoCaptureFindingsForLevel,
   shouldAutoCaptureTaskForLevel,
 } from "./proactivity.js";
