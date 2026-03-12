@@ -276,8 +276,8 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
     return;
   }
 
-  const findingsLevel = getProactivityLevelForFindings();
-  const taskLevel = getProactivityLevelForTask();
+  const findingsLevel = getProactivityLevelForFindings(getCortexPath());
+  const taskLevel = getProactivityLevelForTask(getCortexPath());
   if (taskLevel !== "high") {
     debugLog(`extract-memories task proactivity=${taskLevel}`);
   }

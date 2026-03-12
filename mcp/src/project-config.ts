@@ -17,6 +17,7 @@ export interface ProjectMcpServerEntry {
 
 export interface ProjectConfig {
   ownership?: ProjectOwnershipMode;
+  sourcePath?: string;
   skills?: boolean;
   hooks?: {
     enabled?: boolean;
@@ -72,6 +73,11 @@ export function writeProjectConfig(cortexPath: string, project: string, patch: P
   fs.writeFileSync(tmpPath, yaml.dump(next, { lineWidth: 1000 }));
   fs.renameSync(tmpPath, configPath);
   return next;
+}
+
+export function getProjectSourcePath(cortexPath: string, project: string, config?: ProjectConfig): string | undefined {
+  const raw = (config ?? readProjectConfig(cortexPath, project)).sourcePath;
+  return typeof raw === "string" && raw.trim() ? path.resolve(raw) : undefined;
 }
 
 export function getProjectOwnershipDefault(cortexPath: string): ProjectOwnershipMode {

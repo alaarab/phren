@@ -8,8 +8,18 @@ import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
 import { configureAllHooks } from "./hooks.js";
-import { getMachineName, persistMachineName } from "./machine-identity.js";
-import { debugLog, isRecord, hookConfigPath, homeDir, homePath } from "./shared.js";
+import { getMachineName, machineFilePath, persistMachineName } from "./machine-identity.js";
+import {
+  debugLog,
+  isRecord,
+  hookConfigPath,
+  homeDir,
+  homePath,
+  findCortexPath,
+  readRootManifest,
+  writeRootManifest,
+  type InstallMode,
+} from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import {
   codexJsonCandidates,
@@ -167,6 +177,7 @@ export function parseMcpMode(raw?: string): McpMode | undefined {
 }
 
 export interface InitOptions {
+  mode?: InstallMode;
   machine?: string;
   profile?: string;
   mcp?: McpMode;
@@ -595,7 +606,106 @@ function applyOnboardingPreferences(cortexPath: string, opts: InitOptions): void
   }
 }
 
+async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
+  const detectedRoot = detectProjectDir(process.cwd(), path.join(process.cwd(), ".cortex")) || process.cwd();
+  const hasWorkspaceMarker =
+    fs.existsSync(path.join(detectedRoot, ".git")) ||
+    fs.existsSync(path.join(detectedRoot, "CLAUDE.md")) ||
+    fs.existsSync(path.join(detectedRoot, "AGENTS.md")) ||
+    fs.existsSync(path.join(detectedRoot, ".claude", "CLAUDE.md"));
+  if (!hasWorkspaceMarker) {
+    throw new Error("project-local mode must be run inside a repo or project root");
+  }
+
+  const workspaceRoot = path.resolve(detectedRoot);
+  const cortexPath = path.join(workspaceRoot, ".cortex");
+  const existingManifest = readRootManifest(cortexPath);
+  if (existingManifest && existingManifest.installMode !== "project-local") {
+    throw new Error(`Refusing to reuse non-local cortex root at ${cortexPath}`);
+  }
+
+  const ownershipDefault = opts.projectOwnershipDefault ?? getProjectOwnershipDefault(cortexPath);
+  const mcpEnabled = opts.mcp ? opts.mcp === "on" : true;
+  const projectName = path.basename(workspaceRoot).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+
+  if (opts.dryRun) {
+    log("\nInit dry run. No files will be written.\n");
+    log(`Mode: project-local`);
+    log(`Workspace root: ${workspaceRoot}`);
+    log(`Cortex root: ${cortexPath}`);
+    log(`Project: ${projectName}`);
+    log(`VS Code workspace MCP: ${mcpEnabled ? "on" : "off"}`);
+    log(`Hooks: unsupported in project-local mode`);
+    log("");
+    return;
+  }
+
+  fs.mkdirSync(cortexPath, { recursive: true });
+  writeRootManifest(cortexPath, {
+    version: 1,
+    installMode: "project-local",
+    syncMode: "workspace-git",
+    workspaceRoot,
+    primaryProject: projectName,
+  });
+  ensureGovernanceFiles(cortexPath);
+  fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
+  fs.mkdirSync(path.join(cortexPath, ".runtime"), { recursive: true });
+  fs.mkdirSync(path.join(cortexPath, ".sessions"), { recursive: true });
+  if (!fs.existsSync(path.join(cortexPath, ".gitignore"))) {
+    atomicWriteText(
+      path.join(cortexPath, ".gitignore"),
+      [
+        ".runtime/",
+        ".sessions/",
+        "*.lock",
+        "*.tmp-*",
+        "",
+      ].join("\n")
+    );
+  }
+  if (!fs.existsSync(path.join(cortexPath, "global", "CLAUDE.md"))) {
+    atomicWriteText(
+      path.join(cortexPath, "global", "CLAUDE.md"),
+      "# Global Context\n\nRepo-local Cortex instructions shared across this workspace.\n"
+    );
+  }
+
+  const created = bootstrapFromExisting(cortexPath, workspaceRoot, { ownership: ownershipDefault });
+  applyOnboardingPreferences(cortexPath, opts);
+  writeInstallPreferences(cortexPath, {
+    mcpEnabled,
+    hooksEnabled: false,
+    installedVersion: VERSION,
+  });
+
+  try {
+    const vscodeResult = configureVSCode(cortexPath, { mcpEnabled, scope: "workspace" });
+    logMcpTargetStatus("VS Code", vscodeResult, existingManifest ? "Updated" : "Configured");
+  } catch (err: unknown) {
+    debugLog(`configureVSCode(workspace) failed: ${errorMessage(err)}`);
+  }
+
+  log(`\n${existingManifest ? "Updated" : "Created"} project-local cortex at ${cortexPath}`);
+  log(`  Workspace root: ${workspaceRoot}`);
+  log(`  Project: ${created.project}`);
+  log(`  Ownership: ${created.ownership}`);
+  log(`  Sync mode: workspace-git`);
+  log(`  Hooks: off (unsupported in project-local mode)`);
+  log(`  VS Code MCP: ${mcpEnabled ? "workspace on" : "workspace off"}`);
+
+  const verify = runPostInitVerify(cortexPath);
+  log(`\nVerifying setup...`);
+  for (const check of verify.checks) {
+    log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
+  }
+}
+
 export async function runInit(opts: InitOptions = {}) {
+  if ((opts.mode || "shared") === "project-local") {
+    await runProjectLocalInit(opts);
+    return;
+  }
   const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
   const dryRun = Boolean(opts.dryRun);
   const existing = fs.existsSync(cortexPath);
@@ -747,6 +857,11 @@ export async function runInit(opts: InitOptions = {}) {
   }
 
   if (hasExistingInstall) {
+      writeRootManifest(cortexPath, {
+        version: 1,
+        installMode: "shared",
+        syncMode: "managed-git",
+      });
       ensureGovernanceFiles(cortexPath);
       applyOnboardingPreferences(cortexPath, opts);
       const existingGitRepo = ensureLocalGitRepo(cortexPath);
@@ -908,6 +1023,11 @@ export async function runInit(opts: InitOptions = {}) {
 
   if (fs.existsSync(STARTER_DIR)) {
     copyDir(STARTER_DIR, cortexPath);
+    writeRootManifest(cortexPath, {
+      version: 1,
+      installMode: "shared",
+      syncMode: "managed-git",
+    });
     if (useTemplateProject) {
       const targetProject = walkthroughProject || firstProjectName;
       const projectDir = path.join(cortexPath, targetProject);
@@ -932,6 +1052,11 @@ export async function runInit(opts: InitOptions = {}) {
     log(`  Created cortex v${VERSION} \u2192 ${cortexPath}`);
   } else {
     log(`  Starter not found in package, creating minimal structure...`);
+    writeRootManifest(cortexPath, {
+      version: 1,
+      installMode: "shared",
+      syncMode: "managed-git",
+    });
     fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
     fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
     atomicWriteText(
@@ -1170,7 +1295,8 @@ export async function runInit(opts: InitOptions = {}) {
 }
 
 export async function runMcpMode(modeArg?: string) {
-  const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const cortexPath = findCortexPath() || process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const manifest = readRootManifest(cortexPath);
   const normalizedArg = modeArg?.trim().toLowerCase();
   if (!normalizedArg || normalizedArg === "status") {
     const current = getMcpEnabledPreference(cortexPath);
@@ -1186,6 +1312,15 @@ export async function runMcpMode(modeArg?: string) {
     throw new Error(`Invalid mode "${modeArg}". Use: on | off | status`);
   }
   const enabled = mode === "on";
+
+  if (manifest?.installMode === "project-local") {
+    const vscodeStatus = configureVSCode(cortexPath, { mcpEnabled: enabled, scope: "workspace" });
+    setMcpEnabledPreference(cortexPath, enabled);
+    log(`MCP mode set to ${mode}.`);
+    log(`VS Code status: ${vscodeStatus}`);
+    log(`Project-local mode only configures workspace VS Code MCP.`);
+    return;
+  }
 
   let claudeStatus: ToolStatus = "no_settings";
   let vscodeStatus: ToolStatus = "no_vscode";
@@ -1211,7 +1346,8 @@ export async function runMcpMode(modeArg?: string) {
 }
 
 export async function runHooksMode(modeArg?: string) {
-  const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const cortexPath = findCortexPath() || process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const manifest = readRootManifest(cortexPath);
   const normalizedArg = modeArg?.trim().toLowerCase();
   if (!normalizedArg || normalizedArg === "status") {
     const current = getHooksEnabledPreference(cortexPath);
@@ -1222,6 +1358,10 @@ export async function runHooksMode(modeArg?: string) {
   const mode = parseMcpMode(normalizedArg);
   if (!mode) {
     throw new Error(`Invalid mode "${modeArg}". Use: on | off | status`);
+  }
+
+  if (manifest?.installMode === "project-local") {
+    throw new Error("hooks-mode is unsupported in project-local mode");
   }
 
   const enabled = mode === "on";
@@ -1252,9 +1392,29 @@ export async function runHooksMode(modeArg?: string) {
 }
 
 export async function runUninstall() {
+  const cortexPath = findCortexPath();
+  const manifest = cortexPath ? readRootManifest(cortexPath) : null;
+  if (manifest?.installMode === "project-local" && cortexPath) {
+    log("\nUninstalling project-local cortex...\n");
+    const workspaceRoot = manifest.workspaceRoot || path.dirname(cortexPath);
+    const workspaceMcp = path.join(workspaceRoot, ".vscode", "mcp.json");
+    try {
+      if (removeMcpServerAtPath(workspaceMcp)) {
+        log(`  Removed cortex from VS Code workspace MCP config (${workspaceMcp})`);
+      }
+    } catch (err: unknown) {
+      debugLog(`uninstall local vscode cleanup failed: ${errorMessage(err)}`);
+    }
+    fs.rmSync(cortexPath, { recursive: true, force: true });
+    log(`  Removed ${cortexPath}`);
+    log("\nProject-local cortex uninstalled.");
+    return;
+  }
+
   log("\nUninstalling cortex...\n");
 
   const home = homeDir();
+  const machineFile = machineFilePath();
   const settingsPath = hookConfigPath("claude");
 
   // Remove from Claude Code ~/.claude.json (where MCP servers are actually read)
@@ -1377,8 +1537,8 @@ export async function runUninstall() {
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${cursorHooksFile}: ${errorMessage(err)}`); }
 
   // Remove Codex hooks file in cortex path
-  const cortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
-  const codexHooksFile = hookConfigPath("codex", cortexPath);
+  const uninstallCortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+  const codexHooksFile = hookConfigPath("codex", uninstallCortexPath);
   try {
     if (fs.existsSync(codexHooksFile)) {
       fs.unlinkSync(codexHooksFile);
@@ -1402,8 +1562,23 @@ export async function runUninstall() {
     } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${wrapperPath}: ${errorMessage(err)}`); }
   }
 
-  log(`\nCortex hooks and MCP config removed.`);
-  log(`\nYour Cortex data at ~/.cortex was NOT deleted.`);
-  log(`To fully remove it, run: rm -rf ~/.cortex\n`);
+  try {
+    if (fs.existsSync(machineFile)) {
+      fs.unlinkSync(machineFile);
+      log(`  Removed machine alias (${machineFile})`);
+    }
+  } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${machineFile}: ${errorMessage(err)}`); }
+
+  if (cortexPath && fs.existsSync(cortexPath)) {
+    try {
+      fs.rmSync(cortexPath, { recursive: true, force: true });
+      log(`  Removed cortex root (${cortexPath})`);
+    } catch (err: unknown) {
+      debugLog(`uninstall: cleanup failed for ${cortexPath}: ${errorMessage(err)}`);
+      log(`  Warning: could not remove cortex root (${cortexPath})`);
+    }
+  }
+
+  log(`\nCortex config, hooks, and installed data removed.`);
   log(`Restart your agent(s) to apply changes.\n`);
 }

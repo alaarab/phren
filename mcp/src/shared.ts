@@ -31,10 +31,21 @@ export {
 } from "./cortex-core.js";
 
 export {
+  ROOT_MANIFEST_FILENAME,
+  type InstallMode,
+  type SyncMode,
+  type CortexRootManifest,
+  type InstallContext,
   homeDir,
   homePath,
   expandHomePath,
   defaultCortexPath,
+  rootManifestPath,
+  readRootManifest,
+  writeRootManifest,
+  resolveInstallContext,
+  findNearestCortexPath,
+  isProjectLocalMode,
   runtimeDir,
   tryUnlink,
   sessionsDir,

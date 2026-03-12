@@ -62,7 +62,7 @@ import {
   extractConflictVersions,
 } from "./shared-content.js";
 import { isValidProjectName } from "./utils.js";
-import { grantAdmin, makeTempDir, suppressOutput } from "./test-helpers.js";
+import { grantAdmin, initTestCortexRoot, makeTempDir, suppressOutput } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -73,6 +73,7 @@ let tmpCleanup: (() => void) | undefined;
 
 function makeCortex(): string {
   ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-test-"));
+  initTestCortexRoot(tmpDir);
   return tmpDir;
 }
 
@@ -170,6 +171,7 @@ describe("findCortexPath", () => {
     const tmp = makeTempDir("fakehome-");
     const dotCortex = path.join(tmp.path, ".cortex");
     fs.mkdirSync(dotCortex);
+    initTestCortexRoot(dotCortex);
     const origHome = process.env.HOME;
     process.env.HOME = tmp.path;
     try {
@@ -190,7 +192,7 @@ describe("ensureCortexPath", () => {
       const result = await suppressOutput(() => Promise.resolve(ensureCortexPath()));
       expect(result).toBe(path.join(tmp.path, ".cortex"));
       expect(fs.existsSync(result)).toBe(true);
-      expect(fs.existsSync(path.join(result, "README.md"))).toBe(true);
+      expect(fs.existsSync(path.join(result, "cortex.root.yaml"))).toBe(true);
       expect(findCortexPath()).toBe(result);
     } finally {
       process.env.HOME = origHome;
@@ -502,9 +504,12 @@ describe("checkConsolidationNeeded", () => {
 // --- detectProject ---
 
 describe("detectProject", () => {
-  it("matches project name in cwd path segments", () => {
+  it("matches the longest sourcePath prefix", () => {
     const cortex = makeCortex();
-    makeProject(cortex, "myapp", { "summary.md": "# myapp\n" });
+    makeProject(cortex, "myapp", {
+      "summary.md": "# myapp\n",
+      "cortex.project.yaml": yaml.dump({ sourcePath: "/home/user/myapp" }),
+    });
 
     const result = detectProject(cortex, "/home/user/myapp/src");
     expect(result).toBe("myapp");
@@ -512,31 +517,36 @@ describe("detectProject", () => {
 
   it("returns null when no project matches", () => {
     const cortex = makeCortex();
-    makeProject(cortex, "myapp", { "summary.md": "# myapp\n" });
+    makeProject(cortex, "myapp", {
+      "summary.md": "# myapp\n",
+      "cortex.project.yaml": yaml.dump({ sourcePath: "/home/user/myapp" }),
+    });
 
     const result = detectProject(cortex, "/home/user/other-project/src");
     expect(result).toBeNull();
   });
 
-  it("short names (<=3 chars) only match the last path segment", () => {
+  it("prefers a more specific sourcePath over a parent sourcePath", () => {
     const cortex = makeCortex();
-    makeProject(cortex, "api", { "summary.md": "# api\n" });
+    makeProject(cortex, "web", {
+      "summary.md": "# web\n",
+      "cortex.project.yaml": yaml.dump({ sourcePath: "/home/user/projects/web" }),
+    });
+    makeProject(cortex, "web-api", {
+      "summary.md": "# web-api\n",
+      "cortex.project.yaml": yaml.dump({ sourcePath: "/home/user/projects/web/api" }),
+    });
 
-    // "api" appears as a middle segment, should NOT match
-    const noMatch = detectProject(cortex, "/home/user/api/controllers");
-    expect(noMatch).toBeNull();
-
-    // "api" is the last segment, should match
-    const match = detectProject(cortex, "/home/user/projects/api");
-    expect(match).toBe("api");
+    const match = detectProject(cortex, "/home/user/projects/web/api/src");
+    expect(match).toBe("web-api");
   });
 
-  it("longer names match any path segment", () => {
+  it("does not guess from path segments when sourcePath is missing", () => {
     const cortex = makeCortex();
     makeProject(cortex, "cortex", { "summary.md": "# cortex\n" });
 
     const result = detectProject(cortex, "/home/cortex/mcp/src");
-    expect(result).toBe("cortex");
+    expect(result).toBeNull();
   });
 });
 
@@ -2118,17 +2128,7 @@ describe("findCortexPathWithArg", () => {
   });
 
   it("falls back to ensureCortexPath when no arg given", async () => {
-    const tmp = makeTempDir("fakehome-");
-    const origHome = process.env.HOME;
-    process.env.HOME = tmp.path;
-    try {
-      const result = await suppressOutput(() => Promise.resolve(findCortexPathWithArg()));
-      expect(result).toBe(path.join(tmp.path, ".cortex"));
-      expect(fs.existsSync(result)).toBe(true);
-    } finally {
-      process.env.HOME = origHome;
-      tmp.cleanup();
-    }
+    expect(() => findCortexPathWithArg()).toThrow("cortex root not found");
   });
 });
 

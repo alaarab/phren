@@ -8,6 +8,7 @@ import {
   EXEC_TIMEOUT_MS,
   getCortexPath,
   homePath,
+  readRootManifest,
 } from "./shared.js";
 import {
   appendReviewQueue,
@@ -521,23 +522,38 @@ async function recoverPushConflict(cwd: string): Promise<{ ok: boolean; detail: 
 
 export async function handleHookSessionStart() {
   const startedAt = new Date().toISOString();
+  const cortexPath = getCortexPath();
+  const manifest = readRootManifest(cortexPath);
   const cwd = process.cwd();
-  const activeProject = detectProject(getCortexPath(), cwd, getRuntimeProfile());
-  if (!getHooksEnabledPreference(getCortexPath())) {
-    updateRuntimeHealth(getCortexPath(), { lastSessionStartAt: startedAt });
-    appendAuditLog(getCortexPath(), "hook_session_start", "status=disabled");
+  const activeProject = detectProject(cortexPath, cwd, getRuntimeProfile());
+  if (!getHooksEnabledPreference(cortexPath)) {
+    updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
+    appendAuditLog(cortexPath, "hook_session_start", "status=disabled");
     return;
   }
 
   const hookTool = process.env.CORTEX_HOOK_TOOL || "claude";
-  if (!isToolHookEnabled(getCortexPath(), hookTool)) {
-    appendAuditLog(getCortexPath(), "hook_session_start", `status=tool_disabled tool=${hookTool}`);
+  if (!isToolHookEnabled(cortexPath, hookTool)) {
+    appendAuditLog(cortexPath, "hook_session_start", `status=tool_disabled tool=${hookTool}`);
     return;
   }
 
-  if (!isProjectHookEnabled(getCortexPath(), activeProject, "SessionStart")) {
-    updateRuntimeHealth(getCortexPath(), { lastSessionStartAt: startedAt });
-    appendAuditLog(getCortexPath(), "hook_session_start", `status=project_disabled project=${activeProject}`);
+  if (!isProjectHookEnabled(cortexPath, activeProject, "SessionStart")) {
+    updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
+    appendAuditLog(cortexPath, "hook_session_start", `status=project_disabled project=${activeProject}`);
+    return;
+  }
+
+  if (manifest?.installMode === "project-local") {
+    updateRuntimeHealth(cortexPath, {
+      lastSessionStartAt: startedAt,
+      lastSync: {
+        lastPullAt: startedAt,
+        lastPullStatus: "ok",
+        lastPullDetail: "project-local mode does not manage git sync",
+      },
+    });
+    appendAuditLog(cortexPath, "hook_session_start", "status=skipped-local");
     return;
   }
 
@@ -637,13 +653,15 @@ export function extractConversationInsights(text: string): string[] {
 
 export function filterConversationInsightsForProactivity(
   insights: string[],
-  level = getProactivityLevelForFindings()
+  level = getProactivityLevelForFindings(getCortexPath())
 ): string[] {
   if (level === "high") return insights;
   return insights.filter((insight) => shouldAutoCaptureFindingsForLevel(level, insight));
 }
 
 export async function handleHookStop() {
+  const cortexPath = getCortexPath();
+  const manifest = readRootManifest(cortexPath);
   const now = new Date().toISOString();
   bootstrapCortexDotEnv(getCortexPath());
   const cwd = process.cwd();
@@ -676,14 +694,14 @@ export async function handleHookStop() {
   // Needed for auto-capture transcript_path parsing.
   const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
   const taskSessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
-  const taskLevel = getProactivityLevelForTask();
+  const taskLevel = getProactivityLevelForTask(cortexPath);
   if (taskSessionId && taskLevel !== "high") {
     debugLog(`hook-stop task proactivity=${taskLevel}`);
   }
 
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
   // Gated behind CORTEX_FEATURE_AUTO_CAPTURE=1.
-  const findingsLevel = getProactivityLevelForFindings();
+  const findingsLevel = getProactivityLevelForFindings(cortexPath);
   if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false) && findingsLevel !== "low") {
     try {
       let captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
@@ -753,10 +771,24 @@ export async function handleHookStop() {
   }
 
   // Wrap git operations in a file lock to prevent concurrent agents from fighting
-  const gitOpLockPath = path.join(getCortexPath(), ".runtime", "git-op");
+  const gitOpLockPath = path.join(cortexPath, ".runtime", "git-op");
   await withFileLock(gitOpLockPath, async () => {
 
-  const gitRepo = ensureLocalGitRepo(getCortexPath());
+  if (manifest?.installMode === "project-local") {
+    updateRuntimeHealth(cortexPath, {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "saved-local", detail: "project-local mode writes files only" },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "saved-local",
+        lastPushDetail: "project-local mode does not manage git sync",
+      },
+    });
+    appendAuditLog(cortexPath, "hook_stop", "status=skipped-local");
+    return;
+  }
+
+  const gitRepo = ensureLocalGitRepo(cortexPath);
   if (!gitRepo.ok) {
     finalizeTaskSession({
       cortexPath: getCortexPath(),
@@ -1249,7 +1281,7 @@ export async function handleHookTool() {
       }
     }
 
-    const findingsLevelForTool = getProactivityLevelForFindings();
+    const findingsLevelForTool = getProactivityLevelForFindings(getCortexPath());
     if (activeProject && findingsLevelForTool !== "low") {
       try {
         const candidates = filterToolFindingsForProactivity(
@@ -1309,7 +1341,7 @@ const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|
 
 export function filterToolFindingsForProactivity(
   candidates: Array<{ text: string; confidence: number; explicit?: boolean }>,
-  level = getProactivityLevelForFindings()
+  level = getProactivityLevelForFindings(getCortexPath())
 ): Array<{ text: string; confidence: number; explicit?: boolean }> {
   if (level === "high") return candidates;
   if (level === "low") return [];

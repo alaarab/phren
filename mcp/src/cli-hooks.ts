@@ -201,7 +201,7 @@ export async function handleHookPrompt() {
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 
-    if (isFeatureEnabled("CORTEX_FEATURE_AUTO_EXTRACT", true) && getProactivityLevelForFindings() !== "low" && sessionId && detectedProject && cwd) {
+    if (isFeatureEnabled("CORTEX_FEATURE_AUTO_EXTRACT", true) && getProactivityLevelForFindings(getCortexPath()) !== "low" && sessionId && detectedProject && cwd) {
       const marker = sessionMarker(getCortexPath(), `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
@@ -255,7 +255,7 @@ export async function handleHookPrompt() {
     }
 
     const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getCortexPath(), sessionId);
-    const taskLevel = getProactivityLevelForTask();
+    const taskLevel = getProactivityLevelForTask(getCortexPath());
     const taskLifecycle = handleTaskPromptLifecycle({
       cortexPath: getCortexPath(),
       prompt,

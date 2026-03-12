@@ -1,4 +1,4 @@
-import { getCortexPath } from "./shared.js";
+import { getCortexPath, readRootManifest } from "./shared.js";
 import { installPreferencesFile } from "./cortex-paths.js";
 import {
   getIndexPolicy,
@@ -116,9 +116,9 @@ function proactivityConfigSnapshot(cortexPath: string) {
       proactivityTask: prefs.proactivityTask ?? null,
     },
     effective: {
-      proactivity: getProactivityLevel(),
-      proactivityFindings: getProactivityLevelForFindings(),
-      proactivityTask: getProactivityLevelForTask(),
+      proactivity: getProactivityLevel(cortexPath),
+      proactivityFindings: getProactivityLevelForFindings(cortexPath),
+      proactivityTask: getProactivityLevelForTask(cortexPath),
     },
   };
 }
@@ -561,6 +561,11 @@ export async function handleAccessControl(args: string[]) {
 // ── Machines and profiles ────────────────────────────────────────────────────
 
 function handleConfigMachines() {
+  const manifest = readRootManifest(getCortexPath());
+  if (manifest?.installMode === "project-local") {
+    console.log("config machines is shared-mode only");
+    return;
+  }
   const result = listMachinesStore(getCortexPath());
   if (!result.ok) {
     console.log(result.error);
@@ -571,6 +576,11 @@ function handleConfigMachines() {
 }
 
 function handleConfigProfiles() {
+  const manifest = readRootManifest(getCortexPath());
+  if (manifest?.installMode === "project-local") {
+    console.log("config profiles is shared-mode only");
+    return;
+  }
   const result = listProfilesStore(getCortexPath());
   if (!result.ok) {
     console.log(result.error);

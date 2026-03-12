@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { parseMcpMode, runInit } from "./init.js";
 import { errorMessage } from "./utils.js";
-import { defaultCortexPath } from "./shared.js";
+import { defaultCortexPath, findCortexPath } from "./shared.js";
 import { addProjectFromPath } from "./core-project.js";
 import {
   PROJECT_OWNERSHIP_MODES,
@@ -18,7 +18,7 @@ Usage:
   cortex                                 Open interactive shell
   cortex quickstart                      Quick setup: init + project scaffold
   cortex add [path] [--ownership <mode>] Add current directory (or path) as a cortex project
-  cortex init [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--dry-run] [-y]
+  cortex init [--mode shared|project-local] [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--dry-run] [-y]
                                          Set up cortex and offer to add the current project directory
   cortex projects list                   List all tracked projects
   cortex projects configure <name> [--ownership <mode>] [--hooks on|off]
@@ -264,6 +264,11 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const profileIdx = initArgs.indexOf("--profile");
     const mcpIdx = initArgs.indexOf("--mcp");
     const templateIdx = initArgs.indexOf("--template");
+    const modeArg = getOptionValue(initArgs, "--mode");
+    if (modeArg && !["shared", "project-local"].includes(modeArg)) {
+      console.error(`Invalid --mode value "${modeArg}". Use "shared" or "project-local".`);
+      return finish(1);
+    }
     const ownershipMode = parseProjectOwnershipMode(getOptionValue(initArgs, "--project-ownership"));
     const taskMode = parseTaskModeFlag(getOptionValue(initArgs, "--task-mode"));
     const findingsProactivity = parseProactivityFlag(getOptionValue(initArgs, "--findings-proactivity"));
@@ -294,6 +299,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       return finish(1);
     }
     await runInit({
+      mode: modeArg as "shared" | "project-local" | undefined,
       machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
       profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
       mcp: mcpMode,
@@ -324,7 +330,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   if (argvCommand === "verify") {
     const { runPostInitVerify, getVerifyOutcomeNote } = await import("./init.js");
     const { getWorkflowPolicy } = await import("./shared-governance.js");
-    const cortexPath = defaultCortexPath();
+    const cortexPath = findCortexPath() || defaultCortexPath();
     const result = runPostInitVerify(cortexPath);
     console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
     console.log(`  tasks: ${getWorkflowPolicy(cortexPath).taskMode} mode`);

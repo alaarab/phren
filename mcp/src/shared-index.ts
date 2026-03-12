@@ -10,6 +10,7 @@ import {
   collectNativeMemoryFiles,
   runtimeFile,
   homeDir,
+  readRootManifest,
 } from "./shared.js";
 import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripTaskDoneSection } from "./shared-content.js";
@@ -17,8 +18,7 @@ import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
 import { extractAndLinkEntities, ensureGlobalEntitiesTable } from "./shared-entity-graph.js";
 import { bootstrapSqlJs } from "./shared-sqljs.js";
-import { findProjectDir } from "./project-locator.js";
-import { getProjectOwnershipMode, readProjectConfig } from "./project-config.js";
+import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "./project-config.js";
 import {
   buildSourceDocKey,
   queryDocRows,
@@ -235,7 +235,7 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
           files.push(path.join(dir, f));
         }
         if (ownership === "repo-managed") {
-          for (const entry of getRepoManagedInstructionEntries(projectName)) {
+          for (const entry of getRepoManagedInstructionEntries(cortexPath, projectName)) {
             files.push(entry.fullPath);
           }
         }
@@ -373,8 +373,8 @@ function getEntrySourceDocKey(entry: FileEntry, cortexPath: string): string {
   return buildSourceDocKey(entry.project, entry.fullPath, cortexPath, entry.filename);
 }
 
-function getRepoManagedInstructionEntries(project: string): FileEntry[] {
-  const repoDir = findProjectDir(project);
+function getRepoManagedInstructionEntries(cortexPath: string, project: string): FileEntry[] {
+  const repoDir = getProjectSourcePath(cortexPath, project);
   if (!repoDir) return [];
   const candidates = ["CLAUDE.md", path.join(".claude", "CLAUDE.md")];
   const entries: FileEntry[] = [];
@@ -424,7 +424,7 @@ function globAllFiles(cortexPath: string, profile?: string): { filePaths: string
       allAbsolutePaths.push(fullPath);
     }
     if (ownership === "repo-managed") {
-      for (const entry of getRepoManagedInstructionEntries(projectName)) {
+      for (const entry of getRepoManagedInstructionEntries(cortexPath, projectName)) {
         entries.push(entry);
         allAbsolutePaths.push(entry.fullPath);
       }
@@ -1205,17 +1205,22 @@ export function findFtsCacheForPath(cortexPath: string, profile?: string): { exi
 }
 
 export function detectProject(cortexPath: string, cwd: string, profile?: string): string | null {
+  const manifest = readRootManifest(cortexPath);
+  if (manifest?.installMode === "project-local") {
+    return manifest.primaryProject || null;
+  }
   const projectDirs = getProjectDirs(cortexPath, profile);
-  const cwdSegments = cwd.toLowerCase().split(/[/\\]/);
-
-  const lastSegment = cwdSegments[cwdSegments.length - 1];
+  const resolvedCwd = path.resolve(cwd);
+  let bestMatch: { project: string; length: number } | null = null;
   for (const dir of projectDirs) {
-    const projectName = path.basename(dir).toLowerCase();
-    if (projectName.length <= 3) {
-      if (lastSegment === projectName) return path.basename(dir);
-    } else {
-      if (cwdSegments.includes(projectName)) return path.basename(dir);
+    const projectName = path.basename(dir);
+    const sourcePath = getProjectSourcePath(cortexPath, projectName);
+    if (!sourcePath) continue;
+    const matches = resolvedCwd === sourcePath || resolvedCwd.startsWith(sourcePath + path.sep);
+    if (!matches) continue;
+    if (!bestMatch || sourcePath.length > bestMatch.length) {
+      bestMatch = { project: projectName, length: sourcePath.length };
     }
   }
-  return null;
+  return bestMatch?.project || null;
 }

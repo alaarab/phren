@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
-import { debugLog, defaultCortexPath, homePath } from "./cortex-paths.js";
+import { debugLog, findCortexPath } from "./cortex-paths.js";
 import { governanceInstallPreferencesFile, readInstallPreferences } from "./init-preferences.js";
 import { errorMessage } from "./utils.js";
 import { getWorkflowPolicy } from "./governance-policy.js";
@@ -27,39 +27,43 @@ interface GovernanceProactivityPreferences {
   proactivityTask?: ProactivityLevel;
 }
 
-function readGovernanceProactivityPreferences(): GovernanceProactivityPreferences {
-  const candidates = new Set<string>([
-    governanceInstallPreferencesFile(defaultCortexPath()),
-    governanceInstallPreferencesFile(homePath(".cortex")),
-  ]);
+function resolveProactivityCortexPath(explicitCortexPath?: string): string | null {
+  return explicitCortexPath ?? findCortexPath();
+}
 
-  for (const filePath of candidates) {
-    if (!fs.existsSync(filePath)) continue;
-    try {
-      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
-        proactivity?: string;
-        proactivityFindings?: string;
-        proactivityTask?: string;
-      };
-      return {
-        proactivity: parseProactivityLevel(parsed?.proactivity),
-        proactivityFindings: parseProactivityLevel(parsed?.proactivityFindings),
-        proactivityTask: parseProactivityLevel(parsed?.proactivityTask),
-      };
-    } catch (err: unknown) {
-      debugLog(`readGovernanceProactivityPreferences: failed to parse ${filePath}: ${errorMessage(err)}`);
-    }
+function readGovernanceProactivityPreferences(explicitCortexPath?: string): GovernanceProactivityPreferences {
+  const cortexPath = resolveProactivityCortexPath(explicitCortexPath);
+  if (!cortexPath) return {};
+
+  const filePath = governanceInstallPreferencesFile(cortexPath);
+  if (!fs.existsSync(filePath)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+      proactivity?: string;
+      proactivityFindings?: string;
+      proactivityTask?: string;
+    };
+    return {
+      proactivity: parseProactivityLevel(parsed?.proactivity),
+      proactivityFindings: parseProactivityLevel(parsed?.proactivityFindings),
+      proactivityTask: parseProactivityLevel(parsed?.proactivityTask),
+    };
+  } catch (err: unknown) {
+    debugLog(`readGovernanceProactivityPreferences: failed to parse ${filePath}: ${errorMessage(err)}`);
   }
 
   return {};
 }
 
-function getConfiguredProactivityDefault(): ProactivityLevel {
-  const governancePreference = readGovernanceProactivityPreferences().proactivity;
+function getConfiguredProactivityDefault(explicitCortexPath?: string): ProactivityLevel {
+  const governancePreference = readGovernanceProactivityPreferences(explicitCortexPath).proactivity;
   if (governancePreference) return governancePreference;
 
-  const runtimePreference = parseProactivityLevel(readInstallPreferences(defaultCortexPath()).proactivity);
-  if (runtimePreference) return runtimePreference;
+  const cortexPath = resolveProactivityCortexPath(explicitCortexPath);
+  if (cortexPath) {
+    const runtimePreference = parseProactivityLevel(readInstallPreferences(cortexPath).proactivity);
+    if (runtimePreference) return runtimePreference;
+  }
 
   return DEFAULT_PROACTIVITY_LEVEL;
 }
@@ -75,54 +79,54 @@ function sensitivityToProactivity(sensitivity: string | undefined): ProactivityL
   }
 }
 
-function getWorkflowPolicySensitivityLevel(): ProactivityLevel | undefined {
+function getWorkflowPolicySensitivityLevel(explicitCortexPath?: string): ProactivityLevel | undefined {
+  const cortexPath = resolveProactivityCortexPath(explicitCortexPath);
+  if (!cortexPath) return undefined;
   try {
-    const policy = getWorkflowPolicy(defaultCortexPath());
+    const policy = getWorkflowPolicy(cortexPath);
     return sensitivityToProactivity(policy.findingSensitivity);
   } catch {
     return undefined;
   }
 }
 
-function getConfiguredProactivityLevelForFindingsDefault(): ProactivityLevel {
-  const sharedEnvPreference = parseProactivityLevel(process.env.CORTEX_PROACTIVITY);
-  if (sharedEnvPreference) return sharedEnvPreference;
-
-  // Check workflow-policy.json findingSensitivity FIRST
-  const sensitivityLevel = getWorkflowPolicySensitivityLevel();
-  if (sensitivityLevel) return sensitivityLevel;
-
-  return readGovernanceProactivityPreferences().proactivityFindings ?? getConfiguredProactivityDefault();
+function getConfiguredProactivityLevelForFindingsDefault(explicitCortexPath?: string): ProactivityLevel {
+  const prefs = readGovernanceProactivityPreferences(explicitCortexPath);
+  return prefs.proactivityFindings
+    ?? prefs.proactivity
+    ?? getWorkflowPolicySensitivityLevel(explicitCortexPath)
+    ?? getConfiguredProactivityDefault(explicitCortexPath);
 }
 
-function getConfiguredProactivityLevelForTaskDefault(): ProactivityLevel {
-  const sharedEnvPreference = parseProactivityLevel(process.env.CORTEX_PROACTIVITY);
-  if (sharedEnvPreference) return sharedEnvPreference;
-
-  // Check workflow-policy.json findingSensitivity FIRST
-  const sensitivityLevel = getWorkflowPolicySensitivityLevel();
-  if (sensitivityLevel) return sensitivityLevel;
-
-  return readGovernanceProactivityPreferences().proactivityTask ?? getConfiguredProactivityDefault();
+function getConfiguredProactivityLevelForTaskDefault(explicitCortexPath?: string): ProactivityLevel {
+  const prefs = readGovernanceProactivityPreferences(explicitCortexPath);
+  return prefs.proactivityTask
+    ?? prefs.proactivity
+    ?? getWorkflowPolicySensitivityLevel(explicitCortexPath)
+    ?? getConfiguredProactivityDefault(explicitCortexPath);
 }
 
 function resolveProactivityLevel(raw: string | undefined, fallback: ProactivityLevel): ProactivityLevel {
   return parseProactivityLevel(raw) ?? fallback;
 }
 
-export function getProactivityLevel(): ProactivityLevel {
+export function getProactivityLevel(explicitCortexPath?: string): ProactivityLevel {
   bootstrapCortexDotEnv();
-  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY, getConfiguredProactivityDefault());
+  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY, getConfiguredProactivityDefault(explicitCortexPath));
 }
 
-export function getProactivityLevelForFindings(): ProactivityLevel {
+export function getProactivityLevelForFindings(explicitCortexPath?: string): ProactivityLevel {
   bootstrapCortexDotEnv();
-  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY_FINDINGS, getConfiguredProactivityLevelForFindingsDefault());
+  const findingsPreference = parseProactivityLevel(process.env.CORTEX_PROACTIVITY_FINDINGS);
+  if (findingsPreference) return findingsPreference;
+  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY, getConfiguredProactivityLevelForFindingsDefault(explicitCortexPath));
 }
 
-export function getProactivityLevelForTask(): ProactivityLevel {
+export function getProactivityLevelForTask(explicitCortexPath?: string): ProactivityLevel {
   bootstrapCortexDotEnv();
-  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY_TASKS, getConfiguredProactivityLevelForTaskDefault());
+  const taskPreference = parseProactivityLevel(process.env.CORTEX_PROACTIVITY_TASKS);
+  if (taskPreference) return taskPreference;
+  return resolveProactivityLevel(process.env.CORTEX_PROACTIVITY, getConfiguredProactivityLevelForTaskDefault(explicitCortexPath));
 }
 
 export function hasExplicitFindingSignal(...texts: Array<string | undefined | null>): boolean {

@@ -9,6 +9,7 @@ import {
   type CortexResult,
   forwardErr,
   getProjectDirs,
+  readRootManifest,
 } from "./shared.js";
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { withFileLock as withFileLockRaw } from "./shared-governance.js";
@@ -40,6 +41,11 @@ export interface ProjectCard {
 }
 
 export function resolveActiveProfile(cortexPath: string, requestedProfile?: string): CortexResult<string | undefined> {
+  const manifest = readRootManifest(cortexPath);
+  if (manifest?.installMode === "project-local") {
+    return cortexOk(undefined);
+  }
+
   if (requestedProfile) {
     const profiles = listProfiles(cortexPath);
     if (!profiles.ok) return forwardErr(profiles);
@@ -51,7 +57,7 @@ export function resolveActiveProfile(cortexPath: string, requestedProfile?: stri
   const machines = listMachines(cortexPath);
   if (machines.ok) {
     const profiles = listProfiles(cortexPath);
-    if (!profiles.ok) return forwardErr(profiles);
+    if (!profiles.ok) return cortexOk(undefined);
     const candidates = [getMachineName(), defaultMachineName()].filter((value, index, values) => value && values.indexOf(value) === index);
     for (const machineName of candidates) {
       const mapped = machines.data[machineName];
@@ -62,7 +68,7 @@ export function resolveActiveProfile(cortexPath: string, requestedProfile?: stri
   }
 
   const profiles = listProfiles(cortexPath);
-  if (!profiles.ok) return forwardErr(profiles);
+  if (!profiles.ok) return cortexOk(undefined);
   return cortexOk(profiles.data[0]?.name);
 }
 

@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir } from "../test-helpers.js";
+import { initTestCortexRoot, makeTempDir } from "../test-helpers.js";
 
 const RECOVERY_TEST_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
 
@@ -50,6 +50,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["clone", remote, repoB], { stdio: "ignore" });
     configureRepo(repoA);
     configureRepo(repoB);
+    initTestCortexRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
     fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# task\n\n## Active\n\n- Base task\n");
@@ -90,6 +91,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["clone", remote, repo], { stdio: "ignore" });
     configureRepo(repo);
     fs.mkdirSync(path.join(repo, ".governance"), { recursive: true });
+    initTestCortexRoot(repo);
 
     fs.mkdirSync(path.join(repo, "demo"), { recursive: true });
     fs.writeFileSync(path.join(repo, "demo", "summary.md"), "# summary\n\nbase\n");
@@ -123,6 +125,7 @@ describe("handleBackgroundSync recovery", () => {
     configureRepo(repoB);
     fs.mkdirSync(path.join(repoA, ".governance"), { recursive: true });
     fs.mkdirSync(path.join(repoB, ".governance"), { recursive: true });
+    initTestCortexRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
     fs.writeFileSync(path.join(repoA, "demo", "summary.md"), "# summary\n\nshared line\n");
@@ -164,6 +167,7 @@ describe("handleBackgroundSync recovery", () => {
     configureRepo(repoB);
     fs.mkdirSync(path.join(repoA, ".governance"), { recursive: true });
     fs.mkdirSync(path.join(repoB, ".governance"), { recursive: true });
+    initTestCortexRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
     fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# demo task\n\n## Active\n\n- [ ] Base task\n\n## Queue\n\n## Done\n");

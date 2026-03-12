@@ -36,15 +36,25 @@ cortex init --dry-run
 | First time | `npm install -g @alaarab/cortex && cortex init` |
 | Add a project | Open a session there and let the agent ask, or run `cortex add` |
 | New machine | `cortex init` and paste your cortex repo URL |
+| Repo-local install | `cortex init --mode project-local` inside the repo |
 
-This one command bootstraps Cortex locally. It:
-- Creates `~/.cortex` with starter templates
-- Registers MCP for detected tools (Claude Code, VS Code, Copilot CLI, Cursor, Codex)
-- Sets up hooks for automatic context injection and auto-save
-- Registers your machine
+`cortex init` now supports two install modes:
+
+- `shared` (default): personal cross-machine memory rooted at `~/.cortex`
+- `project-local`: one repo-owned install rooted at `<repo>/.cortex`
+
+What init does depends on the mode:
+
+- `shared`: creates `~/.cortex`, registers supported MCP targets, sets up Claude hooks, registers the current machine/profile, and offers to add the current repo
+- `project-local`: creates `<repo>/.cortex`, writes a root manifest, configures VS Code workspace MCP in `.vscode/mcp.json`, and keeps all state inside the repo
+
+Common init behavior:
+
+- Writes a required `cortex.root.yaml` manifest
 - Offers to add the current repo when you run it inside a git project or a folder with `CLAUDE.md`
 - Asks who should own repo-facing instruction files: `cortex-managed`, `detached`, or `repo-managed`
 - Asks how task handling should work: `off`, `manual`, `suggest`, or `auto`
+- Supports `cortex init --dry-run` for a no-write preview
 
 After init, you'll see something like:
 
@@ -63,14 +73,15 @@ After init, you'll see something like:
 
 Init detects your tools and registers them. A finding saved by Claude Code shows up in Codex next session, and the other way around.
 
-| Agent | Context injection | Auto-save | MCP tools | Instruction files |
-|-------|:-----------------:|:---------:|:---------:|:-----------------:|
-| Claude Code | yes | yes | yes | `CLAUDE.md` |
-| GitHub Copilot CLI | yes | yes | yes | `copilot-instructions.md` |
-| Cursor | yes | yes | yes | via hooks |
-| OpenAI Codex | yes | yes | yes | `AGENTS.md` |
+| Agent | Shared mode | Project-local mode |
+|-------|-------------|--------------------|
+| Claude Code | MCP + hooks | not supported |
+| VS Code Copilot | user MCP | workspace MCP |
+| GitHub Copilot CLI | user MCP | not supported |
+| Cursor | user MCP | not supported |
+| OpenAI Codex | user MCP/TOML | not supported |
 
-MCP or hooks-only, either works. Same knowledge base either way.
+Automatic prompt injection and lifecycle hooks are still Claude-only. Other editors use MCP tools without hook-driven context injection.
 
 ---
 
@@ -137,7 +148,7 @@ Two more things run in the background:
 <details>
 <summary><strong>Memory across your machines</strong></summary>
 
-Your cortex repo carries your project memory. Push it to a private remote, clone it anywhere you work.
+Shared mode uses one cortex repo that carries your project memory. Push it to a private remote, clone it anywhere you work.
 
 ```bash
 cd ~/.cortex
@@ -188,6 +199,34 @@ cortex init --machine ci-runner --profile work
 </details>
 
 <details>
+<summary><strong>Project-local mode</strong></summary>
+
+Project-local mode is the repo-owned install:
+
+```bash
+cd /path/to/repo
+cortex init --mode project-local
+```
+
+That creates:
+
+- `<repo>/.cortex/cortex.root.yaml`
+- `<repo>/.cortex/<project>/...`
+- `<repo>/.vscode/mcp.json` entry for the workspace server
+
+Design constraints:
+
+- one Cortex root per repo
+- one primary project per project-local root
+- no home-directory writes by default
+- no global hooks
+- VS Code workspace MCP is the supported editor integration in this mode
+
+This mode is for repo-owned memory, not cross-machine personal memory. If you want profiles, machine mappings, shared hooks, and the full personal-memory workflow, use shared mode.
+
+</details>
+
+<details>
 <summary><strong>Shared project memory</strong></summary>
 
 When more than one tool or session touches the same project, they all read and write the same store. A Codex session hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context after the next successful sync cycle. No coordination service or custom broker layer, just a shared git repo.
@@ -213,6 +252,27 @@ Because it's all markdown in git, you have a full record of what your agents lea
 <details>
 <summary><strong>Init options and templates</strong></summary>
 
+### Install modes
+
+Shared mode is the default:
+
+```bash
+cortex init
+```
+
+Project-local mode is explicit:
+
+```bash
+cortex init --mode project-local
+```
+
+In project-local mode:
+
+- `cortex mcp-mode on|off` manages `.vscode/mcp.json`
+- `cortex hooks-mode` is unsupported
+- `cortex config machines` and `cortex config profiles` are shared-mode only
+- `cortex uninstall` removes `<repo>/.cortex` and the workspace MCP entry
+
 Hooks-only mode (no MCP tools):
 
 ```bash
@@ -222,10 +282,10 @@ cortex init --mcp off
 Toggle anytime:
 
 ```bash
-cortex mcp-mode on       # recommended: MCP + hooks
-cortex mcp-mode off      # hooks-only fallback
-cortex hooks-mode off    # disable hook execution temporarily
-cortex hooks-mode on     # re-enable hooks
+cortex mcp-mode on       # shared: user MCP, project-local: VS Code workspace MCP
+cortex mcp-mode off      # disable MCP for the current install mode
+cortex hooks-mode off    # shared mode only
+cortex hooks-mode on     # shared mode only
 ```
 
 ### Templates
@@ -445,15 +505,15 @@ cortex doctor [--fix]                    # health checks + optional self-heal
 cortex verify                            # check init completed correctly
 cortex web-ui [--port=3499]              # lightweight web UI in the browser
 cortex update [--refresh-starter]        # update package; optionally refresh starter globals too
-cortex uninstall                         # remove cortex config and hooks
+cortex uninstall                         # remove cortex config, integrations, and installed data
 
 cortex add [path] [--ownership <mode>]     # add current directory (or path) as a project
 cortex projects list                        # list all projects
 cortex projects configure <name> --ownership=<mode>  # change a project's ownership mode
 cortex projects remove <name>               # remove a project (confirmation required)
 
-cortex mcp-mode [on|off|status]          # toggle MCP integration
-cortex hooks-mode [on|off|status]        # toggle hook execution
+cortex mcp-mode [on|off|status]          # shared: user MCP, project-local: VS Code workspace MCP
+cortex hooks-mode [on|off|status]        # shared-mode only
 cortex config project-ownership [mode]   # default ownership for future project enrollments
 cortex config workflow set --taskMode=manual  # set task handling mode
 cortex config proactivity.findings [level]    # findings auto-capture aggressiveness
@@ -531,11 +591,11 @@ This repo has two roles: it's the source code for the `cortex` npm package, and 
 
 **Cortex not injecting context into prompts**
 
-Run `cortex status` and check the Hooks line. If it says "off", run `cortex hooks-mode on`. If hooks are on but nothing's appearing, run `cortex doctor` to check the prompt hook config.
+Run `cortex status` and check the Hooks line. If it says "off", run `cortex hooks-mode on`. If hooks are on but nothing's appearing, run `cortex doctor` to check the prompt hook config. In project-local mode, hooks are intentionally unsupported.
 
 **MCP tools not connecting**
 
-Run `cortex status` and check the MCP line. If it's off, run `cortex mcp-mode on`. If cfg shows "missing", run `cortex init`. For VS Code or Cursor, check that MCP config landed in the right settings file.
+Run `cortex status` and check the MCP line. If it's off, run `cortex mcp-mode on`. If cfg shows "missing", run `cortex init`. In shared mode, MCP lands in user config files. In project-local mode, VS Code MCP lands in `.vscode/mcp.json`.
 
 **"I saved a finding but can't find it"**
 
