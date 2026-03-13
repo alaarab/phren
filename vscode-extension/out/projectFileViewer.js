@@ -36,7 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.showProjectFile = showProjectFile;
 const vscode = __importStar(require("vscode"));
 async function showProjectFile(client, projectName, fileName) {
-    const panel = vscode.window.createWebviewPanel("cortex.projectFile", `${projectName}/${fileName}`, vscode.ViewColumn.Beside, {});
+    const panel = vscode.window.createWebviewPanel("cortex.projectFile", `${projectName}/${fileName}`, vscode.ViewColumn.One, {});
     try {
         const raw = await client.getMemoryDetail(`mem:${projectName}/${fileName}`);
         const data = asRecord(raw);

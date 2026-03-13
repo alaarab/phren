@@ -452,6 +452,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
       );
       treeDataProvider.refresh();
+      // Re-poll health immediately so the status bar updates
+      await statusBar.initialize();
       await vscode.window.showInformationMessage("Cortex: Sync complete.");
     } catch (error) {
       await vscode.window.showErrorMessage(`Cortex sync failed: ${toErrorMessage(error)}`);
@@ -716,7 +718,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         fs.writeFileSync(machinesPath, "# machine-name: profile-name\n", "utf8");
       }
       const document = await vscode.workspace.openTextDocument(vscode.Uri.file(machinesPath));
-      await vscode.window.showTextDocument(document, { preview: false });
+      await vscode.window.showTextDocument(document, { preview: false, viewColumn: vscode.ViewColumn.One });
     } catch (error) {
       await vscode.window.showErrorMessage(`Failed to open machines.yaml: ${toErrorMessage(error)}`);
     }
@@ -775,7 +777,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           label: "Open machines.yaml",
           run: async () => {
             const document = await vscode.workspace.openTextDocument(vscode.Uri.file(machinesPath));
-            await vscode.window.showTextDocument(document, { preview: false });
+            await vscode.window.showTextDocument(document, { preview: false, viewColumn: vscode.ViewColumn.One });
           },
         },
       );

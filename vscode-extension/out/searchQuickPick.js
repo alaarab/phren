@@ -131,7 +131,7 @@ async function showSearchQuickPick(client) {
         const panelTitle = resultItem.result.filename
             ? `${resultItem.result.project}/${resultItem.result.filename}`
             : resultItem.label;
-        const panel = vscode.window.createWebviewPanel("cortex.searchResult", panelTitle, vscode.ViewColumn.Beside, {});
+        const panel = vscode.window.createWebviewPanel("cortex.searchResult", panelTitle, vscode.ViewColumn.One, {});
         panel.webview.html = renderSearchResultHtml(panelTitle, resultItem.result.project, resultItem.fullContent);
         quickPick.hide();
     });
