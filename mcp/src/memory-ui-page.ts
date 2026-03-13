@@ -1596,12 +1596,7 @@ ${SETTINGS_TAB_UI_STYLES}
         <div class="graph-filter" id="graph-project-filter"></div>
         <div class="graph-filter" id="graph-limit-row" style="align-items:center;gap:8px"></div>
       </div>
-      <div class="graph-legend">
-        <span class="graph-legend-item"><span class="graph-legend-dot" style="background:#7c3aed"></span> Project</span>
-        <span class="graph-legend-item"><span class="graph-legend-dot" style="background:#3b82f6"></span> Decision</span>
-        <span class="graph-legend-item"><span class="graph-legend-dot" style="background:#ef4444"></span> Pitfall</span>
-        <span class="graph-legend-item"><span class="graph-legend-dot" style="background:#10b981"></span> Pattern</span>
-      </div>
+      <!-- legend removed: colors explained in Filters dropdown -->
     </div>
     <div id="graph-detail-panel" class="card" style="margin-top:16px">
       <div class="card-header">
