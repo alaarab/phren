@@ -5,7 +5,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
 import { configureAllHooks } from "./hooks.js";
 import { getMachineName, machineFilePath, persistMachineName } from "./machine-identity.js";
@@ -244,49 +243,12 @@ function normalizedBootstrapProjectName(projectPath: string): string {
   return path.basename(projectPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 }
 
-function updateStarterProfiles(cortexPath: string, mutate: (projects: string[]) => string[]): void {
-  const profilesDir = path.join(cortexPath, "profiles");
-  if (!fs.existsSync(profilesDir)) return;
-  for (const pf of fs.readdirSync(profilesDir)) {
-    if (!pf.endsWith(".yaml")) continue;
-    const pfPath = path.join(profilesDir, pf);
-    try {
-      const parsed = yaml.load(fs.readFileSync(pfPath, "utf8"), { schema: yaml.CORE_SCHEMA });
-      if (!isRecord(parsed) || !Array.isArray(parsed.projects)) continue;
-      const projects = parsed.projects.map((project) => String(project));
-      const nextProjects = mutate(projects);
-      if (nextProjects.join("\n") === projects.join("\n")) continue;
-      const tmpPath = `${pfPath}.tmp-${crypto.randomUUID()}`;
-      fs.writeFileSync(tmpPath, yaml.dump({ ...parsed, projects: nextProjects }, { lineWidth: 1000 }));
-      fs.renameSync(tmpPath, pfPath);
-    } catch (err: unknown) {
-      debugLog(`updateStarterProfiles failed for ${pfPath}: ${errorMessage(err)}`);
-    }
-  }
-}
-
 function getPendingBootstrapTarget(cortexPath: string, opts: InitOptions): { path: string; mode: "explicit" | "detected" } | null {
   const cwdProject = detectProjectDir(process.cwd(), cortexPath);
   if (!cwdProject) return null;
   const projectName = normalizedBootstrapProjectName(cwdProject);
   if (isProjectTracked(cortexPath, projectName)) return null;
   return { path: cwdProject, mode: "detected" };
-}
-
-function parseTaskMode(raw: string | undefined | null): "off" | "manual" | "suggest" | "auto" | undefined {
-  if (!raw) return undefined;
-  const normalized = raw.trim().toLowerCase();
-  return ["off", "manual", "suggest", "auto"].includes(normalized)
-    ? normalized as "off" | "manual" | "suggest" | "auto"
-    : undefined;
-}
-
-function parseProactivityAnswer(raw: string | undefined | null, fallback: ProactivityLevel): ProactivityLevel {
-  const normalized = raw?.trim().toLowerCase();
-  if (normalized && PROACTIVITY_LEVELS.includes(normalized as ProactivityLevel)) {
-    return normalized as ProactivityLevel;
-  }
-  return fallback;
 }
 
 function parseLowConfidenceThreshold(raw: string | undefined | null, fallback: number): number {

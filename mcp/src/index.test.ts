@@ -679,17 +679,22 @@ describe("debugLog", () => {
   let tmpCleanup: () => void;
   const origEnv = process.env.CORTEX_DEBUG;
   const origHome = process.env.HOME;
+  const origCortexPath = process.env.CORTEX_PATH;
 
   beforeEach(() => {
     ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-debug-test-"));
     process.env.HOME = tmpDir;
-    fs.mkdirSync(path.join(tmpDir, ".cortex"), { recursive: true });
-    initTestCortexRoot(path.join(tmpDir, ".cortex"));
+    const cortexDir = path.join(tmpDir, ".cortex");
+    fs.mkdirSync(cortexDir, { recursive: true });
+    initTestCortexRoot(cortexDir);
+    process.env.CORTEX_PATH = cortexDir;
   });
 
   afterEach(() => {
     process.env.CORTEX_DEBUG = origEnv;
     process.env.HOME = origHome;
+    if (origCortexPath === undefined) delete process.env.CORTEX_PATH;
+    else process.env.CORTEX_PATH = origCortexPath;
     tmpCleanup();
   });
 

@@ -46,7 +46,7 @@ describe("proactivity config", () => {
 
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
-    delete process.env.CORTEX_PATH;
+    process.env.CORTEX_PATH = path.join(homeDir, ".cortex");
     delete process.env.CORTEX_PROACTIVITY;
     delete process.env.CORTEX_PROACTIVITY_FINDINGS;
     delete process.env.CORTEX_PROACTIVITY_TASKS;

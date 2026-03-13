@@ -158,10 +158,13 @@ describe("findCortexPath", () => {
   it("returns null when no cortex directory exists and no env var", () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
+    const origCwd = process.cwd();
     process.env.HOME = tmp.path;
+    process.chdir(tmp.path);
     try {
       expect(findCortexPath()).toBeNull();
     } finally {
+      process.chdir(origCwd);
       process.env.HOME = origHome;
       tmp.cleanup();
     }
@@ -173,10 +176,13 @@ describe("findCortexPath", () => {
     fs.mkdirSync(dotCortex);
     initTestCortexRoot(dotCortex);
     const origHome = process.env.HOME;
+    const origCwd = process.cwd();
     process.env.HOME = tmp.path;
+    process.chdir(tmp.path);
     try {
       expect(findCortexPath()).toBe(dotCortex);
     } finally {
+      process.chdir(origCwd);
       process.env.HOME = origHome;
       tmp.cleanup();
     }
@@ -210,7 +216,9 @@ describe("ensureCortexPath", () => {
   it("creates ~/.cortex if nothing exists", async () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
+    const origCwd = process.cwd();
     process.env.HOME = tmp.path;
+    process.chdir(tmp.path);
     try {
       const result = await suppressOutput(() => Promise.resolve(ensureCortexPath()));
       expect(result).toBe(path.join(tmp.path, ".cortex"));
@@ -218,6 +226,7 @@ describe("ensureCortexPath", () => {
       expect(fs.existsSync(path.join(result, "cortex.root.yaml"))).toBe(true);
       expect(findCortexPath()).toBe(result);
     } finally {
+      process.chdir(origCwd);
       process.env.HOME = origHome;
       tmp.cleanup();
     }
@@ -2169,7 +2178,18 @@ describe("findCortexPathWithArg", () => {
   });
 
   it("falls back to ensureCortexPath when no arg given", async () => {
-    expect(() => findCortexPathWithArg()).toThrow("cortex root not found");
+    const tmp = makeTempDir("fakehome-no-cortex-");
+    const origHome = process.env.HOME;
+    const origCwd = process.cwd();
+    process.env.HOME = tmp.path;
+    process.chdir(tmp.path);
+    try {
+      expect(() => findCortexPathWithArg()).toThrow("cortex root not found");
+    } finally {
+      process.chdir(origCwd);
+      process.env.HOME = origHome;
+      tmp.cleanup();
+    }
   });
 });
 

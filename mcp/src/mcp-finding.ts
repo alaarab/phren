@@ -17,7 +17,6 @@ import {
 import {
   addFindingToFile,
   addFindingsToFile,
-  checkSemanticDedup,
   checkSemanticConflicts,
   autoMergeConflicts,
 } from "./shared-content.js";

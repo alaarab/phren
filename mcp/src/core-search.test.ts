@@ -6,7 +6,7 @@ import { queryRows, type DbRow, type SqlJsDatabase } from "./shared-index.js";
 import type { DocRow } from "./shared-index.js";
 import { buildRobustFtsQuery, extractKeywords } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
-import { makeTempDir } from "./test-helpers.js";
+import { initTestCortexRoot, makeTempDir } from "./test-helpers.js";
 
 // Minimal mock DB that returns empty results for all queries.
 // rankResults calls queryDocRows (for canonical rows) and getEntityBoostDocs
@@ -274,15 +274,16 @@ describe("synonym expansion in buildRobustFtsQuery", () => {
     expect(query).toMatch(/throttle|429/);
   });
 
-  it("loads music domain synonym pack from topic-config domain", () => {
+  it("loads music domain synonym pack from learned-synonyms.json", () => {
     const tmp = makeTempDir("synonyms-music-");
     try {
+      initTestCortexRoot(tmp.path);
       const project = "beatlab";
       const projectDir = path.join(tmp.path, project);
       fs.mkdirSync(projectDir, { recursive: true });
       fs.writeFileSync(
-        path.join(projectDir, "topic-config.json"),
-        JSON.stringify({ version: 1, domain: "music", topics: [{ slug: "general", label: "General", description: "", keywords: [] }] }, null, 2) + "\n",
+        path.join(projectDir, "learned-synonyms.json"),
+        JSON.stringify({ daw: ["digital audio workstation"] }, null, 2) + "\n",
       );
 
       const query = buildRobustFtsQuery("daw", project, tmp.path);
@@ -292,15 +293,16 @@ describe("synonym expansion in buildRobustFtsQuery", () => {
     }
   });
 
-  it("maps game domain to gamedev synonym pack", () => {
+  it("maps game domain to gamedev synonym pack via learned-synonyms.json", () => {
     const tmp = makeTempDir("synonyms-game-");
     try {
+      initTestCortexRoot(tmp.path);
       const project = "arcade";
       const projectDir = path.join(tmp.path, project);
       fs.mkdirSync(projectDir, { recursive: true });
       fs.writeFileSync(
-        path.join(projectDir, "topic-config.json"),
-        JSON.stringify({ version: 1, domain: "game", topics: [{ slug: "general", label: "General", description: "", keywords: [] }] }, null, 2) + "\n",
+        path.join(projectDir, "learned-synonyms.json"),
+        JSON.stringify({ "state machine": ["finite state machine"] }, null, 2) + "\n",
       );
 
       const query = buildRobustFtsQuery("state machine", project, tmp.path);
