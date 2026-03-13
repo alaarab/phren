@@ -311,9 +311,13 @@ describe("finding sensitivity — init writes policy", () => {
   });
 
   it("cortex init --finding-sensitivity conservative writes conservative to policy", () => {
+    // Use a fake HOME so configureClaude writes hooks to a sandboxed settings.json
+    // instead of the real ~/.claude/settings.json (which would leak the temp CORTEX_PATH).
+    const fakeHome = path.join(tmp.path, "home");
+    fs.mkdirSync(fakeHome, { recursive: true });
     const { exitCode } = runCli(
       ["init", "--yes", "--finding-sensitivity", "conservative", "--mcp", "off", "--hooks-only"],
-      { CORTEX_PATH: tmp.path, CORTEX_ACTOR: "test" },
+      { CORTEX_PATH: tmp.path, CORTEX_ACTOR: "test", HOME: fakeHome, USERPROFILE: fakeHome },
     );
     // init may exit 0 or non-zero depending on environment; just check the file if written
     if (exitCode === 0) {
