@@ -8,7 +8,7 @@ type SessionBucket = "findings" | "tasks";
 
 interface RootSectionNode {
   kind: "rootSection";
-  section: "projects" | "review" | "skills" | "hooks" | "graph" | "manage";
+  section: "review" | "skills" | "hooks" | "graph" | "manage";
   description?: string;
 }
 
@@ -291,9 +291,6 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
 
     if (element.kind === "rootSection") {
-      if (element.section === "projects") {
-        return this.getProjectNodes();
-      }
       if (element.section === "review") {
         return this.getAggregateQueueSectionGroups();
       }
@@ -394,8 +391,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
     switch (element.kind) {
       case "rootSection": {
-        const labels: Record<string, string> = { projects: "Projects", review: "Review", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
-        const icons: Record<string, string> = { projects: "folder-library", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
+        const labels: Record<string, string> = { review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
+        const icons: Record<string, string> = { review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
         const label = labels[element.section] ?? element.section;
 
         if (element.section === "graph") {
@@ -624,16 +621,16 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         return item;
       }
       case "projectGroup": {
-        const groupLabels: Record<string, string> = { device: "This Device", other: "Other" };
+        const groupLabels: Record<string, string> = { device: "This Device", other: "Other Machines" };
         const groupIcons: Record<string, string> = { device: "vm", other: "globe" };
-        const item = new vscode.TreeItem(groupLabels[element.group] ?? element.group, vscode.TreeItemCollapsibleState.Expanded);
+        const item = new vscode.TreeItem(groupLabels[element.group] ?? element.group, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon(groupIcons[element.group] ?? "folder");
         item.id = `cortex.projectGroup.${element.group}`;
         return item;
       }
       case "manageItem": {
-        const manageIcons: Record<string, string> = { health: "heart", profile: "account", machine: "vm", lastSync: "cloud" };
+        const manageIcons: Record<string, string> = { health: "heart", profile: "vm", lastSync: "cloud" };
         const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
         item.description = element.value;
         item.iconPath = themeIcon(manageIcons[element.item] ?? "info");
@@ -643,10 +640,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
           item.tooltip = "Click to run Cortex Doctor";
         } else if (element.item === "profile") {
           item.command = { command: "cortex.switchProfile", title: "Configure Profile" };
-          item.tooltip = "Click to update this machine's profile mapping in machines.yaml";
-        } else if (element.item === "machine") {
-          item.command = { command: "cortex.configureMachine", title: "Configure Machine" };
-          item.tooltip = "Click to edit the machine alias stored in ~/.cortex/.machine-id";
+          item.tooltip = "Click to change this machine's profile mapping";
         } else if (element.item === "lastSync") {
           item.command = { command: "cortex.sync", title: "Sync Now" };
           item.tooltip = "Click to sync Cortex";
@@ -665,14 +659,39 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
   // --- Data fetchers ---
 
   private async getRootSections(): Promise<CortexNode[]> {
-    return [
-      { kind: "rootSection", section: "projects" },
-      { kind: "rootSection", section: "review" },
-      { kind: "rootSection", section: "skills" },
-      { kind: "rootSection", section: "hooks", description: await this.getHookSectionDescription() },
-      { kind: "rootSection", section: "graph" },
-      { kind: "rootSection", section: "manage" },
-    ];
+    // Device projects shown directly at root (no wrapper group).
+    // "Other" projects, review, skills, hooks pushed below.
+    const projects = await this.fetchProjects().catch(() => [] as ProjectSummary[]);
+    const ctx = this.readDeviceContext();
+    const deviceProjects = ctx.activeProjects.size > 0
+      ? projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()))
+      : projects;
+    const otherProjects = ctx.activeProjects.size > 0
+      ? projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()))
+      : [];
+
+    const nodes: CortexNode[] = [];
+
+    // Device projects first — flat, no wrapper
+    for (const p of deviceProjects) {
+      nodes.push({ kind: "project", projectName: p.name, brief: p.brief });
+    }
+    if (deviceProjects.length === 0 && projects.length === 0) {
+      nodes.push({ kind: "message", label: "No projects found", description: "Run cortex init to get started.", iconId: "info" });
+    }
+
+    // Other projects as a collapsed group
+    if (otherProjects.length > 0) {
+      nodes.push({ kind: "projectGroup", group: "other", count: otherProjects.length });
+    }
+
+    // Functional sections
+    nodes.push({ kind: "rootSection", section: "review" });
+    nodes.push({ kind: "rootSection", section: "skills" });
+    nodes.push({ kind: "rootSection", section: "hooks", description: await this.getHookSectionDescription() });
+    nodes.push({ kind: "rootSection", section: "graph" });
+    nodes.push({ kind: "rootSection", section: "manage" });
+    return nodes;
   }
 
   private async getHookSectionDescription(): Promise<string | undefined> {
@@ -1189,10 +1208,9 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
   private getManageNodes(): CortexNode[] {
     const ctx = this.readDeviceContext();
     const nodes: CortexNode[] = [];
-    nodes.push({ kind: "manageItem", item: "health", label: "Health", value: this.lastHealthOk === true ? "ok" : this.lastHealthOk === false ? "error" : "unknown" });
-    nodes.push({ kind: "manageItem", item: "profile", label: "Profile", value: ctx.profile || "(none)" });
-    nodes.push({ kind: "manageItem", item: "machine", label: "Machine", value: ctx.machine });
-    nodes.push({ kind: "manageItem", item: "lastSync", label: "Last Sync", value: ctx.lastSync || "(never)" });
+    nodes.push({ kind: "manageItem", item: "health", label: "Health", value: this.lastHealthOk === true ? "ok" : this.lastHealthOk === false ? "issues" : "..." });
+    nodes.push({ kind: "manageItem", item: "lastSync", label: "Sync", value: ctx.lastSync || "(never)" });
+    nodes.push({ kind: "manageItem", item: "profile", label: "Profile", value: `${ctx.machine} → ${ctx.profile || "none"}` });
     return nodes;
   }
 
