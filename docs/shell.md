@@ -22,13 +22,19 @@ The currently selected project is marked with a green dot. Use `↵` or `:open <
 
 Shows the selected project's `tasks.md` file parsed into three sections: Active, Queue, and Done. Each item has an auto-generated ID for easy reference in commands.
 
+Cross-session checkpoint context is reflected through task metadata and lifecycle actions (`:work next`, `:complete`, `:tidy`), so unfinished work can resume cleanly across sessions.
+
 ### Findings (`l`)
 
 Lists entries from the selected project's FINDINGS.md with dates and optional citations. Entries are shown with their auto-generated IDs for use with `:find remove`.
 
+Finding lifecycle states (for example superseded/retracted/contradicted) and provenance markers are part of what you inspect here before cleanup or contradiction resolution.
+
 ### Review Queue (`m`)
 
 Shows pending review items from `MEMORY_QUEUE.md`. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date. Triage items with `:mq approve`, `:mq reject`, or `:mq edit`.
+
+If you move from shell to browser triage (`cortex web-ui`), the UI runs loopback-only and enforces auth + CSRF on mutations.
 
 ### Skills (`s`)
 
@@ -39,9 +45,18 @@ Skills now have first-class lifecycle state:
 - disabled skills stay on disk but are excluded from active use
 - remove is still separate and destructive
 
+Resolution rules shown by shell tooling match runtime behavior:
+- project-local scope overrides global scope
+- alias/command collisions are flagged and not registered
+- generated artifacts: `.claude/skill-manifest.json` and `.claude/skill-commands.json`
+
 ### Hooks (`k`)
 
 Shows lifecycle hook status and custom hook configuration for the active setup.
+
+Integration model surfaced in shell:
+- Claude: native `SessionStart` / `UserPromptSubmit` / `Stop` hooks
+- Copilot/Cursor/Codex: generated hook config + session wrappers
 
 ### Machines/Profiles (via `:machines`)
 
@@ -50,6 +65,8 @@ Shows the machines.yaml mapping (hostname to profile) and all profiles with thei
 ### Health (`h`)
 
 Runs doctor checks and shows results alongside runtime health data: last hook run, last auto-save, last governance run. Offers remediation commands (`:run fix`, `:relink`, `:rerun hooks`, `:update`).
+
+Health data also reflects RBAC identity context (`CORTEX_ACTOR` and local/shared access-control files), review queue pressure, and whether telemetry is enabled.
 
 ## Navigation
 

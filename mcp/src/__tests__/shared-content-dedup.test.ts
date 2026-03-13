@@ -34,7 +34,7 @@ describe("isDuplicateFinding", () => {
   });
 
   it("skips superseded entries when checking duplicates", () => {
-    const existing = "- Old approach to auth <!-- superseded_by: New approach to auth -->\n- Use parameterized queries for SQL";
+    const existing = '- Old approach to auth <!-- cortex:status "superseded" -->\n- Use parameterized queries for SQL';
     expect(isDuplicateFinding(existing, "- Old approach to auth with minor changes")).toBe(false);
   });
 });

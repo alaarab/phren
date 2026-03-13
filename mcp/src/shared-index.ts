@@ -16,7 +16,12 @@ import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripTaskDoneSection } from "./shared-content.js";
 import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
-import { extractAndLinkEntities, ensureGlobalEntitiesTable } from "./shared-entity-graph.js";
+import {
+  beginUserEntityBuildCache,
+  endUserEntityBuildCache,
+  extractAndLinkEntities,
+  ensureGlobalEntitiesTable,
+} from "./shared-entity-graph.js";
 import { bootstrapSqlJs } from "./shared-sqljs.js";
 import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "./project-config.js";
 import {
@@ -25,6 +30,11 @@ import {
   queryRows,
   type SqlJsDatabase,
 } from "./index-query.js";
+import {
+  classifyTopicForText,
+  readProjectTopics,
+  type ProjectTopic,
+} from "./project-topics.js";
 
 export { porterStem } from "./shared-stemmer.js";
 export { cosineFallback } from "./shared-search-fallback.js";
@@ -105,10 +115,15 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "memory_queue.md": "memory-queue",
 };
 
+function pathHasSegment(relPath: string, segment: string): boolean {
+  const parts = relPath.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts.includes(segment);
+}
+
 export function classifyFile(filename: string, relPath: string): string {
   // Directory takes priority over filename-based classification
-  if (relPath.includes("reference/") || relPath.includes("reference\\")) return "reference";
-  if (relPath.includes("skills/") || relPath.includes("skills\\")) return "skill";
+  if (pathHasSegment(relPath, "reference")) return "reference";
+  if (pathHasSegment(relPath, "skills")) return "skill";
   const mapped = FILE_TYPE_MAP[filename.toLowerCase()];
   if (mapped) return mapped;
   return "other";
@@ -206,6 +221,9 @@ function touchSentinel(cortexPath: string): void {
 function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: string[]): string {
   const policy = getIndexPolicy(cortexPath);
   const hash = crypto.createHash("sha1");
+  const topicConfigEntries = getProjectDirs(cortexPath, profile)
+    .map((dir) => path.join(dir, "topic-config.json"))
+    .filter((configPath) => fs.existsSync(configPath));
 
   if (preGlobbed) {
     for (const f of preGlobbed) {
@@ -214,6 +232,14 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
         hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+    }
+    for (const configPath of topicConfigEntries) {
+      try {
+        const stat = fs.statSync(configPath);
+        hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.size}`);
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash topicConfig: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   } else {
@@ -250,6 +276,14 @@ function computeCortexHash(cortexPath: string, profile?: string, preGlobbed?: st
         hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+    }
+    for (const configPath of topicConfigEntries) {
+      try {
+        const stat = fs.statSync(configPath);
+        hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.size}`);
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] computeCortexHash topicConfig: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   }
@@ -361,6 +395,8 @@ interface FileEntry {
   type: string;
   relFile?: string;
 }
+
+const LEGACY_TOPIC_REFERENCE_RE = /^reference[\\/]+topics[\\/]+([a-z0-9_-]+)\.md$/i;
 
 function normalizeDocSegment(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -482,18 +518,80 @@ function insertFileIntoIndex(
   try {
     const raw = fs.readFileSync(entry.fullPath, "utf-8");
     const content = normalizeIndexedContent(raw, entry.type, cortexPath);
+    const indexedContent = applyReferenceTopicHints(entry, content, cortexPath);
     db.run(
       "INSERT INTO docs (project, filename, type, content, path) VALUES (?, ?, ?, ?, ?)",
-      [entry.project, entry.filename, entry.type, content, entry.fullPath]
+      [entry.project, entry.filename, entry.type, indexedContent, entry.fullPath]
     );
     if (opts?.scheduleEmbeddings) {
-      scheduleEmbedding(cortexPath, entry.fullPath, content.slice(0, 8000));
+      scheduleEmbedding(cortexPath, entry.fullPath, indexedContent.slice(0, 8000));
     }
     return true;
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] insertFileIntoIndex: ${err instanceof Error ? err.message : String(err)}\n`);
     return false;
   }
+}
+
+function normalizeTopicTokenSegment(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function extractLegacyTopicSlug(entry: FileEntry): string | null {
+  const rel = (entry.relFile || "").replace(/\\/g, "/");
+  const match = rel.match(LEGACY_TOPIC_REFERENCE_RE);
+  if (!match) return null;
+  return match[1].toLowerCase();
+}
+
+function detectReferenceTopics(entry: FileEntry, content: string, cortexPath: string): ProjectTopic[] {
+  if (entry.type !== "reference") return [];
+  const { topics } = readProjectTopics(cortexPath, entry.project);
+  if (!topics.length) return [];
+
+  const topicBySlug = new Map<string, ProjectTopic>(topics.map((topic) => [topic.slug, topic]));
+  const lower = content.toLowerCase();
+  const matchedByContent = topics.filter((topic) => {
+    if (topic.slug === "general") return false;
+    return topic.keywords.some((keyword) => keyword && lower.includes(keyword));
+  });
+  const selected: ProjectTopic[] = [];
+  const pushUnique = (topic: ProjectTopic | undefined): void => {
+    if (!topic) return;
+    if (selected.some((item) => item.slug === topic.slug)) return;
+    selected.push(topic);
+  };
+
+  // Backward compatibility: keep legacy topic docs pinned to their filename slug
+  // when that slug still exists in topic-config (or built-in topics).
+  const legacySlug = extractLegacyTopicSlug(entry);
+  if (legacySlug) pushUnique(topicBySlug.get(legacySlug));
+
+  // Content-based topic tags for any reference doc shape (not only reference/topics/<slug>.md).
+  for (const topic of matchedByContent) pushUnique(topic);
+
+  // Preserve previous behavior: always include at least one topic hint.
+  if (!selected.length) {
+    pushUnique(classifyTopicForText(content, topics));
+  }
+
+  return selected;
+}
+
+function applyReferenceTopicHints(entry: FileEntry, content: string, cortexPath: string): string {
+  const topics = detectReferenceTopics(entry, content, cortexPath);
+  if (!topics.length) return content;
+  const hintTokens = new Set<string>();
+  for (const topic of topics) {
+    const slugToken = normalizeTopicTokenSegment(topic.slug) || "general";
+    hintTokens.add(`cortextopic${slugToken}`);
+    for (const keyword of topic.keywords) {
+      const keywordToken = normalizeTopicTokenSegment(keyword);
+      if (!keywordToken) continue;
+      hintTokens.add(`cortextopickeyword${keywordToken}`);
+    }
+  }
+  return `${content}\n\n${Array.from(hintTokens).join(" ")}`.trimEnd();
 }
 
 function deleteEntityLinksForDocPath(db: SqlJsDatabase, cortexPath: string, docPath: string, fallbackProject?: string, fallbackFilename?: string): void {
@@ -762,6 +860,8 @@ function mergeManualLinks(db: SqlJsDatabase, cortexPath: string): void {
 
 async function buildIndexImpl(cortexPath: string, profile?: string): Promise<SqlJsDatabase> {
   const t0 = Date.now();
+  beginUserEntityBuildCache(cortexPath, getProjectDirs(cortexPath, profile).map(dir => path.basename(dir)));
+  try {
 
   // ── Cache dir + hash sentinel ─────────────────────────────────────────────
   let userSuffix: string;
@@ -1045,6 +1145,9 @@ async function buildIndexImpl(cortexPath: string, profile?: string): Promise<Sql
   }
 
   return db;
+  } finally {
+    endUserEntityBuildCache(cortexPath);
+  }
 }
 
 function createEmptyIndexDb(SQL: SqlJsStatic): SqlJsDatabase {

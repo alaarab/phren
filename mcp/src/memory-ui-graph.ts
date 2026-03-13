@@ -101,28 +101,23 @@ export function renderGraphScript(): string {
   function nodeColor(n) { return topicGroupColor(n.group); }
 
   /* ── precomputed score lookups ─────────────────────────────────────── */
-  var _scoreLookup = {};  // project -> best score entry (precomputed)
+  var _scoreLookup = new Map(); // exact scoreKey -> score entry (precomputed)
 
   function buildScoreLookup() {
-    _scoreLookup = {};
+    _scoreLookup = new Map();
     if (!allScores) return;
     var keys = Object.keys(allScores);
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];
-      var slashIdx = key.indexOf('/');
-      if (slashIdx === -1) continue;
-      var proj = key.substring(0, slashIdx);
       var s = allScores[key];
-      var existing = _scoreLookup[proj];
-      if (!existing || (s.impressions || 0) > (existing.impressions || 0)) {
-        _scoreLookup[proj] = s;
-      }
+      if (!s || typeof s !== 'object') continue;
+      _scoreLookup.set(key, s);
     }
   }
 
   function bestScoreForNode(node) {
-    if (!node.project) return null;
-    return _scoreLookup[node.project] || null;
+    if (!node || !node.scoreKey) return null;
+    return _scoreLookup.get(node.scoreKey) || null;
   }
 
   /* ── quality / decay (unified thresholds) ────────────────────────── */
@@ -176,14 +171,26 @@ export function renderGraphScript(): string {
     return clamp(raw, 0.1, 1.0);
   }
 
-  // Unified health ring thresholds: matches the quality multiplier thresholds
-  // multiplier >= 0.8 -> healthy (green), 0.5-0.8 -> stale (yellow), <0.5 -> decaying (red)
+  // Unified health status: driven by multiplier + staleness age
+  // healthy: multiplier > 0.7
+  // stale: multiplier < 0.3 OR lastUsedAt older than 60 days
+  // decaying: multiplier 0.3-0.7 (inclusive, when not stale)
+  function classifyHealth(node) {
+    var entry = bestScoreForNode(node);
+    var q = computeQualityFromEntry(entry);
+    var mult = q.multiplier;
+    var staleByAge = q.daysSince > 60;
+    if (mult < 0.3 || staleByAge) return 'stale';
+    if (mult > 0.7) return 'healthy';
+    return 'decaying';
+  }
+
   function healthRingColor(node) {
     var entry = bestScoreForNode(node);
     if (!entry || !entry.lastUsedAt) return null;
-    var q = computeQualityFromEntry(entry);
-    if (q.multiplier >= 0.8) return '#10b981';
-    if (q.multiplier >= 0.5) return '#f59e0b';
+    var status = classifyHealth(node);
+    if (status === 'healthy') return '#10b981';
+    if (status === 'stale') return '#f59e0b';
     return '#ef4444';
   }
 
@@ -191,27 +198,24 @@ export function renderGraphScript(): string {
   function healthStatusLabel(node) {
     var entry = bestScoreForNode(node);
     if (!entry || !entry.lastUsedAt) return null;
-    var q = computeQualityFromEntry(entry);
-    if (q.multiplier >= 0.8) return 'H';
-    if (q.multiplier >= 0.5) return 'S';
+    var status = classifyHealth(node);
+    if (status === 'healthy') return 'H';
+    if (status === 'stale') return 'S';
     return 'D';
   }
 
   function healthStatusText(node) {
     var entry = bestScoreForNode(node);
     if (!entry || !entry.lastUsedAt) return 'unknown';
-    var q = computeQualityFromEntry(entry);
-    if (q.multiplier >= 0.8) return 'healthy';
-    if (q.multiplier >= 0.5) return 'stale';
-    return 'decaying';
+    return classifyHealth(node);
   }
 
   function healthRingDash(node) {
     var entry = bestScoreForNode(node);
     if (!entry || !entry.lastUsedAt) return null;
-    var q = computeQualityFromEntry(entry);
-    if (q.multiplier >= 0.8) return [];
-    if (q.multiplier >= 0.5) return [6, 3];
+    var status = classifyHealth(node);
+    if (status === 'healthy') return [];
+    if (status === 'stale') return [6, 3];
     return [2, 3];
   }
 
@@ -475,10 +479,8 @@ export function renderGraphScript(): string {
       if (!typeMatches(n.group)) continue;
       if (filterProject !== 'all' && n.project !== filterProject) continue;
       if (filterHealth !== 'all') {
-        var mult = qualityMultiplier(n);
-        if (filterHealth === 'healthy' && mult < 0.8) continue;
-        if (filterHealth === 'stale' && (mult < 0.5 || mult >= 0.8)) continue;
-        if (filterHealth === 'decaying' && mult >= 0.5) continue;
+        var status = classifyHealth(n);
+        if (filterHealth !== status) continue;
       }
       filtered.push(n);
     }
@@ -894,7 +896,16 @@ export function renderGraphScript(): string {
         html += '<div style="margin-top:8px;font-size:12px;color:#9ca3af">Projects: ' + projNames.map(function(p) { return esc(p); }).join(', ') + '</div>';
       }
       if (node.refDocs && node.refDocs.length > 0) {
-        html += '<div style="margin-top:6px;font-size:12px;color:#9ca3af">Docs: ' + node.refDocs.map(function(d) { return esc(d); }).join(', ') + '</div>';
+        var docRefs = node.refDocs.map(function(ref) {
+          if (ref && typeof ref === 'object' && ref.doc) return ref;
+          return { doc: String(ref || ''), project: '' };
+        });
+        html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">Source Docs</div>';
+        for (var di = 0; di < docRefs.length; di++) {
+          var ref = docRefs[di];
+          var scoreBadge = ref.scoreKey ? ' <span style="font-size:10px;color:#6b7280">score</span>' : '';
+          html += '<div style="margin-top:6px;font-size:12px;color:#9ca3af">' + esc(ref.doc) + scoreBadge + '</div>';
+        }
       }
       if (linkedFindings.length > 0) {
         html += '<div style="margin-top:12px;font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">Linked Findings</div>';
@@ -1176,12 +1187,25 @@ export function renderGraphScript(): string {
 
     /* separator + health filter */
     typeHtml += '<span style="display:inline-block;width:1px;height:20px;background:var(--border);margin:0 6px"></span>';
-    typeHtml += '<select data-health-filter style="padding:5px 10px;border-radius:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px;cursor:pointer">';
-    typeHtml += '<option value="all"' + (filterHealth === 'all' ? ' selected' : '') + '>All health</option>';
-    typeHtml += '<option value="healthy"' + (filterHealth === 'healthy' ? ' selected' : '') + '>Healthy (&ge;0.8)</option>';
-    typeHtml += '<option value="stale"' + (filterHealth === 'stale' ? ' selected' : '') + '>Stale (0.5-0.8)</option>';
-    typeHtml += '<option value="decaying"' + (filterHealth === 'decaying' ? ' selected' : '') + '>Decaying (&lt;0.5)</option>';
-    typeHtml += '</select>';
+    typeHtml += '<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:2px">Health</span>';
+    var healthFilters = [
+      { key: 'all', label: 'All', color: 'var(--muted)' },
+      { key: 'healthy', label: 'Healthy', color: '#10b981' },
+      { key: 'stale', label: 'Stale', color: '#f59e0b' },
+      { key: 'decaying', label: 'Decaying', color: '#ef4444' }
+    ];
+    for (var hi = 0; hi < healthFilters.length; hi++) {
+      var hf = healthFilters[hi];
+      var isHealthActive = filterHealth === hf.key;
+      var hPillBg = isHealthActive ? (hf.key === 'all' ? 'var(--surface)' : hf.color + '22') : 'transparent';
+      var hPillBorder = isHealthActive ? (hf.key === 'all' ? 'var(--border)' : hf.color + '55') : 'var(--border)';
+      var hStyle = 'display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;border:1px solid ' + hPillBorder + ';font-size:12px;font-weight:500;cursor:pointer;user-select:none;background:' + hPillBg + ';transition:all .15s;' + (isHealthActive ? 'opacity:1' : 'opacity:0.5');
+      typeHtml += '<span style="' + hStyle + '" data-health-filter="' + hf.key + '">';
+      if (hf.key !== 'all') {
+        typeHtml += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + hf.color + '"></span>';
+      }
+      typeHtml += esc(hf.label) + '</span>';
+    }
 
     /* separator + search input */
     typeHtml += '<span style="display:inline-block;width:1px;height:20px;background:var(--border);margin:0 6px"></span>';
@@ -1200,9 +1224,11 @@ export function renderGraphScript(): string {
     }
 
     /* wire up health filter */
-    var healthSelect = filterEl.querySelector('[data-health-filter]');
-    if (healthSelect) {
-      healthSelect.addEventListener('change', function() { window.graphHealthFilter(healthSelect.value); });
+    var healthEls = filterEl.querySelectorAll('[data-health-filter]');
+    for (var hi = 0; hi < healthEls.length; hi++) {
+      (function(el) {
+        el.addEventListener('click', function() { window.graphHealthFilter(el.getAttribute('data-health-filter')); });
+      })(healthEls[hi]);
     }
 
     /* wire up search input */
@@ -1353,6 +1379,7 @@ export function renderGraphScript(): string {
   window.graphHealthFilter = function(val) {
     filterHealth = val;
     applyFilters();
+    buildFilterBar();
     initPositions();
     startSimulation();
     announceFilterChange();

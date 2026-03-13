@@ -137,6 +137,25 @@ export function buildSharedLifecycleCommands(): LifecycleCommands {
   return buildPackageLifecycleCommands();
 }
 
+function withHookToolEnv(command: string, tool: "claude" | "copilot" | "cursor" | "codex"): string {
+  if (process.platform === "win32") {
+    return `set "CORTEX_HOOK_TOOL=${tool}" && ${command}`;
+  }
+  return `CORTEX_HOOK_TOOL="${tool}" ${command}`;
+}
+
+function withHookToolLifecycleCommands(
+  lifecycle: LifecycleCommands,
+  tool: "claude" | "copilot" | "cursor" | "codex",
+): LifecycleCommands {
+  return {
+    sessionStart: withHookToolEnv(lifecycle.sessionStart, tool),
+    userPromptSubmit: withHookToolEnv(lifecycle.userPromptSubmit, tool),
+    stop: withHookToolEnv(lifecycle.stop, tool),
+    hookTool: withHookToolEnv(lifecycle.hookTool, tool),
+  };
+}
+
 function installSessionWrapper(tool: string, cortexPath: string): boolean {
   const realBinary = resolveToolBinary(tool);
   if (!realBinary) return false;
@@ -448,12 +467,10 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       : detectInstalledTools();
 
   const lifecycle = buildLifecycleCommands(cortexPath);
-  const pullCmd = lifecycle.sessionStart;
-  const promptCmd = lifecycle.userPromptSubmit;
-  const stopCmd = lifecycle.stop;
 
   // ── GitHub Copilot CLI (user-level: ~/.github/hookscortex.json) ──────────
   if (detected.has("copilot")) {
+    const copilotLifecycle = withHookToolLifecycleCommands(lifecycle, "copilot");
     const copilotFile = hookConfigPath("copilot", cortexPath);
     const copilotHooksDir = path.dirname(copilotFile);
     try {
@@ -461,9 +478,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       const config: CopilotHookConfig = {
         version: 1,
         hooks: {
-          sessionStart: [{ type: "command", bash: pullCmd }],
-          userPromptSubmitted: [{ type: "command", bash: promptCmd }],
-          sessionEnd: [{ type: "command", bash: stopCmd }],
+          sessionStart: [{ type: "command", bash: copilotLifecycle.sessionStart }],
+          userPromptSubmitted: [{ type: "command", bash: copilotLifecycle.userPromptSubmit }],
+          sessionEnd: [{ type: "command", bash: copilotLifecycle.stop }],
         },
       };
       if (!validateCopilotConfig(config)) throw new Error("invalid copilot hook config shape");
@@ -477,6 +494,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
   if (detected.has("cursor")) {
+    const cursorLifecycle = withHookToolLifecycleCommands(lifecycle, "cursor");
     const cursorFile = hookConfigPath("cursor", cortexPath);
     try {
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
@@ -488,9 +506,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
         ...existing,
         version: 1,
         // Cursor parity: sessionStart is best-effort where supported; wrapper also enforces lifecycle.
-        sessionStart: { command: pullCmd },
-        beforeSubmitPrompt: { command: promptCmd },
-        stop: { command: stopCmd },
+        sessionStart: { command: cursorLifecycle.sessionStart },
+        beforeSubmitPrompt: { command: cursorLifecycle.userPromptSubmit },
+        stop: { command: cursorLifecycle.stop },
       };
       if (!validateCursorConfig(config)) throw new Error("invalid cursor hook config shape");
       atomicWriteText(cursorFile, JSON.stringify(config, null, 2));
@@ -505,7 +523,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
   if (detected.has("codex")) {
     const codexFile = hookConfigPath("codex", cortexPath);
     try {
-      const lifecycle = buildSharedLifecycleCommands();
+      const codexLifecycle = withHookToolLifecycleCommands(buildSharedLifecycleCommands(), "codex");
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] configureAllHooks codexRead: ${errorMessage(err)}\n`);
@@ -513,9 +531,9 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       const config: CodexHookConfig = {
         ...existing,
         hooks: {
-          SessionStart: [{ type: "command", command: lifecycle.sessionStart }],
-          UserPromptSubmit: [{ type: "command", command: lifecycle.userPromptSubmit }],
-          Stop: [{ type: "command", command: lifecycle.stop }],
+          SessionStart: [{ type: "command", command: codexLifecycle.sessionStart }],
+          UserPromptSubmit: [{ type: "command", command: codexLifecycle.userPromptSubmit }],
+          Stop: [{ type: "command", command: codexLifecycle.stop }],
         },
       };
       if (!validateCodexConfig(config)) throw new Error("invalid codex hook config shape");

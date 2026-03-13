@@ -1,6 +1,6 @@
 {
   "name": "@alaarab/cortex",
-  "version": "1.32.3",
+  "version": "1.33.0",
   "description": "Long-term memory for AI agents. Stored as markdown in a git repo you own.",
   "type": "module",
   "bin": {
@@ -13,7 +13,9 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "chalk": "^5.6.2",
     "glob": "^13.0.6",
+    "inquirer": "^12.10.0",
     "js-yaml": "^4.1.1",
     "sql.js-fts5": "^1.4.0",
     "zod": "^4.3.6"
@@ -31,7 +33,7 @@
     "vitest": "^4.0.18"
   },
   "scripts": {
-    "build": "rm -rf mcp/dist && tsc -p mcp/tsconfig.json && chmod +x mcp/dist/index.js && cp mcp/src/synonyms.json mcp/dist/synonyms.json",
+    "build": "rm -rf mcp/dist && tsc -p mcp/tsconfig.json && chmod +x mcp/dist/index.js && cp mcp/src/synonyms*.json mcp/dist/",
     "dev": "tsx mcp/src/index.ts",
     "lint": "eslint mcp/src/ --ignore-pattern '*.test.ts'",
     "validate-docs": "bash scripts/validate-docs.sh",

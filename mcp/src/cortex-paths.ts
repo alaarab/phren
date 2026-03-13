@@ -132,12 +132,21 @@ function hasRootManifest(candidate: string): boolean {
   return fs.existsSync(rootManifestPath(candidate));
 }
 
+function hasInstallMarkers(candidate: string): boolean {
+  return fs.existsSync(path.join(candidate, "machines.yaml"))
+    || fs.existsSync(path.join(candidate, ".governance"))
+    || fs.existsSync(path.join(candidate, "global"));
+}
+
+function isCortexRootCandidate(candidate: string): boolean {
+  return hasRootManifest(candidate) || hasInstallMarkers(candidate);
+}
+
 export function findNearestCortexPath(startDir: string = process.cwd()): string | null {
   let current = path.resolve(startDir);
   while (true) {
-    if (hasRootManifest(current)) return current;
     const localCandidate = path.join(current, ".cortex");
-    if (hasRootManifest(localCandidate)) return localCandidate;
+    if (isCortexRootCandidate(localCandidate)) return localCandidate;
     const parent = path.dirname(current);
     if (parent === current) break;
     current = parent;
@@ -165,7 +174,7 @@ export function findCortexPath(): string | null {
   const envVal = process.env.CORTEX_PATH?.trim();
   if (envVal) {
     const resolved = path.resolve(expandHomePath(envVal));
-    cachedCortexPath = hasRootManifest(resolved) ? resolved : null;
+    cachedCortexPath = isCortexRootCandidate(resolved) ? resolved : null;
     return cachedCortexPath;
   }
 
@@ -176,7 +185,7 @@ export function findCortexPath(): string | null {
   }
 
   const shared = sharedRootCandidate();
-  cachedCortexPath = hasRootManifest(shared) ? shared : null;
+  cachedCortexPath = isCortexRootCandidate(shared) ? shared : null;
   return cachedCortexPath;
 }
 

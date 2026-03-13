@@ -95,6 +95,15 @@ The distinction is architectural: Cortex applies those patterns to a repo-backed
 
 ## Why cortex
 
+### New in v1.33.0
+
+- Finding lifecycle is now first-class: normalized status metadata, explicit supersede/retract/resolve operations, lifecycle-aware ranking, and lifecycle history preserved through consolidation.
+- Findings now track provenance (`human`, `agent`, `hook`, `extract`) and impact scoring now accounts for passive surfacing with stronger decay resistance for repeatedly useful memories.
+- Session continuity improved with automatic cross-session task checkpoints and richer resumption context.
+- Onboarding is more adaptive: domain-aware init prompts, content-based topic suggestions with pinning, adaptive project-specific synonyms, and storage location selection (global, per-project, custom).
+- Memory structure and integrations expanded: any file under `reference/` is indexed, scoped memory views are available for spawned agents, and settings are consolidated into a findings-first integrations surface.
+- VS Code extension onboarding and release workflow were hardened (auto-install path, uninstall command, publish prep), with first-run reliability fixes and docs synced to the 60-tool MCP server.
+
 **Compounding context, bounded retrieval.** Cortex lets project memory grow over time, but it does not inject the whole store. It searches what you actually wrote and keeps injection selective -- about 550 tokens by default -- so long-lived context does not turn into prompt bloat. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET`.
 
 **Local retrieval keeps the hot path fast.** In the default path, search runs against a local SQLite index instead of a hosted memory API. That cuts out the network hop and helps keep exact-ish code-memory queries responsive.
@@ -374,78 +383,23 @@ mcpServers:
 </details>
 
 <details>
-<summary><strong>The MCP server (51 tools)</strong></summary>
+<summary><strong>The MCP server (60 tools)</strong></summary>
 
-The MCP server indexes your project store into a local SQLite FTS5 database and exposes 51 tools:
+The MCP server indexes your project store into a local SQLite FTS5 database and exposes 60 tools across 11 modules:
 
-### Search and browse
+- Search and browse (5): `get_memory_detail`, `search_knowledge`, `get_project_summary`, `list_projects`, `get_findings`
+- Task management (13): `get_tasks`, `add_task`, `add_tasks`, `complete_task`, `complete_tasks`, `remove_task`, `update_task`, `link_task_issue`, `promote_task_to_issue`, `pin_task`, `work_next_task`, `promote_task`, `tidy_done_tasks`
+- Finding capture (9): `add_finding`, `add_findings`, `supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`, `remove_finding`, `remove_findings`, `push_changes`
+- Memory quality (2): `pin_memory`, `memory_feedback`
+- Data management (3): `export_project`, `import_project`, `manage_project`
+- Entity graph (5): `search_entities`, `get_related_docs`, `read_graph`, `link_findings`, `cross_project_entities`
+- Session management (4): `session_start`, `session_end`, `session_context`, `session_history`
+- Operations and review (8): `add_project`, `get_consolidation_status`, `health_check`, `list_hook_errors`, `get_review_queue`, `approve_queue_item`, `reject_queue_item`, `edit_queue_item`
+- Skills management (6): `list_skills`, `read_skill`, `write_skill`, `remove_skill`, `enable_skill`, `disable_skill`
+- Hooks management (4): `list_hooks`, `toggle_hooks`, `add_custom_hook`, `remove_custom_hook`
+- Extraction (1): `auto_extract_findings`
 
-| Tool | What it does |
-|------|-------------|
-| `search_knowledge` | Lexical-first retrieval: strict FTS5, relaxed lexical rescue, bounded local fallback scoring, and optional gated vector recovery with shared reranking/recency boosts. |
-| `get_memory_detail` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
-| `get_project_summary` | Summary card and file list for a project. |
-| `list_projects` | Everything in your active profile. |
-| `get_findings` | Read recent findings for a project without a search query. |
-| `get_consolidation_status` | Check if findings need consolidation. |
-| `health_check` | Run doctor checks and return results. |
-
-### Task management
-
-| Tool | What it does |
-|------|-------------|
-| `get_tasks` | Read tasks for one or all projects, or fetch a single item by ID or text. |
-| `add_task` | Add a task to the Queue section. |
-| `add_tasks` | Bulk add multiple tasks in one call. |
-| `complete_task` | Match by text, move to Done. |
-| `complete_tasks` | Bulk complete multiple items in one call. |
-| `update_task` | Change priority, context, section, or linked GitHub issue. |
-| `link_task_issue` | Link or unlink an existing GitHub issue on a task item. |
-| `promote_task_to_issue` | Create a GitHub issue from a task item and write the link back. |
-
-### Finding capture
-
-| Tool | What it does |
-|------|-------------|
-| `add_finding` | Save a finding with optional citation and type (`decision`, `pitfall`, `pattern`). |
-| `add_findings` | Bulk add multiple findings in one call. |
-| `remove_finding` | Remove by matching text. |
-| `remove_findings` | Bulk remove multiple findings in one call. |
-| `push_changes` | Commit and push all changes. |
-
-### Memory quality
-
-| Tool | What it does |
-|------|-------------|
-| `pin_memory` | Pin a memory so it never decays. |
-| `memory_feedback` | Record helpful / reprompt / regression outcomes. |
-
-### Data management
-
-| Tool | What it does |
-|------|-------------|
-| `add_project` | Bootstrap a repo or working directory into cortex and add it to the active profile. |
-| `export_project` | Export project data as portable JSON. |
-| `import_project` | Import project from exported JSON. |
-| `manage_project` | Archive or unarchive a project. |
-
-### Entity graph
-
-| Tool | What it does |
-|------|-------------|
-| `search_entities` | Find entities and related docs by name. |
-| `get_related_docs` | Get docs linked to a named entity. |
-| `read_graph` | Read the entity graph for a project or all projects. |
-| `link_findings` | Link a finding to an entity. Persists across rebuilds. |
-| `cross_project_entities` | Find entities shared across multiple projects. |
-
-### Session management
-
-| Tool | What it does |
-|------|-------------|
-| `session_start` | Start a session. Returns prior summary, recent findings, active tasks, and a `sessionId`. |
-| `session_end` | End a session by `sessionId` or bound `connectionId`, and save summary for next time. |
-| `session_context` | Read current session state by `sessionId` or bound `connectionId`. |
+For parameter schemas and examples, see [docs/api-reference.md](docs/api-reference.md).
 
 Governance, policy, and maintenance tools are CLI-only (see `cortex config` and `cortex maintain`).
 

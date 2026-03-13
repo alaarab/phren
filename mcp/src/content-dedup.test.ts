@@ -144,7 +144,7 @@ describe("isDuplicateFinding", () => {
   });
 
   it("skips superseded entries", () => {
-    const withSuperseded = "- Old finding <!-- superseded_by: new -->\n- Unique finding about caching";
+    const withSuperseded = '- Old finding <!-- cortex:status "superseded" -->\n- Unique finding about caching';
     expect(isDuplicateFinding(withSuperseded, "Old finding about something")).toBe(false);
   });
 

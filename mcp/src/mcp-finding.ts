@@ -12,6 +12,7 @@ import {
   debugLog,
   EXEC_TIMEOUT_MS,
   FINDING_TYPES,
+  normalizeMemoryScope,
 } from "./shared.js";
 import {
   addFindingToFile,
@@ -25,13 +26,21 @@ import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings } from "./mcp-session.js";
 import { extractEntityNames } from "./shared-entity-graph.js";
 import { extractFactFromFinding } from "./mcp-extract-facts.js";
-import { appendChildFinding } from "./data-access.js";
+import { appendChildFinding, readFindings } from "./data-access.js";
 import { getActiveTaskForSession } from "./task-lifecycle.js";
+import { FINDING_PROVENANCE_SOURCES } from "./content-citation.js";
+import {
+  isInactiveFindingLine,
+  supersedeFinding,
+  retractFinding as retractFindingLifecycle,
+  resolveFindingContradiction,
+} from "./finding-lifecycle.js";
 
 
 
 const JACCARD_MAYBE_LOW = 0.30;
 const JACCARD_MAYBE_HIGH = 0.55; // above this isDuplicateFinding already catches it
+const RESERVED_PROJECT_DIRS = new Set(["global", ".runtime", ".sessions", ".governance"]);
 
 interface PotentialDuplicate {
   existing: string;
@@ -48,7 +57,7 @@ function findJaccardCandidates(cortexPath: string, project: string, finding: str
     if (newTokens.size < 3) return [];
     const candidates: PotentialDuplicate[] = [];
     for (const line of content.split("\n")) {
-      if (!line.startsWith("- ") || line.includes("superseded_by")) continue;
+      if (!line.startsWith("- ") || isInactiveFindingLine(line)) continue;
       const existingClean = stripMetadata(line).replace(/^-\s+/, "").trim();
       const existingTokens = jaccardTokenize(existingClean);
       if (existingTokens.size < 3) continue;
@@ -67,6 +76,26 @@ function extractConflictsWith(annotations: string[]): string[] {
   return annotations
     .map((annotation) => annotation.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)?.[1])
     .filter((value): value is string => Boolean(value));
+}
+
+function matchesFindingTextSelector(
+  finding: { id: string; stableId?: string; text: string },
+  selector: string
+): boolean {
+  const query = selector.trim().toLowerCase();
+  if (!query) return true;
+
+  const id = finding.id.toLowerCase();
+  const stableId = finding.stableId?.toLowerCase();
+  const text = finding.text.toLowerCase();
+
+  if (query.startsWith("fid:")) {
+    const normalizedFid = query.slice(4).trim();
+    if (!normalizedFid) return false;
+    return stableId === normalizedFid || id === query || id === normalizedFid;
+  }
+
+  return id === query || stableId === query || text === query || text.includes(query);
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -93,14 +122,20 @@ export function register(server: McpServer, ctx: McpContext): void {
           task_item: z.string().optional().describe("Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
         }).optional().describe("Optional source citation for traceability."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
+        source: z.enum(FINDING_PROVENANCE_SOURCES)
+          .optional()
+          .describe("Optional finding provenance source: human, agent, hook, extract, consolidation, or unknown."),
         findingType: z.enum(FINDING_TYPES)
           .optional()
           .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'tradeoff' (deliberate compromise), 'architecture' (structural design note), 'bug' (confirmed defect or failure)."),
+        scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
     },
-    async ({ project, finding, citation, sessionId, findingType }) => {
+    async ({ project, finding, citation, sessionId, source, findingType, scope }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       if (finding.length > 5000) return mcpResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
+      const normalizedScope = normalizeMemoryScope(scope ?? "shared");
+      if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
       return withWriteQueue(async () => {
         try {
           const taggedFinding = findingType ? `[${findingType}] ${finding}` : finding;
@@ -110,6 +145,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
           const result = addFindingToFile(cortexPath, project, taggedFinding, citation, {
             sessionId,
+            source,
+            scope: normalizedScope,
             extraAnnotations: semanticConflicts.checked ? semanticConflicts.annotations : undefined,
           });
           if (!result.ok) {
@@ -178,6 +215,7 @@ export function register(server: McpServer, ctx: McpContext): void {
               ...(conflictsWithList.length > 0 ? { conflicts: conflictsWithList } : {}),
               ...(detectedEntities.length > 0 ? { detectedEntities } : {}),
               ...(potentialDuplicates.length > 0 ? { potentialDuplicates } : {}),
+              scope: normalizedScope,
             }
           });
         } catch (err: unknown) {
@@ -248,6 +286,192 @@ export function register(server: McpServer, ctx: McpContext): void {
             ...(allPotentialDuplicates.length > 0 ? { potentialDuplicates: allPotentialDuplicates } : {}),
           },
         });
+      });
+    }
+  );
+
+  server.registerTool(
+    "supersede_finding",
+    {
+      title: "◆ cortex · supersede finding",
+      description: "Mark an existing finding as superseded and link it to the newer finding text.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        finding_text: z.string().describe("Finding to supersede (supports fid, exact text, or partial match)."),
+        superseded_by: z.string().describe("Text of the new finding that supersedes this one."),
+      }),
+    },
+    async ({ project, finding_text, superseded_by }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = supersedeFinding(cortexPath, project, finding_text, superseded_by);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+        if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+        return mcpResponse({
+          ok: true,
+          message: `Marked finding as superseded in ${project}.`,
+          data: {
+            project,
+            finding: result.data.finding,
+            status: result.data.status,
+            superseded_by: result.data.superseded_by,
+          },
+        });
+      });
+    }
+  );
+
+  server.registerTool(
+    "retract_finding",
+    {
+      title: "◆ cortex · retract finding",
+      description: "Mark an existing finding as retracted and store the reason in lifecycle metadata.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        finding_text: z.string().describe("Finding to retract (supports fid, exact text, or partial match)."),
+        reason: z.string().describe("Reason for retraction."),
+      }),
+    },
+    async ({ project, finding_text, reason }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = retractFindingLifecycle(cortexPath, project, finding_text, reason);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+        if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+        return mcpResponse({
+          ok: true,
+          message: `Retracted finding in ${project}.`,
+          data: {
+            project,
+            finding: result.data.finding,
+            status: result.data.status,
+            reason: result.data.reason,
+          },
+        });
+      });
+    }
+  );
+
+  server.registerTool(
+    "resolve_contradiction",
+    {
+      title: "◆ cortex · resolve contradiction",
+      description: "Resolve a contradiction between two findings and update lifecycle status based on the chosen resolution.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        finding_text: z.string().optional().describe("First finding (supports fid, exact text, or partial match)."),
+        finding_text_other: z.string().optional().describe("Second finding (supports fid, exact text, or partial match)."),
+        finding_a: z.string().optional().describe("Deprecated alias for finding_text."),
+        finding_b: z.string().optional().describe("Deprecated alias for finding_text_other."),
+        resolution: z.enum(["keep_a", "keep_b", "keep_both", "retract_both"]).describe("Resolution strategy."),
+      }).superRefine((value, zodCtx) => {
+        if (!(value.finding_text ?? value.finding_a)) {
+          zodCtx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["finding_text"],
+            message: "finding_text is required.",
+          });
+        }
+        if (!(value.finding_text_other ?? value.finding_b)) {
+          zodCtx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["finding_text_other"],
+            message: "finding_text_other is required.",
+          });
+        }
+      }),
+    },
+    async ({ project, finding_text, finding_text_other, finding_a, finding_b, resolution }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const findingText = (finding_text ?? finding_a)?.trim();
+      const findingTextOther = (finding_text_other ?? finding_b)?.trim();
+      if (!findingText || !findingTextOther) {
+        return mcpResponse({
+          ok: false,
+          error: "Both finding_text and finding_text_other are required.",
+        });
+      }
+      return withWriteQueue(async () => {
+        const result = resolveFindingContradiction(cortexPath, project, findingText, findingTextOther, resolution);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+        if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+        return mcpResponse({
+          ok: true,
+          message: `Resolved contradiction in ${project} with "${resolution}".`,
+          data: {
+            project,
+            resolution: result.data.resolution,
+            finding_text: result.data.finding_a,
+            finding_text_other: result.data.finding_b,
+            finding_a: result.data.finding_a,
+            finding_b: result.data.finding_b,
+          },
+        });
+      });
+    }
+  );
+
+  server.registerTool(
+    "get_contradictions",
+    {
+      title: "◆ cortex · contradictions",
+      description: "List unresolved contradictions (findings currently marked with status contradicted).",
+      inputSchema: z.object({
+        project: z.string().optional().describe("Optional project filter. When omitted, scans all projects."),
+        finding_text: z.string().optional().describe("Optional finding selector (supports fid, exact text, or partial match)."),
+      }),
+    },
+    async ({ project, finding_text }) => {
+      if (project && !isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const projects = project
+        ? [project]
+        : fs.readdirSync(cortexPath, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory() && !RESERVED_PROJECT_DIRS.has(entry.name) && isValidProjectName(entry.name))
+          .map((entry) => entry.name);
+
+      const contradictions: Array<{
+        project: string;
+        id: string;
+        stableId?: string;
+        text: string;
+        date: string;
+        status_updated?: string;
+        status_reason?: string;
+        status_ref?: string;
+      }> = [];
+
+      for (const p of projects) {
+        const result = readFindings(cortexPath, p);
+        if (!result.ok) continue;
+        for (const finding of result.data) {
+          if (finding.status !== "contradicted") continue;
+          if (finding_text && !matchesFindingTextSelector(finding, finding_text)) continue;
+          contradictions.push({
+            project: p,
+            id: finding.id,
+            stableId: finding.stableId,
+            text: finding.text,
+            date: finding.date,
+            status_updated: finding.status_updated,
+            status_reason: finding.status_reason,
+            status_ref: finding.status_ref,
+          });
+        }
+      }
+
+      return mcpResponse({
+        ok: true,
+        message: contradictions.length
+          ? `Found ${contradictions.length} unresolved contradiction${contradictions.length === 1 ? "" : "s"}.`
+          : "No unresolved contradictions found.",
+        data: {
+          project: project ?? null,
+          finding_text: finding_text ?? null,
+          contradictions,
+        },
       });
     }
   );

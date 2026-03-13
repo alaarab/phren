@@ -134,6 +134,17 @@ describe("supersession", () => {
 });
 
 describe("finding provenance", () => {
+  it("writes compact source annotations on finding bullets", () => {
+    const result = addFindingToFile(tmp.path, PROJECT, "Hook-generated context should be tracked", undefined, {
+      source: "hook",
+    });
+    expect(result.ok).toBe(true);
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    expect(content).toContain("<!-- source:hook");
+    expect(content).not.toContain("<!-- source: source:hook");
+  });
+
   it("auto-stamps active task and active session context", () => {
     grantAdmin(tmp.path, "codex-worker");
     writeFile(

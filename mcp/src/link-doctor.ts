@@ -22,6 +22,7 @@ import { verifyFileChecksums, updateFileChecksums } from "./link-checksums.js";
 import { buildSkillManifest } from "./skill-registry.js";
 import { inspectTaskHygiene } from "./task-hygiene.js";
 import { resolveTaskFilePath, TASK_FILE_ALIASES } from "./data-tasks.js";
+import { repairPreexistingInstall } from "./init-setup.js";
 import {
   getMachineName,
   lookupProfile,
@@ -110,9 +111,11 @@ function gitRemoteStatus(cortexPath: string): { ok: boolean; detail: string } {
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
-    return remote ? { ok: true, detail: `origin=${remote}` } : { ok: false, detail: "git origin remote not configured" };
+    return remote
+      ? { ok: true, detail: `origin=${remote}` }
+      : { ok: true, detail: "no remote configured (local-only sync mode)" };
   } catch {
-    return { ok: false, detail: "git origin remote not configured" };
+    return { ok: true, detail: "no remote configured (local-only sync mode)" };
   }
 }
 
@@ -455,11 +458,21 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     });
   }
 
+  if (fix) {
+    const repaired = repairPreexistingInstall(cortexPath);
+    const details: string[] = [];
+    if (repaired.removedLegacyProjects > 0) details.push(`removed ${repaired.removedLegacyProjects} legacy sample profile entries`);
+    if (repaired.createdContextFile) details.push("recreated ~/.cortex-context.md");
+    if (repaired.createdRootMemory) details.push("recreated generated MEMORY.md");
+    if (details.length === 0) details.push("baseline repair complete");
+    checks.push({ name: "baseline-repair", ok: true, detail: details.join("; ") });
+  }
+
   if (fix && profile && profileFile) {
     await runLink(cortexPath, { machine, profile });
     checks.push({ name: "self-heal", ok: true, detail: "relinked hooks, symlinks, context, memory pointers" });
   } else if (fix) {
-    checks.push({ name: "self-heal", ok: false, detail: "blocked: machine/profile not fully configured" });
+    checks.push({ name: "self-heal", ok: false, detail: "relink blocked: machine/profile not fully configured" });
   } else {
     // Read-only mode: just check if hook configs exist, don't write anything
     const detectedTools = detectInstalledTools();

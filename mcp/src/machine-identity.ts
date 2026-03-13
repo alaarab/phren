@@ -4,7 +4,9 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { homePath } from "./shared.js";
 
-const CORTEX_MACHINE_FILE = homePath(".cortex", ".machine-id");
+function cortexMachineFilePath(): string {
+  return homePath(".cortex", ".machine-id");
+}
 
 function atomicWriteText(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -14,7 +16,7 @@ function atomicWriteText(filePath: string, content: string): void {
 }
 
 export function machineFilePath(): string {
-  return CORTEX_MACHINE_FILE;
+  return cortexMachineFilePath();
 }
 
 export function defaultMachineName(): string {

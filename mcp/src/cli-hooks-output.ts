@@ -5,6 +5,10 @@ import {
 import {
   getDocSourceKey,
 } from "./shared-index.js";
+import {
+  logImpact,
+  extractFindingIdsFromSnippet,
+} from "./finding-impact.js";
 import { isFeatureEnabled } from "./utils.js";
 import { annotateStale } from "./cli-hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "./shared-retrieval.js";
@@ -48,6 +52,8 @@ export function buildHookOutput(
   const statusLine = `\u25c6 cortex${projectLabel} \u00b7 ${resultLabel}`;
 
   const parts: string[] = [statusLine, "<cortex-context>"];
+  const impactEntries: Array<{ findingId: string; project: string; sessionId: string }> = [];
+  const impactSessionId = sessionId ?? "none";
 
   const useCompactIndex = isFeatureEnabled("CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE", false) && selected.length >= 3;
 
@@ -61,6 +67,15 @@ export function buildHookOutput(
     parts.push("");
     for (const injected of indexEntries) {
       recordInjection(cortexPathLocal, injected.key, sessionId);
+      if (injected.doc.type === "findings") {
+        for (const findingId of extractFindingIdsFromSnippet(injected.snippet)) {
+          impactEntries.push({
+            findingId,
+            project: injected.doc.project,
+            sessionId: impactSessionId,
+          });
+        }
+      }
       try {
         recordRetrieval(cortexPathLocal, `${injected.doc.project}/${injected.doc.filename}`, injected.doc.type);
       } catch (err: unknown) {
@@ -102,6 +117,15 @@ export function buildHookOutput(
     for (const injected of ordered) {
       const { doc, snippet, key } = injected;
       recordInjection(cortexPathLocal, key, sessionId);
+      if (doc.type === "findings") {
+        for (const findingId of extractFindingIdsFromSnippet(snippet)) {
+          impactEntries.push({
+            findingId,
+            project: doc.project,
+            sessionId: impactSessionId,
+          });
+        }
+      }
       try {
         recordRetrieval(cortexPathLocal, doc.path ?? doc.filename, doc.type);
       } catch (err: unknown) {
@@ -112,6 +136,8 @@ export function buildHookOutput(
       parts.push("");
     }
   }
+
+  logImpact(cortexPathLocal, impactEntries);
 
   parts.push("<cortex-context>");
 

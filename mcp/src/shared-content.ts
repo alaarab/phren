@@ -38,3 +38,12 @@ export {
   addFindingToFile,
   addFindingsToFile,
 } from "./content-learning.js";
+
+export {
+  FINDING_LIFECYCLE_STATUSES,
+  parseFindingLifecycle,
+  buildLifecycleComments,
+  isInactiveFindingLine,
+  type FindingLifecycleStatus,
+  type FindingLifecycleMetadata,
+} from "./finding-lifecycle.js";

@@ -283,10 +283,17 @@ export async function runStatus() {
 
   console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalTask} tasks, ${totalQueue} queued`);
 
+  const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : cortexPath;
+  const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"]) === "true";
+  const hasOriginRemote = isGitRepo && Boolean(runGit(gitTarget, ["remote", "get-url", "origin"]));
   const runtime = readRuntimeHealth(cortexPath);
   if (manifest?.installMode === "project-local") {
     console.log(`\n  ${BOLD}Sync:${RESET}     workspace-managed`);
     console.log(`             auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+  } else if (isGitRepo && !hasOriginRemote) {
+    console.log(`\n  ${BOLD}Sync:${RESET}     local-only ${DIM}(no git remote configured)${RESET}`);
+    console.log(`             auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+    console.log(`             local commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
   } else {
     console.log(`\n  ${BOLD}Sync:${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
     console.log(`             last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
@@ -298,9 +305,7 @@ export async function runStatus() {
   }
 
   // Recent changes (git log)
-  const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : cortexPath;
-  const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"]);
-  if (isGitRepo === "true") {
+  if (isGitRepo) {
     const log = runGit(gitTarget, ["log", "--oneline", "-5", "--no-decorate"]);
     if (log) {
       console.log(`\n  ${BOLD}Recent changes:${RESET}`);

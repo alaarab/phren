@@ -88,6 +88,25 @@ export {
 } from "./proactivity.js";
 
 const RESERVED_PROJECT_DIR_NAMES = new Set(["profiles", "templates", "global"]);
+const MEMORY_SCOPE_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
+
+export function normalizeMemoryScope(scope?: string | null): string | undefined {
+  if (typeof scope !== "string") return undefined;
+  const normalized = scope.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (!MEMORY_SCOPE_PATTERN.test(normalized)) return undefined;
+  return normalized;
+}
+
+export function isMemoryScopeVisible(itemScope: string | undefined, activeScope?: string): boolean {
+  if (!activeScope) return true;
+  if (!itemScope) return true; // Untagged legacy entries are visible to all scoped agents.
+  return itemScope === "shared" || itemScope === activeScope;
+}
+
+export function impactLogFile(cortexPath: string): string {
+  return runtimeFile(cortexPath, "impact.jsonl");
+}
 
 function isProjectDirEntry(entry: fs.Dirent): boolean {
   return entry.isDirectory()

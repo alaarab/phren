@@ -5,14 +5,21 @@ import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { findCortexPath } from "./cortex-paths.js";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
+import { readProjectTopics } from "./project-topics.js";
 
-const _synonymsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "synonyms.json");
-const _synonymsJson: Record<string, string[]> = (() => {
-  try { return JSON.parse(fs.readFileSync(_synonymsPath, "utf8")); } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] synonyms.json load failed: ${err instanceof Error ? err.message : String(err)}\n`);
+const _moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+function loadSynonymsJson(fileName: string): Record<string, string[]> {
+  const filePath = path.join(_moduleDir, fileName);
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] ${fileName} load failed: ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
-})();
+}
+
+const _baseSynonymsJson = loadSynonymsJson("synonyms.json");
 
 // ── Shared Git helper ────────────────────────────────────────────────────────
 
@@ -106,8 +113,58 @@ export function clampInt(raw: string | undefined, fallback: number, min: number,
   return Math.min(max, Math.max(min, parsed));
 }
 
-// Synonym map for fuzzy search expansion — source of truth is mcp/src/synonyms.json
-const SYNONYMS: Record<string, string[]> = _synonymsJson;
+// Base synonym map for fuzzy search expansion — source of truth is mcp/src/synonyms.json
+const BASE_SYNONYMS: Record<string, string[]> = _baseSynonymsJson;
+const LEARNED_SYNONYMS_FILE = "learned-synonyms.json";
+
+function normalizeDomain(rawDomain?: string): "music" | "gamedev" | null {
+  if (!rawDomain) return null;
+  const normalized = rawDomain.trim().toLowerCase().replace(/[_\s]+/g, "-");
+  if (normalized === "music" || normalized === "audio") return "music";
+  if (normalized === "game" || normalized === "gamedev" || normalized === "game-dev" || normalized === "game-development") return "gamedev";
+  return null;
+}
+
+function loadDomainSynonyms(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
+  if (!project || !isValidProjectName(project)) return {};
+  const resolved = cortexPath ?? findCortexPath();
+  if (!resolved) return {};
+
+  // Domain-specific synonyms are now learned adaptively via learned-synonyms.json
+  // rather than hardcoded per-domain files.
+  return {};
+}
+
+function normalizeSynonymTerm(term: string): string {
+  return term.toLowerCase().replace(/"/g, "").trim();
+}
+
+function normalizeSynonymValues(items: string[], baseTerm?: string): string[] {
+  const normalizedBase = baseTerm ? normalizeSynonymTerm(baseTerm) : "";
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const raw of items) {
+    const term = normalizeSynonymTerm(raw);
+    if (!term || term.length <= 1 || term === normalizedBase || seen.has(term)) continue;
+    seen.add(term);
+    normalized.push(term);
+  }
+  return normalized;
+}
+
+function mergeSynonymMaps(...maps: Array<Record<string, string[]>>): Record<string, string[]> {
+  const merged: Record<string, string[]> = {};
+  for (const map of maps) {
+    for (const [rawKey, rawValues] of Object.entries(map)) {
+      const key = normalizeSynonymTerm(rawKey);
+      if (!key) continue;
+      const existing = merged[key] ?? [];
+      const values = normalizeSynonymValues([...(existing || []), ...(Array.isArray(rawValues) ? rawValues : [])], key);
+      if (values.length > 0) merged[key] = values;
+    }
+  }
+  return merged;
+}
 
 
 // Common English stop words to strip from prompts before searching
@@ -127,7 +184,7 @@ export const STOP_WORDS = new Set([
 
 // Extract meaningful keywords from a prompt, including bigrams (2-word noun phrases).
 // Bigrams capture intent better than isolated words (e.g., "rate limit" vs "rate" + "limit").
-export function extractKeywords(text: string): string {
+export function extractKeywordEntries(text: string): string[] {
   const words = text
     .toLowerCase()
     .replace(/[^\w\s-]/g, " ")
@@ -153,7 +210,11 @@ export function extractKeywords(text: string): string {
     if (result.length >= 10) break;
   }
 
-  return result.join(" ");
+  return result;
+}
+
+export function extractKeywords(text: string): string {
+  return extractKeywordEntries(text).join(" ");
 }
 
 // Validate a project name: lowercase letters/numbers with optional hyphen/underscore separators.
@@ -271,6 +332,117 @@ function loadUserSynonyms(project?: string | null, cortexPath?: string | null): 
   };
 }
 
+function parseLearnedSynonymsJson(filePath: string): Record<string, string[]> {
+  if (!fs.existsSync(filePath)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const loaded: Record<string, string[]> = {};
+    for (const [rawKey, rawValue] of Object.entries(parsed)) {
+      if (!Array.isArray(rawValue)) continue;
+      const key = normalizeSynonymTerm(rawKey);
+      if (!key) continue;
+      const synonyms = normalizeSynonymValues(
+        rawValue.filter((v): v is string => typeof v === "string"),
+        key,
+      );
+      if (synonyms.length > 0) loaded[key] = synonyms;
+    }
+    return loaded;
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] learned-synonyms parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
+    return {};
+  }
+}
+
+export function learnedSynonymsPath(cortexPath: string, project: string): string | null {
+  if (!isValidProjectName(project)) return null;
+  return safeProjectPath(cortexPath, project, LEARNED_SYNONYMS_FILE);
+}
+
+export function loadLearnedSynonyms(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
+  if (!project || !isValidProjectName(project)) return {};
+  const resolved = cortexPath ?? findCortexPath();
+  if (!resolved) return {};
+  const targetPath = learnedSynonymsPath(resolved, project);
+  if (!targetPath) return {};
+  return parseLearnedSynonymsJson(targetPath);
+}
+
+export function loadSynonymMap(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
+  return mergeSynonymMaps(
+    BASE_SYNONYMS,
+    loadDomainSynonyms(project, cortexPath),
+    loadUserSynonyms(project, cortexPath),
+    loadLearnedSynonyms(project, cortexPath),
+  );
+}
+
+export function learnSynonym(
+  cortexPath: string,
+  project: string,
+  term: string,
+  synonyms: string[],
+): Record<string, string[]> {
+  if (!isValidProjectName(project)) throw new Error(`Invalid project name: ${project}`);
+  const targetPath = learnedSynonymsPath(cortexPath, project);
+  if (!targetPath) throw new Error(`Path traversal detected for project: ${project}`);
+
+  const normalizedTerm = normalizeSynonymTerm(term);
+  if (!normalizedTerm || normalizedTerm.length <= 1) {
+    throw new Error("Invalid synonym term");
+  }
+  const normalizedSynonyms = normalizeSynonymValues(synonyms, normalizedTerm);
+  if (normalizedSynonyms.length === 0) {
+    return loadLearnedSynonyms(project, cortexPath);
+  }
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const existing = parseLearnedSynonymsJson(targetPath);
+  const next = mergeSynonymMaps(existing, { [normalizedTerm]: normalizedSynonyms });
+  const tmpPath = `${targetPath}.tmp-${Date.now()}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2) + "\n", "utf8");
+  fs.renameSync(tmpPath, targetPath);
+  return next;
+}
+
+export function removeLearnedSynonym(
+  cortexPath: string,
+  project: string,
+  term: string,
+  synonyms?: string[],
+): Record<string, string[]> {
+  if (!isValidProjectName(project)) throw new Error(`Invalid project name: ${project}`);
+  const targetPath = learnedSynonymsPath(cortexPath, project);
+  if (!targetPath) throw new Error(`Path traversal detected for project: ${project}`);
+
+  const normalizedTerm = normalizeSynonymTerm(term);
+  if (!normalizedTerm || normalizedTerm.length <= 1) {
+    throw new Error("Invalid synonym term");
+  }
+
+  const existing = parseLearnedSynonymsJson(targetPath);
+  if (!existing[normalizedTerm]) return existing;
+
+  if (!synonyms || synonyms.length === 0) {
+    delete existing[normalizedTerm];
+  } else {
+    const drop = new Set(normalizeSynonymValues(synonyms));
+    existing[normalizedTerm] = (existing[normalizedTerm] || []).filter((item) => !drop.has(item));
+    if (existing[normalizedTerm].length === 0) delete existing[normalizedTerm];
+  }
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  if (Object.keys(existing).length === 0) {
+    try { fs.unlinkSync(targetPath); } catch {}
+    return {};
+  }
+  const tmpPath = `${targetPath}.tmp-${Date.now()}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(existing, null, 2) + "\n", "utf8");
+  fs.renameSync(tmpPath, targetPath);
+  return existing;
+}
+
 function buildFtsClauses(raw: string, project?: string | null, cortexPath?: string): string[] {
   const MAX_TOTAL_TERMS = 10;
   const MAX_SYNONYM_GROUPS = 3;
@@ -280,10 +452,7 @@ function buildFtsClauses(raw: string, project?: string | null, cortexPath?: stri
   if (!safe) return [];
 
   // Step 2: Merge built-in and per-project synonym maps
-  const synonymsMap = {
-    ...SYNONYMS,
-    ...loadUserSynonyms(project, cortexPath),
-  };
+  const synonymsMap = loadSynonymMap(project, cortexPath);
 
   // Step 3: Tokenize — split sanitized input into individual words (min length 2)
   const baseWords = safe.split(/\s+/).filter((t) => t.length > 1);

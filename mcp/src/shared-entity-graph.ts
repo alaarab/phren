@@ -58,6 +58,27 @@ const ENTITY_PATTERNS = [
   /"([\w][\w\-]{1,30}[\w])"/g,
 ];
 
+function isAllowedEntityName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length <= 1 || trimmed.length >= 100) return false;
+  // Skip version strings (e.g. "1.2.3", "v2.0.0-beta")
+  if (/^v?\d+\.\d+/.test(trimmed)) return false;
+  // Skip file paths and file-like names (e.g. "src/utils.ts", "./config.json")
+  if (
+    /^\.?\//.test(trimmed) ||
+    /\.(ts|js|json|md|yaml|yml|py|go|rs|java|tsx|jsx|css|html|txt|sh|toml|cfg|ini|env|lock)$/i.test(trimmed)
+  ) {
+    return false;
+  }
+
+  if (!/\s/.test(trimmed)) {
+    const normalized = trimmed.replace(/^[@#]/, "").toLowerCase();
+    if (COMMON_SINGLE_WORD_ENTITIES.has(normalized)) return false;
+  }
+
+  return true;
+}
+
 /**
  * Lightweight synchronous entity extraction from text — regex only, no DB writes.
  * Used by add_finding to surface detected entities in the MCP response without
@@ -72,11 +93,7 @@ export function extractEntityNames(content: string): string[] {
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) {
       const name = match[1] || match[0];
-      if (!name || name.length <= 1 || name.length >= 100) continue;
-      // Skip version strings (e.g. "1.2.3", "v2.0.0-beta")
-      if (/^v?\d+\.\d+/.test(name)) continue;
-      // Skip file paths (e.g. "src/utils/helper.ts", "./config.json")
-      if (/^\.?\//.test(name) || /\.(ts|js|json|md|yaml|yml|py|go|rs|java|tsx|jsx|css|html|txt|sh|toml|cfg|ini|env|lock)$/i.test(name)) continue;
+      if (!isAllowedEntityName(name)) continue;
       found.add(name.toLowerCase());
     }
   }
@@ -87,7 +104,7 @@ export function extractEntityNames(content: string): string[] {
   while ((m = annotationRe.exec(content)) !== null) {
     for (const part of m[1].split(",")) {
       const name = part.trim();
-      if (name && name.length > 1 && name.length < 100) {
+      if (isAllowedEntityName(name)) {
         found.add(name.toLowerCase());
       }
     }
@@ -136,24 +153,80 @@ export function ensureGlobalEntitiesTable(db: SqlJsDatabase): void {
  * during a single index build that processes many docs for the same project.
  */
 const _userEntityCache = new Map<string, { mtime: number; entities: string[] }>();
+const _buildUserEntityCache = new Map<string, string[]>();
+let _activeBuildCacheKeyPrefix: string | null = null;
+
+function readUserDefinedEntitiesFromDisk(claudeMdPath: string): { mtime: number; entities: string[] } | null {
+  if (!fs.existsSync(claudeMdPath)) return null;
+  const stat = fs.statSync(claudeMdPath);
+  const content = fs.readFileSync(claudeMdPath, "utf-8");
+  const match = content.match(/<!--\s*cortex:entities:\s*(.+?)\s*-->/);
+  const entities = match
+    ? match[1].split(",").map(s => s.trim()).filter(s => s.length > 0)
+    : [];
+  return { mtime: stat.mtimeMs, entities };
+}
+
+/**
+ * Prime CLAUDE.md entities per project for a single build pass.
+ * During an active build, extractAndLinkEntities resolves user entities from this
+ * in-memory map and avoids per-file sync stat/read calls.
+ */
+export function beginUserEntityBuildCache(cortexPath: string, projects: Iterable<string>): void {
+  _activeBuildCacheKeyPrefix = `${cortexPath}/`;
+  for (const project of projects) {
+    const cacheKey = `${cortexPath}/${project}`;
+    const claudeMdPath = `${cortexPath}/${project}/CLAUDE.md`;
+    try {
+      const loaded = readUserDefinedEntitiesFromDisk(claudeMdPath);
+      if (!loaded) {
+        _buildUserEntityCache.set(cacheKey, []);
+        continue;
+      }
+      _userEntityCache.set(cacheKey, loaded);
+      _buildUserEntityCache.set(cacheKey, loaded.entities);
+    } catch (err: unknown) {
+      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] beginUserEntityBuildCache: ${err instanceof Error ? err.message : String(err)}\n`);
+      _buildUserEntityCache.set(cacheKey, []);
+    }
+  }
+}
+
+/** End a build-scoped cache created by beginUserEntityBuildCache(). */
+export function endUserEntityBuildCache(cortexPath: string): void {
+  const prefix = `${cortexPath}/`;
+  for (const key of [..._buildUserEntityCache.keys()]) {
+    if (key.startsWith(prefix)) _buildUserEntityCache.delete(key);
+  }
+  if (_activeBuildCacheKeyPrefix === prefix) _activeBuildCacheKeyPrefix = null;
+}
 
 function parseUserDefinedEntities(cortexPath: string, project: string): string[] {
   const claudeMdPath = `${cortexPath}/${project}/CLAUDE.md`;
+  const cacheKey = `${cortexPath}/${project}`;
   try {
-    if (!fs.existsSync(claudeMdPath)) return [];
-    const stat = fs.statSync(claudeMdPath);
-    const mtimeMs = stat.mtimeMs;
-    const cacheKey = `${cortexPath}/${project}`;
-    const cached = _userEntityCache.get(cacheKey);
-    if (cached && cached.mtime === mtimeMs) return cached.entities;
+    // Active build path: no sync I/O in per-file extraction.
+    if (_activeBuildCacheKeyPrefix === `${cortexPath}/`) {
+      if (_buildUserEntityCache.has(cacheKey)) return _buildUserEntityCache.get(cacheKey) ?? [];
+      _buildUserEntityCache.set(cacheKey, []);
+      return [];
+    }
 
-    const content = fs.readFileSync(claudeMdPath, "utf-8");
-    const match = content.match(/<!--\s*cortex:entities:\s*(.+?)\s*-->/);
-    const entities = match
-      ? match[1].split(",").map(s => s.trim()).filter(s => s.length > 0)
-      : [];
-    _userEntityCache.set(cacheKey, { mtime: mtimeMs, entities });
-    return entities;
+    const cached = _userEntityCache.get(cacheKey);
+    if (cached) {
+      try {
+        if (fs.existsSync(claudeMdPath) && fs.statSync(claudeMdPath).mtimeMs === cached.mtime) {
+          return cached.entities;
+        }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] parseUserDefinedEntities statCheck: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+    }
+
+    const loaded = readUserDefinedEntitiesFromDisk(claudeMdPath);
+    if (!loaded) return [];
+    _userEntityCache.set(cacheKey, loaded);
+    return loaded.entities;
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] parseUserDefinedEntities: ${err instanceof Error ? err.message : String(err)}\n`);
     return [];
@@ -163,6 +236,8 @@ function parseUserDefinedEntities(cortexPath: string, project: string): string[]
 /** Clear the user entity cache (call between index builds). */
 export function clearUserEntityCache(): void {
   _userEntityCache.clear();
+  _buildUserEntityCache.clear();
+  _activeBuildCacheKeyPrefix = null;
 }
 
 // Words that commonly start sentences or appear in titles — not entity names
@@ -177,6 +252,19 @@ const SENTENCE_START_WORDS = new Set([
   "second", "third", "next", "last", "new", "old", "good", "bad", "best",
   "however", "therefore", "because", "although", "since", "unless", "until",
   "instead", "rather", "already", "always", "never", "sometimes", "often",
+]);
+
+const COMMON_SINGLE_WORD_ENTITIES = new Set([
+  ...SENTENCE_START_WORDS,
+  "agent", "analysis", "app", "approach", "artifact", "branch", "build", "cache",
+  "change", "changes", "check", "cli", "code", "command", "config", "context",
+  "data", "debug", "detail", "doc", "docs", "document", "entity", "error",
+  "example", "extract", "feature", "file", "files", "fix", "flow", "hook", "idea",
+  "index", "info", "issue", "item", "key", "log", "memory", "message", "model",
+  "note", "output", "path", "pattern", "policy", "process", "profile", "project",
+  "query", "repo", "result", "rule", "search", "session", "setting", "state",
+  "step", "summary", "system", "task", "tasks", "test", "tool", "tools", "type",
+  "update", "user", "value", "version", "workflow", "write",
 ]);
 
 // Patterns that look like version strings, file paths, or dates — not entities

@@ -9,6 +9,7 @@ import {
   addTasks as addTasksBatch,
   taskMarkdown,
   type TaskDoc,
+  type TaskItem,
   type TaskSection,
   completeTask as completeTaskStore,
   completeTasks as completeTasksBatch,
@@ -31,6 +32,9 @@ import {
   parseGithubIssueUrl,
   resolveProjectGithubRepo,
 } from "./tasks-github.js";
+import { clearTaskCheckpoint } from "./session-checkpoints.js";
+import { incrementSessionTasksCompleted } from "./mcp-session.js";
+import { normalizeMemoryScope } from "./shared.js";
 
 type TaskStatus = "all" | "active" | "queue" | "done" | "active+queue";
 
@@ -232,15 +236,18 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your cortex)."),
         item: z.string().describe("The task to add."),
+        scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
     },
-    async ({ project, item }) => {
+    async ({ project, item, scope }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const normalizedScope = normalizeMemoryScope(scope ?? "shared");
+      if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
       return withWriteQueue(async () => {
-        const result = addTaskStore(cortexPath, project, item);
+        const result = addTaskStore(cortexPath, project, item, { scope: normalizedScope });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
-        return mcpResponse({ ok: true, message: `Task added: ${result.data.line}`, data: { project, item } });
+        return mcpResponse({ ok: true, message: `Task added: ${result.data.line}`, data: { project, item, scope: normalizedScope } });
       });
     }
   );
@@ -275,13 +282,25 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         item: z.string().describe("Exact or partial text of the item to complete."),
+        sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this to track per-session task completion metrics."),
       }),
     },
-    async ({ project, item }) => {
+    async ({ project, item, sessionId }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
+        const before = resolveTaskItem(cortexPath, project, item);
         const result = completeTaskStore(cortexPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        if (before.ok) {
+          clearTaskCheckpoint(cortexPath, {
+            project,
+            taskId: before.data.stableId ?? before.data.id,
+            stableId: before.data.stableId,
+            positionalId: before.data.id,
+            taskLine: before.data.line,
+          });
+        }
+        incrementSessionTasksCompleted(cortexPath, 1, sessionId, project);
         refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
@@ -296,14 +315,35 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         items: z.array(z.string()).describe("List of partial item texts to complete."),
+        sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this to track per-session task completion metrics."),
       }),
     },
-    async ({ project, items }) => {
+    async ({ project, items, sessionId }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
+        const resolvedItems = items
+          .map((match) => {
+            const resolved = resolveTaskItem(cortexPath, project, match);
+            return resolved.ok ? resolved.data : null;
+          })
+          .filter((task): task is TaskItem => task !== null);
         const result = completeTasksBatch(cortexPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { completed, errors } = result.data;
+        if (completed.length > 0) {
+          const completedSet = new Set(completed);
+          for (const task of resolvedItems) {
+            if (!completedSet.has(task.line)) continue;
+            clearTaskCheckpoint(cortexPath, {
+              project,
+              taskId: task.stableId ?? task.id,
+              stableId: task.stableId,
+              positionalId: task.id,
+              taskLine: task.line,
+            });
+          }
+          incrementSessionTasksCompleted(cortexPath, completed.length, sessionId, project);
+        }
         if (completed.length > 0) refreshTaskIndex(updateFileInIndex, cortexPath, project);
         return mcpResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
       });
@@ -457,8 +497,16 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!linked.ok) return mcpResponse({ ok: false, error: linked.error, errorCode: linked.code });
 
         if (mark_done) {
-          const completed = completeTaskStore(cortexPath, project, linked.data.stableId ? `bid:${linked.data.stableId}` : linked.data.id);
+          const completionMatch = linked.data.stableId ? `bid:${linked.data.stableId}` : linked.data.id;
+          const completed = completeTaskStore(cortexPath, project, completionMatch);
           if (!completed.ok) return mcpResponse({ ok: false, error: completed.error, errorCode: completed.code });
+          clearTaskCheckpoint(cortexPath, {
+            project,
+            taskId: match.data.stableId ?? match.data.id,
+            stableId: match.data.stableId,
+            positionalId: match.data.id,
+            taskLine: match.data.line,
+          });
         }
 
         refreshTaskIndex(updateFileInIndex, cortexPath, project);

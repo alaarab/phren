@@ -28,10 +28,10 @@ The common ones are boring infrastructure issues, not mystery behavior:
 
 - No remote configured: auto-save still commits locally, but nothing syncs across machines until you add a remote.
 - Push failed: the commit stays local and Cortex records the last sync error so `cortex status`, shell, and web UI can show it.
-- Hooks disabled or stale: retrieval stops, but your files are still there; rerun `cortex init` or `cortex hooks enable <tool>`.
+- Hooks disabled or stale: retrieval stops, but your files are still there; rerun `cortex init` or re-enable hooks with `cortex hooks-mode on`.
 - Stale index: search quality drops until the next rebuild; `cortex doctor` and `cortex status` will flag index trouble.
 - Review queue growth: trust filtering is catching too much low-signal or stale content, which usually means your findings need pruning or governance thresholds need adjustment.
-- Governance lockout: if access control blocks a write, nothing is silently discarded; fix `access-control.json` or your actor identity.
+- Governance lockout: if access control blocks a write, nothing is silently discarded; check `.governance/access-control.json`, `.runtime/access-control.local.json`, and actor identity (`CORTEX_ACTOR` / OS user).
 
 ## How does trust decay work?
 
@@ -78,6 +78,12 @@ If a project has never customized topics, the UI shows a starter-topics banner. 
 
 The terminal shell (`cortex`, then press `m`) covers the same workflow if you prefer staying in the terminal.
 
+Security defaults for `cortex web-ui`:
+- loopback-only bind (`127.0.0.1`)
+- random per-run auth token
+- CSRF token required for mutating routes
+- CSP and anti-framing headers enabled
+
 ## What gets saved automatically vs what do I save manually?
 
 **Automatic:**
@@ -91,6 +97,28 @@ The terminal shell (`cortex`, then press `m`) covers the same workflow if you pr
 - Pinning canonical memories that should never decay
 
 In practice, well-configured agents save findings automatically as they work. You review the queue periodically to keep quality high, and run consolidation intentionally when the findings file starts to get repetitive.
+
+## How do finding lifecycle and contradictions work?
+
+Findings now have explicit lifecycle operations:
+- `supersede_finding`: mark older guidance replaced by newer guidance
+- `retract_finding`: invalidate a finding with a reason
+- `resolve_contradiction`: resolve status between conflicting findings
+- `get_contradictions`: list unresolved contradicted findings
+
+Lifecycle metadata stays attached to finding entries, so history remains auditable instead of being silently deleted.
+
+## What is finding provenance and impact scoring?
+
+`add_finding` accepts a `source` field (`human`, `agent`, `hook`, `extract`, `consolidation`, `unknown`) so origin is explicit.
+
+Impact scoring tracks which findings were injected into context and whether those sessions completed tasks. Repeatedly successful findings get a stronger retrieval boost.
+
+## How does cross-session resume work?
+
+`session_end` writes task checkpoints (task ID/text, edited files, failing tests, last attempt, next step).  
+`session_start` surfaces those checkpoints so agents can resume quickly.  
+`session_history` gives list/drill-down access to prior sessions and artifacts.
 
 ## How do I add a new project?
 
@@ -118,7 +146,7 @@ Project setup note:
 
 ## Does cortex require MCP?
 
-No. MCP is recommended — it gives agents 51 tools for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended — it gives agents 60 tools across 11 modules for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
 cortex init --mcp off
@@ -145,11 +173,30 @@ Claude Code, GitHub Copilot CLI, Cursor, VS Code Copilot, and OpenAI Codex.
 
 - Shared mode configures user-scoped integrations for Claude Code, VS Code, Copilot CLI, Cursor, and Codex.
 - Project-local mode configures VS Code workspace MCP only.
-- Claude Code is still the only tool with lifecycle hooks and automatic prompt injection.
+- Claude gets full native lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`) plus MCP.
+- Copilot CLI, Cursor, and Codex get generated hook configs plus session wrappers, in addition to MCP config.
 
 ## Which platforms are supported?
 
 Linux is the primary validation path. macOS and Windows are supported, with explicit config-path handling for their user-home layouts and MCP config locations. The current support matrix and known differences live in `docs/platform-matrix.md`.
+
+## How are skills resolved when names or aliases collide?
+
+Skill resolution precedence is project scope over global scope. Disabled skills remain on disk but are hidden from active mirrors. Alias/command collisions are flagged and left unregistered in generated command outputs.
+
+Generated skill artifacts:
+- `.claude/skill-manifest.json`
+- `.claude/skill-commands.json`
+
+## Is telemetry on by default?
+
+No. Telemetry is opt-in and local-only.
+
+```bash
+cortex config telemetry on
+```
+
+Stats are stored in `.runtime/telemetry.json`. No external reporting is sent by default.
 
 ## Where does cortex store data?
 

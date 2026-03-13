@@ -279,11 +279,11 @@
             <div class="install-step-body">
               <div class="code-block code-block-install">
                 <div class="install-command-row">
-                  <div><span class="code-prompt">$</span> cortex init</div>
-                  <button class="copy-btn" data-cmd="cortex init">copy</button>
+                  <div><span class="code-prompt">$</span> npm install -g @alaarab/cortex && cortex init</div>
+                  <button class="copy-btn" data-cmd="npm install -g @alaarab/cortex && cortex init">copy</button>
                 </div>
                 <div class="install-command-note">
-                  Creates <code style="color:var(--indigo)">~/.cortex</code>, registers the machine, configures MCP, wires up hooks, and bootstraps the repo you are standing in.
+                  Installs Cortex globally, then creates <code style="color:var(--indigo)">~/.cortex</code>, registers the machine, configures MCP, wires up hooks, and bootstraps the repo you are standing in.
                 </div>
                 <div class="install-path-grid">
                   <div class="install-path-card install-path-card-primary">
@@ -334,7 +334,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           </div>
           <div class="step-title">Synced across machines automatically</div>
-          <p class="step-desc">The Stop hook commits and pushes after every response. SessionStart pulls on open. Switch machines mid-task. Profiles control which projects each machine sees.</p>
+          <p class="step-desc">The Stop hook commits locally and queues background sync pushes after every response. SessionStart pulls on open. Switch machines mid-task. Profiles control which projects each machine sees.</p>
         </div>
         <div class="step reveal reveal-delay-3">
           <div class="step-num">03</div>
@@ -353,7 +353,7 @@
     <div class="container">
       <div class="trace-header reveal">
         <div class="section-label">Under the hood</div>
-        <h2 class="section-title">Three hooks. Zero config.</h2>
+        <h2 class="section-title">Three default hooks. Optional PostToolUse.</h2>
       </div>
 
       <div class="trace reveal">
@@ -804,7 +804,7 @@
       <div class="skills-header reveal">
         <div class="section-label">Workflow</div>
         <h2 class="section-title">MCP tools handle the work.<br>Skills are optional shortcuts.</h2>
-        <p class="section-sub" style="margin-top:12px">Cortex exposes MCP tools organized by workflow: search and retrieve context, capture findings and task, review memory quality, and sync across machines. Skills are shortcuts for common multi-step jobs. Not required for daily use. Add your own in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
+        <p class="section-sub" style="margin-top:12px">Cortex exposes MCP tools organized by workflow: search and retrieve context, capture findings and tasks, review memory quality, and sync across machines. Skills are shortcuts for common multi-step jobs. Not required for daily use. Add your own in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
       </div>
 
       <div class="skills-grid">
@@ -823,6 +823,10 @@
         <div class="skill-card reveal reveal-delay-1">
           <div class="skill-name">/cortex-consolidate</div>
           <div class="skill-desc">Find patterns across all project findings. Surfaces what shows up in more than one place.</div>
+        </div>
+        <div class="skill-card reveal">
+          <div class="skill-name">/cortex-profiles</div>
+          <div class="skill-desc">Manage machine-to-profile mappings. Add machines, switch profiles, and keep multi-machine config in sync.</div>
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>

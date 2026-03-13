@@ -53,6 +53,8 @@ Configuration:
   cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds
   cortex config access [get|set ...]     Role-based permissions
   cortex config index [get|set ...]      Indexer include/exclude globs
+  cortex config synonyms [list|add|remove] ...
+                                         Manage project learned synonyms
   cortex config project-ownership [mode] Default ownership for future project enrollments
   cortex config machines                 Registered machines
   cortex config profiles                 Profiles and projects

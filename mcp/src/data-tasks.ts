@@ -51,6 +51,7 @@ export interface TaskItem {
   lastActivity?: string;
   createdAt?: string;
   sessionId?: string;
+  scope?: string;
   childFindings?: string[];
   speculative?: boolean;
   parentFinding?: string;
@@ -170,7 +171,7 @@ function ensureProject(cortexPath: string, project: string): CortexResult<string
 /** Pattern that matches the task metadata comment embedded in task item lines.
  *  Format: <!-- bid:HASH [rank:N] [lastActivity:ISO] -->
  */
-const METADATA_PATTERN = /\s*<!--\s*bid:([a-z0-9]{8})(?:\s+rank:(\d+))?(?:\s+lastActivity:([^\s>]+))?(?:\s+created:([^\s>]+))?(?:\s+session:([^\s>]+))?(?:\s+findings:((?:[a-z0-9]{8}(?::[a-z0-9]{8})?|fid:[a-z0-9]{8})(?:,[a-z0-9a-z:]{3,})*))?(?:\s+parentFinding:([^\s>]+))?(\s+speculative)?\s*-->/;
+const METADATA_PATTERN = /\s*<!--\s*bid:([a-z0-9]{8})(?:\s+rank:(\d+))?(?:\s+lastActivity:([^\s>]+))?(?:\s+created:([^\s>]+))?(?:\s+session:([^\s>]+))?(?:\s+scope:([^\s>]+))?(?:\s+findings:((?:[a-z0-9]{8}(?::[a-z0-9]{8})?|fid:[a-z0-9]{8})(?:,[a-z0-9a-z:]{3,})*))?(?:\s+parentFinding:([^\s>]+))?(\s+speculative)?\s*-->/;
 
 /** Generate a new 8-character random stable ID. */
 function newBid(): string {
@@ -178,11 +179,11 @@ function newBid(): string {
 }
 
 /** Strip the metadata comment from a raw line, returning the clean text and any extracted fields. */
-function stripBid(text: string): { clean: string; bid?: string; rank?: number; lastActivity?: string; createdAt?: string; sessionId?: string; childFindings?: string[]; parentFinding?: string; speculative?: boolean } {
+function stripBid(text: string): { clean: string; bid?: string; rank?: number; lastActivity?: string; createdAt?: string; sessionId?: string; scope?: string; childFindings?: string[]; parentFinding?: string; speculative?: boolean } {
   const m = text.match(METADATA_PATTERN);
   if (!m) return { clean: text };
   const rankNum = m[2] ? Number.parseInt(m[2], 10) : undefined;
-  const childFindings = m[6] ? m[6].split(",").filter(Boolean) : undefined;
+  const childFindings = m[7] ? m[7].split(",").filter(Boolean) : undefined;
   return {
     clean: text.replace(METADATA_PATTERN, "").trimEnd(),
     bid: m[1],
@@ -190,9 +191,10 @@ function stripBid(text: string): { clean: string; bid?: string; rank?: number; l
     lastActivity: m[3] || undefined,
     createdAt: m[4] || undefined,
     sessionId: m[5] || undefined,
+    scope: m[6] || undefined,
     childFindings: childFindings && childFindings.length > 0 ? childFindings : undefined,
-    parentFinding: m[7] || undefined,
-    speculative: m[8] ? true : undefined,
+    parentFinding: m[8] || undefined,
+    speculative: m[9] ? true : undefined,
   };
 }
 
@@ -253,10 +255,11 @@ function normalizeTaskItemLine(item: TaskItem): string {
   const activityPart = item.lastActivity ? ` lastActivity:${item.lastActivity}` : "";
   const createdPart = item.createdAt ? ` created:${item.createdAt}` : "";
   const sessionPart = item.sessionId ? ` session:${item.sessionId}` : "";
+  const scopePart = item.scope ? ` scope:${item.scope}` : "";
   const findingsPart = item.childFindings && item.childFindings.length > 0 ? ` findings:${item.childFindings.join(",")}` : "";
   const parentFindingPart = item.parentFinding ? ` parentFinding:${item.parentFinding}` : "";
   const speculativePart = item.speculative ? " speculative" : "";
-  return `${prefix}${text} <!-- bid:${bid}${rankPart}${activityPart}${createdPart}${sessionPart}${findingsPart}${parentFindingPart}${speculativePart} -->`;
+  return `${prefix}${text} <!-- bid:${bid}${rankPart}${activityPart}${createdPart}${sessionPart}${scopePart}${findingsPart}${parentFindingPart}${speculativePart} -->`;
 }
 
 function parseTaskContent(project: string, taskPath: string, content: string): TaskDoc {
@@ -288,7 +291,7 @@ function parseTaskContent(project: string, taskPath: string, content: string): T
 
     const parsed = stripBulletPrefix(line);
     // Extract and strip the metadata comment before further parsing.
-    const { clean: cleanBody, bid, rank, lastActivity, createdAt, sessionId, childFindings, parentFinding, speculative } = stripBid(parsed.body);
+    const { clean: cleanBody, bid, rank, lastActivity, createdAt, sessionId, scope, childFindings, parentFinding, speculative } = stripBid(parsed.body);
     const pinned = detectPinned(cleanBody);
     const priority = normalizePriority(cleanBody);
     const continuation = parseContinuation(lines, i);
@@ -305,6 +308,7 @@ function parseTaskContent(project: string, taskPath: string, content: string): T
       lastActivity,
       createdAt,
       sessionId,
+      scope,
       childFindings,
       parentFinding,
       speculative,
@@ -456,6 +460,7 @@ export function resolveTaskItem(cortexPath: string, project: string, match: stri
 export interface AddTaskOptions {
   createdAt?: string;
   sessionId?: string;
+  scope?: string;
   speculative?: boolean;
   parentFinding?: string;
 }
@@ -482,6 +487,7 @@ export function addTask(cortexPath: string, project: string, item: string, opts?
       priority: normalizePriority(line),
       createdAt: opts?.createdAt,
       sessionId: opts?.sessionId,
+      scope: opts?.scope,
       parentFinding: opts?.parentFinding,
       speculative: opts?.speculative || undefined,
     };

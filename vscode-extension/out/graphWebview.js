@@ -38,6 +38,7 @@ const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
+const crypto = __importStar(require("crypto"));
 /**
  * Load the web-ui graph script from the MCP dist.
  * This gives us the Barnes-Hut force simulation, relevance gravity, a11y, etc.
@@ -170,6 +171,7 @@ async function loadGraphData(client) {
     const entities = await fetchEntities(client);
     // Memory scores
     const scores = loadMemoryScores();
+    const scoreLookup = buildScoreLookup(scores);
     const nodes = [];
     const edges = [];
     const summaryMap = {};
@@ -192,6 +194,8 @@ async function loadGraphData(client) {
         // Finding nodes
         for (const finding of findings) {
             const findingId = `finding:${projectName}:${finding.id}`;
+            const findingScoreKey = buildScoreKey(projectName, "FINDINGS.md", finding.text);
+            const findingScore = scoreLookup.get(findingScoreKey);
             nodes.push({
                 id: findingId,
                 kind: "finding",
@@ -205,12 +209,18 @@ async function loadGraphData(client) {
                 stableId: finding.stableId,
                 topicSlug: finding.topicSlug,
                 topicLabel: finding.topicLabel,
+                scoreKey: findingScoreKey,
+                qualityMultiplier: qualityMultiplierFromEntry(findingScore),
+                lastUsedAt: findingScore?.lastUsedAt,
+                helpful: findingScore?.helpful,
             });
             edges.push({ source: projectNodeId, target: findingId });
         }
         // Task nodes
         for (const task of tasks) {
             const taskId = `task:${projectName}:${task.id}`;
+            const taskScoreKey = buildScoreKey(projectName, "tasks.md", task.line);
+            const taskScore = scoreLookup.get(taskScoreKey);
             const sectionLower = task.section.toLowerCase();
             const taskColorMap = { active: "#10b981", queue: "#eab308", done: "#6b7280" };
             nodes.push({
@@ -224,6 +234,10 @@ async function loadGraphData(client) {
                 color: taskColorMap[sectionLower] || "#eab308",
                 section: task.section,
                 priority: task.priority,
+                scoreKey: taskScoreKey,
+                qualityMultiplier: qualityMultiplierFromEntry(taskScore),
+                lastUsedAt: taskScore?.lastUsedAt,
+                helpful: taskScore?.helpful,
             });
             edges.push({ source: projectNodeId, target: taskId });
         }
@@ -438,6 +452,35 @@ function loadMemoryScores() {
         return { schemaVersion: 1, entries: {} };
     }
 }
+function buildScoreLookup(scores) {
+    return new Map(Object.entries(scores.entries ?? {}));
+}
+function buildScoreKey(project, filename, snippet) {
+    const short = (snippet || "").slice(0, 160);
+    const digest = crypto.createHash("sha1").update(`${project}:${filename}:${short}`).digest("hex").slice(0, 12);
+    return `${project}/${filename}:${digest}`;
+}
+function qualityMultiplierFromEntry(entry) {
+    if (!entry)
+        return undefined;
+    const now = Date.now();
+    const lastUsed = entry.lastUsedAt ? new Date(entry.lastUsedAt).getTime() : 0;
+    const daysSince = lastUsed ? (now - lastUsed) / 86400000 : 999;
+    let recencyBoost = 0;
+    if (daysSince <= 7)
+        recencyBoost = 0.15;
+    else if (daysSince <= 30)
+        recencyBoost = 0;
+    else
+        recencyBoost = Math.max(-0.3, -0.1 * Math.floor((daysSince - 30) / 30));
+    const impressions = entry.impressions || 0;
+    const frequencyBoost = Math.min(0.2, Math.log(impressions + 1) / Math.LN2 * 0.05);
+    const helpful = entry.helpful || 0;
+    const reprompt = entry.repromptPenalty || 0;
+    const regression = entry.regressionPenalty || 0;
+    const feedbackScore = helpful * 0.15 - (reprompt + regression * 2) * 0.2;
+    return Math.max(0.2, Math.min(1.5, 1 + feedbackScore + recencyBoost + frequencyBoost));
+}
 /* Builtin topic keywords mirroring project-topics.ts BUILTIN_TOPICS */
 const BUILTIN_TOPIC_KEYWORDS = [
     { slug: "api", label: "API", keywords: ["api", "endpoint", "route", "rest", "graphql", "grpc", "request", "response", "http", "url", "webhook", "cors"] },
@@ -625,6 +668,7 @@ ${graphScript}
       project: n.projectName || '',
       label: n.label,
       fullLabel: n.text || n.label,
+      scoreKey: n.scoreKey || '',
       refCount: n.refCount || 0,
       entityType: n.entityType || n.subtype || '',
       section: n.section || '',

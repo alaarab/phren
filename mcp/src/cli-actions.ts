@@ -121,8 +121,18 @@ export async function handleDoctor(args: string[]) {
   if (result.machine) console.log(`machine: ${result.machine}`);
   if (result.profile) console.log(`profile: ${result.profile}`);
   console.log(`tasks: ${getWorkflowPolicy(getCortexPath()).taskMode} mode`);
+  const renderCheckState = (check: { name: string; ok: boolean; detail: string }): "ok" | "fail" | "info" => {
+    if (
+      check.name === "git-remote" &&
+      check.ok &&
+      /no remote configured|local-only/i.test(check.detail)
+    ) {
+      return "info";
+    }
+    return check.ok ? "ok" : "fail";
+  };
   for (const check of result.checks) {
-    console.log(`- ${check.ok ? "ok" : "fail"} ${check.name}: ${check.detail}`);
+    console.log(`- ${renderCheckState(check)} ${check.name}: ${check.detail}`);
   }
 
   try {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
-import { incrementSessionFindings } from "../mcp-session.js";
+import { incrementSessionFindings, incrementSessionTasksCompleted } from "../mcp-session.js";
 
 function sessionFile(cortexPath: string, sessionId: string) {
   return path.join(cortexPath, ".runtime", "sessions", `session-${sessionId}.json`);
@@ -77,5 +77,48 @@ describe("incrementSessionFindings", () => {
     const otherState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "other-project"), "utf-8"));
     expect(demoState.findingsAdded).toBe(5);
     expect(otherState.findingsAdded).toBe(1);
+  });
+});
+
+describe("incrementSessionTasksCompleted", () => {
+  let tmp: { path: string; cleanup: () => void };
+
+  beforeEach(() => { tmp = makeTempDir("mcp-session-task-complete-"); });
+  afterEach(() => tmp.cleanup());
+
+  it("increments tasksCompleted by 1 by default", () => {
+    writeSession(tmp.path, {
+      sessionId: "abc",
+      startedAt: new Date().toISOString(),
+      findingsAdded: 0,
+      tasksCompleted: 0,
+    });
+    incrementSessionTasksCompleted(tmp.path, 1, "abc");
+    const state = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "abc"), "utf-8"));
+    expect(state.tasksCompleted).toBe(1);
+  });
+
+  it("falls back to the most recent active session for the project", () => {
+    writeSession(tmp.path, {
+      sessionId: "other-project",
+      project: "other",
+      startedAt: "2026-03-09T09:00:00.000Z",
+      findingsAdded: 1,
+      tasksCompleted: 1,
+    });
+    writeSession(tmp.path, {
+      sessionId: "demo-session",
+      project: "demo",
+      startedAt: "2026-03-09T10:00:00.000Z",
+      findingsAdded: 2,
+      tasksCompleted: 2,
+    });
+
+    incrementSessionTasksCompleted(tmp.path, 3, undefined, "demo");
+
+    const demoState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "demo-session"), "utf-8"));
+    const otherState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "other-project"), "utf-8"));
+    expect(demoState.tasksCompleted).toBe(5);
+    expect(otherState.tasksCompleted).toBe(1);
   });
 });

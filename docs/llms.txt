@@ -4,9 +4,15 @@ Install: npm install -g @alaarab/cortex && cortex init
 
 Key features:
 - Automatic context injection into every prompt via lifecycle hooks
-- 51 MCP tools for search, task management, finding capture, memory governance, entity graph, skills management, hooks management, bulk operations, data management, and session management
+- 60 MCP tools across 11 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, extraction)
+- Finding lifecycle tooling (`supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`) with provenance and impact scoring
+- Session continuity via cross-session task checkpoints + `session_history`
+- Skill system with source precedence, alias-collision handling, visibility gating, and generated `skill-manifest.json`
 - Memory governance with confidence decay, trust filtering, and quality feedback
-- Interactive terminal shell with eight views (Projects, Task, Findings, Review Queue, Skills, Hooks, Machines/Profiles, Health)
+- Governance identity and RBAC via `CORTEX_ACTOR`, `access-control.local.json`, and role policies
+- Web UI security by default: loopback-only, auth token, CSRF, CSP
+- Telemetry is opt-in and local-only (`.runtime/telemetry.json`)
+- Interactive terminal shell with eight views (Projects, Tasks, Findings, Review Queue, Skills, Hooks, Machines/Profiles, Health)
 - Multi-agent support: Claude Code, Copilot CLI, Cursor, OpenAI Codex
 
 Docs: https://alaarab.github.io/cortex/

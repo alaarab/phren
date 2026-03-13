@@ -2,17 +2,20 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
+import { normalizeMemoryScope } from "./shared.js";
 import { checkPermission, loadCanonicalLocks, saveCanonicalLocksUnlocked, hashContent, withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import { getMachineName } from "./machine-identity.js";
 import {
   type FindingCitation,
-  type FindingSource,
+  type FindingProvenanceSource,
+  type FindingProvenance,
   buildCitationComment,
   buildSourceComment,
   getHeadCommit,
   getRepoRoot,
   inferCitationLocation,
+  isFindingProvenanceSource,
 } from "./content-citation.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts, extractDynamicEntities } from "./content-dedup.js";
 import { validateFindingsFormat, validateFinding } from "./content-validate.js";
@@ -22,6 +25,12 @@ import {
   resolveFindingTaskReference,
   resolveFindingSessionId,
 } from "./finding-context.js";
+import {
+  buildLifecycleComments,
+  parseFindingLifecycle,
+  stripLifecycleComments,
+  type FindingLifecycleMetadata,
+} from "./finding-lifecycle.js";
 
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;
@@ -47,9 +56,13 @@ interface PreparedFinding {
   tagWarning?: string;
 }
 
+const LIFECYCLE_ANNOTATION_RE = /<!--\s*cortex:status(?:_updated|_reason|_ref)?\b[^>]*-->/i;
+
 interface AddFindingOptions {
   extraAnnotations?: string[];
   sessionId?: string;
+  source?: FindingProvenanceSource;
+  scope?: string;
 }
 
 interface AddFindingWriteResult {
@@ -116,14 +129,27 @@ function detectFindingTool(): string | undefined {
   return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
 }
 
-function buildFindingSource(sessionId?: string): FindingSource {
+function detectFindingProvenanceSource(explicitSource?: FindingProvenanceSource): FindingProvenanceSource {
+  if (explicitSource) return explicitSource;
+  const envSource = process.env.CORTEX_FINDING_SOURCE?.trim().toLowerCase();
+  if (isFindingProvenanceSource(envSource)) return envSource;
+  if (process.env.CORTEX_CONSOLIDATION === "1") return "consolidation";
+  if (process.env.CORTEX_AUTO_EXTRACT === "1") return "extract";
+  if (process.env.CORTEX_HOOK_TOOL || process.env.CORTEX_HOOK_PHASE) return "hook";
+  if (process.env.CORTEX_ACTOR?.trim()) return "agent";
+  return "human";
+}
+
+function buildFindingSource(sessionId?: string, explicitSource?: FindingProvenanceSource, scope?: string): FindingProvenance {
   const actor = process.env.CORTEX_ACTOR?.trim() || undefined;
-  const source: FindingSource = {
+  const source: FindingProvenance = {
+    source: detectFindingProvenanceSource(explicitSource),
     machine: getMachineName(),
     actor,
     tool: detectFindingTool(),
     model: detectFindingModel(),
     session_id: sessionId,
+    scope: normalizeMemoryScope(scope),
   };
   return source;
 }
@@ -158,7 +184,7 @@ function prepareFinding(
   fullHistory: string,
   extraAnnotations?: string[],
   citationInput?: Partial<FindingCitation>,
-  source?: FindingSource,
+  source?: FindingProvenance,
   nowIso?: string,
   inferredRepo?: string,
   headCommit?: string,
@@ -179,6 +205,7 @@ function prepareFinding(
   const fidComment = `<!-- fid:${fid} -->`;
   const createdComment = `<!-- created: ${today} -->`;
   const sourceComment = source ? buildSourceComment(source) : "";
+  let lifecycle: FindingLifecycleMetadata = { status: "active", status_updated: today };
   let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} ${fidComment} ${createdComment}`;
   if (sourceComment) bullet += ` ${sourceComment}`;
 
@@ -191,20 +218,41 @@ function prepareFinding(
   const conflicts = detectConflicts(normalizedLearning, existingBullets, dynamicEntities);
   if (conflicts.length > 0) {
     const snippet = conflicts[0].replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
+    lifecycle = {
+      status: "contradicted",
+      status_updated: today,
+      status_reason: "conflicts_with",
+      status_ref: snippet,
+    };
     bullet += ` <!-- conflicts_with: "${snippet}" --> <!-- cortex:contradicts "${snippet}" -->`;
     debugLog(`add_finding: conflict detected for "${project}": ${snippet}`);
   }
   if (extraAnnotations && extraAnnotations.length > 0) {
+    const lifecycleFromExtra = parseFindingLifecycle(`- lifecycle ${extraAnnotations.join(" ")}`);
+    if (
+      lifecycleFromExtra.status !== "active" ||
+      lifecycleFromExtra.status_reason ||
+      lifecycleFromExtra.status_ref ||
+      lifecycleFromExtra.status_updated
+    ) {
+      lifecycle = {
+        ...lifecycle,
+        ...lifecycleFromExtra,
+        status_updated: lifecycleFromExtra.status_updated ?? lifecycle.status_updated ?? today,
+      };
+    }
     const existing = new Set(
       [...bullet.matchAll(/<!--\s*conflicts_with:\s*"([^"]+)"(?:\s*\(from project: [^)]+\))?\s*-->/g)].map((m) => m[0])
     );
     for (const annotation of extraAnnotations) {
       if (!annotation.startsWith("<!--")) continue;
+      if (LIFECYCLE_ANNOTATION_RE.test(annotation)) continue;
       if (existing.has(annotation)) continue;
       bullet += ` ${annotation}`;
       existing.add(annotation);
     }
   }
+  bullet += ` ${buildLifecycleComments(lifecycle, today)}`;
 
   const citation = buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit);
   return {
@@ -314,7 +362,7 @@ export function addFindingToFile(
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;
   const effectiveSessionId = resolveFindingSessionId(cortexPath, project, opts?.sessionId);
-  const source = buildFindingSource(effectiveSessionId);
+  const source = buildFindingSource(effectiveSessionId, opts?.source, opts?.scope);
   const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
   const supersedesText = resolvedCitationInput?.supersedes;
@@ -385,10 +433,14 @@ export function addFindingToFile(
         if (!lines[i].startsWith("- ")) continue;
         const lineText = lines[i].replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").replace(/^\[[^\]]+\]\s+/, "").slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
         if (lineText === needle) {
-          // Remove any legacy superseded_by annotation before adding the new format
+          // Remove any legacy and normalized lifecycle supersession metadata before re-appending.
           lines[i] = lines[i].replace(/\s*<!--\s*superseded_by:.*?-->/g, "");
+          lines[i] = lines[i].replace(/\s*<!--\s*cortex:superseded_by\s+"[^"]+"(?:\s+[0-9-]+)?\s*-->/g, "");
+          lines[i] = stripLifecycleComments(lines[i]);
           const newFirst60 = normalizedForSupersedes.replace(/^-\s+/, "").slice(0, 60);
-          lines[i] = `${lines[i]} <!-- cortex:superseded_by "${newFirst60}" ${today} -->`;
+          lines[i] =
+            `${lines[i]} <!-- cortex:superseded_by "${newFirst60}" ${today} --> ` +
+            `${buildLifecycleComments({ status: "superseded", status_updated: today, status_reason: "superseded_by", status_ref: newFirst60 }, today)}`;
           updated = lines.join("\n");
           break;
         }
@@ -451,7 +503,7 @@ export function addFindingsToFile(
   cortexPath: string,
   project: string,
   learnings: string[],
-  opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string }
+  opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; source?: FindingProvenanceSource; scope?: string }
 ): CortexResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
   const denial = checkPermission(cortexPath, "write");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
@@ -466,7 +518,7 @@ export function addFindingsToFile(
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;
   const effectiveSessionId = resolveFindingSessionId(cortexPath, project, opts?.sessionId);
-  const source = buildFindingSource(effectiveSessionId);
+  const source = buildFindingSource(effectiveSessionId, opts?.source, opts?.scope);
   const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
 

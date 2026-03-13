@@ -22,9 +22,14 @@ import {
 import { isValidProjectName, queueFilePath, safeProjectPath, errorMessage } from "./utils.js";
 import {
   type FindingCitation,
+  type FindingProvenanceSource,
   parseCitationComment,
   parseSourceComment,
 } from "./content-citation.js";
+import {
+  parseFindingLifecycle,
+  type FindingLifecycleStatus,
+} from "./finding-lifecycle.js";
 export type { TaskSection, TaskItem, TaskDoc } from "./data-tasks.js";
 export {
   readTasks,
@@ -101,17 +106,40 @@ export interface FindingItem {
   citationData?: FindingCitation;
   taskItem?: string;
   confidence?: number;
+  source: FindingProvenanceSource;
   machine?: string;
   actor?: string;
   tool?: string;
   model?: string;
   sessionId?: string;
+  scope?: string;
   /** First 60 chars of the newer finding that supersedes this one. Set when this finding is stale. */
   supersededBy?: string;
   /** First 60 chars of the older finding this one replaces. */
   supersedes?: string;
   /** Snippets of findings this one contradicts. */
   contradicts?: string[];
+  status: FindingLifecycleStatus;
+  status_updated?: string;
+  status_reason?: string;
+  status_ref?: string;
+  /** Indicates whether this item comes from archived history blocks (<details> / cortex:archive). */
+  archived?: boolean;
+  /** Tier marker used to distinguish current truth vs archived history. */
+  tier?: "current" | "archived";
+}
+
+export interface ReadFindingsOptions {
+  includeArchived?: boolean;
+}
+
+export interface FindingHistoryEntry {
+  id: string;
+  stableId?: string;
+  text: string;
+  timeline: FindingItem[];
+  current?: FindingItem;
+  archivedCount: number;
 }
 
 export interface QueueItem {
@@ -130,7 +158,27 @@ export interface ProjectQueueItem extends QueueItem {
   project: string;
 }
 
-export function readFindings(cortexPath: string, project: string): CortexResult<FindingItem[]> {
+function extractDateHeading(line: string): string | null {
+  const heading = line.match(/^##\s+(.+)$/);
+  if (!heading) return null;
+  const raw = heading[1].trim();
+  const direct = raw.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (direct) return direct[1];
+  const archived = raw.match(/^Archived\s+(\d{4}-\d{2}-\d{2})$/i);
+  if (archived) return archived[1];
+  return null;
+}
+
+function normalizeFindingGroupKey(item: FindingItem): string {
+  if (item.stableId) return `fid:${item.stableId}`;
+  return item.text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function findingTimelineDate(item: FindingItem): string {
+  return item.status_updated || item.date || "0000-00-00";
+}
+
+export function readFindings(cortexPath: string, project: string, opts: ReadFindingsOptions = {}): CortexResult<FindingItem[]> {
   const ensured = ensureProject(cortexPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
@@ -143,22 +191,28 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
   let date = "unknown";
   let index = 1;
   let inArchiveBlock = false;
+  const includeArchived = opts.includeArchived ?? false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // Skip archived content wrapped in <!-- cortex:archive:start/end --> or <details> blocks
-    if (/<!--\s*cortex:archive:start\s*-->/.test(line) || /^<details>/i.test(line.trim())) {
+    const trimmed = line.trim();
+    const archiveStart = /<!--\s*cortex:archive:start\s*-->/.test(line) || /^<details(?:\s|>)/i.test(trimmed);
+    const archiveEnd = /<!--\s*cortex:archive:end\s*-->/.test(line) || /^<\/details>/i.test(trimmed);
+    if (archiveStart) {
       inArchiveBlock = true;
       continue;
     }
-    if (inArchiveBlock) {
-      if (/<!--\s*cortex:archive:end\s*-->/.test(line) || /^<\/details>/i.test(line.trim())) {
-        inArchiveBlock = false;
-      }
+    if (archiveEnd) {
+      inArchiveBlock = false;
       continue;
     }
-    if (line.startsWith("## ")) {
-      date = line.slice(3).trim();
+    if (inArchiveBlock && !includeArchived) {
+      continue;
+    }
+
+    const extractedDate = extractDateHeading(line);
+    if (extractedDate) {
+      date = extractedDate;
       continue;
     }
     if (!line.startsWith("- ")) continue;
@@ -180,6 +234,7 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
     const supersededByMatch = line.match(/<!--\s*cortex:superseded_by\s+"([^"]+)"\s+[\d-]+\s*-->/);
     const supersedesMatch = line.match(/<!--\s*cortex:supersedes\s+"([^"]+)"\s*-->/);
     const contradictsMatches = [...line.matchAll(/<!--\s*cortex:contradicts\s+"([^"]+)"\s*-->/g)];
+    const lifecycle = parseFindingLifecycle(line);
 
     items.push({
       id: `L${index}`,
@@ -187,6 +242,7 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
       date,
       text,
       confidence,
+      source: source?.source ?? "unknown",
       citation,
       citationData,
       taskItem: citationData?.task_item,
@@ -195,15 +251,77 @@ export function readFindings(cortexPath: string, project: string): CortexResult<
       tool: source?.tool,
       model: source?.model,
       sessionId: source?.session_id,
+      scope: source?.scope,
       supersededBy: supersededByMatch ? supersededByMatch[1] : undefined,
       supersedes: supersedesMatch ? supersedesMatch[1] : undefined,
       contradicts: contradictsMatches.length > 0 ? contradictsMatches.map(m => m[1]) : undefined,
+      status: lifecycle.status,
+      status_updated: lifecycle.status_updated,
+      status_reason: lifecycle.status_reason,
+      status_ref: lifecycle.status_ref,
+      archived: inArchiveBlock,
+      tier: inArchiveBlock ? "archived" : "current",
     });
     if (citation) i += 1;
     index++;
   }
 
   return cortexOk(items);
+}
+
+export function readFindingHistory(cortexPath: string, project: string, findingId?: string): CortexResult<FindingHistoryEntry[]> {
+  const result = readFindings(cortexPath, project, { includeArchived: true });
+  if (!result.ok) return forwardErr(result);
+
+  const allItems = result.data;
+  const needle = findingId?.trim().toLowerCase();
+  const fidNeedle = needle ? needle.replace(/^fid:/, "") : undefined;
+
+  const scopedItems = needle
+    ? allItems.filter((item) => {
+      if (fidNeedle && /^[a-z0-9]{8}$/.test(fidNeedle) && item.stableId?.toLowerCase() === fidNeedle) return true;
+      if (item.id.toLowerCase() === needle) return true;
+      return item.text.toLowerCase().includes(needle);
+    })
+    : allItems;
+
+  if (needle && scopedItems.length === 0) {
+    return cortexErr(`No finding history matching "${findingId}" in project "${project}".`, CortexError.NOT_FOUND);
+  }
+
+  const groups = new Map<string, FindingItem[]>();
+  for (const item of scopedItems) {
+    const key = normalizeFindingGroupKey(item);
+    const bucket = groups.get(key) ?? [];
+    bucket.push(item);
+    groups.set(key, bucket);
+  }
+
+  const history = [...groups.values()].map((timelineItems) => {
+    const timeline = [...timelineItems].sort((a, b) => findingTimelineDate(a).localeCompare(findingTimelineDate(b)));
+    const currentCandidates = timeline.filter(item => item.tier === "current");
+    const current = currentCandidates.length > 0
+      ? currentCandidates.sort((a, b) => findingTimelineDate(b).localeCompare(findingTimelineDate(a)))[0]
+      : undefined;
+    const latest = timeline[timeline.length - 1];
+    const stableId = current?.stableId ?? latest.stableId;
+    return {
+      id: stableId ? `fid:${stableId}` : latest.id,
+      stableId,
+      text: current?.text ?? latest.text,
+      timeline,
+      current,
+      archivedCount: timeline.filter(item => item.tier === "archived").length,
+    };
+  });
+
+  history.sort((a, b) => {
+    const aKey = a.timeline[a.timeline.length - 1] ? findingTimelineDate(a.timeline[a.timeline.length - 1]) : "";
+    const bKey = b.timeline[b.timeline.length - 1] ? findingTimelineDate(b.timeline[b.timeline.length - 1]) : "";
+    return bKey.localeCompare(aKey);
+  });
+
+  return cortexOk(history);
 }
 
 export function addFinding(cortexPath: string, project: string, learning: string): CortexResult<string> {

@@ -33,6 +33,7 @@ describe("CLI config: help", () => {
     expect(stdout).toContain("policy");
     expect(stdout).toContain("workflow");
     expect(stdout).toContain("access");
+    expect(stdout).toContain("synonyms");
   });
 
   it("exits with error for unknown subcommand", () => {
@@ -307,5 +308,55 @@ describe("CLI config: machines and profiles", () => {
     );
     expect(exitCode).toBe(0);
     expect(stdout.length).toBeGreaterThan(0);
+  });
+});
+
+describe("CLI config: synonyms", () => {
+  let cortexDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ cortexDir, cleanup } = setupCortexDir());
+    fs.mkdirSync(path.join(cortexDir, "demo"), { recursive: true });
+  });
+  afterEach(() => cleanup());
+
+  it("lists learned synonyms for a project", () => {
+    const { stdout, exitCode } = runCli(
+      ["config", "synonyms", "list", "demo"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "config-test" }
+    );
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(stdout);
+    expect(payload.project).toBe("demo");
+    expect(payload.synonyms).toEqual({});
+  });
+
+  it("adds and removes learned synonyms", () => {
+    const add = runCli(
+      ["config", "synonyms", "add", "demo", "latency", "slow,lag"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "config-test" }
+    );
+    expect(add.exitCode).toBe(0);
+
+    const listed = runCli(
+      ["config", "synonyms", "demo"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "config-test" }
+    );
+    const payload = JSON.parse(listed.stdout);
+    expect(payload.synonyms.latency).toContain("slow");
+    expect(payload.synonyms.latency).toContain("lag");
+
+    const removeOne = runCli(
+      ["config", "synonyms", "remove", "demo", "latency", "lag"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "config-test" }
+    );
+    expect(removeOne.exitCode).toBe(0);
+
+    const removeAll = runCli(
+      ["config", "synonyms", "remove", "demo", "latency"],
+      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "config-test" }
+    );
+    expect(removeAll.exitCode).toBe(0);
   });
 });

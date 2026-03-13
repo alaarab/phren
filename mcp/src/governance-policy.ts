@@ -911,6 +911,30 @@ export function enforceCanonicalLocks(cortexPath: string, project?: string): str
   return `Canonical locks checked=${checked}, restored=${restored}`;
 }
 
+function mergeLifecycleAndIdComments(primary: string, fallback: string): string {
+  const extract = (line: string, pattern: RegExp): string | undefined => line.match(pattern)?.[0];
+  const strip = (line: string): string => line
+    .replace(/\s*<!--\s*fid:[a-z0-9]{8}\s*-->/gi, "")
+    .replace(/\s*<!--\s*cortex:status\s+"?(?:active|superseded|contradicted|stale|invalid_citation|retracted)"?\s*-->/gi, "")
+    .replace(/\s*<!--\s*cortex:status_updated\s+"[^"]+"\s*-->/gi, "")
+    .replace(/\s*<!--\s*cortex:status_reason\s+"[^"]+"\s*-->/gi, "")
+    .replace(/\s*<!--\s*cortex:status_ref\s+"[^"]+"\s*-->/gi, "");
+
+  const fid = extract(primary, /<!--\s*fid:[a-z0-9]{8}\s*-->/i) ?? extract(fallback, /<!--\s*fid:[a-z0-9]{8}\s*-->/i);
+  const status = extract(primary, /<!--\s*cortex:status\s+"?(?:active|superseded|contradicted|stale|invalid_citation|retracted)"?\s*-->/i)
+    ?? extract(fallback, /<!--\s*cortex:status\s+"?(?:active|superseded|contradicted|stale|invalid_citation|retracted)"?\s*-->/i);
+  const statusUpdated = extract(primary, /<!--\s*cortex:status_updated\s+"[^"]+"\s*-->/i)
+    ?? extract(fallback, /<!--\s*cortex:status_updated\s+"[^"]+"\s*-->/i);
+  const statusReason = extract(primary, /<!--\s*cortex:status_reason\s+"[^"]+"\s*-->/i)
+    ?? extract(fallback, /<!--\s*cortex:status_reason\s+"[^"]+"\s*-->/i);
+  const statusRef = extract(primary, /<!--\s*cortex:status_ref\s+"[^"]+"\s*-->/i)
+    ?? extract(fallback, /<!--\s*cortex:status_ref\s+"[^"]+"\s*-->/i);
+
+  const base = strip(primary).trimEnd();
+  const suffix = [fid, status, statusUpdated, statusReason, statusRef].filter((part): part is string => Boolean(part));
+  return suffix.length > 0 ? `${base} ${suffix.join(" ")}` : base;
+}
+
 export function consolidateProjectFindings(cortexPath: string, project: string, dryRun?: boolean): CortexResult<string> {
   const denial = checkPermission(cortexPath, "delete");
   if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
@@ -986,8 +1010,9 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
         if (!existing) {
           byDate.get(currentDate)?.set(key, { bullet: trimmedBullet, citation });
           uniqueBullets++;
-        } else if (!existing.citation && citation) {
-          existing.citation = citation;
+        } else {
+          existing.bullet = mergeLifecycleAndIdComments(existing.bullet, trimmedBullet);
+          if (!existing.citation && citation) existing.citation = citation;
         }
         if (citation) index++;
       }

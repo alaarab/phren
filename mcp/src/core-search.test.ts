@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 import { rankResults, selectSnippets } from "./shared-retrieval.js";
 import { queryRows, type DbRow, type SqlJsDatabase } from "./shared-index.js";
 import type { DocRow } from "./shared-index.js";
@@ -270,6 +272,42 @@ describe("synonym expansion in buildRobustFtsQuery", () => {
     expect(query).toContain("rate limit");
     expect(query).toContain("OR");
     expect(query).toMatch(/throttle|429/);
+  });
+
+  it("loads music domain synonym pack from topic-config domain", () => {
+    const tmp = makeTempDir("synonyms-music-");
+    try {
+      const project = "beatlab";
+      const projectDir = path.join(tmp.path, project);
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectDir, "topic-config.json"),
+        JSON.stringify({ version: 1, domain: "music", topics: [{ slug: "general", label: "General", description: "", keywords: [] }] }, null, 2) + "\n",
+      );
+
+      const query = buildRobustFtsQuery("daw", project, tmp.path);
+      expect(query).toContain("digital audio workstation");
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("maps game domain to gamedev synonym pack", () => {
+    const tmp = makeTempDir("synonyms-game-");
+    try {
+      const project = "arcade";
+      const projectDir = path.join(tmp.path, project);
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectDir, "topic-config.json"),
+        JSON.stringify({ version: 1, domain: "game", topics: [{ slug: "general", label: "General", description: "", keywords: [] }] }, null, 2) + "\n",
+      );
+
+      const query = buildRobustFtsQuery("state machine", project, tmp.path);
+      expect(query).toContain("finite state machine");
+    } finally {
+      tmp.cleanup();
+    }
   });
 });
 

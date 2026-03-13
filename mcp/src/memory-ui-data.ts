@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 import {
   getProjectDirs,
   runtimeDir,
@@ -12,10 +13,11 @@ import { readInstallPreferences } from "./init-preferences.js";
 import { readCustomHooks } from "./hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "./provider-adapters.js";
 import { getAllSkills } from "./skill-registry.js";
-import { resolveTaskFilePath, readTasks } from "./data-tasks.js";
+import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "./data-tasks.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import { readProjectTopics, classifyTopicForText, type ProjectTopic } from "./project-topics.js";
+import { entryScoreKey } from "./governance-scores.js";
 
 interface EntryScore {
   impressions: number;
@@ -33,12 +35,20 @@ interface GraphNode {
   refCount: number;
   project: string;
   tagged: boolean;
+  scoreKey?: string;
   priority?: string;
   section?: string;
   entityType?: string;
-  refDocs?: string[];
+  refDocs?: GraphDocRef[];
+  scoreKeys?: string[];
   topicSlug?: string;
   topicLabel?: string;
+}
+
+interface GraphDocRef {
+  doc: string;
+  project: string;
+  scoreKey?: string;
 }
 
 interface GraphTopicMeta {
@@ -66,6 +76,28 @@ interface ProjectInfo {
 function extractGithubUrl(content: string): string | undefined {
   const match = content.match(/https?:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/);
   return match ? match[0] : undefined;
+}
+
+function stableId(scope: string, ...parts: string[]): string {
+  const hash = createHash("sha1");
+  for (const part of parts) hash.update(part);
+  return `${scope}:${hash.digest("hex").slice(0, 12)}`;
+}
+
+function exactProjectMentions(text: string, projectSet: Set<string>, currentProject: string): string[] {
+  const tokenMatches = text.toLowerCase().match(/[a-z0-9_-]+/g) ?? [];
+  const tokens = new Set(tokenMatches);
+  const matches: string[] = [];
+  for (const project of projectSet) {
+    if (project === currentProject) continue;
+    if (tokens.has(project.toLowerCase())) matches.push(project);
+  }
+  return matches;
+}
+
+function projectFromSourceDoc(sourceDoc: string): string {
+  const slash = sourceDoc.indexOf("/");
+  return slash > 0 ? sourceDoc.slice(0, slash) : "";
 }
 
 export function readSyncSnapshot(cortexPath: string) {
@@ -216,7 +248,8 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
         const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
         // Classify the finding using the project's topic system
         const topic = classifyTopicForText(`[${tag}] ${text}`, projectTopics);
-        const nodeId = `${project}:${tag}:${nodes.length}`;
+        const scoreKey = entryScoreKey(project, "FINDINGS.md", `[${tag}] ${text}`);
+        const nodeId = stableId("finding", scoreKey);
         taggedCount++;
         nodes.push({
           id: nodeId,
@@ -226,14 +259,15 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
           refCount: taggedCount,
           project,
           tagged: true,
+          scoreKey,
+          scoreKeys: [scoreKey],
+          refDocs: [{ doc: `${project}/FINDINGS.md`, project, scoreKey }],
           topicSlug: topic.slug,
           topicLabel: topic.label,
         });
         links.push({ source: project, target: nodeId });
-        for (const other of projectSet) {
-          if (other !== project && text.toLowerCase().includes(other.toLowerCase())) {
-            links.push({ source: project, target: other });
-          }
+        for (const other of exactProjectMentions(text, projectSet, project)) {
+          links.push({ source: project, target: other });
         }
         continue;
       }
@@ -246,7 +280,8 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
       const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
       // Classify using dynamic topics
       const topic = classifyTopicForText(text, projectTopics);
-      const nodeId = `${project}:finding:${nodes.length}`;
+      const scoreKey = entryScoreKey(project, "FINDINGS.md", text);
+      const nodeId = stableId("finding", scoreKey);
       untaggedAdded++;
       nodes.push({
         id: nodeId,
@@ -256,6 +291,9 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
         refCount: untaggedAdded,
         project,
         tagged: false,
+        scoreKey,
+        scoreKeys: [scoreKey],
+        refDocs: [{ doc: `${project}/FINDINGS.md`, project, scoreKey }],
         topicSlug: topic.slug,
         topicLabel: topic.label,
       });
@@ -277,6 +315,7 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
           if (taskCount >= MAX_TASKS) break;
           const nodeId = `${project}:task:${item.id}`;
           const label = item.line.length > 55 ? `${item.line.slice(0, 52)}...` : item.line;
+          const scoreKey = entryScoreKey(project, TASKS_FILENAME, item.line);
           nodes.push({
             id: nodeId,
             label,
@@ -284,6 +323,9 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
             group,
             project,
             tagged: false,
+            scoreKey,
+            scoreKeys: [scoreKey],
+            refDocs: [{ doc: `${project}/${TASKS_FILENAME}`, project, scoreKey }],
             refCount: 0,
             priority: item.priority,
             section: item.section,
@@ -303,19 +345,53 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
     db = await buildIndex(cortexPath, profile);
     const rows = queryRows(
       db,
-      `SELECT e.name, e.type, COUNT(el.source_id) as ref_count, GROUP_CONCAT(DISTINCT el.source_doc) as docs
+      `SELECT e.id, e.name, e.type, COUNT(DISTINCT el.source_doc) as ref_count
        FROM entities e JOIN entity_links el ON el.target_id = e.id WHERE e.type != 'document'
        GROUP BY e.id, e.name, e.type ORDER BY ref_count DESC LIMIT 500`,
       [],
     );
+    const refRows = queryRows(
+      db,
+      `SELECT e.id, el.source_doc, d.content, d.filename
+       FROM entities e
+       JOIN entity_links el ON el.target_id = e.id
+       LEFT JOIN docs d ON d.source_key = el.source_doc
+       WHERE e.type != 'document'`,
+      [],
+    );
+    const refsByEntity = new Map<number, GraphDocRef[]>();
+    const seenEntityDoc = new Set<string>();
+    if (refRows) {
+      for (const row of refRows) {
+        const entityId = typeof row[0] === "number" ? row[0] : -1;
+        if (entityId < 0) continue;
+        const doc = String(row[1] ?? "");
+        if (!doc) continue;
+        const entityDocKey = `${entityId}::${doc}`;
+        if (seenEntityDoc.has(entityDocKey)) continue;
+        seenEntityDoc.add(entityDocKey);
+        const project = projectFromSourceDoc(doc);
+        const content = typeof row[2] === "string" ? row[2] : "";
+        const filename = typeof row[3] === "string" ? row[3] : "";
+        const scoreKey = project && filename && content ? entryScoreKey(project, filename, content) : undefined;
+        const refs = refsByEntity.get(entityId) ?? [];
+        refs.push({ doc, project, scoreKey });
+        refsByEntity.set(entityId, refs);
+      }
+    }
     if (rows) {
       for (const row of rows) {
-        const name = String(row[0] ?? "");
-        const type = String(row[1] ?? "");
-        const refCount = typeof row[2] === "number" ? row[2] : 0;
-        const docsStr = String(row[3] ?? "");
-        const docs = docsStr ? docsStr.split(",") : [];
-        const nodeId = `entity:${name}:${type}`;
+        const entityId = typeof row[0] === "number" ? row[0] : -1;
+        if (entityId < 0) continue;
+        const name = String(row[1] ?? "");
+        const type = String(row[2] ?? "");
+        const refCount = typeof row[3] === "number" ? row[3] : 0;
+        const refs = (refsByEntity.get(entityId) ?? []).slice().sort((a, b) => a.doc.localeCompare(b.doc));
+        const scoreKeys = refs
+          .map((ref) => ref.scoreKey)
+          .filter((key): key is string => Boolean(key))
+          .sort();
+        const nodeId = `entity:${stableId("entity", type, name)}`;
         nodes.push({
           id: nodeId,
           label: name.length > 55 ? `${name.slice(0, 52)}...` : name,
@@ -324,16 +400,15 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
           project: "",
           tagged: false,
           refCount,
+          scoreKey: scoreKeys[0],
+          scoreKeys,
           entityType: type,
-          refDocs: docs,
+          refDocs: refs,
         });
         // Link entity to each project it appears in
         const linkedProjects = new Set<string>();
-        for (const doc of docs) {
-          const projMatch = doc.match(/^([^/]+)\//);
-          if (projMatch && projectSet.has(projMatch[1])) {
-            linkedProjects.add(projMatch[1]);
-          }
+        for (const ref of refs) {
+          if (ref.project && projectSet.has(ref.project)) linkedProjects.add(ref.project);
         }
         for (const proj of linkedProjects) {
           links.push({ source: nodeId, target: proj });
@@ -359,6 +434,7 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
       for (const file of files) {
         if (refCount >= MAX_REFS) break;
         const nodeId = `${project}:ref:${file}`;
+        const docRef = `${project}/reference/${file}`;
         nodes.push({
           id: nodeId,
           label: file.length > 55 ? `${file.slice(0, 52)}...` : file,
@@ -366,6 +442,8 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
           group: "reference",
           project,
           tagged: false,
+          scoreKeys: [],
+          refDocs: [{ doc: docRef, project }],
           refCount: 0,
         });
         links.push({ source: project, target: nodeId });

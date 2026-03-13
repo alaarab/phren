@@ -58,7 +58,7 @@
 \title{\vspace{-0.8em}Cortex: A Git-Backed Project Memory System\\[2pt]
 \large Architecture, Governance, Concurrent Use, and Comparative Assessment}
 \author{Ala Arab}
-\date{March 10, 2026}
+\date{March 12, 2026}
 
 \begin{document}
 
@@ -94,7 +94,7 @@ Cortex should be read as a system in the same design space as prior memory work 
 \section{Cortex Architecture}
 \label{sec:arch}
 
-The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Memory lives under \texttt{\textasciitilde/.cortex/<project>/} as plain markdown or YAML. The core records are \textbf{findings}, \textbf{task} items, \textbf{canonical memories}, and cross-project \textbf{entities}; \textbf{machine} profiles control which projects are visible in a given environment. The diagram below shows how those subsystems connect on a normal prompt cycle.
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Cortex now supports two install modes rooted by \texttt{cortex.root.yaml}: \textbf{shared} (\texttt{\textasciitilde/.cortex/}) and \textbf{project-local} (\texttt{<repo>/.cortex/}). In both modes, markdown and JSON files remain the source of truth for \textbf{findings}, \textbf{tasks}, \textbf{canonical memories}, \textbf{entity links}, and \textbf{session checkpoints}; the FTS5 index is a local cache. The diagram below shows the current runtime loop.
 
 \vspace{0.2em}
 \begin{center}
@@ -110,21 +110,24 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
   dasharr/.style={-{Stealth[length=5pt]}, dashed, gray},
 ]
 \node[box] (prompt) {User Prompt};
-\node[hook, right=0.9cm of prompt] (ss) {SessionStart\\[-2pt]{\scriptsize git pull}};
+\node[hook, right=0.9cm of prompt] (ss) {SessionStart\\[-2pt]{\scriptsize sync + context warmup}};
 \node[hook, below=0.45cm of ss]    (ups) {UserPromptSubmit\\[-2pt]{\scriptsize keyword extract, inject}};
-\node[hook, below=0.45cm of ups]   (stop) {Stop\\[-2pt]{\scriptsize git commit + push}};
+\node[hook, below=0.45cm of ups]   (ptu) {PostToolUse\\[-2pt]{\scriptsize tool-level continuity}};
+\node[hook, below=0.45cm of ptu]   (stop) {Stop\\[-2pt]{\scriptsize persist + sync}};
 \node[box, right=0.9cm of ups] (fts) {FTS5 Index\\[-2pt]{\scriptsize SQLite, cached snapshot}};
 \node[box, above=0.45cm of fts] (syn)  {Synonym Expansion\\[-2pt]{\scriptsize keyword expansion}};
 \node[box, below=0.45cm of fts] (trust) {Trust Filter\\[-2pt]{\scriptsize age decay, citation score}};
-\node[store, right=0.9cm of fts] (md) {Markdown Files\\[-2pt]{\scriptsize \textasciitilde/.cortex/<project>/}};
+\node[store, right=0.9cm of fts] (md) {Data Layer\\[-2pt]{\scriptsize \textasciitilde/.cortex/ or <repo>/.cortex}};
 \node[store, above=0.45cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
-\node[store, below=0.45cm of md]  (mcp) {MCP Tools (51)\\[-2pt]{\scriptsize findings, tasks, skills, hooks}};
+\node[store, below=0.45cm of md]  (mcp) {MCP Tools (60)\\[-2pt]{\scriptsize 11 domain modules}};
+\node[store, below=0.45cm of mcp] (ckpt) {Session \& Task Checkpoints\\[-2pt]{\scriptsize .runtime/sessions + .sessions/checkpoint-*}};
 \node[gov, right=0.9cm of md] (pol) {Policy Engine\\[-2pt]{\scriptsize .governance/*.json}};
 \node[gov, above=0.45cm of pol] (rbac) {Access Control\\[-2pt]{\scriptsize 4 roles, 6 actions}};
 \node[gov, below=0.45cm of pol] (aud) {Audit Log\\[-2pt]{\scriptsize audit.log}};
 \draw[arr] (prompt) -- (ss);
 \draw[arr] (prompt) -- (ups);
-\draw[arr] (ups)    -- (stop);
+\draw[arr] (ups)    -- (ptu);
+\draw[arr] (ptu)    -- (stop);
 \draw[arr] (ups) -- (syn);
 \draw[arr] (syn) -- (fts);
 \draw[arr] (fts) -- (trust);
@@ -132,13 +135,16 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \draw[arr] (fts) -- (md);
 \draw[arr] (md)  -- (git);
 \draw[arr] (mcp) -- (md);
+\draw[arr] (ptu) -- (mcp);
+\draw[arr] (mcp) -- (ckpt);
 \draw[arr] (stop) -- (md);
+\draw[arr] (stop) -- (ckpt);
 \draw[arr] (md)  -- (pol);
 \draw[arr] (pol) -- (rbac);
 \draw[arr] (pol) -- (aud);
 \draw[dasharr] (ss) to[bend left=18] (fts);
 \node[draw, rounded corners=2pt, fill=white, inner sep=5pt, font=\scriptsize,
-      anchor=north] (leg) at ($(stop.south)!0.5!(aud.south)+(0,-0.5cm)$) {
+      anchor=north] (leg) at ($(ckpt.south)!0.5!(aud.south)+(0,-0.45cm)$) {
   \raisebox{1.5pt}{\tikz{\fill[orange!15] (0,0) rectangle (0.7em,0.7em);\draw(0,0)rectangle(0.7em,0.7em);}}~Hooks\quad
   \raisebox{1.5pt}{\tikz{\fill[blue!8] (0,0) rectangle (0.7em,0.7em);\draw(0,0)rectangle(0.7em,0.7em);}}~Retrieval\quad
   \raisebox{1.5pt}{\tikz{\fill[green!12] (0,0) rectangle (0.7em,0.7em);\draw(0,0)rectangle(0.7em,0.7em);}}~Storage\quad
@@ -148,7 +154,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 }% end resizebox
 \end{center}
 \captionsetup{font=footnotesize}
-\captionof{figure}{Cortex data flow. Prompt cycle: keyword extraction \textrightarrow\ lexical retrieval \textrightarrow\ optional vector recovery \textrightarrow\ trust filter \textrightarrow\ context injection. SessionStart warms the FTS5 cache; writes are committed locally and a background sync is scheduled when a remote exists.}
+\captionof{figure}{Cortex runtime loop. Lifecycle events (\texttt{SessionStart}, \texttt{UserPromptSubmit}, optional \texttt{PostToolUse}, \texttt{Stop}) drive retrieval and persistence over a shared or project-local cortex root. Findings, tasks, and checkpoint artifacts stay file-backed; FTS5 remains a local cache.}
 \label{fig:arch}
 
 % ─── BODY: two columns for dense technical content ───────────────────────────
@@ -156,18 +162,22 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \begin{multicols}{2}
 
 \subsection{Storage and Retrieval}
-Cortex keeps memory in project markdown files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. Markdown files remain the single source of truth; the index is a cached snapshot that hook and MCP entrypoints load and refresh incrementally. This lets project memory accumulate as ordinary repo state while keeping retrieval separate, selective, and cheap. It also removes the hosted round trip from the default path, which helps keep exact-ish coding-memory lookups responsive. The result is strong inspectability (diffs, git history, plain-text grep) with low platform lock-in.
+Cortex keeps memory in local files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. In shared mode, state lives in \texttt{\textasciitilde/.cortex}; in project-local mode, state lives in \texttt{<repo>/.cortex} with a single primary project. Runtime path resolution prefers an explicit path or nearest rooted \texttt{.cortex} before falling back to home scope. Markdown/JSON files remain the source of truth; the index is a cached snapshot that hook and MCP entrypoints refresh incrementally. This preserves inspectability (git history, plain-text grep, portable exports) while keeping retrieval bounded and local.
 
 Before injection, a trust filter scores each entry by age decay and citation validity (Section~\ref{sec:decay}), suppressing entries below a configurable confidence floor. Archived entries are stripped so consolidated history does not pollute active search. When semantic recovery is enabled, embeddings are cached locally and init can pre-warm coverage so the first real session is not starting from zero. Recovery queries use a persistent candidate index rather than re-embedding the corpus on every search.
 
 \subsection{Lifecycle Automation}
-Three hook stages automate retrieval and persistence \cite{cortex-cli,cortex-hooks}:
+Lifecycle automation is now a four-event model with tool-level continuity support \cite{cortex-cli,cortex-hooks}:
 \begin{enumerate}
-  \item \texttt{SessionStart}: pulls the cortex repo and warms the index cache.
-  \item \texttt{UserPromptSubmit}: extracts keywords, searches the index, and injects relevant snippets within the token budget. Fires a consolidation notice when thresholds are met.
-  \item \texttt{Stop}: auto-commits local cortex changes after every response and schedules background sync when a remote exists.
+  \item \texttt{SessionStart}: sync + health checks + prior-session context restore.
+  \item \texttt{UserPromptSubmit}: keyword extraction, retrieval, trust filtering, and bounded context injection.
+  \item \texttt{PostToolUse}: optional hook surface for tool-call continuity and follow-up capture.
+  \item \texttt{Stop}: persistence path (save, sync scheduling, metrics/task finalization).
 \end{enumerate}
-The architectural point of hooks is that memory capture and retrieval stay inside the normal agent loop rather than becoming a separate manual habit.
+Claude uses native lifecycle hooks; Copilot/Cursor/Codex use generated wrappers + tool configs to enforce equivalent lifecycle semantics. The architectural point is unchanged: memory capture and retrieval stay inside the normal agent loop rather than becoming a separate manual habit.
+
+\subsection{MCP Module Surface}
+Cortex MCP currently exposes \textbf{60 tools across 11 modules}: search/browse, task management, finding capture and lifecycle, memory quality, data management, entity graph, session management, operations/review, skills management, hooks management, and extraction. Newly expanded lifecycle surfaces include contradiction/supersession tools for findings and session history/continuity tooling.
 
 \subsection{Token Budget and Progressive Disclosure}
 \label{sec:context-opt}
@@ -178,6 +188,11 @@ This matters most in multi-tool coding sessions where search, task lookup, revie
 \subsection{Governance}
 \label{sec:governance}
 The governance engine \cite{cortex-shared} provides four configurable policy layers: retention and TTL (default 120-day decay, 365-day retention), workflow approval gates for risky queue items, role-based access control (admin/maintainer/contributor/viewer with 6 action types), and canonical locks protecting pinned memories from bulk overwrites. All governance events are appended to a timestamped audit log. These controls exist to contain familiar failure modes: stale memory, unreviewed risky writes, accidental overwrites, and unaudited shared-store drift.
+
+\subsection{Finding Lifecycle, Provenance, and Impact}
+Finding records now include normalized lifecycle metadata and provenance tracking. The lifecycle status set is \texttt{active}, \texttt{superseded}, \texttt{contradicted}, \texttt{stale}, \texttt{invalid\_citation}, and \texttt{retracted}, with status updates and reasons persisted inline in finding metadata comments. Provenance is carried through a typed \texttt{source} field (\texttt{human}, \texttt{agent}, \texttt{hook}, \texttt{extract}, \texttt{consolidation}, \texttt{unknown}).
+
+Impact scoring is session-linked rather than static: surfaced finding IDs are logged at retrieval time, completion outcomes are marked when session work lands, and repeatedly surfaced plus completed findings are promoted as higher-impact candidates in subsequent ranking.
 
 \subsection{Trust Decay and Confidence Scoring}
 \label{sec:decay}
@@ -232,15 +247,20 @@ These thresholds are operational defaults rather than scientific constants; they
 \label{fig:decay}
 
 \subsection{Extensibility}
-Seven user-defined hook events cover save, search, finding, and index lifecycles \cite{cortex-hooks}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
+Nine custom integration hook events cover save, search, finding, indexing, session-end, and consolidation lifecycles \cite{cortex-hooks}. Lifecycle registration also supports \texttt{PostToolUse} in addition to \texttt{SessionStart}, \texttt{UserPromptSubmit}, and \texttt{Stop}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
 
+\pagebreak[2]
 \section{Concurrent and Cross-Machine Use}
 Modern workflows frequently involve multiple sessions, tools, or machines touching the same project. Memory systems that assume a single serial session break under this pattern.
 
-Cortex handles multi-agent use through four mechanisms. \textbf{Shared git-backed state}: all agents read and write the same \texttt{\textasciitilde/.cortex} directory. Concurrent reads are safe at the file system layer; MCP writes are serialized within a process by file locks with configurable timeouts and stale-lock detection. \textbf{Automatic conflict resolution}: the background sync worker uses \texttt{pull --rebase} and auto-merges safe markdown conflicts in \texttt{FINDINGS.md} and the task file (\texttt{tasks.md}); transient push failures are retried automatically, and unresolved conflicts are surfaced in \texttt{cortex status} and the review UI. \textbf{Skill-driven coordination}: skills in \texttt{global/skills/} define reusable agent behaviors injected per project. \textbf{Hook isolation}: each agent session gets its own execution context; the consolidation notice fires once per session via marker files.
+Cortex handles multi-agent use through four mechanisms. \textbf{Dual-root storage model}: teams can share one git-backed root (\texttt{\textasciitilde/.cortex}) or run isolated project-local roots (\texttt{<repo>/.cortex}) per workspace. \textbf{Serialized writes with resilient sync}: concurrent reads are filesystem-safe; MCP writes are serialized by lock files with stale-lock cleanup; shared-mode sync uses rebase-first push retries with safe markdown auto-merge on common files. \textbf{Deterministic skill resolution}: project-scoped skills override global skills by name, and skills can be enabled/disabled without deleting source files. \textbf{Cross-session task checkpoints}: session end persists resumable checkpoint snapshots (task, edited files, failing tests, next-step hints), and session start restores them into continuity context.
 
 This is an eventually consistent shared-memory model optimized for append-heavy agent workflows, not strong coordination in the distributed-systems sense.
 
+\subsection{Operator Surfaces}
+Cortex ships three operator-facing review planes: \texttt{cortex shell}, \texttt{cortex web-ui}, and a VS Code extension. The web UI is hardened for local operation (loopback bind, per-run auth token validation, single-use CSRF tokens with TTL, CSP + anti-framing headers). The VS Code extension adds an activity-bar tree view for projects/findings/tasks/skills/hooks, an interactive entity-graph webview, and first-run onboarding that validates local MCP/runtime wiring before enabling live operations.
+
+\pagebreak[2]
 \section{Comparative Assessment}
 \textit{Evidence window: representative public documentation reviewed through March 6, 2026.}
 
@@ -278,11 +298,12 @@ The systems differ less in whether they can retrieve a relevant memory and more 
   \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed systems expose different audit primitives rather than equivalent git-native transparency.
   \item \textbf{Policy and access governance}: role-based access control, approval workflows, TTL and retention policy, and canonical locks are first-class features.
   \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection.
-  \item \textbf{Human review surfaces}: \texttt{cortex shell} and \texttt{cortex web-ui} let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
+  \item \textbf{Human review surfaces}: \texttt{cortex shell}, hardened \texttt{cortex web-ui}, and the VS Code extension (tree view + graph + onboarding) let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
 \end{itemize}
 
 Any memory system can add a vector index. Governance, auditability, and review tooling require deliberate architectural choices that are harder to retrofit.
 
+\pagebreak[2]
 \section{FTS5 vs Semantic Search}
 \label{sec:fts5}
 
@@ -297,7 +318,7 @@ Cortex now shares the same staged hybrid policy across hook injection and \textt
 
 The staged design matters because each retrieval tier has a different cost profile. The practical hot path is sublinear because the linear fallbacks are gated and bounded rather than paid on every request.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \begin{tabularx}{\columnwidth}{>{\raggedright\arraybackslash}p{2.2cm} >{\raggedright\arraybackslash}p{2.4cm} >{\raggedright\arraybackslash}X}
 \toprule
@@ -319,6 +340,7 @@ These numbers are implementation checks on one live cortex store, not a general 
 The interpretation is intentionally modest: on this corpus the lexical path was strong enough that vector recovery was usually unnecessary, so the hybrid path inherited nearly the same speed profile. Synthetic large-corpus scaling runs are documented separately because they answer a different question than this live-store measurement.
 The March 10 shared-corpus rerun against claude-mem reached the same practical conclusion from the other direction: on identifier-heavy coding queries, lexical-first retrieval stayed cheaper and more exact than the semantic-first alternative, even when the competing corpus had already been seeded. Taken together, the measured results support a narrow latency claim: local lexical-first retrieval is a real speed advantage for this style of code-memory workload.
 
+\pagebreak[2]
 \section{Limitations}
 \label{sec:limitations}
 
@@ -340,6 +362,7 @@ The March 10 shared-corpus rerun against claude-mem reached the same practical c
 
 \textbf{Operator burden.} Local-first operation shifts responsibility to the user or team: git hygiene, policy tuning, backup expectations, and occasional conflict repair do not disappear just because the system is local.
 
+\pagebreak[2]
 \section{Conclusion}
 The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex treats memory as repo-backed project state rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session. File locks serialize in-process writes, the background sync worker rebases and auto-merges safe markdown changes, and the shared store remains eventually consistent for append-heavy workflows.
 

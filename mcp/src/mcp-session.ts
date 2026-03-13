@@ -4,26 +4,111 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { resolveFindingsPath, debugLog } from "./shared.js";
+import { execFileSync } from "child_process";
+import { debugLog, isMemoryScopeVisible, normalizeMemoryScope } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
 import { readExtractedFacts } from "./mcp-extract-facts.js";
 import { resolveFindingSessionId } from "./finding-context.js";
-import { resolveTaskFilePath, readTasks } from "./data-tasks.js";
+import { readTasks } from "./data-tasks.js";
 import { readFindings } from "./data-access.js";
 import { getProjectDirs } from "./shared.js";
+import { getActiveTaskForSession } from "./task-lifecycle.js";
+import { listTaskCheckpoints, writeTaskCheckpoint } from "./session-checkpoints.js";
+import { markImpactEntriesCompletedForSession } from "./finding-impact.js";
 
 interface SessionState {
   sessionId: string;
   project?: string;
+  agentScope?: string;
   startedAt: string;
   endedAt?: string;
   summary?: string;
   findingsAdded: number;
+  tasksCompleted: number;
 }
 
 const STALE_SESSION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function collectGitStatusSnapshot(cwd: string): { gitStatus: string; editedFiles: string[] } {
+  try {
+    const output = execFileSync("git", ["status", "--short"], { cwd, encoding: "utf8" }).trim();
+    if (!output) return { gitStatus: "", editedFiles: [] };
+    const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
+    const editedFiles = lines.map((line) => line.replace(/^[ MADRCU?!]{1,2}\s+/, "").trim()).filter(Boolean);
+    return { gitStatus: output, editedFiles };
+  } catch (err: unknown) {
+    debugLog(`session checkpoint git status failed: ${errorMessage(err)}`);
+    return { gitStatus: "", editedFiles: [] };
+  }
+}
+
+function extractFailingTests(summary?: string, fallbackContext?: string): string[] {
+  const text = [summary || "", fallbackContext || ""].join("\n").trim();
+  if (!text) return [];
+  const tests = new Set<string>();
+
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    const failLine = trimmed.match(/^FAIL(?:ED)?\s+(.+)$/i);
+    if (failLine?.[1]) tests.add(failLine[1].trim());
+
+    const vitestLine = trimmed.match(/^(?:\u00d7|\u2716)\s+(.+)$/);
+    if (vitestLine?.[1]) tests.add(vitestLine[1].trim());
+
+    const named = trimmed.match(/(?:failing tests?|failed tests?)\s*:\s*(.+)$/i);
+    if (named?.[1]) {
+      for (const part of named[1].split(/[;,]/)) {
+        const candidate = part.trim();
+        if (candidate) tests.add(candidate);
+      }
+    }
+
+    const junitStyle = trimmed.match(/test(?:\s+case)?\s+["'`](.+?)["'`]\s+failed/i);
+    if (junitStyle?.[1]) tests.add(junitStyle[1].trim());
+  }
+
+  return [...tests];
+}
+
+function extractResumptionHint(
+  summary: string | undefined,
+  fallbackNextStep: string,
+  fallbackLastAttempt: string,
+): { lastAttempt: string; nextStep: string } {
+  const normalizedSummary = (summary || "").trim();
+  if (!normalizedSummary) {
+    return {
+      lastAttempt: fallbackLastAttempt.trim() || "No prior attempt captured",
+      nextStep: fallbackNextStep.trim() || "Resume implementation",
+    };
+  }
+
+  const lines = normalizedSummary
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const nextPattern = /^(?:next(?:\s+step)?|next up|todo|to do|follow-up|follow up|remaining)\s*[:\-]\s*(.+)$/i;
+  let nextStep: string | null = null;
+  const lastAttemptLines: string[] = [];
+
+  for (const line of lines) {
+    const nextMatch = line.match(nextPattern);
+    if (nextMatch?.[1]) {
+      if (!nextStep) nextStep = nextMatch[1].trim();
+      continue;
+    }
+    lastAttemptLines.push(line);
+  }
+
+  const lastAttempt = (lastAttemptLines.join(" ").trim() || normalizedSummary).trim();
+  return {
+    lastAttempt: lastAttempt || fallbackLastAttempt.trim() || "No prior attempt captured",
+    nextStep: nextStep || fallbackNextStep.trim() || "Resume implementation",
+  };
+}
 
 /** Per-connection session map keyed by arbitrary connection ID (if provided). */
 const _sessionMap = new Map<string, string>();
@@ -88,6 +173,33 @@ function findMostRecentSession(cortexPath: string): { file: string; state: Sessi
   const state = readSessionStateFile(bestFile);
   if (!state) return null;
   return { file: bestFile, state };
+}
+
+export function resolveActiveSessionScope(cortexPath: string, project?: string): string | undefined {
+  const dir = sessionsDir(cortexPath);
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+
+  let bestState: SessionState | null = null;
+  let bestStartedAt = 0;
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
+    const fullPath = path.join(dir, entry.name);
+    const state = readSessionStateFile(fullPath);
+    if (!state || state.endedAt) continue;
+    if (project && state.project && state.project !== project) continue;
+    const startedAt = Date.parse(state.startedAt || "");
+    const candidate = Number.isNaN(startedAt) ? 0 : startedAt;
+    if (!bestState || candidate >= bestStartedAt) {
+      bestState = state;
+      bestStartedAt = candidate;
+    }
+  }
+  return normalizeMemoryScope(bestState?.agentScope);
 }
 
 /** Path for the last-summary fast-path file. */
@@ -206,12 +318,26 @@ function cleanupStaleSessions(cortexPath: string): number {
 
 /** Increment the findingsAdded counter for a session. Falls back to the most relevant active session for the project. */
 export function incrementSessionFindings(cortexPath: string, count = 1, sessionId?: string, project?: string): void {
+  incrementSessionCounter(cortexPath, "findingsAdded", count, sessionId, project);
+}
+
+export function incrementSessionTasksCompleted(cortexPath: string, count = 1, sessionId?: string, project?: string): void {
+  incrementSessionCounter(cortexPath, "tasksCompleted", count, sessionId, project);
+}
+
+function incrementSessionCounter(
+  cortexPath: string,
+  field: "findingsAdded" | "tasksCompleted",
+  count = 1,
+  sessionId?: string,
+  project?: string,
+): void {
   try {
     const effectiveSessionId = project
       ? resolveFindingSessionId(cortexPath, project, sessionId)
       : sessionId;
     if (!effectiveSessionId) {
-      debugLog("incrementSessionFindings called without a resolvable sessionId — skipping");
+      debugLog(`${field} increment called without a resolvable sessionId — skipping`);
       return;
     }
     const resolved = resolveSessionFile(cortexPath, effectiveSessionId);
@@ -220,10 +346,16 @@ export function incrementSessionFindings(cortexPath: string, count = 1, sessionI
     withFileLock(file, () => {
       const current = readSessionStateFile(file);
       if (!current) return;
-      writeSessionStateFile(file, { ...current, findingsAdded: current.findingsAdded + count });
+      const nextValue = Number.isFinite(current[field]) ? current[field] + count : count;
+      writeSessionStateFile(file, {
+        ...current,
+        findingsAdded: Number.isFinite(current.findingsAdded) ? current.findingsAdded : 0,
+        tasksCompleted: Number.isFinite(current.tasksCompleted) ? current.tasksCompleted : 0,
+        [field]: nextValue,
+      });
     });
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] incrementSessionFindings: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] incrementSessionCounter(${field}): ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -231,11 +363,13 @@ export function incrementSessionFindings(cortexPath: string, count = 1, sessionI
 export interface SessionHistoryEntry {
   sessionId: string;
   project?: string;
+  agentScope?: string;
   startedAt: string;
   endedAt?: string;
   durationMins?: number;
   summary?: string;
   findingsAdded: number;
+  tasksCompleted: number;
   status: "active" | "ended";
 }
 
@@ -272,11 +406,13 @@ export function listAllSessions(cortexPath: string, limit = 50): SessionHistoryE
       entries.push({
         sessionId: state.sessionId,
         project: state.project,
+        agentScope: state.agentScope,
         startedAt: state.startedAt,
         endedAt: state.endedAt,
         durationMins: Math.round(durationMs / 60000),
         summary: state.summary,
-        findingsAdded: state.findingsAdded,
+        findingsAdded: Number.isFinite(state.findingsAdded) ? state.findingsAdded : 0,
+        tasksCompleted: Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0,
         status: state.endedAt ? "ended" : "active",
       });
     } catch {
@@ -357,6 +493,11 @@ export function getSessionArtifacts(
   return { findings, tasks };
 }
 
+function hasCompletedTasksInSession(cortexPath: string, sessionId: string, project?: string): boolean {
+  const artifacts = getSessionArtifacts(cortexPath, sessionId, project);
+  return artifacts.tasks.some((task) => task.section === "Done" && task.checked);
+}
+
 export function register(server: McpServer, ctx: McpContext): void {
   const { cortexPath } = ctx;
 
@@ -365,11 +506,17 @@ export function register(server: McpServer, ctx: McpContext): void {
     description: "Mark the start of a new session and retrieve context from prior sessions. Call this at the start of a conversation when not using hooks. Returns prior session summary and recent project findings. The returned sessionId should be passed to session_end and session_context to avoid cross-client collisions.",
     inputSchema: z.object({
       project: z.string().optional().describe("Project to load context for."),
+      agentScope: z.string().optional().describe("Optional memory scope for this agent session (for example 'researcher' or 'builder')."),
       connectionId: z.string().optional().describe("Optional stable identifier for this client connection. When provided, session_end/session_context can resolve the session without an explicit sessionId."),
     }),
-  }, async ({ project, connectionId }) => {
+  }, async ({ project, agentScope, connectionId }) => {
     // Clean up stale sessions (>24h)
     cleanupStaleSessions(cortexPath);
+
+    const normalizedAgentScope = agentScope === undefined ? undefined : normalizeMemoryScope(agentScope);
+    if (agentScope !== undefined && !normalizedAgentScope) {
+      return mcpResponse({ ok: false, error: `Invalid agentScope: "${agentScope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars).` });
+    }
 
     // Find most recent prior session for context
     const priorResult = findMostRecentSession(cortexPath);
@@ -386,8 +533,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     const next: SessionState = {
       sessionId,
       project: project ?? priorProject,
+      agentScope: normalizedAgentScope,
       startedAt: new Date().toISOString(),
       findingsAdded: 0,
+      tasksCompleted: 0,
     };
     const newFile = sessionFileForId(cortexPath, sessionId);
     writeSessionStateFile(newFile, next);
@@ -400,33 +549,35 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
 
     const activeProject = project ?? priorProject;
+    const activeScope = normalizedAgentScope;
     if (activeProject && isValidProjectName(activeProject)) {
-      const findingsPath = resolveFindingsPath(path.join(cortexPath, activeProject));
-      if (findingsPath) {
-        try {
-          const content = fs.readFileSync(findingsPath, "utf-8");
-          const bullets = content.split("\n").filter(l => l.startsWith("- ")).slice(-5);
+      try {
+        const findings = readFindings(cortexPath, activeProject);
+        if (findings.ok) {
+          const bullets = findings.data
+            .filter((entry) => isMemoryScopeVisible(normalizeMemoryScope(entry.scope), activeScope))
+            .slice(-5)
+            .map((entry) => `- ${entry.text}`);
           if (bullets.length > 0) {
             parts.push(`## Recent findings (${activeProject})\n${bullets.join("\n")}`);
           }
-        } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start findingsRead: ${err instanceof Error ? err.message : String(err)}\n`);
         }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start findingsRead: ${err instanceof Error ? err.message : String(err)}\n`);
       }
-      const taskPath = resolveTaskFilePath(cortexPath, activeProject);
-      if (taskPath) {
-        try {
-          const content = fs.readFileSync(taskPath, "utf-8");
-          const queueStart = content.indexOf("## Queue");
-          if (queueStart >= 0) {
-            const queueItems = content.slice(queueStart).split("\n").filter(l => l.startsWith("- [ ]")).slice(0, 5);
-            if (queueItems.length > 0) {
-              parts.push(`## Active task (${activeProject})\n${queueItems.join("\n")}`);
-            }
+      try {
+        const tasks = readTasks(cortexPath, activeProject);
+        if (tasks.ok) {
+          const queueItems = tasks.data.items.Queue
+            .filter((entry) => isMemoryScopeVisible(normalizeMemoryScope(entry.scope), activeScope))
+            .slice(0, 5)
+            .map((entry) => `- [ ] ${entry.line}`);
+          if (queueItems.length > 0) {
+            parts.push(`## Active task (${activeProject})\n${queueItems.join("\n")}`);
           }
-        } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start taskRead: ${err instanceof Error ? err.message : String(err)}\n`);
         }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start taskRead: ${err instanceof Error ? err.message : String(err)}\n`);
       }
       // Surface extracted preferences/facts for this project
       try {
@@ -437,13 +588,34 @@ export function register(server: McpServer, ctx: McpContext): void {
       } catch (err: unknown) {
         if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start factsRead: ${err instanceof Error ? err.message : String(err)}\n`);
       }
+
+      try {
+          const checkpoints = listTaskCheckpoints(cortexPath, activeProject).slice(0, 3);
+        if (checkpoints.length > 0) {
+          const lines: string[] = [];
+          for (const checkpoint of checkpoints) {
+            lines.push(`- ${(checkpoint.taskText || checkpoint.taskLine).trim()} (task: ${checkpoint.taskId})`);
+            lines.push(`  Last attempt: ${checkpoint.resumptionHint.lastAttempt}`);
+            lines.push(`  Next step: ${checkpoint.resumptionHint.nextStep}`);
+            if (checkpoint.editedFiles.length > 0) {
+              lines.push(`  Edited files: ${checkpoint.editedFiles.slice(0, 5).join(", ")}${checkpoint.editedFiles.length > 5 ? ", ..." : ""}`);
+            }
+            if (checkpoint.failingTests.length > 0) {
+              lines.push(`  Failing tests: ${checkpoint.failingTests.slice(0, 3).join(", ")}${checkpoint.failingTests.length > 3 ? ", ..." : ""}`);
+            }
+          }
+          parts.push(`## Continue where you left off? (${activeProject})\n${lines.join("\n")}`);
+        }
+      } catch (err: unknown) {
+        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start checkpointsRead: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
     }
 
     const message = parts.length > 0
       ? `Session started (${sessionId.slice(0, 8)}).\n\n${parts.join("\n\n")}`
       : `Session started (${sessionId.slice(0, 8)}). No prior context found.`;
 
-    return mcpResponse({ ok: true, message, data: { sessionId, project: activeProject } });
+    return mcpResponse({ ok: true, message, data: { sessionId, project: activeProject, agentScope: activeScope } });
   });
 
   server.registerTool("session_end", {
@@ -491,20 +663,69 @@ export function register(server: McpServer, ctx: McpContext): void {
       writeLastSummary(cortexPath, effectiveSummary, state.sessionId, endedState.project);
     }
 
+    if (endedState.project && isValidProjectName(endedState.project)) {
+      try {
+        const trackedActiveTask = getActiveTaskForSession(cortexPath, state.sessionId, endedState.project);
+        const activeTask = trackedActiveTask ?? (() => {
+          const tasks = readTasks(cortexPath, endedState.project!);
+          if (!tasks.ok) return null;
+          return tasks.data.items.Active[0] ?? null;
+        })();
+        if (activeTask) {
+          const taskId = activeTask.stableId || activeTask.id;
+          const { gitStatus, editedFiles } = collectGitStatusSnapshot(process.cwd());
+          const resumptionHint = extractResumptionHint(
+            effectiveSummary,
+            activeTask.line,
+            activeTask.context || "No prior attempt captured",
+          );
+          writeTaskCheckpoint(cortexPath, {
+            project: endedState.project,
+            taskId,
+            taskText: activeTask.line,
+            taskLine: activeTask.line,
+            sessionId: state.sessionId,
+            createdAt: new Date().toISOString(),
+            resumptionHint,
+            gitStatus,
+            editedFiles,
+            failingTests: extractFailingTests(effectiveSummary, activeTask.context),
+          });
+        }
+      } catch (err: unknown) {
+        debugLog(`session checkpoint write failed: ${errorMessage(err)}`);
+      }
+    }
+
+    try {
+      const tasksCompleted = Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0;
+      if (tasksCompleted > 0 || hasCompletedTasksInSession(cortexPath, state.sessionId, endedState.project)) {
+        markImpactEntriesCompletedForSession(cortexPath, state.sessionId, endedState.project);
+      }
+    } catch (err: unknown) {
+      debugLog(`impact scoring update failed: ${errorMessage(err)}`);
+    }
+
     const durationMs = new Date(endedState.endedAt!).getTime() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);
 
     runCustomHooks(cortexPath, "post-session-end", {
       CORTEX_SESSION_ID: state.sessionId,
       CORTEX_DURATION_MINS: String(durationMins),
-      CORTEX_FINDINGS_ADDED: String(state.findingsAdded),
+      CORTEX_FINDINGS_ADDED: String(endedState.findingsAdded),
+      CORTEX_TASKS_COMPLETED: String(Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0),
       ...(endedState.project ? { CORTEX_PROJECT: endedState.project } : {}),
     });
 
     return mcpResponse({
       ok: true,
-      message: `Session ended. Duration: ~${durationMins} min. ${state.findingsAdded} finding(s) added.${summary ? " Summary saved for next session." : ""}`,
-      data: { sessionId: state.sessionId, durationMins, findingsAdded: state.findingsAdded },
+      message: `Session ended. Duration: ~${durationMins} min. ${endedState.findingsAdded} finding(s) added, ${Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0} task(s) completed.${summary ? " Summary saved for next session." : ""}`,
+      data: {
+        sessionId: state.sessionId,
+        durationMins,
+        findingsAdded: endedState.findingsAdded,
+        tasksCompleted: Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0,
+      },
     });
   });
 
@@ -529,9 +750,11 @@ export function register(server: McpServer, ctx: McpContext): void {
     const parts = [
       `Session: ${state.sessionId.slice(0, 8)}`,
       `Project: ${state.project ?? "none"}`,
+      `Agent scope: ${state.agentScope ?? "none"}`,
       `Started: ${state.startedAt}`,
       `Duration: ~${durationMins} min`,
       `Findings added: ${state.findingsAdded}`,
+      `Tasks completed: ${Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0}`,
     ];
     if (state.summary) parts.push(`Prior summary: ${state.summary}`);
 
@@ -590,8 +813,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       const dur = s.durationMins != null ? `${s.durationMins}m` : "?";
       const status = s.status === "active" ? " ●" : "";
       const findings = s.findingsAdded > 0 ? ` ${s.findingsAdded}f` : "";
+      const tasks = s.tasksCompleted > 0 ? ` ${s.tasksCompleted}t` : "";
       const date = s.startedAt.slice(0, 16).replace("T", " ");
-      return `${id}${status}  ${date}  ${dur}${findings}  ${proj}${s.summary ? "  " + s.summary.slice(0, 60) : ""}`;
+      return `${id}${status}  ${date}  ${dur}${findings}${tasks}  ${proj}${s.summary ? "  " + s.summary.slice(0, 60) : ""}`;
     });
 
     return mcpResponse({

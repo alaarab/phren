@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { spawn, spawnSync } from "child_process";
 import { CortexClient } from "./cortexClient";
 import { CortexTreeProvider } from "./providers/CortexTreeProvider";
 import { showSearchQuickPick } from "./searchQuickPick";
@@ -27,12 +28,24 @@ import {
 let client: CortexClient | undefined;
 let outputChannel: vscode.OutputChannel;
 
+const GLOBAL_CORTEX_STORE_PATH = path.join(os.homedir(), ".cortex");
+const CORTEX_PACKAGE_NAME = "@alaarab/cortex";
+const ONBOARDING_COMPLETE_SETTING = "onboardingComplete";
+
+interface CommandResult {
+  ok: boolean;
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel("Cortex");
   context.subscriptions.push(outputChannel);
   outputChannel.appendLine("Cortex extension activating...");
   const config = vscode.workspace.getConfiguration("cortex");
-  const runtimeConfig = resolveRuntimeConfig(config);
+  await runOnboardingIfNeeded(config);
+  const runtimeConfig = resolveRuntimeConfig(vscode.workspace.getConfiguration("cortex"));
 
   outputChannel.appendLine(`Cortex store path: ${runtimeConfig.storePath}`);
   outputChannel.appendLine(`Node path: ${runtimeConfig.nodePath}`);
@@ -604,6 +617,97 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
+  const uninstallDisposable = vscode.commands.registerCommand("cortex.uninstall", async () => {
+    const proceed = await vscode.window.showWarningMessage(
+      "Uninstall Cortex from this machine?",
+      {
+        modal: true,
+        detail: "This removes Cortex MCP entries from editor configs, uninstalls the global npm package, and resets VS Code Cortex settings.",
+      },
+      "Uninstall Cortex",
+    );
+    if (proceed !== "Uninstall Cortex") {
+      return;
+    }
+
+    const deleteStoreChoice = await vscode.window.showWarningMessage(
+      `Also delete ${GLOBAL_CORTEX_STORE_PATH}?`,
+      {
+        modal: true,
+        detail: "This permanently deletes Cortex memory and project data on this machine.",
+      },
+      "Delete ~/.cortex",
+      "Keep Data",
+    );
+    const deleteStore = deleteStoreChoice === "Delete ~/.cortex";
+
+    const summary = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: "Cortex: Uninstalling...", cancellable: false },
+      async (progress) => {
+        progress.report({ message: "Clearing Cortex MCP entries from editor configs..." });
+        const cleanupResult = clearCortexMcpEntries();
+
+        progress.report({ message: `Running npm uninstall -g ${CORTEX_PACKAGE_NAME}...` });
+        const npmResult = uninstallGlobalCortexPackage();
+
+        progress.report({ message: "Resetting VS Code Cortex extension settings..." });
+        const resetResult = await resetCortexExtensionSettings(context);
+
+        let storeRemoval: { removed: boolean; skipped: boolean; error?: string } = { removed: false, skipped: true };
+        if (deleteStore) {
+          progress.report({ message: `Deleting ${GLOBAL_CORTEX_STORE_PATH}...` });
+          storeRemoval = removeCortexStore(GLOBAL_CORTEX_STORE_PATH);
+        }
+
+        return { cleanupResult, npmResult, resetResult, storeRemoval };
+      },
+    );
+
+    outputChannel.appendLine("=== Cortex Uninstall ===");
+    for (const filePath of summary.cleanupResult.cleanedFiles) {
+      outputChannel.appendLine(`Cleaned MCP entry: ${filePath}`);
+    }
+    for (const warning of summary.cleanupResult.warnings) {
+      outputChannel.appendLine(`Warning: ${warning}`);
+    }
+    if (summary.npmResult.stdout) {
+      outputChannel.appendLine(summary.npmResult.stdout.trim());
+    }
+    if (summary.npmResult.stderr) {
+      outputChannel.appendLine(summary.npmResult.stderr.trim());
+    }
+    for (const warning of summary.resetResult.warnings) {
+      outputChannel.appendLine(`Warning: ${warning}`);
+    }
+    if (deleteStore) {
+      if (summary.storeRemoval.removed) {
+        outputChannel.appendLine(`Removed ${GLOBAL_CORTEX_STORE_PATH}`);
+      } else if (summary.storeRemoval.error) {
+        outputChannel.appendLine(`Warning: ${summary.storeRemoval.error}`);
+      }
+    }
+    outputChannel.appendLine("=== End ===");
+
+    const failedSteps: string[] = [];
+    if (!summary.npmResult.ok) failedSteps.push("global npm uninstall");
+    if (summary.storeRemoval.error) failedSteps.push("~/.cortex deletion");
+    if (summary.resetResult.warnings.length > 0) failedSteps.push("settings reset (partial)");
+
+    treeDataProvider.refresh();
+
+    if (failedSteps.length > 0) {
+      await vscode.window.showWarningMessage(
+        `Cortex uninstall finished with warnings (${failedSteps.join(", ")}). See the Cortex output channel for details.`,
+      );
+      outputChannel.show(true);
+      return;
+    }
+
+    await vscode.window.showInformationMessage(
+      `Cortex uninstall complete. Removed ${summary.cleanupResult.cleanedFiles.length} MCP entr${summary.cleanupResult.cleanedFiles.length === 1 ? "y" : "ies"}${deleteStore ? " and deleted ~/.cortex" : ""}.`,
+    );
+  });
+
   const openMachinesConfigDisposable = vscode.commands.registerCommand("cortex.openMachinesConfig", async () => {
     try {
       const machinesPath = machinesConfigPath(runtimeConfig.storePath);
@@ -794,6 +898,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     hooksStatusDisposable,
     toggleHooksCommandDisposable,
     manageProjectDisposable,
+    uninstallDisposable,
     addTaskDisposable,
     completeTaskDisposable,
     removeTaskDisposable,
@@ -901,6 +1006,353 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asArraySafe(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Promise<void> {
+  const completed = config.get<boolean>(ONBOARDING_COMPLETE_SETTING, false);
+  if (completed) {
+    return;
+  }
+
+  outputChannel.appendLine("Running first-time Cortex onboarding...");
+
+  try {
+    const globallyInstalled = await isGlobalCortexInstalled();
+    if (!globallyInstalled) {
+      const installChoice = await vscode.window.showInformationMessage(
+        "Cortex is not installed globally. Install it now to enable the extension backend?",
+        "Install Cortex",
+        "Skip",
+      );
+      if (installChoice === "Install Cortex") {
+        const result = await runCommandWithProgress(
+          "Installing Cortex globally...",
+          getNpmCommand(),
+          ["install", "-g", CORTEX_PACKAGE_NAME],
+        );
+        if (result.ok) {
+          await vscode.window.showInformationMessage("Cortex global install complete.");
+        } else {
+          await vscode.window.showErrorMessage(`Cortex install failed: ${summarizeCommandError(result)}`);
+        }
+      }
+    }
+
+    if (!pathExists(GLOBAL_CORTEX_STORE_PATH)) {
+      const initChoice = await vscode.window.showInformationMessage(
+        `${GLOBAL_CORTEX_STORE_PATH} was not found. Initialize Cortex now?`,
+        "Initialize Cortex",
+        "Skip",
+      );
+      if (initChoice === "Initialize Cortex") {
+        const result = await runCommandWithProgress(
+          "Initializing Cortex store...",
+          getNpxCommand(),
+          [CORTEX_PACKAGE_NAME, "init", "--yes"],
+        );
+        if (result.ok) {
+          await vscode.window.showInformationMessage("Cortex store initialized.");
+        } else {
+          await vscode.window.showErrorMessage(`Cortex init failed: ${summarizeCommandError(result)}`);
+        }
+      }
+    }
+
+    if (!hasCortexMcpEntry()) {
+      const configureChoice = await vscode.window.showInformationMessage(
+        "Cortex MCP entry is missing in ~/.claude/settings.json. Configure it now?",
+        "Configure MCP",
+        "Skip",
+      );
+      if (configureChoice === "Configure MCP") {
+        const result = await runCommandWithProgress(
+          "Configuring Cortex MCP entry...",
+          getNpxCommand(),
+          [CORTEX_PACKAGE_NAME, "init", "--yes"],
+        );
+        if (result.ok) {
+          await vscode.window.showInformationMessage("Cortex MCP configuration updated.");
+        } else {
+          await vscode.window.showErrorMessage(`Cortex MCP configuration failed: ${summarizeCommandError(result)}`);
+        }
+      }
+    }
+
+    const workspaceFolder = getPrimaryWorkspaceFolderPath();
+    if (workspaceFolder) {
+      const addProjectChoice = await vscode.window.showInformationMessage(
+        `Track this workspace in Cortex?\n${workspaceFolder}`,
+        "Track Project",
+        "Skip",
+      );
+      if (addProjectChoice === "Track Project") {
+        const result = await runCommandWithProgress(
+          "Adding workspace to Cortex projects...",
+          getNpxCommand(),
+          [CORTEX_PACKAGE_NAME, "add", workspaceFolder],
+        );
+        if (result.ok) {
+          await vscode.window.showInformationMessage("Workspace added to Cortex projects.");
+        } else {
+          await vscode.window.showErrorMessage(`Failed to add project: ${summarizeCommandError(result)}`);
+        }
+      }
+    }
+  } finally {
+    try {
+      await config.update(ONBOARDING_COMPLETE_SETTING, true, vscode.ConfigurationTarget.Global);
+      outputChannel.appendLine("Cortex onboarding complete (cortex.onboardingComplete=true).");
+    } catch (error) {
+      outputChannel.appendLine(`Failed to persist onboarding flag: ${toErrorMessage(error)}`);
+    }
+  }
+}
+
+async function isGlobalCortexInstalled(): Promise<boolean> {
+  const result = await runCommand(getNpmCommand(), ["list", "-g", CORTEX_PACKAGE_NAME, "--json"]);
+  const parsed = safeParseJson(result.stdout);
+  const dependencies = asRecord(parsed?.dependencies);
+  const packageEntry = dependencies ? dependencies[CORTEX_PACKAGE_NAME] : undefined;
+  return Boolean(packageEntry);
+}
+
+function getNpmCommand(): string {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function getNpxCommand(): string {
+  return process.platform === "win32" ? "npx.cmd" : "npx";
+}
+
+function getPrimaryWorkspaceFolderPath(): string | undefined {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    return undefined;
+  }
+  return folders[0]?.uri.fsPath;
+}
+
+function hasCortexMcpEntry(): boolean {
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  if (!fs.existsSync(settingsPath)) {
+    return false;
+  }
+
+  try {
+    const raw = fs.readFileSync(settingsPath, "utf8");
+    const json = safeParseJson(raw);
+    const mcpServers = asRecord(json?.mcpServers);
+    const servers = asRecord(json?.servers);
+    return Boolean(mcpServers?.cortex || servers?.cortex);
+  } catch (error) {
+    outputChannel.appendLine(`Failed to read ${settingsPath}: ${toErrorMessage(error)}`);
+    return false;
+  }
+}
+
+async function runCommandWithProgress(title: string, command: string, args: string[]): Promise<CommandResult> {
+  return vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title, cancellable: false },
+    async () => runCommand(command, args),
+  );
+}
+
+async function runCommand(command: string, args: string[]): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { shell: false });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({
+        ok: false,
+        status: null,
+        stdout,
+        stderr: `${stderr}\n${toErrorMessage(error)}`.trim(),
+      });
+    });
+    child.on("close", (status) => {
+      resolve({
+        ok: status === 0,
+        status,
+        stdout,
+        stderr,
+      });
+    });
+  });
+}
+
+function safeParseJson(raw: string): Record<string, unknown> | undefined {
+  try {
+    const value = JSON.parse(raw);
+    return asRecord(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizeCommandError(result: CommandResult): string {
+  if (result.stderr.trim()) {
+    return result.stderr.trim().split("\n").slice(-1)[0];
+  }
+  if (result.stdout.trim()) {
+    return result.stdout.trim().split("\n").slice(-1)[0];
+  }
+  return result.status === null ? "failed to start command" : `exit code ${result.status}`;
+}
+
+interface McpCleanupResult {
+  cleanedFiles: string[];
+  warnings: string[];
+}
+
+interface NpmUninstallResult {
+  ok: boolean;
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+interface SettingsResetResult {
+  resetKeys: string[];
+  warnings: string[];
+}
+
+function clearCortexMcpEntries(): McpCleanupResult {
+  const cleanedFiles: string[] = [];
+  const warnings: string[] = [];
+  const candidateFiles = getMcpConfigCandidateFiles();
+
+  for (const filePath of candidateFiles) {
+    try {
+      if (removeMcpServerAtPath(filePath)) {
+        cleanedFiles.push(filePath);
+      }
+    } catch (error) {
+      warnings.push(`${filePath}: ${toErrorMessage(error)}`);
+    }
+  }
+
+  const codexTomlPath = path.join(os.homedir(), ".codex", "config.toml");
+  try {
+    if (removeTomlMcpServer(codexTomlPath)) {
+      cleanedFiles.push(codexTomlPath);
+    }
+  } catch (error) {
+    warnings.push(`${codexTomlPath}: ${toErrorMessage(error)}`);
+  }
+
+  return { cleanedFiles, warnings };
+}
+
+function getMcpConfigCandidateFiles(): string[] {
+  const home = os.homedir();
+  const files = [
+    path.join(home, ".claude", "settings.json"),
+    path.join(home, ".cursor", "mcp.json"),
+  ];
+
+  return Array.from(new Set(files.filter((value): value is string => Boolean(value))));
+}
+
+function removeMcpServerAtPath(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  let data: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    data = parsed as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(`malformed JSON: ${toErrorMessage(error)}`);
+  }
+
+  let removed = false;
+  for (const key of ["mcpServers", "servers"] as const) {
+    const root = data[key];
+    if (!root || typeof root !== "object" || Array.isArray(root)) continue;
+    const objectRoot = root as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(objectRoot, "cortex")) {
+      delete objectRoot.cortex;
+      removed = true;
+    }
+  }
+
+  if (removed) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf8");
+  }
+  return removed;
+}
+
+function removeTomlMcpServer(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  const content = fs.readFileSync(filePath, "utf8");
+  const sectionRe = /^\[mcp_servers\.cortex\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
+  if (!sectionRe.test(content)) return false;
+  const next = content.replace(sectionRe, "").replace(/\n{3,}/g, "\n\n");
+  fs.writeFileSync(filePath, next, "utf8");
+  return true;
+}
+
+function uninstallGlobalCortexPackage(): NpmUninstallResult {
+  try {
+    const result = spawnSync("npm", ["uninstall", "-g", CORTEX_PACKAGE_NAME], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return {
+      ok: result.status === 0,
+      status: result.status,
+      stdout: typeof result.stdout === "string" ? result.stdout : "",
+      stderr: typeof result.stderr === "string" ? result.stderr : "",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: null,
+      stdout: "",
+      stderr: toErrorMessage(error),
+    };
+  }
+}
+
+function removeCortexStore(storePath: string): { removed: boolean; skipped: boolean; error?: string } {
+  if (!fs.existsSync(storePath)) return { removed: false, skipped: true };
+  try {
+    fs.rmSync(storePath, { recursive: true, force: true });
+    return { removed: true, skipped: false };
+  } catch (error) {
+    return { removed: false, skipped: false, error: toErrorMessage(error) };
+  }
+}
+
+async function resetCortexExtensionSettings(context: vscode.ExtensionContext): Promise<SettingsResetResult> {
+  const warnings: string[] = [];
+  const resetKeys: string[] = [];
+  const config = vscode.workspace.getConfiguration("cortex");
+  const packageJson = context.extension.packageJSON as Record<string, unknown>;
+  const contributes = asRecord(packageJson.contributes);
+  const configuration = asRecord(contributes?.configuration);
+  const properties = asRecord(configuration?.properties) ?? {};
+  const keys = Object.keys(properties).filter((key) => key.startsWith("cortex."));
+
+  for (const key of keys) {
+    const section = key.slice("cortex.".length);
+    try {
+      await config.update(section, undefined, vscode.ConfigurationTarget.Global);
+      resetKeys.push(key);
+    } catch (error) {
+      warnings.push(`${key}: ${toErrorMessage(error)}`);
+    }
+  }
+
+  return { resetKeys, warnings };
 }
 
 // ── Settings → cortex preference file sync ──────────────────────────────────

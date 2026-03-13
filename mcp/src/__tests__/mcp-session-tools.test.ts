@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 import type { SqlJsDatabase } from "../shared-index.js";
 import type { McpContext } from "../mcp-types.js";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import { register } from "../mcp-session.js";
+import { register as registerTasks } from "../mcp-tasks.js";
+import { writeTaskCheckpoint } from "../session-checkpoints.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 
@@ -97,5 +101,107 @@ describe("mcp-session tool contract", () => {
     const endRes = parseResult(await server.call("session_end", { sessionId: started.data.sessionId, summary: "done" }));
     expect(endRes.ok).toBe(true);
     expect(endRes.data.sessionId).toBe(started.data.sessionId);
+  });
+
+  it("writes task checkpoints on session_end and surfaces them on next session_start", async () => {
+    const demoDir = path.join(tmp.path, "demo");
+    fs.mkdirSync(demoDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(demoDir, "tasks.md"),
+      [
+        "# demo tasks",
+        "",
+        "## Active",
+        "",
+        "- [ ] Implement snapshot pipeline <!-- bid:abc123ef -->",
+        "  Context: Wire checkpoint snapshot and summarize failing tests",
+        "",
+        "## Queue",
+        "",
+        "## Done",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+
+    const started = parseResult(await server.call("session_start", { project: "demo" }));
+    expect(started.ok).toBe(true);
+    const ended = parseResult(await server.call("session_end", {
+      sessionId: started.data.sessionId,
+      summary: "Checkpoint writer added. Failing tests: mcp-session-tools checkpoint context\nNext step: Fix the checkpoint matcher",
+    }));
+    expect(ended.ok).toBe(true);
+
+    const checkpointFile = path.join(tmp.path, ".sessions", "checkpoint-demo-abc123ef.json");
+    expect(fs.existsSync(checkpointFile)).toBe(true);
+    const checkpoint = JSON.parse(fs.readFileSync(checkpointFile, "utf8")) as {
+      taskId: string;
+      taskLine: string;
+      taskText?: string;
+      failingTests: string[];
+      resumptionHint: { lastAttempt: string; nextStep: string };
+    };
+    expect(checkpoint.taskId).toBe("abc123ef");
+    expect(checkpoint.taskLine).toContain("Implement snapshot pipeline");
+    expect(checkpoint.taskText).toContain("Implement snapshot pipeline");
+    expect(checkpoint.failingTests[0]).toContain("mcp-session-tools checkpoint context");
+    expect(checkpoint.resumptionHint.lastAttempt).toContain("Checkpoint writer added.");
+    expect(checkpoint.resumptionHint.nextStep).toContain("Fix the checkpoint matcher");
+
+    const resumed = parseResult(await server.call("session_start", { project: "demo" }));
+    expect(resumed.ok).toBe(true);
+    expect(resumed.message).toContain("Continue where you left off?");
+    expect(resumed.message).toContain("Implement snapshot pipeline");
+  });
+
+  it("removes checkpoint files when complete_task finishes the associated task", async () => {
+    registerTasks(server as any, {
+      cortexPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    });
+
+    const demoDir = path.join(tmp.path, "demo");
+    fs.mkdirSync(demoDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(demoDir, "tasks.md"),
+      [
+        "# demo tasks",
+        "",
+        "## Active",
+        "",
+        "- [ ] Implement snapshot pipeline <!-- bid:deadbeef -->",
+        "",
+        "## Queue",
+        "",
+        "## Done",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+
+    writeTaskCheckpoint(tmp.path, {
+      project: "demo",
+      taskId: "deadbeef",
+      taskLine: "Implement snapshot pipeline",
+      createdAt: new Date().toISOString(),
+      resumptionHint: {
+        lastAttempt: "Wrote baseline implementation",
+        nextStep: "Fix failing assertions",
+      },
+      gitStatus: "M mcp/src/mcp-session.ts",
+      editedFiles: ["mcp/src/mcp-session.ts"],
+      failingTests: ["mcp-session-tools checkpoint context"],
+    });
+
+    const checkpointFile = path.join(tmp.path, ".sessions", "checkpoint-demo-deadbeef.json");
+    expect(fs.existsSync(checkpointFile)).toBe(true);
+
+    const completed = parseResult(await server.call("complete_task", { project: "demo", item: "snapshot pipeline" }));
+    expect(completed.ok).toBe(true);
+    expect(fs.existsSync(checkpointFile)).toBe(false);
   });
 });

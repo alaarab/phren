@@ -20,6 +20,7 @@ import {
   filterTrustedFindingsDetailed,
 } from "./shared-content.js";
 import { parseCitationComment } from "./content-citation.js";
+import { getHighImpactFindings } from "./finding-impact.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -620,15 +621,23 @@ export function applyTrustFilter(
   rows: DocRow[],
   ttlDays: number,
   minConfidence: number,
-  decay: Partial<RetentionPolicy["decay"]>
+  decay: Partial<RetentionPolicy["decay"]>,
+  cortexPath?: string
 ): TrustFilterResult {
   const queueItems: TrustFilterQueueItem[] = [];
   const auditEntries: string[] = [];
+  const highImpactFindingIds = cortexPath ? getHighImpactFindings(cortexPath, 3) : undefined;
 
   const filtered = rows
     .map((doc) => {
       if (!TRUST_FILTERED_TYPES.has(doc.type)) return doc;
-      const trust = filterTrustedFindingsDetailed(doc.content, { ttlDays, minConfidence, decay });
+      const trust = filterTrustedFindingsDetailed(doc.content, {
+        ttlDays,
+        minConfidence,
+        decay,
+        project: doc.project,
+        highImpactFindingIds,
+      });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
         const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);

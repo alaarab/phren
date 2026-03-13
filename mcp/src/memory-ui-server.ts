@@ -22,7 +22,7 @@ import {
   TASKS_FILENAME,
 } from "./data-access.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
-import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
+import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 import {
   buildGraph,
   collectProjectsForUI,
@@ -33,11 +33,22 @@ import {
   recentAccepted,
   recentUsage,
 } from "./memory-ui-data.js";
-import { ensureTopicReferenceDoc, getProjectTopicsResponse, listProjectReferenceDocs, readReferenceContent, reclassifyLegacyTopicDocs, writeProjectTopics } from "./project-topics.js";
+import { CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
+import {
+  ensureTopicReferenceDoc,
+  getProjectTopicsResponse,
+  listProjectReferenceDocs,
+  pinProjectTopicSuggestion,
+  readReferenceContent,
+  reclassifyLegacyTopicDocs,
+  unpinProjectTopicSuggestion,
+  writeProjectTopics,
+} from "./project-topics.js";
 import { getWorkflowPolicy, updateWorkflowPolicy } from "./governance-policy.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
 import { listAllSessions, getSessionArtifacts } from "./mcp-session.js";
+import { repairPreexistingInstall } from "./init-setup.js";
 
 export interface WebUiOptions {
   authToken?: string;
@@ -54,6 +65,7 @@ const CSRF_TOKEN_TTL_MS = 15 * 60 * 1000;
 const MAX_FORM_BODY_BYTES = 1_048_576;
 const WEB_UI_READY_ATTEMPTS = 12;
 const WEB_UI_READY_DELAY_MS = 75;
+const WEB_UI_PORT_RETRY_ATTEMPTS = 3;
 
 export function getWebUiBrowserCommand(url: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
   if (platform === "darwin") return { command: "open", args: [url] };
@@ -127,6 +139,34 @@ async function listenOnLoopback(server: http.Server, port: number): Promise<numb
     server.once("listening", onListening);
     server.listen(port, "127.0.0.1");
   });
+}
+
+async function bindWebUiPort(
+  server: http.Server,
+  requestedPort: number,
+  allowPortFallback: boolean,
+): Promise<number> {
+  const candidates: number[] = [requestedPort];
+  if (allowPortFallback && requestedPort > 0) {
+    for (let i = 1; i <= WEB_UI_PORT_RETRY_ATTEMPTS; i++) {
+      candidates.push(requestedPort + i);
+    }
+  }
+
+  let lastError: unknown = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    try {
+      if (candidate !== requestedPort) {
+        process.stderr.write(`[cortex] web-ui port ${candidate - 1} is busy, retrying on ${candidate}\n`);
+      }
+      return await listenOnLoopback(server, candidate);
+    } catch (err: unknown) {
+      lastError = err;
+      if (!allowPortFallback || !isAddressInUse(err) || i === candidates.length - 1) break;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("failed to bind web-ui server");
 }
 
 function pruneExpiredCsrfTokens(csrfTokens?: Map<string, number>): void {
@@ -326,12 +366,34 @@ function parseTopicsPayload(raw: string): Array<{ slug: string; label: string; d
   }
 }
 
+function parseTopicPayload(raw: string): { slug: string; label: string; description: string; keywords: string[] } | null {
+  try {
+    const topic = JSON.parse(raw);
+    if (!topic || typeof topic !== "object") return null;
+    return {
+      slug: String((topic as Record<string, unknown>).slug || ""),
+      label: String((topic as Record<string, unknown>).label || ""),
+      description: String((topic as Record<string, unknown>).description || ""),
+      keywords: Array.isArray((topic as Record<string, unknown>).keywords)
+        ? ((topic as Record<string, unknown>).keywords as unknown[]).map((keyword) => String(keyword))
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function createWebUiHttpServer(
   cortexPath: string,
   renderPage: (cortexPath: string, authToken?: string, nonce?: string) => string,
   profile?: string,
   opts?: WebUiOptions,
 ): http.Server {
+  try {
+    repairPreexistingInstall(cortexPath);
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] web-ui repair: ${errorMessage(err)}\n`);
+  }
   const authToken = opts?.authToken;
   const csrfTokens = opts?.csrfTokens;
 
@@ -617,6 +679,60 @@ export function createWebUiHttpServer(
       return;
     }
 
+    if (req.method === "POST" && pathname === "/api/project-topics/pin") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const rawTopic = String(parsed.topic || "");
+        if (!project || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
+          return;
+        }
+        const topic = parseTopicPayload(rawTopic);
+        if (!topic) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Invalid topic payload" }));
+          return;
+        }
+        const pinned = pinProjectTopicSuggestion(cortexPath, project, topic);
+        if (!pinned.ok) {
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify(pinned));
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(cortexPath, project) }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/project-topics/unpin") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const slug = String(parsed.slug || "");
+        if (!project || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
+          return;
+        }
+        const unpinned = unpinProjectTopicSuggestion(cortexPath, project, slug);
+        if (!unpinned.ok) {
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify(unpinned));
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(cortexPath, project) }));
+      });
+      return;
+    }
+
     if (req.method === "GET" && pathname.startsWith("/api/graph")) {
       const graphParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
       const focusProject = graphParams.get("project") || undefined;
@@ -626,18 +742,18 @@ export function createWebUiHttpServer(
     }
 
     if (req.method === "GET" && pathname === "/api/scores") {
-      let entries: Record<string, unknown> = {};
+      let scores: Record<string, unknown> = {};
       try {
         const raw = fs.readFileSync(path.join(cortexPath, ".runtime", "memory-scores.json"), "utf-8");
         const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && parsed.entries) {
-          entries = parsed.entries;
+        if (parsed && typeof parsed === "object") {
+          scores = parsed as Record<string, unknown>;
         }
       } catch {
         // file missing or unparseable – return empty
       }
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(entries));
+      res.end(JSON.stringify(scores));
       return;
     }
 
@@ -707,14 +823,17 @@ export function createWebUiHttpServer(
         const prefs = readInstallPreferences(cortexPath);
         const workflowPolicy = getWorkflowPolicy(cortexPath);
         const hooksData = getHooksData(cortexPath);
+        const proactivityFindings = prefs.proactivityFindings || prefs.proactivity || "high";
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({
           ok: true,
           proactivity: prefs.proactivity || "high",
-          proactivityFindings: prefs.proactivityFindings || prefs.proactivity || "high",
+          proactivityFindings,
           proactivityTask: prefs.proactivityTask || prefs.proactivity || "high",
           taskMode: workflowPolicy.taskMode,
           findingSensitivity: workflowPolicy.findingSensitivity || "balanced",
+          autoCaptureEnabled: proactivityFindings !== "low",
+          consolidationEntryThreshold: CONSOLIDATION_ENTRY_THRESHOLD,
           hooksEnabled: hooksData.globalEnabled,
           mcpEnabled: prefs.mcpEnabled !== false,
           hookTools: hooksData.tools,
@@ -741,6 +860,73 @@ export function createWebUiHttpServer(
         const result = updateWorkflowPolicy(cortexPath, { findingSensitivity: value as "minimal" | "conservative" | "balanced" | "aggressive" });
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(result.ok ? { ok: true, findingSensitivity: result.data.findingSensitivity } : { ok: false, error: result.error }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/settings/task-mode") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const value = String(parsed.value || "").trim().toLowerCase();
+        const valid = ["off", "manual", "auto"];
+        if (!valid.includes(value)) {
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: `Invalid task mode: "${value}". Must be one of: ${valid.join(", ")}` }));
+          return;
+        }
+        const result = updateWorkflowPolicy(cortexPath, { taskMode: value as "off" | "manual" | "auto" });
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(result.ok ? { ok: true, taskMode: result.data.taskMode } : { ok: false, error: result.error }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/settings/proactivity") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const value = String(parsed.value || "").trim().toLowerCase();
+        const valid = ["high", "medium", "low"];
+        if (!valid.includes(value)) {
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: `Invalid proactivity: "${value}". Must be one of: ${valid.join(", ")}` }));
+          return;
+        }
+        writeInstallPreferences(cortexPath, { proactivity: value as "high" | "medium" | "low" });
+        writeGovernanceInstallPreferences(cortexPath, { proactivity: value as "high" | "medium" | "low" });
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, proactivity: value }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/settings/auto-capture") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const enabled = String(parsed.enabled || "").toLowerCase() === "true";
+        const next = enabled ? "high" : "low";
+        writeInstallPreferences(cortexPath, { proactivityFindings: next });
+        writeGovernanceInstallPreferences(cortexPath, { proactivityFindings: next });
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, autoCaptureEnabled: enabled, proactivityFindings: next }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/settings/mcp-enabled") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const enabled = String(parsed.enabled || "").toLowerCase() === "true";
+        writeInstallPreferences(cortexPath, { mcpEnabled: enabled });
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, mcpEnabled: enabled }));
       });
       return;
     }
@@ -869,14 +1055,7 @@ export async function startWebUiServer(
   const authToken = crypto.randomUUID();
   const csrfTokens = new Map<string, number>();
   const server = createWebUiHttpServer(cortexPath, renderPage, profile, { authToken, csrfTokens });
-  let boundPort: number;
-  try {
-    boundPort = await listenOnLoopback(server, port);
-  } catch (err: unknown) {
-    if (!opts.allowPortFallback || port === 0 || !isAddressInUse(err)) throw err;
-    process.stderr.write(`[cortex] web-ui port ${port} is busy, using a random local port instead\n`);
-    boundPort = await listenOnLoopback(server, 0);
-  }
+  const boundPort = await bindWebUiPort(server, port, Boolean(opts.allowPortFallback && port !== 0));
 
   const publicUrl = `http://127.0.0.1:${boundPort}`;
   const reviewUrl = `${publicUrl}/?_auth=${encodeURIComponent(authToken)}`;
@@ -889,7 +1068,7 @@ export async function startWebUiServer(
   }
 
   const shouldAutoOpen = opts.autoOpen ?? Boolean(process.stdout.isTTY);
-  if (shouldAutoOpen) {
+  if (shouldAutoOpen && ready) {
     try {
       if (opts.browserLauncher) await opts.browserLauncher(reviewUrl);
       else await launchWebUiBrowser(reviewUrl);
@@ -897,6 +1076,9 @@ export async function startWebUiServer(
       process.stderr.write(`[cortex] web-ui browser launch failed: ${errorMessage(err)}\n`);
       process.stdout.write(`secure session URL: ${reviewUrl}\n`);
     }
+  } else if (shouldAutoOpen && !ready) {
+    process.stderr.write("[cortex] skipped auto-open because readiness check failed; use the secure URL below\n");
+    process.stdout.write(`secure session URL: ${reviewUrl}\n`);
   } else {
     process.stdout.write(`secure session URL: ${reviewUrl}\n`);
   }

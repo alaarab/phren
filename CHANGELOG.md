@@ -3,6 +3,36 @@
 All notable changes to cortex are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.33.0] - 2026-03-12
+
+### Added
+- **Finding lifecycle controls**: findings now carry normalized lifecycle status metadata, with explicit lifecycle tools to supersede, retract, and resolve findings instead of only replacing text in place.
+- **Finding provenance tracking**: each finding now stores a `source` field so ingestion paths are auditable across `human`, `agent`, `hook`, and `extract` origins.
+- **Finding impact scoring**: impact now tracks passive surfacing frequency and applies a decay-resistance boost to keep repeatedly-useful findings from fading too quickly.
+- **Cross-session task checkpoints**: task state now auto-snapshots and feeds resumption context when a new session starts.
+- **Adaptive init**: `cortex init` now infers project domain, topics, and reference structure from repo content before falling back to manual selection.
+- **Adaptive topics**: topic suggestions can now be inferred from project content and pinned when they should remain canonical.
+- **Adaptive synonym expansion**: project-specific synonym mappings are now learned from local usage patterns and fed back into retrieval.
+- **Storage location choice in init**: onboarding now supports global, per-project, or custom storage root selection.
+- **Per-agent memory scopes**: spawned agents can operate on scoped memory views instead of always inheriting full project context.
+- **VS Code extension onboarding and lifecycle commands**: extension flow now supports guided auto-install onboarding, uninstall command support, and release/publish readiness updates.
+
+### Changed
+- **Lifecycle-aware retrieval ranking**: search ranking now factors finding lifecycle state so active and trusted findings outrank superseded or retracted entries.
+- **Consolidation keeps lifecycle history**: consolidation now preserves finding status transitions/history rather than flattening lifecycle state.
+- **Reference indexing is freeform**: any file under `reference/` is now indexed (not only a constrained document set).
+- **Settings tab overhaul**: web UI settings are now findings-first and integrations are merged into a single coherent configuration surface.
+- **Init UX polish**: onboarding now uses richer inquirer menus, improved terminal colors, and updated branding/wording across prompts.
+
+### Fixed
+- **First-run onboarding gaps**: improved prompting for untracked project registration and hardened early-session web UI reliability.
+
+### Docs
+- **Comprehensive docs sync**: public docs were fully updated for the current 60-tool MCP server and new onboarding/retrieval behaviors.
+
+### Internal
+- **Graph data-model cleanup**: removed `GROUP_CONCAT` dependency from graph reads and standardized stable IDs for graph-linked records.
+
 ## [1.32.2] - 2026-03-11
 
 ### Fixed
@@ -676,7 +706,11 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `cortex` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.31.1...HEAD
+[Unreleased]: https://github.com/alaarab/cortex/compare/v1.33.0...HEAD
+[1.33.0]: https://github.com/alaarab/cortex/compare/v1.32.2...v1.33.0
+[1.32.2]: https://github.com/alaarab/cortex/compare/v1.32.1...v1.32.2
+[1.32.1]: https://github.com/alaarab/cortex/compare/v1.32.0...v1.32.1
+[1.32.0]: https://github.com/alaarab/cortex/compare/v1.31.1...v1.32.0
 [1.31.1]: https://github.com/alaarab/cortex/compare/v1.29.1...v1.31.1
 [1.29.1]: https://github.com/alaarab/cortex/compare/v1.28.0...v1.29.1
 [1.25.0]: https://github.com/alaarab/cortex/compare/v1.20.0...v1.25.0

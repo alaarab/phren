@@ -2,7 +2,7 @@
   "name": "cortex-vscode",
   "displayName": "Cortex VS Code",
   "description": "Browse, search, and manage Cortex knowledge directly from VS Code.",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -118,6 +118,10 @@
       {
         "command": "cortex.manageProject",
         "title": "Cortex: Manage Project"
+      },
+      {
+        "command": "cortex.uninstall",
+        "title": "Cortex: Uninstall Cortex"
       },
       {
         "command": "cortex.switchProfile",
@@ -275,6 +279,11 @@
           "default": "",
           "description": "Path to the Cortex store directory. Leave blank to use ~/.cortex."
         },
+        "cortex.onboardingComplete": {
+          "type": "boolean",
+          "default": false,
+          "description": "Internal extension flag that tracks whether first-run onboarding prompts have already been shown."
+        },
         "cortex.proactivity": {
           "type": "string",
           "enum": ["high", "medium", "low"],
@@ -364,8 +373,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./ && node -e \"try{require('fs').copyFileSync(require('path').resolve(__dirname,'..','mcp','dist','memory-ui-graph.js'),require('path').resolve(__dirname,'out','memory-ui-graph.js'));console.log('Copied memory-ui-graph.js to out/')}catch(e){console.warn('Note: mcp/dist/memory-ui-graph.js not found, graph engine will use repo-relative path')}\"",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package",
-    "publish:extension": "vsce publish"
+    "package": "vsce package --no-dependencies",
+    "publish:extension": "vsce publish --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

@@ -10,7 +10,14 @@ import {
   runtimeFile,
   DOC_TYPES,
   FINDING_TAGS,
+  isMemoryScopeVisible,
+  normalizeMemoryScope,
 } from "./shared.js";
+import {
+  FINDING_LIFECYCLE_STATUSES,
+  parseFindingLifecycle,
+  type FindingLifecycleStatus,
+} from "./shared-content.js";
 import {
   decodeStringRow,
   queryRows,
@@ -25,6 +32,8 @@ import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier, getRetentionPolicy } from "./shared-governance.js";
 import { callLlm } from "./content-dedup.js";
 import { rankResults, searchKnowledgeRows, applyTrustFilter } from "./shared-retrieval.js";
+import { parseSourceComment } from "./content-citation.js";
+import { resolveActiveSessionScope } from "./mcp-session.js";
 
 /**
  * Q30: Log zero-result queries to .runtime/search-misses.jsonl.
@@ -48,6 +57,90 @@ export function logSearchMiss(cortexPath: string, query: string, project?: strin
   } catch (err: unknown) {
     if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] logSearchMiss: ${err instanceof Error ? err.message : String(err)}\n`);
   }
+}
+
+const HISTORY_FINDING_STATUSES = new Set<FindingLifecycleStatus>(["superseded", "retracted"]);
+const DEGRADED_FINDING_STATUSES = new Set<FindingLifecycleStatus>(["contradicted", "stale", "invalid_citation"]);
+
+interface FindingLifecycleSummary {
+  statuses: FindingLifecycleStatus[];
+  primaryStatus: FindingLifecycleStatus;
+}
+
+function findingRowKey(row: { path: string; project: string; filename: string }): string {
+  return row.path || `${row.project}/${row.filename}`;
+}
+
+function summarizeFindingStatuses(content: string, includeHistory: boolean, filterStatus?: FindingLifecycleStatus): FindingLifecycleSummary | null {
+  const statuses = content
+    .split("\n")
+    .filter(line => line.startsWith("- "))
+    .map(line => parseFindingLifecycle(line).status);
+  if (!statuses.length) return null;
+
+  const deduped = [...new Set(statuses)];
+  const visible = deduped.filter(status => includeHistory || !HISTORY_FINDING_STATUSES.has(status));
+  if (!visible.length) return null;
+
+  const filtered = filterStatus ? visible.filter(status => status === filterStatus) : visible;
+  if (!filtered.length) return null;
+
+  const primaryStatus = filtered.includes("active") ? "active" : filtered[0];
+  return { statuses: filtered, primaryStatus };
+}
+
+function lifecycleSortBucket(summary?: FindingLifecycleSummary): number {
+  if (!summary) return 1;
+  if (summary.statuses.includes("active")) return 0;
+  if (summary.statuses.some(status => DEGRADED_FINDING_STATUSES.has(status))) return 3;
+  return 2;
+}
+
+function filterFindingsContentByScope(content: string, activeScope: string): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+  let keepCitation = false;
+  for (const line of lines) {
+    if (line.startsWith("- ")) {
+      const source = parseSourceComment(line);
+      const itemScope = normalizeMemoryScope(source?.scope);
+      keepCitation = isMemoryScopeVisible(itemScope, activeScope);
+      if (keepCitation) out.push(line);
+      continue;
+    }
+    if (/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/.test(line.trim())) {
+      if (keepCitation) out.push(line);
+      continue;
+    }
+    keepCitation = false;
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+function taskLineScope(line: string): string | undefined {
+  const scopeMatch = line.match(/<!--[^>]*\bscope:([^\s>]+)[^>]*-->/);
+  return normalizeMemoryScope(scopeMatch?.[1]);
+}
+
+function filterTaskContentByScope(content: string, activeScope: string): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+  let keepContinuation = false;
+  for (const line of lines) {
+    if (line.startsWith("- ")) {
+      keepContinuation = isMemoryScopeVisible(taskLineScope(line), activeScope);
+      if (keepContinuation) out.push(line);
+      continue;
+    }
+    if (/^\s+/.test(line)) {
+      if (keepContinuation) out.push(line);
+      continue;
+    }
+    keepContinuation = false;
+    out.push(line);
+  }
+  return out.join("\n");
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -148,22 +241,25 @@ export function register(server: McpServer, ctx: McpContext): void {
           .optional()
           .describe("Filter findings by type tag: decision, pitfall, pattern, tradeoff, architecture, bug."),
         since: z.string().optional().describe('Filter findings by creation date. Formats: "7d" (last 7 days), "30d" (last 30 days), "YYYY-MM" (since start of month), "YYYY-MM-DD" (since date).'),
+        status: z.enum(FINDING_LIFECYCLE_STATUSES).optional().describe("Filter findings by lifecycle status: active, superseded, contradicted, stale, invalid_citation, or retracted."),
+        include_history: z.boolean().optional().describe("When true, include historical findings (superseded/retracted). Default false."),
         synthesize: z.boolean().optional().describe("When true, generate a short synthesis paragraph from the top results using an LLM. Requires CORTEX_LLM_ENDPOINT, ANTHROPIC_API_KEY, or OPENAI_API_KEY."),
       }),
     },
-    async ({ query, limit, project, type, tag, since, synthesize }) => {
+    async ({ query, limit, project, type, tag, since, status, include_history, synthesize }) => {
       try {
         if (query.length > 1000) return mcpResponse({ ok: false, error: "Search query exceeds 1000 character limit." });
         const db = ctx.db();
         const maxResults = limit ?? 5;
         const filterType = type === "skills" ? "skill" : type;
         const filterTag = tag?.toLowerCase();
+        const filterStatus = status;
+        const includeHistory = include_history ?? false;
         const filterProject = project?.trim();
         if (filterProject && !isValidProjectName(filterProject)) {
           return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         }
-        const hasPostFilter = Boolean(filterTag || since);
-        const fetchLimit = hasPostFilter ? Math.min(maxResults * 5, 200) : maxResults;
+        const fetchLimit = (filterTag || since || filterStatus) ? Math.min(maxResults * 5, 200) : maxResults;
         const retrieval = await searchKnowledgeRows(db, {
           query,
           maxResults,
@@ -181,6 +277,29 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!rows || rows.length === 0) {
           logSearchMiss(cortexPath, query, filterProject);
           return mcpResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
+        }
+
+        const activeScope = resolveActiveSessionScope(cortexPath, filterProject);
+        if (activeScope) {
+          rows = rows
+            .map((row) => {
+              if (row.type === "findings") {
+                const filteredContent = filterFindingsContentByScope(row.content, activeScope);
+                const hasVisible = filteredContent.split("\n").some((line) => line.startsWith("- "));
+                return hasVisible ? { ...row, content: filteredContent } : null;
+              }
+              if (row.type === "task") {
+                const filteredContent = filterTaskContentByScope(row.content, activeScope);
+                const hasVisible = filteredContent.split("\n").some((line) => line.startsWith("- "));
+                return hasVisible ? { ...row, content: filteredContent } : null;
+              }
+              return row;
+            })
+            .filter((row): row is NonNullable<typeof row> => Boolean(row));
+          if (rows.length === 0) {
+            logSearchMiss(cortexPath, query, filterProject);
+            return mcpResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
+          }
         }
 
         // Filter by observation tag if requested
@@ -238,18 +357,25 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
 
-        // Trim back to requested limit after post-query filters
-        if (hasPostFilter && rows && rows.length > maxResults) {
-          rows = rows.slice(0, maxResults);
-        }
-
-        // Filter out superseded entries — standardized on cortex:superseded_by format
+        const lifecycleByRowKey = new Map<string, FindingLifecycleSummary>();
         if (rows) {
-          rows = rows.map(row => {
-            if (!row.content.includes("cortex:superseded_by")) return row;
-            const filteredLines = row.content.split("\n").filter(line => !line.includes("cortex:superseded_by"));
-            return { ...row, content: filteredLines.join("\n") };
-          });
+          const filteredRows = [];
+          for (const row of rows) {
+            if (row.type !== "findings") {
+              if (filterStatus) continue;
+              filteredRows.push(row);
+              continue;
+            }
+            const summary = summarizeFindingStatuses(row.content, includeHistory, filterStatus);
+            if (!summary) continue;
+            lifecycleByRowKey.set(findingRowKey(row), summary);
+            filteredRows.push(row);
+          }
+          rows = filteredRows;
+          if (rows.length === 0) {
+            logSearchMiss(cortexPath, query, filterProject);
+            return mcpResponse({ ok: true, message: "No results found after lifecycle filters.", data: { query, results: [] } });
+          }
         }
 
         rows = rankResults(
@@ -262,20 +388,43 @@ export function register(server: McpServer, ctx: McpContext): void {
           undefined,
           query,
           { skipTaskFilter: true, filterType: filterType ?? null }
-        ).slice(0, maxResults);
+        );
 
         // Apply trust filter — same as hook-prompt uses — to strip stale/low-confidence findings
         try {
           const policy = getRetentionPolicy(cortexPath);
-          const trustResult = applyTrustFilter(rows, policy.ttlDays, policy.minInjectConfidence, policy.decay);
+          const trustResult = applyTrustFilter(rows, policy.ttlDays, policy.minInjectConfidence, policy.decay, cortexPath);
           rows = trustResult.rows;
         } catch (err: unknown) {
           debugLog(`search_knowledge trustFilter: ${errorMessage(err)}`);
         }
 
+        rows = rows
+          .map((row, idx) => ({ row, idx }))
+          .sort((a, b) => {
+            const aBucket = a.row.type === "findings" ? lifecycleSortBucket(lifecycleByRowKey.get(findingRowKey(a.row))) : 1;
+            const bBucket = b.row.type === "findings" ? lifecycleSortBucket(lifecycleByRowKey.get(findingRowKey(b.row))) : 1;
+            if (aBucket !== bBucket) return aBucket - bBucket;
+            return a.idx - b.idx;
+          })
+          .map(entry => entry.row);
+
+        if (rows.length > maxResults) {
+          rows = rows.slice(0, maxResults);
+        }
+
         const results = rows.map((row) => {
           const snippet = extractSnippet(row.content, query);
-          return { project: row.project, filename: row.filename, type: row.type, snippet, path: row.path };
+          const lifecycle = row.type === "findings" ? lifecycleByRowKey.get(findingRowKey(row)) : undefined;
+          return {
+            project: row.project,
+            filename: row.filename,
+            type: row.type,
+            snippet,
+            path: row.path,
+            status: lifecycle?.primaryStatus,
+            statuses: lifecycle?.statuses,
+          };
         });
 
         let relatedEntities: string[] = [];
@@ -470,40 +619,64 @@ export function register(server: McpServer, ctx: McpContext): void {
         project: z.string().describe("Project name."),
         limit: z.number().int().min(1).max(200).optional().describe("Max rows to return (default 50)."),
         include_superseded: z.boolean().optional().describe("If true, include findings that have been superseded by a newer finding (hidden by default)."),
+        include_history: z.boolean().optional().describe("When true, include historical findings (superseded/retracted). Default false."),
+        status: z.enum(FINDING_LIFECYCLE_STATUSES).optional().describe("Filter findings by lifecycle status."),
       }),
     },
-    async ({ project, limit, include_superseded }) => {
+    async ({ project, limit, include_superseded, include_history, status }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const result = readFindings(cortexPath, project);
+      const includeHistory = include_history ?? include_superseded ?? false;
+      const result = readFindings(cortexPath, project, { includeArchived: includeHistory });
       if (!result.ok) return mcpResponse({ ok: false, error: result.error });
       const allItems = result.data;
-      const activeItems = include_superseded ? allItems : allItems.filter(f => !f.supersededBy);
-      const supersededCount = allItems.length - activeItems.length;
-      if (!activeItems.length) {
-        const msg = supersededCount > 0
-          ? `No active findings for "${project}". ${supersededCount} superseded finding(s) hidden. Pass include_superseded=true to show them.`
-          : `No findings found for "${project}".`;
-        return mcpResponse({ ok: true, message: msg, data: { project, findings: [], total: 0, supersededCount } });
+      let historyCount = allItems.filter(f => f.tier === "archived" || HISTORY_FINDING_STATUSES.has(f.status)).length;
+      if (!includeHistory) {
+        const withArchive = readFindings(cortexPath, project, { includeArchived: true });
+        if (withArchive.ok) {
+          historyCount = withArchive.data.filter(f => f.tier === "archived" || HISTORY_FINDING_STATUSES.has(f.status)).length;
+        }
       }
-      const capped = activeItems.slice(0, limit ?? 50);
+      const visibleItems = includeHistory
+        ? allItems
+        : allItems.filter(f => f.tier !== "archived" && !HISTORY_FINDING_STATUSES.has(f.status));
+      const filteredItems = status ? visibleItems.filter(f => f.status === status) : visibleItems;
+      if (!filteredItems.length) {
+        const msg = historyCount > 0 && !includeHistory
+          ? `No findings found for "${project}" with current filters. ${historyCount} historical finding(s) hidden. Pass include_history=true to show history.`
+          : `No findings found for "${project}".`;
+        return mcpResponse({ ok: true, message: msg, data: { project, findings: [], total: 0, status: status ?? null, include_history: includeHistory, historyCount } });
+      }
+      const capped = filteredItems.slice(0, limit ?? 50).map(entry => ({
+        ...entry,
+        lifecycle: {
+          status: entry.status,
+          status_updated: entry.status_updated,
+          status_reason: entry.status_reason,
+          status_ref: entry.status_ref,
+        },
+      }));
       const lines = capped.map((entry) => {
         const metadata: string[] = [];
+        metadata.push(`status=${entry.status}`);
         if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
         if (entry.sessionId) metadata.push(`session=${entry.sessionId.slice(0, 8)}`);
+        if (entry.scope) metadata.push(`scope=${entry.scope}`);
         if (entry.actor) metadata.push(`actor=${entry.actor}`);
         if (entry.tool) metadata.push(`tool=${entry.tool}`);
         if (entry.model) metadata.push(`model=${entry.model}`);
         if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
         if (entry.supersededBy) metadata.push(`superseded_by="${entry.supersededBy.slice(0, 30)}"`);
         if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);
+        if (entry.tier === "archived") metadata.push("tier=archived");
         const idLabel = entry.stableId ? `${entry.id}|fid:${entry.stableId}` : entry.id;
         return `- [${idLabel}] ${entry.date}: ${entry.text}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
       });
-      const supersededNote = supersededCount > 0 ? ` (${supersededCount} superseded hidden)` : "";
+      const hiddenHistoryCount = includeHistory ? 0 : historyCount;
+      const historyNote = hiddenHistoryCount > 0 ? ` (${hiddenHistoryCount} historical hidden)` : "";
       return mcpResponse({
         ok: true,
-        message: `Findings for ${project} (${capped.length}/${activeItems.length})${supersededNote}:\n` + lines.join("\n"),
-        data: { project, findings: capped, total: activeItems.length, supersededCount },
+        message: `Findings for ${project} (${capped.length}/${filteredItems.length})${historyNote}:\n` + lines.join("\n"),
+        data: { project, findings: capped, total: filteredItems.length, status: status ?? null, include_history: includeHistory, historyCount: hiddenHistoryCount },
       });
     }
   );

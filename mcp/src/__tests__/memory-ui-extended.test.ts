@@ -329,14 +329,14 @@ describe.sequential("web-ui graph API", () => {
     const defaultRes = await httpGet(port, "/api/graph");
     expect(defaultRes.status).toBe(200);
     const defaultData = JSON.parse(defaultRes.body);
-    const defaultDemoNodes = defaultData.nodes.filter((n: any) => String(n.id).startsWith("demo:"));
-    expect(defaultDemoNodes).toHaveLength(300);
+    const defaultDemoFindings = defaultData.nodes.filter((n: any) => n.project === "demo" && String(n.group).startsWith("topic:"));
+    expect(defaultDemoFindings).toHaveLength(300);
 
     const focusedRes = await httpGet(port, "/api/graph?project=demo");
     expect(focusedRes.status).toBe(200);
     const focusedData = JSON.parse(focusedRes.body);
-    const focusedDemoNodes = focusedData.nodes.filter((n: any) => String(n.id).startsWith("demo:"));
-    expect(focusedDemoNodes).toHaveLength(310);
+    const focusedDemoFindings = focusedData.nodes.filter((n: any) => n.project === "demo" && String(n.group).startsWith("topic:"));
+    expect(focusedDemoFindings).toHaveLength(310);
   });
 });
 

@@ -154,6 +154,8 @@ describe("hooks", () => {
       expect(config.hooks.sessionStart[0].bash).toContain("hook-session-start");
       expect(config.hooks.userPromptSubmitted[0].bash).toContain("hook-prompt");
       expect(config.hooks.sessionEnd[0].bash).toContain("hook-stop");
+      expect(config.hooks.sessionStart[0].bash).toContain("CORTEX_HOOK_TOOL");
+      expect(config.hooks.sessionStart[0].bash).toContain("copilot");
     });
 
     it("writes valid Cursor hook config with correct schema", () => {
@@ -171,6 +173,8 @@ describe("hooks", () => {
       expect(config.sessionStart.command).toContain("hook-session-start");
       expect(config.beforeSubmitPrompt.command).toContain("hook-prompt");
       expect(config.stop.command).toContain("hook-stop");
+      expect(config.sessionStart.command).toContain("CORTEX_HOOK_TOOL");
+      expect(config.sessionStart.command).toContain("cursor");
     });
 
     it("writes valid Codex hook config with correct schema", () => {
@@ -188,6 +192,8 @@ describe("hooks", () => {
       expect(config.hooks.SessionStart[0].command).toContain("hook-session-start");
       expect(config.hooks.UserPromptSubmit[0].command).toContain("hook-prompt");
       expect(config.hooks.Stop[0].command).toContain("hook-stop");
+      expect(config.hooks.SessionStart[0].command).toContain("CORTEX_HOOK_TOOL");
+      expect(config.hooks.SessionStart[0].command).toContain("codex");
     });
 
     it("Cursor config preserves existing fields", () => {
@@ -485,16 +491,20 @@ describe("hooks", () => {
       const lifecycle = buildLifecycleCommands(cortexPath);
       const sharedLifecycle = buildSharedLifecycleCommands();
       const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "cortex.json"), "utf8"));
-      expect(copilot.hooks.sessionStart[0].bash).toBe(lifecycle.sessionStart);
-      expect(copilot.hooks.userPromptSubmitted[0].bash).toBe(lifecycle.userPromptSubmit);
-      expect(copilot.hooks.sessionEnd[0].bash).toBe(lifecycle.stop);
+      expect(copilot.hooks.sessionStart[0].bash).toContain(lifecycle.sessionStart);
+      expect(copilot.hooks.userPromptSubmitted[0].bash).toContain(lifecycle.userPromptSubmit);
+      expect(copilot.hooks.sessionEnd[0].bash).toContain(lifecycle.stop);
+      expect(copilot.hooks.sessionStart[0].bash).toContain("CORTEX_HOOK_TOOL");
+      expect(copilot.hooks.sessionStart[0].bash).toContain("copilot");
 
       expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(false);
 
       const codex = JSON.parse(fs.readFileSync(path.join(cortexPath, "codex.json"), "utf8"));
-      expect(codex.hooks.SessionStart[0].command).toBe(sharedLifecycle.sessionStart);
-      expect(codex.hooks.UserPromptSubmit[0].command).toBe(sharedLifecycle.userPromptSubmit);
-      expect(codex.hooks.Stop[0].command).toBe(sharedLifecycle.stop);
+      expect(codex.hooks.SessionStart[0].command).toContain(sharedLifecycle.sessionStart);
+      expect(codex.hooks.UserPromptSubmit[0].command).toContain(sharedLifecycle.userPromptSubmit);
+      expect(codex.hooks.Stop[0].command).toContain(sharedLifecycle.stop);
+      expect(codex.hooks.SessionStart[0].command).toContain("CORTEX_HOOK_TOOL");
+      expect(codex.hooks.SessionStart[0].command).toContain("codex");
       expect(codex.hooks.SessionStart[0].command).not.toContain(cortexPath);
       expect(codex.hooks.SessionStart[0].command).not.toContain(".npm/_npx");
 

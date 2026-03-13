@@ -511,6 +511,112 @@ describe("mcp-search: get_findings", () => {
     expect(res.data.findings[0].taskItem).toBe("deadbeef");
     expect(res.data.findings[0].tool).toBe("codex");
   });
+
+  it("hides historical findings by default and includes them when include_history=true", async () => {
+    makeProject(tmp.path, "historyproj", {
+      "FINDINGS.md": "# historyproj FINDINGS\n\n## 2026-03-09\n\n- Active finding stays visible <!-- created: 2026-03-09 --> <!-- cortex:status \"active\" -->\n- Old finding is historical <!-- created: 2026-03-09 --> <!-- cortex:status \"superseded\" -->\n\n<details>\n<summary>Archived</summary>\n\n## 2026-02-20\n\n- Archived historical finding <!-- created: 2026-02-20 --> <!-- cortex:status \"retracted\" -->\n</details>\n",
+    });
+
+    const hidden = parseResult(await server.call("get_findings", { project: "historyproj" }));
+    expect(hidden.ok).toBe(true);
+    expect(hidden.data.findings).toHaveLength(1);
+    expect(hidden.data.findings[0].status).toBe("active");
+    expect(hidden.data.include_history).toBe(false);
+
+    const shown = parseResult(await server.call("get_findings", { project: "historyproj", include_history: true }));
+    expect(shown.ok).toBe(true);
+    expect(shown.data.findings).toHaveLength(3);
+    expect(shown.data.findings.some((f: any) => f.status === "superseded")).toBe(true);
+    expect(shown.data.findings.some((f: any) => f.tier === "archived")).toBe(true);
+    expect(shown.data.include_history).toBe(true);
+  });
+
+  it("supports status filter and includes normalized lifecycle fields", async () => {
+    makeProject(tmp.path, "lifecycleproj", {
+      "FINDINGS.md": "# lifecycleproj FINDINGS\n\n## 2026-03-09\n\n- Citation failed on this finding <!-- created: 2026-03-09 --> <!-- cortex:status \"invalid_citation\" --> <!-- cortex:status_updated \"2026-03-10\" --> <!-- cortex:status_reason \"citation_missing\" --> <!-- cortex:status_ref \"docs/ref.md:12\" -->\n- Baseline healthy finding <!-- created: 2026-03-09 --> <!-- cortex:status \"active\" -->\n",
+    });
+
+    const filtered = parseResult(await server.call("get_findings", { project: "lifecycleproj", status: "invalid_citation" }));
+    expect(filtered.ok).toBe(true);
+    expect(filtered.data.findings).toHaveLength(1);
+    expect(filtered.data.findings[0].status).toBe("invalid_citation");
+    expect(filtered.data.findings[0].status_updated).toBe("2026-03-10");
+    expect(filtered.data.findings[0].status_reason).toBe("citation_missing");
+    expect(filtered.data.findings[0].status_ref).toBe("docs/ref.md:12");
+    expect(filtered.data.findings[0].lifecycle.status).toBe("invalid_citation");
+  });
+});
+
+describe("mcp-search: lifecycle search ordering and filters", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-lifecycle-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "active-proj", {
+      "FINDINGS.md": "# active-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears here <!-- created: 2026-03-01 --> <!-- cortex:status \"active\" -->\n",
+    });
+    makeProject(tmp.path, "degraded-proj", {
+      "FINDINGS.md": "# degraded-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears but is stale <!-- created: 2026-03-01 --> <!-- cortex:status \"stale\" -->\n",
+    });
+    makeProject(tmp.path, "history-proj", {
+      "FINDINGS.md": "# history-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears but is retracted <!-- created: 2026-03-01 --> <!-- cortex:status \"retracted\" -->\n",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      cortexPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.CORTEX_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("ranks active findings before degraded findings", async () => {
+    const res = parseResult(await server.call("search_knowledge", {
+      query: "shared lifecycle token",
+      type: "findings",
+      include_history: true,
+      limit: 5,
+    }));
+    expect(res.ok).toBe(true);
+    expect(res.data.results.length).toBeGreaterThanOrEqual(2);
+    expect(res.data.results[0].status).toBe("active");
+  });
+
+  it("hides history by default and supports lifecycle status filter", async () => {
+    const hiddenHistory = parseResult(await server.call("search_knowledge", {
+      query: "shared lifecycle token retracted",
+      type: "findings",
+      limit: 5,
+    }));
+    expect(hiddenHistory.ok).toBe(true);
+    expect(hiddenHistory.data.results.some((r: any) => r.status === "retracted")).toBe(false);
+
+    const filtered = parseResult(await server.call("search_knowledge", {
+      query: "shared lifecycle token",
+      type: "findings",
+      include_history: true,
+      status: "stale",
+      limit: 5,
+    }));
+    expect(filtered.ok).toBe(true);
+    expect(filtered.data.results.length).toBeGreaterThan(0);
+    expect(filtered.data.results.every((r: any) => r.status === "stale")).toBe(true);
+  });
 });
 
 describe("mcp-search: get_memory_detail URL decode", () => {

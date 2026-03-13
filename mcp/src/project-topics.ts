@@ -12,9 +12,25 @@ export interface ProjectTopic {
   keywords: string[];
 }
 
+export interface BuiltinTopic {
+  name: string;
+  description: string;
+  keywords: string[];
+}
+
+interface TopicInputShape {
+  slug?: string;
+  label?: string;
+  name?: string;
+  description?: string;
+  keywords?: unknown;
+}
+
 interface ProjectTopicConfigFile {
   version: 1;
-  topics: ProjectTopic[];
+  domain?: string;
+  topics: TopicInputShape[];
+  pinnedTopics?: ProjectTopic[];
 }
 
 export type ProjectTopicSource = "default" | "custom";
@@ -50,14 +66,16 @@ export interface ProjectTopicSuggestion {
   label: string;
   description: string;
   keywords: string[];
-  source: "builtin" | "heuristic";
+  source: "builtin" | "heuristic" | "pinned";
   reason: string;
+  confidence: number;
 }
 
 export interface ProjectTopicsResponse {
   source: ProjectTopicSource;
   topics: ProjectTopic[];
   suggestions: ProjectTopicSuggestion[];
+  pinnedTopics: ProjectTopic[];
   legacyDocs: LegacyTopicDocInfo[];
   topicDocs: ProjectTopicDocInfo[];
 }
@@ -83,7 +101,7 @@ const TOPIC_CONFIG_FILENAME = "topic-config.json";
 const AUTO_TOPIC_MARKER_PREFIX = "<!-- cortex:auto-topic";
 const AUTO_TOPIC_MARKER_RE = /^<!--\s*cortex:auto-topic(?:\s+slug=([a-z0-9_-]+))?\s*-->$/;
 const ARCHIVED_SECTION_RE = /^## Archived (\d{4}-\d{2}-\d{2})$/;
-const BUILTIN_TOPICS: ProjectTopic[] = [
+const SOFTWARE_TOPICS: ProjectTopic[] = [
   {
     slug: "api",
     label: "API",
@@ -175,6 +193,202 @@ const BUILTIN_TOPICS: ProjectTopic[] = [
     keywords: [],
   },
 ];
+const DOMAIN_TOPICS: Record<string, ProjectTopic[]> = {
+  software: SOFTWARE_TOPICS,
+  music: [
+    {
+      slug: "composition",
+      label: "Composition",
+      description: "Melody, harmony, rhythm, and songwriting decisions.",
+      keywords: ["composition", "songwriting", "melody", "harmony", "chords", "rhythm", "motif"],
+    },
+    {
+      slug: "production",
+      label: "Production",
+      description: "Session workflow, recording choices, and production techniques.",
+      keywords: ["production", "recording", "session", "tracking", "workflow", "arrangement", "producer"],
+    },
+    {
+      slug: "mixing",
+      label: "Mixing",
+      description: "Balance, EQ, dynamics, and spatial processing choices.",
+      keywords: ["mixing", "mix", "eq", "compression", "reverb", "delay", "balance", "panning"],
+    },
+    {
+      slug: "sound-design",
+      label: "Sound Design",
+      description: "Timbre creation, synthesis, sampling, and texture shaping.",
+      keywords: ["sound-design", "sound design", "synthesis", "synth", "patch", "sample", "texture"],
+    },
+    {
+      slug: "instruments",
+      label: "Instruments",
+      description: "Instrument selection, performance notes, and articulation decisions.",
+      keywords: ["instrument", "instruments", "guitar", "piano", "drums", "bass", "performance"],
+    },
+    {
+      slug: "theory",
+      label: "Theory",
+      description: "Music theory concepts, progressions, and structural analysis.",
+      keywords: ["theory", "scale", "mode", "progression", "counterpoint", "voice-leading", "tonality"],
+    },
+    {
+      slug: "arrangement",
+      label: "Arrangement",
+      description: "Section structure, orchestration, and part distribution.",
+      keywords: ["arrangement", "arrange", "structure", "section", "orchestration", "voicing"],
+    },
+    {
+      slug: "mastering",
+      label: "Mastering",
+      description: "Final loudness, translation checks, and delivery formats.",
+      keywords: ["mastering", "master", "loudness", "limiting", "metering", "delivery", "reference"],
+    },
+  ],
+  game: [
+    {
+      slug: "mechanics",
+      label: "Mechanics",
+      description: "Core gameplay systems, controls, and player interaction rules.",
+      keywords: ["mechanics", "gameplay", "controls", "systems", "player", "loop", "balance"],
+    },
+    {
+      slug: "rendering",
+      label: "Rendering",
+      description: "Graphics pipeline, shaders, performance, and visual output.",
+      keywords: ["rendering", "graphics", "shader", "pipeline", "lighting", "fps", "gpu"],
+    },
+    {
+      slug: "physics",
+      label: "Physics",
+      description: "Simulation behavior, collisions, and movement dynamics.",
+      keywords: ["physics", "collision", "rigidbody", "simulation", "velocity", "forces"],
+    },
+    {
+      slug: "ai",
+      label: "AI",
+      description: "Agent behavior, decision-making, and pathfinding systems.",
+      keywords: ["ai", "npc", "behavior", "pathfinding", "state-machine", "decision", "navigation"],
+    },
+    {
+      slug: "level-design",
+      label: "Level Design",
+      description: "Map layout, encounter flow, and progression structure.",
+      keywords: ["level-design", "level design", "level", "map", "encounter", "pacing", "layout"],
+    },
+    {
+      slug: "audio",
+      label: "Audio",
+      description: "In-game sound effects, music integration, and audio systems.",
+      keywords: ["audio", "sfx", "music", "voice", "spatial-audio", "mix", "implementation"],
+    },
+    {
+      slug: "networking",
+      label: "Networking",
+      description: "Multiplayer sync, replication, latency handling, and netcode.",
+      keywords: ["networking", "multiplayer", "replication", "latency", "netcode", "server", "client"],
+    },
+    {
+      slug: "ui",
+      label: "UI",
+      description: "HUD, menus, readability, and interaction flows.",
+      keywords: ["ui", "hud", "menu", "interface", "ux", "interaction", "readability"],
+    },
+  ],
+  research: [
+    {
+      slug: "methodology",
+      label: "Methodology",
+      description: "Research design, protocol choices, and evaluation approach.",
+      keywords: ["methodology", "method", "protocol", "design", "experiment", "evaluation"],
+    },
+    {
+      slug: "sources",
+      label: "Sources",
+      description: "Primary references, citations, provenance, and credibility checks.",
+      keywords: ["sources", "citation", "reference", "paper", "provenance", "credibility"],
+    },
+    {
+      slug: "analysis",
+      label: "Analysis",
+      description: "Interpretation, data analysis, and evidence synthesis.",
+      keywords: ["analysis", "data", "interpretation", "evidence", "findings", "synthesis"],
+    },
+    {
+      slug: "writing",
+      label: "Writing",
+      description: "Drafting, clarity, structure, and argument framing.",
+      keywords: ["writing", "draft", "structure", "clarity", "argument", "narrative"],
+    },
+    {
+      slug: "review",
+      label: "Review",
+      description: "Peer feedback, revision notes, and quality checks.",
+      keywords: ["review", "peer-review", "feedback", "revision", "critique", "quality"],
+    },
+  ],
+  creative: [
+    {
+      slug: "worldbuilding",
+      label: "Worldbuilding",
+      description: "Setting rules, lore consistency, and environment details.",
+      keywords: ["worldbuilding", "setting", "lore", "canon", "environment", "rules"],
+    },
+    {
+      slug: "characters",
+      label: "Characters",
+      description: "Character goals, arcs, voice, and relationship dynamics.",
+      keywords: ["characters", "character", "arc", "motivation", "voice", "relationship"],
+    },
+    {
+      slug: "plot",
+      label: "Plot",
+      description: "Story beats, pacing, conflict, and narrative structure.",
+      keywords: ["plot", "story", "beats", "conflict", "pacing", "structure"],
+    },
+    {
+      slug: "style",
+      label: "Style",
+      description: "Tone, diction, constraints, and stylistic direction.",
+      keywords: ["style", "tone", "voice", "diction", "register", "aesthetic"],
+    },
+    {
+      slug: "research",
+      label: "Research",
+      description: "Reference gathering, fact checks, and contextual grounding.",
+      keywords: ["research", "reference", "fact-check", "context", "source", "notes"],
+    },
+    {
+      slug: "revision",
+      label: "Revision",
+      description: "Editing passes, rewrite strategy, and quality improvements.",
+      keywords: ["revision", "edit", "rewrite", "polish", "draft", "improve"],
+    },
+  ],
+  other: [
+    {
+      slug: "notes",
+      label: "Notes",
+      description: "General observations and quick capture items.",
+      keywords: ["notes", "observation", "idea", "capture", "context"],
+    },
+    {
+      slug: "reference",
+      label: "Reference",
+      description: "Supporting references, links, and background material.",
+      keywords: ["reference", "links", "docs", "source", "background"],
+    },
+    {
+      slug: "tasks",
+      label: "Tasks",
+      description: "Action items, follow-ups, and execution checklist details.",
+      keywords: ["tasks", "todo", "action", "follow-up", "checklist"],
+    },
+  ],
+};
+const GENERAL_TOPIC: ProjectTopic = SOFTWARE_TOPICS.find((topic) => topic.slug === "general")!;
+const DEFAULT_TOPIC_LIMIT = 8;
+const SUGGESTION_LIMIT = 8;
 
 function normalizeKeyword(raw: string): string {
   return raw
@@ -202,10 +416,13 @@ function titleCaseLabel(raw: string): string {
     .join(" ");
 }
 
-function normalizeTopic(topic: ProjectTopic): ProjectTopic {
-  const slug = normalizeTopicSlug(topic.slug || topic.label);
-  const label = (topic.label || titleCaseLabel(slug)).trim() || titleCaseLabel(slug);
-  const description = (topic.description || "").trim();
+function normalizeTopic(topic: TopicInputShape): ProjectTopic {
+  const name = typeof topic.name === "string" ? topic.name : "";
+  const labelInput = typeof topic.label === "string" ? topic.label : name;
+  const slugInput = typeof topic.slug === "string" ? topic.slug : labelInput;
+  const slug = normalizeTopicSlug(slugInput || labelInput);
+  const label = (labelInput || titleCaseLabel(slug)).trim() || titleCaseLabel(slug);
+  const description = (typeof topic.description === "string" ? topic.description : "").trim();
   const keywords = Array.from(new Set(
     (Array.isArray(topic.keywords) ? topic.keywords : [])
       .map((keyword) => normalizeKeyword(String(keyword)))
@@ -214,8 +431,19 @@ function normalizeTopic(topic: ProjectTopic): ProjectTopic {
   return { slug, label, description, keywords };
 }
 
-function normalizeTopics(topics: ProjectTopic[]): ProjectTopic[] {
+function normalizeTopics(topics: TopicInputShape[]): ProjectTopic[] {
   return topics.map(normalizeTopic);
+}
+
+function dedupeTopics(topics: ProjectTopic[]): ProjectTopic[] {
+  const seen = new Set<string>();
+  const unique: ProjectTopic[] = [];
+  for (const topic of topics) {
+    if (!topic.slug || seen.has(topic.slug)) continue;
+    seen.add(topic.slug);
+    unique.push(topic);
+  }
+  return unique;
 }
 
 function validateTopics(topics: ProjectTopic[]): string | null {
@@ -245,7 +473,7 @@ function validateTopics(topics: ProjectTopic[]): string | null {
 
 function ensureGeneralTopic(topics: ProjectTopic[]): ProjectTopic[] {
   if (topics.some((topic) => topic.slug === "general")) return topics;
-  return [...topics, BUILTIN_TOPICS.find((topic) => topic.slug === "general")!];
+  return [...topics, { ...GENERAL_TOPIC, keywords: [...GENERAL_TOPIC.keywords] }];
 }
 
 function topicConfigPath(cortexPath: string, project: string): string | null {
@@ -277,26 +505,229 @@ function readJsonFile<T>(filePath: string): T | null {
   }
 }
 
-export function getBuiltinTopics(): ProjectTopic[] {
-  return BUILTIN_TOPICS.map((topic) => ({ ...topic, keywords: [...topic.keywords] }));
+function countByTerm(terms: string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const term of terms) {
+    const current = counts.get(term) ?? 0;
+    counts.set(term, current + 1);
+  }
+  return counts;
 }
 
-export function readProjectTopics(cortexPath: string, project: string): { source: ProjectTopicSource; topics: ProjectTopic[] } {
+function readTopicInputContent(cortexPath: string, project: string): string[] {
+  const parts: string[] = [];
+  for (const file of ["CLAUDE.md", "FINDINGS.md"]) {
+    const filePath = safeProjectPath(cortexPath, project, file);
+    if (!filePath || !fs.existsSync(filePath)) continue;
+    const content = fs.readFileSync(filePath, "utf8").trim();
+    if (content) parts.push(content);
+  }
+  const referenceDir = safeProjectPath(cortexPath, project, "reference");
+  if (referenceDir && fs.existsSync(referenceDir)) {
+    for (const filePath of readReferenceMarkdownFiles(referenceDir)) {
+      try {
+        const content = fs.readFileSync(filePath, "utf8").trim();
+        if (content) parts.push(content);
+      } catch {
+        // Ignore unreadable files and continue.
+      }
+    }
+  }
+  return parts;
+}
+
+interface TopicContentSignal {
+  hasContent: boolean;
+  corpus: string;
+  corpusLower: string;
+  termCounts: Map<string, number>;
+}
+
+function buildTopicContentSignal(cortexPath: string, project: string): TopicContentSignal {
+  const parts = readTopicInputContent(cortexPath, project);
+  const corpus = parts.join("\n");
+  if (!corpus.trim()) {
+    return { hasContent: false, corpus: "", corpusLower: "", termCounts: new Map<string, number>() };
+  }
+  const keywordSignal = extractKeywords(corpus);
+  const termCounts = countByTerm(tokenizeSuggestionTerms(`${corpus}\n${keywordSignal}`));
+  return { hasContent: true, corpus, corpusLower: corpus.toLowerCase(), termCounts };
+}
+
+function termScore(termCounts: Map<string, number>, term: string): number {
+  const normalized = normalizeKeyword(term);
+  if (!normalized) return 0;
+  return termCounts.get(normalized) ?? 0;
+}
+
+function buildAdaptiveTopicCandidates(signal: TopicContentSignal, catalog: ProjectTopic[]): Array<{ topic: ProjectTopic; score: number }> {
+  const scored: Array<{ topic: ProjectTopic; score: number }> = [];
+  for (const topic of catalog) {
+    if (topic.slug === "general") continue;
+    const base = termScore(signal.termCounts, topic.label);
+    const keywordScore = topic.keywords.reduce((sum, keyword) => sum + termScore(signal.termCounts, keyword), 0);
+    const score = base + keywordScore;
+    if (score <= 0) continue;
+    scored.push({ topic, score });
+  }
+  return scored.sort((a, b) => b.score - a.score || a.topic.label.localeCompare(b.topic.label));
+}
+
+function buildHeuristicTopicCandidates(signal: TopicContentSignal, takenSlugs: Set<string>): Array<{ topic: ProjectTopic; score: number }> {
+  const entries = [...signal.termCounts.entries()]
+    .filter(([term, count]) => count >= 3 && term.length >= 4 && term.length <= 48)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const out: Array<{ topic: ProjectTopic; score: number }> = [];
+  for (const [term, score] of entries) {
+    if (out.length >= DEFAULT_TOPIC_LIMIT) break;
+    if (term.split(" ").length > 2) continue;
+    const slug = normalizeTopicSlug(term);
+    if (!slug || takenSlugs.has(slug) || slug === "general") continue;
+    takenSlugs.add(slug);
+    const keywords = Array.from(new Set(
+      term.split(" ")
+        .concat(slug.split("-"))
+        .map((keyword) => normalizeKeyword(keyword))
+        .filter((keyword) => keyword.length > 2)
+    )).slice(0, 6);
+    out.push({
+      topic: {
+        slug,
+        label: titleCaseLabel(term),
+        description: "Suggested from repeated terminology in project findings and reference docs.",
+        keywords,
+      },
+      score,
+    });
+  }
+  return out;
+}
+
+function confidenceFromScore(score: number): number {
+  const value = Math.min(0.99, 0.2 + Math.log1p(Math.max(0, score)) / 3.2);
+  return Number(value.toFixed(2));
+}
+
+export function normalizeBuiltinTopicDomain(domain?: string): keyof typeof DOMAIN_TOPICS {
+  if (!domain) return "software";
+  const normalized = domain.trim().toLowerCase();
+  if (normalized === "writing") return "creative";
+  if (normalized in DOMAIN_TOPICS) return normalized as keyof typeof DOMAIN_TOPICS;
+  return "software";
+}
+
+function resolveDomainTopics(domain?: string): ProjectTopic[] {
+  return DOMAIN_TOPICS[normalizeBuiltinTopicDomain(domain)];
+}
+
+export function getBuiltinTopicConfig(domain?: string): BuiltinTopic[] {
+  return ensureGeneralTopic(resolveDomainTopics(domain))
+    .map((topic) => ({
+      name: topic.label,
+      description: topic.description,
+      keywords: [...topic.keywords],
+    }));
+}
+
+function readProjectDomain(cortexPath: string, project: string): string | undefined {
+  const configPath = topicConfigPath(cortexPath, project);
+  if (!configPath || !fs.existsSync(configPath)) return undefined;
+  const parsed = readJsonFile<ProjectTopicConfigFile>(configPath);
+  return typeof parsed?.domain === "string" ? parsed.domain : undefined;
+}
+
+export function getBuiltinTopics(cortexPath?: string, project?: string): ProjectTopic[] {
+  const domain = (cortexPath && project) ? readProjectDomain(cortexPath, project) : undefined;
+  const fallback = ensureGeneralTopic(resolveDomainTopics(domain)).map((topic) => ({ ...topic, keywords: [...topic.keywords] }));
+  if (!cortexPath || !project || !isValidProjectName(project)) return fallback;
+
+  const signal = buildTopicContentSignal(cortexPath, project);
+  if (!signal.hasContent) return fallback;
+
+  const adaptive: ProjectTopic[] = [];
+  const taken = new Set<string>();
+  for (const candidate of buildAdaptiveTopicCandidates(signal, fallback)) {
+    if (adaptive.length >= DEFAULT_TOPIC_LIMIT - 1) break;
+    if (candidate.score < 2) continue;
+    if (taken.has(candidate.topic.slug)) continue;
+    taken.add(candidate.topic.slug);
+    adaptive.push({ ...candidate.topic, keywords: [...candidate.topic.keywords] });
+  }
+  for (const candidate of buildHeuristicTopicCandidates(signal, taken)) {
+    if (adaptive.length >= DEFAULT_TOPIC_LIMIT - 1) break;
+    adaptive.push(candidate.topic);
+  }
+
+  const merged = ensureGeneralTopic(dedupeTopics(adaptive));
+  if (merged.length <= 1) return fallback;
+  return merged;
+}
+
+export function readProjectTopics(cortexPath: string, project: string): { source: ProjectTopicSource; topics: ProjectTopic[]; domain?: string } {
+  const builtinTopics = getBuiltinTopics(cortexPath, project);
   const configPath = topicConfigPath(cortexPath, project);
   if (!configPath || !fs.existsSync(configPath)) {
-    return { source: "default", topics: getBuiltinTopics() };
+    return { source: "default", topics: builtinTopics };
   }
   const parsed = readJsonFile<ProjectTopicConfigFile>(configPath);
   if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.topics)) {
-    return { source: "default", topics: getBuiltinTopics() };
+    return { source: "default", topics: builtinTopics };
   }
   const normalized = ensureGeneralTopic(normalizeTopics(parsed.topics));
   const validationError = validateTopics(normalized);
   if (validationError) {
     debugLog(`readProjectTopics: invalid ${configPath}: ${validationError}`);
-    return { source: "default", topics: getBuiltinTopics() };
+    return { source: "default", topics: builtinTopics };
   }
-  return { source: "custom", topics: normalized };
+  return { source: "custom", topics: normalized, domain: typeof parsed.domain === "string" ? parsed.domain : undefined };
+}
+
+export function readPinnedTopics(cortexPath: string, project: string): ProjectTopic[] {
+  const configPath = topicConfigPath(cortexPath, project);
+  if (!configPath || !fs.existsSync(configPath)) return [];
+  const parsed = readJsonFile<ProjectTopicConfigFile>(configPath);
+  if (!parsed || !Array.isArray(parsed.pinnedTopics)) return [];
+  return dedupeTopics(normalizeTopics(parsed.pinnedTopics)).filter((topic) => topic.slug !== "general");
+}
+
+function writePinnedTopics(cortexPath: string, project: string, pinnedTopics: ProjectTopic[]): { ok: true; pinnedTopics: ProjectTopic[] } | { ok: false; error: string } {
+  if (!isValidProjectName(project)) return { ok: false, error: `Invalid project: "${project}".` };
+  const configPath = topicConfigPath(cortexPath, project);
+  if (!configPath) return { ok: false, error: `Invalid project path for "${project}".` };
+  const pinned = dedupeTopics(normalizeTopics(pinnedTopics)).filter((topic) => topic.slug !== "general");
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  withFileLock(configPath, () => {
+    const existing = readJsonFile<ProjectTopicConfigFile>(configPath);
+    const payload: ProjectTopicConfigFile = {
+      version: 1,
+      topics: ensureGeneralTopic(normalizeTopics(Array.isArray(existing?.topics) ? existing.topics : getBuiltinTopics(cortexPath, project))),
+      pinnedTopics: pinned,
+      ...(typeof existing?.domain === "string" ? { domain: existing.domain } : {}),
+    };
+    const tmpPath = `${configPath}.tmp-${crypto.randomUUID()}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2) + "\n");
+    fs.renameSync(tmpPath, configPath);
+  });
+  return { ok: true, pinnedTopics: pinned };
+}
+
+export function pinProjectTopicSuggestion(
+  cortexPath: string,
+  project: string,
+  topic: ProjectTopic,
+): { ok: true; pinnedTopics: ProjectTopic[] } | { ok: false; error: string } {
+  const current = readPinnedTopics(cortexPath, project);
+  return writePinnedTopics(cortexPath, project, [...current, topic]);
+}
+
+export function unpinProjectTopicSuggestion(
+  cortexPath: string,
+  project: string,
+  slug: string,
+): { ok: true; pinnedTopics: ProjectTopic[] } | { ok: false; error: string } {
+  const normalized = normalizeTopicSlug(slug);
+  const current = readPinnedTopics(cortexPath, project).filter((topic) => topic.slug !== normalized);
+  return writePinnedTopics(cortexPath, project, current);
 }
 
 export function writeProjectTopics(cortexPath: string, project: string, topics: ProjectTopic[]): { ok: true; topics: ProjectTopic[] } | { ok: false; error: string } {
@@ -308,7 +739,13 @@ export function writeProjectTopics(cortexPath: string, project: string, topics: 
   if (validationError) return { ok: false, error: validationError };
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   withFileLock(configPath, () => {
-    const payload: ProjectTopicConfigFile = { version: 1, topics: normalized };
+    const existing = readJsonFile<ProjectTopicConfigFile>(configPath);
+    const payload: ProjectTopicConfigFile = {
+      version: 1,
+      topics: normalized,
+      ...(Array.isArray(existing?.pinnedTopics) ? { pinnedTopics: dedupeTopics(normalizeTopics(existing.pinnedTopics)).filter((topic) => topic.slug !== "general") } : {}),
+      ...(typeof existing?.domain === "string" ? { domain: existing.domain } : {}),
+    };
     const tmpPath = `${configPath}.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2) + "\n");
     fs.renameSync(tmpPath, configPath);
@@ -605,8 +1042,20 @@ function collectSuggestionCorpus(cortexPath: string, project: string): string {
   return parts.join("\n");
 }
 
-export function suggestProjectTopics(cortexPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicSuggestion[] {
+export function suggestTopics(cortexPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicSuggestion[] {
   const currentTopics = topics ?? readProjectTopics(cortexPath, project).topics;
+  const pinnedTopics = readPinnedTopics(cortexPath, project);
+  if (pinnedTopics.length > 0) {
+    return pinnedTopics.slice(0, SUGGESTION_LIMIT).map((topic) => ({
+      slug: topic.slug,
+      label: topic.label,
+      description: topic.description,
+      keywords: [...topic.keywords],
+      source: "pinned" as const,
+      reason: "Pinned topic suggestion (manual override).",
+      confidence: 1,
+    }));
+  }
   const taken = new Set<string>();
   const takenKeywords = new Set<string>();
   for (const topic of currentTopics) {
@@ -615,7 +1064,9 @@ export function suggestProjectTopics(cortexPath: string, project: string, topics
     for (const keyword of topic.keywords) takenKeywords.add(keyword);
   }
 
-  const corpus = collectSuggestionCorpus(cortexPath, project);
+  const signal = buildTopicContentSignal(cortexPath, project);
+  const corpus = `${signal.corpus}\n${collectSuggestionCorpus(cortexPath, project)}`;
+  const corpusLower = corpus.toLowerCase();
   const keywordSignal = extractKeywords(corpus);
   const scoreMap = new Map<string, number>();
   for (const term of tokenizeSuggestionTerms(`${corpus}\n${keywordSignal}`)) {
@@ -628,9 +1079,9 @@ export function suggestProjectTopics(cortexPath: string, project: string, topics
 
   const suggestions: ProjectTopicSuggestion[] = [];
 
-  for (const builtin of BUILTIN_TOPICS) {
+  for (const builtin of getBuiltinTopics(cortexPath, project)) {
     if (builtin.slug === "general" || taken.has(builtin.slug)) continue;
-    const score = builtin.keywords.reduce((count, keyword) => count + (corpus.toLowerCase().includes(keyword) ? 1 : 0), 0);
+    const score = builtin.keywords.reduce((count, keyword) => count + (corpusLower.includes(keyword) ? 1 : 0), 0);
     if (score <= 0) continue;
     suggestions.push({
       slug: builtin.slug,
@@ -639,11 +1090,12 @@ export function suggestProjectTopics(cortexPath: string, project: string, topics
       keywords: [...builtin.keywords.slice(0, 6)],
       source: "builtin",
       reason: "Matches repeated project language already present in this project.",
+      confidence: confidenceFromScore(score),
     });
   }
 
   for (const [term, score] of [...scoreMap.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
-    if (suggestions.length >= 5) break;
+    if (suggestions.length >= SUGGESTION_LIMIT) break;
     if (score < 2) continue;
     const slug = normalizeTopicSlug(term);
     if (!slug || taken.has(slug) || takenKeywords.has(term)) continue;
@@ -659,6 +1111,7 @@ export function suggestProjectTopics(cortexPath: string, project: string, topics
       keywords,
       source: "heuristic",
       reason: "Repeated project-specific language suggests this deserves its own topic.",
+      confidence: confidenceFromScore(score),
     });
     taken.add(slug);
   }
@@ -669,17 +1122,20 @@ export function suggestProjectTopics(cortexPath: string, project: string, topics
     if (seen.has(suggestion.slug)) continue;
     seen.add(suggestion.slug);
     deduped.push(suggestion);
-    if (deduped.length >= 5) break;
+    if (deduped.length >= SUGGESTION_LIMIT) break;
   }
   return deduped;
 }
+
+export const suggestProjectTopics = suggestTopics;
 
 export function getProjectTopicsResponse(cortexPath: string, project: string): ProjectTopicsResponse {
   const { source, topics } = readProjectTopics(cortexPath, project);
   return {
     source,
     topics,
-    suggestions: suggestProjectTopics(cortexPath, project, topics),
+    suggestions: suggestTopics(cortexPath, project, topics),
+    pinnedTopics: readPinnedTopics(cortexPath, project),
     legacyDocs: listLegacyTopicDocs(cortexPath, project),
     topicDocs: listProjectTopicDocs(cortexPath, project, topics),
   };

@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.cortex, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (51):
+MCP Tools (60 across 11 modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?) - FTS5 search with synonym expansion
@@ -20,14 +20,24 @@ MCP Tools (51):
     add_tasks(project, items[]) - bulk add multiple tasks
     complete_task(project, item) - match by text, move to Done
     complete_tasks(project, items[]) - bulk complete multiple items
+    remove_task(project, item) - remove a task by matching text
     update_task(project, item, updates) - change priority, context, section, or linked GitHub issue
     link_task_issue(project, item, issue_number?, issue_url?, unlink?) - link or unlink an existing GitHub issue on a task item
     promote_task_to_issue(project, item, repo?, title?, body?, mark_done?) - create a GitHub issue from a task item and link it back
+    pin_task(project, item) - pin a task so it stays visible across sessions
+    work_next_task(project?) - pick the next highest-priority task to work on
+    promote_task(project, item) - promote a task to a higher priority section
+    tidy_done_tasks(project?) - archive completed tasks to keep the list clean
 
   Finding capture:
-    add_finding(project, finding, citation?: {file?, line?, repo?, commit?, task_item?}, findingType?, sessionId?) - append finding with optional citation and type tag
+    add_finding(project, finding, citation?: {file?, line?, repo?, commit?, task_item?}, findingType?, sessionId?, source?) - append finding with optional citation/type/provenance
+      source: "human" | "agent" | "hook" | "extract" | "consolidation" | "unknown"
       findingType: "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug"
     add_findings(project, findings[], sessionId?) - bulk add multiple findings
+    supersede_finding(project, finding_text, superseded_by) - mark a finding as superseded
+    retract_finding(project, finding_text, reason) - retract a finding with reason metadata
+    resolve_contradiction(project, finding_text, finding_text_other, resolution) - resolve contradiction lifecycle state
+    get_contradictions(project?, finding_text?) - list unresolved contradicted findings
     remove_finding(project, finding) - remove by matching text
     remove_findings(project, findings[]) - bulk remove multiple findings
     push_changes(message?) - commit and push all cortex changes
@@ -40,9 +50,10 @@ MCP Tools (51):
     cross_project_entities() - find entities shared across multiple projects
 
   Session management (for agents without hooks):
-    session_start(project?, connectionId?) - mark session start, retrieve prior session context, return sessionId
-    session_end(summary?, sessionId?, connectionId?) - end a session by explicit identity and save summary
+    session_start(project?, connectionId?) - mark session start, retrieve prior session context + checkpoints, return sessionId
+    session_end(summary?, sessionId?, connectionId?) - end a session, save summary, write task checkpoint/impact outcomes
     session_context(sessionId?, connectionId?) - get current session state by explicit identity
+    session_history(limit?, sessionId?, project?) - list past sessions or drill into a specific session
 
   Memory quality:
     pin_memory(project, memory) - write canonical/pinned memory that bypasses decay
@@ -61,6 +72,11 @@ MCP Tools (51):
     remove_skill(name, project?) - delete a skill file
     enable_skill(name, project) - enable a skill without deleting its file
     disable_skill(name, project) - disable a skill without deleting its file
+    resolution model:
+      precedence: project scope overrides global scope
+      alias collisions: conflicting commands/aliases are marked unregistered
+      visibility gating: disabled skills stay on disk but are hidden from active mirrors
+      generated artifacts: .claude/skill-manifest.json + .claude/skill-commands.json
 
   Hooks management:
     list_hooks(project?) - show hook status for all tools + custom hooks + config paths, optionally including project overrides
@@ -71,6 +87,18 @@ MCP Tools (51):
   Finding retrieval:
     get_findings(project, limit?) - read recent findings without a search query
 
+  Health and review:
+    get_consolidation_status(project?) - check if findings need consolidation
+    health_check() - run doctor checks and return results
+    list_hook_errors() - show recent hook errors and failures
+    get_review_queue(project?) - read items waiting for review
+    approve_queue_item(project, item) - approve an item from the review queue
+    reject_queue_item(project, item) - reject an item from the review queue
+    edit_queue_item(project, item, new_text) - edit an item in the review queue before accepting
+
+  Finding extraction:
+    auto_extract_findings(context) - extract findings from conversation context automatically
+
 CLI Commands:
 
   cortex                               - interactive shell (TTY default)
@@ -78,10 +106,10 @@ CLI Commands:
   cortex search <query>                - FTS5 search with synonym expansion
   cortex add-finding <project> "..."   - append a finding from the terminal
   cortex pin <project> "..."           - promote canonical memory
-  cortex task                       - cross-project task view
+  cortex tasks                      - cross-project task view
   cortex skill-list                    - list installed skills
   cortex doctor [--fix] [--agents]     - health checks with optional self-heal
-  cortex review-ui [--port=3499]       - lightweight memory web UI
+  cortex web-ui [--port=3499]          - lightweight memory web UI
   cortex status                        - health, active project, stats
   cortex update [--refresh-starter]    - update package; optionally refresh starter globals
   cortex verify                        - post-init verification
@@ -137,6 +165,9 @@ Key File Locations:
   ~/.cortex/<project>/tasks.md        - task queue across sessions
   ~/.cortex/<project>/MEMORY_QUEUE.md - items pending human review
   ~/.cortex/.runtime/                 - audit.log, search history, caches
+  ~/.cortex/.runtime/access-control.local.json - local RBAC role augmentation
+  ~/.cortex/.runtime/telemetry.json   - opt-in local telemetry counters
+  ~/.cortex/.sessions/                - task checkpoint files for cross-session resume
   ~/.cortex/.governance/              - governance policy JSON files
   ~/.cortex/global/skills/            - personal workflow slash commands
   ~/.cortex/global/CLAUDE.md          - user-level agent instructions
@@ -155,11 +186,17 @@ Finding Tags:
 
 Agent Support:
 
-  Claude Code    - full hooks + MCP, writes ~/.claude/settings.json
-  Cursor         - MCP only via ~/.cursor/mcp.json (no auto hooks)
-  VS Code Copilot- MCP only via ~/.config/Code/User/mcp.json
-  Codex CLI      - MCP only via ~/.codex/config.json
+  Claude Code    - full lifecycle hooks (SessionStart/UserPromptSubmit/Stop) + MCP
+  Cursor         - MCP + generated hooks config + session wrapper
+  VS Code Copilot- MCP integration (workspace or user depending mode)
+  Copilot CLI    - MCP + generated hooks config + session wrapper
+  Codex CLI      - MCP + generated hooks config + session wrapper
   Windsurf       - manual MCP setup (see docs/ide-setup.md)
+
+Security and governance notes:
+  Web UI security: loopback-only bind, per-run auth token, CSRF on mutations, CSP headers
+  RBAC sources: .governance/access-control.json + .runtime/access-control.local.json
+  Telemetry: opt-in only (`cortex config telemetry on`), local storage only, no external reporting by default
 
 Docs: https://alaarab.github.io/cortex/
 Source: https://github.com/alaarab/cortex

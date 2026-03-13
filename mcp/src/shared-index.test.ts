@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { makeTempDir, writeFile, grantAdmin } from "./test-helpers.js";
+import { writeProjectTopics } from "./project-topics.js";
 import {
   buildIndex,
   buildSourceDocKey,
@@ -427,6 +428,54 @@ describe("buildIndex", () => {
     const rows = queryRows(db2, "SELECT * FROM docs WHERE docs MATCH ?", ["stable"]);
     expect(rows).not.toBeNull();
     db2.close();
+  });
+
+  it("classifies arbitrary reference docs by topic keywords at index time", async () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "game", {
+      "reference/level-design.md": "# Level Design\n\nShader compilation and frame pacing during combat arenas.\n",
+    });
+    const saved = writeProjectTopics(cortex, "game", [
+      { slug: "rendering", label: "Rendering", description: "Shaders and frames", keywords: ["shader", "frame", "render"] },
+      { slug: "gameplay", label: "Gameplay", description: "Gameplay systems", keywords: ["combat", "arena", "pause"] },
+      { slug: "general", label: "General", description: "Fallback", keywords: [] },
+    ]);
+    expect(saved.ok).toBe(true);
+
+    const db = await buildIndex(cortex);
+    const rows = queryRows(
+      db,
+      "SELECT filename, content FROM docs WHERE project = ? AND filename = ? AND type = ?",
+      ["game", "level-design.md", "reference"]
+    );
+    expect(rows).not.toBeNull();
+    expect(String(rows![0][1])).toContain("cortextopicrendering");
+    db.close();
+  });
+
+  it("keeps legacy reference/topics/<slug>.md compatibility in index-time topic tagging", async () => {
+    const cortex = makeCortex();
+    grantAdmin(cortex);
+    makeProject(cortex, "app", {
+      "reference/topics/database.md": "# Notes\n\nUI layout notes without strong database keywords.\n",
+    });
+    const saved = writeProjectTopics(cortex, "app", [
+      { slug: "database", label: "Database", description: "Storage", keywords: ["query", "schema"] },
+      { slug: "frontend", label: "Frontend", description: "UI", keywords: ["ui", "layout"] },
+      { slug: "general", label: "General", description: "Fallback", keywords: [] },
+    ]);
+    expect(saved.ok).toBe(true);
+
+    const db = await buildIndex(cortex);
+    const rows = queryRows(
+      db,
+      "SELECT filename, content FROM docs WHERE project = ? AND filename = ? AND type = ?",
+      ["app", "database.md", "reference"]
+    );
+    expect(rows).not.toBeNull();
+    expect(String(rows![0][1])).toContain("cortextopicdatabase");
+    db.close();
   });
 });
 

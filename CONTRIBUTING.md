@@ -23,13 +23,18 @@ The build compiles TypeScript from `mcp/src/` into `mcp/dist/` and marks the ent
 
 | Path | What it does |
 |------|-------------|
-| `mcp/src/index.ts` | CLI routing + MCP server (47 tools) |
-| `mcp/src/shared.ts` | Core logic: FTS5 indexing, querying, memory governance |
+| `mcp/src/index.ts` | CLI routing + MCP server bootstrap (60 public tools across 11 modules) |
+| `mcp/src/shared.ts` | Shared path/runtime helpers and core exports |
 | `mcp/src/cli.ts` | CLI subcommands (search, doctor, shell, etc.) |
 | `mcp/src/utils.ts` | FTS5 sanitization, synonym expansion, keyword extraction |
 | `mcp/src/init.ts` | `npx cortex init`: configures MCP + hooks |
 | `mcp/src/link.ts` | Profile sync, symlinks, hooks, context |
 | `mcp/src/data-access.ts` | Task CRUD, machine/profile listing, learning management |
+| `mcp/src/mcp-*.ts` | MCP module handlers (search/tasks/findings/memory/data/graph/session/ops/skills/hooks/extract) |
+| `mcp/src/skill-registry.ts` | Skill precedence, alias collision handling, visibility gating, manifest generation |
+| `mcp/src/governance-policy.ts` | RBAC, policy files, actor resolution (`CORTEX_ACTOR` + local access control) |
+| `mcp/src/memory-ui-server.ts` | Web UI server, auth/CSRF/CSP/loopback security model |
+| `mcp/src/telemetry.ts` | Opt-in local telemetry collection and summaries |
 | `starter/` | Template files copied to `~/.cortex` on init |
 | `docs/` | GitHub Pages site and documentation |
 | `skills/` | Cortex slash command definitions |
@@ -68,7 +73,11 @@ Read `CLAUDE.md` for the full set of conventions. The highlights:
 - Keep PRs small and focused. One feature or fix per PR.
 - Include a short description of what changed and why.
 - If your PR changes user-facing behavior, update the README.
-- If your PR adds or changes MCP tools, update `docs/api-reference.md`.
+- If your PR adds or changes MCP tools, update:
+  - `docs/api-reference.md`
+  - `docs/llms-install.md`
+  - `docs/llms-full.txt`
+- If your PR changes finding lifecycle/provenance, session checkpoints/history, web-ui security, RBAC identity, or telemetry behavior, update the matching docs in `docs/` in the same PR.
 - Make sure CI passes before requesting review.
 
 ## Commit conventions
@@ -83,11 +92,14 @@ docs: update API reference with bulk tools
 
 ## Adding a new MCP tool
 
-1. Add the tool definition in `mcp/src/index.ts` following the existing `server.registerTool()` pattern
+1. Add the tool definition in the correct module (`mcp/src/mcp-<domain>.ts`) following the existing `server.registerTool()` pattern
 2. Implement the handler (call data-access functions, return `{ ok, message, data }`)
-3. Add it to the tools list in `CLAUDE.md`
+3. Register/verify the module from `mcp/src/index.ts` if you created a new module
 4. Add tests in the relevant `*.test.ts` file
-5. Update `docs/api-reference.md` with the new tool's parameters
+5. Update docs:
+   - `docs/api-reference.md` parameters and examples
+   - `docs/llms-install.md` / `docs/llms-full.txt` tool listings
+   - integration/security/governance docs when behavior affects hooks, skills, RBAC, web UI, or telemetry
 
 ## Adding a global skill
 

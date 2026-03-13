@@ -586,12 +586,141 @@ describe("runInit walkthrough integration", () => {
     expect(defaultProfile).toContain("- global");
     expect(defaultProfile).not.toContain("my-api");
     expect(defaultProfile).not.toContain("my-frontend");
+    const envFile = fs.readFileSync(path.join(cortexPath, ".env"), "utf8");
+    expect(envFile).toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
 
     const insideWorkTree = execFileSync("git", ["-C", cortexPath, "rev-parse", "--is-inside-work-tree"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     expect(insideWorkTree).toBe("true");
+  });
+
+  it("fresh init writes detached ownership as the clean-install default", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-clean-defaults");
+    process.env.CORTEX_PATH = cortexPath;
+
+    await suppressOutput(() => runInit({ yes: true }));
+
+    const installPrefs = JSON.parse(fs.readFileSync(path.join(cortexPath, ".runtime", "install-preferences.json"), "utf8"));
+    expect(installPrefs.projectOwnershipDefault).toBe("detached");
+    expect(installPrefs.skillsScope).toBe("global");
+  });
+
+  it("fresh init creates generated skill assets for first-run agent discovery", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-generated-assets");
+    process.env.CORTEX_PATH = cortexPath;
+
+    await suppressOutput(() => runInit({ yes: true }));
+
+    expect(fs.existsSync(path.join(cortexPath, "cortex.SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(homeDir, ".claude", "skill-manifest.json"))).toBe(true);
+    expect(fs.existsSync(path.join(homeDir, ".claude", "skill-commands.json"))).toBe(true);
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(homeDir, ".claude", "skill-manifest.json"), "utf8"));
+    expect(manifest.scope).toBe("global");
+  });
+
+  it("update flow removes legacy sample projects and recreates generated assets", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-repair-existing");
+    process.env.CORTEX_PATH = cortexPath;
+    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(cortexPath, "global"), { recursive: true });
+    fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${os.hostname()}: default\n`);
+    fs.writeFileSync(
+      path.join(cortexPath, "profiles", "default.yaml"),
+      [
+        "name: default",
+        "description: Default profile",
+        "projects:",
+        "  - global",
+        "  - my-api",
+        "  - my-frontend",
+        "  - real-project",
+        "",
+      ].join("\n"),
+    );
+
+    await suppressOutput(() => runInit({ yes: true }));
+
+    const profileText = fs.readFileSync(path.join(cortexPath, "profiles", "default.yaml"), "utf8");
+    expect(profileText).not.toContain("my-api");
+    expect(profileText).not.toContain("my-frontend");
+    expect(profileText).toContain("real-project");
+    expect(fs.existsSync(path.join(cortexPath, ".runtime"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, ".governance"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, ".sessions"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, ".runtime", "canonical-locks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, "global", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, "global", "skills", "pipeline.md"))).toBe(true);
+    expect(fs.existsSync(path.join(cortexPath, "cortex.SKILL.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(cortexPath, ".env"), "utf8")).toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
+    expect(fs.existsSync(path.join(homeDir, ".claude", "skill-manifest.json"))).toBe(true);
+    expect(fs.existsSync(path.join(homeDir, ".claude", "skill-commands.json"))).toBe(true);
+    expect(fs.existsSync(path.join(homeDir, ".cortex-context.md"))).toBe(true);
+    const memoryFile = path.join(
+      homeDir,
+      ".claude",
+      "projects",
+      homeDir.replace(/[/\\:]/g, "-").replace(/^-/, ""),
+      "memory",
+      "MEMORY.md",
+    );
+    expect(fs.existsSync(memoryFile)).toBe(true);
+  });
+
+  it("update flow preserves explicit auto-capture opt-out in existing .env", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-repair-existing-explicit-off");
+    process.env.CORTEX_PATH = cortexPath;
+    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(cortexPath, "global"), { recursive: true });
+    fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${os.hostname()}: default\n`);
+    fs.writeFileSync(
+      path.join(cortexPath, "profiles", "default.yaml"),
+      "name: default\ndescription: Default profile\nprojects:\n  - global\n",
+    );
+    fs.writeFileSync(path.join(cortexPath, ".env"), "CORTEX_FEATURE_AUTO_CAPTURE=0\n");
+
+    await suppressOutput(() => runInit({ yes: true }));
+
+    const envFile = fs.readFileSync(path.join(cortexPath, ".env"), "utf8");
+    expect(envFile).toContain("CORTEX_FEATURE_AUTO_CAPTURE=0");
+    expect(envFile).not.toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
+  });
+
+  it("repair flow targets active agent home when HOME and USERPROFILE differ", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-repair-devcontainer");
+    const fakeHome = path.join(tmpRoot, "fake-home");
+    const actualAgentHome = path.join(tmpRoot, "agent-home");
+    process.env.CORTEX_PATH = cortexPath;
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = actualAgentHome;
+    fs.mkdirSync(path.join(actualAgentHome, ".claude"), { recursive: true });
+    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(cortexPath, "global"), { recursive: true });
+    fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${os.hostname()}: default\n`);
+    fs.writeFileSync(
+      path.join(cortexPath, "profiles", "default.yaml"),
+      "name: default\ndescription: Default profile\nprojects:\n  - global\n",
+    );
+
+    await suppressOutput(() => runInit({ yes: true }));
+
+    expect(fs.existsSync(path.join(actualAgentHome, ".cortex-context.md"))).toBe(true);
+    expect(fs.existsSync(path.join(fakeHome, ".cortex-context.md"))).toBe(false);
+    const memoryFile = path.join(
+      actualAgentHome,
+      ".claude",
+      "projects",
+      actualAgentHome.replace(/[/\\:]/g, "-").replace(/^-/, ""),
+      "memory",
+      "MEMORY.md",
+    );
+    expect(fs.existsSync(memoryFile)).toBe(true);
+    expect(fs.existsSync(path.join(actualAgentHome, ".claude", "skill-manifest.json"))).toBe(true);
+    expect(fs.existsSync(path.join(actualAgentHome, ".claude", "skill-commands.json"))).toBe(true);
+    expect(fs.existsSync(path.join(fakeHome, ".claude", "skill-manifest.json"))).toBe(false);
+    expect(fs.existsSync(path.join(fakeHome, ".claude", "skill-commands.json"))).toBe(false);
   });
 
   it("init output explains next steps without a restart step", async () => {
@@ -623,6 +752,40 @@ describe("runInit walkthrough integration", () => {
     expect(fs.existsSync(path.join(cortexPath, "my-first-project"))).toBe(false);
   });
 
+  it("walkthrough auto-capture opt-out writes explicit default to .env", async () => {
+    const cortexPath = path.join(tmpRoot, "cortex-walkthrough-autocapture-off");
+    process.env.CORTEX_PATH = cortexPath;
+
+    await suppressOutput(() => runInit({ yes: true, _walkthroughAutoCapture: false }));
+
+    const envFile = fs.readFileSync(path.join(cortexPath, ".env"), "utf8");
+    expect(envFile).toContain("CORTEX_FEATURE_AUTO_CAPTURE=0");
+    expect(envFile).not.toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
+  });
+
+  it("per-project storage writes repo bindings and initializes .cortex in the repo root", async () => {
+    const repoRoot = path.join(tmpRoot, "repo-storage");
+    const cortexPath = path.join(repoRoot, ".cortex");
+    const origCwd = process.cwd();
+    fs.mkdirSync(path.join(repoRoot, ".git"), { recursive: true });
+    process.chdir(repoRoot);
+
+    try {
+      await suppressOutput(() => runInit({
+        yes: true,
+        _walkthroughStorageChoice: "project",
+        _walkthroughStoragePath: cortexPath,
+        _walkthroughStorageRepoRoot: repoRoot,
+      }));
+    } finally {
+      process.chdir(origCwd);
+    }
+
+    expect(fs.existsSync(path.join(cortexPath, "cortex.root.yaml"))).toBe(true);
+    expect(fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf8")).toContain(".cortex/");
+    expect(fs.readFileSync(path.join(repoRoot, ".env"), "utf8")).toContain(`CORTEX_PATH=${cortexPath}`);
+  });
+
   it("persists onboarding defaults for ownership, proactivity, and task mode", async () => {
     const cortexPath = path.join(tmpRoot, "cortex-onboarding-defaults");
     process.env.CORTEX_PATH = cortexPath;
@@ -640,6 +803,8 @@ describe("runInit walkthrough integration", () => {
     const workflowPolicy = JSON.parse(fs.readFileSync(path.join(cortexPath, ".governance", "workflow-policy.json"), "utf8"));
 
     expect(installPrefs.projectOwnershipDefault).toBe("detached");
+    expect(installPrefs.proactivityFindings).toBe("medium");
+    expect(installPrefs.proactivityTask).toBe("low");
     expect(governancePrefs.proactivityFindings).toBe("medium");
     expect(governancePrefs.proactivityTask).toBe("low");
     expect(workflowPolicy.taskMode).toBe("suggest");

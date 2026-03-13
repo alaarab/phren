@@ -1547,7 +1547,5 @@ function themeIcon(id: string): vscode.ThemeIcon {
   if (id === "file") {
     return vscode.ThemeIcon.File;
   }
-  // ThemeIcon constructor may be private in some type def versions, but it exists at runtime
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new (vscode.ThemeIcon as any)(id) as vscode.ThemeIcon;
+  return new vscode.ThemeIcon(id);
 }

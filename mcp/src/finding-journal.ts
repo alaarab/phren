@@ -5,11 +5,13 @@ import { runtimeDir, CortexResult, cortexOk, cortexErr, CortexError } from "./sh
 import { withFileLock } from "./shared-governance.js";
 import { addFindingToFile } from "./shared-content.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
+import type { FindingProvenanceSource } from "./content-citation.js";
 
 export interface FindingJournalEntry {
   at: string;
   project: string;
   text: string;
+  source?: FindingProvenanceSource;
   sessionId?: string;
   repo?: string;
   commit?: string;
@@ -61,7 +63,7 @@ export function appendFindingJournal(
   cortexPath: string,
   project: string,
   text: string,
-  opts: { sessionId?: string; repo?: string; commit?: string; file?: string } = {}
+  opts: { sessionId?: string; repo?: string; commit?: string; file?: string; source?: FindingProvenanceSource } = {}
 ): CortexResult<string> {
   if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
   const filePath = journalFileFor(cortexPath, project, opts.sessionId);
@@ -69,6 +71,7 @@ export function appendFindingJournal(
     at: new Date().toISOString(),
     project,
     text,
+    ...(opts.source ? { source: opts.source } : {}),
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(opts.repo ? { repo: opts.repo } : {}),
     ...(opts.commit ? { commit: opts.commit } : {}),
@@ -118,6 +121,9 @@ export function compactFindingJournals(cortexPath: string, project?: string): Fi
           ...(entry.repo ? { repo: entry.repo } : {}),
           ...(entry.commit ? { commit: entry.commit } : {}),
           ...(entry.file ? { file: entry.file } : {}),
+        }, {
+          source: entry.source,
+          sessionId: entry.sessionId,
         });
         if (!write.ok) {
           result.failed += 1;

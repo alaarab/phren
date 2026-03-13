@@ -12,6 +12,7 @@ import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecution
 import { getWorkflowPolicy } from "./shared-governance.js";
 import { debugLog, sessionMarker } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import { incrementSessionTasksCompleted } from "./mcp-session.js";
 
 export type TaskMode = "off" | "manual" | "suggest" | "auto";
 
@@ -353,6 +354,7 @@ export function finalizeTaskSession(args: {
       debugLog(`task lifecycle complete ${state.project}: ${completed.error}`);
       return;
     }
+    incrementSessionTasksCompleted(args.cortexPath, 1, state.sessionId, state.project);
     clearTaskSessionState(args.cortexPath, args.sessionId);
     return;
   }

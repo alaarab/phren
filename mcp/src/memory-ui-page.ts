@@ -130,6 +130,164 @@ const PROJECT_REFERENCE_UI_STYLES = `
   }
 `;
 
+const SETTINGS_TAB_UI_STYLES = `
+  .settings-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .settings-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .settings-section-findings { border-top: 3px solid color-mix(in srgb, var(--accent) 60%, var(--border)); }
+  .settings-section-behavior { border-top: 3px solid color-mix(in srgb, var(--blue) 45%, var(--border)); }
+  .settings-section-integrations { border-top: 3px solid color-mix(in srgb, var(--purple) 45%, var(--border)); }
+  .settings-section-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--border-light);
+    background: var(--surface);
+  }
+  .settings-section-header h3 {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .settings-section-header p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  .settings-section-body {
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .settings-control {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+  }
+  .settings-control-primary {
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface-raised));
+    border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  }
+  .settings-control-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .settings-control-label {
+    font-size: var(--text-base);
+    font-weight: 600;
+    color: var(--ink-secondary);
+  }
+  .settings-control-note {
+    color: var(--muted);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  .settings-control-value {
+    color: var(--ink-secondary);
+    font-size: var(--text-base);
+    font-weight: 600;
+  }
+  .settings-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .settings-chip {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink-secondary);
+    border-radius: 999px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-family: var(--font);
+    font-weight: 600;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .settings-chip:hover {
+    border-color: var(--accent);
+    color: var(--ink);
+  }
+  .settings-chip.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+  .settings-chip.readonly {
+    cursor: default;
+    opacity: 0.92;
+  }
+  .settings-chip.readonly:hover {
+    border-color: var(--border);
+    color: var(--ink-secondary);
+  }
+  .settings-chip.active.readonly:hover {
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .settings-status-inline {
+    min-height: 18px;
+    font-size: var(--text-sm);
+    color: var(--muted);
+  }
+  .settings-status-inline.ok { color: var(--success); }
+  .settings-status-inline.err { color: var(--danger); }
+  .settings-integrations-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .settings-integrations-table th,
+  .settings-integrations-table td {
+    text-align: left;
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--border-light);
+    font-size: var(--text-sm);
+    vertical-align: middle;
+  }
+  .settings-integrations-table th {
+    color: var(--muted);
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    font-size: var(--text-xs);
+  }
+  .settings-integrations-table tr:last-child td { border-bottom: none; }
+  .settings-tool {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--ink-secondary);
+    text-transform: capitalize;
+  }
+  .settings-indicator {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+  }
+  .settings-indicator.on { background: var(--success); }
+  .settings-indicator.off { background: var(--danger); }
+`;
+
 function h(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -456,9 +614,14 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
       }).join('');
       var suggestionRows = (topicsData.suggestions || []).length
         ? topicsData.suggestions.map(function(suggestion) {
+            var confidencePct = Math.round((Number(suggestion.confidence || 0)) * 100);
+            var meta = suggestion.reason + (confidencePct > 0 ? ' · confidence ' + confidencePct + '%' : '');
+            var isPinned = suggestion.source === 'pinned';
             return '<div class="split-item">' +
-              '<div class="reference-item-main"><span class="reference-item-title">' + esc(suggestion.label) + '</span><span class="reference-item-meta">' + esc(suggestion.reason) + '</span></div>' +
-              '<button class="btn btn-sm reference-item-action" data-ref-action="useSuggestion" data-slug="' + esc(suggestion.slug) + '">Use</button>' +
+              '<div class="reference-item-main"><span class="reference-item-title">' + esc(suggestion.label) + '</span><span class="reference-item-meta">' + esc(meta) + '</span></div>' +
+              (isPinned
+                ? '<button class="btn btn-sm reference-item-action" data-ref-action="unpinSuggestion" data-slug="' + esc(suggestion.slug) + '">Unpin</button>'
+                : '<button class="btn btn-sm reference-item-action" data-ref-action="pinSuggestion" data-slug="' + esc(suggestion.slug) + '">Pin</button><button class="btn btn-sm reference-item-action" data-ref-action="useSuggestion" data-slug="' + esc(suggestion.slug) + '">Use</button>') +
             '</div>';
           }).join('')
         : '<div class="reference-sidebar-note">No topic suggestions right now.</div>';
@@ -622,6 +785,53 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
       });
       saveTopics(topics, suggestion.slug);
     };
+    window.cortexReferencePinSuggestion = function(slug) {
+      if (!_referenceState.topicsData) return;
+      var suggestion = (_referenceState.topicsData.suggestions || []).find(function(item) { return item.slug === slug; });
+      if (!suggestion) return;
+      fetchCsrfToken(function(csrfToken) {
+        var topicPayload = JSON.stringify({
+          slug: suggestion.slug,
+          label: suggestion.label,
+          description: suggestion.description,
+          keywords: suggestion.keywords || []
+        });
+        var body = 'project=' + encodeURIComponent(_referenceState.project) + '&topic=' + encodeURIComponent(topicPayload);
+        if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
+        fetch('/api/project-topics/pin', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: authBody(body)
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (!data.ok) {
+            setStatus(data.error || 'Pin failed', 'err');
+            return;
+          }
+          _referenceState.topicsData = data;
+          loadReferenceState(_referenceState.selectedType || 'topic', _referenceState.selectedKey || 'general');
+          setStatus('Pinned', 'ok');
+        }).catch(function() { setStatus('Pin failed', 'err'); });
+      });
+    };
+    window.cortexReferenceUnpinSuggestion = function(slug) {
+      fetchCsrfToken(function(csrfToken) {
+        var body = 'project=' + encodeURIComponent(_referenceState.project) + '&slug=' + encodeURIComponent(slug || '');
+        if (csrfToken) body += '&_csrf=' + encodeURIComponent(csrfToken);
+        fetch('/api/project-topics/unpin', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: authBody(body)
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (!data.ok) {
+            setStatus(data.error || 'Unpin failed', 'err');
+            return;
+          }
+          _referenceState.topicsData = data;
+          loadReferenceState(_referenceState.selectedType || 'topic', _referenceState.selectedKey || 'general');
+          setStatus('Unpinned', 'ok');
+        }).catch(function() { setStatus('Unpin failed', 'err'); });
+      });
+    };
     window.cortexReferenceReclassify = function() {
       fetchCsrfToken(function(csrfToken) {
         var body = 'project=' + encodeURIComponent(_referenceState.project);
@@ -655,6 +865,8 @@ function renderProjectReferenceEnhancementScript(authToken: string): string {
       else if (action === 'selectTopic') { cortexReferenceSelectTopic(actionEl.getAttribute('data-slug')); }
       else if (action === 'selectFile') { cortexReferenceSelectFile(actionEl.getAttribute('data-file')); }
       else if (action === 'useSuggestion') { e.stopPropagation(); cortexReferenceUseSuggestion(actionEl.getAttribute('data-slug')); }
+      else if (action === 'pinSuggestion') { e.stopPropagation(); cortexReferencePinSuggestion(actionEl.getAttribute('data-slug')); }
+      else if (action === 'unpinSuggestion') { e.stopPropagation(); cortexReferenceUnpinSuggestion(actionEl.getAttribute('data-slug')); }
     });
     document.addEventListener('submit', function(e) {
       var form = e.target;
@@ -855,65 +1067,130 @@ function renderTasksAndSettingsScript(authToken: string): string {
       container.innerHTML = html;
     };
 
+    function setSettingsStatus(message, type) {
+      var el = document.getElementById('settings-status-inline');
+      if (!el) return;
+      el.textContent = message || '';
+      el.className = 'settings-status-inline' + (type ? ' ' + type : '');
+    }
+
+    function findingUiToStorage(level) {
+      var map = { high: 'aggressive', medium: 'balanced', low: 'conservative', minimal: 'minimal' };
+      return map[level] || 'balanced';
+    }
+
+    function findingStorageToUi(level) {
+      var map = { aggressive: 'high', balanced: 'medium', conservative: 'low', minimal: 'minimal' };
+      return map[level] || 'medium';
+    }
+
+    function postSettings(endpoint, payload, okMessage) {
+      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
+      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
+        var body = new URLSearchParams(payload || {});
+        if (csrfData.token) body.set('_csrf', csrfData.token);
+        var url = _tsAuthToken ? tsAuthUrl(endpoint) : endpoint;
+        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          setSettingsStatus(data.error || 'Settings update failed', 'err');
+          return;
+        }
+        _settingsLoaded = false;
+        loadSettings();
+        setSettingsStatus(okMessage || 'Settings updated', 'ok');
+      }).catch(function(err) {
+        setSettingsStatus('Settings update failed: ' + String(err), 'err');
+      });
+    }
+
     function loadSettings() {
       var url = _tsAuthToken ? tsAuthUrl('/api/settings') : '/api/settings';
       fetch(url).then(function(r) { return r.json(); }).then(function(data) {
-        if (!data.ok) return;
-        var proactEl = document.getElementById('settings-proactivity');
-        if (proactEl) {
-          proactEl.innerHTML =
-            '<div><strong>Findings</strong><div class="text-muted">' + esc(data.proactivityFindings || data.proactivity || 'high') + '</div></div>' +
-            '<div><strong>Tasks</strong><div class="text-muted">' + esc(data.proactivityTask || data.proactivity || 'high') + '</div></div>' +
-            '<div><strong>Default</strong><div class="text-muted">' + esc(data.proactivity || 'high') + '</div></div>';
+        if (!data.ok) {
+          setSettingsStatus(data.error || 'Failed to load settings', 'err');
+          return;
         }
-        var tmEl = document.getElementById('settings-task-mode');
-        if (tmEl) {
-          var modeDescriptions = { off: 'Tasks are disabled', manual: 'Tasks are added only when explicitly requested', suggest: 'Claude suggests tasks but waits for confirmation', auto: 'Claude adds tasks automatically' };
-          var mode = data.taskMode || 'auto';
-          tmEl.innerHTML = '<strong>' + esc(mode) + '</strong> &mdash; <span class="text-muted">' + esc(modeDescriptions[mode] || mode) + '</span>';
-        }
-        var hooksEl = document.getElementById('settings-hooks');
-        if (hooksEl && data.hookTools) {
-          var globalEnabled = data.hooksEnabled;
-          var html = '<div style="margin-bottom:8px"><strong>Global hooks: </strong><span class="badge ' + (globalEnabled ? 'badge-on' : 'badge-off') + '">' + (globalEnabled ? 'enabled' : 'disabled') + '</span></div>';
-          html += '<div style="display:flex;flex-wrap:wrap;gap:8px">';
-          data.hookTools.forEach(function(tool) {
-            html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--text-sm)">';
-            html += '<span>' + esc(tool.tool) + '</span>';
-            html += '<span class="badge ' + (tool.enabled ? 'badge-on' : 'badge-off') + '">' + (tool.enabled ? 'on' : 'off') + '</span>';
-            html += '</div>';
+
+        var findingDescriptions = {
+          high: 'Capture findings proactively, including minor observations.',
+          medium: 'Capture findings that are likely useful.',
+          low: 'Capture findings only when clearly significant.',
+          minimal: 'Only capture explicitly flagged findings.'
+        };
+
+        var findingsEl = document.getElementById('settings-findings');
+        if (findingsEl) {
+          var fsUi = findingStorageToUi(data.findingSensitivity || 'balanced');
+          var findingsHtml = '';
+          findingsHtml += '<div class="settings-control">';
+          findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Finding sensitivity</span></div>';
+          findingsHtml += '<div class="settings-chip-row">';
+          ['high', 'medium', 'low', 'minimal'].forEach(function(level) {
+            var active = level === fsUi ? ' active' : '';
+            findingsHtml += '<button data-ts-action="setFindingSensitivity" data-level="' + esc(level) + '" class="settings-chip' + active + '">' + esc(level) + '</button>';
           });
-          html += '</div>';
-          hooksEl.innerHTML = html;
+          findingsHtml += '</div>';
+          findingsHtml += '<div class="settings-control-note" id="settings-fs-desc">' + esc(findingDescriptions[fsUi] || '') + '</div>';
+          findingsHtml += '</div>';
+          findingsHtml += '<div class="settings-control">';
+          findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Auto-capture</span>';
+          findingsHtml += '<button data-ts-action="toggleAutoCapture" data-enabled="' + (data.autoCaptureEnabled ? 'true' : 'false') + '" class="settings-chip' + (data.autoCaptureEnabled ? ' active' : '') + '">' + (data.autoCaptureEnabled ? 'On' : 'Off') + '</button></div>';
+          findingsHtml += '<div class="settings-control-note">Turn automatic finding capture on or off.</div>';
+          findingsHtml += '</div>';
+          findingsHtml += '<div class="settings-control">';
+          findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Consolidation threshold</span><span class="badge">' + esc(String(data.consolidationEntryThreshold || 25)) + ' entries</span></div>';
+          findingsHtml += '<div class="settings-control-note">Consolidation is also recommended after 60+ days with at least 10 new entries.</div>';
+          findingsHtml += '</div>';
+          findingsEl.innerHTML = findingsHtml;
         }
-        var fsEl = document.getElementById('settings-finding-sensitivity');
-        if (fsEl) {
-          var fsDescriptions = {
-            minimal: 'Only capture explicitly flagged findings',
-            conservative: 'Capture findings when clearly significant',
-            balanced: 'Capture findings that are likely useful (default)',
-            aggressive: 'Capture findings proactively, including minor observations'
-          };
-          var currentFs = data.findingSensitivity || 'balanced';
-          var fsLevels = ['minimal', 'conservative', 'balanced', 'aggressive'];
-          var fsHtml = '<div style="display:flex;flex-direction:column;gap:10px">';
-          fsHtml += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
-          fsLevels.forEach(function(level) {
-            var active = level === currentFs;
-            fsHtml += '<button data-ts-action="setFindingSensitivity" data-level="' + esc(level) + '" style="padding:6px 14px;border:1px solid ' + (active ? 'var(--accent)' : 'var(--border)') + ';border-radius:var(--radius-sm);background:' + (active ? 'var(--accent)' : 'transparent') + ';color:' + (active ? '#fff' : 'inherit') + ';cursor:pointer;font-size:var(--text-sm)">' + esc(level) + '</button>';
+
+        var behaviorEl = document.getElementById('settings-behavior');
+        if (behaviorEl) {
+          var taskMode = data.taskMode === 'suggest' ? 'manual' : (data.taskMode || 'auto');
+          var proactivity = data.proactivity || 'high';
+          var behaviorHtml = '';
+          behaviorHtml += '<div class="settings-control">';
+          behaviorHtml += '<div class="settings-control-header"><span class="settings-control-label">Task mode</span></div>';
+          behaviorHtml += '<div class="settings-chip-row">';
+          ['auto', 'manual', 'off'].forEach(function(mode) {
+            var active = mode === taskMode ? ' active' : '';
+            behaviorHtml += '<button data-ts-action="setTaskMode" data-mode="' + esc(mode) + '" class="settings-chip' + active + '">' + esc(mode) + '</button>';
           });
-          fsHtml += '</div>';
-          fsHtml += '<div class="text-muted" id="settings-fs-desc" style="font-size:var(--text-sm)">' + esc(fsDescriptions[currentFs] || currentFs) + '</div>';
-          fsHtml += '</div>';
-          fsEl.innerHTML = fsHtml;
+          behaviorHtml += '</div></div>';
+          behaviorHtml += '<div class="settings-control">';
+          behaviorHtml += '<div class="settings-control-header"><span class="settings-control-label">Proactivity level</span></div>';
+          behaviorHtml += '<div class="settings-chip-row">';
+          ['high', 'medium', 'low'].forEach(function(level) {
+            var active = level === proactivity ? ' active' : '';
+            behaviorHtml += '<button data-ts-action="setProactivity" data-level="' + esc(level) + '" class="settings-chip' + active + '">' + esc(level) + '</button>';
+          });
+          behaviorHtml += '</div></div>';
+          behaviorEl.innerHTML = behaviorHtml;
         }
-        var mcpEl = document.getElementById('settings-mcp');
-        if (mcpEl) {
-          mcpEl.innerHTML = '<strong>MCP server: </strong><span class="badge ' + (data.mcpEnabled ? 'badge-on' : 'badge-off') + '">' + (data.mcpEnabled ? 'enabled' : 'disabled') + '</span>';
+
+        var integrationsEl = document.getElementById('settings-integrations');
+        if (integrationsEl) {
+          var tools = Array.isArray(data.hookTools) ? data.hookTools : [];
+          var html = '';
+          html += '<div class="settings-control-header" style="margin-bottom:10px"><span class="settings-control-label">Global MCP</span>';
+          html += '<button data-ts-action="toggleMcpEnabled" data-enabled="' + (data.mcpEnabled ? 'true' : 'false') + '" class="settings-chip' + (data.mcpEnabled ? ' active' : '') + '">' + (data.mcpEnabled ? 'On' : 'Off') + '</button></div>';
+          html += '<table class="settings-integrations-table"><thead><tr><th>Tool</th><th>Hooks</th><th>MCP</th><th>Control</th></tr></thead><tbody>';
+          tools.forEach(function(tool) {
+            var hooksOn = !!tool.enabled;
+            var mcpOn = !!data.mcpEnabled;
+            html += '<tr>';
+            html += '<td><span class="settings-tool">' + esc(tool.tool) + '</span></td>';
+            html += '<td><span class="settings-indicator ' + (hooksOn ? 'on' : 'off') + '"></span>' + (hooksOn ? 'enabled' : 'disabled') + '</td>';
+            html += '<td><span class="settings-indicator ' + (mcpOn ? 'on' : 'off') + '"></span>' + (mcpOn ? 'enabled' : 'disabled') + '</td>';
+            html += '<td><button data-ts-action="toggleIntegrationTool" data-tool="' + esc(tool.tool) + '" class="settings-chip' + (hooksOn ? ' active' : '') + '">' + (hooksOn ? 'Disable' : 'Enable') + '</button></td>';
+            html += '</tr>';
+          });
+          html += '</tbody></table>';
+          integrationsEl.innerHTML = html;
         }
       }).catch(function(err) {
-        var el = document.getElementById('settings-proactivity');
-        if (el) el.innerHTML = '<div style="color:var(--muted)">Failed to load settings: ' + esc(String(err)) + '</div>';
+        setSettingsStatus('Failed to load settings: ' + String(err), 'err');
       });
     }
 
@@ -1044,35 +1321,45 @@ function renderTasksAndSettingsScript(authToken: string): string {
       if (!actionEl) return;
       var action = actionEl.getAttribute('data-ts-action');
       if (action === 'setFindingSensitivity') { setFindingSensitivity(actionEl.getAttribute('data-level')); }
+      else if (action === 'toggleAutoCapture') { setAutoCapture(actionEl.getAttribute('data-enabled') !== 'true'); }
+      else if (action === 'setTaskMode') { setTaskMode(actionEl.getAttribute('data-mode')); }
+      else if (action === 'setProactivity') { setProactivity(actionEl.getAttribute('data-level')); }
+      else if (action === 'toggleMcpEnabled') { setMcpEnabled(actionEl.getAttribute('data-enabled') !== 'true'); }
+      else if (action === 'toggleIntegrationTool') { toggleIntegrationTool(actionEl.getAttribute('data-tool')); }
       else if (action === 'showSessionDetail') { showSessionDetail(actionEl.getAttribute('data-session-id')); }
       else if (action === 'backToSessionsList') { backToSessionsList(); }
     });
 
     window.setFindingSensitivity = function(level) {
       var descriptions = {
-        minimal: 'Only capture explicitly flagged findings',
-        conservative: 'Capture findings when clearly significant',
-        balanced: 'Capture findings that are likely useful (default)',
-        aggressive: 'Capture findings proactively, including minor observations'
+        high: 'Capture findings proactively, including minor observations.',
+        medium: 'Capture findings that are likely useful.',
+        low: 'Capture findings only when clearly significant.',
+        minimal: 'Only capture explicitly flagged findings.'
       };
-      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
-      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
-        var body = new URLSearchParams({ value: level });
-        if (csrfData.token) body.set('_csrf', csrfData.token);
-        var postUrl = _tsAuthToken ? tsAuthUrl('/api/settings/finding-sensitivity') : '/api/settings/finding-sensitivity';
-        return fetch(postUrl, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.ok) {
-          _settingsLoaded = false;
-          loadSettings();
-          var desc = document.getElementById('settings-fs-desc');
-          if (desc) desc.textContent = descriptions[level] || level;
-        } else {
-          alert('Failed to update finding sensitivity: ' + (data.error || 'Unknown error'));
-        }
-      }).catch(function(err) {
-        alert('Error: ' + String(err));
-      });
+      postSettings('/api/settings/finding-sensitivity', { value: findingUiToStorage(level || 'medium') }, 'Finding sensitivity updated.');
+      var desc = document.getElementById('settings-fs-desc');
+      if (desc) desc.textContent = descriptions[level] || level;
+    };
+
+    window.setAutoCapture = function(enabled) {
+      postSettings('/api/settings/auto-capture', { enabled: String(!!enabled) }, 'Auto-capture updated.');
+    };
+
+    window.setTaskMode = function(mode) {
+      postSettings('/api/settings/task-mode', { value: String(mode || 'auto') }, 'Task mode updated.');
+    };
+
+    window.setProactivity = function(level) {
+      postSettings('/api/settings/proactivity', { value: String(level || 'high') }, 'Proactivity updated.');
+    };
+
+    window.setMcpEnabled = function(enabled) {
+      postSettings('/api/settings/mcp-enabled', { enabled: String(!!enabled) }, 'MCP setting updated.');
+    };
+
+    window.toggleIntegrationTool = function(tool) {
+      postSettings('/api/hook-toggle', { tool: String(tool || '') }, 'Integration updated.');
     };
   })();`;
 }
@@ -1178,6 +1465,7 @@ export function renderWebUiPage(cortexPath: string, authToken?: string, nonce?: 
   <style>
 ${WEB_UI_STYLES}
 ${PROJECT_REFERENCE_UI_STYLES}
+${SETTINGS_TAB_UI_STYLES}
   </style>
 </head>
 <body>
@@ -1384,37 +1672,26 @@ ${PROJECT_REFERENCE_UI_STYLES}
 
   <!-- ── Settings Tab ───────────────────────────────────────── -->
   <div id="tab-settings" class="tab-content">
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><h2>Proactivity</h2></div>
-      <div class="card-body">
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px" id="settings-proactivity">
-          <div style="color:var(--muted)">Loading...</div>
+    <div class="settings-shell">
+      <div id="settings-status-inline" class="settings-status-inline" aria-live="polite"></div>
+      <section class="settings-section settings-section-findings">
+        <div class="settings-section-header">Findings</div>
+        <div class="settings-section-body">
+          <div id="settings-findings" style="color:var(--muted)">Loading...</div>
         </div>
-      </div>
-    </div>
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><h2>Task Mode</h2></div>
-      <div class="card-body">
-        <div id="settings-task-mode" style="color:var(--muted)">Loading...</div>
-      </div>
-    </div>
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><h2>Hooks</h2></div>
-      <div class="card-body">
-        <div id="settings-hooks" style="color:var(--muted)">Loading...</div>
-      </div>
-    </div>
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><h2>Finding Sensitivity</h2></div>
-      <div class="card-body">
-        <div id="settings-finding-sensitivity" style="color:var(--muted)">Loading...</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h2>MCP</h2></div>
-      <div class="card-body">
-        <div id="settings-mcp" style="color:var(--muted)">Loading...</div>
-      </div>
+      </section>
+      <section class="settings-section settings-section-behavior">
+        <div class="settings-section-header">Behavior</div>
+        <div class="settings-section-body">
+          <div id="settings-behavior" style="color:var(--muted)">Loading...</div>
+        </div>
+      </section>
+      <section class="settings-section settings-section-integrations">
+        <div class="settings-section-header">Integrations</div>
+        <div class="settings-section-body">
+          <div id="settings-integrations" style="color:var(--muted)">Loading...</div>
+        </div>
+      </section>
     </div>
   </div>
 </div>

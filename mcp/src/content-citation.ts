@@ -3,6 +3,7 @@ import * as path from "path";
 import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 import { errorMessage, runGitOrThrow } from "./utils.js";
 import type { RetentionPolicy } from "./shared-governance.js";
+import { findingIdFromLine } from "./finding-impact.js";
 
 export interface FindingCitation {
   created_at: string;
@@ -14,12 +15,31 @@ export interface FindingCitation {
   task_item?: string;
 }
 
-export interface FindingSource {
+export const FINDING_PROVENANCE_SOURCES = [
+  "human",
+  "agent",
+  "hook",
+  "extract",
+  "consolidation",
+  "unknown",
+] as const;
+
+export type FindingProvenanceSource = (typeof FINDING_PROVENANCE_SOURCES)[number];
+export type FindingSource = FindingProvenanceSource;
+
+export function isFindingProvenanceSource(value: string | undefined): value is FindingProvenanceSource {
+  if (!value) return false;
+  return (FINDING_PROVENANCE_SOURCES as readonly string[]).includes(value);
+}
+
+export interface FindingProvenance {
+  source?: FindingProvenanceSource;
   machine?: string;
   actor?: string;
   tool?: string;
   model?: string;
   session_id?: string;
+  scope?: string;
 }
 
 export interface FindingTrustIssue {
@@ -32,6 +52,8 @@ export interface TrustFilterOptions {
   ttlDays?: number;
   minConfidence?: number;
   decay?: Partial<RetentionPolicy["decay"]>;
+  project?: string;
+  highImpactFindingIds?: Set<string>;
 }
 
 export function getHeadCommit(cwd: string): string | undefined {
@@ -88,21 +110,29 @@ function readSourceToken(match: RegExpMatchArray | null | undefined): string | u
   return raw;
 }
 
-export function buildSourceComment(source: FindingSource): string {
+export function buildSourceComment(source: FindingProvenance): string {
   const parts: string[] = [];
+  if (source.source) parts.push(source.source);
   if (source.machine) parts.push(`machine:${source.machine}`);
   if (source.actor) parts.push(`actor:${source.actor}`);
   if (source.tool) parts.push(`tool:${source.tool}`);
   if (source.model) parts.push(`model:${source.model}`);
   if (source.session_id) parts.push(`session:${source.session_id}`);
-  return parts.length > 0 ? `<!-- source: ${parts.join(" ")} -->` : "";
+  if (source.scope) parts.push(`scope:${source.scope}`);
+  return parts.length > 0 ? `<!-- source:${parts.join(" ")} -->` : "";
 }
 
-export function parseSourceComment(line: string): FindingSource | null {
+export function parseSourceComment(line: string): FindingProvenance | null {
   const sourceMatch = line.match(/<!--\s*source:\s*(.*?)\s*-->/);
   if (!sourceMatch) return null;
 
   const payload = sourceMatch[1];
+  const firstToken = payload.trim().split(/\s+/)[0] || "";
+  const sourceRaw =
+    (firstToken && !firstToken.includes(":") ? firstToken : undefined) ??
+    readSourceToken(payload.match(/(?:^|\s)source:(".*?"|\S+)/)) ??
+    readSourceToken(payload.match(/(?:^|\s)kind:(".*?"|\S+)/));
+  const source = isFindingProvenanceSource(sourceRaw) ? sourceRaw : undefined;
   const machine =
     readSourceToken(payload.match(/(?:^|\s)machine:(".*?"|\S+)/)) ??
     readSourceToken(payload.match(/(?:^|\s)host:(".*?"|\S+)/));
@@ -114,9 +144,13 @@ export function parseSourceComment(line: string): FindingSource | null {
   const session_id =
     readSourceToken(payload.match(/(?:^|\s)session:(".*?"|\S+)/)) ??
     readSourceToken(payload.match(/(?:^|\s)session_id:(".*?"|\S+)/));
+  const rawScope = readSourceToken(payload.match(/(?:^|\s)scope:(".*?"|\S+)/));
+  const scope = rawScope === undefined
+    ? undefined
+    : (rawScope.trim() ? rawScope.trim() : "shared");
 
-  if (!machine && !actor && !tool && !model && !session_id) return null;
-  return { machine, actor, tool, model, session_id };
+  if (!source && !machine && !actor && !tool && !model && !session_id && !scope) return null;
+  return { source, machine, actor, tool, model, session_id, scope };
 }
 
 export function parseCitationComment(line: string): FindingCitation | null {
@@ -277,6 +311,8 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
     ...DEFAULT_DECAY,
     ...(options.decay || {}),
   };
+  const highImpactFindingIds = options.highImpactFindingIds;
+  const project = options.project;
 
   const lines = content.split("\n");
   const out: string[] = [];
@@ -360,6 +396,14 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
       continue;
     }
     if (!citation) confidence *= 0.8;
+    const provenance = parseSourceComment(line)?.source ?? "unknown";
+    if (provenance === "human") confidence *= 1.1;
+    if (provenance === "extract") confidence *= 0.9;
+    if (project && highImpactFindingIds?.size) {
+      const findingId = findingIdFromLine(line);
+      if (highImpactFindingIds.has(findingId)) confidence *= 1.15;
+    }
+    confidence = Math.max(0, Math.min(1, confidence));
     if (confidence < minConfidence) {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
       if (citation) i++;

@@ -123,7 +123,9 @@ describe("hooks platform compatibility", () => {
       expect(fs.existsSync(codexFile)).toBe(true);
       const codex = JSON.parse(fs.readFileSync(codexFile, "utf8"));
       const sharedLifecycle = buildSharedLifecycleCommands();
-      expect(codex.hooks.SessionStart[0].command).toBe(sharedLifecycle.sessionStart);
+      expect(codex.hooks.SessionStart[0].command).toContain(sharedLifecycle.sessionStart);
+      expect(codex.hooks.SessionStart[0].command).toContain("CORTEX_HOOK_TOOL");
+      expect(codex.hooks.SessionStart[0].command).toContain("codex");
       expect(codex.hooks.SessionStart[0].command).not.toContain(cortexPath);
       // Should NOT be in home directory
       expect(fs.existsSync(path.join(homeDir, "codex.json"))).toBe(false);

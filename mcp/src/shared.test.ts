@@ -181,6 +181,29 @@ describe("findCortexPath", () => {
       tmp.cleanup();
     }
   });
+
+  it("finds the nearest ancestor .cortex directory", () => {
+    const tmp = makeTempDir("ancestor-cortex-");
+    const repoRoot = path.join(tmp.path, "repo");
+    const nestedDir = path.join(repoRoot, "packages", "app");
+    const localCortex = path.join(repoRoot, ".cortex");
+    fs.mkdirSync(nestedDir, { recursive: true });
+    fs.mkdirSync(localCortex, { recursive: true });
+    initTestCortexRoot(localCortex);
+
+    const origCwd = process.cwd();
+    const origHome = process.env.HOME;
+    process.env.HOME = path.join(tmp.path, "home");
+    fs.mkdirSync(process.env.HOME, { recursive: true });
+    process.chdir(nestedDir);
+    try {
+      expect(findCortexPath()).toBe(localCortex);
+    } finally {
+      process.chdir(origCwd);
+      process.env.HOME = origHome;
+      tmp.cleanup();
+    }
+  });
 });
 
 describe("ensureCortexPath", () => {
@@ -917,6 +940,24 @@ describe("filterTrustedFindingsDetailed", () => {
     ].join("\n");
     const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.3 });
     expect(result.content).toContain("- Finding with citation");
+  });
+
+  it("gives human provenance a small confidence boost over extract", () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 50);
+    const dateStr = d.toISOString().slice(0, 10);
+    const content = [
+      "# proj FINDINGS",
+      "",
+      `## ${dateStr}`,
+      "",
+      "- Human finding <!-- source:human actor:alice -->",
+      "- Extracted finding <!-- source:extract tool:auto-extract -->",
+      "",
+    ].join("\n");
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.75 });
+    expect(result.content).toContain("Human finding");
+    expect(result.content).not.toContain("Extracted finding");
   });
 
   it("accepts numeric ttlDays shorthand", () => {

@@ -13,3 +13,6 @@ docs/wp*.png
 .claude/
 /FINDINGS.md
 *.vsix
+.runtime/
+.sessions/
+video/

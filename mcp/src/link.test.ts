@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
+import { execFileSync } from "child_process";
 import * as yaml from "js-yaml";
 import { isVersionNewer } from "./init.js";
 import { getMachineName } from "./machine-identity.js";
@@ -803,6 +804,36 @@ describe("link", () => {
       const result = await runDoctor(cortexPath);
       expect(result.machine).toBeDefined();
       expect(typeof result.machine).toBe("string");
+    });
+
+    it("treats missing git origin as local-only info instead of failure", async () => {
+      execFileSync("git", ["init"], { cwd: cortexPath, stdio: "ignore" });
+      const result = await runDoctor(cortexPath);
+      const remoteCheck = result.checks.find((c) => c.name === "git-remote");
+      expect(remoteCheck).toBeDefined();
+      expect(remoteCheck!.ok).toBe(true);
+      expect(remoteCheck!.detail).toContain("no remote configured");
+    });
+
+    it("doctor --fix applies baseline repair even when relink is blocked", async () => {
+      const profilesDir = path.join(cortexPath, "profiles");
+      fs.mkdirSync(profilesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(profilesDir, "default.yaml"),
+        "name: default\ndescription: Default profile\nprojects:\n  - global\n  - my-api\n  - my-frontend\n",
+      );
+
+      const result = await runDoctor(cortexPath, true);
+      const baseline = result.checks.find((c) => c.name === "baseline-repair");
+      const selfHeal = result.checks.find((c) => c.name === "self-heal");
+      expect(baseline?.ok).toBe(true);
+      expect(baseline?.detail).toContain("legacy sample profile entries");
+      expect(selfHeal?.ok).toBe(false);
+      const repairedProfile = fs.readFileSync(path.join(profilesDir, "default.yaml"), "utf8");
+      expect(repairedProfile).not.toContain("my-api");
+      expect(repairedProfile).not.toContain("my-frontend");
+      expect(fs.existsSync(path.join(cortexPath, ".runtime"))).toBe(true);
+      expect(fs.existsSync(path.join(cortexPath, ".governance"))).toBe(true);
     });
   });
 

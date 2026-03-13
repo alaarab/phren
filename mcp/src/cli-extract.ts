@@ -22,6 +22,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import type { FindingProvenanceSource } from "./content-citation.js";
 
 function runGit(cwd: string, args: string[]): string | null {
   return runGitShared(cwd, args, EXEC_TIMEOUT_MS, debugLog);
@@ -261,7 +262,13 @@ export function scoreFindingCandidate(subject: string, body: string): { score: n
 
 // ── handleExtractMemories ────────────────────────────────────────────────────
 
-export async function handleExtractMemories(projectArg?: string, cwdArg?: string, silent: boolean = false, sessionId?: string) {
+export async function handleExtractMemories(
+  projectArg?: string,
+  cwdArg?: string,
+  silent: boolean = false,
+  sessionId?: string,
+  source: FindingProvenanceSource = "extract",
+) {
   const project = inferProject(projectArg);
   if (!project) {
     if (!silent) console.error("Usage: cortex extract-memories <project>");
@@ -303,6 +310,7 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
     const line = `${candidate.text} (source commit ${rec.hash.slice(0, 8)})`;
     if (candidate.score >= threshold) {
       appendFindingJournal(getCortexPath(), project, line, {
+        source,
         sessionId,
         repo: repoRoot,
         commit: rec.hash,
@@ -323,6 +331,7 @@ export async function handleExtractMemories(projectArg?: string, cwdArg?: string
     }
     if (c.score >= threshold) {
       appendFindingJournal(getCortexPath(), project, line, {
+        source,
         sessionId,
         repo: repoRoot,
         commit: c.commit,

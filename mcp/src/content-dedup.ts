@@ -4,6 +4,7 @@ import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "./shared.js";
 import { isFeatureEnabled, safeProjectPath } from "./utils.js";
 import { UNIVERSAL_TECH_TERMS_RE, EXTRA_ENTITY_PATTERNS } from "./cortex-core.js";
+import { isInactiveFindingLine } from "./finding-lifecycle.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
 
@@ -241,7 +242,7 @@ export function extractDynamicEntities(cortexPath: string, project: string): Set
 
     // Rebuild: scan bullets for candidate tokens
     const content = fs.readFileSync(findingsPath, "utf8");
-    const bullets = content.split("\n").filter(l => l.startsWith("- ") && !l.includes("superseded_by"));
+    const bullets = content.split("\n").filter(l => l.startsWith("- ") && !isInactiveFindingLine(l));
 
     // Count occurrences of each candidate across bullets
     const counts = new Map<string, number>();
@@ -343,8 +344,7 @@ export function isDuplicateFinding(existingContent: string, newLearning: string,
 
   const bullets = existingContent.split("\n").filter(l => l.startsWith("- "));
   for (const bullet of bullets) {
-    // Skip superseded entries (both legacy <!-- superseded_by: and new <!-- cortex:superseded_by formats)
-    if (bullet.includes("superseded_by")) continue;
+    if (isInactiveFindingLine(bullet)) continue;
 
     const existingWords = normalize(bullet);
     if (existingWords.length === 0) continue;
@@ -502,7 +502,7 @@ export async function checkSemanticDedup(
   if (!fs.existsSync(findingsPath)) return false;
 
   const existingContent = fs.readFileSync(findingsPath, "utf8");
-  const bullets = existingContent.split("\n").filter((l) => l.startsWith("- ") && !l.includes("superseded_by"));
+  const bullets = existingContent.split("\n").filter((l) => l.startsWith("- ") && !isInactiveFindingLine(l));
 
   for (const bullet of bullets) {
     const a = stripMetadata(newLearning).trim();

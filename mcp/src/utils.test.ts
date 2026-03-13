@@ -3,7 +3,16 @@ import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
 import { resetCortexDotEnvBootstrapForTests } from "./cortex-dotenv.js";
-import { isFeatureEnabled, normalizeExecCommand, runGit, runGitOrThrow } from "./utils.js";
+import {
+  isFeatureEnabled,
+  normalizeExecCommand,
+  runGit,
+  runGitOrThrow,
+  buildRobustFtsQuery,
+  learnSynonym,
+  loadLearnedSynonyms,
+  removeLearnedSynonym,
+} from "./utils.js";
 
 describe("runGit", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -95,5 +104,42 @@ describe("normalizeExecCommand", () => {
       command: "C:\\tools\\gh.cmd",
       shell: true,
     });
+  });
+});
+
+describe("learned synonyms", () => {
+  let tmp: { path: string; cleanup: () => void };
+
+  beforeEach(() => {
+    tmp = makeTempDir("learned-synonyms-");
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("learnSynonym persists and merges learned terms into robust query expansion", () => {
+    fs.mkdirSync(path.join(tmp.path, "demo"), { recursive: true });
+    learnSynonym(tmp.path, "demo", "bugfix", ["regression", "hotfix"]);
+    const loaded = loadLearnedSynonyms("demo", tmp.path);
+    expect(loaded.bugfix).toContain("regression");
+    expect(loaded.bugfix).toContain("hotfix");
+
+    const query = buildRobustFtsQuery("bugfix", "demo", tmp.path);
+    expect(query).toContain("\"bugfix\"");
+    expect(query).toContain("\"regression\"");
+  });
+
+  it("removeLearnedSynonym removes selected values and then key", () => {
+    fs.mkdirSync(path.join(tmp.path, "demo"), { recursive: true });
+    learnSynonym(tmp.path, "demo", "latency", ["slow", "lag", "delay"]);
+    removeLearnedSynonym(tmp.path, "demo", "latency", ["lag"]);
+    let loaded = loadLearnedSynonyms("demo", tmp.path);
+    expect(loaded.latency).toContain("slow");
+    expect(loaded.latency).not.toContain("lag");
+
+    removeLearnedSynonym(tmp.path, "demo", "latency");
+    loaded = loadLearnedSynonyms("demo", tmp.path);
+    expect(loaded.latency).toBeUndefined();
   });
 });

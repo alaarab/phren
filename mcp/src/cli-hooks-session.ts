@@ -7,6 +7,8 @@ import {
   sessionMarker,
   EXEC_TIMEOUT_MS,
   getCortexPath,
+  getProjectDirs,
+  findProjectNameCaseInsensitive,
   homePath,
   readRootManifest,
 } from "./shared.js";
@@ -35,11 +37,11 @@ import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { runDoctor } from "./link.js";
 import { getHooksEnabledPreference } from "./init.js";
-import { detectProjectDir, ensureLocalGitRepo, isProjectTracked } from "./init-setup.js";
+import { detectProjectDir, ensureLocalGitRepo, isProjectTracked, repairPreexistingInstall } from "./init-setup.js";
 import { isToolHookEnabled } from "./hooks.js";
 import { appendFindingJournal } from "./finding-journal.js";
-import { isProjectHookEnabled } from "./project-config.js";
-import { isTaskFileName } from "./data-tasks.js";
+import { getProjectSourcePath, isProjectHookEnabled, readProjectConfig } from "./project-config.js";
+import { isTaskFileName, TASKS_FILENAME } from "./data-tasks.js";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import {
   buildIndex,
@@ -96,15 +98,91 @@ export function getUntrackedProjectNotice(cortexPath: string, cwd: string): stri
   const profile = resolveRuntimeProfile(cortexPath);
   const projectDir = detectProjectDir(cwd, cortexPath);
   if (!projectDir) return null;
+  const activeProfile = profile || undefined;
+  // Check the exact current working directory against projects in the active profile.
+  // This avoids prompting when cwd is already inside a tracked sourcePath.
+  if (detectProject(cortexPath, cwd, activeProfile)) return null;
+  if (detectProject(cortexPath, projectDir, activeProfile)) return null;
   const projectName = path.basename(projectDir).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  if (isProjectTracked(cortexPath, projectName, profile || undefined)) return null;
+  if (isProjectTracked(cortexPath, projectName, activeProfile)) {
+    const trackedName = getProjectDirs(cortexPath, activeProfile)
+      .map((dir) => path.basename(dir))
+      .find((name) => name.toLowerCase() === projectName)
+      || findProjectNameCaseInsensitive(cortexPath, projectName)
+      || projectName;
+    const config = readProjectConfig(cortexPath, trackedName);
+    const sourcePath = getProjectSourcePath(cortexPath, trackedName, config);
+    if (!sourcePath) return null;
+    const resolvedProjectDir = path.resolve(projectDir);
+    const sameSource = resolvedProjectDir === sourcePath || resolvedProjectDir.startsWith(sourcePath + path.sep);
+    if (sameSource) return null;
+  }
   return [
     "<cortex-notice>",
-    "This project directory is not tracked by cortex.",
+    "This project directory is not tracked by cortex yet.",
+    "Run `npx cortex add` to track it now.",
+    `Suggested command: \`npx cortex add \"${projectDir}\"\``,
     "Ask the user whether they want to add it to cortex now.",
-    "If they say no, tell them they can always run `npx cortex add` later from this directory.",
+    "If they say no, tell them they can always run `npx cortex add` later.",
     "If they say yes, also ask whether Cortex should manage repo instruction files or leave their existing repo-owned CLAUDE/AGENTS files alone.",
     `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="cortex-managed"|"detached"|"repo-managed", or run \`npx cortex add\` from that directory.`,
+    "After onboarding, run `npx cortex doctor` if hooks or MCP tools are not responding.",
+    "<cortex-notice>",
+    "",
+  ].join("\n");
+}
+
+const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
+
+function projectHasBootstrapSignals(cortexPath: string, project: string): boolean {
+  const projectDir = path.join(cortexPath, project);
+  const findingsPath = path.join(projectDir, "FINDINGS.md");
+  if (fs.existsSync(findingsPath)) {
+    const findings = fs.readFileSync(findingsPath, "utf8");
+    if (/^-\s+/m.test(findings)) return true;
+  }
+
+  const tasksPath = path.join(projectDir, TASKS_FILENAME);
+  if (fs.existsSync(tasksPath)) {
+    const tasks = fs.readFileSync(tasksPath, "utf8");
+    if (/^-\s+\[(?: |x|X)\]/m.test(tasks)) return true;
+  }
+
+  return false;
+}
+
+export function getSessionStartOnboardingNotice(
+  cortexPath: string,
+  cwd: string,
+  activeProject: string | null,
+): string | null {
+  const markerPath = sessionMarker(cortexPath, SESSION_START_ONBOARDING_MARKER);
+  if (fs.existsSync(markerPath)) return null;
+
+  if (getUntrackedProjectNotice(cortexPath, cwd)) return null;
+
+  const profile = resolveRuntimeProfile(cortexPath);
+  const trackedProjects = getProjectDirs(cortexPath, profile).filter((dir) => path.basename(dir) !== "global");
+
+  if (trackedProjects.length === 0) {
+    return [
+      "<cortex-notice>",
+      "Cortex onboarding: no tracked projects are active for this workspace yet.",
+      "Start in a project repo and run `npx cortex add` so SessionStart can inject project context.",
+      "Run `npx cortex doctor` to verify hooks and MCP wiring after setup.",
+      "<cortex-notice>",
+      "",
+    ].join("\n");
+  }
+
+  if (!activeProject) return null;
+  if (projectHasBootstrapSignals(cortexPath, activeProject)) return null;
+
+  return [
+    "<cortex-notice>",
+    `Cortex onboarding: project "${activeProject}" is tracked but memory is still empty.`,
+    "Capture one finding with `add_finding` and one task with `add_task` to seed future SessionStart context.",
+    "Run `npx cortex doctor` if setup seems incomplete.",
     "<cortex-notice>",
     "",
   ].join("\n");
@@ -538,6 +616,12 @@ export async function handleHookSessionStart() {
     return;
   }
 
+  try {
+    repairPreexistingInstall(cortexPath);
+  } catch (err: unknown) {
+    debugLog(`hook-session-start repair failed: ${errorMessage(err)}`);
+  }
+
   if (!isProjectHookEnabled(cortexPath, activeProject, "SessionStart")) {
     updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
     appendAuditLog(cortexPath, "hook_session_start", `status=project_disabled project=${activeProject}`);
@@ -596,16 +680,22 @@ export async function handleHookSessionStart() {
 
   // Untracked project detection: suggest `cortex add` if CWD looks like a project but isn't tracked
   try {
-    const cortexPath = getCortexPath();
-    if (cortexPath) {
-      const notice = getUntrackedProjectNotice(cortexPath, cwd);
-      if (notice) {
-        process.stdout.write(notice);
-        debugLog(`untracked project detected at ${cwd}`);
+    const notice = getUntrackedProjectNotice(cortexPath, cwd);
+    if (notice) {
+      process.stdout.write(notice);
+      debugLog(`untracked project detected at ${cwd}`);
+    }
+    const onboarding = getSessionStartOnboardingNotice(cortexPath, cwd, activeProject);
+    if (onboarding) {
+      process.stdout.write(onboarding);
+      try {
+        fs.writeFileSync(sessionMarker(cortexPath, SESSION_START_ONBOARDING_MARKER), `${startedAt}\n`);
+      } catch (err: unknown) {
+        debugLog(`session-start onboarding marker write failed: ${errorMessage(err)}`);
       }
     }
   } catch (err: unknown) {
-    debugLog(`untracked project detection failed: ${errorMessage(err)}`);
+    debugLog(`session-start onboarding detection failed: ${errorMessage(err)}`);
   }
 }
 
@@ -756,6 +846,7 @@ export async function handleHookStop() {
             const insights = filterConversationInsightsForProactivity(extractConversationInsights(captureInput), findingsLevel);
             for (const insight of insights) {
               appendFindingJournal(getCortexPath(), activeProject, `[pattern] ${insight}`, {
+                source: "hook",
                 sessionId: `hook-stop-${Date.now()}`,
               });
               debugLog(`auto-capture: saved insight for ${activeProject}: ${insight.slice(0, 60)}`);

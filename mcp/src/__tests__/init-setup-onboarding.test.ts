@@ -3,7 +3,15 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
-import { bootstrapFromExisting, detectProjectDir, isProjectTracked } from "../init-setup.js";
+import {
+  bootstrapFromExisting,
+  detectProjectDir,
+  ensureProjectScaffold,
+  ensureGitignoreEntry,
+  inferInitScaffoldFromRepo,
+  isProjectTracked,
+  upsertProjectEnvVar,
+} from "../init-setup.js";
 
 describe("init setup onboarding helpers", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -96,5 +104,91 @@ describe("init setup onboarding helpers", () => {
     expect(result.claudePath).toBe(path.join(projectRoot, "CLAUDE.md"));
     expect(fs.existsSync(path.join(cortexPath, "app", "CLAUDE.md"))).toBe(false);
     expect(fs.readFileSync(path.join(cortexPath, "app", "cortex.project.yaml"), "utf8")).toContain("ownership: repo-managed");
+  });
+
+  it("writes domain topic-config entries in BuiltinTopic shape", () => {
+    const projectDir = path.join(cortexPath, "mixlab");
+    ensureProjectScaffold(projectDir, "mixlab", "music");
+
+    const config = JSON.parse(fs.readFileSync(path.join(projectDir, "topic-config.json"), "utf8"));
+    expect(config.version).toBe(1);
+    expect(config.domain).toBe("music");
+    expect(Array.isArray(config.topics)).toBe(true);
+    expect(config.topics.length).toBeGreaterThan(0);
+    expect(config.topics[0]).toHaveProperty("name");
+    expect(config.topics[0]).toHaveProperty("description");
+    expect(config.topics[0]).toHaveProperty("keywords");
+    expect(config.topics[0]).not.toHaveProperty("slug");
+    expect(config.topics[0]).not.toHaveProperty("label");
+  });
+
+  it("defaults topic-config domain to software when no domain is provided", () => {
+    const projectDir = path.join(cortexPath, "default-domain");
+    ensureProjectScaffold(projectDir, "default-domain");
+
+    const config = JSON.parse(fs.readFileSync(path.join(projectDir, "topic-config.json"), "utf8"));
+    expect(config.domain).toBe("software");
+    expect(config.topics.some((topic: { name?: string }) => topic.name === "General")).toBe(true);
+  });
+
+  it("infers domain/topics from repo content before falling back", () => {
+    fs.writeFileSync(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "app",
+      description: "Semantic memory retrieval with embeddings and vector search",
+      keywords: ["memory", "embeddings", "retrieval", "vector", "search"],
+      scripts: { build: "tsc -p .", test: "vitest" },
+    }, null, 2));
+    fs.writeFileSync(path.join(projectRoot, "README.md"), "# app\n\nembeddings embeddings embeddings\nvector search retrieval\n");
+    fs.writeFileSync(path.join(projectRoot, "tsconfig.json"), "{\n  \"compilerOptions\": {}\n}\n");
+    fs.mkdirSync(path.join(projectRoot, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, "docs", "architecture.md"), "retrieval pipeline and embeddings index\n");
+
+    const inferred = inferInitScaffoldFromRepo(projectRoot);
+    expect(inferred).not.toBeNull();
+    expect(inferred?.domain).toBe("software");
+    expect(inferred?.topics.some((topic) => topic.name === "Embeddings")).toBe(true);
+    expect(inferred?.referenceHints).toContain("README.md");
+  });
+
+  it("uses inferred scaffold for topic-config and CLAUDE scaffold", () => {
+    const projectDir = path.join(cortexPath, "adaptive");
+    ensureProjectScaffold(projectDir, "adaptive", "software", {
+      domain: "software",
+      topics: [
+        { name: "API", description: "API contracts", keywords: ["api", "endpoint"] },
+        { name: "Embeddings", description: "Vector retrieval behavior", keywords: ["embedding", "vector"] },
+        { name: "General", description: "Fallback", keywords: [] },
+      ],
+      referenceHints: ["README.md", "docs/"],
+      commandHints: ["npm run build", "npm run test"],
+      confidence: 0.9,
+      reason: "test scaffold",
+    });
+
+    const config = JSON.parse(fs.readFileSync(path.join(projectDir, "topic-config.json"), "utf8"));
+    expect(config.topics.some((topic: { name: string }) => topic.name === "Embeddings")).toBe(true);
+    const claude = fs.readFileSync(path.join(projectDir, "CLAUDE.md"), "utf8");
+    expect(claude).toContain("## Reference Structure");
+    expect(claude).toContain("README.md");
+  });
+
+  it("adds .cortex/ to repo .gitignore once", () => {
+    expect(ensureGitignoreEntry(projectRoot, ".cortex/")).toBe(true);
+    expect(ensureGitignoreEntry(projectRoot, ".cortex/")).toBe(false);
+    const gitignore = fs.readFileSync(path.join(projectRoot, ".gitignore"), "utf8");
+    expect(gitignore).toContain(".cortex/");
+    expect((gitignore.match(/\.cortex\//g) || []).length).toBe(1);
+  });
+
+  it("upserts CORTEX_PATH in project .env", () => {
+    const target = path.join(projectRoot, ".cortex");
+    expect(upsertProjectEnvVar(projectRoot, "CORTEX_PATH", target)).toBe(true);
+    expect(fs.readFileSync(path.join(projectRoot, ".env"), "utf8")).toContain(`CORTEX_PATH=${target}`);
+
+    const next = path.join(projectRoot, ".cortex-custom");
+    expect(upsertProjectEnvVar(projectRoot, "CORTEX_PATH", next)).toBe(true);
+    const envFile = fs.readFileSync(path.join(projectRoot, ".env"), "utf8");
+    expect(envFile).toContain(`CORTEX_PATH=${next}`);
+    expect(envFile).not.toMatch(new RegExp(`^CORTEX_PATH=${target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
   });
 });

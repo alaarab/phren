@@ -31,6 +31,13 @@ import {
   getProjectOwnershipDefault,
   parseProjectOwnershipMode,
 } from "./project-config.js";
+import {
+  isValidProjectName,
+  learnedSynonymsPath,
+  learnSynonym,
+  loadLearnedSynonyms,
+  removeLearnedSynonym,
+} from "./utils.js";
 // ── Config router ────────────────────────────────────────────────────────────
 
 export async function handleConfig(args: string[]) {
@@ -63,6 +70,8 @@ export async function handleConfig(args: string[]) {
       return handleConfigFindingSensitivity(rest);
     case "llm":
       return handleConfigLlm(rest);
+    case "synonyms":
+      return handleConfigSynonyms(rest);
     default:
       console.log(`cortex config - manage settings and policies
 
@@ -84,6 +93,8 @@ Subcommands:
                                         Default ownership for future project enrollments
   cortex config llm [get|set model|endpoint|key]
                                         LLM config for semantic dedup/conflict features
+  cortex config synonyms [list|add|remove] ...
+                                        Manage project learned synonyms
   cortex config machines                 Registered machines and profiles
   cortex config profiles                 All profiles and their projects
   cortex config telemetry [on|off|reset] Local usage stats (opt-in, no external reporting)`);
@@ -104,6 +115,70 @@ function normalizeProactivityLevel(raw: string | undefined): ProactivityLevel | 
 
 function printProactivityUsage(subcommand: string): void {
   console.error(`Usage: cortex config ${subcommand} [high|medium|low]`);
+}
+
+function printSynonymsUsage(): void {
+  console.error("Usage: cortex config synonyms list <project>");
+  console.error("       cortex config synonyms add <project> <term> <syn1,syn2,...>");
+  console.error("       cortex config synonyms remove <project> <term> [syn1,syn2,...]");
+}
+
+function parseSynonymItems(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function handleConfigSynonyms(args: string[]) {
+  const cortexPath = getCortexPath();
+  let action = args[0] || "list";
+  let project = args[1];
+  if (action !== "list" && action !== "add" && action !== "remove" && isValidProjectName(action)) {
+    project = action;
+    action = "list";
+  }
+
+  if (!project || !isValidProjectName(project)) {
+    printSynonymsUsage();
+    process.exit(1);
+  }
+
+  if (action === "list") {
+    console.log(JSON.stringify({
+      project,
+      path: learnedSynonymsPath(cortexPath, project),
+      synonyms: loadLearnedSynonyms(project, cortexPath),
+    }, null, 2));
+    return;
+  }
+
+  if (action === "add") {
+    const term = args[2];
+    const synonyms = parseSynonymItems(args[3]);
+    if (!term || synonyms.length === 0) {
+      printSynonymsUsage();
+      process.exit(1);
+    }
+    const updated = learnSynonym(cortexPath, project, term, synonyms);
+    console.log(JSON.stringify({ project, term, synonyms: updated[term.toLowerCase()] ?? [], updated }, null, 2));
+    return;
+  }
+
+  if (action === "remove") {
+    const term = args[2];
+    if (!term) {
+      printSynonymsUsage();
+      process.exit(1);
+    }
+    const updated = removeLearnedSynonym(cortexPath, project, term, parseSynonymItems(args[3]));
+    console.log(JSON.stringify({ project, term: term.toLowerCase(), updated }, null, 2));
+    return;
+  }
+
+  printSynonymsUsage();
+  process.exit(1);
 }
 
 function proactivityConfigSnapshot(cortexPath: string) {

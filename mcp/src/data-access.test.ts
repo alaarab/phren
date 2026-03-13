@@ -25,6 +25,7 @@ import {
   saveShellState,
   resetShellState,
   readFindings,
+  readFindingHistory,
   addFinding,
   removeFinding,
   TASKS_FILENAME,
@@ -471,13 +472,16 @@ describe("readFindings", () => {
     expect(result.data[0].date).toBe("2026-03-01");
     expect(result.data[0].text).toContain("auth middleware");
     expect(result.data[0].citation).toContain("cortex:cite");
+    expect(result.data[0].source).toBe("unknown");
 
     expect(result.data[1].date).toBe("2026-03-01");
     expect(result.data[1].text).toContain("WAL mode");
     expect(result.data[1].citation).toBeUndefined();
+    expect(result.data[1].source).toBe("unknown");
 
     expect(result.data[2].date).toBe("2026-02-15");
     expect(result.data[2].text).toContain("vitest");
+    expect(result.data[2].source).toBe("unknown");
   });
 
   it("returns an empty array when no FINDINGS.md exists", () => {
@@ -509,7 +513,7 @@ describe("readFindings", () => {
 
 ## 2026-03-09
 
-- Refactor slices should stay independently releasable <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->
+- Refactor slices should stay independently releasable <!-- created: 2026-03-09 --> <!-- source: source:agent machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->
   <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","task_item":"deadbeef"} -->
 `,
     );
@@ -523,8 +527,76 @@ describe("readFindings", () => {
     expect(result.data[0].actor).toBe("codex");
     expect(result.data[0].tool).toBe("codex");
     expect(result.data[0].model).toBe("gpt-5");
+    expect(result.data[0].source).toBe("agent");
     expect(result.data[0].sessionId).toBe("session-1234");
     expect(result.data[0].citationData?.task_item).toBe("deadbeef");
+  });
+
+  it("excludes archived details by default and includes them when requested", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      `# ${PROJECT} FINDINGS
+
+## 2026-03-10
+
+- Current finding remains visible <!-- fid:aaaabbbb --> <!-- cortex:status "active" -->
+
+<details>
+<summary>Archived</summary>
+
+## 2026-02-01
+
+- Archived finding from details <!-- fid:ccccdddd --> <!-- cortex:status "superseded" --> <!-- cortex:status_updated "2026-02-03" --> <!-- cortex:status_reason "superseded_by" --> <!-- cortex:status_ref "new-approach" -->
+</details>
+`,
+    );
+
+    const currentOnly = readFindings(tmpDir, PROJECT);
+    expect(currentOnly.ok).toBe(true);
+    if (!currentOnly.ok) return;
+    expect(currentOnly.data).toHaveLength(1);
+    expect(currentOnly.data[0].tier).toBe("current");
+
+    const withArchived = readFindings(tmpDir, PROJECT, { includeArchived: true });
+    expect(withArchived.ok).toBe(true);
+    if (!withArchived.ok) return;
+    expect(withArchived.data).toHaveLength(2);
+    const archived = withArchived.data.find((entry) => entry.stableId === "ccccdddd");
+    expect(archived?.tier).toBe("archived");
+    expect(archived?.status).toBe("superseded");
+    expect(archived?.status_updated).toBe("2026-02-03");
+    expect(archived?.status_reason).toBe("superseded_by");
+    expect(archived?.status_ref).toBe("new-approach");
+  });
+});
+
+describe("readFindingHistory", () => {
+  it("reconstructs timeline from current + archived findings", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      `# ${PROJECT} FINDINGS
+
+## 2026-03-12
+
+- Current finding text <!-- fid:aa11bb22 --> <!-- cortex:status "active" --> <!-- cortex:status_updated "2026-03-12" -->
+
+<details>
+<summary>Archived</summary>
+
+## 2026-02-10
+
+- Current finding text <!-- fid:aa11bb22 --> <!-- cortex:status "superseded" --> <!-- cortex:status_updated "2026-02-10" --> <!-- cortex:status_reason "superseded_by" --> <!-- cortex:status_ref "replacement" -->
+</details>
+`,
+    );
+
+    const result = readFindingHistory(tmpDir, PROJECT, "fid:aa11bb22");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].archivedCount).toBe(1);
+    expect(result.data[0].current?.status).toBe("active");
+    expect(result.data[0].timeline.map((entry) => entry.status)).toEqual(["superseded", "active"]);
   });
 });
 
