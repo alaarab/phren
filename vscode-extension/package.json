@@ -2,7 +2,7 @@
   "name": "cortex-vscode",
   "displayName": "Cortex VS Code",
   "description": "Browse, search, and manage Cortex knowledge directly from VS Code.",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -20,6 +20,9 @@
   },
   "categories": [
     "Other"
+  ],
+  "activationEvents": [
+    "onView:cortex.explorer"
   ],
   "keywords": [
     "cortex",
@@ -261,113 +264,166 @@
         }
       ]
     },
-    "configuration": {
-      "title": "Cortex",
-      "properties": {
-        "cortex.mcpServerPath": {
-          "type": "string",
-          "default": "",
-          "description": "Absolute path to the Cortex MCP server entrypoint JavaScript file. Leave blank to auto-detect a global install."
-        },
-        "cortex.nodePath": {
-          "type": "string",
-          "default": "node",
-          "description": "Path to the Node.js binary used to run the cortex MCP server."
-        },
-        "cortex.storePath": {
-          "type": "string",
-          "default": "",
-          "description": "Path to the Cortex store directory. Leave blank to use ~/.cortex."
-        },
-        "cortex.onboardingComplete": {
-          "type": "boolean",
-          "default": false,
-          "description": "Internal extension flag that tracks whether first-run onboarding prompts have already been shown."
-        },
-        "cortex.proactivity": {
-          "type": "string",
-          "enum": ["high", "medium", "low"],
-          "default": "high",
-          "description": "How proactively Cortex captures findings and tasks. High: always auto-capture. Medium: only when explicit signals detected. Low: never auto-capture."
-        },
-        "cortex.proactivityFindings": {
-          "type": "string",
-          "enum": ["high", "medium", "low"],
-          "default": "high",
-          "description": "Override proactivity level specifically for findings capture."
-        },
-        "cortex.proactivityTasks": {
-          "type": "string",
-          "enum": ["high", "medium", "low"],
-          "default": "high",
-          "description": "Override proactivity level specifically for task capture."
-        },
-        "cortex.autoExtract": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically extract insights from project context on each prompt."
-        },
-        "cortex.autoCapture": {
-          "type": "boolean",
-          "default": false,
-          "description": "Extract insights from conversation transcripts at session end."
-        },
-        "cortex.taskMode": {
-          "type": "string",
-          "enum": ["off", "manual", "suggest", "auto"],
-          "default": "auto",
-          "description": "Task automation mode. Off: tasks disabled. Manual: only when explicitly requested. Suggest: Claude suggests but waits for confirmation. Auto: Claude adds tasks automatically."
-        },
-        "cortex.hooksEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable or disable cortex hooks globally. When disabled, no hooks fire on prompts or session events."
-        },
-        "cortex.findingSensitivity": {
-          "type": "string",
-          "enum": ["minimal", "conservative", "balanced", "aggressive"],
-          "default": "balanced",
-          "enumDescriptions": [
-            "Only save findings when explicitly asked. No auto-capture.",
-            "Save decisions and pitfalls only. Auto-capture: 3/session max.",
-            "Save non-obvious patterns and decisions. Auto-capture: 10/session.",
-            "Save everything worth remembering. Auto-capture: 20/session."
-          ],
-          "description": "Controls how aggressively Cortex captures findings and auto-captures insights from sessions."
-        },
-        "cortex.semanticDedup": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable semantic duplicate detection for **offline maintenance commands** (`cortex maintain consolidate`, `cortex maintain extract`) when no agent session is active. Live dedup during `add_finding` uses the active agent (Claude/GPT) instead — no extra API call needed. Batch mode uses a separate LLM call per finding group. Results cached 24h. Cost scales with `cortex.llmModel` (~$0.01/batch-session with Haiku)."
-        },
-        "cortex.semanticConflict": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable semantic conflict detection for **offline maintenance commands** (`cortex maintain consolidate`, `cortex maintain extract`) when no agent session is active. Live conflict detection during `add_finding` uses the active agent instead. Batch mode uses a separate LLM call per finding group. Results cached 24h. Cost scales with `cortex.llmModel` (~$0.01/batch-session with Haiku)."
-        },
-        "cortex.llmModel": {
-          "type": "string",
-          "default": "",
-          "enum": [
-            "",
-            "claude-haiku-4-5-20251001",
-            "claude-sonnet-4-6",
-            "claude-opus-4-6",
-            "gpt-4o-mini",
-            "gpt-4o"
-          ],
-          "enumDescriptions": [
-            "Use server default (Haiku)",
-            "Claude Haiku 4.5 — recommended for offline batch operations (~$0.01/session)",
-            "Claude Sonnet 4.6 — higher quality, ~10x more expensive than Haiku",
-            "Claude Opus 4.6 — expensive for batch operations; not recommended",
-            "GPT-4o mini — cost-effective alternative for batch operations",
-            "GPT-4o — expensive for batch operations; not recommended"
-          ],
-          "markdownDescription": "Model for **offline cortex operations** (`consolidate`, `extract`). Sets `CORTEX_LLM_MODEL`. **Live dedup uses the active agent instead** — this setting only applies when running maintenance commands without an active session. Haiku is recommended for batch operations."
+    "configuration": [
+      {
+        "title": "Setup",
+        "properties": {
+          "cortex.mcpServerPath": {
+            "type": "string",
+            "default": "",
+            "order": 1,
+            "markdownDescription": "Absolute path to the Cortex MCP server entrypoint (`index.js`). Leave blank to auto-detect from a global `npm install -g cortex`."
+          },
+          "cortex.nodePath": {
+            "type": "string",
+            "default": "node",
+            "order": 2,
+            "markdownDescription": "Path to the Node.js binary used to spawn the MCP server. VS Code's built-in Electron binary won't work — this must point to a real `node` install."
+          },
+          "cortex.storePath": {
+            "type": "string",
+            "default": "",
+            "order": 3,
+            "markdownDescription": "Path to the Cortex store directory (where projects, findings, and config live). Leave blank to use `~/.cortex`."
+          },
+          "cortex.onboardingComplete": {
+            "type": "boolean",
+            "default": false,
+            "order": 4,
+            "description": "Internal flag — set to true after first-run onboarding completes. Reset to false to re-trigger onboarding."
+          }
+        }
+      },
+      {
+        "title": "Capture Behavior",
+        "properties": {
+          "cortex.findingSensitivity": {
+            "type": "string",
+            "enum": ["minimal", "conservative", "balanced", "aggressive"],
+            "default": "balanced",
+            "order": 1,
+            "enumDescriptions": [
+              "Minimal — Only save findings when you explicitly ask (e.g. 'remember this'). Zero auto-capture. Best for: users who want full manual control.",
+              "Conservative — Save decisions and pitfalls only. Auto-capture up to 3 findings per session. Best for: small projects or when noise is a concern.",
+              "Balanced — Save non-obvious patterns, decisions, pitfalls, and bugs worth remembering. Auto-capture up to 10 per session. Best for: most projects.",
+              "Aggressive — Save everything worth remembering, err on the side of capturing. Auto-capture up to 20 per session. Best for: complex projects with many contributors."
+            ],
+            "markdownDescription": "**Master control for how aggressively Cortex captures findings.** This sets the session cap (how many findings can be auto-captured per session) and the agent instruction (what kinds of insights to save). Higher levels capture more but may produce noise; lower levels are quieter but may miss useful patterns."
+          },
+          "cortex.proactivity": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "default": "high",
+            "order": 2,
+            "enumDescriptions": [
+              "High — Always auto-capture findings and tasks without waiting for explicit signals. Cortex actively monitors conversations for insights worth saving.",
+              "Medium — Only auto-capture when explicit signals are detected (e.g. words like 'add finding', 'worth remembering', tags like [decision], [pitfall]). Quieter but still responsive.",
+              "Low — Never auto-capture. Cortex only saves findings and tasks when you explicitly use a command or MCP tool. Fully manual."
+            ],
+            "markdownDescription": "**Global proactivity level** for both findings and tasks. Controls whether Cortex auto-captures insights or waits for explicit signals. Override per-type with the findings and tasks settings below."
+          },
+          "cortex.proactivityFindings": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "default": "high",
+            "order": 3,
+            "enumDescriptions": [
+              "High — Always auto-capture findings (patterns, decisions, bugs) from conversations.",
+              "Medium — Only capture findings when explicit signals detected (e.g. 'remember this', [decision] tags).",
+              "Low — Never auto-capture findings. Only saved via explicit add_finding calls."
+            ],
+            "markdownDescription": "**Override proactivity for findings only.** When set, this takes priority over the global `#cortex.proactivity#` for finding capture. Leave at the same level as global proactivity if you don't need a separate override."
+          },
+          "cortex.proactivityTasks": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "default": "high",
+            "order": 4,
+            "enumDescriptions": [
+              "High — Always auto-capture tasks from conversations (e.g. 'we should fix X' → task created).",
+              "Medium — Only capture tasks when explicit signals detected (e.g. 'add this to tasks', 'put that on the todo list').",
+              "Low — Never auto-capture tasks. Only created via explicit add_task calls."
+            ],
+            "markdownDescription": "**Override proactivity for tasks only.** When set, this takes priority over the global `#cortex.proactivity#` for task capture. Leave at the same level as global proactivity if you don't need a separate override."
+          },
+          "cortex.taskMode": {
+            "type": "string",
+            "enum": ["off", "manual", "suggest", "auto"],
+            "default": "auto",
+            "order": 5,
+            "enumDescriptions": [
+              "Off — Task system completely disabled. No task tracking, no task injection into context.",
+              "Manual — Tasks only created when you explicitly request them (e.g. 'add task: fix the login bug').",
+              "Suggest — Agent suggests tasks but waits for your confirmation before adding them. Good for reviewing before committing.",
+              "Auto — Agent adds tasks automatically when it detects actionable work items in conversation. Most hands-off."
+            ],
+            "markdownDescription": "**Task automation mode.** Controls how the agent interacts with the task system. Separate from proactivity — this controls the agent's permission to create/manage tasks, while proactivity controls *when* it tries to."
+          },
+          "cortex.autoExtract": {
+            "type": "boolean",
+            "default": true,
+            "order": 6,
+            "markdownDescription": "**Extract insights from project context on each prompt.** When enabled, the hook-prompt pipeline scans the current project for keywords and injects relevant cortex findings into the agent's context. Disable if you want cortex to be purely manual (search_knowledge only)."
+          },
+          "cortex.autoCapture": {
+            "type": "boolean",
+            "default": false,
+            "order": 7,
+            "markdownDescription": "**Extract insights from conversation transcripts at session end.** When enabled, cortex analyzes the full conversation after a session ends and captures findings it missed during the session. Useful for catching patterns that only become apparent in retrospect. Requires an active LLM endpoint."
+          }
+        }
+      },
+      {
+        "title": "Hooks & Integration",
+        "properties": {
+          "cortex.hooksEnabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "markdownDescription": "**Master switch for cortex hooks.** When disabled, no hooks fire on prompts, session starts, or stops — cortex becomes a passive MCP server that only responds when explicitly called. Hooks handle: context injection (SessionStart), knowledge retrieval (UserPromptSubmit), and auto-save (Stop)."
+          }
+        }
+      },
+      {
+        "title": "Semantic Analysis (Offline)",
+        "properties": {
+          "cortex.semanticDedup": {
+            "type": "boolean",
+            "default": false,
+            "order": 1,
+            "markdownDescription": "**Semantic duplicate detection for offline maintenance.** Used by `cortex maintain consolidate` and `cortex maintain extract` when no agent session is active. Detects findings that say the same thing in different words and merges them.\n\n- **Live sessions**: Dedup uses the active agent (Claude/GPT) at no extra cost.\n- **Batch mode**: Uses a separate LLM call per finding group. Results cached 24h.\n- **Cost**: ~$0.01/batch-session with Haiku."
+          },
+          "cortex.semanticConflict": {
+            "type": "boolean",
+            "default": false,
+            "order": 2,
+            "markdownDescription": "**Semantic conflict detection for offline maintenance.** Used by `cortex maintain consolidate` and `cortex maintain extract` when no agent session is active. Detects findings that contradict each other (e.g. 'always use X' vs 'never use X') and annotates them.\n\n- **Live sessions**: Conflict detection uses the active agent at no extra cost.\n- **Batch mode**: Uses a separate LLM call per finding group. Results cached 24h.\n- **Cost**: ~$0.01/batch-session with Haiku."
+          },
+          "cortex.llmModel": {
+            "type": "string",
+            "default": "",
+            "order": 3,
+            "enum": [
+              "",
+              "claude-haiku-4-5-20251001",
+              "claude-sonnet-4-6",
+              "claude-opus-4-6",
+              "gpt-4o-mini",
+              "gpt-4o"
+            ],
+            "enumDescriptions": [
+              "Server default (Haiku) — cheapest option, recommended",
+              "Claude Haiku 4.5 — fast and cheap, best for batch operations (~$0.01/session)",
+              "Claude Sonnet 4.6 — higher quality, ~10x more expensive than Haiku",
+              "Claude Opus 4.6 — highest quality but very expensive for batch; not recommended",
+              "GPT-4o mini — cost-effective OpenAI alternative for batch operations",
+              "GPT-4o — expensive for batch operations; not recommended"
+            ],
+            "markdownDescription": "**LLM model for offline cortex operations** (`consolidate`, `extract`). Only used when semantic dedup or conflict detection is enabled above.\n\n- **Live sessions**: The active agent handles dedup/conflict — this setting is ignored.\n- **Batch mode**: This model runs the analysis. Haiku is recommended for cost.\n- Sets the `CORTEX_LLM_MODEL` environment variable."
+          }
         }
       }
-    }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
