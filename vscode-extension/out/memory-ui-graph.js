@@ -6,7 +6,7 @@
  *   - <canvas id="graph-canvas"> inside .graph-container
  *   - <div id="graph-tooltip">
  *   - <div class="graph-controls"> with zoom/reset buttons
- *   - <div id="graph-filter">, <div id="graph-project-filter">, <div id="graph-limit-row">
+ *   - <div id="graph-filter"> (project/limit rows are hidden by script)
  *   - <div class="graph-legend">
  *   - <div id="graph-detail-panel"> with graph-detail-meta and graph-detail-body
  *
@@ -78,6 +78,7 @@ export function renderGraphScript() {
   var filterHealth = 'all';
   var nodeLimit = 500;
   var dragging = null, dragOffX = 0, dragOffY = 0;
+  var dragPullDepths = null;
   var panning = false, panStartX = 0, panStartY = 0;
   var alpha = 1.0;
   var animFrame = null;
@@ -98,6 +99,91 @@ export function renderGraphScript() {
   }
 
   function nodeColor(n) { return topicGroupColor(n.group); }
+
+  function colorWithAlpha(color, alphaVal) {
+    if (!color) return 'rgba(120,130,145,' + alphaVal + ')';
+    if (color.indexOf('hsl(') === 0) {
+      return color.replace('hsl(', 'hsla(').replace(')', ',' + alphaVal + ')');
+    }
+    if (color.indexOf('#') === 0) {
+      var hex = color.slice(1);
+      if (hex.length === 3) {
+        hex = hex.charAt(0) + hex.charAt(0) + hex.charAt(1) + hex.charAt(1) + hex.charAt(2) + hex.charAt(2);
+      }
+      if (hex.length === 6) {
+        var r = parseInt(hex.slice(0, 2), 16);
+        var g = parseInt(hex.slice(2, 4), 16);
+        var b = parseInt(hex.slice(4, 6), 16);
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + alphaVal + ')';
+      }
+    }
+    return 'rgba(120,130,145,' + alphaVal + ')';
+  }
+
+  function edgePhase(link) {
+    if (typeof link._phase === 'number') return link._phase;
+    var sid = (link._source && link._source.id ? String(link._source.id) : '');
+    var tid = (link._target && link._target.id ? String(link._target.id) : '');
+    var key = sid + '->' + tid;
+    var h = 2166136261;
+    for (var i = 0; i < key.length; i++) {
+      h ^= key.charCodeAt(i);
+      h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+    }
+    link._phase = ((h >>> 0) % 1024) / 1024;
+    return link._phase;
+  }
+
+  function collectConnectedDepths(root, maxDepth) {
+    if (!root) return null;
+    var neigh = new Map();
+    for (var i = 0; i < visibleLinks.length; i++) {
+      var lk = visibleLinks[i];
+      if (!lk._source || !lk._target) continue;
+      if (!neigh.has(lk._source)) neigh.set(lk._source, []);
+      if (!neigh.has(lk._target)) neigh.set(lk._target, []);
+      neigh.get(lk._source).push(lk._target);
+      neigh.get(lk._target).push(lk._source);
+    }
+
+    var depths = new Map();
+    depths.set(root, 0);
+    var queue = [root];
+    var q = 0;
+    while (q < queue.length) {
+      var cur = queue[q++];
+      var depth = depths.get(cur);
+      if (depth >= maxDepth) continue;
+      var adj = neigh.get(cur) || [];
+      for (var j = 0; j < adj.length; j++) {
+        var nxt = adj[j];
+        if (depths.has(nxt)) continue;
+        depths.set(nxt, depth + 1);
+        queue.push(nxt);
+      }
+    }
+    depths.delete(root);
+    return depths;
+  }
+
+  function applyDragClusterPull() {
+    if (!dragging || !dragPullDepths) return;
+    var entries = Array.from(dragPullDepths.entries());
+    for (var i = 0; i < entries.length; i++) {
+      var nd = entries[i][0];
+      var depth = entries[i][1];
+      if (!nd || nd === dragging) continue;
+      var depthWeight = depth === 1 ? 1.0 : depth === 2 ? 0.45 : 0.2;
+      var dx = dragging.x - nd.x;
+      var dy = dragging.y - nd.y;
+      var dist = Math.sqrt(dx * dx + dy * dy) + 0.001;
+      var soft = 0.009 * depthWeight / (1 + dist * 0.01);
+      nd.vx = (nd.vx || 0) + dx * soft;
+      nd.vy = (nd.vy || 0) + dy * soft;
+      nd.x += nd.vx * 0.12;
+      nd.y += nd.vy * 0.12;
+    }
+  }
 
   /* ── precomputed score lookups ─────────────────────────────────────── */
   var _scoreLookup = new Map(); // exact scoreKey -> score entry (precomputed)
@@ -343,7 +429,7 @@ export function renderGraphScript() {
 
   /* ── force simulation ───────────────────────────────────────────────── */
   var THETA = 0.7, REPULSION = 8000, SPRING_K = 0.02, REST_LEN = 120;
-  var GRAVITY = 0.006, ALPHA_DECAY = 0.04, MIN_ALPHA = 0.005, DAMPING = 0.35;
+  var GRAVITY = 0.012, ALPHA_DECAY = 0.04, MIN_ALPHA = 0.005, DAMPING = 0.35;
 
   var SMALL_GRAPH_THRESHOLD = 100;
 
@@ -409,19 +495,15 @@ export function renderGraphScript() {
       if (t !== dragging) { t.vx -= fx; t.vy -= fy; }
     }
 
-    /* relevance-based center gravity: relevant nodes pull to center, stale drift out */
+    /* uniform center gravity for organic spread */
     var cx = W / 2 / scale - panX / scale;
     var cy = H / 2 / scale - panY / scale;
     /* scale gravity down for larger graphs so clusters spread */
-    var gravScale = n > 50 ? 50 / n : 1;
+    var gravScale = n > 50 ? 80 / n : 1;
     for (var i = 0; i < n; i++) {
       var nd = nodes[i];
       if (nd === dragging) continue;
-      var rel = nodeRelevance(nd);
-      // relevance modulates gravity: high relevance → 3x base, low → 0.3x base
-      // this creates a natural center-to-edge gradient by importance
-      // floor at 0.15 prevents outlier nodes from drifting to infinity in large graphs
-      var grav = GRAVITY * Math.max(0.15, (0.3 + rel * 2.7) * gravScale);
+      var grav = GRAVITY * gravScale;
       nd.vx += (cx - nd.x) * grav * alpha;
       nd.vy += (cy - nd.y) * grav * alpha;
     }
@@ -565,7 +647,8 @@ export function renderGraphScript() {
     var links = visibleLinks;
 
     /* 1. edges */
-    ctx.lineWidth = Math.max(0.5, Math.min(0.8 / scale, 3));
+    var baseEdgeWidth = Math.max(0.3, Math.min(0.4 / scale, 1.2));
+    ctx.lineWidth = baseEdgeWidth;
     if (searchQuery) {
       var _sq = searchQuery.toLowerCase();
       for (var i = 0; i < links.length; i++) {
@@ -574,14 +657,14 @@ export function renderGraphScript() {
         var sMatch = ((lk._source.label || '').toLowerCase().indexOf(_sq) !== -1 || (lk._source.fullLabel || '').toLowerCase().indexOf(_sq) !== -1);
         var tMatch = ((lk._target.label || '').toLowerCase().indexOf(_sq) !== -1 || (lk._target.fullLabel || '').toLowerCase().indexOf(_sq) !== -1);
         ctx.beginPath();
-        ctx.strokeStyle = (sMatch || tMatch) ? 'rgba(150,150,150,0.18)' : 'rgba(150,150,150,0.04)';
+        ctx.strokeStyle = (sMatch || tMatch) ? 'rgba(150,150,150,0.11)' : 'rgba(150,150,150,0.035)';
         ctx.moveTo(lk._source.x, lk._source.y);
         ctx.lineTo(lk._target.x, lk._target.y);
         ctx.stroke();
       }
     } else {
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(150,150,150,0.18)';
+      ctx.strokeStyle = 'rgba(150,150,150,0.10)';
       for (var i = 0; i < links.length; i++) {
         var lk = links[i];
         if (!lk._source || !lk._target) continue;
@@ -590,6 +673,46 @@ export function renderGraphScript() {
       }
       ctx.stroke();
     }
+
+    /* subtle flowing pulse: per-edge phase offset + gaussian-like falloff */
+    for (var i = 0; i < links.length; i++) {
+      var lk = links[i];
+      var s = lk._source, t = lk._target;
+      if (!s || !t) continue;
+      var dx = t.x - s.x;
+      var dy = t.y - s.y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 2) continue;
+      var phase = edgePhase(lk);
+      var p = (pulseT * 0.055 + phase) % 1;
+      var center = p * dist;
+      var halfLen = Math.min(36 / scale, dist * 0.35) * (0.75 + 0.25 * Math.sin((pulseT + phase) * Math.PI * 2));
+      var sPos = Math.max(0, center - halfLen);
+      var ePos = Math.min(dist, center + halfLen);
+      var x1 = s.x + dx * (sPos / dist);
+      var y1 = s.y + dy * (sPos / dist);
+      var x2 = s.x + dx * (ePos / dist);
+      var y2 = s.y + dy * (ePos / dist);
+      var glowAlpha = 0.16;
+      if (searchQuery) {
+        var q = searchQuery.toLowerCase();
+        var sm = ((s.label || '').toLowerCase().indexOf(q) !== -1 || (s.fullLabel || '').toLowerCase().indexOf(q) !== -1);
+        var tm = ((t.label || '').toLowerCase().indexOf(q) !== -1 || (t.fullLabel || '').toLowerCase().indexOf(q) !== -1);
+        glowAlpha = (sm || tm) ? 0.16 : 0.08;
+      }
+      var glowColor = colorWithAlpha(nodeColor(s), glowAlpha);
+      var grad = ctx.createLinearGradient(x1, y1, x2, y2);
+      grad.addColorStop(0, colorWithAlpha(nodeColor(s), 0));
+      grad.addColorStop(0.5, glowColor);
+      grad.addColorStop(1, colorWithAlpha(nodeColor(s), 0));
+      ctx.beginPath();
+      ctx.lineWidth = baseEdgeWidth * 2.6;
+      ctx.strokeStyle = grad;
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+    ctx.lineWidth = baseEdgeWidth;
 
     /* 2. health rings with dash patterns + text labels (WCAG 1.4.1) */
     for (var i = 0; i < nodes.length; i++) {
@@ -954,6 +1077,7 @@ export function renderGraphScript() {
       var hit = hitTest(mx, my);
       if (hit) {
         dragging = hit;
+        dragPullDepths = collectConnectedDepths(hit, 2);
         dragOffX = (mx - panX) / scale - hit.x;
         dragOffY = (my - panY) / scale - hit.y;
         renderGraphDetails(hit);
@@ -973,6 +1097,8 @@ export function renderGraphScript() {
         dragging.y = (my - panY) / scale - dragOffY;
         dragging.vx = 0;
         dragging.vy = 0;
+        applyDragClusterPull();
+        alpha = Math.max(alpha, 0.14);
         render();
       } else if (panning) {
         panX = mx - panStartX;
@@ -1004,12 +1130,21 @@ export function renderGraphScript() {
     });
 
     canvas.addEventListener('mouseup', function() {
-      dragging = null;
+      if (dragging) {
+        dragging = null;
+        dragPullDepths = null;
+        /* restart simulation so gravity pulls nodes back into place */
+        alpha = Math.max(alpha, 0.3);
+      }
       panning = false;
     });
 
     canvas.addEventListener('mouseleave', function() {
-      dragging = null;
+      if (dragging) {
+        dragging = null;
+        dragPullDepths = null;
+        alpha = Math.max(alpha, 0.3);
+      }
       panning = false;
       if (tooltip) tooltip.style.display = 'none';
     });
@@ -1146,7 +1281,7 @@ export function renderGraphScript() {
     }
     var topicSlugsInData = Object.keys(topicsInData).sort(function(a, b) { return topicsInData[a].localeCompare(topicsInData[b]); });
 
-    /* type filter (multi-select toggles with color dots) */
+    /* type filter options for dropdown */
     var types = [
       { key: 'project', label: 'Projects', color: COLORS.project },
       { key: 'finding', label: 'Findings', color: COLORS.other },
@@ -1154,126 +1289,111 @@ export function renderGraphScript() {
       { key: 'entity', label: 'Entities', color: COLORS.entity },
       { key: 'reference', label: 'Refs', color: COLORS.reference }
     ];
-    var typeHtml = '<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Type</span>';
+    var typeSection = '';
     for (var i = 0; i < types.length; i++) {
-      var t = types[i];
-      var isActive = !!filterTypes[t.key];
-      var pillBg = isActive ? t.color + '22' : 'transparent';
-      var pillBorder = isActive ? t.color + '55' : 'var(--border)';
-      var style = 'display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;border:1px solid ' + pillBorder + ';font-size:12px;font-weight:500;cursor:pointer;user-select:none;background:' + pillBg + ';transition:all .15s;' + (isActive ? 'opacity:1' : 'opacity:0.45');
-      typeHtml += '<span style="' + style + '" data-filter-type="' + t.key + '">';
-      typeHtml += '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + t.color + '"></span>';
-      typeHtml += esc(t.label) + '</span>';
+      var tp = types[i];
+      typeSection += '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink);cursor:pointer">';
+      typeSection += '<input type="checkbox" data-filter-type-check="' + tp.key + '"' + (filterTypes[tp.key] ? ' checked' : '') + ' />';
+      typeSection += '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + tp.color + '"></span>' + esc(tp.label);
+      typeSection += '</label>';
     }
 
-    /* per-topic subtoggle pills (only shown when Findings master toggle is on) */
-    if (filterTypes.finding && topicSlugsInData.length > 0) {
-      typeHtml += '<span style="display:inline-block;width:1px;height:16px;background:var(--border);margin:0 4px;vertical-align:middle"></span>';
-      for (var i = 0; i < topicSlugsInData.length; i++) {
-        var slug = topicSlugsInData[i];
-        var topicKey = 'topic:' + slug;
-        var color = topicGroupColor(topicKey);
-        /* Default to active if no explicit setting yet */
-        var isTopicActive = (topicKey in filterTypes) ? !!filterTypes[topicKey] : true;
-        var tPillBg = isTopicActive ? color + '22' : 'transparent';
-        var tPillBorder = isTopicActive ? color + '55' : 'var(--border)';
-        var tStyle = 'display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;border:1px solid ' + tPillBorder + ';font-size:11px;font-weight:500;cursor:pointer;user-select:none;background:' + tPillBg + ';transition:all .15s;' + (isTopicActive ? 'opacity:1' : 'opacity:0.4');
-        typeHtml += '<span style="' + tStyle + '" data-filter-type="' + topicKey + '">';
-        typeHtml += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + '"></span>';
-        typeHtml += esc(topicsInData[slug]) + '</span>';
-      }
+    var topicSection = '';
+    for (var j = 0; j < topicSlugsInData.length; j++) {
+      var slug = topicSlugsInData[j];
+      var topicKey = 'topic:' + slug;
+      var topicColor = topicGroupColor(topicKey);
+      var topicActive = (topicKey in filterTypes) ? !!filterTypes[topicKey] : true;
+      topicSection += '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink);cursor:pointer">';
+      topicSection += '<input type="checkbox" data-filter-type-check="' + topicKey + '"' + (topicActive ? ' checked' : '') + ' />';
+      topicSection += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + topicColor + '"></span>' + esc(topicsInData[slug]);
+      topicSection += '</label>';
     }
 
-    /* separator + health filter */
-    typeHtml += '<span style="display:inline-block;width:1px;height:20px;background:var(--border);margin:0 6px"></span>';
-    typeHtml += '<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:2px">Health</span>';
+    /* health filter options */
     var healthFilters = [
-      { key: 'all', label: 'All', color: 'var(--muted)' },
-      { key: 'healthy', label: 'Healthy', color: '#10b981' },
-      { key: 'stale', label: 'Stale', color: '#f59e0b' },
-      { key: 'decaying', label: 'Decaying', color: '#ef4444' }
+      { key: 'all', label: 'All' },
+      { key: 'healthy', label: 'Healthy' },
+      { key: 'stale', label: 'Stale' },
+      { key: 'decaying', label: 'Decaying' }
     ];
+    var healthSection = '';
     for (var hi = 0; hi < healthFilters.length; hi++) {
       var hf = healthFilters[hi];
-      var isHealthActive = filterHealth === hf.key;
-      var hPillBg = isHealthActive ? (hf.key === 'all' ? 'var(--surface)' : hf.color + '22') : 'transparent';
-      var hPillBorder = isHealthActive ? (hf.key === 'all' ? 'var(--border)' : hf.color + '55') : 'var(--border)';
-      var hStyle = 'display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;border:1px solid ' + hPillBorder + ';font-size:12px;font-weight:500;cursor:pointer;user-select:none;background:' + hPillBg + ';transition:all .15s;' + (isHealthActive ? 'opacity:1' : 'opacity:0.5');
-      typeHtml += '<span style="' + hStyle + '" data-health-filter="' + hf.key + '">';
-      if (hf.key !== 'all') {
-        typeHtml += '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + hf.color + '"></span>';
-      }
-      typeHtml += esc(hf.label) + '</span>';
+      healthSection += '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink);cursor:pointer">';
+      healthSection += '<input type="radio" name="graph-health-filter" value="' + hf.key + '"' + (filterHealth === hf.key ? ' checked' : '') + ' />';
+      healthSection += esc(hf.label) + '</label>';
     }
 
-    /* separator + search input */
-    typeHtml += '<span style="display:inline-block;width:1px;height:20px;background:var(--border);margin:0 6px"></span>';
-    typeHtml += '<input type="text" data-search-filter placeholder="Search nodes..." style="padding:5px 12px;border-radius:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px;width:160px" />';
-
-    filterEl.innerHTML = typeHtml;
-
-    /* wire up type/topic filter clicks via addEventListener */
-    var typeEls = filterEl.querySelectorAll('[data-filter-type]');
-    for (var ti = 0; ti < typeEls.length; ti++) {
-      (function(el) {
-        el.addEventListener('click', function() {
-          window.graphFilterBy(el.getAttribute('data-filter-type'));
-        });
-      })(typeEls[ti]);
+    var projects = {};
+    for (var k = 0; k < allNodes.length; k++) {
+      if (allNodes[k].project) projects[allNodes[k].project] = 1;
+    }
+    var projNames = Object.keys(projects).sort();
+    var projectOpts = '<option value="all"' + (filterProject === 'all' ? ' selected' : '') + '>All projects</option>';
+    for (var p = 0; p < projNames.length; p++) {
+      var proj = projNames[p];
+      projectOpts += '<option value="' + esc(proj) + '"' + (filterProject === proj ? ' selected' : '') + '>' + esc(proj) + '</option>';
     }
 
-    /* wire up health filter */
-    var healthEls = filterEl.querySelectorAll('[data-health-filter]');
-    for (var hi = 0; hi < healthEls.length; hi++) {
-      (function(el) {
-        el.addEventListener('click', function() { window.graphHealthFilter(el.getAttribute('data-health-filter')); });
-      })(healthEls[hi]);
-    }
+    filterEl.innerHTML =
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;width:100%">' +
+        '<input type="text" data-search-filter placeholder="Search nodes..." value="' + esc(searchQuery || '') + '" style="flex:1 1 auto;min-width:180px;padding:7px 12px;border-radius:8px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" />' +
+        '<details data-filter-menu style="position:relative;flex:0 0 auto">' +
+          '<summary style="list-style:none;cursor:pointer;padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;font-weight:600;color:var(--ink);user-select:none">Filters</summary>' +
+          '<div style="position:absolute;right:0;top:calc(100% + 8px);z-index:20;min-width:290px;max-height:330px;overflow:auto;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-raised,var(--surface));box-shadow:var(--shadow-lg)">' +
+            '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Type</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:10px">' + typeSection + '</div>' +
+            (topicSection ? '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Topics</div><div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:10px">' + topicSection + '</div>' : '') +
+            '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Health</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:10px">' + healthSection + '</div>' +
+            '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Project</div>' +
+            '<select data-project-filter style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink);font-size:12px;margin-bottom:10px">' + projectOpts + '</select>' +
+            '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Node Limit</div>' +
+            '<input type="number" data-limit-input min="10" max="10000" value="' + nodeLimit + '" style="width:110px;padding:6px 8px;border-radius:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" />' +
+          '</div>' +
+        '</details>' +
+        '<span style="flex:0 0 auto;font-size:11px;color:var(--muted);white-space:nowrap">' + visibleNodes.length + ' / ' + allNodes.length + '</span>' +
+      '</div>';
 
-    /* wire up search input */
-    var searchInput = filterEl.querySelector('[data-search-filter]');
-    if (searchInput) {
-      searchInput.addEventListener('input', function() { window.graphSearchFilter(searchInput.value); });
-    }
-
-    /* project filter */
     if (projectFilterEl) {
-      var projects = {};
-      for (var i = 0; i < allNodes.length; i++) {
-        if (allNodes[i].project) projects[allNodes[i].project] = 1;
-      }
-      var projHtml = '<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Project</span>';
-      projHtml += '<button class="' + (filterProject === 'all' ? 'btn btn-sm active' : 'btn btn-sm') + '" style="padding:4px 12px" data-project-filter="all">All</button>';
-      var projNames = Object.keys(projects).sort();
-      for (var i = 0; i < projNames.length; i++) {
-        var p = projNames[i];
-        var cls = p === filterProject ? 'btn btn-sm active' : 'btn btn-sm';
-        projHtml += '<button class="' + cls + '" style="padding:4px 12px" data-project-filter="' + esc(p) + '">' + esc(p) + '</button>';
-      }
-      projectFilterEl.innerHTML = projHtml;
-
-      /* wire up project filter clicks */
-      var projBtns = projectFilterEl.querySelectorAll('[data-project-filter]');
-      for (var pi = 0; pi < projBtns.length; pi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            window.graphProjectFilter(btn.getAttribute('data-project-filter'));
-          });
-        })(projBtns[pi]);
-      }
+      projectFilterEl.style.display = 'none';
+      projectFilterEl.innerHTML = '';
+    }
+    if (limitRow) {
+      limitRow.style.display = 'none';
+      limitRow.innerHTML = '';
     }
 
-    /* node limit */
-    if (limitRow) {
-      limitRow.innerHTML = '<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Limit</span>' +
-        '<input type="number" data-limit-input min="10" max="10000" value="' + nodeLimit + '" style="width:72px;padding:5px 8px;border-radius:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" />' +
-        '<span style="font-size:11px;color:var(--muted)">' + visibleNodes.length + ' of ' + allNodes.length + ' nodes</span>';
+    var searchInput = filterEl.querySelector('[data-search-filter]');
+    if (searchInput) searchInput.addEventListener('input', function() { window.graphSearchFilter(searchInput.value); });
 
-      /* wire up limit input */
-      var limitInput = limitRow.querySelector('[data-limit-input]');
-      if (limitInput) {
-        limitInput.addEventListener('change', function() { window.applyGraphLimit(parseInt(limitInput.value, 10)); });
-      }
+    var typeChecks = filterEl.querySelectorAll('[data-filter-type-check]');
+    for (var c = 0; c < typeChecks.length; c++) {
+      (function(chk) {
+        chk.addEventListener('change', function() {
+          window.graphSetFilterType(chk.getAttribute('data-filter-type-check'), chk.checked);
+        });
+      })(typeChecks[c]);
+    }
+
+    var healthRadios = filterEl.querySelectorAll('input[name="graph-health-filter"]');
+    for (var r = 0; r < healthRadios.length; r++) {
+      (function(el) {
+        el.addEventListener('change', function() {
+          if (el.checked) window.graphHealthFilter(el.value);
+        });
+      })(healthRadios[r]);
+    }
+
+    var projectSelect = filterEl.querySelector('[data-project-filter]');
+    if (projectSelect) {
+      projectSelect.addEventListener('change', function() { window.graphProjectFilter(projectSelect.value); });
+    }
+
+    var limitInput = filterEl.querySelector('[data-limit-input]');
+    if (limitInput) {
+      limitInput.addEventListener('change', function() { window.applyGraphLimit(parseInt(limitInput.value, 10)); });
     }
   }
 
@@ -1359,6 +1479,15 @@ export function renderGraphScript() {
 
   window.graphFilterBy = function(type) {
     filterTypes[type] = !filterTypes[type];
+    applyFilters();
+    buildFilterBar();
+    initPositions();
+    startSimulation();
+    announceFilterChange();
+  };
+
+  window.graphSetFilterType = function(type, enabled) {
+    filterTypes[type] = !!enabled;
     applyFilters();
     buildFilterBar();
     initPositions();

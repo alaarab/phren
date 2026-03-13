@@ -5,7 +5,7 @@ export async function showProjectFile(client: CortexClient, projectName: string,
   const panel = vscode.window.createWebviewPanel(
     "cortex.projectFile",
     `${projectName}/${fileName}`,
-    vscode.ViewColumn.Beside,
+    vscode.ViewColumn.One,
     {}
   );
 

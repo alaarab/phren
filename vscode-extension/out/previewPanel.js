@@ -51,11 +51,11 @@ function showPreview(opts) {
         if (opts.onMessage) {
             messageDisposable = panel.webview.onDidReceiveMessage(opts.onMessage);
         }
-        panel.reveal(vscode.ViewColumn.Beside, true);
+        panel.reveal(vscode.ViewColumn.One, true);
         return;
     }
     currentKey = opts.key;
-    panel = vscode.window.createWebviewPanel("cortex.preview", opts.title, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }, { enableScripts: true });
+    panel = vscode.window.createWebviewPanel("cortex.preview", opts.title, { viewColumn: vscode.ViewColumn.One, preserveFocus: true }, { enableScripts: true });
     panel.onDidDispose(() => {
         panel = undefined;
         currentKey = undefined;

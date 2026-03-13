@@ -143,7 +143,7 @@ export async function showSearchQuickPick(client: CortexClient): Promise<void> {
     const panel = vscode.window.createWebviewPanel(
       "cortex.searchResult",
       panelTitle,
-      vscode.ViewColumn.Beside,
+      vscode.ViewColumn.One,
       {},
     );
     panel.webview.html = renderSearchResultHtml(panelTitle, resultItem.result.project, resultItem.fullContent);

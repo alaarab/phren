@@ -25,7 +25,7 @@ export function showPreview(opts: PreviewOptions): void {
     if (opts.onMessage) {
       messageDisposable = panel.webview.onDidReceiveMessage(opts.onMessage);
     }
-    panel.reveal(vscode.ViewColumn.Beside, true);
+    panel.reveal(vscode.ViewColumn.One, true);
     return;
   }
 
@@ -33,7 +33,7 @@ export function showPreview(opts: PreviewOptions): void {
   panel = vscode.window.createWebviewPanel(
     "cortex.preview",
     opts.title,
-    { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+    { viewColumn: vscode.ViewColumn.One, preserveFocus: true },
     { enableScripts: true },
   );
 
