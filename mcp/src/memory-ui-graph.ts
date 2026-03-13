@@ -344,7 +344,7 @@ export function renderGraphScript(): string {
 
   /* ── force simulation ───────────────────────────────────────────────── */
   var THETA = 0.7, REPULSION = 8000, SPRING_K = 0.02, REST_LEN = 120;
-  var GRAVITY = 0.006, ALPHA_DECAY = 0.04, MIN_ALPHA = 0.005, DAMPING = 0.35;
+  var GRAVITY = 0.012, ALPHA_DECAY = 0.04, MIN_ALPHA = 0.005, DAMPING = 0.35;
 
   var SMALL_GRAPH_THRESHOLD = 100;
 
@@ -414,7 +414,7 @@ export function renderGraphScript(): string {
     var cx = W / 2 / scale - panX / scale;
     var cy = H / 2 / scale - panY / scale;
     /* scale gravity down for larger graphs so clusters spread */
-    var gravScale = n > 50 ? 50 / n : 1;
+    var gravScale = n > 50 ? 80 / n : 1;
     for (var i = 0; i < n; i++) {
       var nd = nodes[i];
       if (nd === dragging) continue;
@@ -566,7 +566,7 @@ export function renderGraphScript(): string {
     var links = visibleLinks;
 
     /* 1. edges */
-    ctx.lineWidth = Math.max(0.5, Math.min(0.8 / scale, 3));
+    ctx.lineWidth = Math.max(0.3, Math.min(0.4 / scale, 1.2));
     if (searchQuery) {
       var _sq = searchQuery.toLowerCase();
       for (var i = 0; i < links.length; i++) {
@@ -1005,12 +1005,19 @@ export function renderGraphScript(): string {
     });
 
     canvas.addEventListener('mouseup', function() {
-      dragging = null;
+      if (dragging) {
+        dragging = null;
+        /* restart simulation so gravity pulls nodes back into place */
+        alpha = Math.max(alpha, 0.3);
+      }
       panning = false;
     });
 
     canvas.addEventListener('mouseleave', function() {
-      dragging = null;
+      if (dragging) {
+        dragging = null;
+        alpha = Math.max(alpha, 0.3);
+      }
       panning = false;
       if (tooltip) tooltip.style.display = 'none';
     });
