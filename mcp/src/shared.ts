@@ -71,6 +71,7 @@ export {
   computeCortexLiveStateToken,
   getCortexPath,
   qualityMarkers,
+  atomicWriteText,
 } from "./cortex-paths.js";
 
 export {

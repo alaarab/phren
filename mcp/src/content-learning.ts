@@ -35,19 +35,6 @@ import {
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;
 
-function normalizeMigratedBullet(raw: string): string {
-  const cleaned = raw
-    .replace(/^\s*[-*]\s*/, "")
-    .replace(/^\[[ xX]\]\s*/, "")
-    .replace(/^\d+\.\s*/, "")
-    .trim();
-  return cleaned;
-}
-
-function shouldPinCanonical(text: string): boolean {
-  return /(must|always|never|avoid|required|critical|do not|don't)\b/i.test(text);
-}
-
 interface PreparedFinding {
   original: string;
   normalized: string;

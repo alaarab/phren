@@ -4,9 +4,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import {
+  atomicWriteText,
   debugLog,
   canonicalLocksFile,
   findProjectNameCaseInsensitive,
@@ -38,13 +38,6 @@ import {
 import { getBuiltinTopicConfig, normalizeBuiltinTopicDomain, type BuiltinTopic } from "./project-topics.js";
 import { writeSkillMd } from "./link-skills.js";
 import { syncScopeSkillsToDir } from "./skill-files.js";
-
-function atomicWriteText(filePath: string, content: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, content);
-  fs.renameSync(tmpPath, filePath);
-}
 
 export interface PostInitCheck {
   name: string;

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import { CortexError, isRecord } from "./cortex-core.js";
@@ -47,9 +48,9 @@ export function rootManifestPath(cortexPath: string): string {
   return path.join(cortexPath, ROOT_MANIFEST_FILENAME);
 }
 
-function atomicWriteText(filePath: string, content: string): void {
+export function atomicWriteText(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(tmpPath, content);
   fs.renameSync(tmpPath, filePath);
 }

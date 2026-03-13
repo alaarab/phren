@@ -98,7 +98,6 @@ interface ArchivedTopicEntry {
 }
 
 const TOPIC_CONFIG_FILENAME = "topic-config.json";
-const AUTO_TOPIC_MARKER_PREFIX = "<!-- cortex:auto-topic";
 const AUTO_TOPIC_MARKER_RE = /^<!--\s*cortex:auto-topic(?:\s+slug=([a-z0-9_-]+))?\s*-->$/;
 const ARCHIVED_SECTION_RE = /^## Archived (\d{4}-\d{2}-\d{2})$/;
 const SOFTWARE_TOPICS: ProjectTopic[] = [

@@ -119,20 +119,17 @@ interface MatchedFinding {
 
 export type ContradictionResolution = "keep_a" | "keep_b" | "keep_both" | "retract_both";
 
-function normalizeFindingText(value: string): string {
-  return value
-    .replace(/^-\s+/, "")
-    .replace(/<!--.*?-->/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
 function findingTextFromLine(line: string): string {
   return line
     .replace(/^-\s+/, "")
     .replace(/<!--.*?-->/g, "")
     .trim();
+}
+
+function normalizeFindingText(value: string): string {
+  return findingTextFromLine(value)
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 function removeRelationComments(line: string): string {

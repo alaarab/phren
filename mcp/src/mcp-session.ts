@@ -17,6 +17,7 @@ import { getProjectDirs } from "./shared.js";
 import { getActiveTaskForSession } from "./task-lifecycle.js";
 import { listTaskCheckpoints, writeTaskCheckpoint } from "./session-checkpoints.js";
 import { markImpactEntriesCompletedForSession } from "./finding-impact.js";
+import { atomicWriteJson, debugError, scanSessionFiles } from "./session-utils.js";
 
 interface SessionState {
   sessionId: string;
@@ -126,72 +127,46 @@ function sessionFileForId(cortexPath: string, sessionId: string): string {
 function readSessionStateFile(file: string): SessionState | null {
   if (!fs.existsSync(file)) return null;
   try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readSessionStateFile: ${err instanceof Error ? err.message : String(err)}\n`);
+    debugError("readSessionStateFile", err);
     return null;
   }
 }
 
 function writeSessionStateFile(file: string, state: SessionState): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tempFile = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tempFile, JSON.stringify(state, null, 2));
-  fs.renameSync(tempFile, file);
+  atomicWriteJson(file, state);
 }
 
 /** Find the most recent *active* (not ended) session file by mtime. */
 function findMostRecentSession(cortexPath: string): { file: string; state: SessionState } | null {
   const dir = sessionsDir(cortexPath);
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSession readdir: ${err instanceof Error ? err.message : String(err)}\n`);
-    return null;
-  }
+  const results = scanSessionFiles<SessionState>(
+    dir,
+    readSessionStateFile,
+    (state) => !state.endedAt,
+    { errorScope: "findMostRecentSession" },
+  );
 
-  let bestFile: string | null = null;
-  let bestMtime = 0;
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
-    const fullPath = path.join(dir, entry.name);
-    try {
-      const state = readSessionStateFile(fullPath);
-      // Skip ended sessions — fallback should only return active sessions
-      if (!state || state.endedAt) continue;
-      const stat = fs.statSync(fullPath);
-      if (stat.mtimeMs > bestMtime) {
-        bestMtime = stat.mtimeMs;
-        bestFile = fullPath;
-      }
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSession statFile: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  }
-
-  if (!bestFile) return null;
-  const state = readSessionStateFile(bestFile);
-  if (!state) return null;
-  return { file: bestFile, state };
+  if (results.length === 0) return null;
+  const best = results[0]; // already sorted newest-mtime-first
+  return { file: best.fullPath, state: best.data };
 }
 
 export function resolveActiveSessionScope(cortexPath: string, project?: string): string | undefined {
   const dir = sessionsDir(cortexPath);
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return undefined;
-  }
+  const results = scanSessionFiles<SessionState>(
+    dir,
+    readSessionStateFile,
+    (state) => {
+      if (state.endedAt) return false;
+      if (project && state.project && state.project !== project) return false;
+      return true;
+    },
+    { includeMtime: false, errorScope: "resolveActiveSessionScope" },
+  );
 
   let bestState: SessionState | null = null;
   let bestStartedAt = 0;
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
-    const fullPath = path.join(dir, entry.name);
-    const state = readSessionStateFile(fullPath);
-    if (!state || state.endedAt) continue;
-    if (project && state.project && state.project !== project) continue;
+  for (const { data: state } of results) {
     const startedAt = Date.parse(state.startedAt || "");
     const candidate = Number.isNaN(startedAt) ? 0 : startedAt;
     if (!bestState || candidate >= bestStartedAt) {
@@ -213,7 +188,7 @@ function writeLastSummary(cortexPath: string, summary: string, sessionId: string
     const data = { summary, sessionId, project, endedAt: new Date().toISOString() };
     fs.writeFileSync(lastSummaryPath(cortexPath), JSON.stringify(data, null, 2));
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] writeLastSummary: ${err instanceof Error ? err.message : String(err)}\n`);
+    debugError("writeLastSummary", err);
   }
 }
 
@@ -232,41 +207,21 @@ function findMostRecentSummaryWithProject(cortexPath: string): { summary: string
       if (data.summary) return { summary: data.summary, project: data.project };
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSummaryWithProject fastPath: ${err instanceof Error ? err.message : String(err)}\n`);
+    debugError("findMostRecentSummaryWithProject fastPath", err);
   }
 
   // Slow path: scan all session files
   const dir = sessionsDir(cortexPath);
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSummaryWithProject readdir: ${err instanceof Error ? err.message : String(err)}\n`);
-    return { summary: null };
-  }
+  const results = scanSessionFiles<SessionState>(
+    dir,
+    readSessionStateFile,
+    (state) => !!state.summary,
+    { errorScope: "findMostRecentSummaryWithProject" },
+  );
 
-  let bestSummary: string | null = null;
-  let bestProject: string | undefined;
-  let bestMtime = 0;
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
-    const fullPath = path.join(dir, entry.name);
-    try {
-      const state = readSessionStateFile(fullPath);
-      if (!state || !state.summary) continue;
-      const stat = fs.statSync(fullPath);
-      if (stat.mtimeMs > bestMtime) {
-        bestMtime = stat.mtimeMs;
-        bestSummary = state.summary;
-        bestProject = state.project;
-      }
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findMostRecentSummaryWithProject statFile: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-  }
-
-  return { summary: bestSummary, project: bestProject };
+  if (results.length === 0) return { summary: null };
+  const best = results[0]; // already sorted newest-mtime-first
+  return { summary: best.data.summary!, project: best.data.project };
 }
 
 /** Resolve session file from an explicit sessionId or a previously-bound connectionId. */
@@ -286,22 +241,18 @@ function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId
 /** Remove session files older than 24 hours. */
 function cleanupStaleSessions(cortexPath: string): number {
   const dir = sessionsDir(cortexPath);
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanupStaleSessions readdir: ${err instanceof Error ? err.message : String(err)}\n`);
-    return 0;
-  }
+  // Scan all session files (keep all, we'll filter and unlink manually)
+  const results = scanSessionFiles<SessionState | null>(
+    dir,
+    (filePath) => readSessionStateFile(filePath) ?? null,
+    () => true, // accept everything — we decide inside the loop
+    { includeMtime: false, errorScope: "cleanupStaleSessions" },
+  );
 
   let cleaned = 0;
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
-    const fullPath = path.join(dir, entry.name);
+  for (const { fullPath, data: state } of results) {
     try {
       // prefer startedAt from the JSON content over mtime (reliable on noatime mounts)
-      const state = readSessionStateFile(fullPath);
       const ageMs = state?.startedAt
         ? Date.now() - new Date(state.startedAt).getTime()
         : Date.now() - fs.statSync(fullPath).mtimeMs;
@@ -310,7 +261,7 @@ function cleanupStaleSessions(cortexPath: string): number {
         cleaned++;
       }
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanupStaleSessions statFile: ${err instanceof Error ? err.message : String(err)}\n`);
+      debugError("cleanupStaleSessions entry", err);
     }
   }
   return cleaned;
@@ -355,7 +306,7 @@ function incrementSessionCounter(
       });
     });
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] incrementSessionCounter(${field}): ${err instanceof Error ? err.message : String(err)}\n`);
+    debugError(`incrementSessionCounter(${field})`, err);
   }
 }
 
@@ -376,48 +327,32 @@ export interface SessionHistoryEntry {
 /** List all sessions (both active and ended) from the sessions directory, sorted newest first. */
 export function listAllSessions(cortexPath: string, limit = 50): SessionHistoryEntry[] {
   const dir = sessionsDir(cortexPath);
-  let files: fs.Dirent[];
-  try {
-    files = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  // Sort files by mtime (newest first) BEFORE parsing, then stop after `limit`
-  const sessionFiles = files
-    .filter((entry) => entry.isFile() && entry.name.startsWith("session-") && entry.name.endsWith(".json"))
-    .map((entry) => {
-      const fullPath = path.join(dir, entry.name);
-      let mtimeMs = 0;
-      try { mtimeMs = fs.statSync(fullPath).mtimeMs; } catch { /* use 0 */ }
-      return { fullPath, mtimeMs };
-    })
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  // scanSessionFiles returns results sorted by mtime (newest first)
+  const results = scanSessionFiles<SessionState>(
+    dir,
+    readSessionStateFile,
+    () => true,
+    { errorScope: "listAllSessions" },
+  );
 
   const entries: SessionHistoryEntry[] = [];
-  for (const { fullPath } of sessionFiles) {
+  for (const { data: state } of results) {
     if (entries.length >= limit) break;
-    try {
-      const state = readSessionStateFile(fullPath);
-      if (!state) continue;
-      const durationMs = state.endedAt
-        ? new Date(state.endedAt).getTime() - new Date(state.startedAt).getTime()
-        : Date.now() - new Date(state.startedAt).getTime();
-      entries.push({
-        sessionId: state.sessionId,
-        project: state.project,
-        agentScope: state.agentScope,
-        startedAt: state.startedAt,
-        endedAt: state.endedAt,
-        durationMins: Math.round(durationMs / 60000),
-        summary: state.summary,
-        findingsAdded: Number.isFinite(state.findingsAdded) ? state.findingsAdded : 0,
-        tasksCompleted: Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0,
-        status: state.endedAt ? "ended" : "active",
-      });
-    } catch {
-      continue;
-    }
+    const durationMs = state.endedAt
+      ? new Date(state.endedAt).getTime() - new Date(state.startedAt).getTime()
+      : Date.now() - new Date(state.startedAt).getTime();
+    entries.push({
+      sessionId: state.sessionId,
+      project: state.project,
+      agentScope: state.agentScope,
+      startedAt: state.startedAt,
+      endedAt: state.endedAt,
+      durationMins: Math.round(durationMs / 60000),
+      summary: state.summary,
+      findingsAdded: Number.isFinite(state.findingsAdded) ? state.findingsAdded : 0,
+      tasksCompleted: Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0,
+      status: state.endedAt ? "ended" : "active",
+    });
   }
 
   // Already sorted by mtime, but re-sort by startedAt for accuracy
@@ -563,7 +498,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start findingsRead: ${err instanceof Error ? err.message : String(err)}\n`);
+        debugError("session_start findingsRead", err);
       }
       try {
         const tasks = readTasks(cortexPath, activeProject);
@@ -577,7 +512,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start taskRead: ${err instanceof Error ? err.message : String(err)}\n`);
+        debugError("session_start taskRead", err);
       }
       // Surface extracted preferences/facts for this project
       try {
@@ -586,7 +521,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           parts.push(`## Preferences (${activeProject})\n${facts.map(f => `- ${f.fact}`).join("\n")}`);
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start factsRead: ${err instanceof Error ? err.message : String(err)}\n`);
+        debugError("session_start factsRead", err);
       }
 
       try {
@@ -607,7 +542,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           parts.push(`## Continue where you left off? (${activeProject})\n${lines.join("\n")}`);
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] session_start checkpointsRead: ${err instanceof Error ? err.message : String(err)}\n`);
+        debugError("session_start checkpointsRead", err);
       }
     }
 

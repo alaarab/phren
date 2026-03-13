@@ -9,6 +9,7 @@ import { execFileSync } from "child_process";
 import { configureAllHooks } from "./hooks.js";
 import { getMachineName, machineFilePath, persistMachineName } from "./machine-identity.js";
 import {
+  atomicWriteText,
   debugLog,
   isRecord,
   hookConfigPath,
@@ -129,7 +130,7 @@ import {
   parseProjectOwnershipMode,
   getProjectOwnershipDefault,
 } from "./project-config.js";
-import { PROACTIVITY_LEVELS, type ProactivityLevel } from "./proactivity.js";
+import { type ProactivityLevel } from "./proactivity.js";
 import { getWorkflowPolicy, updateWorkflowPolicy } from "./shared-governance.js";
 import { addProjectToProfile } from "./profile-store.js";
 
@@ -144,13 +145,6 @@ interface HookEntry {
 }
 
 type HookMap = Partial<Record<"UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", HookEntry[]>> & Record<string, unknown>;
-
-function atomicWriteText(filePath: string, content: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, content);
-  fs.renameSync(tmpPath, filePath);
-}
 
 function parseVersion(version: string): { major: number; minor: number; patch: number; pre: string } {
   const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?/);
@@ -1176,6 +1170,67 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
   }
 }
 
+/**
+ * Configure MCP for all detected AI coding tools (Claude, VS Code, Cursor, Copilot, Codex).
+ * @param verb - label used in log messages, e.g. "Updated" or "Configured"
+ */
+function configureMcpTargets(
+  cortexPath: string,
+  opts: { mcpEnabled: boolean; hooksEnabled: boolean },
+  verb: "Configured" | "Updated",
+): void {
+  try {
+    const status = configureClaude(cortexPath, { mcpEnabled: opts.mcpEnabled, hooksEnabled: opts.hooksEnabled });
+    if (status === "disabled" || status === "already_disabled") {
+      log(`  ${verb} Claude Code hooks (MCP disabled)`);
+    } else {
+      log(`  ${verb} Claude Code MCP + hooks`);
+    }
+  } catch (e) {
+    log(`  Could not configure Claude Code settings (${e}), add manually`);
+  }
+
+  try {
+    const vscodeResult = configureVSCode(cortexPath, { mcpEnabled: opts.mcpEnabled });
+    logMcpTargetStatus("VS Code", vscodeResult, verb);
+  } catch (err: unknown) {
+    debugLog(`configureVSCode failed: ${errorMessage(err)}`);
+  }
+
+  try {
+    logMcpTargetStatus("Cursor", configureCursorMcp(cortexPath, { mcpEnabled: opts.mcpEnabled }), verb);
+  } catch (err: unknown) {
+    debugLog(`configureCursorMcp failed: ${errorMessage(err)}`);
+  }
+
+  try {
+    logMcpTargetStatus("Copilot CLI", configureCopilotMcp(cortexPath, { mcpEnabled: opts.mcpEnabled }), verb);
+  } catch (err: unknown) {
+    debugLog(`configureCopilotMcp failed: ${errorMessage(err)}`);
+  }
+
+  try {
+    logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled: opts.mcpEnabled }), verb);
+  } catch (err: unknown) {
+    debugLog(`configureCodexMcp failed: ${errorMessage(err)}`);
+  }
+}
+
+/**
+ * Configure hooks if enabled, or log a disabled message.
+ * @param verb - label used in log messages, e.g. "Updated" or "Configured"
+ */
+function configureHooksIfEnabled(cortexPath: string, hooksEnabled: boolean, verb: string): void {
+  if (hooksEnabled) {
+    try {
+      const hooked = configureAllHooks(cortexPath, { allTools: true });
+      if (hooked.length) log(`  ${verb} hooks: ${hooked.join(", ")}`);
+    } catch (err: unknown) { debugLog(`configureAllHooks failed: ${errorMessage(err)}`); }
+  } else {
+    log(`  Hooks are disabled by preference (run: npx cortex hooks-mode on)`);
+  }
+}
+
 export async function runInit(opts: InitOptions = {}) {
   if ((opts.mode || "shared") === "project-local") {
     await runProjectLocalInit(opts);
@@ -1397,50 +1452,8 @@ export async function runInit(opts: InitOptions = {}) {
       }
 
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
-      try {
-        const status = configureClaude(cortexPath, { mcpEnabled, hooksEnabled });
-        if (status === "disabled" || status === "already_disabled") {
-          log(`  Updated Claude Code hooks (MCP disabled)`);
-        } else {
-          log(`  Updated Claude Code MCP + hooks`);
-        }
-      } catch (e) {
-        log(`  Could not configure Claude Code settings (${e}), add manually`);
-      }
-
-      try {
-        const vscodeResult = configureVSCode(cortexPath, { mcpEnabled });
-        logMcpTargetStatus("VS Code", vscodeResult, "Updated");
-      } catch (err: unknown) {
-        debugLog(`configureVSCode failed: ${errorMessage(err)}`);
-      }
-
-      try {
-        logMcpTargetStatus("Cursor", configureCursorMcp(cortexPath, { mcpEnabled }), "Updated");
-      } catch (err: unknown) {
-        debugLog(`configureCursorMcp failed: ${errorMessage(err)}`);
-      }
-
-      try {
-        logMcpTargetStatus("Copilot CLI", configureCopilotMcp(cortexPath, { mcpEnabled }), "Updated");
-      } catch (err: unknown) {
-        debugLog(`configureCopilotMcp failed: ${errorMessage(err)}`);
-      }
-
-      try {
-        logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled }), "Updated");
-      } catch (err: unknown) {
-        debugLog(`configureCodexMcp failed: ${errorMessage(err)}`);
-      }
-
-      if (hooksEnabled) {
-        try {
-          const hooked = configureAllHooks(cortexPath, { allTools: true });
-          if (hooked.length) log(`  Updated hooks: ${hooked.join(", ")}`);
-        } catch (err: unknown) { debugLog(`configureAllHooks failed: ${errorMessage(err)}`); }
-      } else {
-        log(`  Hooks are disabled by preference (run: npx cortex hooks-mode on)`);
-      }
+      configureMcpTargets(cortexPath, { mcpEnabled, hooksEnabled }, "Updated");
+      configureHooksIfEnabled(cortexPath, hooksEnabled, "Updated");
 
       const prefs = readInstallPreferences(cortexPath);
       const previousVersion = prefs.installedVersion;
@@ -1649,53 +1662,9 @@ export async function runInit(opts: InitOptions = {}) {
     }
   }
 
-  // Configure Claude Code
-  try {
-    const status = configureClaude(cortexPath, { mcpEnabled, hooksEnabled });
-    if (status === "disabled" || status === "already_disabled") {
-      log(`  Configured Claude Code hooks (MCP disabled)`);
-    } else {
-      log(`  Configured Claude Code MCP + hooks`);
-    }
-  } catch (e) {
-    log(`  Could not configure Claude Code settings (${e}), add manually`);
-  }
-
-  // Configure VS Code
-  try {
-    const vscodeResult = configureVSCode(cortexPath, { mcpEnabled });
-    logMcpTargetStatus("VS Code", vscodeResult, "Configured");
-  } catch (err: unknown) {
-    debugLog(`configureVSCode failed: ${errorMessage(err)}`);
-  }
-
-  try {
-    logMcpTargetStatus("Cursor", configureCursorMcp(cortexPath, { mcpEnabled }), "Configured");
-  } catch (err: unknown) {
-    debugLog(`configureCursorMcp failed: ${errorMessage(err)}`);
-  }
-
-  try {
-    logMcpTargetStatus("Copilot CLI", configureCopilotMcp(cortexPath, { mcpEnabled }), "Configured");
-  } catch (err: unknown) {
-    debugLog(`configureCopilotMcp failed: ${errorMessage(err)}`);
-  }
-
-  try {
-    logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled }), "Configured");
-  } catch (err: unknown) {
-    debugLog(`configureCodexMcp failed: ${errorMessage(err)}`);
-  }
-
-  // Configure hooks for other detected AI coding tools (Copilot CLI, Cursor, Codex)
-  if (hooksEnabled) {
-    try {
-      const hooked = configureAllHooks(cortexPath, { allTools: true });
-      if (hooked.length) log(`  Configured hooks: ${hooked.join(", ")}`);
-    } catch (err: unknown) { debugLog(`configureAllHooks failed: ${errorMessage(err)}`); }
-  } else {
-    log(`  Hooks are disabled by preference (run: npx cortex hooks-mode on)`);
-  }
+  // Configure MCP for all detected AI coding tools and hooks
+  configureMcpTargets(cortexPath, { mcpEnabled, hooksEnabled }, "Configured");
+  configureHooksIfEnabled(cortexPath, hooksEnabled, "Configured");
 
   writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION });
 

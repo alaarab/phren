@@ -44,6 +44,43 @@ function persistCache<T>(cachePath: string, cache: Record<string, TimestampedCac
   fs.writeFileSync(cachePath, JSON.stringify(cache));
 }
 
+/**
+ * Generic cache-through helper: load cache → check TTL → touch timestamp → persist → return.
+ * If the key is cached and within TTL, returns the cached result.
+ * Otherwise, calls `compute()` to produce a fresh result, caches it, and returns it.
+ */
+async function withCache<T>(
+  cachePath: string,
+  key: string,
+  ttlMs: number,
+  compute: () => Promise<T>,
+): Promise<T> {
+  // Check cache
+  try {
+    const cache = loadCache<T>(cachePath);
+    if (cache[key] && Date.now() - cache[key].ts < ttlMs) {
+      cache[key].ts = Date.now();
+      persistCache(cachePath, cache);
+      return cache[key].result;
+    }
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] withCache load (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+
+  const result = await compute();
+
+  // Persist result
+  try {
+    const cache = loadCache<T>(cachePath);
+    cache[key] = { result, ts: Date.now() };
+    persistCache(cachePath, cache);
+  } catch (err: unknown) {
+    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] withCache persist (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+
+  return result;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -524,32 +561,11 @@ async function semanticDedup(a: string, b: string, cortexPath: string, signal?: 
   const key = crypto.createHash("sha256").update(a + "|||" + b).digest("hex");
   const cachePath = runtimeFile(cortexPath, "dedup-cache.json");
 
-  // Check cache
   try {
-    const cache = loadCache<boolean>(cachePath);
-    if (cache[key] && Date.now() - cache[key].ts < DEDUP_CACHE_TTL_MS) {
-      cache[key].ts = Date.now();
-      persistCache(cachePath, cache);
-      return cache[key].result;
-    }
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] dedupCache load: ${err instanceof Error ? err.message : String(err)}\n`);
-  }
-
-  try {
-    const answer = await callLlm(`Are these two findings semantically equivalent? Reply YES or NO only.\nA: ${a}\nB: ${b}`, signal);
-    const result = answer.trim().toUpperCase().startsWith("YES");
-
-    // Cache result
-    try {
-      const cache = loadCache<boolean>(cachePath);
-      cache[key] = { result, ts: Date.now() };
-      persistCache(cachePath, cache);
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] dedupCache persist: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-
-    return result;
+    return await withCache<boolean>(cachePath, key, DEDUP_CACHE_TTL_MS, async () => {
+      const answer = await callLlm(`Are these two findings semantically equivalent? Reply YES or NO only.\nA: ${a}\nB: ${b}`, signal);
+      return answer.trim().toUpperCase().startsWith("YES");
+    });
   } catch (error) {
     if (isAbortError(error)) return false;
     return false; // fallback: not a duplicate
@@ -662,34 +678,13 @@ async function llmConflictCheck(
   const key = crypto.createHash("sha256").update(existing + "|||" + newFinding).digest("hex");
   const cachePath = runtimeFile(cortexPath, "conflict-cache.json");
 
-  // 7-day cache
   try {
-    const cache = loadCache<"CONFLICT" | "OK">(cachePath);
-    if (cache[key] && Date.now() - cache[key].ts < CONFLICT_CACHE_TTL_MS) {
-      cache[key].ts = Date.now();
-      persistCache(cachePath, cache);
-      return cache[key].result;
-    }
-  } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] conflictCache load: ${err instanceof Error ? err.message : String(err)}\n`);
-  }
-
-  try {
-    const answer = await callLlm(`Finding A: ${existing}. Finding B: ${newFinding}. Do these contradict each other about how to use ${entity}? Reply CONFLICT or OK only.`, signal);
-    const result = answer.trim().toUpperCase().startsWith("CONFLICT")
-      ? ("CONFLICT" as const)
-      : ("OK" as const);
-
-    // Cache
-    try {
-      const cache = loadCache<"CONFLICT" | "OK">(cachePath);
-      cache[key] = { result, ts: Date.now() };
-      persistCache(cachePath, cache);
-    } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] conflictCache persist: ${err instanceof Error ? err.message : String(err)}\n`);
-    }
-
-    return result;
+    return await withCache<"CONFLICT" | "OK">(cachePath, key, CONFLICT_CACHE_TTL_MS, async () => {
+      const answer = await callLlm(`Finding A: ${existing}. Finding B: ${newFinding}. Do these contradict each other about how to use ${entity}? Reply CONFLICT or OK only.`, signal);
+      return answer.trim().toUpperCase().startsWith("CONFLICT")
+        ? ("CONFLICT" as const)
+        : ("OK" as const);
+    });
   } catch (error) {
     if (isAbortError(error)) return "OK";
     return "OK";

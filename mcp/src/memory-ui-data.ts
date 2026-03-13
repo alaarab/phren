@@ -16,7 +16,7 @@ import { getAllSkills } from "./skill-registry.js";
 import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "./data-tasks.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
-import { readProjectTopics, classifyTopicForText, type ProjectTopic } from "./project-topics.js";
+import { readProjectTopics, classifyTopicForText } from "./project-topics.js";
 import { entryScoreKey } from "./governance-scores.js";
 
 interface EntryScore {

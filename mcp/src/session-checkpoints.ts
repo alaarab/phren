@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { errorMessage } from "./utils.js";
 import { debugLog, sessionMarker } from "./shared.js";
+import { atomicWriteJson } from "./session-utils.js";
 
 export interface TaskCheckpoint {
   project: string;
@@ -70,13 +71,11 @@ function readCheckpointFile(filePath: string): TaskCheckpoint | null {
 
 export function writeTaskCheckpoint(cortexPath: string, checkpoint: TaskCheckpoint): void {
   const filePath = checkpointPath(cortexPath, checkpoint.project, checkpoint.taskId);
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   const normalizedCheckpoint: TaskCheckpoint = {
     ...checkpoint,
     taskText: checkpoint.taskText ?? checkpoint.taskLine,
   };
-  fs.writeFileSync(tmpPath, JSON.stringify(normalizedCheckpoint, null, 2) + "\n");
-  fs.renameSync(tmpPath, filePath);
+  atomicWriteJson(filePath, normalizedCheckpoint);
 }
 
 export function listTaskCheckpoints(cortexPath: string, project?: string): TaskCheckpoint[] {

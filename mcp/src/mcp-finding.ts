@@ -21,6 +21,7 @@ import {
   autoMergeConflicts,
 } from "./shared-content.js";
 import { jaccardTokenize, jaccardSimilarity, stripMetadata } from "./content-dedup.js";
+import type { CortexResult } from "./cortex-core.js";
 import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings } from "./mcp-session.js";
 import { extractEntityNames } from "./shared-entity-graph.js";
@@ -95,6 +96,26 @@ function matchesFindingTextSelector(
   }
 
   return id === query || stableId === query || text === query || text.includes(query);
+}
+
+/** Shared boilerplate for lifecycle mutation tools: validate project → call core fn → update index → map response. */
+function withLifecycleMutation<T>(
+  cortexPath: string,
+  project: string,
+  writeQueue: McpContext["withWriteQueue"],
+  updateIndex: McpContext["updateFileInIndex"],
+  handler: () => CortexResult<T>,
+  mapResponse: (data: T) => { message: string; data: Record<string, unknown> },
+) {
+  if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+  return writeQueue(async () => {
+    const result = handler();
+    if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+    const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+    if (resolvedFindingsDir) updateIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+    const mapped = mapResponse(result.data);
+    return mcpResponse({ ok: true, message: mapped.message, data: mapped.data });
+  });
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -301,23 +322,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, finding_text, superseded_by }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      return withWriteQueue(async () => {
-        const result = supersedeFinding(cortexPath, project, finding_text, superseded_by);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const resolvedFindingsDir = safeProjectPath(cortexPath, project);
-        if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
-        return mcpResponse({
-          ok: true,
+      return withLifecycleMutation(
+        cortexPath, project, withWriteQueue, updateFileInIndex,
+        () => supersedeFinding(cortexPath, project, finding_text, superseded_by),
+        (data) => ({
           message: `Marked finding as superseded in ${project}.`,
-          data: {
-            project,
-            finding: result.data.finding,
-            status: result.data.status,
-            superseded_by: result.data.superseded_by,
-          },
-        });
-      });
+          data: { project, finding: data.finding, status: data.status, superseded_by: data.superseded_by },
+        }),
+      );
     }
   );
 
@@ -333,23 +345,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, finding_text, reason }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      return withWriteQueue(async () => {
-        const result = retractFindingLifecycle(cortexPath, project, finding_text, reason);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const resolvedFindingsDir = safeProjectPath(cortexPath, project);
-        if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
-        return mcpResponse({
-          ok: true,
+      return withLifecycleMutation(
+        cortexPath, project, withWriteQueue, updateFileInIndex,
+        () => retractFindingLifecycle(cortexPath, project, finding_text, reason),
+        (data) => ({
           message: `Retracted finding in ${project}.`,
-          data: {
-            project,
-            finding: result.data.finding,
-            status: result.data.status,
-            reason: result.data.reason,
-          },
-        });
-      });
+          data: { project, finding: data.finding, status: data.status, reason: data.reason },
+        }),
+      );
     }
   );
 
@@ -383,7 +386,6 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project, finding_text, finding_text_other, finding_a, finding_b, resolution }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const findingText = (finding_text ?? finding_a)?.trim();
       const findingTextOther = (finding_text_other ?? finding_b)?.trim();
       if (!findingText || !findingTextOther) {
@@ -392,24 +394,21 @@ export function register(server: McpServer, ctx: McpContext): void {
           error: "Both finding_text and finding_text_other are required.",
         });
       }
-      return withWriteQueue(async () => {
-        const result = resolveFindingContradiction(cortexPath, project, findingText, findingTextOther, resolution);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const resolvedFindingsDir = safeProjectPath(cortexPath, project);
-        if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
-        return mcpResponse({
-          ok: true,
+      return withLifecycleMutation(
+        cortexPath, project, withWriteQueue, updateFileInIndex,
+        () => resolveFindingContradiction(cortexPath, project, findingText, findingTextOther, resolution),
+        (data) => ({
           message: `Resolved contradiction in ${project} with "${resolution}".`,
           data: {
             project,
-            resolution: result.data.resolution,
-            finding_text: result.data.finding_a,
-            finding_text_other: result.data.finding_b,
-            finding_a: result.data.finding_a,
-            finding_b: result.data.finding_b,
+            resolution: data.resolution,
+            finding_text: data.finding_a,
+            finding_text_other: data.finding_b,
+            finding_a: data.finding_a,
+            finding_b: data.finding_b,
           },
-        });
-      });
+        }),
+      );
     }
   );
 

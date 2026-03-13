@@ -5,7 +5,6 @@ import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { findCortexPath } from "./cortex-paths.js";
 import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
-import { readProjectTopics } from "./project-topics.js";
 
 const _moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -116,24 +115,6 @@ export function clampInt(raw: string | undefined, fallback: number, min: number,
 // Base synonym map for fuzzy search expansion — source of truth is mcp/src/synonyms.json
 const BASE_SYNONYMS: Record<string, string[]> = _baseSynonymsJson;
 const LEARNED_SYNONYMS_FILE = "learned-synonyms.json";
-
-function normalizeDomain(rawDomain?: string): "music" | "gamedev" | null {
-  if (!rawDomain) return null;
-  const normalized = rawDomain.trim().toLowerCase().replace(/[_\s]+/g, "-");
-  if (normalized === "music" || normalized === "audio") return "music";
-  if (normalized === "game" || normalized === "gamedev" || normalized === "game-dev" || normalized === "game-development") return "gamedev";
-  return null;
-}
-
-function loadDomainSynonyms(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
-  if (!project || !isValidProjectName(project)) return {};
-  const resolved = cortexPath ?? findCortexPath();
-  if (!resolved) return {};
-
-  // Domain-specific synonyms are now learned adaptively via learned-synonyms.json
-  // rather than hardcoded per-domain files.
-  return {};
-}
 
 function normalizeSynonymTerm(term: string): string {
   return term.toLowerCase().replace(/"/g, "").trim();
@@ -372,7 +353,6 @@ export function loadLearnedSynonyms(project?: string | null, cortexPath?: string
 export function loadSynonymMap(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
   return mergeSynonymMaps(
     BASE_SYNONYMS,
-    loadDomainSynonyms(project, cortexPath),
     loadUserSynonyms(project, cortexPath),
     loadLearnedSynonyms(project, cortexPath),
   );
