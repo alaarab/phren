@@ -1,6 +1,6 @@
 {
   "name": "@alaarab/cortex",
-  "version": "1.33.3",
+  "version": "1.33.4",
   "description": "Long-term memory for AI agents. Stored as markdown in a git repo you own.",
   "type": "module",
   "bin": {
