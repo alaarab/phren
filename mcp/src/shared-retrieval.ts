@@ -20,7 +20,7 @@ import {
   filterTrustedFindingsDetailed,
 } from "./shared-content.js";
 import { parseCitationComment } from "./content-citation.js";
-import { getHighImpactFindings } from "./finding-impact.js";
+import { getHighImpactFindings, getImpactSurfaceCounts } from "./finding-impact.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -408,11 +408,28 @@ export function searchDocuments(
     runScopedFtsQuery(relaxedQuery);
   }
 
+  // Tier 1.5: Fragment graph expansion
+  const fragmentExpansionDocs: DocRow[] = [];
+  const queryLower = (prompt + " " + keywords).toLowerCase();
+  const fragmentBoostDocKeys = getEntityBoostDocs(db, queryLower);
+  for (const docKey of fragmentBoostDocKeys) {
+    if (ftsSeenKeys.has(docKey)) continue;
+    const rows = queryDocRows(
+      db,
+      "SELECT project, filename, type, content, path FROM docs WHERE path = ? LIMIT 1",
+      [docKey]
+    );
+    if (rows?.length) {
+      ftsSeenKeys.add(docKey);
+      fragmentExpansionDocs.push(rows[0]);
+    }
+  }
+
   // Tier 2: Token-overlap semantic — always run, scored independently
   const semanticDocs = semanticFallbackDocs(db, `${prompt}\n${keywords}`, detectedProject);
 
   // Merge with Reciprocal Rank Fusion so documents found by both tiers rank highest
-  const merged = rrfMerge([ftsDocs, semanticDocs]);
+  const merged = rrfMerge([ftsDocs, fragmentExpansionDocs, semanticDocs]);
   if (merged.length === 0) return null;
   return merged.slice(0, 12);
 }
@@ -627,6 +644,7 @@ export function applyTrustFilter(
   const queueItems: TrustFilterQueueItem[] = [];
   const auditEntries: string[] = [];
   const highImpactFindingIds = phrenPath ? getHighImpactFindings(phrenPath, 3) : undefined;
+  const impactCounts = phrenPath ? getImpactSurfaceCounts(phrenPath, 1) : undefined;
 
   const filtered = rows
     .map((doc) => {
@@ -637,6 +655,7 @@ export function applyTrustFilter(
         decay,
         project: doc.project,
         highImpactFindingIds,
+        impactCounts,
       });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
@@ -766,7 +785,7 @@ export function rankResults(
   const scored: ScoredDoc[] = ranked.map((doc) => {
     const globBoost = getProjectGlobBoost(phrenPathLocal, doc.project, cwd, gitCtx?.changedFiles);
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
-    const entity = entityBoostPaths.has(doc.path) ? 1.3 : 1;
+    const entity = entityBoostPaths.has(doc.path) ? 1.5 : 1;
     const date = getRecentDate(doc);
     const fileRel = fileRelevanceBoost(doc.path, changedFiles);
     const branchMat = branchMatchBoost(doc.content, gitCtx?.branch);
@@ -915,6 +934,24 @@ export function markStaleCitations(snippet: string): string {
   return result.join("\n");
 }
 
+function annotateContradictions(snippet: string): string {
+  return snippet.split('\n').map(line => {
+    const conflictMatch = line.match(/<!-- conflicts_with: "(.*?)" -->/);
+    const contradictMatch = line.match(/<!-- phren:contradicts "(.*?)" -->/);
+    const statusMatch = line.match(/phren:status "contradicted"/);
+    if (conflictMatch) {
+      return line.replace(conflictMatch[0], '') + ` [CONTRADICTED — conflicts with: "${conflictMatch[1]}"]`;
+    }
+    if (contradictMatch) {
+      return line.replace(contradictMatch[0], '') + ` [CONTRADICTED — see: "${contradictMatch[1]}"]`;
+    }
+    if (statusMatch) {
+      return line + ' [CONTRADICTED]';
+    }
+    return line;
+  }).join('\n');
+}
+
 export function selectSnippets(
   rows: DocRow[],
   keywords: string,
@@ -945,6 +982,7 @@ export function selectSnippets(
     if (TRUST_FILTERED_TYPES.has(doc.type)) {
       snippet = markStaleCitations(snippet);
     }
+    snippet = annotateContradictions(snippet);
     snippet = dedupSnippetBullets(snippet);
     if (!snippet.trim()) continue;
     let focusScore = queryTokens.length > 0

@@ -37,6 +37,7 @@ export {
   upsertCanonical,
   addFindingToFile,
   addFindingsToFile,
+  autoDetectFindingType,
 } from "./content-learning.js";
 
 export {
