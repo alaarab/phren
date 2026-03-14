@@ -1,7 +1,7 @@
 <!-- tokens: ~1400 -->
 # CLAUDE.md
 
-Open-source framework that gives Claude persistent memory across sessions and machines. Published as `phren` on npm.
+Open-source knowledge layer for AI agents. Claude remembers you. Phren remembers your work. Published as `@phren/cli` on npm.
 
 ## Project Location
 

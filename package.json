@@ -1,7 +1,7 @@
 {
   "name": "@phren/cli",
   "version": "0.0.4",
-  "description": "Long-term memory for AI agents. Stored as markdown in a git repo you own.",
+  "description": "Knowledge layer for AI agents. Claude remembers you. Phren remembers your work.",
   "type": "module",
   "bin": {
     "phren": "mcp/dist/index.js"
