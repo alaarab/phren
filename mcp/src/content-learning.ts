@@ -287,14 +287,14 @@ export function upsertCanonical(phrenPath: string, project: string, memory: stri
   const bullet = memory.startsWith("- ") ? memory : `- ${memory}`;
   withFileLock(canonicalPath, () => {
     if (!fs.existsSync(canonicalPath)) {
-      fs.writeFileSync(canonicalPath, `# ${project} Pinned Findings\n\n## Pinned\n\n${bullet} _(added ${today})_\n`);
+      fs.writeFileSync(canonicalPath, `# ${project} Truths\n\n## Truths\n\n${bullet} _(added ${today})_\n`);
     } else {
       const existing = fs.readFileSync(canonicalPath, "utf8");
       const line = `${bullet} _(added ${today})_`;
       if (!existing.includes(bullet)) {
         const updated = existing.includes("## Truths")
-          ? existing.replace("## Pinned", `## Pinned\n\n${line}`)
-          : `${existing.trimEnd()}\n\n## Pinned\n\n${line}\n`;
+          ? existing.replace("## Truths", `## Truths\n\n${line}`)
+          : `${existing.trimEnd()}\n\n## Truths\n\n${line}\n`;
         const content = updated.endsWith("\n") ? updated : updated + "\n";
         const tmpPath = canonicalPath + `.tmp-${crypto.randomUUID()}`;
         fs.writeFileSync(tmpPath, content);
