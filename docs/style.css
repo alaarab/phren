@@ -1993,7 +1993,29 @@ a:focus-visible, button:focus-visible {
 }
 
 /* --- KEYWORD GLOW --- */
-/* Memory / core concept — warm gold pulse */
+/* Findings — electric blue (primary content) */
+.kw-finding {
+  color: #42A5F5;
+  text-shadow: 0 0 8px rgba(66,165,245,0.35);
+  font-weight: 500;
+  animation: kw-shimmer-cyan 3s ease-in-out infinite;
+}
+
+/* Fragments — violet (connections) */
+.kw-fragment {
+  color: #CE93D8;
+  text-shadow: 0 0 8px rgba(206,147,216,0.35);
+  font-weight: 500;
+}
+
+/* Tasks — emerald (work items) */
+.kw-task {
+  color: #66BB6A;
+  text-shadow: 0 0 6px rgba(102,187,106,0.3);
+  font-weight: 500;
+}
+
+/* Truths / Memory — gold (permanent knowledge) */
 .kw-memory {
   color: #FFD54F;
   text-shadow: 0 0 10px rgba(255,213,79,0.4);
@@ -2001,46 +2023,24 @@ a:focus-visible, button:focus-visible {
   animation: kw-pulse-gold 4s ease-in-out infinite;
 }
 
-/* Findings — cyan shimmer (primary content type) */
-.kw-finding {
-  color: #4DD0E1;
-  text-shadow: 0 0 8px rgba(77,208,225,0.35);
-  font-weight: 500;
-  animation: kw-shimmer-cyan 3s ease-in-out infinite;
-}
-
-/* Fragments — purple glow (connections between findings) */
-.kw-fragment {
-  color: #B39DDB;
-  text-shadow: 0 0 8px rgba(179,157,219,0.4);
-  font-weight: 500;
-}
-
-/* Tasks — green steady (work items) */
-.kw-task {
-  color: #81C784;
-  text-shadow: 0 0 6px rgba(129,199,132,0.3);
-  font-weight: 500;
-}
-
-/* Skills — coral/pink (reusable commands) */
+/* Skills — coral (reusable commands) */
 .kw-skill {
-  color: #FF8A80;
-  text-shadow: 0 0 8px rgba(255,138,128,0.3);
+  color: #FF7043;
+  text-shadow: 0 0 8px rgba(255,112,67,0.3);
   font-weight: 500;
 }
 
-/* Sessions — soft blue (conversation boundaries) */
+/* Sessions — warm pink (conversation boundaries) */
 .kw-session {
-  color: #80DEEA;
-  text-shadow: 0 0 6px rgba(128,222,234,0.25);
+  color: #F48FB1;
+  text-shadow: 0 0 6px rgba(244,143,177,0.3);
   font-weight: 500;
 }
 
-/* Hooks — electric cyan flash */
+/* Hooks — cyan (system integration) */
 .kw-hook {
-  color: var(--indigo);
-  text-shadow: 0 0 10px rgba(0,229,255,0.4);
+  color: #26C6DA;
+  text-shadow: 0 0 10px rgba(38,198,218,0.4);
   font-weight: 500;
   animation: kw-flash-cyan 5s ease-in-out infinite;
 }
