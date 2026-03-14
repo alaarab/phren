@@ -63,7 +63,7 @@ describe("read_graph pagination", () => {
   afterEach(() => tmp.cleanup());
 
   function seedMultipleEntities(phrenPath: string) {
-    // Create findings that mention multiple entities so the entity graph has entries
+    // Create findings that mention multiple fragments so the fragment graph has entries
     seedFindings(phrenPath, "proj", [
       "# proj Findings",
       "",
@@ -85,7 +85,7 @@ describe("read_graph pagination", () => {
     ]));
   }
 
-  it("limit=2 returns only 2 entities", async () => {
+  it("limit=2 returns only 2 fragments", async () => {
     seedMultipleEntities(tmp.path);
     const db = await buildIndex(tmp.path);
 
@@ -103,7 +103,7 @@ describe("read_graph pagination", () => {
     expect(rows).not.toBeNull();
     expect(rows!.length).toBeLessThanOrEqual(2);
 
-    // Total count should be >= 4 (our 4 manual entities)
+    // Total count should be >= 4 (our 4 manual fragments)
     const countSql = `
       SELECT COUNT(*) FROM (
         SELECT e.id FROM entities e
@@ -142,7 +142,7 @@ describe("read_graph pagination", () => {
     const page1 = queryRows(db, sql, [2, 0]);
     const page2 = queryRows(db, sql, [2, 2]);
     expect(page1).not.toBeNull();
-    if (!page2 || page2.length === 0) return; // not enough entities for pagination
+    if (!page2 || page2.length === 0) return; // not enough fragments for pagination
 
     // Pages should not overlap
     const page1Names = page1!.map(r => String(r[0]));

@@ -73,13 +73,24 @@ window.addEventListener('scroll', () => {
     raf = requestAnimationFrame(draw);
   }
 
-  init();
-  draw();
-
-  window.addEventListener('resize', () => {
-    cancelAnimationFrame(raf);
+  const prefersReducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!prefersReducedMotion && window.innerWidth > 900) {
     init();
     draw();
+
+    window.addEventListener('resize', () => {
+      cancelAnimationFrame(raf);
+      init();
+      draw();
+    });
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      cancelAnimationFrame(raf);
+    } else if (!prefersReducedMotion && window.innerWidth > 900) {
+      draw();
+    }
   });
 })();
 
@@ -130,7 +141,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
         obs.unobserve(entry.target);
       }
     });
-  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  }, { threshold: 0.1, rootMargin: '0px 0px 0px 0px' });
 
   els.forEach(el => obs.observe(el));
 })();

@@ -14,9 +14,9 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 | `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 60 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
-| `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, memory queue, audit log |
+| `mcp/src/shared-governance.ts` | Config: policy/access/workflow config, memory queue, audit log |
 | `mcp/src/shared-index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
-| `mcp/src/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
+| `mcp/src/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, config commands |
 | `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
 | `mcp/src/init.ts` | `npx phren init`: configures MCP + hooks for all detected agents |
 | `mcp/src/link.ts` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
@@ -28,7 +28,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 | `mcp/src/session-checkpoints.ts` | Cross-session checkpoints: auto-snapshot on end, resume on start |
 | `mcp/src/project-topics.ts` | Adaptive topics: suggestTopics from repo content, topic-config generation |
 | `mcp/src/content-citation.ts` | Citation tracking: provenance, trust filtering, scope normalization |
-| `mcp/src/cli-config.ts` | CLI config management: project ownership, storage, governance settings |
+| `mcp/src/cli-config.ts` | CLI config management: project ownership, storage, config |
 | `skills/` | Phren slash commands: sync, init, discover, consolidate, profiles |
 | `starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
 | `starter/templates/` | Project templates: python-project, monorepo, library, frontend |
@@ -125,7 +125,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `add_custom_hook(event, command, timeout?)` : add a custom integration hook
 - `remove_custom_hook(event, command?)` : remove custom hooks by event/command match
 
-Governance, policy, and maintenance tools are CLI-only (see `phren config` and `phren maintain`).
+Config, policy, and maintenance tools are CLI-only (see `phren config` and `phren maintain`).
 
 ## CLI Commands
 
@@ -200,7 +200,7 @@ Full data flow documentation lives at `~phren/docs/architecture.md`. Key diagram
 User Prompt -> SessionStart (git pull) -> UserPromptSubmit (FTS5 search, inject context)
      |                                            |
      v                                            v
- MCP Tools (add_finding, task, etc.)    Governance (trust filter, confidence decay)
+ MCP Tools (add_finding, task, etc.)    Config (trust filter, confidence decay)
      |                                            |
      v                                            v
  ~/.phren/<project>/ files              Stop hook (git add, commit, push)
@@ -208,7 +208,7 @@ User Prompt -> SessionStart (git pull) -> UserPromptSubmit (FTS5 search, inject 
 
 Three paths on every prompt cycle:
 1. **Retrieval**: keyword extraction, synonym expansion, FTS5 search, snippet injection
-2. **Governance**: citation validity, confidence decay, policy thresholds
+2. **Config**: citation validity, confidence decay, policy thresholds
 3. **Persistence**: MCP writes + Stop hook git commit/push
 
 ## Directory Structure
@@ -219,7 +219,7 @@ Ephemeral files live in subdirectories to keep the phren root clean:
 |-----------|----------|
 | `.runtime/` | audit.log, debug.log, telemetry.json, search-history.jsonl, quality markers, lock files |
 | `.sessions/` | noticed-{session}, extracted-{session} markers |
-| `.governance/` | shared policy JSON and access control |
+| `.config/` | shared policy JSON and access control |
 | `<project>/reference/` | Deep reference docs indexed as `reference` type |
 
 Use `runtimeFile(phrenPath, name)` and `sessionMarker(phrenPath, name)` helpers from shared.ts.
@@ -315,7 +315,7 @@ Use `runtimeFile(phrenPath, name)` and `sessionMarker(phrenPath, name)` helpers 
 **Access control:**
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PHREN_ACTOR` | `$USER` | Override the actor name used in governance audit log entries. |
+| `PHREN_ACTOR` | `$USER` | Override the actor name used in config audit log entries. |
 
 ## Finding Quality Rules
 

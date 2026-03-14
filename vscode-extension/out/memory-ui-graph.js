@@ -336,7 +336,7 @@ export function renderGraphScript() {
       if (cKeys[f].indexOf('topic:') === 0) fc += counts[cKeys[f]];
     }
     if (fc) parts.push(fc + ' findings');
-    if (counts.entity) parts.push(counts.entity + ' entities');
+    if (counts.entity) parts.push(counts.entity + ' fragments');
     var tc = (counts['task-active']||0) + (counts['task-queue']||0);
     if (tc) parts.push(tc + ' tasks');
     announce('Graph with ' + parts.join(', '));
@@ -605,7 +605,7 @@ export function renderGraphScript() {
     var html = '';
     /* Fixed node types first */
     var fixedOrder = ['project', 'task-active', 'task-queue', 'entity', 'reference'];
-    var fixedLabels = { project: 'Project', 'task-active': 'Active Task', 'task-queue': 'Queued Task', entity: 'Entity', reference: 'Reference' };
+    var fixedLabels = { project: 'Project', 'task-active': 'Active Task', 'task-queue': 'Queued Task', entity: 'Fragment', reference: 'Reference' };
     for (var i = 0; i < fixedOrder.length; i++) {
       var g = fixedOrder[i];
       if (!seenGroups[g]) continue;
@@ -963,7 +963,7 @@ export function renderGraphScript() {
       html += '<span>Connections: ' + fileCount + '</span>';
       html += '<span>Findings: ' + findingCount + '</span>';
       html += '<span>Tasks: ' + taskCount + '</span>';
-      html += '<span>Entities: ' + entityCount + '</span>';
+      html += '<span>Fragments: ' + entityCount + '</span>';
       html += '</div>';
       html += qualityBar;
 
@@ -1290,7 +1290,7 @@ export function renderGraphScript() {
       { key: 'project', label: 'Projects', color: COLORS.project },
       { key: 'finding', label: 'Findings', color: COLORS.other },
       { key: 'task', label: 'Tasks', color: COLORS['task-active'] },
-      { key: 'entity', label: 'Entities', color: COLORS.entity },
+      { key: 'entity', label: 'Fragments', color: COLORS.entity },
       { key: 'reference', label: 'Refs', color: COLORS.reference }
     ];
     var typeSection = '';

@@ -108,7 +108,7 @@ Phren MCP is split into 11 modules:
 3. Finding capture and lifecycle
 4. Memory quality
 5. Data management
-6. Entity graph
+6. Fragment graph
 7. Session management
 8. Operations and review queue
 9. Skills management

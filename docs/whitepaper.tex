@@ -94,7 +94,7 @@ Phren should be read as a system in the same design space as prior memory work s
 \section{Phren Architecture}
 \label{sec:arch}
 
-The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Phren now supports two install modes rooted by \texttt{phren.root.yaml}: \textbf{shared} (\texttt{\textasciitilde/.phren/}) and \textbf{project-local} (\texttt{<repo>/.phren/}). In both modes, markdown and JSON files remain the source of truth for \textbf{findings}, \textbf{tasks}, \textbf{canonical memories}, \textbf{entity links}, and \textbf{session checkpoints}; the FTS5 index is a local cache. The diagram below shows the current runtime loop.
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Phren now supports two install modes rooted by \texttt{phren.root.yaml}: \textbf{shared} (\texttt{\textasciitilde/.phren/}) and \textbf{project-local} (\texttt{<repo>/.phren/}). In both modes, markdown and JSON files remain the source of truth for \textbf{findings}, \textbf{tasks}, \textbf{canonical memories}, \textbf{fragment links}, and \textbf{session checkpoints}; the FTS5 index is a local cache. The diagram below shows the current runtime loop.
 
 \vspace{0.2em}
 \begin{center}
@@ -177,7 +177,7 @@ Lifecycle automation is now a four-event model with tool-level continuity suppor
 Claude uses native lifecycle hooks; Copilot/Cursor/Codex use generated wrappers + tool configs to enforce equivalent lifecycle semantics. The architectural point is unchanged: memory capture and retrieval stay inside the normal agent loop rather than becoming a separate manual habit.
 
 \subsection{MCP Module Surface}
-Phren MCP currently exposes \textbf{60 tools across 11 modules}: search/browse, task management, finding capture and lifecycle, memory quality, data management, entity graph, session management, operations/review, skills management, hooks management, and extraction. Newly expanded lifecycle surfaces include contradiction/supersession tools for findings and session history/continuity tooling.
+Phren MCP currently exposes \textbf{60 tools across 11 modules}: search/browse, task management, finding capture and lifecycle, memory quality, data management, fragment graph, session management, operations/review, skills management, hooks management, and extraction. Newly expanded lifecycle surfaces include contradiction/supersession tools for findings and session history/continuity tooling.
 
 \subsection{Token Budget and Progressive Disclosure}
 \label{sec:context-opt}
@@ -258,7 +258,7 @@ Phren handles multi-agent use through four mechanisms. \textbf{Dual-root storage
 This is an eventually consistent shared-memory model optimized for append-heavy agent workflows, not strong coordination in the distributed-systems sense.
 
 \subsection{Operator Surfaces}
-Phren ships three operator-facing review planes: \texttt{phren shell}, \texttt{phren web-ui}, and a VS Code extension. The web UI is hardened for local operation (loopback bind, per-run auth token validation, single-use CSRF tokens with TTL, CSP + anti-framing headers). The VS Code extension adds an activity-bar tree view for projects/findings/tasks/skills/hooks, an interactive entity-graph webview, and first-run onboarding that validates local MCP/runtime wiring before enabling live operations.
+Phren ships three operator-facing review planes: \texttt{phren shell}, \texttt{phren web-ui}, and a VS Code extension. The web UI is hardened for local operation (loopback bind, per-run auth token validation, single-use CSRF tokens with TTL, CSP + anti-framing headers). The VS Code extension adds an activity-bar tree view for projects/findings/tasks/skills/hooks, an interactive fragment-graph webview, and first-run onboarding that validates local MCP/runtime wiring before enabling live operations.
 
 \pagebreak[2]
 \section{Comparative Assessment}

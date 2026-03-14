@@ -42,7 +42,7 @@
       },
       {
         "command": "phren.showGraph",
-        "title": "Phren: Show Entity Graph",
+        "title": "Phren: Show Fragment Graph",
         "icon": "$(type-hierarchy)"
       },
       {

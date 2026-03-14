@@ -71,7 +71,7 @@ function loadGraphScript() {
 }
 /* ── Main entry ──────────────────────────────────────────── */
 async function showGraphWebview(client, context) {
-    const panel = vscode.window.createWebviewPanel("phren.entityGraph", "Phren Entity Graph", vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
+    const panel = vscode.window.createWebviewPanel("phren.fragmentGraph", "Phren Fragment Graph", vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
     panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "phren.svg"));
     panel.webview.html = renderLoadingHtml(panel.webview);
     let graphData;
@@ -167,7 +167,7 @@ async function loadGraphData(client) {
         ]);
         return { projectName: p.name, summary, findings, tasks };
     }));
-    // Entity graph
+    // Fragment graph
     const entities = await fetchEntities(client);
     // Memory scores
     const scores = loadMemoryScores();
@@ -242,7 +242,7 @@ async function loadGraphData(client) {
             edges.push({ source: projectNodeId, target: taskId });
         }
     }
-    // Entity nodes and edges
+    // Fragment nodes and edges
     const projectNameSet = new Set(projects.map((p) => p.name));
     for (const entity of entities) {
         const entityId = entity.id || `entity:${entity.name}`;
@@ -270,7 +270,7 @@ async function loadGraphData(client) {
             connectedProjects: uniqueConnected,
             docs: entity.docs,
         });
-        // Entity → project edges
+        // Fragment → project edges
         for (const pName of uniqueConnected) {
             edges.push({ source: entityId, target: `project:${pName}` });
         }
@@ -526,12 +526,12 @@ function renderLoadingHtml(webview) {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Phren Entity Graph</title>
+  <title>Phren Fragment Graph</title>
   <style>
     body { margin:0; display:grid; place-items:center; min-height:100vh; color:var(--vscode-foreground); font-family:sans-serif; }
   </style>
 </head>
-<body><div>Loading Phren Entity Graph...</div></body>
+<body><div>Loading fragment graph...</div></body>
 </html>`;
 }
 function renderErrorHtml(webview, errorMessage) {
@@ -542,13 +542,13 @@ function renderErrorHtml(webview, errorMessage) {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Phren Entity Graph</title>
+  <title>Phren Fragment Graph</title>
   <style>
     body { margin:0; display:grid; place-items:center; min-height:100vh; padding:24px; color:var(--vscode-errorForeground); font-family:sans-serif; }
     .panel { max-width:720px; border:1px solid; border-radius:10px; padding:16px; }
   </style>
 </head>
-<body><div class="panel">Failed to render entity graph: ${escapeHtml(errorMessage)}</div></body>
+<body><div class="panel">Failed to render fragment graph: ${escapeHtml(errorMessage)}</div></body>
 </html>`;
 }
 function renderGraphHtml(webview, payload) {
@@ -562,7 +562,7 @@ function renderGraphHtml(webview, payload) {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Phren Entity Graph</title>
+  <title>Phren Fragment Graph</title>
   <style>
     :root {
       color-scheme:light dark;

@@ -10,7 +10,7 @@ This extension connects VS Code to your local Phren store and MCP server so you 
 - Lists tracked Phren projects with drill-down sections for findings, tasks, and reference docs.
 - Opens findings and reference files in read-only detail panels.
 - Lets you search Phren knowledge from VS Code and preview full results beside your editor.
-- Shows the Phren entity graph in a webview.
+- Shows the Phren fragment graph in a webview.
 - Adds a status bar picker for the active Phren project.
 - Lets you add a finding from the editor context menu.
 - Opens skills in an editable webview so you can update and toggle them in place.
@@ -54,7 +54,7 @@ The sidebar is structured around real Phren objects, not synthetic dashboards:
 - `Projects`: each project expands into `Findings`, `Task`, and `Reference`.
 - `Skills`: grouped by source so you can inspect project-local and global skills.
 - `Hooks`: current hook state by tool.
-- `Entity Graph`: one-click entry into the graph view.
+- `Fragment Graph`: one-click entry into the graph view.
 
 ### Search Knowledge
 
@@ -93,7 +93,7 @@ Skills open in an editor-like webview with inline save and enable/disable contro
 ## Commands
 
 - `Phren: Search Knowledge`
-- `Phren: Show Entity Graph`
+- `Phren: Show Fragment Graph`
 - `Phren: Refresh`
 - `Phren: Add Finding`
 - `Phren: Set Active Project`

@@ -14,7 +14,7 @@ Today Phren only has partial invalidation semantics:
 
 That is enough to avoid some obviously wrong retrieval, but it is not a first-class lifecycle model. Users cannot reliably answer:
 
-- what is the current truth for this entity?
+- what is the current truth for this fragment?
 - which finding replaced an older one?
 - whether two findings are unresolved contradictions or both conditionally true?
 - why a result is hidden, demoted, or shown as historical?
@@ -167,9 +167,9 @@ Add a dedicated invalidation surface:
 - contradiction resolution actions: `Supersede`, `Keep both`, `Mark contradicted`, `Retract`.
 - a separate unresolved-contradictions queue instead of burying these in generic review noise.
 
-### Entity view
+### Fragment view
 
-For an entity or topic, show two lanes:
+For a fragment or topic, show two lanes:
 
 - `Current truth`
 - `History`
@@ -187,7 +187,7 @@ Reuse the same lifecycle metadata:
 
 - badges in finding detail
 - quick actions to resolve contradictions
-- history view for a finding or entity
+- history view for a finding or fragment
 
 ## Archive and Consolidation
 

@@ -423,7 +423,7 @@ async function activate(context) {
                     if (index.docCount !== undefined)
                         outputChannel.appendLine(`  Documents: ${index.docCount}`);
                     if (index.entityCount !== undefined)
-                        outputChannel.appendLine(`  Entities: ${index.entityCount}`);
+                        outputChannel.appendLine(`  Fragments: ${index.entityCount}`);
                     if (index.stale !== undefined)
                         outputChannel.appendLine(`  Stale: ${index.stale}`);
                 }

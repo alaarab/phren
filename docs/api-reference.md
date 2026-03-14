@@ -4,7 +4,7 @@ Phren exposes 60 MCP tools across 11 modules through the Model Context Protocol.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
-Module layout: search, tasks, findings, memory quality, data management, entity graph, sessions, operations/review, skills, hooks, extraction.
+Module layout: search, tasks, findings, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction.
 
 ---
 
@@ -383,57 +383,57 @@ Archive or unarchive a project. Archive renames the directory with `.archived` s
 
 ---
 
-## Entity Graph
+## Fragment Graph
 
-### `search_entities`
+### `search_fragments`
 
-Find entities and related docs by name.
+Find fragments and related docs by name.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | yes | Entity name to search for (partial match). |
+| `query` | string | yes | Fragment name to search for (partial match). |
 | `project` | string | no | Optional project filter. |
 | `limit` | number | no | Max results (default 10). |
 
 ### `get_related_docs`
 
-Get docs linked to a named entity.
+Get docs linked to a named fragment.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `entity` | string | yes | Entity name to look up related documents for. |
+| `fragment` | string | yes | Fragment name to look up related documents for. |
 | `project` | string | no | Optional project filter. |
 | `limit` | number | no | Max docs to return (default 10). |
 
 ### `read_graph`
 
-Read the entity graph for a project or all projects.
+Read the fragment graph for a project or all projects.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Project name. Omit to read the graph across all projects. |
-| `limit` | number | no | Max entities to return (default 500, max 2000). |
+| `limit` | number | no | Max fragments to return (default 500, max 2000). |
 | `offset` | number | no | Pagination offset (default 0). |
 
 ### `link_findings`
 
-Manually link a finding to an entity. The link persists to `manual-links.json` and survives graph rebuilds.
+Manually link a finding to a fragment. The link persists to `manual-links.json` and survives graph rebuilds.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding_text` | string | yes | Text of the finding to link. |
-| `entity` | string | yes | Entity name to link to. |
+| `fragment` | string | yes | Fragment name to link to. |
 | `relation` | string | no | Relationship type (e.g. "mentions", "implements"). |
-| `entity_type` | string | no | Entity type label (for example `library`, `service`, `concept`, `architecture`). Defaults to `entity`. |
+| `fragment_type` | string | no | Fragment type label (for example `library`, `service`, `concept`, `architecture`). Defaults to `fragment`. |
 
-### `cross_project_entities`
+### `cross_project_fragments`
 
-Find entities that appear in multiple projects. Useful for discovering shared patterns and dependencies.
+Find fragments that appear in multiple projects. Useful for discovering shared patterns and dependencies.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `entity` | string | yes | Entity name to search for (partial match). |
+| `fragment` | string | yes | Fragment name to search for (partial match). |
 | `exclude_project` | string | no | Exclude one project from the result set. |
 | `limit` | number | no | Max results (default 20). |
 

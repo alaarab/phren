@@ -339,7 +339,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     // task loading failed — continue with other data sources
   }
 
-  // ── Fragments (entity graph) ───────────────────────────────────────
+  // ── Fragments (fragment graph) ──────────────────────────────────────
   let db: SqlJsDatabase | null = null;
   try {
     db = await buildIndex(phrenPath, profile);
@@ -405,7 +405,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           entityType: type,
           refDocs: refs,
         });
-        // Link entity to each project it appears in
+        // Link fragment to each project it appears in
         const linkedProjects = new Set<string>();
         for (const ref of refs) {
           if (ref.project && projectSet.has(ref.project)) linkedProjects.add(ref.project);
@@ -416,7 +416,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
       }
     }
   } catch {
-    // entity loading failed — continue with other data sources
+    // fragment loading failed — continue with other data sources
   } finally {
     if (db) {
       try { db.close(); } catch { /* already closed or failed — ignore */ }

@@ -26,7 +26,7 @@ const SERVICES = [
   "queue-processor",
   "deploy-orchestrator",
   "timeline-service",
-  "entity-graph",
+  "fragment-graph",
 ];
 
 const COMPONENTS = [
@@ -50,7 +50,7 @@ const ISSUES = [
   "citation-validity-check",
   "review-queue-triage",
   "eventual-consistency-merge",
-  "cross-project-entity-link",
+  "cross-project-fragment-link",
   "session-identity-binding",
   "background-sync-retry",
 ];

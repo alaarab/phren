@@ -422,8 +422,8 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
           const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
           item.iconPath = themeIcon(icons[element.section]);
           item.id = `phren.root.${element.section}`;
-          item.command = { command: "phren.showGraph", title: "Show Entity Graph" };
-          item.tooltip = "Open the Phren entity graph visualization";
+          item.command = { command: "phren.showGraph", title: "Show Fragment Graph" };
+          item.tooltip = "Open the Phren fragment graph visualization";
           return item;
         }
 

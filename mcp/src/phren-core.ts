@@ -1,7 +1,7 @@
 // Shared Phren result types, validation tags, and low-level helpers.
 
 /**
- * Minimal cross-domain starter set for entity/conflict detection.
+ * Minimal cross-domain starter set for fragment/conflict detection.
  *
  * Kept intentionally small: only terms that are genuinely universal across
  * disciplines (languages, infra primitives, version control). Framework-specific
@@ -12,8 +12,8 @@ export const UNIVERSAL_TECH_TERMS_RE =
   /\b(Python|Rust|Go|Java|TypeScript|JavaScript|Docker|Kubernetes|AWS|GCP|Azure|SQL|Git)\b/gi;
 
 /**
- * Additional entity patterns beyond CamelCase and acronyms.
- * Each pattern has a named group so callers can identify the entity type.
+ * Additional fragment patterns beyond CamelCase and acronyms.
+ * Each pattern has a named group so callers can identify the fragment type.
  */
 export const EXTRA_ENTITY_PATTERNS: Array<{ re: RegExp; label: string }> = [
   // Semantic version numbers: v1.2.3, 2.0.0-beta.1

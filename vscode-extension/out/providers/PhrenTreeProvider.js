@@ -163,15 +163,15 @@ class PhrenTreeProvider {
         }
         switch (element.kind) {
             case "rootSection": {
-                const labels = { projects: "Projects", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
+                const labels = { projects: "Projects", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Fragment Graph", manage: "Manage" };
                 const icons = { projects: "folder-library", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
                 const label = labels[element.section] ?? element.section;
                 if (element.section === "graph") {
                     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
                     item.iconPath = themeIcon(icons[element.section]);
                     item.id = `phren.root.${element.section}`;
-                    item.command = { command: "phren.showGraph", title: "Show Entity Graph" };
-                    item.tooltip = "Open the Phren entity graph visualization";
+                    item.command = { command: "phren.showGraph", title: "Show Fragment Graph" };
+                    item.tooltip = "Open the Phren fragment graph visualization";
                     return item;
                 }
                 const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);

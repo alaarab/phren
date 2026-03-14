@@ -16,7 +16,7 @@ const CATEGORY_BY_MODULE: Record<string, string> = {
   "mcp-finding": "Finding capture",
   "mcp-memory": "Memory quality",
   "mcp-data": "Data management",
-  "mcp-graph": "Entities and graph",
+  "mcp-graph": "Fragments and graph",
   "mcp-session": "Session management",
   "mcp-ops": "Operations and review",
   "mcp-skills": "Skills management",

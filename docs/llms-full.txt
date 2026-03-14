@@ -42,12 +42,12 @@ MCP Tools (60 across 11 modules):
     remove_findings(project, findings[]) - bulk remove multiple findings
     push_changes(message?) - commit and push all phren changes
 
-  Entity graph:
-    search_entities(name) - find entities and their related docs
-    get_related_docs(entity) - get docs linked to a named entity
-    read_graph(project?) - read the entity graph for a project or all projects
-    link_findings(project, finding_text, entity, relation?) - manually link a finding to an entity
-    cross_project_entities() - find entities shared across multiple projects
+  Fragment graph:
+    search_fragments(name) - find fragments and their related docs
+    get_related_docs(fragment) - get docs linked to a named fragment
+    read_graph(project?) - read the fragment graph for a project or all projects
+    link_findings(project, finding_text, fragment, relation?) - manually link a finding to a fragment
+    cross_project_fragments() - find fragments shared across multiple projects
 
   Session management (for agents without hooks):
     session_start(project?, connectionId?) - mark session start, retrieve prior session context + checkpoints, return sessionId

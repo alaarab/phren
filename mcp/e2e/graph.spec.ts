@@ -632,17 +632,17 @@ test.describe.serial("graph visualization e2e", () => {
     expect(hiddenDisplay).toBe("none");
   });
 
-  test("entity nodes visible via type filter and interactive", async ({ page }) => {
+  test("fragment nodes visible via type filter and interactive", async ({ page }) => {
     await openGraphTab(page);
 
-    // Filter to show only entities
+    // Filter to show only fragments
     const entityBtn = page.locator("#graph-filter span").filter({ hasText: "Fragments" });
     // First click "all off" by clicking each active type to disable, or use the type filter
-    // The filter is a toggle — clicking "Entities" should toggle it.
-    // By default all types are active. Let's filter to only entities by:
-    // 1. Click Entities (keeps it on), then toggle off others
+    // The filter is a toggle — clicking "Fragments" should toggle it.
+    // By default all types are active. Let's filter to only fragments by:
+    // 1. Click Fragments (keeps it on), then toggle off others
     // Actually the filter works as multi-select toggles. Let's just check that
-    // entity nodes exist by filtering to entities only.
+    // fragment nodes exist by filtering to fragments only.
 
     // Click "Projects" to toggle it off
     await page.locator("#graph-filter span").filter({ hasText: "Projects" }).click();
@@ -651,18 +651,18 @@ test.describe.serial("graph visualization e2e", () => {
     await page.locator("#graph-filter span").filter({ hasText: "Refs" }).click();
     await page.waitForTimeout(500);
 
-    // Now only entity nodes should be visible
+    // Now only fragment nodes should be visible
     const limitRow = page.locator("#graph-limit-row");
     const text = await limitRow.textContent();
     const match = text?.match(/(\d+)\s+of\s+(\d+)/);
     const entityCount = Number(match?.[1]);
     expect(entityCount).toBeGreaterThan(0);
 
-    // Click on the canvas to select an entity node
+    // Click on the canvas to select a fragment node
     const found = await clickUntilNodeSelected(page);
     expect(found).toBe(true);
-    // Entity type badge is in the meta header — shows specific type like "concept", "person", etc.
-    // The detail body should show "References:" which is unique to entity detail panels
+    // Fragment type badge is in the meta header — shows specific type like "concept", "person", etc.
+    // The detail body should show "References:" which is unique to fragment detail panels
     const bodyText = await page.locator("#graph-detail-body").textContent();
     expect(bodyText?.toLowerCase()).toContain("references:");
 

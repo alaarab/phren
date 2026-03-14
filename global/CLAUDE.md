@@ -66,9 +66,9 @@ The phren MCP server is running. Use these tools proactively. Don't ask the user
 - **When the user says they want to do something later:** call `add_task(project, item)` instead of listing it in chat
 - **When a task is finished:** offer to add any follow-ups to the task rather than leaving them in the conversation
 - **To triage the task:** call `work_next_task(project)` to promote the top Queue item to Active, `pin_task(project, item)` to pin an important task, or `tidy_done_tasks(project)` to archive old completed items
-- **When you discover something about a codebase entity:** call `search_entities(name)` or `get_related_docs(entity)` to see what's already known
-- **To explore the knowledge graph:** call `read_graph(project?)` to see entities and their relationships
-- **To link a finding to an entity:** call `link_findings(project, finding_text, entity, relation?)` to persist a manual link
+- **When you discover something about a codebase fragment:** call `search_fragments(name)` or `get_related_docs(fragment)` to see what's already known
+- **To explore the knowledge graph:** call `read_graph(project?)` to see fragments and their relationships
+- **To link a finding to a fragment:** call `link_findings(project, finding_text, fragment, relation?)` to persist a manual link
 - **At session start (if no lifecycle hooks):** call `session_start(project?)` to get prior session summary, recent findings, and active task
 - **At session end (if no lifecycle hooks):** call `session_end(summary?)` to save a summary for the next session
 - **To check session state:** call `session_context()` for current project, duration, and findings added so far

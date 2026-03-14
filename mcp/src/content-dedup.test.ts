@@ -165,13 +165,13 @@ describe("isDuplicateFinding", () => {
 // ── detectConflicts ─────────────────────────────────────────────────────────
 
 describe("detectConflicts", () => {
-  it("detects polarity conflict on shared entity", () => {
+  it("detects polarity conflict on shared fragment", () => {
     const existing = ["- Always use Docker for local development"];
     const conflicts = detectConflicts("Never use Docker for local development", existing);
     expect(conflicts.length).toBeGreaterThan(0);
   });
 
-  it("returns empty when no shared entities", () => {
+  it("returns empty when no shared fragments", () => {
     const existing = ["- Always use Docker for deployments"];
     const conflicts = detectConflicts("Never use Redis without auth", existing);
     expect(conflicts).toEqual([]);
@@ -187,24 +187,24 @@ describe("detectConflicts", () => {
     expect(detectConflicts("Always use Python", [])).toEqual([]);
   });
 
-  it("returns empty when new finding has no entities", () => {
+  it("returns empty when new finding has no fragments", () => {
     const existing = ["- Always use Docker"];
     expect(detectConflicts("This is a generic statement", existing)).toEqual([]);
   });
 
-  it("detects conflicts with version entities", () => {
+  it("detects conflicts with version fragments", () => {
     const existing = ["- Always pin to v1.2.3 in production"];
     const conflicts = detectConflicts("Never pin to v1.2.3 in production", existing);
     expect(conflicts.length).toBeGreaterThan(0);
   });
 
-  it("detects conflicts with env var entities", () => {
+  it("detects conflicts with env var fragments", () => {
     const existing = ["- Always set PHREN_DEBUG in development"];
     const conflicts = detectConflicts("Never set PHREN_DEBUG in development", existing);
     expect(conflicts.length).toBeGreaterThan(0);
   });
 
-  it("uses dynamic entities for conflict detection", () => {
+  it("uses dynamic fragments for conflict detection", () => {
     const lines = ["- Always enable PhotonEngine for rendering"];
     const dynamic = new Set(["photonengine"]);
     const conflicts = detectConflicts("Avoid PhotonEngine for rendering", lines, dynamic);

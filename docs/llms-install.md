@@ -100,15 +100,15 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `import_project` | `data` | Import project data from a previously exported JSON payload. |
 | `manage_project` | `project`, `action` | Archive or unarchive a project. |
 
-### Entity Graph
+### Fragment Graph
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `search_entities` | `name` | Find entities and related docs by name. |
-| `get_related_docs` | `entity` | Get docs linked to a named entity. |
-| `read_graph` | `project?` | Read the entity graph for a project or all projects. |
-| `link_findings` | `project`, `finding_text`, `entity`, `relation?` | Manually link a finding to an entity. |
-| `cross_project_entities` | (none) | Find entities shared across multiple projects. |
+| `search_fragments` | `name` | Find fragments and related docs by name. |
+| `get_related_docs` | `fragment` | Get docs linked to a named fragment. |
+| `read_graph` | `project?` | Read the fragment graph for a project or all projects. |
+| `link_findings` | `project`, `finding_text`, `fragment`, `relation?` | Manually link a finding to a fragment. |
+| `cross_project_fragments` | (none) | Find fragments shared across multiple projects. |
 
 ### Session Management
 

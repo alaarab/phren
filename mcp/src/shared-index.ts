@@ -317,7 +317,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       }
     }
   }
-  // Include manual entity links so graph changes invalidate the cache
+  // Include manual fragment links so graph changes invalidate the cache
   const manualLinksPath = runtimeFile(phrenPath, "manual-links.json");
   if (fs.existsSync(manualLinksPath)) {
     try {
@@ -643,7 +643,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     const type = classifyFile(filename, relFile);
     const entry: FileEntry = { fullPath: resolvedPath, project, filename, type, relFile };
     if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
-      // Re-extract entities for finding files
+      // Re-extract fragments for finding files
       if (type === "findings") {
         try {
           const content = fs.readFileSync(resolvedPath, "utf-8");
@@ -723,7 +723,7 @@ function isSentinelFresh(phrenPath: string, sentinel: { computedAt: number }): b
 }
 
 /**
- * Attempt to restore the entity graph (entities, entity_links, global_entities) from a
+ * Attempt to restore the fragment graph (entities, entity_links, global_entities) from a
  * previously persisted JSON snapshot. Returns true if the graph was loaded, false if the
  * caller must run full extraction instead.
  */
@@ -754,7 +754,7 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
       // is not empty after a cached-graph rebuild path.
       if (Array.isArray(graph.globalEntities)) {
         for (const [entity, project, docKey] of graph.globalEntities) {
-          // Skip global entities whose source doc no longer exists
+          // Skip global fragments whose source doc no longer exists
           if (docKey && !validDocKeys.has(docKey)) continue;
           try {
             db.run(
@@ -766,7 +766,7 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
           }
         }
       } else {
-        // Older cache without globalEntities: re-derive from entity_links + entities
+        // Older cache without globalEntities: re-derive from entity_links + entities tables
         try {
           const rows = db.exec(
             `SELECT e.name, el.source_doc FROM entity_links el
@@ -799,7 +799,7 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
   return false;
 }
 
-/** Merge manual entity links (written by link_findings tool) into the live DB. Always runs on
+/** Merge manual fragment links (written by link_findings tool) into the live DB. Always runs on
  * every build so hand-authored links survive a full index rebuild. */
 function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
   const manualLinksPath = runtimeFile(phrenPath, 'manual-links.json');
@@ -1012,7 +1012,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
                   try {
                     const content = fs.readFileSync(entry.fullPath, "utf-8");
                     extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
-                  } catch (err: unknown) { debugLog(`entity extraction failed: ${errorMessage(err)}`); }
+                  } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
                 }
               }
 
@@ -1070,17 +1070,17 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
     );
   `);
 
-  // Entity graph tables for lightweight reference graph
+  // Fragment graph tables for lightweight reference graph
   db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, first_seen_at TEXT, UNIQUE(name, type))`);
   db.run(`CREATE TABLE IF NOT EXISTS entity_links (source_id INTEGER REFERENCES entities(id), target_id INTEGER REFERENCES entities(id), rel_type TEXT NOT NULL, source_doc TEXT, PRIMARY KEY (source_id, target_id, rel_type))`);
-  // Q20: Cross-project entity index
+  // Q20: Cross-project fragment index
   ensureGlobalEntitiesTable(db);
 
   const allFiles = globResult.entries;
   const newHashes: Record<string, string> = {};
   let fileCount = 0;
 
-  // Try loading cached entity graph
+  // Try loading cached fragment graph
   const graphPath = runtimeFile(phrenPath, 'entity-graph.json');
   const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles, phrenPath);
 
@@ -1092,17 +1092,17 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
       }
     if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
       fileCount++;
-      // Extract entities from finding files (if not loaded from cache)
+      // Extract fragments from finding files (if not loaded from cache)
       if (!entityGraphLoaded && entry.type === "findings") {
         try {
           const content = fs.readFileSync(entry.fullPath, "utf-8");
           extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
-        } catch (err: unknown) { debugLog(`entity extraction failed: ${errorMessage(err)}`); }
+        } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
       }
     }
   }
 
-  // Persist entity graph for next build
+  // Persist fragment graph for next build
   if (!entityGraphLoaded) {
     try {
       const entityRows = db.exec("SELECT id, name, type FROM entities")[0]?.values ?? [];

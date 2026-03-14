@@ -40,11 +40,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **FTS index debounce**: Skip expensive index rebuilds if rebuilt within last 5s (configurable via `PHREN_INDEX_DEBOUNCE_MS`).
 - **Circular dependency**: Broke `utils.ts` ↔ `shared.ts` import cycle by importing directly from `phren-paths.ts`.
 - **Path traversal defense**: `safeProjectPath` now walks up to deepest existing ancestor for symlink resolution, catches escapes even for non-existent leaf paths. Null byte and separator checks added.
-- **Entity detection expansion**: 5 new patterns (versions, env vars, file paths, error codes, ISO dates) in `EXTRA_ENTITY_PATTERNS`.
+- **Fragment detection expansion**: 5 new patterns (versions, env vars, file paths, error codes, ISO dates) in `EXTRA_ENTITY_PATTERNS`.
 - **Error code regex tightened**: Now requires numeric suffix (TS2345, E0001) to avoid false positives on common words.
 
 ### Added
-- **93 new tests**: `phren-core.test.ts` (41 tests) and `content-dedup.test.ts` (52 tests) covering entity extraction, dedup logic, secret scanning, coref resolution.
+- **93 new tests**: `phren-core.test.ts` (41 tests) and `content-dedup.test.ts` (52 tests) covering fragment extraction, dedup logic, secret scanning, coref resolution.
 
 ## [1.32.1] - 2026-03-11
 
@@ -57,7 +57,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Finding sensitivity levels**: four-level knob (`minimal`, `conservative`, `balanced`, `aggressive`) controls how aggressively Phren captures findings and auto-captures session insights. Configurable via `phren config finding-sensitivity`, VS Code settings (`phren.findingSensitivity`), and written to `.governance/policy.json` for the MCP server to read.
 - **Dedup via response**: `add_finding` now returns Jaccard similarity candidates alongside the saved finding instead of making a separate LLM call. Zero extra API cost for live duplicate detection — the active agent evaluates candidates directly.
-- **Domain-neutral entity detection**: entity extraction now learns entity patterns adaptively from each project's own findings instead of matching against a hardcoded web-dev vocabulary. Reduces false positives on non-web projects.
+- **Domain-neutral fragment detection**: fragment extraction now learns fragment patterns adaptively from each project's own findings instead of matching against a hardcoded web-dev vocabulary. Reduces false positives on non-web projects.
 - **Stack-ranked task priorities with gravity**: tasks now carry a numeric rank instead of `high`/`medium`/`low`. Inactive tasks sink over time via a gravity function so the top of the list stays actionable without manual triage.
 - **Progressive task model**: tasks are created as execution happens rather than planned upfront. Findings auto-link to the currently active task so context is preserved without extra MCP calls.
 - **`phren task reorder`** CLI command for manually adjusting task rank.
@@ -159,8 +159,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Auto-capture at session end**: `PHREN_FEATURE_AUTO_CAPTURE=1` extracts insights from the conversation transcript at Stop hook. Offered in `phren init` walkthrough.
 - **Semantic dedup/conflict in init walkthrough**: `phren init` now prompts to enable `PHREN_FEATURE_SEMANTIC_DEDUP` and `PHREN_FEATURE_SEMANTIC_CONFLICT` when an LLM is configured.
 - **`conflicts_with` in `add_finding` response**: MCP response now includes `conflictsWith` field when a conflict is detected.
-- **Entity hints in `add_finding` response**: `detectedEntities: string[]` returned when entities are auto-extracted from finding text.
-- **Automatic entity extraction**: entities auto-extracted from finding text on write (backtick-quoted, double-quoted, `<!-- entity: X -->` annotations).
+- **Fragment hints in `add_finding` response**: `detectedFragments: string[]` returned when fragments are auto-extracted from finding text.
+- **Automatic fragment extraction**: fragments auto-extracted from finding text on write (backtick-quoted, double-quoted, `<!-- fragment: X -->` annotations).
 - **Cross-project contradiction detection**: `PHREN_FEATURE_SEMANTIC_CONFLICT` now scans global + top-2 other projects' FINDINGS.md, not just the current project.
 
 ### Fixed
@@ -178,7 +178,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **callLlm OpenAI routing**: properly routes to OpenAI's API when `OPENAI_API_KEY` is set (was incorrectly sending to Anthropic).
 - **Conflict annotation targeting**: uses content + date tag matching instead of unreliable 60-char prefix to find the correct bullet.
 - **Bulk `add_findings` semantic gates**: bulk path now runs semantic dedup and conflict checks per-finding (was bypassing them entirely).
-- **Manual entity links in global_entities**: `link_findings` now populates `global_entities` so manual links appear in cross-project entity discovery.
+- **Manual fragment links in global_entities**: `link_findings` now populates `global_entities` so manual links appear in cross-project fragment discovery.
 
 ## [1.15.6] - 2026-03-08
 
@@ -267,14 +267,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Docs
 - Whitepaper: tool count updated from 19 to 29 in all three references
-- `docs/architecture.md`: MCP diagram updated to show all 7 tool categories including entity graph and session management
+- `docs/architecture.md`: MCP diagram updated to show all 7 tool categories including fragment graph and session management
 - `docs/llms-full.txt`: tool count 28 -> 29, added `cross_project_entities`, fixed tag parameter reference
 - `CLAUDE.md`: updated tool count in Key Files table
 
 ## [1.13.6] - 2026-03-07
 
 ### Added
-- Entity graph: `search_entities`, `get_related_docs`, `read_graph`, `link_findings`, `cross_project_entities` (29 tools total)
+- Fragment graph: `search_fragments`, `get_related_docs`, `read_graph`, `link_findings`, `cross_project_fragments` (29 tools total)
 - Session management: `session_start`, `session_end`, `session_context` for agents without lifecycle hooks
 - `get_memory_detail` for progressive disclosure (Layer 3)
 - `add_tasks` bulk MCP tool

@@ -233,7 +233,7 @@ const PROSE_ENTITY_RE = UNIVERSAL_TECH_TERMS_RE;
 const POSITIVE_RE = /\b(always|prefer|should|must|works|recommend|enable)\b/i;
 const NEGATIVE_RE = /\b(never|avoid|don't|do not|shouldn't|must not|broken|deprecated|disable)\b/i;
 
-// ── Dynamic entity extraction ─────────────────────────────────────────────────
+// ── Dynamic fragment extraction ────────────────────────────────────────────────
 
 const ENTITY_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -318,7 +318,7 @@ function extractProseEntities(text: string, dynamicEntities?: Set<string>): stri
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) found.add(m[0].toLowerCase());
 
-  // Match additional entity patterns (versions, env keys, file paths, error codes, dates)
+  // Match additional fragment patterns (versions, env keys, file paths, error codes, dates)
   for (const { re: pattern } of EXTRA_ENTITY_PATTERNS) {
     const pRe = new RegExp(pattern.source, pattern.flags);
     let pm: RegExpExecArray | null;
@@ -326,7 +326,7 @@ function extractProseEntities(text: string, dynamicEntities?: Set<string>): stri
   }
 
   if (dynamicEntities) {
-    // Also check whether any dynamic entity appears (case-insensitive word match)
+    // Also check whether any dynamic fragment appears (case-insensitive word match)
     for (const entity of dynamicEntities) {
       const escaped = entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       if (new RegExp(`\\b${escaped}\\b`, "i").test(text)) {
