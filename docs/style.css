@@ -1,20 +1,20 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #0A0B09;
-  --bg-1: #0E100C;
-  --bg-2: #13150F;
-  --indigo: #3A7BAE;
-  --indigo-dark: #2B5F8E;
-  --indigo-deeper: #1C4A6E;
-  --copper: #F5C840;
-  --copper-mid: #D4892E;
-  --copper-dark: #8B4A12;
+  --bg: #12122a;
+  --bg-1: #161635;
+  --bg-2: #1a1a3e;
+  --indigo: #00E5FF;
+  --indigo-dark: #00B8D4;
+  --indigo-deeper: #0097A7;
+  --copper: #9B8DC8;
+  --copper-mid: #7B68AE;
+  --copper-dark: #2D2255;
   --text: #E8E4D9;
   --text-muted: #8A8680;
   --text-dim: #5A5752;
-  --border: #1C2018;
-  --border-subtle: #161812;
+  --border: #1e1e40;
+  --border-subtle: #19193a;
 }
 
 html { scroll-behavior: smooth; }
