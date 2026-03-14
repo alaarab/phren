@@ -10,7 +10,7 @@ describe("cli-hooks-globs", () => {
 
   beforeEach(() => {
     clearProjectGlobCache();
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-globs-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-globs-test-"));
   });
 
   afterEach(() => {

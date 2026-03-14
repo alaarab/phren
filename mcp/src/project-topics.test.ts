@@ -18,7 +18,7 @@ function makeProject(root: string, name: string, files: Record<string, string>):
 }
 
 beforeEach(() => {
-  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-project-topics-"));
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-project-topics-"));
 });
 
 afterEach(() => {
@@ -124,7 +124,7 @@ describe("project topic config", () => {
       "reference/topics/general.md": [
         "# game - General",
         "",
-        "<!-- cortex:auto-topic slug=general -->",
+        "<!-- phren:auto-topic slug=general -->",
         "",
         "## Archived 2026-03-01",
         "",

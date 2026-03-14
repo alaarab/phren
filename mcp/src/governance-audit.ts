@@ -16,8 +16,8 @@ interface RetrievalLogEntry {
   retrievedAt: string;
 }
 
-export function recordRetrieval(cortexPath: string, file: string, section: string): void {
-  const dir = path.join(cortexPath, ".runtime");
+export function recordRetrieval(phrenPath: string, file: string, section: string): void {
+  const dir = path.join(phrenPath, ".runtime");
   fs.mkdirSync(dir, { recursive: true });
   const logPath = path.join(dir, "retrieval-log.jsonl");
   const entry: RetrievalLogEntry = { file, section, retrievedAt: new Date().toISOString() };

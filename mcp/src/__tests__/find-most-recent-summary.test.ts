@@ -4,18 +4,18 @@ import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
 import { findMostRecentSummary } from "../mcp-session.js";
 
-function sessionsDir(cortexPath: string) {
-  return path.join(cortexPath, ".runtime", "sessions");
+function sessionsDir(phrenPath: string) {
+  return path.join(phrenPath, ".runtime", "sessions");
 }
 
-function writeSession(cortexPath: string, state: { sessionId: string; [key: string]: unknown }) {
-  const dir = sessionsDir(cortexPath);
+function writeSession(phrenPath: string, state: { sessionId: string; [key: string]: unknown }) {
+  const dir = sessionsDir(phrenPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `session-${state.sessionId}.json`), JSON.stringify(state));
 }
 
-function writeLastSummary(cortexPath: string, data: { summary: string; sessionId: string; endedAt: string }) {
-  const dir = sessionsDir(cortexPath);
+function writeLastSummary(phrenPath: string, data: { summary: string; sessionId: string; endedAt: string }) {
+  const dir = sessionsDir(phrenPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "last-summary.json"), JSON.stringify(data));
 }

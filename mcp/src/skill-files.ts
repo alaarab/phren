@@ -45,8 +45,8 @@ function removeManagedSkillLink(dest: string, managedRoot: string): void {
     if (!resolvedTarget.startsWith(managedPrefix)) return;
     fs.unlinkSync(dest);
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT" && process.env.CORTEX_DEBUG) {
-      process.stderr.write(`[cortex] removeManagedSkillLink: ${errorMessage(err)}\n`);
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT" && (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
+      process.stderr.write(`[phren] removeManagedSkillLink: ${errorMessage(err)}\n`);
     }
   }
 }
@@ -67,8 +67,8 @@ function writeSkillArtifacts(destDir: string, manifest: SkillManifest): void {
   );
 }
 
-export function syncScopeSkillsToDir(cortexPath: string, scope: string, destDir: string): SkillManifest {
-  const manifest = buildSkillManifest(cortexPath, "", scope, destDir);
+export function syncScopeSkillsToDir(phrenPath: string, scope: string, destDir: string): SkillManifest {
+  const manifest = buildSkillManifest(phrenPath, "", scope, destDir);
   const expectedNames = new Set<string>();
   fs.mkdirSync(destDir, { recursive: true });
 
@@ -76,35 +76,35 @@ export function syncScopeSkillsToDir(cortexPath: string, scope: string, destDir:
     const destName = skill.format === "folder" ? skill.name : path.basename(skill.path);
     const destPath = path.join(destDir, destName);
     if (!skill.visibleToAgents) {
-      removeManagedSkillLink(destPath, cortexPath);
+      removeManagedSkillLink(destPath, phrenPath);
       continue;
     }
     expectedNames.add(destName);
-    symlinkManagedSkill(skill.root, destPath, cortexPath);
+    symlinkManagedSkill(skill.root, destPath, phrenPath);
   }
 
   for (const entry of fs.readdirSync(destDir)) {
     if (expectedNames.has(entry)) continue;
-    removeManagedSkillLink(path.join(destDir, entry), cortexPath);
+    removeManagedSkillLink(path.join(destDir, entry), phrenPath);
   }
 
   writeSkillArtifacts(destDir, manifest);
   return manifest;
 }
 
-export function syncSkillLinksForScope(cortexPath: string, scope: string): SkillManifest | null {
+export function syncSkillLinksForScope(phrenPath: string, scope: string): SkillManifest | null {
   if (scope.toLowerCase() === "global") {
-    return syncScopeSkillsToDir(cortexPath, "global", homePath(".claude", "skills"));
+    return syncScopeSkillsToDir(phrenPath, "global", homePath(".claude", "skills"));
   }
 
   const projectDir = findProjectDir(scope);
   if (!projectDir) return null;
-  return syncScopeSkillsToDir(cortexPath, scope, path.join(projectDir, ".claude", "skills"));
+  return syncScopeSkillsToDir(phrenPath, scope, path.join(projectDir, ".claude", "skills"));
 }
 
-export function setSkillEnabledAndSync(cortexPath: string, scope: string, name: string, enabled: boolean): void {
-  setSkillEnabled(cortexPath, scope, name, enabled);
-  syncSkillLinksForScope(cortexPath, scope);
+export function setSkillEnabledAndSync(phrenPath: string, scope: string, name: string, enabled: boolean): void {
+  setSkillEnabled(phrenPath, scope, name, enabled);
+  syncSkillLinksForScope(phrenPath, scope);
 }
 
 export function removeSkillPath(skillPath: string): string {

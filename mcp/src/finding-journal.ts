@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { runtimeDir, CortexResult, cortexOk, cortexErr, CortexError } from "./shared.js";
+import { runtimeDir, PhrenResult, phrenOk, phrenErr, PhrenError } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 import { addFindingToFile } from "./shared-content.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
@@ -26,8 +26,8 @@ export interface FindingJournalCompactResult {
   failed: number;
 }
 
-function journalRoot(cortexPath: string): string {
-  const dir = path.join(runtimeDir(cortexPath), "finding-journal");
+function journalRoot(phrenPath: string): string {
+  const dir = path.join(runtimeDir(phrenPath), "finding-journal");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -38,14 +38,14 @@ function sanitizeSessionId(sessionId?: string): string {
   return safe || "session";
 }
 
-function journalFileFor(cortexPath: string, project: string, sessionId?: string): string {
-  const projectDir = path.join(journalRoot(cortexPath), project);
+function journalFileFor(phrenPath: string, project: string, sessionId?: string): string {
+  const projectDir = path.join(journalRoot(phrenPath), project);
   fs.mkdirSync(projectDir, { recursive: true });
   return path.join(projectDir, `${sanitizeSessionId(sessionId)}.jsonl`);
 }
 
-function listJournalFiles(cortexPath: string, project?: string): string[] {
-  const root = journalRoot(cortexPath);
+function listJournalFiles(phrenPath: string, project?: string): string[] {
+  const root = journalRoot(phrenPath);
   const projects = project ? [project] : fs.readdirSync(root).filter((entry) => fs.statSync(path.join(root, entry)).isDirectory());
   const files: string[] = [];
   for (const projectName of projects) {
@@ -60,13 +60,13 @@ function listJournalFiles(cortexPath: string, project?: string): string[] {
 }
 
 export function appendFindingJournal(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   text: string,
   opts: { sessionId?: string; repo?: string; commit?: string; file?: string; source?: FindingProvenanceSource } = {}
-): CortexResult<string> {
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const filePath = journalFileFor(cortexPath, project, opts.sessionId);
+): PhrenResult<string> {
+  if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
+  const filePath = journalFileFor(phrenPath, project, opts.sessionId);
   const entry: FindingJournalEntry = {
     at: new Date().toISOString(),
     project,
@@ -82,13 +82,13 @@ export function appendFindingJournal(
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.appendFileSync(filePath, JSON.stringify(entry) + "\n");
     });
-    return cortexOk(filePath);
+    return phrenOk(filePath);
   } catch (err: unknown) {
-    return cortexErr(`Failed to append finding journal: ${errorMessage(err)}`, CortexError.PERMISSION_DENIED);
+    return phrenErr(`Failed to append finding journal: ${errorMessage(err)}`, PhrenError.PERMISSION_DENIED);
   }
 }
 
-export function compactFindingJournals(cortexPath: string, project?: string): FindingJournalCompactResult {
+export function compactFindingJournals(phrenPath: string, project?: string): FindingJournalCompactResult {
   const result: FindingJournalCompactResult = {
     filesProcessed: 0,
     entriesProcessed: 0,
@@ -97,7 +97,7 @@ export function compactFindingJournals(cortexPath: string, project?: string): Fi
     failed: 0,
   };
 
-  for (const filePath of listJournalFiles(cortexPath, project)) {
+  for (const filePath of listJournalFiles(phrenPath, project)) {
     const claimed = `${filePath}.${crypto.randomUUID()}.claim`;
     try {
       fs.renameSync(filePath, claimed);
@@ -117,7 +117,7 @@ export function compactFindingJournals(cortexPath: string, project?: string): Fi
 
       for (const entry of entries) {
         result.entriesProcessed += 1;
-        const write = addFindingToFile(cortexPath, entry.project, entry.text, {
+        const write = addFindingToFile(phrenPath, entry.project, entry.text, {
           ...(entry.repo ? { repo: entry.repo } : {}),
           ...(entry.commit ? { commit: entry.commit } : {}),
           ...(entry.file ? { file: entry.file } : {}),

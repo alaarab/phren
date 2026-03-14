@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "./shared.js";
 import { isFeatureEnabled, safeProjectPath } from "./utils.js";
-import { UNIVERSAL_TECH_TERMS_RE, EXTRA_ENTITY_PATTERNS } from "./cortex-core.js";
+import { UNIVERSAL_TECH_TERMS_RE, EXTRA_ENTITY_PATTERNS } from "./phren-core.js";
 import { isInactiveFindingLine } from "./finding-lifecycle.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
@@ -64,7 +64,7 @@ async function withCache<T>(
       return cache[key].result;
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] withCache load (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] withCache load (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   const result = await compute();
@@ -75,7 +75,7 @@ async function withCache<T>(
     cache[key] = { result, ts: Date.now() };
     persistCache(cachePath, cache);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] withCache persist (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] withCache persist (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   return result;
@@ -118,14 +118,14 @@ export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 
   // Check abort before starting any work to avoid unnecessary API calls
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-  const endpoint = process.env.CORTEX_LLM_ENDPOINT;
-  const customKey = process.env.CORTEX_LLM_KEY;
+  const endpoint = (process.env.PHREN_LLM_ENDPOINT);
+  const customKey = (process.env.PHREN_LLM_KEY);
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.CORTEX_LLM_MODEL;
+  const model = (process.env.PHREN_LLM_MODEL);
 
   if (endpoint) {
-    // Custom endpoint: use CORTEX_LLM_KEY, fall back to any available key
+    // Custom endpoint: use PHREN_LLM_KEY, fall back to any available key
     const key = customKey || openaiKey || anthropicKey || "";
     return fetchLlm(
       `${endpoint.replace(/\/$/, "")}/chat/completions`,
@@ -255,14 +255,14 @@ interface ProjectEntityCache {
  * Results are cached in .runtime/project-entities-{project}.json (1h TTL or
  * invalidated when FINDINGS.md changes).
  */
-export function extractDynamicEntities(cortexPath: string, project: string): Set<string> {
+export function extractDynamicEntities(phrenPath: string, project: string): Set<string> {
   try {
-    const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
+    const findingsPath = path.join(phrenPath, project, "FINDINGS.md");
     if (!fs.existsSync(findingsPath)) return new Set();
 
     const findingsStat = fs.statSync(findingsPath);
     const findingsMtime = findingsStat.mtimeMs;
-    const cachePath = runtimeFile(cortexPath, `project-entities-${project}.json`);
+    const cachePath = runtimeFile(phrenPath, `project-entities-${project}.json`);
 
     // Try reading existing cache
     if (fs.existsSync(cachePath)) {
@@ -521,19 +521,19 @@ export function resolveCoref(text: string, context: { project?: string; file?: s
 }
 
 /**
- * LLM-based semantic dedup check. Only called when CORTEX_FEATURE_SEMANTIC_DEDUP=1.
+ * LLM-based semantic dedup check. Only called when PHREN_FEATURE_SEMANTIC_DEDUP=1.
  * Must be called before addFindingToFile() since that function is sync.
  * Returns true if the new learning is a semantic duplicate of any existing bullet.
  */
 export async function checkSemanticDedup(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   newLearning: string,
   signal?: AbortSignal
 ): Promise<boolean> {
-  if (!isFeatureEnabled("CORTEX_FEATURE_SEMANTIC_DEDUP", false)) return false;
+  if (!isFeatureEnabled("PHREN_FEATURE_SEMANTIC_DEDUP", false)) return false;
 
-  const resolvedDir = safeProjectPath(cortexPath, project);
+  const resolvedDir = safeProjectPath(phrenPath, project);
   if (!resolvedDir) return false;
   const findingsPath = path.join(resolvedDir, "FINDINGS.md");
   if (!fs.existsSync(findingsPath)) return false;
@@ -550,16 +550,16 @@ export async function checkSemanticDedup(
     const jaccard = jaccardSimilarity(tokA, tokB);
     if (jaccard >= 0.55) continue; // already caught by sync isDuplicateFinding
     if (jaccard >= 0.3) {
-      const isDup = await semanticDedup(a, b, cortexPath, signal);
+      const isDup = await semanticDedup(a, b, phrenPath, signal);
       if (isDup) return true;
     }
   }
   return false;
 }
 
-async function semanticDedup(a: string, b: string, cortexPath: string, signal?: AbortSignal): Promise<boolean> {
+async function semanticDedup(a: string, b: string, phrenPath: string, signal?: AbortSignal): Promise<boolean> {
   const key = crypto.createHash("sha256").update(a + "|||" + b).digest("hex");
-  const cachePath = runtimeFile(cortexPath, "dedup-cache.json");
+  const cachePath = runtimeFile(phrenPath, "dedup-cache.json");
 
   try {
     return await withCache<boolean>(cachePath, key, DEDUP_CACHE_TTL_MS, async () => {
@@ -575,21 +575,21 @@ async function semanticDedup(a: string, b: string, cortexPath: string, signal?: 
 const CONFLICT_CHECK_TOTAL_TIMEOUT_MS = 30_000;
 
 /**
- * LLM-based conflict check. Only called when CORTEX_FEATURE_SEMANTIC_CONFLICT=1.
+ * LLM-based conflict check. Only called when PHREN_FEATURE_SEMANTIC_CONFLICT=1.
  * Call after detectConflicts() in addFindingToFile flow.
  * Returns conflict annotations to append to the bullet.
  * Also scans global findings and other projects for cross-project contradictions.
  * Has a 30-second total timeout; returns partial results if the deadline is hit.
  */
 export async function checkSemanticConflicts(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   newFinding: string,
   signal?: AbortSignal
 ): Promise<{ annotations: string[]; checked: boolean }> {
-  if (!isFeatureEnabled("CORTEX_FEATURE_SEMANTIC_CONFLICT", false)) return { annotations: [], checked: false };
+  if (!isFeatureEnabled("PHREN_FEATURE_SEMANTIC_CONFLICT", false)) return { annotations: [], checked: false };
 
-  const resolvedDir = safeProjectPath(cortexPath, project);
+  const resolvedDir = safeProjectPath(phrenPath, project);
   if (!resolvedDir) return { annotations: [], checked: false };
 
   const newEntities = extractProseEntities(newFinding);
@@ -606,7 +606,7 @@ export async function checkSemanticConflicts(
   }
 
   // Global project findings
-  const globalFindingsPath = path.join(cortexPath, "global", "FINDINGS.md");
+  const globalFindingsPath = path.join(phrenPath, "global", "FINDINGS.md");
   if (fs.existsSync(globalFindingsPath)) {
     const content = fs.readFileSync(globalFindingsPath, "utf8");
     const bullets = content.split("\n").filter((l) => l.startsWith("- "));
@@ -616,16 +616,16 @@ export async function checkSemanticConflicts(
   // Scan other projects by FINDINGS.md recency so we still check the hottest projects first,
   // but do not truncate the search set and miss older contradictions.
   try {
-    const entries = fs.readdirSync(cortexPath, { withFileTypes: true });
+    const entries = fs.readdirSync(phrenPath, { withFileTypes: true });
     const otherProjects = entries
       .filter((e) => e.isDirectory() && e.name !== project && e.name !== "global" && !e.name.startsWith("."))
       .map((e) => {
-        const fp = path.join(cortexPath, e.name, "FINDINGS.md");
+        const fp = path.join(phrenPath, e.name, "FINDINGS.md");
         if (!fs.existsSync(fp)) return null;
         try {
           return { name: e.name, mtime: fs.statSync(fp).mtimeMs, fp };
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] crossProjectScan stat: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] crossProjectScan stat: ${err instanceof Error ? err.message : String(err)}\n`);
           return null;
         }
       })
@@ -638,7 +638,7 @@ export async function checkSemanticConflicts(
       if (bullets.length > 0) sources.push({ bullets, sourceProject: proj.name });
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] crossProjectScan: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] crossProjectScan: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   const annotations: string[] = [];
@@ -656,7 +656,7 @@ export async function checkSemanticConflicts(
       const shared = lineEntities.filter((e) => newEntities.includes(e));
       if (shared.length === 0) continue;
 
-      const result = await llmConflictCheck(line, newFinding, shared[0], cortexPath, signal);
+      const result = await llmConflictCheck(line, newFinding, shared[0], phrenPath, signal);
       if (result === "CONFLICT") {
         const snippet = stripMetadata(line).trim().slice(0, 80);
         const sourceLabel = sourceProject ? ` (from project: ${sourceProject})` : "";
@@ -672,11 +672,11 @@ async function llmConflictCheck(
   existing: string,
   newFinding: string,
   entity: string,
-  cortexPath: string,
+  phrenPath: string,
   signal?: AbortSignal
 ): Promise<"CONFLICT" | "OK"> {
   const key = crypto.createHash("sha256").update(existing + "|||" + newFinding).digest("hex");
-  const cachePath = runtimeFile(cortexPath, "conflict-cache.json");
+  const cachePath = runtimeFile(phrenPath, "conflict-cache.json");
 
   try {
     return await withCache<"CONFLICT" | "OK">(cachePath, key, CONFLICT_CACHE_TTL_MS, async () => {

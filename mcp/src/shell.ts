@@ -3,7 +3,6 @@ import * as path from "path";
 import {
   addTask,
   addFinding,
-  editQueueItem,
   loadShellState,
   saveShellState,
   ShellState,
@@ -41,7 +40,7 @@ import { errorMessage } from "./utils.js";
 
 // ── Shell class ──────────────────────────────────────────────────────────────
 
-export class CortexShell {
+export class PhrenShell {
   private state: ShellState;
   private message = `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`;
   healthCache?: { at: number; result: DoctorResultLike };
@@ -64,7 +63,7 @@ export class CortexShell {
   get filter(): string | undefined { return this.state.filter; }
 
   constructor(
-    readonly cortexPath: string,
+    readonly phrenPath: string,
     readonly profile: string,
     readonly deps: ShellDeps = {
       runDoctor,
@@ -73,14 +72,14 @@ export class CortexShell {
       runUpdate: defaultRunUpdate,
     },
   ) {
-    this.state = loadShellState(cortexPath);
+    this.state = loadShellState(phrenPath);
     this.state.view = "Projects";
     this.message = this.state.project
       ? `  Dashboard ready — active context ${style.boldCyan(this.state.project)}`
       : `  Dashboard ready — choose a project with ${style.boldCyan("↵")} or stay global`;
   }
 
-  close(): void { saveShellState(this.cortexPath, this.state); }
+  close(): void { saveShellState(this.phrenPath, this.state); }
   setMessage(msg: string): void { this.message = msg; }
 
   confirmThen(label: string, action: () => void): void {
@@ -91,12 +90,12 @@ export class CortexShell {
   setView(view: ShellView): void {
     this.state.view = view;
     this.viewScrollMap[view] = 0;
-    saveShellState(this.cortexPath, this.state);
+    saveShellState(this.phrenPath, this.state);
   }
 
   setFilter(value: string): void {
     this.state.filter = value.trim() || undefined;
-    saveShellState(this.cortexPath, this.state);
+    saveShellState(this.phrenPath, this.state);
     this.setMessage(this.state.filter ? `  Filter: ${style.yellow(this.state.filter)}` : "  Filter cleared.");
   }
 
@@ -108,7 +107,7 @@ export class CortexShell {
         if (this.undoStack.length > MAX_UNDO_STACK) this.undoStack.shift();
       }
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] shell pushUndo: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell pushUndo: ${errorMessage(err)}\n`);
     }
   }
 
@@ -141,7 +140,7 @@ export class CortexShell {
   private setScroll(n: number): void { this.viewScrollMap[this.state.view] = Math.max(0, n); }
 
   getListItems(): { id?: string; name?: string; text?: string; line?: string }[] {
-    return getListItems(this.cortexPath, this.profile, this.state, this.healthLineCount);
+    return getListItems(this.phrenPath, this.profile, this.state, this.healthLineCount);
   }
 
   startInput(ctx: string, initial: string): void { this.navMode = "input"; this.inputCtx = ctx; this.inputBuf = initial; }
@@ -155,14 +154,14 @@ export class CortexShell {
     switch (ctx) {
       case "filter": this.setFilter(buf); break;
       case "command": await this.runPalette(buf.startsWith(":") ? buf.slice(1) : buf); break;
-      case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addTask(this.cortexPath, p, buf))}`); break; }
-      case "learn-add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addFinding(this.cortexPath, p, buf))}`); break; }
+      case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addTask(this.phrenPath, p, buf))}`); break; }
+      case "learn-add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addFinding(this.phrenPath, p, buf))}`); break; }
       case "skill-add": {
         const p = this.ensureProjectSelected();
         if (!p) return;
         const name = buf.trim().replace(/\.md$/i, "").replace(/[^a-zA-Z0-9_-]/g, "-");
         if (!name) { this.setMessage("  No name entered."); return; }
-        const destDir = path.join(this.cortexPath, p, "skills");
+        const destDir = path.join(this.phrenPath, p, "skills");
         fs.mkdirSync(destDir, { recursive: true });
         const dest = path.join(destDir, `${name}.md`);
         if (fs.existsSync(dest)) { this.setMessage(`  Skill "${name}" already exists.`); return; }
@@ -171,7 +170,7 @@ export class CortexShell {
         this.setMessage(`  Created skill "${name}" — edit ${dest}`);
         break;
       }
-      case "mq-edit": { const p = this.ensureProjectSelected(); if (!p) return; const r = editQueueItem(this.cortexPath, p, this.inputMqId, buf); this.setMessage(`  ${resultMsg(r)}`); this.inputMqId = ""; break; }
+      case "mq-edit": { this.setMessage("  Queue editing has been removed. The review queue is now read-only."); this.inputMqId = ""; break; }
     }
   }
 
@@ -206,7 +205,7 @@ export class CortexShell {
 
   private async doctorSnapshot(): Promise<DoctorResultLike> {
     if (this.healthCache && Date.now() - this.healthCache.at < 10_000) return this.healthCache.result;
-    const result = await this.deps.runDoctor(this.cortexPath, false);
+    const result = await this.deps.runDoctor(this.phrenPath, false);
     this.healthCache = { at: Date.now(), result };
     return result;
   }
@@ -215,7 +214,7 @@ export class CortexShell {
 
   async render(): Promise<string> {
     const ctx: ViewContext = {
-      cortexPath: this.cortexPath, profile: this.profile, state: this.state,
+      phrenPath: this.phrenPath, profile: this.profile, state: this.state,
       currentCursor: () => this.currentCursor(), currentScroll: () => this.currentScroll(),
       setScroll: (n) => this.setScroll(n),
     };
@@ -229,7 +228,7 @@ export class CortexShell {
   private asNavigationHost(): NavigationHost {
     const self = this;
     return {
-      cortexPath: this.cortexPath, profile: this.profile, state: this.state, deps: this.deps,
+      phrenPath: this.phrenPath, profile: this.profile, state: this.state, deps: this.deps,
       get showHelp() { return self.showHelp; }, set showHelp(v) { self.showHelp = v; },
       get healthCache() { return self.healthCache; }, set healthCache(v) { self.healthCache = v; },
       get prevHealthView() { return self.prevHealthView; }, set prevHealthView(v) { self.prevHealthView = v; },
@@ -272,7 +271,7 @@ export class CortexShell {
     if (["q", "quit", ":q", ":quit", ":exit"].includes(input.toLowerCase())) return false;
     if (input === "p") { this.setView("Projects"); this.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
     if (input === "b") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Tasks"); this.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return true; }
-    if (input === "l") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Findings"); this.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
+    if (input === "l") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Findings"); this.setMessage(`  ${TAB_ICONS.Findings} Fragments`); return true; }
     if (input === "m") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
     if (input === "s") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Skills"); this.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
     if (input === "k") { this.setView("Hooks"); this.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
@@ -284,7 +283,7 @@ export class CortexShell {
   }
 
   completeInput(line: string): string[] {
-    return completeInputFn(line, this.cortexPath, this.profile, this.state);
+    return completeInputFn(line, this.phrenPath, this.profile, this.state);
   }
 }
 

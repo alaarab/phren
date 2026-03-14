@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 import { showPreview } from "./previewPanel";
 
 export interface QueueItemData {
@@ -15,7 +15,7 @@ export interface QueueItemData {
   model?: string;
 }
 
-export function showQueueItemDetail(client: CortexClient, item: QueueItemData, onRefresh: () => void): void {
+export function showQueueItemDetail(client: PhrenClient, item: QueueItemData, onRefresh: () => void): void {
   showPreview({
     key: `queue:${item.projectName}:${item.id}`,
     title: `Queue: ${item.projectName} · ${item.id}`,
@@ -56,12 +56,12 @@ export function showQueueItemDetail(client: CortexClient, item: QueueItemData, o
 function renderQueueItemHtml(item: QueueItemData): string {
   const sectionColor: Record<string, string> = {
     Review: "#2a7acc",
-    Stale: "#c89b2a",
+    Stale: "#7B68AE",
     Conflicts: "#c33",
   };
   const color = sectionColor[item.section] ?? "#888";
   const confidenceHtml = item.confidence !== undefined
-    ? `<span class="badge" style="background:${item.confidence < 0.7 ? '#c89b2a' : '#388a34'}">${Math.round(item.confidence * 100)}% confidence</span>`
+    ? `<span class="badge" style="background:${item.confidence < 0.7 ? '#7B68AE' : '#388a34'}">${Math.round(item.confidence * 100)}% confidence</span>`
     : "";
   const riskyHtml = item.risky ? '<span class="badge" style="background:#c33">risky</span>' : "";
   const metaHtml = [

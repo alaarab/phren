@@ -98,7 +98,7 @@ interface ArchivedTopicEntry {
 }
 
 const TOPIC_CONFIG_FILENAME = "topic-config.json";
-const AUTO_TOPIC_MARKER_RE = /^<!--\s*cortex:auto-topic(?:\s+slug=([a-z0-9_-]+))?\s*-->$/;
+const AUTO_TOPIC_MARKER_RE = /^<!--\s*phren:auto-topic(?:\s+slug=([a-z0-9_-]+))?\s*-->$/;
 const ARCHIVED_SECTION_RE = /^## Archived (\d{4}-\d{2}-\d{2})$/;
 const SOFTWARE_TOPICS: ProjectTopic[] = [
   {
@@ -475,24 +475,24 @@ function ensureGeneralTopic(topics: ProjectTopic[]): ProjectTopic[] {
   return [...topics, { ...GENERAL_TOPIC, keywords: [...GENERAL_TOPIC.keywords] }];
 }
 
-function topicConfigPath(cortexPath: string, project: string): string | null {
-  return safeProjectPath(cortexPath, project, TOPIC_CONFIG_FILENAME);
+function topicConfigPath(phrenPath: string, project: string): string | null {
+  return safeProjectPath(phrenPath, project, TOPIC_CONFIG_FILENAME);
 }
 
-function projectDirPath(cortexPath: string, project: string): string | null {
-  return safeProjectPath(cortexPath, project);
+function projectDirPath(phrenPath: string, project: string): string | null {
+  return safeProjectPath(phrenPath, project);
 }
 
-export function topicReferenceDir(cortexPath: string, project: string): string | null {
-  return safeProjectPath(cortexPath, project, "reference", "topics");
+export function topicReferenceDir(phrenPath: string, project: string): string | null {
+  return safeProjectPath(phrenPath, project, "reference", "topics");
 }
 
 export function topicReferenceRelativePath(slug: string): string {
   return path.posix.join("reference", "topics", `${slug}.md`);
 }
 
-export function topicReferencePath(cortexPath: string, project: string, slug: string): string | null {
-  return safeProjectPath(cortexPath, project, "reference", "topics", `${normalizeTopicSlug(slug)}.md`);
+export function topicReferencePath(phrenPath: string, project: string, slug: string): string | null {
+  return safeProjectPath(phrenPath, project, "reference", "topics", `${normalizeTopicSlug(slug)}.md`);
 }
 
 function readJsonFile<T>(filePath: string): T | null {
@@ -513,15 +513,15 @@ function countByTerm(terms: string[]): Map<string, number> {
   return counts;
 }
 
-function readTopicInputContent(cortexPath: string, project: string): string[] {
+function readTopicInputContent(phrenPath: string, project: string): string[] {
   const parts: string[] = [];
   for (const file of ["CLAUDE.md", "FINDINGS.md"]) {
-    const filePath = safeProjectPath(cortexPath, project, file);
+    const filePath = safeProjectPath(phrenPath, project, file);
     if (!filePath || !fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8").trim();
     if (content) parts.push(content);
   }
-  const referenceDir = safeProjectPath(cortexPath, project, "reference");
+  const referenceDir = safeProjectPath(phrenPath, project, "reference");
   if (referenceDir && fs.existsSync(referenceDir)) {
     for (const filePath of readReferenceMarkdownFiles(referenceDir)) {
       try {
@@ -542,8 +542,8 @@ interface TopicContentSignal {
   termCounts: Map<string, number>;
 }
 
-function buildTopicContentSignal(cortexPath: string, project: string): TopicContentSignal {
-  const parts = readTopicInputContent(cortexPath, project);
+function buildTopicContentSignal(phrenPath: string, project: string): TopicContentSignal {
+  const parts = readTopicInputContent(phrenPath, project);
   const corpus = parts.join("\n");
   if (!corpus.trim()) {
     return { hasContent: false, corpus: "", corpusLower: "", termCounts: new Map<string, number>() };
@@ -628,19 +628,19 @@ export function getBuiltinTopicConfig(domain?: string): BuiltinTopic[] {
     }));
 }
 
-function readProjectDomain(cortexPath: string, project: string): string | undefined {
-  const configPath = topicConfigPath(cortexPath, project);
+function readProjectDomain(phrenPath: string, project: string): string | undefined {
+  const configPath = topicConfigPath(phrenPath, project);
   if (!configPath || !fs.existsSync(configPath)) return undefined;
   const parsed = readJsonFile<ProjectTopicConfigFile>(configPath);
   return typeof parsed?.domain === "string" ? parsed.domain : undefined;
 }
 
-export function getBuiltinTopics(cortexPath?: string, project?: string): ProjectTopic[] {
-  const domain = (cortexPath && project) ? readProjectDomain(cortexPath, project) : undefined;
+export function getBuiltinTopics(phrenPath?: string, project?: string): ProjectTopic[] {
+  const domain = (phrenPath && project) ? readProjectDomain(phrenPath, project) : undefined;
   const fallback = ensureGeneralTopic(resolveDomainTopics(domain)).map((topic) => ({ ...topic, keywords: [...topic.keywords] }));
-  if (!cortexPath || !project || !isValidProjectName(project)) return fallback;
+  if (!phrenPath || !project || !isValidProjectName(project)) return fallback;
 
-  const signal = buildTopicContentSignal(cortexPath, project);
+  const signal = buildTopicContentSignal(phrenPath, project);
   if (!signal.hasContent) return fallback;
 
   const adaptive: ProjectTopic[] = [];
@@ -662,9 +662,9 @@ export function getBuiltinTopics(cortexPath?: string, project?: string): Project
   return merged;
 }
 
-export function readProjectTopics(cortexPath: string, project: string): { source: ProjectTopicSource; topics: ProjectTopic[]; domain?: string } {
-  const builtinTopics = getBuiltinTopics(cortexPath, project);
-  const configPath = topicConfigPath(cortexPath, project);
+export function readProjectTopics(phrenPath: string, project: string): { source: ProjectTopicSource; topics: ProjectTopic[]; domain?: string } {
+  const builtinTopics = getBuiltinTopics(phrenPath, project);
+  const configPath = topicConfigPath(phrenPath, project);
   if (!configPath || !fs.existsSync(configPath)) {
     return { source: "default", topics: builtinTopics };
   }
@@ -681,17 +681,17 @@ export function readProjectTopics(cortexPath: string, project: string): { source
   return { source: "custom", topics: normalized, domain: typeof parsed.domain === "string" ? parsed.domain : undefined };
 }
 
-export function readPinnedTopics(cortexPath: string, project: string): ProjectTopic[] {
-  const configPath = topicConfigPath(cortexPath, project);
+export function readPinnedTopics(phrenPath: string, project: string): ProjectTopic[] {
+  const configPath = topicConfigPath(phrenPath, project);
   if (!configPath || !fs.existsSync(configPath)) return [];
   const parsed = readJsonFile<ProjectTopicConfigFile>(configPath);
   if (!parsed || !Array.isArray(parsed.pinnedTopics)) return [];
   return dedupeTopics(normalizeTopics(parsed.pinnedTopics)).filter((topic) => topic.slug !== "general");
 }
 
-function writePinnedTopics(cortexPath: string, project: string, pinnedTopics: ProjectTopic[]): { ok: true; pinnedTopics: ProjectTopic[] } | { ok: false; error: string } {
+function writePinnedTopics(phrenPath: string, project: string, pinnedTopics: ProjectTopic[]): { ok: true; pinnedTopics: ProjectTopic[] } | { ok: false; error: string } {
   if (!isValidProjectName(project)) return { ok: false, error: `Invalid project: "${project}".` };
-  const configPath = topicConfigPath(cortexPath, project);
+  const configPath = topicConfigPath(phrenPath, project);
   if (!configPath) return { ok: false, error: `Invalid project path for "${project}".` };
   const pinned = dedupeTopics(normalizeTopics(pinnedTopics)).filter((topic) => topic.slug !== "general");
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -699,7 +699,7 @@ function writePinnedTopics(cortexPath: string, project: string, pinnedTopics: Pr
     const existing = readJsonFile<ProjectTopicConfigFile>(configPath);
     const payload: ProjectTopicConfigFile = {
       version: 1,
-      topics: ensureGeneralTopic(normalizeTopics(Array.isArray(existing?.topics) ? existing.topics : getBuiltinTopics(cortexPath, project))),
+      topics: ensureGeneralTopic(normalizeTopics(Array.isArray(existing?.topics) ? existing.topics : getBuiltinTopics(phrenPath, project))),
       pinnedTopics: pinned,
       ...(typeof existing?.domain === "string" ? { domain: existing.domain } : {}),
     };
@@ -711,27 +711,27 @@ function writePinnedTopics(cortexPath: string, project: string, pinnedTopics: Pr
 }
 
 export function pinProjectTopicSuggestion(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   topic: ProjectTopic,
 ): { ok: true; pinnedTopics: ProjectTopic[] } | { ok: false; error: string } {
-  const current = readPinnedTopics(cortexPath, project);
-  return writePinnedTopics(cortexPath, project, [...current, topic]);
+  const current = readPinnedTopics(phrenPath, project);
+  return writePinnedTopics(phrenPath, project, [...current, topic]);
 }
 
 export function unpinProjectTopicSuggestion(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   slug: string,
 ): { ok: true; pinnedTopics: ProjectTopic[] } | { ok: false; error: string } {
   const normalized = normalizeTopicSlug(slug);
-  const current = readPinnedTopics(cortexPath, project).filter((topic) => topic.slug !== normalized);
-  return writePinnedTopics(cortexPath, project, current);
+  const current = readPinnedTopics(phrenPath, project).filter((topic) => topic.slug !== normalized);
+  return writePinnedTopics(phrenPath, project, current);
 }
 
-export function writeProjectTopics(cortexPath: string, project: string, topics: ProjectTopic[]): { ok: true; topics: ProjectTopic[] } | { ok: false; error: string } {
+export function writeProjectTopics(phrenPath: string, project: string, topics: ProjectTopic[]): { ok: true; topics: ProjectTopic[] } | { ok: false; error: string } {
   if (!isValidProjectName(project)) return { ok: false, error: `Invalid project: "${project}".` };
-  const configPath = topicConfigPath(cortexPath, project);
+  const configPath = topicConfigPath(phrenPath, project);
   if (!configPath) return { ok: false, error: `Invalid project path for "${project}".` };
   const normalized = ensureGeneralTopic(normalizeTopics(topics));
   const validationError = validateTopics(normalized);
@@ -774,9 +774,9 @@ function topicDocHeader(project: string, topic: ProjectTopic): string {
   const lines = [
     `# ${project} - ${topic.label}`,
     "",
-    `<!-- cortex:auto-topic slug=${topic.slug} -->`,
+    `<!-- phren:auto-topic slug=${topic.slug} -->`,
   ];
-  if (topic.description) lines.push(`<!-- cortex:topic-description ${topic.description.replace(/-->/g, "").trim()} -->`);
+  if (topic.description) lines.push(`<!-- phren:topic-description ${topic.description.replace(/-->/g, "").trim()} -->`);
   lines.push("");
   return lines.join("\n");
 }
@@ -837,8 +837,8 @@ export function appendArchivedEntriesToTopicDoc(filePath: string, project: strin
   });
 }
 
-export function ensureTopicReferenceDoc(cortexPath: string, project: string, topic: ProjectTopic): { ok: true; path: string } | { ok: false; error: string } {
-  const filePath = topicReferencePath(cortexPath, project, topic.slug);
+export function ensureTopicReferenceDoc(phrenPath: string, project: string, topic: ProjectTopic): { ok: true; path: string } | { ok: false; error: string } {
+  const filePath = topicReferencePath(phrenPath, project, topic.slug);
   if (!filePath) return { ok: false, error: `Invalid topic doc path for "${topic.slug}".` };
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -878,11 +878,11 @@ function parseLegacyTopicEntries(content: string, project: string): { slug: stri
     }
     if (!currentDate) return { slug: fallbackSlug, error: "content exists before archived sections" };
     if (!line.startsWith("- ")) {
-      if (/^\s*<!--\s*cortex:topic-description\b/.test(line)) continue;
+      if (/^\s*<!--\s*phren:topic-description\b/.test(line)) continue;
       return { slug: fallbackSlug, error: "contains non-archived prose" };
     }
     const next = lines[i + 1] || "";
-    const hasCitation = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->/.test(next);
+    const hasCitation = /^\s*<!--\s*phren:cite\s+\{.*\}\s*-->/.test(next);
     entries.push({
       date: currentDate,
       bullet: line,
@@ -931,12 +931,12 @@ function safeStatIso(filePath: string): string {
   try { return new Date(fs.statSync(filePath).mtimeMs).toISOString(); } catch { return ""; }
 }
 
-export function listProjectTopicDocs(cortexPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicDocInfo[] {
-  const projectDir = projectDirPath(cortexPath, project);
+export function listProjectTopicDocs(phrenPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicDocInfo[] {
+  const projectDir = projectDirPath(phrenPath, project);
   if (!projectDir) return [];
-  const topicList = topics ?? readProjectTopics(cortexPath, project).topics;
+  const topicList = topics ?? readProjectTopics(phrenPath, project).topics;
   return topicList.map((topic) => {
-    const filePath = topicReferencePath(cortexPath, project, topic.slug);
+    const filePath = topicReferencePath(phrenPath, project, topic.slug);
     const exists = Boolean(filePath && fs.existsSync(filePath));
     let entryCount = 0;
     if (filePath && exists) {
@@ -955,11 +955,11 @@ export function listProjectTopicDocs(cortexPath: string, project: string, topics
   });
 }
 
-export function listProjectReferenceDocs(cortexPath: string, project: string, topics?: ProjectTopic[]): ReferenceListResponse {
-  const projectDir = projectDirPath(cortexPath, project);
+export function listProjectReferenceDocs(phrenPath: string, project: string, topics?: ProjectTopic[]): ReferenceListResponse {
+  const projectDir = projectDirPath(phrenPath, project);
   if (!projectDir) return { topicDocs: [], otherDocs: [] };
-  const topicDocs = listProjectTopicDocs(cortexPath, project, topics);
-  const referenceDir = safeProjectPath(cortexPath, project, "reference");
+  const topicDocs = listProjectTopicDocs(phrenPath, project, topics);
+  const referenceDir = safeProjectPath(phrenPath, project, "reference");
   if (!referenceDir || !fs.existsSync(referenceDir)) return { topicDocs, otherDocs: [] };
   const otherDocs: ProjectReferenceDocInfo[] = [];
   for (const filePath of readReferenceMarkdownFiles(referenceDir)) {
@@ -979,9 +979,9 @@ export function listProjectReferenceDocs(cortexPath: string, project: string, to
   return { topicDocs, otherDocs };
 }
 
-export function listLegacyTopicDocs(cortexPath: string, project: string): LegacyTopicDocInfo[] {
-  const projectDir = projectDirPath(cortexPath, project);
-  const referenceDir = safeProjectPath(cortexPath, project, "reference");
+export function listLegacyTopicDocs(phrenPath: string, project: string): LegacyTopicDocInfo[] {
+  const projectDir = projectDirPath(phrenPath, project);
+  const referenceDir = safeProjectPath(phrenPath, project, "reference");
   if (!projectDir || !referenceDir || !fs.existsSync(referenceDir)) return [];
   const files = fs.readdirSync(referenceDir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
@@ -1019,10 +1019,10 @@ function tokenizeSuggestionTerms(text: string): string[] {
   return terms;
 }
 
-function collectSuggestionCorpus(cortexPath: string, project: string): string {
+function collectSuggestionCorpus(phrenPath: string, project: string): string {
   const parts: string[] = [];
   for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md"]) {
-    const filePath = safeProjectPath(cortexPath, project, file);
+    const filePath = safeProjectPath(phrenPath, project, file);
     if (!filePath || !fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8");
     if (file === "FINDINGS.md") {
@@ -1032,18 +1032,18 @@ function collectSuggestionCorpus(cortexPath: string, project: string): string {
     }
     parts.push(content);
   }
-  const generalDoc = topicReferencePath(cortexPath, project, "general");
+  const generalDoc = topicReferencePath(phrenPath, project, "general");
   if (generalDoc && fs.existsSync(generalDoc)) parts.push(fs.readFileSync(generalDoc, "utf8"));
-  for (const legacyDoc of listLegacyTopicDocs(cortexPath, project)) {
+  for (const legacyDoc of listLegacyTopicDocs(phrenPath, project)) {
     if (!legacyDoc.eligible) continue;
     try { parts.push(fs.readFileSync(legacyDoc.path, "utf8")); } catch {}
   }
   return parts.join("\n");
 }
 
-export function suggestTopics(cortexPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicSuggestion[] {
-  const currentTopics = topics ?? readProjectTopics(cortexPath, project).topics;
-  const pinnedTopics = readPinnedTopics(cortexPath, project);
+export function suggestTopics(phrenPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicSuggestion[] {
+  const currentTopics = topics ?? readProjectTopics(phrenPath, project).topics;
+  const pinnedTopics = readPinnedTopics(phrenPath, project);
   if (pinnedTopics.length > 0) {
     return pinnedTopics.slice(0, SUGGESTION_LIMIT).map((topic) => ({
       slug: topic.slug,
@@ -1063,8 +1063,8 @@ export function suggestTopics(cortexPath: string, project: string, topics?: Proj
     for (const keyword of topic.keywords) takenKeywords.add(keyword);
   }
 
-  const signal = buildTopicContentSignal(cortexPath, project);
-  const corpus = `${signal.corpus}\n${collectSuggestionCorpus(cortexPath, project)}`;
+  const signal = buildTopicContentSignal(phrenPath, project);
+  const corpus = `${signal.corpus}\n${collectSuggestionCorpus(phrenPath, project)}`;
   const corpusLower = corpus.toLowerCase();
   const keywordSignal = extractKeywords(corpus);
   const scoreMap = new Map<string, number>();
@@ -1078,7 +1078,7 @@ export function suggestTopics(cortexPath: string, project: string, topics?: Proj
 
   const suggestions: ProjectTopicSuggestion[] = [];
 
-  for (const builtin of getBuiltinTopics(cortexPath, project)) {
+  for (const builtin of getBuiltinTopics(phrenPath, project)) {
     if (builtin.slug === "general" || taken.has(builtin.slug)) continue;
     const score = builtin.keywords.reduce((count, keyword) => count + (corpusLower.includes(keyword) ? 1 : 0), 0);
     if (score <= 0) continue;
@@ -1128,48 +1128,48 @@ export function suggestTopics(cortexPath: string, project: string, topics?: Proj
 
 export const suggestProjectTopics = suggestTopics;
 
-export function getProjectTopicsResponse(cortexPath: string, project: string): ProjectTopicsResponse {
-  const { source, topics } = readProjectTopics(cortexPath, project);
+export function getProjectTopicsResponse(phrenPath: string, project: string): ProjectTopicsResponse {
+  const { source, topics } = readProjectTopics(phrenPath, project);
   return {
     source,
     topics,
-    suggestions: suggestTopics(cortexPath, project, topics),
-    pinnedTopics: readPinnedTopics(cortexPath, project),
-    legacyDocs: listLegacyTopicDocs(cortexPath, project),
-    topicDocs: listProjectTopicDocs(cortexPath, project, topics),
+    suggestions: suggestTopics(phrenPath, project, topics),
+    pinnedTopics: readPinnedTopics(phrenPath, project),
+    legacyDocs: listLegacyTopicDocs(phrenPath, project),
+    topicDocs: listProjectTopicDocs(phrenPath, project, topics),
   };
 }
 
-export function resolveReferenceContentPath(cortexPath: string, project: string, file: string): string | null {
+export function resolveReferenceContentPath(phrenPath: string, project: string, file: string): string | null {
   if (!isValidProjectName(project) || !file || file.includes("\0")) return null;
   if (!file.endsWith(".md")) return null;
-  const filePath = safeProjectPath(cortexPath, project, file);
+  const filePath = safeProjectPath(phrenPath, project, file);
   if (!filePath) return null;
-  const referenceRoot = safeProjectPath(cortexPath, project, "reference");
+  const referenceRoot = safeProjectPath(phrenPath, project, "reference");
   if (!referenceRoot) return null;
   const normalizedRoot = referenceRoot + path.sep;
   if (filePath !== referenceRoot && !filePath.startsWith(normalizedRoot)) return null;
   return filePath;
 }
 
-export function readReferenceContent(cortexPath: string, project: string, file: string): { ok: true; content: string } | { ok: false; error: string } {
-  const filePath = resolveReferenceContentPath(cortexPath, project, file);
+export function readReferenceContent(phrenPath: string, project: string, file: string): { ok: true; content: string } | { ok: false; error: string } {
+  const filePath = resolveReferenceContentPath(phrenPath, project, file);
   if (!filePath) return { ok: false, error: "Invalid project or reference file" };
   if (!fs.existsSync(filePath)) return { ok: false, error: `File not found: ${file}` };
   return { ok: true, content: fs.readFileSync(filePath, "utf8") };
 }
 
-export function reclassifyLegacyTopicDocs(cortexPath: string, project: string): ReclassifyTopicsResult {
-  const { topics } = readProjectTopics(cortexPath, project);
-  const referenceDir = safeProjectPath(cortexPath, project, "reference");
+export function reclassifyLegacyTopicDocs(phrenPath: string, project: string): ReclassifyTopicsResult {
+  const { topics } = readProjectTopics(phrenPath, project);
+  const referenceDir = safeProjectPath(phrenPath, project, "reference");
   if (!referenceDir || !fs.existsSync(referenceDir)) return { movedFiles: 0, movedEntries: 0, skipped: [] };
   const skipped: Array<{ file: string; reason: string }> = [];
   const archivedBullets = collectArchivedBulletsRecursively(path.join(referenceDir, "topics"));
   let movedFiles = 0;
   let movedEntries = 0;
 
-  for (const legacyDoc of listLegacyTopicDocs(cortexPath, project)) {
-    const result = readReferenceContent(cortexPath, project, legacyDoc.file);
+  for (const legacyDoc of listLegacyTopicDocs(phrenPath, project)) {
+    const result = readReferenceContent(phrenPath, project, legacyDoc.file);
     if (!result.ok) {
       skipped.push({ file: legacyDoc.file, reason: result.error });
       continue;
@@ -1196,7 +1196,7 @@ export function reclassifyLegacyTopicDocs(cortexPath: string, project: string): 
     try {
       for (const [slug, entries] of grouped) {
         const topic = topics.find((item) => item.slug === slug) ?? topics.find((item) => item.slug === "general")!;
-        const targetPath = topicReferencePath(cortexPath, project, slug);
+        const targetPath = topicReferencePath(phrenPath, project, slug);
         if (!targetPath) throw new Error(`Invalid target topic path for "${slug}"`);
         appendArchivedEntriesToTopicDoc(targetPath, project, topic, entries);
         movedEntries += entries.length;

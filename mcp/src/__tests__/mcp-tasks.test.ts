@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_ACTOR;
   tmpCleanup();
 });
 

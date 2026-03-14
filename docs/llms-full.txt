@@ -1,9 +1,9 @@
-cortex - Long-term memory for your AI agents.
-npm package: @alaarab/cortex
+phren - Long-term memory for your AI agents.
+npm package: @alaarab/phren
 
 Quick start:
-  cortex init
-  This creates ~/.cortex, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
+  phren init
+  This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
 MCP Tools (60 across 11 modules):
@@ -40,7 +40,7 @@ MCP Tools (60 across 11 modules):
     get_contradictions(project?, finding_text?) - list unresolved contradicted findings
     remove_finding(project, finding) - remove by matching text
     remove_findings(project, findings[]) - bulk remove multiple findings
-    push_changes(message?) - commit and push all cortex changes
+    push_changes(message?) - commit and push all phren changes
 
   Entity graph:
     search_entities(name) - find entities and their related docs
@@ -60,7 +60,7 @@ MCP Tools (60 across 11 modules):
     memory_feedback(key, feedback) - record helpful/reprompt/regression outcomes
 
   Data management:
-    add_project(path, profile?) - bootstrap a repo or working directory into cortex and add it to the active profile
+    add_project(path, profile?) - bootstrap a repo or working directory into phren and add it to the active profile
     export_project(project) - export project data as portable JSON
     import_project(data) - import project from exported JSON
     manage_project(project, action) - archive or unarchive a project
@@ -101,76 +101,76 @@ MCP Tools (60 across 11 modules):
 
 CLI Commands:
 
-  cortex                               - interactive shell (TTY default)
-  cortex shell                         - explicit shell mode
-  cortex search <query>                - FTS5 search with synonym expansion
-  cortex add-finding <project> "..."   - append a finding from the terminal
-  cortex pin <project> "..."           - promote canonical memory
-  cortex tasks                      - cross-project task view
-  cortex skill-list                    - list installed skills
-  cortex doctor [--fix] [--agents]     - health checks with optional self-heal
-  cortex web-ui [--port=3499]          - lightweight memory web UI
-  cortex status                        - health, active project, stats
-  cortex update [--refresh-starter]    - update package; optionally refresh starter globals
-  cortex verify                        - post-init verification
+  phren                               - interactive shell (TTY default)
+  phren shell                         - explicit shell mode
+  phren search <query>                - FTS5 search with synonym expansion
+  phren add-finding <project> "..."   - append a finding from the terminal
+  phren pin <project> "..."           - promote canonical memory
+  phren tasks                      - cross-project task view
+  phren skill-list                    - list installed skills
+  phren doctor [--fix] [--agents]     - health checks with optional self-heal
+  phren web-ui [--port=3499]          - lightweight memory web UI
+  phren status                        - health, active project, stats
+  phren update [--refresh-starter]    - update package; optionally refresh starter globals
+  phren verify                        - post-init verification
 
-  cortex config policy get|set ...     - retention, TTL, decay, confidence
-  cortex config workflow get|set ...   - approval workflow settings
-  cortex config access get|set ...     - role-based permissions
-  cortex config index get|set ...      - indexer include/exclude globs
-  cortex config machines               - registered machines
-  cortex config profiles               - profiles and projects
+  phren config policy get|set ...     - retention, TTL, decay, confidence
+  phren config workflow get|set ...   - approval workflow settings
+  phren config access get|set ...     - role-based permissions
+  phren config index get|set ...      - indexer include/exclude globs
+  phren config machines               - registered machines
+  phren config profiles               - profiles and projects
 
-  cortex maintain govern [project]     - queue stale/conflicting memories
-  cortex maintain prune [project]      - delete expired entries
-  cortex maintain consolidate [project]- deduplicate FINDINGS.md
-  cortex maintain extract [project]    - mine git and GitHub signals
+  phren maintain govern [project]     - queue stale/conflicting memories
+  phren maintain prune [project]      - delete expired entries
+  phren maintain consolidate [project]- deduplicate FINDINGS.md
+  phren maintain extract [project]    - mine git and GitHub signals
 
-  cortex mcp-mode on|off|status        - toggle MCP integration
-  cortex hooks-mode on|off|status      - toggle hook execution
+  phren mcp-mode on|off|status        - toggle MCP integration
+  phren hooks-mode on|off|status      - toggle hook execution
 
 Environment Variables:
 
-  CORTEX_PATH                    - override cortex directory (default: ~/.cortex)
-  CORTEX_PROFILE                 - active profile name (filters indexed projects)
-  CORTEX_ACTOR                   - identity for access control and audit logging
-  CORTEX_DEBUG                   - set to 1 for debug logging to ~/.cortex/.runtime/debug.log
-  CORTEX_CONTEXT_TOKEN_BUDGET    - max approx tokens injected by hook-prompt (default: 550)
-  CORTEX_CONTEXT_SNIPPET_LINES   - max lines per injected snippet (default: 6)
-  CORTEX_CONTEXT_SNIPPET_CHARS   - max chars per injected snippet (default: 520)
-  CORTEX_FEATURE_AUTO_EXTRACT    - toggle git/GitHub mining in hook-prompt (default: on, set 0 to disable)
-  CORTEX_FEATURE_DAILY_MAINTENANCE - toggle detached daily governance (default: on, set 0 to disable)
-  CORTEX_FINDINGS_CAP            - max active findings before auto-archiving (default: 20)
-  CORTEX_LLM_ENDPOINT            - OpenAI-compatible endpoint for semantic dedup/conflict
-  CORTEX_LLM_KEY                 - API key for LLM endpoint (or OPENAI_API_KEY)
-  CORTEX_LLM_MODEL               - model name for LLM endpoint
-  CORTEX_EMBEDDING_PROVIDER      - "api" or unset; enables semantic search fallback
-  CORTEX_EMBEDDING_API_URL       - OpenAI-compatible /embeddings endpoint (e.g. https://api.openai.com/v1)
-  CORTEX_EMBEDDING_API_KEY       - Bearer token for CORTEX_EMBEDDING_API_URL
-  CORTEX_FEATURE_SEMANTIC_DEDUP  - set 1 to enable LLM-based paraphrase dedup
-  CORTEX_FEATURE_SEMANTIC_CONFLICT - set 1 to enable LLM-based contradiction detection
-  CORTEX_FEATURE_AUTO_CAPTURE    - set 1 to extract insights from conversation transcripts at session end
+  PHREN_PATH                    - override phren directory (default: ~/.phren)
+  PHREN_PROFILE                 - active profile name (filters indexed projects)
+  PHREN_ACTOR                   - identity for access control and audit logging
+  PHREN_DEBUG                   - set to 1 for debug logging to ~/.phren/.runtime/debug.log
+  PHREN_CONTEXT_TOKEN_BUDGET    - max approx tokens injected by hook-prompt (default: 550)
+  PHREN_CONTEXT_SNIPPET_LINES   - max lines per injected snippet (default: 6)
+  PHREN_CONTEXT_SNIPPET_CHARS   - max chars per injected snippet (default: 520)
+  PHREN_FEATURE_AUTO_EXTRACT    - toggle git/GitHub mining in hook-prompt (default: on, set 0 to disable)
+  PHREN_FEATURE_DAILY_MAINTENANCE - toggle detached daily governance (default: on, set 0 to disable)
+  PHREN_FINDINGS_CAP            - max active findings before auto-archiving (default: 20)
+  PHREN_LLM_ENDPOINT            - OpenAI-compatible endpoint for semantic dedup/conflict
+  PHREN_LLM_KEY                 - API key for LLM endpoint (or OPENAI_API_KEY)
+  PHREN_LLM_MODEL               - model name for LLM endpoint
+  PHREN_EMBEDDING_PROVIDER      - "api" or unset; enables semantic search fallback
+  PHREN_EMBEDDING_API_URL       - OpenAI-compatible /embeddings endpoint (e.g. https://api.openai.com/v1)
+  PHREN_EMBEDDING_API_KEY       - Bearer token for PHREN_EMBEDDING_API_URL
+  PHREN_FEATURE_SEMANTIC_DEDUP  - set 1 to enable LLM-based paraphrase dedup
+  PHREN_FEATURE_SEMANTIC_CONFLICT - set 1 to enable LLM-based contradiction detection
+  PHREN_FEATURE_AUTO_CAPTURE    - set 1 to extract insights from conversation transcripts at session end
 
 Key File Locations:
 
-  ~/.cortex/                          - cortex root directory
-  ~/.cortex/machines.yaml             - hostname-to-profile mapping
-  ~/.cortex/profiles/                 - profile YAML files listing projects per profile
-  ~/.cortex/<project>/summary.md      - five-line project summary card
-  ~/.cortex/<project>/CLAUDE.md       - full project context (architecture, commands, conventions)
-  ~/.cortex/<project>/topic-config.json - project-owned archive topic definitions
-  ~/.cortex/<project>/reference/      - deep reference docs and archived topic buckets
-  ~/.cortex/<project>/reference/topics/ - machine-managed topic docs for archived findings
-  ~/.cortex/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
-  ~/.cortex/<project>/tasks.md        - task queue across sessions
-  ~/.cortex/<project>/MEMORY_QUEUE.md - items pending human review
-  ~/.cortex/.runtime/                 - audit.log, search history, caches
-  ~/.cortex/.runtime/access-control.local.json - local RBAC role augmentation
-  ~/.cortex/.runtime/telemetry.json   - opt-in local telemetry counters
-  ~/.cortex/.sessions/                - task checkpoint files for cross-session resume
-  ~/.cortex/.governance/              - governance policy JSON files
-  ~/.cortex/global/skills/            - personal workflow slash commands
-  ~/.cortex/global/CLAUDE.md          - user-level agent instructions
+  ~/.phren/                          - phren root directory
+  ~/.phren/machines.yaml             - hostname-to-profile mapping
+  ~/.phren/profiles/                 - profile YAML files listing projects per profile
+  ~/.phren/<project>/summary.md      - five-line project summary card
+  ~/.phren/<project>/CLAUDE.md       - full project context (architecture, commands, conventions)
+  ~/.phren/<project>/topic-config.json - project-owned archive topic definitions
+  ~/.phren/<project>/reference/      - deep reference docs and archived topic buckets
+  ~/.phren/<project>/reference/topics/ - machine-managed topic docs for archived findings
+  ~/.phren/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
+  ~/.phren/<project>/tasks.md        - task queue across sessions
+  ~/.phren/<project>/MEMORY_QUEUE.md - items pending human review
+  ~/.phren/.runtime/                 - audit.log, search history, caches
+  ~/.phren/.runtime/access-control.local.json - local RBAC role augmentation
+  ~/.phren/.runtime/telemetry.json   - opt-in local telemetry counters
+  ~/.phren/.sessions/                - task checkpoint files for cross-session resume
+  ~/.phren/.governance/              - governance policy JSON files
+  ~/.phren/global/skills/            - personal workflow slash commands
+  ~/.phren/global/CLAUDE.md          - user-level agent instructions
 
 Finding Tags:
 
@@ -196,7 +196,7 @@ Agent Support:
 Security and governance notes:
   Web UI security: loopback-only bind, per-run auth token, CSRF on mutations, CSP headers
   RBAC sources: .governance/access-control.json + .runtime/access-control.local.json
-  Telemetry: opt-in only (`cortex config telemetry on`), local storage only, no external reporting by default
+  Telemetry: opt-in only (`phren config telemetry on`), local storage only, no external reporting by default
 
-Docs: https://alaarab.github.io/cortex/
-Source: https://github.com/alaarab/cortex
+Docs: https://alaarab.github.io/phren/
+Source: https://github.com/alaarab/phren

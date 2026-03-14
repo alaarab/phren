@@ -27,18 +27,18 @@ export {
   markImpactEntriesCompletedForSession,
 };
 
-export function appendImpactEntries(cortexPath: string, entries: PendingImpactEntry[]): void {
+export function appendImpactEntries(phrenPath: string, entries: PendingImpactEntry[]): void {
   const pending = entries.filter((entry) => !entry.taskCompleted);
   if (pending.length === 0) return;
-  logImpact(cortexPath, pending.map((entry) => ({
+  logImpact(phrenPath, pending.map((entry) => ({
     findingId: entry.findingId,
     project: entry.project,
     sessionId: entry.sessionId,
   })));
 }
 
-export function getHighImpactFindingKeys(cortexPath: string, minSuccessCount = 3): Set<string> {
-  const findingIds = getHighImpactFindings(cortexPath, minSuccessCount);
+export function getHighImpactFindingKeys(phrenPath: string, minSuccessCount = 3): Set<string> {
+  const findingIds = getHighImpactFindings(phrenPath, minSuccessCount);
   // Legacy API encoded project+findingId; new API tracks finding ID globally.
   // Return IDs as-is to preserve compatibility where only membership checks are used.
   return findingIds;

@@ -28,7 +28,7 @@
   linkcolor=blue!45!black,
   urlcolor=blue!45!black,
   citecolor=blue!45!black,
-  pdftitle={Cortex: A Git-Backed Project Memory System},
+  pdftitle={Phren: A Git-Backed Project Memory System},
   pdfauthor={Ala Arab}
 }
 
@@ -55,7 +55,7 @@
 \definecolor{scoreLklo}{HTML}{CFEAD6}
 \definecolor{scoreDark}{HTML}{134E4A}
 
-\title{\vspace{-0.8em}Cortex: A Git-Backed Project Memory System\\[2pt]
+\title{\vspace{-0.8em}Phren: A Git-Backed Project Memory System\\[2pt]
 \large Architecture, Governance, Concurrent Use, and Comparative Assessment}
 \author{Ala Arab}
 \date{March 12, 2026}
@@ -66,7 +66,7 @@
 \maketitle\vspace{-1em}
 
 \begin{abstract}
-\noindent Persistent project memory becomes operationally important once work spans sessions, tools, and machines. This paper examines Cortex as a markdown-native, git-backed project memory system with hook-driven capture, trust-scored retrieval, and configurable governance. The contribution is a systems-design case study and operator-workflow argument rather than a claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas. In Cortex's default path, memory compounds as repo state while retrieval stays bounded through a local SQLite FTS5 index with no network hop, no required hosted service, and a more predictable latency profile for everyday code-memory lookup. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory are architecture-level unless explicitly labeled as measured Cortex implementation notes.
+\noindent Persistent project memory becomes operationally important once work spans sessions, tools, and machines. This paper examines Phren as a markdown-native, git-backed project memory system with hook-driven capture, trust-scored retrieval, and configurable governance. The contribution is a systems-design case study and operator-workflow argument rather than a claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas. In Phren's default path, memory compounds as repo state while retrieval stays bounded through a local SQLite FTS5 index with no network hop, no required hosted service, and a more predictable latency profile for everyday code-memory lookup. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory are architecture-level unless explicitly labeled as measured Phren implementation notes.
 \end{abstract}
 
 \vspace{0.1em}
@@ -87,14 +87,14 @@ Agent memory systems are often compared on retrieval quality alone, even though 
 \end{enumerate}
 \end{multicols}
 
-Cortex should be read as a system in the same design space as prior memory work such as MemoryBank, MemGPT, claude-mem, Supermemory, Mem0, and Copilot Memory. The goal is not to claim invention of persistent memory itself, but to evaluate a particular combination of storage ownership, governance, and operator workflow.
+Phren should be read as a system in the same design space as prior memory work such as MemoryBank, MemGPT, claude-mem, Supermemory, Mem0, and Copilot Memory. The goal is not to claim invention of persistent memory itself, but to evaluate a particular combination of storage ownership, governance, and operator workflow.
 
 % ─── ARCHITECTURE: full-width intro + inline diagram, then two-column body ────
 \vspace{0.2em}
-\section{Cortex Architecture}
+\section{Phren Architecture}
 \label{sec:arch}
 
-The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Cortex now supports two install modes rooted by \texttt{cortex.root.yaml}: \textbf{shared} (\texttt{\textasciitilde/.cortex/}) and \textbf{project-local} (\texttt{<repo>/.cortex/}). In both modes, markdown and JSON files remain the source of truth for \textbf{findings}, \textbf{tasks}, \textbf{canonical memories}, \textbf{entity links}, and \textbf{session checkpoints}; the FTS5 index is a local cache. The diagram below shows the current runtime loop.
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Phren now supports two install modes rooted by \texttt{phren.root.yaml}: \textbf{shared} (\texttt{\textasciitilde/.phren/}) and \textbf{project-local} (\texttt{<repo>/.phren/}). In both modes, markdown and JSON files remain the source of truth for \textbf{findings}, \textbf{tasks}, \textbf{canonical memories}, \textbf{entity links}, and \textbf{session checkpoints}; the FTS5 index is a local cache. The diagram below shows the current runtime loop.
 
 \vspace{0.2em}
 \begin{center}
@@ -117,7 +117,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \node[box, right=0.9cm of ups] (fts) {FTS5 Index\\[-2pt]{\scriptsize SQLite, cached snapshot}};
 \node[box, above=0.45cm of fts] (syn)  {Synonym Expansion\\[-2pt]{\scriptsize keyword expansion}};
 \node[box, below=0.45cm of fts] (trust) {Trust Filter\\[-2pt]{\scriptsize age decay, citation score}};
-\node[store, right=0.9cm of fts] (md) {Data Layer\\[-2pt]{\scriptsize \textasciitilde/.cortex/ or <repo>/.cortex}};
+\node[store, right=0.9cm of fts] (md) {Data Layer\\[-2pt]{\scriptsize \textasciitilde/.phren/ or <repo>/.phren}};
 \node[store, above=0.45cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
 \node[store, below=0.45cm of md]  (mcp) {MCP Tools (60)\\[-2pt]{\scriptsize 11 domain modules}};
 \node[store, below=0.45cm of mcp] (ckpt) {Session \& Task Checkpoints\\[-2pt]{\scriptsize .runtime/sessions + .sessions/checkpoint-*}};
@@ -154,7 +154,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 }% end resizebox
 \end{center}
 \captionsetup{font=footnotesize}
-\captionof{figure}{Cortex runtime loop. Lifecycle events (\texttt{SessionStart}, \texttt{UserPromptSubmit}, optional \texttt{PostToolUse}, \texttt{Stop}) drive retrieval and persistence over a shared or project-local cortex root. Findings, tasks, and checkpoint artifacts stay file-backed; FTS5 remains a local cache.}
+\captionof{figure}{Phren runtime loop. Lifecycle events (\texttt{SessionStart}, \texttt{UserPromptSubmit}, optional \texttt{PostToolUse}, \texttt{Stop}) drive retrieval and persistence over a shared or project-local phren root. Findings, tasks, and checkpoint artifacts stay file-backed; FTS5 remains a local cache.}
 \label{fig:arch}
 
 % ─── BODY: two columns for dense technical content ───────────────────────────
@@ -162,12 +162,12 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \begin{multicols}{2}
 
 \subsection{Storage and Retrieval}
-Cortex keeps memory in local files and builds a local SQLite FTS5 index for retrieval \cite{cortex-readme,cortex-shared,cortex-cli}. In shared mode, state lives in \texttt{\textasciitilde/.cortex}; in project-local mode, state lives in \texttt{<repo>/.cortex} with a single primary project. Runtime path resolution prefers an explicit path or nearest rooted \texttt{.cortex} before falling back to home scope. Markdown/JSON files remain the source of truth; the index is a cached snapshot that hook and MCP entrypoints refresh incrementally. This preserves inspectability (git history, plain-text grep, portable exports) while keeping retrieval bounded and local.
+Phren keeps memory in local files and builds a local SQLite FTS5 index for retrieval \cite{phren-readme,phren-shared,phren-cli}. In shared mode, state lives in \texttt{\textasciitilde/.phren}; in project-local mode, state lives in \texttt{<repo>/.phren} with a single primary project. Runtime path resolution prefers an explicit path or nearest rooted \texttt{.phren} before falling back to home scope. Markdown/JSON files remain the source of truth; the index is a cached snapshot that hook and MCP entrypoints refresh incrementally. This preserves inspectability (git history, plain-text grep, portable exports) while keeping retrieval bounded and local.
 
 Before injection, a trust filter scores each entry by age decay and citation validity (Section~\ref{sec:decay}), suppressing entries below a configurable confidence floor. Archived entries are stripped so consolidated history does not pollute active search. When semantic recovery is enabled, embeddings are cached locally and init can pre-warm coverage so the first real session is not starting from zero. Recovery queries use a persistent candidate index rather than re-embedding the corpus on every search.
 
 \subsection{Lifecycle Automation}
-Lifecycle automation is now a four-event model with tool-level continuity support \cite{cortex-cli,cortex-hooks}:
+Lifecycle automation is now a four-event model with tool-level continuity support \cite{phren-cli,phren-hooks}:
 \begin{enumerate}
   \item \texttt{SessionStart}: sync + health checks + prior-session context restore.
   \item \texttt{UserPromptSubmit}: keyword extraction, retrieval, trust filtering, and bounded context injection.
@@ -177,17 +177,17 @@ Lifecycle automation is now a four-event model with tool-level continuity suppor
 Claude uses native lifecycle hooks; Copilot/Cursor/Codex use generated wrappers + tool configs to enforce equivalent lifecycle semantics. The architectural point is unchanged: memory capture and retrieval stay inside the normal agent loop rather than becoming a separate manual habit.
 
 \subsection{MCP Module Surface}
-Cortex MCP currently exposes \textbf{60 tools across 11 modules}: search/browse, task management, finding capture and lifecycle, memory quality, data management, entity graph, session management, operations/review, skills management, hooks management, and extraction. Newly expanded lifecycle surfaces include contradiction/supersession tools for findings and session history/continuity tooling.
+Phren MCP currently exposes \textbf{60 tools across 11 modules}: search/browse, task management, finding capture and lifecycle, memory quality, data management, entity graph, session management, operations/review, skills management, hooks management, and extraction. Newly expanded lifecycle surfaces include contradiction/supersession tools for findings and session history/continuity tooling.
 
 \subsection{Token Budget and Progressive Disclosure}
 \label{sec:context-opt}
-MCP tool responses consume context tokens, so retrieval quality is only half the problem; the other half is how much context the system spends to expose that memory. Cortex uses progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Tasks support summary-only, paginated, and single-item fetch modes.
+MCP tool responses consume context tokens, so retrieval quality is only half the problem; the other half is how much context the system spends to expose that memory. Phren uses progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Tasks support summary-only, paginated, and single-item fetch modes.
 
 This matters most in multi-tool coding sessions where search, task lookup, review notes, and shell output all compete for the same window. The design goal is to let project memory compound over time without turning long-lived context into prompt bloat. The same bounded path also keeps retrieval work small enough to stay responsive in daily use. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
 
 \subsection{Governance}
 \label{sec:governance}
-The governance engine \cite{cortex-shared} provides four configurable policy layers: retention and TTL (default 120-day decay, 365-day retention), workflow approval gates for risky queue items, role-based access control (admin/maintainer/contributor/viewer with 6 action types), and canonical locks protecting pinned memories from bulk overwrites. All governance events are appended to a timestamped audit log. These controls exist to contain familiar failure modes: stale memory, unreviewed risky writes, accidental overwrites, and unaudited shared-store drift.
+The governance engine \cite{phren-shared} provides four configurable policy layers: retention and TTL (default 120-day decay, 365-day retention), workflow approval gates for risky queue items, role-based access control (admin/maintainer/contributor/viewer with 6 action types), and canonical locks protecting pinned memories from bulk overwrites. All governance events are appended to a timestamped audit log. These controls exist to contain familiar failure modes: stale memory, unreviewed risky writes, accidental overwrites, and unaudited shared-store drift.
 
 \subsection{Finding Lifecycle, Provenance, and Impact}
 Finding records now include normalized lifecycle metadata and provenance tracking. The lifecycle status set is \texttt{active}, \texttt{superseded}, \texttt{contradicted}, \texttt{stale}, \texttt{invalid\_citation}, and \texttt{retracted}, with status updates and reasons persisted inline in finding metadata comments. Provenance is carried through a typed \texttt{source} field (\texttt{human}, \texttt{agent}, \texttt{hook}, \texttt{extract}, \texttt{consolidation}, \texttt{unknown}).
@@ -247,24 +247,24 @@ These thresholds are operational defaults rather than scientific constants; they
 \label{fig:decay}
 
 \subsection{Extensibility}
-Nine custom integration hook events cover save, search, finding, indexing, session-end, and consolidation lifecycles \cite{cortex-hooks}. Lifecycle registration also supports \texttt{PostToolUse} in addition to \texttt{SessionStart}, \texttt{UserPromptSubmit}, and \texttt{Stop}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
+Nine custom integration hook events cover save, search, finding, indexing, session-end, and consolidation lifecycles \cite{phren-hooks}. Lifecycle registration also supports \texttt{PostToolUse} in addition to \texttt{SessionStart}, \texttt{UserPromptSubmit}, and \texttt{Stop}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
 
 \pagebreak[2]
 \section{Concurrent and Cross-Machine Use}
 Modern workflows frequently involve multiple sessions, tools, or machines touching the same project. Memory systems that assume a single serial session break under this pattern.
 
-Cortex handles multi-agent use through four mechanisms. \textbf{Dual-root storage model}: teams can share one git-backed root (\texttt{\textasciitilde/.cortex}) or run isolated project-local roots (\texttt{<repo>/.cortex}) per workspace. \textbf{Serialized writes with resilient sync}: concurrent reads are filesystem-safe; MCP writes are serialized by lock files with stale-lock cleanup; shared-mode sync uses rebase-first push retries with safe markdown auto-merge on common files. \textbf{Deterministic skill resolution}: project-scoped skills override global skills by name, and skills can be enabled/disabled without deleting source files. \textbf{Cross-session task checkpoints}: session end persists resumable checkpoint snapshots (task, edited files, failing tests, next-step hints), and session start restores them into continuity context.
+Phren handles multi-agent use through four mechanisms. \textbf{Dual-root storage model}: teams can share one git-backed root (\texttt{\textasciitilde/.phren}) or run isolated project-local roots (\texttt{<repo>/.phren}) per workspace. \textbf{Serialized writes with resilient sync}: concurrent reads are filesystem-safe; MCP writes are serialized by lock files with stale-lock cleanup; shared-mode sync uses rebase-first push retries with safe markdown auto-merge on common files. \textbf{Deterministic skill resolution}: project-scoped skills override global skills by name, and skills can be enabled/disabled without deleting source files. \textbf{Cross-session task checkpoints}: session end persists resumable checkpoint snapshots (task, edited files, failing tests, next-step hints), and session start restores them into continuity context.
 
 This is an eventually consistent shared-memory model optimized for append-heavy agent workflows, not strong coordination in the distributed-systems sense.
 
 \subsection{Operator Surfaces}
-Cortex ships three operator-facing review planes: \texttt{cortex shell}, \texttt{cortex web-ui}, and a VS Code extension. The web UI is hardened for local operation (loopback bind, per-run auth token validation, single-use CSRF tokens with TTL, CSP + anti-framing headers). The VS Code extension adds an activity-bar tree view for projects/findings/tasks/skills/hooks, an interactive entity-graph webview, and first-run onboarding that validates local MCP/runtime wiring before enabling live operations.
+Phren ships three operator-facing review planes: \texttt{phren shell}, \texttt{phren web-ui}, and a VS Code extension. The web UI is hardened for local operation (loopback bind, per-run auth token validation, single-use CSRF tokens with TTL, CSP + anti-framing headers). The VS Code extension adds an activity-bar tree view for projects/findings/tasks/skills/hooks, an interactive entity-graph webview, and first-run onboarding that validates local MCP/runtime wiring before enabling live operations.
 
 \pagebreak[2]
 \section{Comparative Assessment}
 \textit{Evidence window: representative public documentation reviewed through March 6, 2026.}
 
-This section separates what public evidence can support from what still needs direct measurement. Documentation and product surfaces support architecture-level comparison, but not cross-vendor retrieval or latency claims on their own. Measured results in this paper are therefore limited to Cortex implementation notes and shared-corpus local reruns called out explicitly. The systems below are reference points rather than an exhaustive survey.
+This section separates what public evidence can support from what still needs direct measurement. Documentation and product surfaces support architecture-level comparison, but not cross-vendor retrieval or latency claims on their own. Measured results in this paper are therefore limited to Phren implementation notes and shared-corpus local reruns called out explicitly. The systems below are reference points rather than an exhaustive survey.
 
 \subsection{Current comparison scope}
 \raggedright
@@ -278,12 +278,12 @@ Two claim types are currently defensible. Architecture-level differences such as
 
 \subsection{Measured local comparison on a shared synthetic corpus}
 
-A fresh March 10, 2026 rerun exercised Cortex and claude-mem on the same identifier-heavy synthetic corpora at 1k, 10k, and 100k memories using persisted local stores and the same query shape \cite{cortex-bench,cortex-bench-claude,cortex-bench-compare}. The result is operational rather than universal: Cortex averaged 5.19/13.20/91.63\,ms lexical query latency with exact top-hit rates of 12/12 at each size, while claude-mem averaged 221.07/147.91/225.11\,ms with exact top-hit rates of 0/8. Even with \texttt{--skip-seed}, claude-mem still paid 25--4062\,ms of Chroma-side backfill/check work before the query path settled. On this coding-style corpus with strong identifiers, Cortex's lexical-first path was cheaper, more stable, and more exact.
+A fresh March 10, 2026 rerun exercised Phren and claude-mem on the same identifier-heavy synthetic corpora at 1k, 10k, and 100k memories using persisted local stores and the same query shape \cite{phren-bench,phren-bench-claude,phren-bench-compare}. The result is operational rather than universal: Phren averaged 5.19/13.20/91.63\,ms lexical query latency with exact top-hit rates of 12/12 at each size, while claude-mem averaged 221.07/147.91/225.11\,ms with exact top-hit rates of 0/8. Even with \texttt{--skip-seed}, claude-mem still paid 25--4062\,ms of Chroma-side backfill/check work before the query path settled. On this coding-style corpus with strong identifiers, Phren's lexical-first path was cheaper, more stable, and more exact.
 
 \subsection{Operational fit (non-empirical)}
 
 \begin{itemize}
-  \item \textbf{Cortex}: favors repo-backed project memory, git auditability, and stronger governance; tradeoff is more local setup and operator burden.
+  \item \textbf{Phren}: favors repo-backed project memory, git auditability, and stronger governance; tradeoff is more local setup and operator burden.
   \item \textbf{Supermemory}: favors a hosted API-first workflow; tradeoff is less local inspectability and portability.
   \item \textbf{claude-mem}: favors a lighter local hook-driven setup; tradeoff is a smaller governance and operator-tooling surface.
   \item \textbf{Copilot Memory}: favors teams already standardized on GitHub/Copilot; tradeoff is tighter platform scope and less control over storage and workflow.
@@ -298,7 +298,7 @@ The systems differ less in whether they can retrieve a relevant memory and more 
   \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed systems expose different audit primitives rather than equivalent git-native transparency.
   \item \textbf{Policy and access governance}: role-based access control, approval workflows, TTL and retention policy, and canonical locks are first-class features.
   \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection.
-  \item \textbf{Human review surfaces}: \texttt{cortex shell}, hardened \texttt{cortex web-ui}, and the VS Code extension (tree view + graph + onboarding) let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
+  \item \textbf{Human review surfaces}: \texttt{phren shell}, hardened \texttt{phren web-ui}, and the VS Code extension (tree view + graph + onboarding) let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
 \end{itemize}
 
 Any memory system can add a vector index. Governance, auditability, and review tooling require deliberate architectural choices that are harder to retrofit.
@@ -307,12 +307,12 @@ Any memory system can add a vector index. Governance, auditability, and review t
 \section{FTS5 vs Semantic Search}
 \label{sec:fts5}
 
-Cortex is fundamentally anchored in SQLite FTS5 (BM25 ranking), with fallback layers in some paths. That choice is deliberate. In the default path, FTS5 gives Cortex zero required hosted dependencies, deterministic and auditable results, low-latency lookup on typical corpus sizes, and offline operation with no retrieval-side token cost. The tradeoff is familiar: vocabulary mismatch remains real, paraphrased concepts do not align automatically, and BM25 ranks by term frequency rather than meaning. Semantic search retrieves better on paraphrase-heavy queries. FTS5 retrieves better when vocabulary is consistent, offline operation is required, or zero retrieval-side token cost matters. Cortex's claim is narrower: lexical-first is often the right default for repo-backed coding memory because it is cheap, inspectable, and predictable.
+Phren is fundamentally anchored in SQLite FTS5 (BM25 ranking), with fallback layers in some paths. That choice is deliberate. In the default path, FTS5 gives Phren zero required hosted dependencies, deterministic and auditable results, low-latency lookup on typical corpus sizes, and offline operation with no retrieval-side token cost. The tradeoff is familiar: vocabulary mismatch remains real, paraphrased concepts do not align automatically, and BM25 ranks by term frequency rather than meaning. Semantic search retrieves better on paraphrase-heavy queries. FTS5 retrieves better when vocabulary is consistent, offline operation is required, or zero retrieval-side token cost matters. Phren's claim is narrower: lexical-first is often the right default for repo-backed coding memory because it is cheap, inspectable, and predictable.
 
 \subsection{Hybrid Retrieval: Current State}
 \label{sec:hybrid}
 
-Cortex now shares the same staged hybrid policy across hook injection and \texttt{search\_knowledge}: strict FTS5 first, a relaxed lexical rescue query if the strict pass misses, cheap local fallback scoring, and vector recovery only when lexical hits are sparse or weak. The vector path uses persistent embeddings and a cached candidate index, then the shared reranker weights local lexical overlap ahead of weaker semantic tails. Benchmark claims still require published conditions because corpus size, cache warmth, and query mix change the outcome \cite{cortex-bench}.
+Phren now shares the same staged hybrid policy across hook injection and \texttt{search\_knowledge}: strict FTS5 first, a relaxed lexical rescue query if the strict pass misses, cheap local fallback scoring, and vector recovery only when lexical hits are sparse or weak. The vector path uses persistent embeddings and a cached candidate index, then the shared reranker weights local lexical overlap ahead of weaker semantic tails. Benchmark claims still require published conditions because corpus size, cache warmth, and query mix change the outcome \cite{phren-bench}.
 
 \subsection{Retrieval Complexity}
 
@@ -336,7 +336,7 @@ Rerank + snippets & $O(R \log R + S)$ & $R$ is a small capped candidate set and 
 
 \subsection{Measured Retrieval Notes}
 
-These numbers are implementation checks on one live cortex store, not a general ranking of memory systems. A single author-local benchmark on March 9, 2026 measured the current lexical-first and gated-hybrid paths against a warm Cortex store with 139 indexed documents, real workflow queries, and the default 550-token hook budget \cite{cortex-bench}. Lexical latency averaged 14.71--15.93\,ms; the gated hybrid path stayed in nearly the same range at 12.90--13.60\,ms because the lexical stages usually satisfied the query before vector recovery was needed; injected payload remained stable at roughly 326--342 tokens; both modes hit every published query; and persistent candidate pruning still reduced the cosine stage to roughly 6.3--8.6\% of the eligible corpus when vector recovery did fire.
+These numbers are implementation checks on one live phren store, not a general ranking of memory systems. A single author-local benchmark on March 9, 2026 measured the current lexical-first and gated-hybrid paths against a warm Phren store with 139 indexed documents, real workflow queries, and the default 550-token hook budget \cite{phren-bench}. Lexical latency averaged 14.71--15.93\,ms; the gated hybrid path stayed in nearly the same range at 12.90--13.60\,ms because the lexical stages usually satisfied the query before vector recovery was needed; injected payload remained stable at roughly 326--342 tokens; both modes hit every published query; and persistent candidate pruning still reduced the cosine stage to roughly 6.3--8.6\% of the eligible corpus when vector recovery did fire.
 The interpretation is intentionally modest: on this corpus the lexical path was strong enough that vector recovery was usually unnecessary, so the hybrid path inherited nearly the same speed profile. Synthetic large-corpus scaling runs are documented separately because they answer a different question than this live-store measurement.
 The March 10 shared-corpus rerun against claude-mem reached the same practical conclusion from the other direction: on identifier-heavy coding queries, lexical-first retrieval stayed cheaper and more exact than the semantic-first alternative, even when the competing corpus had already been seeded. Taken together, the measured results support a narrow latency claim: local lexical-first retrieval is a real speed advantage for this style of code-memory workload.
 
@@ -346,7 +346,7 @@ The March 10 shared-corpus rerun against claude-mem reached the same practical c
 
 \textbf{FTS5 retrieval ceiling.} Vocabulary mismatch remains a real failure mode in large projects, partially mitigated by synonym expansion.
 
-\textbf{Hook-path indexing overhead.} Index load and validation adds perceptible latency for large cortex repos, even with a warm cache.
+\textbf{Hook-path indexing overhead.} Index load and validation adds perceptible latency for large phren repos, even with a warm cache.
 
 \textbf{Ranking quality.} BM25 is not calibrated to agent-context relevance. The quality feedback loop requires usage history; new projects start cold.
 
@@ -356,7 +356,7 @@ The March 10 shared-corpus rerun against claude-mem reached the same practical c
 
 \textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure. Initial setup is guided, but advanced policy configuration still requires direct CLI commands.
 
-\textbf{Web UI is opt-in.} \texttt{cortex web-ui} is not started automatically; memory triage requires an explicit invocation. This is intentional---triage is a deliberate act, not an ambient background process.
+\textbf{Web UI is opt-in.} \texttt{phren web-ui} is not started automatically; memory triage requires an explicit invocation. This is intentional---triage is a deliberate act, not an ambient background process.
 
 \textbf{Uni-directional portability.} Export/import works for project data; migrating governance configuration to another memory system is manual.
 
@@ -364,9 +364,9 @@ The March 10 shared-corpus rerun against claude-mem reached the same practical c
 
 \pagebreak[2]
 \section{Conclusion}
-The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Cortex treats memory as repo-backed project state rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session. File locks serialize in-process writes, the background sync worker rebases and auto-merges safe markdown changes, and the shared store remains eventually consistent for append-heavy workflows.
+The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Phren treats memory as repo-backed project state rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session. File locks serialize in-process writes, the background sync worker rebases and auto-merges safe markdown changes, and the shared store remains eventually consistent for append-heavy workflows.
 
-Managed alternatives are reasonable when memory is expected to arrive bundled with a platform and data custody is not a priority. Cortex fits best when the priority is repo-backed project memory: markdown as source of truth, predictable token discipline, git auditability, and enough governance to keep shared memory usable over time.
+Managed alternatives are reasonable when memory is expected to arrive bundled with a platform and data custody is not a priority. Phren fits best when the priority is repo-backed project memory: markdown as source of truth, predictable token discipline, git auditability, and enough governance to keep shared memory usable over time.
 
 \end{multicols}
 
@@ -400,14 +400,14 @@ Managed alternatives are reasonable when memory is expected to arrive bundled wi
 \bibitem{gh-memory-docs} GitHub Docs: Copilot Memory. \url{https://docs.github.com/en/copilot/how-tos/use-copilot-agents/copilot-memory}
 \bibitem{gh-changelog-jan2026} GitHub Changelog (Jan 15, 2026). \href{https://github.blog/changelog/2026-01-15-agentic-memory-for-github-copilot-is-in-public-preview/}{github.blog}
 \bibitem{gh-changelog-mar2026} GitHub Changelog (Mar 4, 2026). \href{https://github.blog/changelog/2026-03-04-copilot-memory-now-on-by-default-for-pro-and-pro-users-in-public-preview/}{github.blog}
-\bibitem{cortex-readme} Cortex README. \url{https://github.com/alaarab/cortex/blob/main/README.md}
-\bibitem{cortex-cli} Cortex: \texttt{mcp/src/cli.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/cli.ts}
-\bibitem{cortex-shared} Cortex: \texttt{mcp/src/shared.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/shared.ts}
-\bibitem{cortex-hooks} Cortex: \texttt{mcp/src/hooks.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/hooks.ts}
-\bibitem{cortex-index} Cortex: \texttt{mcp/src/index.ts}. \url{https://github.com/alaarab/cortex/blob/main/mcp/src/index.ts}
-\bibitem{cortex-bench} Cortex: \texttt{scripts/bench-retrieval-modes.ts}. \url{https://github.com/alaarab/cortex/blob/main/scripts/bench-retrieval-modes.ts}
-\bibitem{cortex-bench-claude} Cortex: \texttt{scripts/bench-claude-mem-synthetic.ts}. \url{https://github.com/alaarab/cortex/blob/main/scripts/bench-claude-mem-synthetic.ts}
-\bibitem{cortex-bench-compare} Cortex: \texttt{docs/benchmark-comparison-fair.md}. \url{https://github.com/alaarab/cortex/blob/main/docs/benchmark-comparison-fair.md}
+\bibitem{phren-readme} Phren README. \url{https://github.com/alaarab/phren/blob/main/README.md}
+\bibitem{phren-cli} Phren: \texttt{mcp/src/cli.ts}. \url{https://github.com/alaarab/phren/blob/main/mcp/src/cli.ts}
+\bibitem{phren-shared} Phren: \texttt{mcp/src/shared.ts}. \url{https://github.com/alaarab/phren/blob/main/mcp/src/shared.ts}
+\bibitem{phren-hooks} Phren: \texttt{mcp/src/hooks.ts}. \url{https://github.com/alaarab/phren/blob/main/mcp/src/hooks.ts}
+\bibitem{phren-index} Phren: \texttt{mcp/src/index.ts}. \url{https://github.com/alaarab/phren/blob/main/mcp/src/index.ts}
+\bibitem{phren-bench} Phren: \texttt{scripts/bench-retrieval-modes.ts}. \url{https://github.com/alaarab/phren/blob/main/scripts/bench-retrieval-modes.ts}
+\bibitem{phren-bench-claude} Phren: \texttt{scripts/bench-claude-mem-synthetic.ts}. \url{https://github.com/alaarab/phren/blob/main/scripts/bench-claude-mem-synthetic.ts}
+\bibitem{phren-bench-compare} Phren: \texttt{docs/benchmark-comparison-fair.md}. \url{https://github.com/alaarab/phren/blob/main/docs/benchmark-comparison-fair.md}
 \end{thebibliography}
 \end{multicols}
 

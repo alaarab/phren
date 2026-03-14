@@ -39,12 +39,12 @@ const child_process_1 = require("child_process");
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const PACKAGE_NAMES = ["@alaarab/cortex", "cortex"];
+const PACKAGE_NAMES = ["@alaarab/phren", "phren"];
 const MCP_ENTRYPOINT_RELATIVE_PATH = path.join("mcp", "dist", "index.js");
 function resolveRuntimeConfig(config) {
     const nodePath = normalizeCommandPath(config.get("nodePath", "node")) ?? "node";
     const configuredMcpServerPath = normalizeConfiguredPath(config.get("mcpServerPath", ""));
-    const storePath = normalizeConfiguredPath(config.get("storePath", "")) ?? path.join(os.homedir(), ".cortex");
+    const storePath = normalizeConfiguredPath(config.get("storePath", "")) ?? path.join(os.homedir(), ".phren");
     if (configuredMcpServerPath) {
         return {
             configuredMcpServerPath,
@@ -66,7 +66,7 @@ function pathExists(targetPath) {
 }
 function detectMcpServerPath() {
     const candidates = new Set();
-    const envCandidate = normalizeConfiguredPath(process.env.CORTEX_MCP_SERVER_PATH);
+    const envCandidate = normalizeConfiguredPath(process.env.PHREN_MCP_SERVER_PATH);
     if (envCandidate) {
         candidates.add(envCandidate);
     }
@@ -76,9 +76,9 @@ function detectMcpServerPath() {
             candidates.add(path.join(globalNodeModules, packageName, MCP_ENTRYPOINT_RELATIVE_PATH));
         }
     }
-    const cortexBinaryPath = runCommand("which", ["cortex"]);
-    if (cortexBinaryPath) {
-        const resolvedBinaryPath = safeRealpath(cortexBinaryPath);
+    const phrenBinaryPath = runCommand("which", ["phren"]);
+    if (phrenBinaryPath) {
+        const resolvedBinaryPath = safeRealpath(phrenBinaryPath);
         const prefixPath = path.resolve(path.dirname(resolvedBinaryPath), "..");
         for (const packageName of PACKAGE_NAMES) {
             candidates.add(path.join(prefixPath, "lib", "node_modules", packageName, MCP_ENTRYPOINT_RELATIVE_PATH));

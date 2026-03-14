@@ -47,3 +47,23 @@ export {
   type FindingLifecycleStatus,
   type FindingLifecycleMetadata,
 } from "./finding-lifecycle.js";
+
+export {
+  METADATA_REGEX,
+  parseStatus,
+  parseStatusField,
+  parseSupersession,
+  parseSupersedesRef,
+  parseContradiction,
+  parseAllContradictions,
+  parseFindingId,
+  parseCreatedDate,
+  isCitationLine,
+  isArchiveStart,
+  isArchiveEnd,
+  stripLifecycleMetadata,
+  stripRelationMetadata,
+  stripAllMetadata,
+  stripComments,
+  addMetadata,
+} from "./content-metadata.js";

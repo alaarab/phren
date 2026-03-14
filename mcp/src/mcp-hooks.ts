@@ -58,14 +58,14 @@ function normalizeProjectHookEvent(input: string | undefined): typeof PROJECT_HO
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath } = ctx;
+  const { phrenPath } = ctx;
 
   // ── list_hooks ───────────────────────────────────────────────────────────
 
   server.registerTool(
     "list_hooks",
     {
-      title: "◆ cortex · hooks",
+      title: "◆ phren · hooks",
       description:
         "List hook status for all tools (claude, copilot, cursor, codex) with enable/disable state, " +
         "config file paths, and custom integration hooks.",
@@ -74,16 +74,16 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project }) => {
-      const prefs = readInstallPreferences(cortexPath);
+      const prefs = readInstallPreferences(phrenPath);
       const globalEnabled = prefs.hooksEnabled !== false;
       const toolPrefs = prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {};
       const paths = {
-        claude: hookConfigPath("claude", cortexPath),
-        copilot: hookConfigPath("copilot", cortexPath),
-        cursor: hookConfigPath("cursor", cortexPath),
-        codex: hookConfigPath("codex", cortexPath),
+        claude: hookConfigPath("claude", phrenPath),
+        copilot: hookConfigPath("copilot", phrenPath),
+        cursor: hookConfigPath("cursor", phrenPath),
+        codex: hookConfigPath("codex", phrenPath),
       };
-      const customHooks = readCustomHooks(cortexPath);
+      const customHooks = readCustomHooks(phrenPath);
       let projectHooks: {
         project: string;
         baseEnabled: boolean | null;
@@ -92,18 +92,18 @@ export function register(server: McpServer, ctx: McpContext): void {
       } | null = null;
 
       if (project !== undefined) {
-        if (!isValidProjectName(project) || !fs.existsSync(path.join(cortexPath, project))) {
+        if (!isValidProjectName(project) || !fs.existsSync(path.join(phrenPath, project))) {
           return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
         }
-        const config = readProjectConfig(cortexPath, project);
+        const config = readProjectConfig(phrenPath, project);
         projectHooks = {
           project,
           baseEnabled: typeof config.hooks?.enabled === "boolean" ? config.hooks.enabled : null,
-          configPath: path.join(cortexPath, project, "cortex.project.yaml"),
+          configPath: path.join(phrenPath, project, "phren.project.yaml"),
           events: PROJECT_HOOK_EVENTS.map((event) => ({
             event,
             configured: typeof config.hooks?.[event] === "boolean" ? config.hooks[event]! : null,
-            enabled: isProjectHookEnabled(cortexPath, project, event, config),
+            enabled: isProjectHookEnabled(phrenPath, project, event, config),
           })),
         };
       }
@@ -148,7 +148,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "toggle_hooks",
     {
-      title: "◆ cortex · toggle hooks",
+      title: "◆ phren · toggle hooks",
       description:
         "Enable or disable hooks globally, for a specific tool, or for a tracked project.",
       inputSchema: z.object({
@@ -168,7 +168,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       if (project) {
-        if (!isValidProjectName(project) || !fs.existsSync(path.join(cortexPath, project))) {
+        if (!isValidProjectName(project) || !fs.existsSync(path.join(phrenPath, project))) {
           return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
         }
         const normalizedEvent = normalizeProjectHookEvent(event);
@@ -176,14 +176,14 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok: false, error: `Invalid event "${event}". Use: ${PROJECT_HOOK_EVENTS.join(", ")}` });
         }
         if (normalizedEvent) {
-          writeProjectHookConfig(cortexPath, project, { [normalizedEvent]: enabled });
+          writeProjectHookConfig(phrenPath, project, { [normalizedEvent]: enabled });
           return mcpResponse({
             ok: true,
             message: `${enabled ? "Enabled" : "Disabled"} ${normalizedEvent} hook for ${project}.`,
             data: { project, event: normalizedEvent, enabled },
           });
         }
-        writeProjectHookConfig(cortexPath, project, { enabled });
+        writeProjectHookConfig(phrenPath, project, { enabled });
         return mcpResponse({
           ok: true,
           message: `${enabled ? "Enabled" : "Disabled"} hooks for project ${project}.`,
@@ -196,8 +196,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!normalized) {
           return mcpResponse({ ok: false, error: `Invalid tool "${tool}". Use: ${HOOK_TOOLS.join(", ")}` });
         }
-        const prefs = readInstallPreferences(cortexPath);
-        writeInstallPreferences(cortexPath, {
+        const prefs = readInstallPreferences(phrenPath);
+        writeInstallPreferences(phrenPath, {
           hookTools: {
             ...(prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {}),
             [normalized]: enabled,
@@ -206,7 +206,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: true, message: `${enabled ? "Enabled" : "Disabled"} hooks for ${normalized}.`, data: { tool: normalized, enabled } });
       }
 
-      writeInstallPreferences(cortexPath, { hooksEnabled: enabled });
+      writeInstallPreferences(phrenPath, { hooksEnabled: enabled });
       return mcpResponse({ ok: true, message: `${enabled ? "Enabled" : "Disabled"} hooks globally.`, data: { global: true, enabled } });
     }
   );
@@ -216,7 +216,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "add_custom_hook",
     {
-      title: "◆ cortex · add custom hook",
+      title: "◆ phren · add custom hook",
       description:
         "Add a custom integration hook. Valid events: " +
         VALID_CUSTOM_EVENTS.join(", ") + ". " +
@@ -225,7 +225,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         event: z.enum(VALID_CUSTOM_EVENTS).describe("Hook event name."),
         command: z.string().optional().describe("Shell command to execute."),
         webhook: z.string().optional().describe("HTTP POST URL to call asynchronously (webhook hook)."),
-        secret: z.string().optional().describe("HMAC-SHA256 signing secret for webhook hooks. Sent as X-Cortex-Signature header."),
+        secret: z.string().optional().describe("HMAC-SHA256 signing secret for webhook hooks. Sent as X-Phren-Signature header."),
         timeout: z.number().int().min(1).optional().describe("Timeout in ms (default 5000)."),
       }),
     },
@@ -267,9 +267,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       return ctx.withWriteQueue(async () => {
-        const prefs = readInstallPreferences(cortexPath);
+        const prefs = readInstallPreferences(phrenPath);
         const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
-        writeInstallPreferences(cortexPath, { ...prefs, customHooks: [...existing, newHook] });
+        writeInstallPreferences(phrenPath, { ...prefs, customHooks: [...existing, newHook] });
         return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${"webhook" in newHook ? "[webhook] " : ""}${getHookTarget(newHook)}`, data: { hook: newHook, total: existing.length + 1 } });
       });
     }
@@ -280,7 +280,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "remove_custom_hook",
     {
-      title: "◆ cortex · remove custom hook",
+      title: "◆ phren · remove custom hook",
       description: "Remove custom hook(s) by event and optional command text (partial match).",
       inputSchema: z.object({
         event: z.enum(VALID_CUSTOM_EVENTS).describe("Hook event name to match."),
@@ -289,7 +289,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ event, command }) => {
       return ctx.withWriteQueue(async () => {
-        const prefs = readInstallPreferences(cortexPath);
+        const prefs = readInstallPreferences(phrenPath);
         const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
         const remaining = existing.filter(h => h.event !== event || (command && !getHookTarget(h).includes(command)));
         const removed = existing.length - remaining.length;
@@ -298,7 +298,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok: false, error: `No custom hooks matched event="${event}"${command ? ` command containing "${command}"` : ""}.` });
         }
 
-        writeInstallPreferences(cortexPath, { ...prefs, customHooks: remaining });
+        writeInstallPreferences(phrenPath, { ...prefs, customHooks: remaining });
         return mcpResponse({ ok: true, message: `Removed ${removed} custom hook(s) for "${event}".`, data: { removed, remaining: remaining.length } });
       });
     }

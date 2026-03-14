@@ -42,7 +42,7 @@ describe("mcp-skills", () => {
     );
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "work",
       db: () => { throw new Error("unused"); },
       rebuildIndex: async () => {},
@@ -53,7 +53,7 @@ describe("mcp-skills", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 

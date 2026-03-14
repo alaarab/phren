@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import {
-  findCortexPath,
+  findPhrenPath,
   getProjectDirs,
   EXEC_TIMEOUT_QUICK_MS,
   debugLog,
@@ -17,6 +17,7 @@ import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared } from "./utils.js";
 import { readRuntimeHealth, resolveTaskFilePath } from "./data-access.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { renderPhrenArt } from "./phren-art.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,7 +27,7 @@ function readPackageVersion(): string {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readPackageVersion: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readPackageVersion: ${err instanceof Error ? err.message : String(err)}\n`);
     return "unknown";
   }
 }
@@ -49,8 +50,8 @@ function countBullets(filePath: string): number {
   return content.split("\n").filter((l) => l.startsWith("- ")).length;
 }
 
-function countQueueItems(cortexPath: string, project: string): number {
-  const queueFile = path.join(cortexPath, project, "MEMORY_QUEUE.md");
+function countQueueItems(phrenPath: string, project: string): number {
+  const queueFile = path.join(phrenPath, project, "MEMORY_QUEUE.md");
   return countBullets(queueFile);
 }
 
@@ -62,50 +63,50 @@ function hasCommandHook(value: unknown): boolean {
   if (!Array.isArray(value)) return false;
   return value.some((entry) => {
     if (!isRecord(entry) || !Array.isArray(entry.hooks)) return false;
-    return entry.hooks.some((hook) => isRecord(hook) && typeof hook.command === "string" && hook.command.includes("cortex"));
+    return entry.hooks.some((hook) => isRecord(hook) && typeof hook.command === "string" && (hook.command.includes("phren") || hook.command.includes("phren")));
   });
 }
 
 export async function runStatus() {
-  const cortexPath = findCortexPath();
-  if (!cortexPath) {
-    console.log(`${RED}cortex not found${RESET}. Run ${CYAN}npx cortex init${RESET} to set up.`);
+  const phrenPath = findPhrenPath();
+  if (!phrenPath) {
+    console.log(`${RED}phren not found${RESET}. Run ${CYAN}npx phren init${RESET} to set up.`);
     process.exit(1);
   }
 
   const cwd = process.cwd();
-  const manifest = readRootManifest(cortexPath);
-  const profile = resolveRuntimeProfile(cortexPath);
-  const activeProject = detectProject(cortexPath, cwd, profile);
+  const manifest = readRootManifest(phrenPath);
+  const profile = resolveRuntimeProfile(phrenPath);
+  const activeProject = detectProject(phrenPath, cwd, profile);
 
   const version = readPackageVersion();
-  console.log(`\n${BOLD}cortex status${RESET} ${DIM}v${version}${RESET}\n`);
+  console.log("");
+  console.log(renderPhrenArt("  "));
+  console.log(`\n${BOLD}phren${RESET} ${DIM}v${version}${RESET}\n`);
 
   // Active project
   if (activeProject) {
-    console.log(`  ${BOLD}Project:${RESET}  ${CYAN}${activeProject}${RESET} ${DIM}(detected from cwd)${RESET}`);
-  } else {
-    console.log(`  ${BOLD}Project:${RESET}  ${DIM}none detected${RESET}`);
+    console.log(`  ${DIM}project${RESET}  ${activeProject}`);
   }
 
-  // Cortex path
-  console.log(`  ${BOLD}Path:${RESET}     ${cortexPath}`);
-  console.log(`  ${BOLD}Mode:${RESET}     ${manifest?.installMode || "unknown"}`);
+  // Phren path and config
+  console.log(`  ${DIM}path${RESET}     ${phrenPath}`);
+  console.log(`  ${DIM}mode${RESET}     ${manifest?.installMode || "unknown"}`);
   if (manifest?.workspaceRoot) {
-    console.log(`  ${BOLD}Workspace:${RESET} ${manifest.workspaceRoot}`);
+    console.log(`  ${DIM}workspace${RESET} ${manifest.workspaceRoot}`);
   }
   if (manifest?.syncMode) {
-    console.log(`  ${BOLD}Sync mode:${RESET} ${manifest.syncMode}`);
+    console.log(`  ${DIM}sync${RESET}     ${manifest.syncMode}`);
   }
   if (profile) {
-    console.log(`  ${BOLD}Profile:${RESET}  ${profile}`);
+    console.log(`  ${DIM}profile${RESET}  ${profile}`);
   }
 
   // MCP + hooks status
-  const mcpEnabled = getMcpEnabledPreference(cortexPath);
-  const hooksEnabled = getHooksEnabledPreference(cortexPath);
-  console.log(`  ${BOLD}MCP:${RESET}      ${mcpEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
-  console.log(`  ${BOLD}Hooks:${RESET}    ${hooksEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
+  const mcpEnabled = getMcpEnabledPreference(phrenPath);
+  const hooksEnabled = getHooksEnabledPreference(phrenPath);
+  console.log(`  ${DIM}mcp${RESET}      ${mcpEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
+  console.log(`  ${DIM}hooks${RESET}    ${hooksEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
 
   // Hook health: check ~/.claude/settings.json
   let hooksInstalled = false;
@@ -117,9 +118,9 @@ export async function runStatus() {
         const parsed = JSON.parse(fs.readFileSync(workspaceMcp, "utf8")) as unknown;
         const settings = isRecord(parsed) ? parsed : {};
         const servers = isRecord(settings.servers) ? settings.servers : undefined;
-        mcpConfigured = Boolean(servers?.cortex);
+        mcpConfigured = Boolean(servers?.phren || servers?.phren);
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusWorkspaceMcp parse: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusWorkspaceMcp parse: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   } else {
@@ -130,19 +131,19 @@ export async function runStatus() {
         const settings = isRecord(parsed) ? parsed : {};
         const mcpServers = isRecord(settings.mcpServers) ? settings.mcpServers : undefined;
         const hooks = isRecord(settings.hooks) ? settings.hooks : undefined;
-        mcpConfigured = Boolean(mcpServers?.cortex);
+        mcpConfigured = Boolean(mcpServers?.phren || mcpServers?.phren);
         const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
         hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   }
-  console.log(`  ${BOLD}MCP cfg:${RESET}  ${check(mcpConfigured)} ${DIM}(${manifest?.installMode === "project-local" ? "in .vscode/mcp.json" : "in settings.json"})${RESET}`);
+  console.log(`  ${DIM}mcp cfg${RESET}  ${check(mcpConfigured)} ${DIM}(${manifest?.installMode === "project-local" ? ".vscode/mcp.json" : "settings.json"})${RESET}`);
   if (manifest?.installMode === "project-local") {
-    console.log(`  ${BOLD}Hooks cfg:${RESET} ${DIM}unsupported in project-local mode${RESET}`);
+    console.log(`  ${DIM}hooks cfg${RESET} ${DIM}n/a in project-local mode${RESET}`);
   } else {
-    console.log(`  ${BOLD}Hooks cfg:${RESET} ${check(hooksInstalled)} ${DIM}(in settings.json)${RESET}`);
+    console.log(`  ${DIM}hooks cfg${RESET} ${check(hooksInstalled)} ${DIM}(settings.json)${RESET}`);
   }
 
   // FTS index health
@@ -150,11 +151,11 @@ export async function runStatus() {
   let ftsIndexSize = 0;
   let ftsDocCount: number | null = null;
   try {
-    const cache = findFtsCacheForPath(cortexPath, profile);
+    const cache = findFtsCacheForPath(phrenPath, profile);
     ftsIndexOk = cache.exists;
     ftsIndexSize = cache.sizeBytes ?? 0;
     if (!ftsIndexOk) {
-      const db = await buildIndex(cortexPath, profile || undefined);
+      const db = await buildIndex(phrenPath, profile || undefined);
       const healthRow = queryRows(db, "SELECT count(*) FROM docs", []);
       const count = Number((healthRow?.[0]?.[0] as number | string | undefined) ?? 0);
       if (Number.isFinite(count) && count >= 0) {
@@ -163,53 +164,53 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusFtsIndex: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusFtsIndex: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   const ftsLabel = ftsIndexOk
     ? `${GREEN}ok${RESET} ${DIM}(${ftsIndexSize > 0 ? `${(ftsIndexSize / 1024).toFixed(0)} KB` : `${ftsDocCount ?? 0} docs`})${RESET}`
     : `${YELLOW}not built${RESET} ${DIM}(run a search to build)${RESET}`;
-  console.log(`  ${BOLD}FTS index:${RESET} ${ftsLabel}`);
+  console.log(`  ${DIM}fts${RESET}      ${ftsLabel}`);
 
   try {
     const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared-ollama.js");
     const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
     const ollamaUrl = getOllamaUrl();
     if (!ollamaUrl) {
-      console.log(`  ${BOLD}Semantic:${RESET} ${DIM}disabled (optional)${RESET}`);
+      console.log(`  ${DIM}semantic${RESET} ${DIM}disabled (optional)${RESET}`);
     } else {
       const available = await checkOllamaAvailable();
       if (!available) {
-        console.log(`  ${BOLD}Semantic:${RESET} ${YELLOW}offline${RESET} ${DIM}(${ollamaUrl})${RESET}`);
+        console.log(`  ${DIM}semantic${RESET} ${YELLOW}offline${RESET} ${DIM}(${ollamaUrl})${RESET}`);
       } else {
         const modelReady = await checkModelAvailable();
         const model = getEmbeddingModel();
         if (!modelReady) {
-          console.log(`  ${BOLD}Semantic:${RESET} ${YELLOW}model missing${RESET} ${DIM}(${model})${RESET}`);
+          console.log(`  ${DIM}semantic${RESET} ${YELLOW}model missing${RESET} ${DIM}(${model})${RESET}`);
         } else {
-          const cache = getEmbeddingCache(cortexPath);
+          const cache = getEmbeddingCache(phrenPath);
           await cache.load().catch(() => {});
-          const coverage = cache.coverage(listIndexedDocumentPaths(cortexPath, profile || undefined));
-          console.log(`  ${BOLD}Semantic:${RESET} ${GREEN}ready${RESET} ${DIM}(${model}; ${formatEmbeddingCoverage(coverage)})${RESET}`);
+          const coverage = cache.coverage(listIndexedDocumentPaths(phrenPath, profile || undefined));
+          console.log(`  ${DIM}semantic${RESET} ${GREEN}ready${RESET} ${DIM}(${model}; ${formatEmbeddingCoverage(coverage)})${RESET}`);
         }
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] statusSemantic: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusSemantic: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   // Agent integration status
-  function hasCortexEntry(filePath: string): boolean {
+  function hasPhrenEntry(filePath: string): boolean {
     if (!fs.existsSync(filePath)) return false;
     try {
       const raw = fs.readFileSync(filePath, "utf8");
-      return raw.includes('"cortex"') || raw.includes("'cortex'");
+      return raw.includes('"phren"') || raw.includes("'phren'") || raw.includes('"phren"') || raw.includes("'phren'");
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hasCortexEntry: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hasPhrenEntry: ${err instanceof Error ? err.message : String(err)}\n`);
       return false;
     }
   }
   function agentConfigured(candidates: string[]): boolean {
-    return candidates.some(hasCortexEntry);
+    return candidates.some(hasPhrenEntry);
   }
   const home = homeDir();
   const agentChecks: { name: string; configured: boolean }[] = manifest?.installMode === "project-local" && manifest.workspaceRoot ? [
@@ -261,46 +262,46 @@ export async function runStatus() {
   const configuredAgents = agentChecks.filter((a) => a.configured).map((a) => a.name);
   const missingAgents = agentChecks.filter((a) => !a.configured).map((a) => a.name);
   if (configuredAgents.length > 0) {
-    console.log(`  ${BOLD}Agents:${RESET}   ${GREEN}${configuredAgents.join(", ")}${RESET}`);
+    console.log(`  ${DIM}agents${RESET}   ${GREEN}${configuredAgents.join(", ")}${RESET}`);
   }
   if (missingAgents.length > 0) {
-    console.log(`  ${DIM}          Not configured: ${missingAgents.join(", ")} — run cortex init to add${RESET}`);
+    console.log(`  ${DIM}          Not configured: ${missingAgents.join(", ")} — run phren init to add${RESET}`);
   }
 
   // Stats
-  const projectDirs = getProjectDirs(cortexPath, profile);
+  const projectDirs = getProjectDirs(phrenPath, profile);
   let totalFindings = 0;
   let totalTask = 0;
   let totalQueue = 0;
 
   for (const dir of projectDirs) {
     const projName = path.basename(dir);
-    totalFindings += countBullets(path.join(cortexPath, projName, "FINDINGS.md"));
-    const taskPath = resolveTaskFilePath(cortexPath, projName);
+    totalFindings += countBullets(path.join(phrenPath, projName, "FINDINGS.md"));
+    const taskPath = resolveTaskFilePath(phrenPath, projName);
     if (taskPath) totalTask += countBullets(taskPath);
-    totalQueue += countQueueItems(cortexPath, projName);
+    totalQueue += countQueueItems(phrenPath, projName);
   }
 
-  console.log(`\n  ${BOLD}Stats:${RESET}    ${projectDirs.length} projects, ${totalFindings} findings, ${totalTask} tasks, ${totalQueue} queued`);
+  console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} fragments, ${totalTask} tasks, ${totalQueue} queued`);
 
-  const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : cortexPath;
+  const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : phrenPath;
   const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"]) === "true";
   const hasOriginRemote = isGitRepo && Boolean(runGit(gitTarget, ["remote", "get-url", "origin"]));
-  const runtime = readRuntimeHealth(cortexPath);
+  const runtime = readRuntimeHealth(phrenPath);
   if (manifest?.installMode === "project-local") {
-    console.log(`\n  ${BOLD}Sync:${RESET}     workspace-managed`);
-    console.log(`             auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+    console.log(`\n  ${DIM}sync${RESET}     workspace-managed`);
+    console.log(`           auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
   } else if (isGitRepo && !hasOriginRemote) {
-    console.log(`\n  ${BOLD}Sync:${RESET}     local-only ${DIM}(no git remote configured)${RESET}`);
-    console.log(`             auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
-    console.log(`             local commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+    console.log(`\n  ${DIM}sync${RESET}     local-only ${DIM}(no git remote)${RESET}`);
+    console.log(`           auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+    console.log(`           local commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
   } else {
-    console.log(`\n  ${BOLD}Sync:${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
-    console.log(`             last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
-    console.log(`             last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
-    console.log(`             unsynced commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+    console.log(`\n  ${DIM}sync${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+    console.log(`           last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
+    console.log(`           last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
+    console.log(`           unsynced commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
     if (runtime.lastSync?.lastPushDetail) {
-      console.log(`             push detail: ${runtime.lastSync.lastPushDetail}`);
+      console.log(`           push detail ${runtime.lastSync.lastPushDetail}`);
     }
   }
 
@@ -308,7 +309,7 @@ export async function runStatus() {
   if (isGitRepo) {
     const log = runGit(gitTarget, ["log", "--oneline", "-5", "--no-decorate"]);
     if (log) {
-      console.log(`\n  ${BOLD}Recent changes:${RESET}`);
+      console.log(`\n  ${DIM}recent${RESET}`);
       for (const line of log.split("\n")) {
         console.log(`    ${DIM}${line}${RESET}`);
       }
@@ -323,7 +324,7 @@ export async function runStatus() {
   }
 
   // Telemetry
-  const telemetry = getTelemetrySummary(cortexPath);
+  const telemetry = getTelemetrySummary(phrenPath);
   const firstLine = telemetry.split("\n")[0];
   console.log(`\n  ${BOLD}${firstLine}${RESET}`);
 

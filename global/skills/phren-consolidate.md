@@ -1,10 +1,10 @@
 ---
-name: cortex-consolidate
+name: phren-consolidate
 description: Find patterns across project findings and surface insights that apply everywhere.
 dependencies:
   - git
 ---
-# cortex-consolidate - Cross-project synthesis
+# phren-consolidate - Cross-project synthesis
 
 > Find patterns across project findings and surface insights that apply everywhere.
 
@@ -16,7 +16,7 @@ The point: something you learned on one project probably applies elsewhere. This
 
 This skill needs at least two projects with FINDINGS.md files to be useful. If you haven't captured any findings yet, use `add_finding()` during a session first.
 
-**Works with or without profiles.** If profiles are set up, it scans projects in the active profile. If not, it scans all project directories in the cortex repo.
+**Works with or without profiles.** If profiles are set up, it scans projects in the active profile. If not, it scans all project directories in the phren repo.
 
 ## When to run
 
@@ -26,27 +26,27 @@ This skill needs at least two projects with FINDINGS.md files to be useful. If y
 
 ## What to do
 
-### 1. Find the cortex directory
+### 1. Find the phren directory
 
 ```bash
-CORTEX_DIR="${CORTEX_DIR:-$HOME/.cortex}"
-ls "$CORTEX_DIR" 2>/dev/null
+PHREN_DIR="${PHREN_DIR:-$HOME/.phren}"
+ls "$PHREN_DIR" 2>/dev/null
 ```
 
 If it doesn't exist, tell the user:
-> "No cortex directory found at ~/.cortex. This skill needs a cortex repo with project findings. Run `cortex-init` to set one up, or set CORTEX_DIR if yours is elsewhere."
+> "No phren directory found at ~/.phren. This skill needs a phren repo with project findings. Run `phren-init` to set one up, or set PHREN_DIR if yours is elsewhere."
 
 ### 2. Gather ALL findings
 
 Try the profile-aware path first, fall back to scanning all directories:
 
 ```bash
-MACHINE=$(cat ~/.cortex/.machine-id 2>/dev/null || hostname)
+MACHINE=$(cat ~/.phren/.machine-id 2>/dev/null || hostname)
 # look up profile in machines.yaml to get the project list
 
 # fallback: scan all project directories
 FINDINGS_FILES=()
-for dir in "$CORTEX_DIR"/*/; do
+for dir in "$PHREN_DIR"/*/; do
   if [ -f "$dir/FINDINGS.md" ]; then
     PROJECT_NAME=$(basename "$dir")
     FINDINGS_FILES+=("$PROJECT_NAME:$dir/FINDINGS.md")
@@ -83,11 +83,11 @@ Don't force categories. If only one project mentions something, it stays project
 
 ### 4. Check existing global findings
 
-Before writing, read `$CORTEX_DIR/global/FINDINGS.md` if it exists. Don't duplicate entries that are already there. Update existing entries if there's new evidence or additional projects that confirm the pattern.
+Before writing, read `$PHREN_DIR/global/FINDINGS.md` if it exists. Don't duplicate entries that are already there. Update existing entries if there's new evidence or additional projects that confirm the pattern.
 
 ### 5. Write global findings
 
-File: `$CORTEX_DIR/global/FINDINGS.md`
+File: `$PHREN_DIR/global/FINDINGS.md`
 
 ```markdown
 # Cross-project findings
@@ -113,7 +113,7 @@ Rules for each entry:
 ### 6. Report
 
 ```
-cortex-consolidate
+phren-consolidate
 
 Scanned: my-app (12 findings), backend (8 findings), frontend (5 findings)
 
@@ -126,13 +126,13 @@ New patterns added: 4
 Existing patterns updated: 2 (added new project evidence)
 Skipped: 0 (already captured)
 
-Updated: $CORTEX_DIR/global/FINDINGS.md
+Updated: $PHREN_DIR/global/FINDINGS.md
 ```
 
 ### 7. Commit (if git repo)
 
 ```bash
-cd "$CORTEX_DIR"
+cd "$PHREN_DIR"
 git add global/FINDINGS.md
 git commit -m "update global findings"
 git push  # only if remote exists
@@ -149,4 +149,4 @@ git push  # only if remote exists
 ## Related skills
 
 - `add_finding()`: capture findings during a session via MCP
-- `cortex-sync`: sync the consolidated findings to other machines
+- `phren-sync`: sync the consolidated findings to other machines

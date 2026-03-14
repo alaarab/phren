@@ -1,9 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CortexClient = void 0;
+exports.PhrenClient = void 0;
 const child_process_1 = require("child_process");
 const DEFAULT_TIMEOUT_MS = 15000;
-class CortexClient {
+class PhrenClient {
     constructor(options) {
         this.pending = new Map();
         this.buffer = Buffer.alloc(0);
@@ -20,13 +20,13 @@ class CortexClient {
         });
         this.process.stderr.on("data", (chunk) => {
             const message = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
-            console.error(`[cortex-mcp] ${message.trim()}`);
+            console.error(`[phren-mcp] ${message.trim()}`);
         });
         this.process.on("exit", (code, signal) => {
             if (this.disposed) {
                 return;
             }
-            this.rejectPending(new Error(`cortex MCP process exited (code=${code ?? "null"}, signal=${signal ?? "null"})`));
+            this.rejectPending(new Error(`phren MCP process exited (code=${code ?? "null"}, signal=${signal ?? "null"})`));
         });
         this.process.on("error", (error) => {
             this.rejectPending(error);
@@ -136,7 +136,7 @@ class CortexClient {
             return;
         }
         this.disposed = true;
-        this.rejectPending(new Error("Cortex client disposed."));
+        this.rejectPending(new Error("Phren client disposed."));
         if (!this.process.killed) {
             this.process.kill();
         }
@@ -167,7 +167,7 @@ class CortexClient {
                     protocolVersion,
                     capabilities: {},
                     clientInfo: {
-                        name: "cortex-vscode",
+                        name: "phren-vscode",
                         version: this.options.clientVersion ?? "0.0.0",
                     },
                 });
@@ -194,7 +194,7 @@ class CortexClient {
     }
     async sendRequest(method, params) {
         if (this.disposed) {
-            throw new Error("Cortex client has been disposed.");
+            throw new Error("Phren client has been disposed.");
         }
         const id = this.nextId++;
         const message = JSON.stringify({
@@ -247,7 +247,7 @@ class CortexClient {
                 this.handleMessage(message);
             }
             catch (error) {
-                console.error(`[cortex-mcp] Failed to parse JSON-RPC line: ${String(error)}`);
+                console.error(`[phren-mcp] Failed to parse JSON-RPC line: ${String(error)}`);
             }
         }
     }
@@ -283,7 +283,7 @@ class CortexClient {
     unwrapToolResponse(value) {
         const response = asRecord(value);
         if (response?.ok === false) {
-            throw new Error(response.error ?? response.message ?? "Cortex tool call failed.");
+            throw new Error(response.error ?? response.message ?? "Phren tool call failed.");
         }
         return value;
     }
@@ -295,8 +295,8 @@ class CortexClient {
         this.pending.clear();
     }
 }
-exports.CortexClient = CortexClient;
+exports.PhrenClient = PhrenClient;
 function asRecord(value) {
     return typeof value === "object" && value !== null ? value : undefined;
 }
-//# sourceMappingURL=cortexClient.js.map
+//# sourceMappingURL=phrenClient.js.map

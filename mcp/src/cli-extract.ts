@@ -2,7 +2,7 @@ import {
   debugLog,
   appendAuditLog,
   EXEC_TIMEOUT_MS,
-  getCortexPath,
+  getPhrenPath,
 } from "./shared.js";
 import {
   appendReviewQueue,
@@ -40,7 +40,7 @@ function shouldRetryGh(err: unknown): boolean {
 
 function inferProject(arg?: string): string | null {
   if (arg) return arg;
-  return detectProject(getCortexPath(), process.cwd(), resolveRuntimeProfile(getCortexPath()));
+  return detectProject(getPhrenPath(), process.cwd(), resolveRuntimeProfile(getPhrenPath()));
 }
 
 // ── Git log parsing ──────────────────────────────────────────────────────────
@@ -94,8 +94,8 @@ interface Candidate {
 
 export async function runGhJson<T>(cwd: string, args: string[]): Promise<T | null> {
   if (!commandExists("gh")) return null;
-  const retries = clampInt(process.env.CORTEX_GH_RETRIES, 2, 0, 5);
-  const timeoutMs = clampInt(process.env.CORTEX_GH_TIMEOUT_MS, 10000, 1000, 60000);
+  const retries = clampInt((process.env.PHREN_GH_RETRIES), 2, 0, 5);
+  const timeoutMs = clampInt((process.env.PHREN_GH_TIMEOUT_MS), 10000, 1000, 60000);
   const ghExec = resolveExecCommand("gh");
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -122,7 +122,7 @@ export function ghCachePath(repoRoot: string): string {
   const absPath = path.resolve(repoRoot);
   const repoHash = crypto.createHash("sha1").update(absPath).digest("hex").slice(0, 12);
   const dateKey = new Date().toISOString().slice(0, 10);
-  return path.join(os.tmpdir(), `cortex-gh-cache-${repoHash}-${dateKey}.json`);
+  return path.join(os.tmpdir(), `phren-gh-cache-${repoHash}-${dateKey}.json`);
 }
 
 const GH_CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
@@ -139,9 +139,9 @@ export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[
   }
 
   const candidates: Candidate[] = [];
-  const prLimit = clampInt(process.env.CORTEX_GH_PR_LIMIT, 40, 5, 200);
-  const runLimit = clampInt(process.env.CORTEX_GH_RUN_LIMIT, 25, 5, 200);
-  const issueLimit = clampInt(process.env.CORTEX_GH_ISSUE_LIMIT, 25, 5, 200);
+  const prLimit = clampInt((process.env.PHREN_GH_PR_LIMIT), 40, 5, 200);
+  const runLimit = clampInt((process.env.PHREN_GH_RUN_LIMIT), 25, 5, 200);
+  const issueLimit = clampInt((process.env.PHREN_GH_ISSUE_LIMIT), 25, 5, 200);
 
   const prs = await runGhJson<GhPr[]>(repoRoot, [
     "pr",
@@ -271,7 +271,7 @@ export async function handleExtractMemories(
 ) {
   const project = inferProject(projectArg);
   if (!project) {
-    if (!silent) console.error("Usage: cortex extract-memories <project>");
+    if (!silent) console.error("Usage: phren extract-memories <project>");
     if (!silent) process.exit(1);
     return;
   }
@@ -283,21 +283,21 @@ export async function handleExtractMemories(
     return;
   }
 
-  const findingsLevel = getProactivityLevelForFindings(getCortexPath());
-  const taskLevel = getProactivityLevelForTask(getCortexPath());
+  const findingsLevel = getProactivityLevelForFindings(getPhrenPath());
+  const taskLevel = getProactivityLevelForTask(getPhrenPath());
   if (taskLevel !== "high") {
     debugLog(`extract-memories task proactivity=${taskLevel}`);
   }
   if (findingsLevel === "low") {
-    appendAuditLog(getCortexPath(), "extract_memories", `project=${project} skipped=proactivity_low`);
+    appendAuditLog(getPhrenPath(), "extract_memories", `project=${project} skipped=proactivity_low`);
     if (!silent) console.log(`Skipped memory extraction for ${project}: findings proactivity is low.`);
     return;
   }
 
-  const days = Number.parseInt(process.env.CORTEX_MEMORY_EXTRACT_WINDOW_DAYS || "30", 10);
-  const threshold = Number.parseFloat(process.env.CORTEX_MEMORY_AUTO_ACCEPT || String(getRetentionPolicy(getCortexPath()).autoAcceptThreshold));
+  const days = Number.parseInt((process.env.PHREN_MEMORY_EXTRACT_WINDOW_DAYS) || "30", 10);
+  const threshold = Number.parseFloat((process.env.PHREN_MEMORY_AUTO_ACCEPT) || String(getRetentionPolicy(getPhrenPath()).autoAcceptThreshold));
   const records = parseGitLogRecords(repoRoot, Number.isNaN(days) ? 30 : days);
-  const ghCandidates = isFeatureEnabled("CORTEX_FEATURE_GH_MINING", false)
+  const ghCandidates = isFeatureEnabled("PHREN_FEATURE_GH_MINING", false)
     ? await mineGithubCandidates(repoRoot)
     : [];
 
@@ -309,7 +309,7 @@ export async function handleExtractMemories(
     if (!candidate) continue;
     const line = `${candidate.text} (source commit ${rec.hash.slice(0, 8)})`;
     if (candidate.score >= threshold) {
-      appendFindingJournal(getCortexPath(), project, line, {
+      appendFindingJournal(getPhrenPath(), project, line, {
         source,
         sessionId,
         repo: repoRoot,
@@ -317,7 +317,7 @@ export async function handleExtractMemories(
       });
       accepted++;
     } else {
-      const qr1 = appendReviewQueue(getCortexPath(), project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
+      const qr1 = appendReviewQueue(getPhrenPath(), project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
       if (qr1.ok) queued += qr1.data;
     }
   }
@@ -327,10 +327,10 @@ export async function handleExtractMemories(
     const line = `${c.text}${c.commit ? ` (source commit ${c.commit.slice(0, 8)})` : ""}`;
     if (c.text.startsWith("CI failure pattern:")) {
       const key = entryScoreKey(project, "FINDINGS.md", line);
-      recordFeedback(getCortexPath(), key, "regression");
+      recordFeedback(getPhrenPath(), key, "regression");
     }
     if (c.score >= threshold) {
-      appendFindingJournal(getCortexPath(), project, line, {
+      appendFindingJournal(getPhrenPath(), project, line, {
         source,
         sessionId,
         repo: repoRoot,
@@ -339,17 +339,17 @@ export async function handleExtractMemories(
       });
       accepted++;
     } else {
-      const qr2 = appendReviewQueue(getCortexPath(), project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
+      const qr2 = appendReviewQueue(getPhrenPath(), project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
       if (qr2.ok) queued += qr2.data;
     }
   }
 
   if (!silent) {
-    const compacted = compactFindingJournals(getCortexPath(), project);
+    const compacted = compactFindingJournals(getPhrenPath(), project);
     debugLog(`extract-memories compacted journals for ${project}: added=${compacted.added} skipped=${compacted.skipped} failed=${compacted.failed}`);
   }
 
-  flushEntryScores(getCortexPath());
-  appendAuditLog(getCortexPath(), "extract_memories", `project=${project} accepted=${accepted} queued=${queued} window_days=${days}`);
+  flushEntryScores(getPhrenPath());
+  appendAuditLog(getPhrenPath(), "extract_memories", `project=${project} accepted=${accepted} queued=${queued} window_days=${days}`);
   if (!silent) console.log(`Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, window=${days}d`);
 }

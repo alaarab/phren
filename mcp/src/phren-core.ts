@@ -1,4 +1,4 @@
-// Shared Cortex result types, validation tags, and low-level helpers.
+// Shared Phren result types, validation tags, and low-level helpers.
 
 /**
  * Minimal cross-domain starter set for entity/conflict detection.
@@ -18,7 +18,7 @@ export const UNIVERSAL_TECH_TERMS_RE =
 export const EXTRA_ENTITY_PATTERNS: Array<{ re: RegExp; label: string }> = [
   // Semantic version numbers: v1.2.3, 2.0.0-beta.1
   { re: /\bv?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\b/g, label: "version" },
-  // Environment variable keys: CORTEX_*, NODE_ENV, etc. (2+ uppercase segments separated by _)
+  // Environment variable keys: PHREN_*, NODE_ENV, etc. (2+ uppercase segments separated by _)
   { re: /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, label: "env_key" },
   // File paths: at least one slash with an extension or known dir prefix
   { re: /(?:~\/|\.\/|\/)[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+/g, label: "file_path" },
@@ -33,7 +33,7 @@ export const EXEC_TIMEOUT_MS = 30_000;
 export const EXEC_TIMEOUT_QUICK_MS = 10_000;
 
 // Structured error codes for consistent error handling across data-access and MCP tools
-export const CortexError = {
+export const PhrenError = {
   PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
   INVALID_PROJECT_NAME: "INVALID_PROJECT_NAME",
   FILE_NOT_FOUND: "FILE_NOT_FOUND",
@@ -49,36 +49,36 @@ export const CortexError = {
   NETWORK_ERROR: "NETWORK_ERROR",
 } as const;
 
-export type CortexErrorCode = typeof CortexError[keyof typeof CortexError];
+export type PhrenErrorCode = typeof PhrenError[keyof typeof PhrenError];
 
 // Discriminated union for typed error returns in the data-access layer.
 // Replaces `T | string` patterns so callers can structurally distinguish errors.
-export type CortexResult<T> =
+export type PhrenResult<T> =
   | { ok: true; data: T }
-  | { ok: false; error: string; code?: CortexErrorCode };
+  | { ok: false; error: string; code?: PhrenErrorCode };
 
-export function cortexOk<T>(data: T): CortexResult<T> {
+export function phrenOk<T>(data: T): PhrenResult<T> {
   return { ok: true, data };
 }
 
-export function cortexErr<T>(error: string, code?: CortexErrorCode): CortexResult<T> {
+export function phrenErr<T>(error: string, code?: PhrenErrorCode): PhrenResult<T> {
   return { ok: false, error, code };
 }
 
-// Forward a failed CortexResult to a different result type (re-types the error branch).
+// Forward a failed PhrenResult to a different result type (re-types the error branch).
 // Safe to call after an `if (!result.ok)` guard; extracts error and code from the union.
-export function forwardErr<T>(result: CortexResult<unknown>): CortexResult<T> {
+export function forwardErr<T>(result: PhrenResult<unknown>): PhrenResult<T> {
   if (!result.ok) return { ok: false, error: result.error, code: result.code };
   return { ok: false, error: "unexpected forward of ok result" };
 }
 
-const ERROR_CODES = new Set(Object.values(CortexError));
+const ERROR_CODES = new Set(Object.values(PhrenError));
 
 // Extract the error code from an error string (e.g. "PROJECT_NOT_FOUND: ...").
-// Returns the code if the string starts with a known CortexError, or undefined.
-export function parseCortexErrorCode(msg: string): CortexErrorCode | undefined {
+// Returns the code if the string starts with a known PhrenError, or undefined.
+export function parsePhrenErrorCode(msg: string): PhrenErrorCode | undefined {
   const prefix = msg.split(":")[0]?.trim();
-  if (prefix && ERROR_CODES.has(prefix as CortexErrorCode)) return prefix as CortexErrorCode;
+  if (prefix && ERROR_CODES.has(prefix as PhrenErrorCode)) return prefix as PhrenErrorCode;
   return undefined;
 }
 

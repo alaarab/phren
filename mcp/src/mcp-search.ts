@@ -39,7 +39,7 @@ import { resolveActiveSessionScope } from "./mcp-session.js";
  * Q30: Log zero-result queries to .runtime/search-misses.jsonl.
  * Strips PII-like tokens (emails, UUIDs, numbers) and keeps only query terms.
  */
-export function logSearchMiss(cortexPath: string, query: string, project?: string): void {
+export function logSearchMiss(phrenPath: string, query: string, project?: string): void {
   try {
     const sanitized = query
       .replace(/\S+@\S+\.\S+/g, "<email>")      // strip emails
@@ -52,10 +52,10 @@ export function logSearchMiss(cortexPath: string, query: string, project?: strin
       ts: Date.now(),
       project: project ?? null,
     });
-    const missFile = runtimeFile(cortexPath, "search-misses.jsonl");
+    const missFile = runtimeFile(phrenPath, "search-misses.jsonl");
     fs.appendFileSync(missFile, entry + "\n");
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] logSearchMiss: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] logSearchMiss: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -108,7 +108,7 @@ function filterFindingsContentByScope(content: string, activeScope: string): str
       if (keepCitation) out.push(line);
       continue;
     }
-    if (/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/.test(line.trim())) {
+    if (/^\s*<!--\s*phren:cite\s+\{.*\}\s*-->\s*$/.test(line.trim())) {
       if (keepCitation) out.push(line);
       continue;
     }
@@ -144,20 +144,20 @@ function filterTaskContentByScope(content: string, activeScope: string): string 
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, profile } = ctx;
+  const { phrenPath, profile } = ctx;
 
   server.registerTool(
     "get_memory_detail",
     {
-      title: "◆ cortex · memory detail",
+      title: "◆ phren · memory detail",
       description:
         "Fetch the full content of a specific memory entry by its ID. Use this after receiving a compact " +
-        "memory index from the hook-prompt (when CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE is enabled). " +
+        "memory index from the hook-prompt (when PHREN_FEATURE_PROGRESSIVE_DISCLOSURE is enabled). " +
         "The id format is `mem:project/path/to/file.md` as shown in the memory index.",
       inputSchema: z.object({
         id: z.string().describe(
           "Memory ID in the format `mem:project/path/to/file.md` (e.g. `mem:my-app/reference/api/auth.md`). " +
-          "Returned by the hook-prompt compact index when CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1."
+          "Returned by the hook-prompt compact index when PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1."
         ),
       }),
     },
@@ -166,7 +166,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const id = normalizeMemoryId(rawId);
       const match = id.match(/^mem:([^/]+)\/(.+)$/);
       if (!match) {
-        return mcpResponse({ ok: false, error: `Invalid memory id format "${rawId}". Expected mem:project/path/to/file.md.` });
+        return mcpResponse({ ok: false, error: `Invalid memory ID format "${rawId}". Expected mem:project/path/to/file.md.` });
       }
       const [, project] = match;
       if (!isValidProjectName(project)) {
@@ -174,7 +174,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       const db = ctx.db();
-      const doc = queryDocBySourceKey(db, cortexPath, id.slice(4));
+      const doc = queryDocBySourceKey(db, phrenPath, id.slice(4));
       if (!doc) {
         return mcpResponse({ ok: false, error: `Memory not found: ${id}` });
       }
@@ -187,7 +187,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         updatedAt = stat.mtime.toISOString();
         createdAt = stat.birthtime.toISOString();
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] search_knowledge statFile: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search_knowledge statFile: ${errorMessage(err)}\n`);
       }
 
       // Extract tags from content (e.g. [decision], [pitfall], [pattern])
@@ -196,7 +196,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       // Get quality score if available
       const scoreKey = entryScoreKey(doc.project, doc.filename, doc.content);
-      const qualityMultiplier = getQualityMultiplier(cortexPath, scoreKey);
+      const qualityMultiplier = getQualityMultiplier(phrenPath, scoreKey);
 
       return mcpResponse({
         ok: true,
@@ -225,8 +225,8 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "search_knowledge",
     {
-      title: "◆ cortex · search",
-      description: "Search the user's cortex. Call this at the start of any session to get project context, and any time the user asks about their codebase, stack, architecture, past decisions, commands, conventions, or findings. Prefer this over asking the user to re-explain things they've already documented.",
+      title: "◆ phren · search",
+      description: "Search the user's phren. Call this at the start of any session to get project context, and any time the user asks about their codebase, stack, architecture, past decisions, commands, conventions, or findings. Prefer this over asking the user to re-explain things they've already told phren.",
       inputSchema: z.object({
         query: z.string().describe("Search query (supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes)"),
         limit: z.number().min(1).max(20).optional().describe("Max results to return (1-20, default 5)"),
@@ -243,7 +243,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         since: z.string().optional().describe('Filter findings by creation date. Formats: "7d" (last 7 days), "30d" (last 30 days), "YYYY-MM" (since start of month), "YYYY-MM-DD" (since date).'),
         status: z.enum(FINDING_LIFECYCLE_STATUSES).optional().describe("Filter findings by lifecycle status: active, superseded, contradicted, stale, invalid_citation, or retracted."),
         include_history: z.boolean().optional().describe("When true, include historical findings (superseded/retracted). Default false."),
-        synthesize: z.boolean().optional().describe("When true, generate a short synthesis paragraph from the top results using an LLM. Requires CORTEX_LLM_ENDPOINT, ANTHROPIC_API_KEY, or OPENAI_API_KEY."),
+        synthesize: z.boolean().optional().describe("When true, generate a short synthesis paragraph from the top results using an LLM. Requires PHREN_LLM_ENDPOINT, ANTHROPIC_API_KEY, or OPENAI_API_KEY."),
       }),
     },
     async ({ query, limit, project, type, tag, since, status, include_history, synthesize }) => {
@@ -266,7 +266,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           fetchLimit,
           filterProject,
           filterType,
-          cortexPath,
+          phrenPath,
         });
         const safeQuery = retrieval.safeQuery;
 
@@ -275,11 +275,11 @@ export function register(server: McpServer, ctx: McpContext): void {
         const usedFallback = retrieval.usedFallback;
 
         if (!rows || rows.length === 0) {
-          logSearchMiss(cortexPath, query, filterProject);
+          logSearchMiss(phrenPath, query, filterProject);
           return mcpResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
         }
 
-        const activeScope = resolveActiveSessionScope(cortexPath, filterProject);
+        const activeScope = resolveActiveSessionScope(phrenPath, filterProject);
         if (activeScope) {
           rows = rows
             .map((row) => {
@@ -297,7 +297,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             })
             .filter((row): row is NonNullable<typeof row> => Boolean(row));
           if (rows.length === 0) {
-            logSearchMiss(cortexPath, query, filterProject);
+            logSearchMiss(phrenPath, query, filterProject);
             return mcpResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
           }
         }
@@ -307,7 +307,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           const tagPattern = `[${filterTag.toLowerCase()}]`;
           rows = rows.filter(row => row.content.toLowerCase().includes(tagPattern));
           if (rows.length === 0) {
-            logSearchMiss(cortexPath, query, filterProject);
+            logSearchMiss(phrenPath, query, filterProject);
             return mcpResponse({ ok: true, message: `No results found with tag [${filterTag}].`, data: { query, results: [] } });
           }
         }
@@ -351,7 +351,7 @@ export function register(server: McpServer, ctx: McpContext): void {
               return createdDates.some(m => new Date(`${m[1]}T00:00:00Z`).getTime() >= sinceMs);
             });
             if (rows.length === 0) {
-              logSearchMiss(cortexPath, query, filterProject);
+              logSearchMiss(phrenPath, query, filterProject);
             return mcpResponse({ ok: true, message: `No results found since ${since}.`, data: { query, results: [] } });
             }
           }
@@ -373,7 +373,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
           rows = filteredRows;
           if (rows.length === 0) {
-            logSearchMiss(cortexPath, query, filterProject);
+            logSearchMiss(phrenPath, query, filterProject);
             return mcpResponse({ ok: true, message: "No results found after lifecycle filters.", data: { query, results: [] } });
           }
         }
@@ -383,7 +383,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           "general",
           null,
           filterProject ?? null,
-          cortexPath,
+          phrenPath,
           db,
           undefined,
           query,
@@ -392,8 +392,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         // Apply trust filter — same as hook-prompt uses — to strip stale/low-confidence findings
         try {
-          const policy = getRetentionPolicy(cortexPath);
-          const trustResult = applyTrustFilter(rows, policy.ttlDays, policy.minInjectConfidence, policy.decay, cortexPath);
+          const policy = getRetentionPolicy(phrenPath);
+          const trustResult = applyTrustFilter(rows, policy.ttlDays, policy.minInjectConfidence, policy.decay, phrenPath);
           rows = trustResult.rows;
         } catch (err: unknown) {
           debugLog(`search_knowledge trustFilter: ${errorMessage(err)}`);
@@ -427,20 +427,20 @@ export function register(server: McpServer, ctx: McpContext): void {
           };
         });
 
-        let relatedEntities: string[] = [];
+        let relatedFragments: string[] = [];
         try {
           const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
           for (const term of terms) {
             const links = queryEntityLinks(db, term);
             if (links.related.length > 0) {
-              relatedEntities.push(...links.related);
+              relatedFragments.push(...links.related);
             } else {
-              logEntityMiss(cortexPath, term, "search_knowledge", filterProject);
+              logEntityMiss(phrenPath, term, "search_knowledge", filterProject);
             }
           }
-          relatedEntities = [...new Set(relatedEntities)].slice(0, 10);
+          relatedFragments = [...new Set(relatedFragments)].slice(0, 10);
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] entityGraph query: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragment query: ${err instanceof Error ? err.message : String(err)}\n`);
         }
 
         const formatted = results.map((r) =>
@@ -452,10 +452,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (synthesize && results.length > 0) {
           try {
             const synthKey = createHash("sha256").update([query, filterProject ?? "", filterType ?? "", filterTag ?? "", since ?? ""].join("|")).digest("hex").slice(0, 16);
-            const synthCachePath = runtimeFile(cortexPath, "synth-cache.json");
+            const synthCachePath = runtimeFile(phrenPath, "synth-cache.json");
             let synthCache: Record<string, { result: string; ts: number }> = {};
             try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch (err: unknown) {
-              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] search_knowledge synthCacheRead: ${errorMessage(err)}\n`);
+              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search_knowledge synthCacheRead: ${errorMessage(err)}\n`);
             }
             const cached = synthCache[synthKey];
             const SYNTH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -474,7 +474,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                   for (const k of oldest) delete synthCache[k];
                 }
                 try { fs.writeFileSync(synthCachePath, JSON.stringify(synthCache)); } catch (err: unknown) {
-                  if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] synthCache write: ${err instanceof Error ? err.message : String(err)}\n`);
+                  if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synthCache write: ${err instanceof Error ? err.message : String(err)}\n`);
                 }
               }
             }
@@ -484,13 +484,13 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         const fallbackNote = usedFallback ? " (keyword fallback)" : "";
-        const entityNote = relatedEntities.length > 0 ? `\n\nRelated entities: ${relatedEntities.join(", ")}` : "";
+        const fragmentNote = relatedFragments.length > 0 ? `\n\nRelated fragments: ${relatedFragments.join(", ")}` : "";
         const synthesisBlock = synthesis ? `\n\n${synthesis}\n\n---\n\n` : "\n\n";
-        runCustomHooks(cortexPath, "post-search", { CORTEX_QUERY: query, CORTEX_RESULT_COUNT: String(results.length) });
+        runCustomHooks(phrenPath, "post-search", { PHREN_QUERY: query, PHREN_RESULT_COUNT: String(results.length) });
         return mcpResponse({
           ok: true,
-          message: `Found ${results.length} result(s) for "${query}"${fallbackNote}:${synthesisBlock}${formatted.join("\n\n---\n\n")}${entityNote}`,
-          data: { query, count: results.length, results, fallback: usedFallback, relatedEntities: relatedEntities.length > 0 ? relatedEntities : undefined, ...(synthesis ? { synthesis } : {}) },
+          message: `Found ${results.length} result(s) for "${query}"${fallbackNote}:${synthesisBlock}${formatted.join("\n\n---\n\n")}${fragmentNote}`,
+          data: { query, count: results.length, results, fallback: usedFallback, relatedFragments: relatedFragments.length > 0 ? relatedFragments : undefined, ...(synthesis ? { synthesis } : {}) },
         });
       } catch (err: unknown) {
         return mcpResponse({ ok: false, error: `Search error: ${errorMessage(err)}`, errorCode: "INTERNAL_ERROR" });
@@ -501,7 +501,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "get_project_summary",
     {
-      title: "◆ cortex · project",
+      title: "◆ phren · project",
       description: "Get a project's summary card and available docs. Call this when starting work on a specific project to orient yourself: what it is, the stack, current status, and how to run it.",
       inputSchema: z.object({
         name: z.string().describe("Project name (e.g. 'my-app', 'backend', 'frontend')"),
@@ -549,9 +549,9 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "list_projects",
     {
-      title: "◆ cortex · projects",
+      title: "◆ phren · projects",
       description:
-        "List all projects in the active cortex profile with a brief summary of each. " +
+        "List all projects in the active phren profile with a brief summary of each. " +
         "Shows which documentation files exist per project.",
       inputSchema: z.object({
         page: z.number().int().min(1).optional().describe("1-based page number (default 1)."),
@@ -592,10 +592,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         return { name: proj, brief, badges, fileCount: rows.length };
       });
 
-      const lines: string[] = [`# Cortex Projects (${projects.length})`];
+      const lines: string[] = [`# Phren Projects (${projects.length})`];
       if (profile) lines.push(`Profile: ${profile}`);
       lines.push(`Page: ${pageNum}/${totalPages} (page_size=${pageSize})`);
-      lines.push(`Path: ${cortexPath}\n`);
+      lines.push(`Path: ${phrenPath}\n`);
       for (const p of projectList) {
         lines.push(`## ${p.name}`);
         if (p.brief) lines.push(p.brief);
@@ -613,7 +613,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "get_findings",
     {
-      title: "◆ cortex · findings",
+      title: "◆ phren · findings",
       description: "List recent findings for a project without requiring a search query.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -626,12 +626,12 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, limit, include_superseded, include_history, status }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const includeHistory = include_history ?? include_superseded ?? false;
-      const result = readFindings(cortexPath, project, { includeArchived: includeHistory });
+      const result = readFindings(phrenPath, project, { includeArchived: includeHistory });
       if (!result.ok) return mcpResponse({ ok: false, error: result.error });
       const allItems = result.data;
       let historyCount = allItems.filter(f => f.tier === "archived" || HISTORY_FINDING_STATUSES.has(f.status)).length;
       if (!includeHistory) {
-        const withArchive = readFindings(cortexPath, project, { includeArchived: true });
+        const withArchive = readFindings(phrenPath, project, { includeArchived: true });
         if (withArchive.ok) {
           historyCount = withArchive.data.filter(f => f.tier === "archived" || HISTORY_FINDING_STATUSES.has(f.status)).length;
         }

@@ -3,8 +3,8 @@ import * as path from "path";
 import { execFileSync, spawnSync } from "child_process";
 import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
-import { findCortexPath } from "./cortex-paths.js";
-import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
+import { findPhrenPath } from "./phren-paths.js";
+import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
 
 const _moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -13,7 +13,7 @@ function loadSynonymsJson(fileName: string): Record<string, string[]> {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] ${fileName} load failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] ${fileName} load failed: ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }
@@ -100,7 +100,7 @@ export function errorMessage(err: unknown): string {
 // ── Feature flag and clamping helpers ────────────────────────────────────────
 
 export function isFeatureEnabled(envName: string, defaultValue: boolean = true): boolean {
-  bootstrapCortexDotEnv();
+  bootstrapPhrenDotEnv();
   const raw = process.env[envName];
   if (!raw) return defaultValue;
   return !["0", "false", "off", "no"].includes(raw.trim().toLowerCase());
@@ -210,7 +210,7 @@ export function isValidProjectName(name: string): boolean {
   return /^[a-z0-9][a-z0-9_-]*$/.test(name);
 }
 
-// Resolve a path inside the cortex directory and reject anything that escapes it.
+// Resolve a path inside the phren directory and reject anything that escapes it.
 // Checks both lexical resolution and (when the path exists) real path after symlink
 // resolution to prevent symlink-based traversal.
 export function safeProjectPath(base: string, ...segments: string[]): string | null {
@@ -245,11 +245,11 @@ export function safeProjectPath(base: string, ...segments: string[]): string | n
 export type QueueSection = "Review" | "Stale" | "Conflicts";
 const QUEUE_FILENAME = "MEMORY_QUEUE.md";
 
-export function queueFilePath(cortexPath: string, project: string): string {
+export function queueFilePath(phrenPath: string, project: string): string {
   if (!isValidProjectName(project)) {
     throw new Error(`Invalid project name: ${project}`);
   }
-  const result = safeProjectPath(cortexPath, project, QUEUE_FILENAME);
+  const result = safeProjectPath(phrenPath, project, QUEUE_FILENAME);
   if (!result) {
     throw new Error(`Path traversal detected for project: ${project}`);
   }
@@ -294,13 +294,13 @@ function parseSynonymsYaml(filePath: string): Record<string, string[]> {
     }
     return loaded;
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] synonyms.yaml parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synonyms.yaml parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }
 
-function loadUserSynonyms(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
-  const resolved = cortexPath ?? findCortexPath();
+function loadUserSynonyms(project?: string | null, phrenPath?: string | null): Record<string, string[]> {
+  const resolved = phrenPath ?? findPhrenPath();
   if (!resolved) return {};
 
   const globalSynonyms = parseSynonymsYaml(path.join(resolved, "global", "synonyms.yaml"));
@@ -331,41 +331,41 @@ function parseLearnedSynonymsJson(filePath: string): Record<string, string[]> {
     }
     return loaded;
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] learned-synonyms parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] learned-synonyms parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }
 
-export function learnedSynonymsPath(cortexPath: string, project: string): string | null {
+export function learnedSynonymsPath(phrenPath: string, project: string): string | null {
   if (!isValidProjectName(project)) return null;
-  return safeProjectPath(cortexPath, project, LEARNED_SYNONYMS_FILE);
+  return safeProjectPath(phrenPath, project, LEARNED_SYNONYMS_FILE);
 }
 
-export function loadLearnedSynonyms(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
+export function loadLearnedSynonyms(project?: string | null, phrenPath?: string | null): Record<string, string[]> {
   if (!project || !isValidProjectName(project)) return {};
-  const resolved = cortexPath ?? findCortexPath();
+  const resolved = phrenPath ?? findPhrenPath();
   if (!resolved) return {};
   const targetPath = learnedSynonymsPath(resolved, project);
   if (!targetPath) return {};
   return parseLearnedSynonymsJson(targetPath);
 }
 
-export function loadSynonymMap(project?: string | null, cortexPath?: string | null): Record<string, string[]> {
+export function loadSynonymMap(project?: string | null, phrenPath?: string | null): Record<string, string[]> {
   return mergeSynonymMaps(
     BASE_SYNONYMS,
-    loadUserSynonyms(project, cortexPath),
-    loadLearnedSynonyms(project, cortexPath),
+    loadUserSynonyms(project, phrenPath),
+    loadLearnedSynonyms(project, phrenPath),
   );
 }
 
 export function learnSynonym(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   term: string,
   synonyms: string[],
 ): Record<string, string[]> {
   if (!isValidProjectName(project)) throw new Error(`Invalid project name: ${project}`);
-  const targetPath = learnedSynonymsPath(cortexPath, project);
+  const targetPath = learnedSynonymsPath(phrenPath, project);
   if (!targetPath) throw new Error(`Path traversal detected for project: ${project}`);
 
   const normalizedTerm = normalizeSynonymTerm(term);
@@ -374,7 +374,7 @@ export function learnSynonym(
   }
   const normalizedSynonyms = normalizeSynonymValues(synonyms, normalizedTerm);
   if (normalizedSynonyms.length === 0) {
-    return loadLearnedSynonyms(project, cortexPath);
+    return loadLearnedSynonyms(project, phrenPath);
   }
 
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
@@ -387,13 +387,13 @@ export function learnSynonym(
 }
 
 export function removeLearnedSynonym(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   term: string,
   synonyms?: string[],
 ): Record<string, string[]> {
   if (!isValidProjectName(project)) throw new Error(`Invalid project name: ${project}`);
-  const targetPath = learnedSynonymsPath(cortexPath, project);
+  const targetPath = learnedSynonymsPath(phrenPath, project);
   if (!targetPath) throw new Error(`Path traversal detected for project: ${project}`);
 
   const normalizedTerm = normalizeSynonymTerm(term);
@@ -423,7 +423,7 @@ export function removeLearnedSynonym(
   return existing;
 }
 
-function buildFtsClauses(raw: string, project?: string | null, cortexPath?: string): string[] {
+function buildFtsClauses(raw: string, project?: string | null, phrenPath?: string): string[] {
   const MAX_TOTAL_TERMS = 10;
   const MAX_SYNONYM_GROUPS = 3;
 
@@ -432,7 +432,7 @@ function buildFtsClauses(raw: string, project?: string | null, cortexPath?: stri
   if (!safe) return [];
 
   // Step 2: Merge built-in and per-project synonym maps
-  const synonymsMap = loadSynonymMap(project, cortexPath);
+  const synonymsMap = loadSynonymMap(project, phrenPath);
 
   // Step 3: Tokenize — split sanitized input into individual words (min length 2)
   const baseWords = safe.split(/\s+/).filter((t) => t.length > 1);
@@ -537,8 +537,8 @@ function clauseSignalScore(clause: string): number {
 // - extracts bigrams and treats them as quoted phrases
 // - expands known synonyms (capped at 10 total terms)
 // - applies AND between core terms, with synonyms as OR alternatives
-export function buildRobustFtsQuery(raw: string, project?: string | null, cortexPath?: string): string {
-  const clauses = buildFtsClauses(raw, project, cortexPath);
+export function buildRobustFtsQuery(raw: string, project?: string | null, phrenPath?: string): string {
+  const clauses = buildFtsClauses(raw, project, phrenPath);
   if (clauses.length === 0) return "";
   return clauses.join(" AND ");
 }
@@ -546,8 +546,8 @@ export function buildRobustFtsQuery(raw: string, project?: string | null, cortex
 // Build a relaxed lexical rescue query that matches any 2 of the most informative
 // clauses. This is only intended as a fallback when the stricter AND query returns
 // nothing; it trades precision for recall while staying in the FTS index.
-export function buildRelaxedFtsQuery(raw: string, project?: string | null, cortexPath?: string): string {
-  const clauses = buildFtsClauses(raw, project, cortexPath);
+export function buildRelaxedFtsQuery(raw: string, project?: string | null, phrenPath?: string): string {
+  const clauses = buildFtsClauses(raw, project, phrenPath);
   if (clauses.length < 3) return "";
 
   const salientClauses = clauses
@@ -572,10 +572,10 @@ export function buildRelaxedFtsQuery(raw: string, project?: string | null, corte
   return combos.join(" OR ");
 }
 
-export function buildFtsQueryVariants(raw: string, project?: string | null, cortexPath?: string): string[] {
+export function buildFtsQueryVariants(raw: string, project?: string | null, phrenPath?: string): string[] {
   const variants = [
-    buildRobustFtsQuery(raw, project, cortexPath),
-    buildRelaxedFtsQuery(raw, project, cortexPath),
+    buildRobustFtsQuery(raw, project, phrenPath),
+    buildRelaxedFtsQuery(raw, project, phrenPath),
   ].filter(Boolean);
   return [...new Set(variants)];
 }

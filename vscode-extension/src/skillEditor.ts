@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 import { showPreview } from "./previewPanel";
 
-export async function showSkillEditor(client: CortexClient, skillName: string, skillSource: string): Promise<void> {
+export async function showSkillEditor(client: PhrenClient, skillName: string, skillSource: string): Promise<void> {
   let skillContent = "";
   let skillEnabled = true;
 

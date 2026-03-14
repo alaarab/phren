@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
-import { resetCortexDotEnvBootstrapForTests } from "./cortex-dotenv.js";
+import { resetPhrenDotEnvBootstrapForTests } from "./phren-dotenv.js";
 import {
   isFeatureEnabled,
   normalizeExecCommand,
@@ -44,15 +44,15 @@ describe("feature flag bootstrap", () => {
   let tmp: { path: string; cleanup: () => void };
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
-  const origDedup = process.env.CORTEX_FEATURE_SEMANTIC_DEDUP;
+  const origDedup = process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
 
   beforeEach(() => {
     tmp = makeTempDir("feature-flags-");
     process.env.HOME = tmp.path;
     process.env.USERPROFILE = tmp.path;
-    delete process.env.CORTEX_FEATURE_SEMANTIC_DEDUP;
-    fs.mkdirSync(path.join(tmp.path, ".cortex"), { recursive: true });
-    resetCortexDotEnvBootstrapForTests();
+    delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+    fs.mkdirSync(path.join(tmp.path, ".phren"), { recursive: true });
+    resetPhrenDotEnvBootstrapForTests();
   });
 
   afterEach(() => {
@@ -60,23 +60,23 @@ describe("feature flag bootstrap", () => {
     else process.env.HOME = origHome;
     if (origUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = origUserProfile;
-    if (origDedup === undefined) delete process.env.CORTEX_FEATURE_SEMANTIC_DEDUP;
-    else process.env.CORTEX_FEATURE_SEMANTIC_DEDUP = origDedup;
-    resetCortexDotEnvBootstrapForTests();
+    if (origDedup === undefined) delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+    else process.env.PHREN_FEATURE_SEMANTIC_DEDUP = origDedup;
+    resetPhrenDotEnvBootstrapForTests();
     tmp.cleanup();
   });
 
-  it("loads persisted feature flags from ~/.cortex/.env when env is unset", () => {
-    fs.writeFileSync(path.join(tmp.path, ".cortex", ".env"), "CORTEX_FEATURE_SEMANTIC_DEDUP=1\n");
+  it("loads persisted feature flags from ~/.phren/.env when env is unset", () => {
+    fs.writeFileSync(path.join(tmp.path, ".phren", ".env"), "PHREN_FEATURE_SEMANTIC_DEDUP=1\n");
 
-    expect(isFeatureEnabled("CORTEX_FEATURE_SEMANTIC_DEDUP", false)).toBe(true);
+    expect(isFeatureEnabled("PHREN_FEATURE_SEMANTIC_DEDUP", false)).toBe(true);
   });
 
-  it("does not override an explicit environment setting with ~/.cortex/.env", () => {
-    fs.writeFileSync(path.join(tmp.path, ".cortex", ".env"), "CORTEX_FEATURE_SEMANTIC_DEDUP=1\n");
-    process.env.CORTEX_FEATURE_SEMANTIC_DEDUP = "0";
+  it("does not override an explicit environment setting with ~/.phren/.env", () => {
+    fs.writeFileSync(path.join(tmp.path, ".phren", ".env"), "PHREN_FEATURE_SEMANTIC_DEDUP=1\n");
+    process.env.PHREN_FEATURE_SEMANTIC_DEDUP = "0";
 
-    expect(isFeatureEnabled("CORTEX_FEATURE_SEMANTIC_DEDUP", true)).toBe(false);
+    expect(isFeatureEnabled("PHREN_FEATURE_SEMANTIC_DEDUP", true)).toBe(false);
   });
 });
 

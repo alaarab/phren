@@ -31,18 +31,18 @@ import { collectNativeMemoryFiles } from "./shared.js";
 describe.sequential("mcp mode configuration", () => {
   let tmpRoot: string;
   let homeDir: string;
-  let cortexPath: string;
+  let phrenPath: string;
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
 
   let tmpCleanup: () => void;
 
   beforeEach(() => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-init-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-init-test-"));
     homeDir = path.join(tmpRoot, "home");
-    cortexPath = path.join(tmpRoot, "cortex");
+    phrenPath = path.join(tmpRoot, "phren");
     fs.mkdirSync(homeDir, { recursive: true });
-    fs.mkdirSync(cortexPath, { recursive: true });
+    fs.mkdirSync(phrenPath, { recursive: true });
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
     resetVSCodeProbeCache();
@@ -62,21 +62,21 @@ describe.sequential("mcp mode configuration", () => {
   });
 
   it("supports init --dry-run without creating files", async () => {
-    const dryRunPath = path.join(tmpRoot, "dry-run-cortex");
-    process.env.CORTEX_PATH = dryRunPath;
+    const dryRunPath = path.join(tmpRoot, "dry-run-phren");
+    process.env.PHREN_PATH = dryRunPath;
     expect(fs.existsSync(dryRunPath)).toBe(false);
 
     await runInit({ dryRun: true });
 
     expect(fs.existsSync(dryRunPath)).toBe(false);
-    delete process.env.CORTEX_PATH;
+    delete process.env.PHREN_PATH;
   });
 
   it("dry-run reports project enrollment when run inside an untracked repo", async () => {
-    const dryRunPath = path.join(tmpRoot, "dry-run-bootstrap-cortex");
+    const dryRunPath = path.join(tmpRoot, "dry-run-bootstrap-phren");
     const projectDir = path.join(tmpRoot, "tracked-repo");
     const origCwd = process.cwd();
-    process.env.CORTEX_PATH = dryRunPath;
+    process.env.PHREN_PATH = dryRunPath;
     fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
     process.chdir(projectDir);
 
@@ -93,17 +93,17 @@ describe.sequential("mcp mode configuration", () => {
     const output = chunks.join("");
     expect(output).toContain("Would offer to add current project directory");
     expect(output).toContain(projectDir);
-    delete process.env.CORTEX_PATH;
+    delete process.env.PHREN_PATH;
   });
 
   it("stages starter updates for modified global skills instead of overwriting them", () => {
-    const targetSkill = path.join(cortexPath, "global", "skills", "pipeline.md");
+    const targetSkill = path.join(phrenPath, "global", "skills", "pipeline.md");
     fs.mkdirSync(path.dirname(targetSkill), { recursive: true });
     fs.writeFileSync(targetSkill, "# custom pipeline\n");
 
-    const updates = applyStarterTemplateUpdates(cortexPath);
-    const stagedSkill = path.join(cortexPath, ".runtime", "starter-updates", "global", "skills", "pipeline.md.new");
-    const currentSkill = path.join(cortexPath, ".runtime", "starter-updates", "global", "skills", "pipeline.md.current");
+    const updates = applyStarterTemplateUpdates(phrenPath);
+    const stagedSkill = path.join(phrenPath, ".runtime", "starter-updates", "global", "skills", "pipeline.md.new");
+    const currentSkill = path.join(phrenPath, ".runtime", "starter-updates", "global", "skills", "pipeline.md.current");
 
     expect(fs.readFileSync(targetSkill, "utf8")).toBe("# custom pipeline\n");
     expect(fs.existsSync(`${targetSkill}.bak`)).toBe(false);
@@ -124,19 +124,19 @@ describe.sequential("mcp mode configuration", () => {
   });
 
   it("defaults to mcp enabled and persists preference updates", () => {
-    expect(getMcpEnabledPreference(cortexPath)).toBe(true);
-    setMcpEnabledPreference(cortexPath, false);
-    expect(getMcpEnabledPreference(cortexPath)).toBe(false);
-    setMcpEnabledPreference(cortexPath, true);
-    expect(getMcpEnabledPreference(cortexPath)).toBe(true);
+    expect(getMcpEnabledPreference(phrenPath)).toBe(true);
+    setMcpEnabledPreference(phrenPath, false);
+    expect(getMcpEnabledPreference(phrenPath)).toBe(false);
+    setMcpEnabledPreference(phrenPath, true);
+    expect(getMcpEnabledPreference(phrenPath)).toBe(true);
   });
 
   it("defaults to hooks enabled and persists preference updates", () => {
-    expect(getHooksEnabledPreference(cortexPath)).toBe(true);
-    setHooksEnabledPreference(cortexPath, false);
-    expect(getHooksEnabledPreference(cortexPath)).toBe(false);
-    setHooksEnabledPreference(cortexPath, true);
-    expect(getHooksEnabledPreference(cortexPath)).toBe(true);
+    expect(getHooksEnabledPreference(phrenPath)).toBe(true);
+    setHooksEnabledPreference(phrenPath, false);
+    expect(getHooksEnabledPreference(phrenPath)).toBe(false);
+    setHooksEnabledPreference(phrenPath, true);
+    expect(getHooksEnabledPreference(phrenPath)).toBe(true);
   });
 
   it("toggles Claude MCP config on and off while keeping hooks", () => {
@@ -148,7 +148,7 @@ describe.sequential("mcp mode configuration", () => {
       JSON.stringify(
         {
           servers: {
-            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
+            phren: { command: "npx", args: ["-y", "phren", "/old/path"] },
           },
         },
         null,
@@ -156,19 +156,19 @@ describe.sequential("mcp mode configuration", () => {
       )
     );
 
-    const offStatus = configureClaude(cortexPath, { mcpEnabled: false });
+    const offStatus = configureClaude(phrenPath, { mcpEnabled: false });
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(offCfg.mcpServers?.cortex).toBeUndefined();
+    expect(offCfg.mcpServers?.phren).toBeUndefined();
     expect(Array.isArray(offCfg.hooks?.UserPromptSubmit)).toBe(true);
     expect(Array.isArray(offCfg.hooks?.Stop)).toBe(true);
     expect(Array.isArray(offCfg.hooks?.SessionStart)).toBe(true);
 
-    const onStatus = configureClaude(cortexPath, { mcpEnabled: true });
+    const onStatus = configureClaude(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
   });
 
   it("can disable and re-enable Claude hooks independently from MCP", () => {
@@ -177,14 +177,14 @@ describe.sequential("mcp mode configuration", () => {
     const settingsPath = path.join(claudeDir, "settings.json");
     fs.writeFileSync(settingsPath, JSON.stringify({ hooks: {} }, null, 2));
 
-    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: false });
+    configureClaude(phrenPath, { mcpEnabled: true, hooksEnabled: false });
     const offCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     const offHooks = JSON.stringify(offCfg.hooks || {});
     expect(offHooks).not.toContain("hook-prompt");
     expect(offHooks).not.toContain("hook-stop");
     expect(offHooks).not.toContain("hook-session-start");
 
-    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: true });
+    configureClaude(phrenPath, { mcpEnabled: true, hooksEnabled: true });
     const onCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     const onHooks = JSON.stringify(onCfg.hooks || {});
     expect(onHooks).toContain("hook-prompt");
@@ -201,7 +201,7 @@ describe.sequential("mcp mode configuration", () => {
       JSON.stringify(
         {
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
+            phren: { command: "npx", args: ["-y", "phren", "/old/path"] },
           },
         },
         null,
@@ -209,16 +209,16 @@ describe.sequential("mcp mode configuration", () => {
       )
     );
 
-    const offStatus = configureVSCode(cortexPath, { mcpEnabled: false });
+    const offStatus = configureVSCode(phrenPath, { mcpEnabled: false });
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(offCfg.servers?.cortex).toBeUndefined();
+    expect(offCfg.servers?.phren).toBeUndefined();
 
-    const onStatus = configureVSCode(cortexPath, { mcpEnabled: true });
+    const onStatus = configureVSCode(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.servers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(onCfg.servers?.cortex?.args).toContain(cortexPath);
+    expect(onCfg.servers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.servers?.phren?.args).toContain(phrenPath);
   });
 
   it("detects VS Code in USERPROFILE/AppData/Roaming path", () => {
@@ -226,12 +226,12 @@ describe.sequential("mcp mode configuration", () => {
     fs.mkdirSync(roamingDir, { recursive: true });
     const mcpPath = path.join(roamingDir, "mcp.json");
 
-    const onStatus = configureVSCode(cortexPath, { mcpEnabled: true });
+    const onStatus = configureVSCode(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
 
     const cfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(cfg.servers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(cfg.servers?.cortex?.args).toContain(cortexPath);
+    expect(cfg.servers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(cfg.servers?.phren?.args).toContain(phrenPath);
   });
 
   it("toggles Cursor MCP config on and off", () => {
@@ -243,7 +243,7 @@ describe.sequential("mcp mode configuration", () => {
       JSON.stringify(
         {
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
+            phren: { command: "npx", args: ["-y", "phren", "/old/path"] },
           },
         },
         null,
@@ -251,16 +251,16 @@ describe.sequential("mcp mode configuration", () => {
       )
     );
 
-    const offStatus = configureCursorMcp(cortexPath, { mcpEnabled: false });
+    const offStatus = configureCursorMcp(phrenPath, { mcpEnabled: false });
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(offCfg.mcpServers?.cortex).toBeUndefined();
+    expect(offCfg.mcpServers?.phren).toBeUndefined();
 
-    const onStatus = configureCursorMcp(cortexPath, { mcpEnabled: true });
+    const onStatus = configureCursorMcp(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
   });
 
   it("toggles Copilot CLI MCP config on and off with canonical mcpServers config", () => {
@@ -272,7 +272,7 @@ describe.sequential("mcp mode configuration", () => {
       JSON.stringify(
         {
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
+            phren: { command: "npx", args: ["-y", "phren", "/old/path"] },
           },
         },
         null,
@@ -280,29 +280,29 @@ describe.sequential("mcp mode configuration", () => {
       )
     );
 
-    const offStatus = configureCopilotMcp(cortexPath, { mcpEnabled: false });
+    const offStatus = configureCopilotMcp(phrenPath, { mcpEnabled: false });
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(offCfg.mcpServers?.cortex).toBeUndefined();
+    expect(offCfg.mcpServers?.phren).toBeUndefined();
 
-    const onStatus = configureCopilotMcp(cortexPath, { mcpEnabled: true });
+    const onStatus = configureCopilotMcp(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
   });
 
   it("uses mcpServers key for fresh Copilot CLI config", () => {
     const copilotDir = path.join(homeDir, ".copilot");
     fs.mkdirSync(copilotDir, { recursive: true });
 
-    const onStatus = configureCopilotMcp(cortexPath, { mcpEnabled: true });
+    const onStatus = configureCopilotMcp(phrenPath, { mcpEnabled: true });
     // First internal call installs, but the returned status is from the final call
     expect(["installed", "already_configured"]).toContain(onStatus);
     const mcpPath = path.join(copilotDir, "mcp-config.json");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toBeDefined();
-    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+    expect(onCfg.mcpServers?.phren?.command).toBeDefined();
+    expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
   });
 
   it("throws on malformed JSON via patchJsonFile (tested through configureClaude)", () => {
@@ -311,7 +311,7 @@ describe.sequential("mcp mode configuration", () => {
     const settingsPath = path.join(claudeDir, "settings.json");
     fs.writeFileSync(settingsPath, "{ this is not valid json !!!");
 
-    expect(() => configureClaude(cortexPath, { mcpEnabled: true })).toThrow("Malformed JSON");
+    expect(() => configureClaude(phrenPath, { mcpEnabled: true })).toThrow("Malformed JSON");
   });
 
   it("rejects null JSON roots in provider config files", () => {
@@ -320,7 +320,7 @@ describe.sequential("mcp mode configuration", () => {
     const settingsPath = path.join(claudeDir, "settings.json");
     fs.writeFileSync(settingsPath, "null");
 
-    expect(() => configureClaude(cortexPath, { mcpEnabled: true })).toThrow("top-level JSON value must be an object");
+    expect(() => configureClaude(phrenPath, { mcpEnabled: true })).toThrow("top-level JSON value must be an object");
   });
 
   it("rejects array JSON roots in provider config files", () => {
@@ -329,7 +329,7 @@ describe.sequential("mcp mode configuration", () => {
     const settingsPath = path.join(claudeDir, "settings.json");
     fs.writeFileSync(settingsPath, "[]");
 
-    expect(() => configureClaude(cortexPath, { mcpEnabled: true })).toThrow("top-level JSON value must be an object");
+    expect(() => configureClaude(phrenPath, { mcpEnabled: true })).toThrow("top-level JSON value must be an object");
   });
 
   it("normalizes non-object hooks values before writing Claude hooks", () => {
@@ -338,7 +338,7 @@ describe.sequential("mcp mode configuration", () => {
     const settingsPath = path.join(claudeDir, "settings.json");
     fs.writeFileSync(settingsPath, JSON.stringify({ hooks: [] }, null, 2));
 
-    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: true });
+    configureClaude(phrenPath, { mcpEnabled: true, hooksEnabled: true });
 
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     expect(Array.isArray(cfg.hooks)).toBe(false);
@@ -347,7 +347,7 @@ describe.sequential("mcp mode configuration", () => {
     expect(Array.isArray(cfg.hooks?.SessionStart)).toBe(true);
   });
 
-  it("preserves non-cortex hooks when configuring (isCortexCommand filtering)", () => {
+  it("preserves non-phren hooks when configuring (isPhrenCommand filtering)", () => {
     const claudeDir = path.join(homeDir, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });
     const settingsPath = path.join(claudeDir, "settings.json");
@@ -362,7 +362,7 @@ describe.sequential("mcp mode configuration", () => {
       }, null, 2)
     );
 
-    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: true });
+    configureClaude(phrenPath, { mcpEnabled: true, hooksEnabled: true });
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     const promptHooks = cfg.hooks?.UserPromptSubmit || [];
     const customHook = promptHooks.find((h: any) => h.command?.includes("custom-hook"));
@@ -379,7 +379,7 @@ describe.sequential("mcp mode configuration", () => {
         {
           hooks: { Stop: [{ type: "command", command: "echo keep" }] },
           mcpServers: {
-            cortex: { command: "npx", args: ["-y", "cortex", "/old/path"] },
+            phren: { command: "npx", args: ["-y", "phren", "/old/path"] },
           },
         },
         null,
@@ -387,17 +387,17 @@ describe.sequential("mcp mode configuration", () => {
       )
     );
 
-    const offStatus = configureCodexMcp(cortexPath, { mcpEnabled: false });
+    const offStatus = configureCodexMcp(phrenPath, { mcpEnabled: false });
     expect(offStatus).toBe("disabled");
     const offCfg = JSON.parse(fs.readFileSync(codexConfig, "utf8"));
-    expect(offCfg.mcpServers?.cortex).toBeUndefined();
+    expect(offCfg.mcpServers?.phren).toBeUndefined();
     expect(Array.isArray(offCfg.hooks?.Stop)).toBe(true);
 
-    const onStatus = configureCodexMcp(cortexPath, { mcpEnabled: true });
+    const onStatus = configureCodexMcp(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(codexConfig, "utf8"));
-    expect(onCfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
-    expect(onCfg.mcpServers?.cortex?.args).toContain(cortexPath);
+    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
     expect(Array.isArray(onCfg.hooks?.Stop)).toBe(true);
   });
 });
@@ -449,15 +449,15 @@ describe("isVersionNewer", () => {
 describe("ensureGovernanceFiles", () => {
   let tmpDir: string;
   let tmpCleanup: () => void;
-  const origActor = process.env.CORTEX_ACTOR;
+  const origActor = process.env.PHREN_ACTOR;
 
   beforeEach(() => {
-    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-gov-test-"));
+    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-gov-test-"));
   });
 
   afterEach(() => {
-    if (origActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = origActor;
+    if (origActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = origActor;
     tmpCleanup();
   });
 
@@ -466,7 +466,6 @@ describe("ensureGovernanceFiles", () => {
     const govDir = path.join(tmpDir, ".governance");
 
     expect(fs.existsSync(path.join(govDir, "retention-policy.json"))).toBe(true);
-    expect(fs.existsSync(path.join(govDir, "access-control.json"))).toBe(true);
     expect(fs.existsSync(path.join(govDir, "workflow-policy.json"))).toBe(true);
     expect(fs.existsSync(path.join(govDir, "index-policy.json"))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, ".runtime", "runtime-health.json"))).toBe(true);
@@ -480,24 +479,11 @@ describe("ensureGovernanceFiles", () => {
     expect(policy.ttlDays).toBe(120);
     expect(policy.retentionDays).toBe(365);
 
-    const access = JSON.parse(fs.readFileSync(path.join(govDir, "access-control.json"), "utf8"));
-    expect(Array.isArray(access.admins)).toBe(true);
-
     const workflow = JSON.parse(fs.readFileSync(path.join(govDir, "workflow-policy.json"), "utf8"));
-    expect(workflow.requireMaintainerApproval).toBe(false);
+    expect(typeof workflow.lowConfidenceThreshold).toBe("number");
 
     const indexPol = JSON.parse(fs.readFileSync(path.join(govDir, "index-policy.json"), "utf8"));
     expect(Array.isArray(indexPol.includeGlobs)).toBe(true);
-  });
-
-  it("seeds access control with an open ACL by default", () => {
-    ensureGovernanceFiles(tmpDir);
-
-    const access = JSON.parse(fs.readFileSync(path.join(tmpDir, ".governance", "access-control.json"), "utf8"));
-    expect(access.admins).toEqual([]);
-    expect(access.maintainers).toEqual([]);
-    expect(access.contributors).toEqual([]);
-    expect(access.viewers).toEqual([]);
   });
 
   it("does not overwrite existing governance files", () => {
@@ -512,29 +498,6 @@ describe("ensureGovernanceFiles", () => {
     expect(after.ttlDays).toBe(999);
   });
 
-  it("creates a local maintainer override when a cloned ACL excludes the current actor", () => {
-    process.env.CORTEX_ACTOR = "local-user";
-    const govDir = path.join(tmpDir, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "access-control.json"),
-      JSON.stringify({
-        admins: ["remote-admin"],
-        maintainers: [],
-        contributors: [],
-        viewers: [],
-      }, null, 2) + "\n",
-    );
-
-    ensureGovernanceFiles(tmpDir);
-
-    const sharedAccess = JSON.parse(fs.readFileSync(path.join(govDir, "access-control.json"), "utf8"));
-    expect(sharedAccess.admins).toEqual(["remote-admin"]);
-    expect(sharedAccess.maintainers).toEqual([]);
-
-    const localAccess = JSON.parse(fs.readFileSync(path.join(tmpDir, ".runtime", "access-control.local.json"), "utf8"));
-    expect(localAccess.maintainers).toContain("local-user");
-  });
 });
 
 describe("runInit walkthrough integration", () => {
@@ -542,12 +505,12 @@ describe("runInit walkthrough integration", () => {
   let homeDir: string;
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
-  const origCortexPath = process.env.CORTEX_PATH;
+  const origPhrenPath = process.env.PHREN_PATH;
 
   let tmpCleanup: () => void;
 
   beforeEach(() => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-walk-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-walk-test-"));
     homeDir = path.join(tmpRoot, "home");
     fs.mkdirSync(path.join(homeDir, ".claude"), { recursive: true });
     process.env.HOME = homeDir;
@@ -558,38 +521,38 @@ describe("runInit walkthrough integration", () => {
   afterEach(() => {
     process.env.HOME = origHome;
     process.env.USERPROFILE = origUserProfile;
-    if (origCortexPath) process.env.CORTEX_PATH = origCortexPath;
-    else delete process.env.CORTEX_PATH;
+    if (origPhrenPath) process.env.PHREN_PATH = origPhrenPath;
+    else delete process.env.PHREN_PATH;
     tmpCleanup();
   });
 
   it("--yes skips walkthrough and uses defaults", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-yes");
-    process.env.CORTEX_PATH = cortexPath;
+    const phrenPath = path.join(tmpRoot, "phren-yes");
+    process.env.PHREN_PATH = phrenPath;
     await suppressOutput(() => runInit({ yes: true }));
-    expect(fs.existsSync(cortexPath)).toBe(true);
+    expect(fs.existsSync(phrenPath)).toBe(true);
     // Should have governance files created
-    expect(fs.existsSync(path.join(cortexPath, ".governance", "retention-policy.json"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, ".governance", "retention-policy.json"))).toBe(true);
   });
 
   it("fresh init starts empty and initializes a local git repo", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-empty");
-    process.env.CORTEX_PATH = cortexPath;
+    const phrenPath = path.join(tmpRoot, "phren-empty");
+    process.env.PHREN_PATH = phrenPath;
 
     await suppressOutput(() => runInit({ yes: true }));
 
-    expect(fs.existsSync(path.join(cortexPath, "my-api"))).toBe(false);
-    expect(fs.existsSync(path.join(cortexPath, "my-frontend"))).toBe(false);
-    expect(fs.existsSync(path.join(cortexPath, "my-first-project"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, "my-api"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, "my-frontend"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, "my-first-project"))).toBe(false);
 
-    const defaultProfile = fs.readFileSync(path.join(cortexPath, "profiles", "default.yaml"), "utf8");
+    const defaultProfile = fs.readFileSync(path.join(phrenPath, "profiles", "default.yaml"), "utf8");
     expect(defaultProfile).toContain("- global");
     expect(defaultProfile).not.toContain("my-api");
     expect(defaultProfile).not.toContain("my-frontend");
-    const envFile = fs.readFileSync(path.join(cortexPath, ".env"), "utf8");
-    expect(envFile).toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
+    const envFile = fs.readFileSync(path.join(phrenPath, ".env"), "utf8");
+    expect(envFile).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
 
-    const insideWorkTree = execFileSync("git", ["-C", cortexPath, "rev-parse", "--is-inside-work-tree"], {
+    const insideWorkTree = execFileSync("git", ["-C", phrenPath, "rev-parse", "--is-inside-work-tree"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
@@ -597,23 +560,23 @@ describe("runInit walkthrough integration", () => {
   });
 
   it("fresh init writes detached ownership as the clean-install default", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-clean-defaults");
-    process.env.CORTEX_PATH = cortexPath;
+    const phrenPath = path.join(tmpRoot, "phren-clean-defaults");
+    process.env.PHREN_PATH = phrenPath;
 
     await suppressOutput(() => runInit({ yes: true }));
 
-    const installPrefs = JSON.parse(fs.readFileSync(path.join(cortexPath, ".runtime", "install-preferences.json"), "utf8"));
+    const installPrefs = JSON.parse(fs.readFileSync(path.join(phrenPath, ".runtime", "install-preferences.json"), "utf8"));
     expect(installPrefs.projectOwnershipDefault).toBe("detached");
     expect(installPrefs.skillsScope).toBe("global");
   });
 
   it("fresh init creates generated skill assets for first-run agent discovery", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-generated-assets");
-    process.env.CORTEX_PATH = cortexPath;
+    const phrenPath = path.join(tmpRoot, "phren-generated-assets");
+    process.env.PHREN_PATH = phrenPath;
 
     await suppressOutput(() => runInit({ yes: true }));
 
-    expect(fs.existsSync(path.join(cortexPath, "cortex.SKILL.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "phren.SKILL.md"))).toBe(true);
     expect(fs.existsSync(path.join(homeDir, ".claude", "skill-manifest.json"))).toBe(true);
     expect(fs.existsSync(path.join(homeDir, ".claude", "skill-commands.json"))).toBe(true);
 
@@ -622,13 +585,13 @@ describe("runInit walkthrough integration", () => {
   });
 
   it("update flow removes legacy sample projects and recreates generated assets", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-repair-existing");
-    process.env.CORTEX_PATH = cortexPath;
-    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
-    fs.mkdirSync(path.join(cortexPath, "global"), { recursive: true });
-    fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${os.hostname()}: default\n`);
+    const phrenPath = path.join(tmpRoot, "phren-repair-existing");
+    process.env.PHREN_PATH = phrenPath;
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(phrenPath, "global"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${os.hostname()}: default\n`);
     fs.writeFileSync(
-      path.join(cortexPath, "profiles", "default.yaml"),
+      path.join(phrenPath, "profiles", "default.yaml"),
       [
         "name: default",
         "description: Default profile",
@@ -643,21 +606,21 @@ describe("runInit walkthrough integration", () => {
 
     await suppressOutput(() => runInit({ yes: true }));
 
-    const profileText = fs.readFileSync(path.join(cortexPath, "profiles", "default.yaml"), "utf8");
+    const profileText = fs.readFileSync(path.join(phrenPath, "profiles", "default.yaml"), "utf8");
     expect(profileText).not.toContain("my-api");
     expect(profileText).not.toContain("my-frontend");
     expect(profileText).toContain("real-project");
-    expect(fs.existsSync(path.join(cortexPath, ".runtime"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, ".governance"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, ".sessions"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, ".runtime", "canonical-locks.json"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, "global", "CLAUDE.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, "global", "skills", "pipeline.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, "cortex.SKILL.md"))).toBe(true);
-    expect(fs.readFileSync(path.join(cortexPath, ".env"), "utf8")).toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
+    expect(fs.existsSync(path.join(phrenPath, ".runtime"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, ".governance"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
+    // canonical-locks.json removed (canonical locks feature was stripped)
+    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "global", "skills", "pipeline.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "phren.SKILL.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(phrenPath, ".env"), "utf8")).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
     expect(fs.existsSync(path.join(homeDir, ".claude", "skill-manifest.json"))).toBe(true);
     expect(fs.existsSync(path.join(homeDir, ".claude", "skill-commands.json"))).toBe(true);
-    expect(fs.existsSync(path.join(homeDir, ".cortex-context.md"))).toBe(true);
+    expect(fs.existsSync(path.join(homeDir, ".phren-context.md"))).toBe(true);
     const memoryFile = path.join(
       homeDir,
       ".claude",
@@ -670,44 +633,44 @@ describe("runInit walkthrough integration", () => {
   });
 
   it("update flow preserves explicit auto-capture opt-out in existing .env", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-repair-existing-explicit-off");
-    process.env.CORTEX_PATH = cortexPath;
-    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
-    fs.mkdirSync(path.join(cortexPath, "global"), { recursive: true });
-    fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${os.hostname()}: default\n`);
+    const phrenPath = path.join(tmpRoot, "phren-repair-existing-explicit-off");
+    process.env.PHREN_PATH = phrenPath;
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(phrenPath, "global"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${os.hostname()}: default\n`);
     fs.writeFileSync(
-      path.join(cortexPath, "profiles", "default.yaml"),
+      path.join(phrenPath, "profiles", "default.yaml"),
       "name: default\ndescription: Default profile\nprojects:\n  - global\n",
     );
-    fs.writeFileSync(path.join(cortexPath, ".env"), "CORTEX_FEATURE_AUTO_CAPTURE=0\n");
+    fs.writeFileSync(path.join(phrenPath, ".env"), "PHREN_FEATURE_AUTO_CAPTURE=0\n");
 
     await suppressOutput(() => runInit({ yes: true }));
 
-    const envFile = fs.readFileSync(path.join(cortexPath, ".env"), "utf8");
-    expect(envFile).toContain("CORTEX_FEATURE_AUTO_CAPTURE=0");
-    expect(envFile).not.toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
+    const envFile = fs.readFileSync(path.join(phrenPath, ".env"), "utf8");
+    expect(envFile).toContain("PHREN_FEATURE_AUTO_CAPTURE=0");
+    expect(envFile).not.toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
   });
 
   it("repair flow targets active agent home when HOME and USERPROFILE differ", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-repair-devcontainer");
+    const phrenPath = path.join(tmpRoot, "phren-repair-devcontainer");
     const fakeHome = path.join(tmpRoot, "fake-home");
     const actualAgentHome = path.join(tmpRoot, "agent-home");
-    process.env.CORTEX_PATH = cortexPath;
+    process.env.PHREN_PATH = phrenPath;
     process.env.HOME = fakeHome;
     process.env.USERPROFILE = actualAgentHome;
     fs.mkdirSync(path.join(actualAgentHome, ".claude"), { recursive: true });
-    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
-    fs.mkdirSync(path.join(cortexPath, "global"), { recursive: true });
-    fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${os.hostname()}: default\n`);
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(phrenPath, "global"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${os.hostname()}: default\n`);
     fs.writeFileSync(
-      path.join(cortexPath, "profiles", "default.yaml"),
+      path.join(phrenPath, "profiles", "default.yaml"),
       "name: default\ndescription: Default profile\nprojects:\n  - global\n",
     );
 
     await suppressOutput(() => runInit({ yes: true }));
 
-    expect(fs.existsSync(path.join(actualAgentHome, ".cortex-context.md"))).toBe(true);
-    expect(fs.existsSync(path.join(fakeHome, ".cortex-context.md"))).toBe(false);
+    expect(fs.existsSync(path.join(actualAgentHome, ".phren-context.md"))).toBe(true);
+    expect(fs.existsSync(path.join(fakeHome, ".phren-context.md"))).toBe(false);
     const memoryFile = path.join(
       actualAgentHome,
       ".claude",
@@ -724,8 +687,8 @@ describe("runInit walkthrough integration", () => {
   });
 
   it("init output explains next steps without a restart step", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-restart-msg");
-    process.env.CORTEX_PATH = cortexPath;
+    const phrenPath = path.join(tmpRoot, "phren-restart-msg");
+    process.env.PHREN_PATH = phrenPath;
     const chunks: string[] = [];
     const origWrite = process.stdout.write;
     process.stdout.write = ((chunk: any) => { chunks.push(String(chunk)); return true; }) as any;
@@ -741,31 +704,31 @@ describe("runInit walkthrough integration", () => {
   });
 
   it("walkthrough project name seeds the requested starter project only", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-rename");
-    process.env.CORTEX_PATH = cortexPath;
+    const phrenPath = path.join(tmpRoot, "phren-rename");
+    process.env.PHREN_PATH = phrenPath;
     const opts: any = { yes: true, _walkthroughProject: "my-app" };
     opts.yes = true;
     await suppressOutput(() => runInit(opts));
 
-    expect(fs.existsSync(cortexPath)).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, "my-app", "CLAUDE.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, "my-first-project"))).toBe(false);
+    expect(fs.existsSync(phrenPath)).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "my-app", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "my-first-project"))).toBe(false);
   });
 
   it("walkthrough auto-capture opt-out writes explicit default to .env", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-walkthrough-autocapture-off");
-    process.env.CORTEX_PATH = cortexPath;
+    const phrenPath = path.join(tmpRoot, "phren-walkthrough-autocapture-off");
+    process.env.PHREN_PATH = phrenPath;
 
     await suppressOutput(() => runInit({ yes: true, _walkthroughAutoCapture: false }));
 
-    const envFile = fs.readFileSync(path.join(cortexPath, ".env"), "utf8");
-    expect(envFile).toContain("CORTEX_FEATURE_AUTO_CAPTURE=0");
-    expect(envFile).not.toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
+    const envFile = fs.readFileSync(path.join(phrenPath, ".env"), "utf8");
+    expect(envFile).toContain("PHREN_FEATURE_AUTO_CAPTURE=0");
+    expect(envFile).not.toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
   });
 
-  it("per-project storage writes repo bindings and initializes .cortex in the repo root", async () => {
+  it("per-project storage writes repo bindings and initializes .phren in the repo root", async () => {
     const repoRoot = path.join(tmpRoot, "repo-storage");
-    const cortexPath = path.join(repoRoot, ".cortex");
+    const phrenPath = path.join(repoRoot, ".phren");
     const origCwd = process.cwd();
     fs.mkdirSync(path.join(repoRoot, ".git"), { recursive: true });
     process.chdir(repoRoot);
@@ -774,21 +737,21 @@ describe("runInit walkthrough integration", () => {
       await suppressOutput(() => runInit({
         yes: true,
         _walkthroughStorageChoice: "project",
-        _walkthroughStoragePath: cortexPath,
+        _walkthroughStoragePath: phrenPath,
         _walkthroughStorageRepoRoot: repoRoot,
       }));
     } finally {
       process.chdir(origCwd);
     }
 
-    expect(fs.existsSync(path.join(cortexPath, "cortex.root.yaml"))).toBe(true);
-    expect(fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf8")).toContain(".cortex/");
-    expect(fs.readFileSync(path.join(repoRoot, ".env"), "utf8")).toContain(`CORTEX_PATH=${cortexPath}`);
+    expect(fs.existsSync(path.join(phrenPath, "phren.root.yaml"))).toBe(true);
+    expect(fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf8")).toContain(".phren/");
+    expect(fs.readFileSync(path.join(repoRoot, ".env"), "utf8")).toContain(`PHREN_PATH=${phrenPath}`);
   });
 
   it("persists onboarding defaults for ownership, proactivity, and task mode", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-onboarding-defaults");
-    process.env.CORTEX_PATH = cortexPath;
+    const phrenPath = path.join(tmpRoot, "phren-onboarding-defaults");
+    process.env.PHREN_PATH = phrenPath;
 
     await suppressOutput(() => runInit({
       yes: true,
@@ -798,9 +761,9 @@ describe("runInit walkthrough integration", () => {
       taskMode: "suggest",
     }));
 
-    const installPrefs = JSON.parse(fs.readFileSync(path.join(cortexPath, ".runtime", "install-preferences.json"), "utf8"));
-    const governancePrefs = JSON.parse(fs.readFileSync(path.join(cortexPath, ".governance", "install-preferences.json"), "utf8"));
-    const workflowPolicy = JSON.parse(fs.readFileSync(path.join(cortexPath, ".governance", "workflow-policy.json"), "utf8"));
+    const installPrefs = JSON.parse(fs.readFileSync(path.join(phrenPath, ".runtime", "install-preferences.json"), "utf8"));
+    const governancePrefs = JSON.parse(fs.readFileSync(path.join(phrenPath, ".governance", "install-preferences.json"), "utf8"));
+    const workflowPolicy = JSON.parse(fs.readFileSync(path.join(phrenPath, ".governance", "workflow-policy.json"), "utf8"));
 
     expect(installPrefs.projectOwnershipDefault).toBe("detached");
     expect(installPrefs.proactivityFindings).toBe("medium");
@@ -811,10 +774,10 @@ describe("runInit walkthrough integration", () => {
   });
 
   it("honors a declined current-project enrollment from onboarding", async () => {
-    const cortexPath = path.join(tmpRoot, "cortex-skip-bootstrap");
+    const phrenPath = path.join(tmpRoot, "phren-skip-bootstrap");
     const repoDir = path.join(tmpRoot, "tracked-repo");
     const origCwd = process.cwd();
-    process.env.CORTEX_PATH = cortexPath;
+    process.env.PHREN_PATH = phrenPath;
     fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
     process.chdir(repoDir);
     try {
@@ -826,7 +789,7 @@ describe("runInit walkthrough integration", () => {
       process.chdir(origCwd);
     }
 
-    expect(fs.existsSync(path.join(cortexPath, "tracked-repo"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, "tracked-repo"))).toBe(false);
   });
 });
 
@@ -834,7 +797,7 @@ describe("warmSemanticSearch", () => {
   let tmp: { path: string; cleanup: () => void };
 
   beforeEach(() => {
-    tmp = makeTempDir("cortex-semantic-warmup-");
+    tmp = makeTempDir("phren-semantic-warmup-");
     vi.restoreAllMocks();
   });
 
@@ -901,7 +864,7 @@ describe("collectNativeMemoryFiles", () => {
   let tmpCleanup: () => void;
 
   beforeEach(() => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-native-mem-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-native-mem-"));
     process.env.HOME = tmpRoot;
   });
 
@@ -927,7 +890,7 @@ describe("collectNativeMemoryFiles", () => {
     expect(names).toEqual(["backend", "myapp"]);
   });
 
-  it("skips root MEMORY.md to avoid duplicating cortex-managed content", () => {
+  it("skips root MEMORY.md to avoid duplicating phren-managed content", () => {
     const memDir = path.join(tmpRoot, ".claude", "projects", "-home-user", "memory");
     fs.mkdirSync(memDir, { recursive: true });
     fs.writeFileSync(path.join(memDir, "MEMORY.md"), "# root memory");
@@ -952,22 +915,22 @@ describe("collectNativeMemoryFiles", () => {
 
 describe("runPostInitVerify", () => {
   it("reports setup hardening checks for git, node, remote, and config writability", () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-verify-test-");
+    const { path: tmpDir, cleanup } = makeTempDir("phren-verify-test-");
     const home = path.join(tmpDir, "home");
-    const cortex = path.join(tmpDir, "cortex");
+    const phren = path.join(tmpDir, "phren");
     const origHome = process.env.HOME;
     const origProfile = process.env.USERPROFILE;
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     try {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+      fs.mkdirSync(path.join(phren, "global"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
       fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
-      fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
+      fs.writeFileSync(path.join(phren, "global", "CLAUDE.md"), "# Global\n");
 
-      const result = runPostInitVerify(cortex);
+      const result = runPostInitVerify(phren);
       const names = result.checks.map((check) => check.name);
       expect(names).toContain("git-installed");
       expect(names).toContain("node-version");
@@ -996,26 +959,26 @@ describe("runPostInitVerify", () => {
   });
 
   it("flags install metadata drift when installedVersion does not match runtime", () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-verify-version-test-");
+    const { path: tmpDir, cleanup } = makeTempDir("phren-verify-version-test-");
     const home = path.join(tmpDir, "home");
-    const cortex = path.join(tmpDir, "cortex");
+    const phren = path.join(tmpDir, "phren");
     const origHome = process.env.HOME;
     const origProfile = process.env.USERPROFILE;
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     try {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+      fs.mkdirSync(path.join(phren, "global"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
       fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
-      fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
+      fs.writeFileSync(path.join(phren, "global", "CLAUDE.md"), "# Global\n");
       fs.writeFileSync(
-        path.join(cortex, ".runtime", "install-preferences.json"),
-        JSON.stringify({ installedVersion: "0.0.1" }, null, 2)
+        path.join(phren, ".runtime", "install-preferences.json"),
+        JSON.stringify({ installedVersion: "0.0.0-fake" }, null, 2)
       );
 
-      const result = runPostInitVerify(cortex);
+      const result = runPostInitVerify(phren);
       const versionCheck = result.checks.find((check) => check.name === "installed-version");
       expect(versionCheck?.ok).toBe(false);
       expect(versionCheck?.detail).toContain("runtime");
@@ -1027,18 +990,18 @@ describe("runPostInitVerify", () => {
   });
 
   it("explains hooks-only or local-only verify failures without hiding them", () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-verify-mode-note-");
+    const { path: tmpDir, cleanup } = makeTempDir("phren-verify-mode-note-");
     const home = path.join(tmpDir, "home");
-    const cortex = path.join(tmpDir, "cortex");
+    const phren = path.join(tmpDir, "phren");
     const origHome = process.env.HOME;
     const origProfile = process.env.USERPROFILE;
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     try {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
-      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+      fs.mkdirSync(path.join(phren, "global"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
       fs.writeFileSync(
         path.join(home, ".claude", "settings.json"),
         JSON.stringify({
@@ -1049,18 +1012,18 @@ describe("runPostInitVerify", () => {
           },
         }, null, 2)
       );
-      fs.writeFileSync(path.join(cortex, "global", "CLAUDE.md"), "# Global\n");
+      fs.writeFileSync(path.join(phren, "global", "CLAUDE.md"), "# Global\n");
       fs.writeFileSync(
-        path.join(cortex, ".runtime", "install-preferences.json"),
+        path.join(phren, ".runtime", "install-preferences.json"),
         JSON.stringify({ mcpEnabled: false, hooksEnabled: true, installedVersion: VERSION }, null, 2)
       );
-      fs.mkdirSync(path.join(cortex, "demo"), { recursive: true });
+      fs.mkdirSync(path.join(phren, "demo"), { recursive: true });
 
-      const result = runPostInitVerify(cortex);
+      const result = runPostInitVerify(phren);
       const mcpCheck = result.checks.find((check) => check.name === "mcp-config");
       expect(mcpCheck?.ok).toBe(false);
       expect(mcpCheck?.detail).toContain("expected while MCP mode is OFF");
-      expect(getVerifyOutcomeNote(cortex, result.checks)).toContain("local-only / hooks-only mode");
+      expect(getVerifyOutcomeNote(phren, result.checks)).toContain("local-only / hooks-only mode");
     } finally {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origProfile;
@@ -1079,19 +1042,19 @@ describe("project templates", () => {
   });
 
   it("runInit with --template applies template files to project", async () => {
-    const { path: tmpDir, cleanup } = makeTempDir("cortex-template-test-");
+    const { path: tmpDir, cleanup } = makeTempDir("phren-template-test-");
     const origHome = process.env.HOME;
-    const origCortex = process.env.CORTEX_PATH;
+    const origPhren = process.env.PHREN_PATH;
     process.env.HOME = tmpDir;
     process.env.USERPROFILE = tmpDir;
-    process.env.CORTEX_PATH = path.join(tmpDir, "cortex");
+    process.env.PHREN_PATH = path.join(tmpDir, "phren");
     resetVSCodeProbeCache();
 
     try {
       await suppressOutput(() => runInit({ yes: true, template: "python-project" }));
-      const cortexDir = path.join(tmpDir, "cortex");
-      const claudeMd = fs.readFileSync(path.join(cortexDir, "my-first-project", "CLAUDE.md"), "utf8");
-      const profile = fs.readFileSync(path.join(cortexDir, "profiles", "default.yaml"), "utf8");
+      const phrenDir = path.join(tmpDir, "phren");
+      const claudeMd = fs.readFileSync(path.join(phrenDir, "my-first-project", "CLAUDE.md"), "utf8");
+      const profile = fs.readFileSync(path.join(phrenDir, "profiles", "default.yaml"), "utf8");
       expect(claudeMd).toContain("Python project");
       expect(claudeMd).toContain("pytest");
       expect(claudeMd).not.toContain("{{project}}");
@@ -1099,8 +1062,8 @@ describe("project templates", () => {
     } finally {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origHome;
-      if (origCortex) process.env.CORTEX_PATH = origCortex;
-      else delete process.env.CORTEX_PATH;
+      if (origPhren) process.env.PHREN_PATH = origPhren;
+      else delete process.env.PHREN_PATH;
       resetVSCodeProbeCache();
       cleanup();
     }

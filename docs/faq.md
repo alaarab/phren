@@ -1,37 +1,37 @@
-# Cortex FAQ
+# Phren FAQ
 
 ## How is this different from just using CLAUDE.md?
 
 `CLAUDE.md` loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time — whether the content is relevant or not. With five agents running in parallel, that's 10,000 tokens of context before anyone types a word.
 
-Cortex searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with `CORTEX_CONTEXT_TOKEN_BUDGET`, regardless of how large your knowledge base grows. You can run more agents in parallel for the same cost, and they're not reading noise.
+Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with `PHREN_CONTEXT_TOKEN_BUDGET`, regardless of how large your knowledge base grows. You can run more agents in parallel for the same cost, and they're not reading noise.
 
-`CLAUDE.md` is also static. Cortex learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.
+`CLAUDE.md` is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.
 
 ## Does this slow down my prompts?
 
 Usually not on a warm local repo. The hook runs locally: keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path. On a healthy warm cache it is often fast enough that you will barely notice it, but the exact latency depends on corpus size, filesystem speed, and whether semantic retrieval is enabled.
 
-The main exceptions are the first prompt in a session, where `SessionStart` pulls the cortex repo from git, and very large or slow filesystems, where index work can become noticeable. On a fast connection the pull is often under a second; on a slow connection it can be a few seconds. This is configurable — you can disable the auto-pull if you prefer to sync manually.
+The main exceptions are the first prompt in a session, where `SessionStart` pulls the phren repo from git, and very large or slow filesystems, where index work can become noticeable. On a fast connection the pull is often under a second; on a slow connection it can be a few seconds. This is configurable — you can disable the auto-pull if you prefer to sync manually.
 
 ## What happens when I run multiple agents at the same time?
 
-They all read and write the same `~/.cortex` directory. Concurrent reads are safe. Writes are serialized within a process by file locks; cross-process synchronization happens at the git layer.
+They all read and write the same `~/.phren` directory. Concurrent reads are safe. Writes are serialized within a process by file locks; cross-process synchronization happens at the git layer.
 
 In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing — it's just a shared git repo.
 
-The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Cortex retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and web UI. Under extreme parallelism, think of Cortex as eventually consistent rather than strongly coordinated.
+The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Phren retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and web UI. Under extreme parallelism, think of Phren as eventually consistent rather than strongly coordinated.
 
 ## What failure modes should I expect?
 
 The common ones are boring infrastructure issues, not mystery behavior:
 
 - No remote configured: auto-save still commits locally, but nothing syncs across machines until you add a remote.
-- Push failed: the commit stays local and Cortex records the last sync error so `cortex status`, shell, and web UI can show it.
-- Hooks disabled or stale: retrieval stops, but your files are still there; rerun `cortex init` or re-enable hooks with `cortex hooks-mode on`.
-- Stale index: search quality drops until the next rebuild; `cortex doctor` and `cortex status` will flag index trouble.
+- Push failed: the commit stays local and Phren records the last sync error so `phren status`, shell, and web UI can show it.
+- Hooks disabled or stale: retrieval stops, but your files are still there; rerun `phren init` or re-enable hooks with `phren hooks-mode on`.
+- Stale index: search quality drops until the next rebuild; `phren doctor` and `phren status` will flag index trouble.
 - Review queue growth: trust filtering is catching too much low-signal or stale content, which usually means your findings need pruning or governance thresholds need adjustment.
-- Governance lockout: if access control blocks a write, nothing is silently discarded; check `.governance/access-control.json`, `.runtime/access-control.local.json`, and actor identity (`CORTEX_ACTOR` / OS user).
+- Governance lockout: if access control blocks a write, nothing is silently discarded; check `.governance/access-control.json`, `.runtime/access-control.local.json`, and actor identity (`PHREN_ACTOR` / OS user).
 
 ## How does trust decay work?
 
@@ -49,12 +49,12 @@ Entries below 0.35 are suppressed entirely and move to the review queue instead 
 
 You can pin a memory with `pin_memory` to make it never decay. Pinned entries live in `CANONICAL_MEMORIES.md` and always inject regardless of age.
 
-All thresholds are configurable via `cortex config policy`.
+All thresholds are configurable via `phren config policy`.
 
 ## How do I use the web UI?
 
 ```bash
-cortex web-ui
+phren web-ui
 ```
 
 Opens a browser-based interface at `localhost:3499` (configurable with `--port`). From there you can approve, reject, or edit entries in the memory queue and inspect project memory without starting an agent session.
@@ -76,9 +76,9 @@ From that tab you can:
 
 If a project has never customized topics, the UI shows a starter-topics banner. Saving topics in the UI writes `topic-config.json` and creates the matching topic docs immediately so they are visible before the next archive cycle.
 
-The terminal shell (`cortex`, then press `m`) covers the same workflow if you prefer staying in the terminal.
+The terminal shell (`phren`, then press `m`) covers the same workflow if you prefer staying in the terminal.
 
-Security defaults for `cortex web-ui`:
+Security defaults for `phren web-ui`:
 - loopback-only bind (`127.0.0.1`)
 - random per-run auth token
 - CSRF token required for mutating routes
@@ -92,8 +92,8 @@ Security defaults for `cortex web-ui`:
 - Session state committed and pushed by the Stop hook after every response
 
 **Manual:**
-- Running `/cortex-consolidate` when findings pile up and you want patterns surfaced
-- Running `cortex maintain govern` to queue low-value or stale entries for review
+- Running `/phren-consolidate` when findings pile up and you want patterns surfaced
+- Running `phren maintain govern` to queue low-value or stale entries for review
 - Pinning canonical memories that should never decay
 
 In practice, well-configured agents save findings automatically as they work. You review the queue periodically to keep quality high, and run consolidation intentionally when the findings file starts to get repetitive.
@@ -126,43 +126,43 @@ For an existing repo:
 
 ```bash
 cd ~/code/my-project
-cortex add
+phren add
 ```
 
-Cortex bootstraps `~/.cortex/my-project/` and adds it to your active profile. If you just open a session in an untracked repo, cortex tells the agent to ask whether you want to add it.
+Phren bootstraps `~/.phren/my-project/` and adds it to your active profile. If you just open a session in an untracked repo, phren tells the agent to ask whether you want to add it.
 
 For a brand-new project scaffold inside Claude:
 
 ```bash
-/cortex-init my-project
+/phren-init my-project
 ```
 
 Project setup note:
-- `cortex add` is the canonical path for existing repos.
+- `phren add` is the canonical path for existing repos.
 - Platform-specific behavior is documented in `docs/platform-matrix.md`.
 - Best-effort vs fail-closed behavior is documented in `docs/error-reporting.md`.
 - Package/update behavior is documented in `docs/versioning.md`.
 - The local task is still the primary planning surface. GitHub issue links are optional metadata on task items, and promotion is one-way by default to avoid issue spam.
 
-## Does cortex require MCP?
+## Does phren require MCP?
 
-No. MCP is recommended — it gives agents 60 tools across 11 modules for reading and writing memory directly. But cortex also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended — it gives agents 60 tools across 11 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
-cortex init --mcp off
+phren init --mcp off
 ```
 
 Toggle anytime:
 
 ```bash
-cortex mcp-mode on
-cortex mcp-mode off
+phren mcp-mode on
+phren mcp-mode off
 ```
 
 ## How do I preview init changes without writing files?
 
 ```bash
-cortex init --dry-run
+phren init --dry-run
 ```
 
 Prints what would be created or updated and exits without touching anything.
@@ -193,41 +193,41 @@ Generated skill artifacts:
 No. Telemetry is opt-in and local-only.
 
 ```bash
-cortex config telemetry on
+phren config telemetry on
 ```
 
 Stats are stored in `.runtime/telemetry.json`. No external reporting is sent by default.
 
-## Where does cortex store data?
+## Where does phren store data?
 
-Shared mode stores data in `~/.cortex` by default. Set `CORTEX_PATH` to use a custom shared root.
+Shared mode stores data in `~/.phren` by default. Set `PHREN_PATH` to use a custom shared root.
 
 ```bash
-CORTEX_PATH=/path/to/my-cortex cortex init
+PHREN_PATH=/path/to/my-phren phren init
 ```
 
 Project-local mode stores data inside the repo:
 
 ```bash
 cd /path/to/repo
-cortex init --mode project-local
+phren init --mode project-local
 ```
 
-That creates `<repo>/.cortex` and keeps the install repo-local.
+That creates `<repo>/.phren` and keeps the install repo-local.
 
 ## What does uninstall remove?
 
-`cortex uninstall` now removes the active install, not just the agent config.
+`phren uninstall` now removes the active install, not just the agent config.
 
-- Shared mode: removes Cortex MCP/hooks/config plus the active Cortex root and machine alias.
-- Project-local mode: removes `<repo>/.cortex` and the workspace MCP entry from `.vscode/mcp.json`.
+- Shared mode: removes Phren MCP/hooks/config plus the active Phren root and machine alias.
+- Project-local mode: removes `<repo>/.phren` and the workspace MCP entry from `.vscode/mcp.json`.
 
 If you want to preserve data, export or back up the root before uninstalling.
 
 ## How do I navigate the shell?
 
 ```bash
-cortex
+phren
 ```
 
 Opens the interactive shell. Single-key navigation:

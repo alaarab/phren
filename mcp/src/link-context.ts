@@ -8,7 +8,7 @@ import { resolveTaskFilePath } from "./data-tasks.js";
 function log(msg: string) { process.stdout.write(msg + "\n"); }
 
 function contextFilePath(): string {
-  return homePath(".cortex-context.md");
+  return homePath(".phren-context.md");
 }
 
 export function claudeProjectKey(): string {
@@ -20,8 +20,8 @@ function displayName(slug: string): string {
   return slug.split("-").map(w => w[0]?.toUpperCase() + w.slice(1)).join(" ");
 }
 
-function allKnownProjects(cortexPath: string): string[] {
-  const profilesDir = path.join(cortexPath, "profiles");
+function allKnownProjects(phrenPath: string): string[] {
+  const profilesDir = path.join(phrenPath, "profiles");
   if (!fs.existsSync(profilesDir)) return [];
   const projects = new Set<string>();
   for (const f of fs.readdirSync(profilesDir)) {
@@ -36,14 +36,14 @@ function allKnownProjects(cortexPath: string): string[] {
 
 function writeContextFile(managedContent: string) {
   const contextFile = contextFilePath();
-  const wrapped = `<!-- cortex-managed -->\n${managedContent}\n<!-- cortex-managed -->`;
+  const wrapped = `<!-- phren-managed -->\n${managedContent}\n<!-- phren-managed -->`;
   if (fs.existsSync(contextFile)) {
     const existing = fs.readFileSync(contextFile, "utf8");
-    if (existing.includes("<!-- cortex-managed -->")) {
-      const startIdx = existing.indexOf("<!-- cortex-managed -->");
-      const endIdx = existing.indexOf("<!-- cortex-managed -->");
+    if (existing.includes("<!-- phren-managed -->")) {
+      const startIdx = existing.indexOf("<!-- phren-managed -->");
+      const endIdx = existing.indexOf("<!-- phren-managed -->");
       const before = startIdx > 0 ? existing.slice(0, startIdx).trimEnd() : "";
-      const after = endIdx !== -1 ? existing.slice(endIdx + "<!-- cortex-managed -->".length).trimStart() : "";
+      const after = endIdx !== -1 ? existing.slice(endIdx + "<!-- phren-managed -->".length).trimStart() : "";
       const parts = [before, wrapped, after].filter(Boolean);
       fs.writeFileSync(contextFile, parts.join("\n") + "\n");
       return;
@@ -63,12 +63,12 @@ function formatMcpStatus(status: string): string {
   return "";
 }
 
-export function writeContextDefault(machine: string, profile: string, mcpStatus: string, projects: string[], cortexPath: string) {
-  const all = allKnownProjects(cortexPath);
+export function writeContextDefault(machine: string, profile: string, mcpStatus: string, projects: string[], phrenPath: string) {
+  const all = allKnownProjects(phrenPath);
   const inactive = all.filter(p => !projects.includes(p));
   const mcpLine = formatMcpStatus(mcpStatus);
   const lines = [
-    "# cortex context",
+    "# phren context",
     `Machine: ${machine}`,
     `Profile: ${profile}`,
     `Active projects: ${projects.join(", ")}`,
@@ -80,10 +80,10 @@ export function writeContextDefault(machine: string, profile: string, mcpStatus:
   log(`  wrote ${contextFilePath()}`);
 }
 
-export function writeContextDebugging(machine: string, profile: string, mcpStatus: string, projects: string[], cortexPath: string) {
+export function writeContextDebugging(machine: string, profile: string, mcpStatus: string, projects: string[], phrenPath: string) {
   const mcpLine = formatMcpStatus(mcpStatus);
   let content = [
-    "# cortex context (debugging)",
+    "# phren context (debugging)",
     `Machine: ${machine}`,
     `Profile: ${profile}`,
     `Last synced: ${new Date().toISOString().slice(0, 10)}`,
@@ -93,7 +93,7 @@ export function writeContextDebugging(machine: string, profile: string, mcpStatu
   const MAX_FILE_BYTES = 50 * 1024;
   for (const project of projects) {
     if (project === "global") continue;
-    const findings = path.join(cortexPath, project, "FINDINGS.md");
+    const findings = path.join(phrenPath, project, "FINDINGS.md");
     if (fs.existsSync(findings)) {
       let body = fs.readFileSync(findings, "utf8");
       if (body.length > MAX_FILE_BYTES) {
@@ -109,10 +109,10 @@ export function writeContextDebugging(machine: string, profile: string, mcpStatu
   log(`  wrote ${contextFilePath()} (debugging mode)`);
 }
 
-export function writeContextPlanning(machine: string, profile: string, mcpStatus: string, projects: string[], cortexPath: string) {
+export function writeContextPlanning(machine: string, profile: string, mcpStatus: string, projects: string[], phrenPath: string) {
   const mcpLine = formatMcpStatus(mcpStatus);
   let content = [
-    "# cortex context (planning)",
+    "# phren context (planning)",
     `Machine: ${machine}`,
     `Profile: ${profile}`,
     `Last synced: ${new Date().toISOString().slice(0, 10)}`,
@@ -126,8 +126,8 @@ export function writeContextPlanning(machine: string, profile: string, mcpStatus
       content += `\n\n(remaining projects truncated, context size limit reached)\n`;
       break;
     }
-    const summaryFile = path.join(cortexPath, project, "summary.md");
-    const taskFile = resolveTaskFilePath(cortexPath, project);
+    const summaryFile = path.join(phrenPath, project, "summary.md");
+    const taskFile = resolveTaskFilePath(phrenPath, project);
     if (!fs.existsSync(summaryFile) && !taskFile) continue;
     content += `\n\n## ${project}\n`;
     if (fs.existsSync(summaryFile)) content += fs.readFileSync(summaryFile, "utf8") + "\n";
@@ -146,7 +146,7 @@ export function writeContextPlanning(machine: string, profile: string, mcpStatus
 
 export function writeContextClean(machine: string, profile: string, mcpStatus: string, projects: string[]) {
   const mcpLine = formatMcpStatus(mcpStatus);
-  let content = `# cortex context (clean)\nMachine: ${machine} | Profile: ${profile} | Projects: ${projects.join(", ")}\n`;
+  let content = `# phren context (clean)\nMachine: ${machine} | Profile: ${profile} | Projects: ${projects.join(", ")}\n`;
   if (mcpLine) content += mcpLine + "\n";
   writeContextFile(content);
   log(`  wrote ${contextFilePath()} (clean mode)`);
@@ -154,7 +154,7 @@ export function writeContextClean(machine: string, profile: string, mcpStatus: s
 
 // ── Memory management ───────────────────────────────────────────────────────
 
-export function readBackNativeMemory(cortexPath: string, projects: string[]) {
+export function readBackNativeMemory(phrenPath: string, projects: string[]) {
   const projectKey = claudeProjectKey();
   const memoryDir = homePath(".claude", "projects", projectKey, "memory");
   if (!fs.existsSync(memoryDir)) return;
@@ -177,23 +177,23 @@ export function readBackNativeMemory(cortexPath: string, projects: string[]) {
       .trim();
     if (!notes) continue;
 
-    const targetFile = path.join(cortexPath, project, "native-notes.md");
+    const targetFile = path.join(phrenPath, project, "native-notes.md");
     const existing = fs.existsSync(targetFile) ? fs.readFileSync(targetFile, "utf8").trim() : "";
     if (existing === notes) continue;
 
-    fs.mkdirSync(path.join(cortexPath, project), { recursive: true });
+    fs.mkdirSync(path.join(phrenPath, project), { recursive: true });
     fs.writeFileSync(targetFile, notes + "\n");
     log(`  synced native memory notes for ${project}`);
   }
 }
 
-export function rebuildMemory(cortexPath: string, projects: string[]) {
+export function rebuildMemory(phrenPath: string, projects: string[]) {
   const projectKey = claudeProjectKey();
   const memoryDir = homePath(".claude", "projects", projectKey, "memory");
   const memoryFile = path.join(memoryDir, "MEMORY.md");
 
   const hasSummaries = projects.some(p =>
-    p !== "global" && fs.existsSync(path.join(cortexPath, p, "summary.md"))
+    p !== "global" && fs.existsSync(path.join(phrenPath, p, "summary.md"))
   );
   if (!hasSummaries) return;
 
@@ -202,32 +202,32 @@ export function rebuildMemory(cortexPath: string, projects: string[]) {
   let header = "";
   if (fs.existsSync(memoryFile)) {
     const existing = fs.readFileSync(memoryFile, "utf8");
-    const idx = existing.indexOf("<!-- cortex:projects:start -->");
+    const idx = existing.indexOf("<!-- phren:projects:start -->");
     if (idx !== -1) header = existing.slice(0, idx);
   }
 
-  let managed = "<!-- cortex:projects:start -->\n<!-- Auto-generated by cortex link. Do not edit below this line. -->\n\n## Active Projects\n\n| Project | What | Memory |\n|---------|------|--------|\n";
+  let managed = "<!-- phren:projects:start -->\n<!-- Auto-generated by phren link. Do not edit below this line. -->\n\n## Active Projects\n\n| Project | What | Memory |\n|---------|------|--------|\n";
   for (const project of projects) {
     if (project === "global") continue;
-    const summaryFile = path.join(cortexPath, project, "summary.md");
+    const summaryFile = path.join(phrenPath, project, "summary.md");
     if (!fs.existsSync(summaryFile)) continue;
     const summary = fs.readFileSync(summaryFile, "utf8");
     const whatMatch = summary.match(/^\*\*What:\*\*\s*(.+)/m);
     const what = whatMatch?.[1]?.trim() ?? "(see summary)";
     managed += `| ${displayName(project)} | ${what} | MEMORY-${project}.md |\n`;
   }
-  managed += "\n<!-- cortex:projects:end -->";
+  managed += "\n<!-- phren:projects:end -->";
 
-  const freshHeader = "# Root Memory\n\n## Machine Context\nRead `~/.cortex-context.md` for profile, active projects, last sync date.\n\n## Cross-Project Notes\n- Read a project's CLAUDE.md before making changes.\n- Per-project memory files (MEMORY-{name}.md) have commands, versions, findings.\n\n";
+  const freshHeader = "# Root Memory\n\n## Machine Context\nRead `~/.phren-context.md` for profile, active projects, last sync date.\n\n## Cross-Project Notes\n- Read a project's CLAUDE.md before making changes.\n- Per-project memory files (MEMORY-{name}.md) have commands, versions, findings.\n\n";
   fs.writeFileSync(memoryFile, (header || freshHeader) + managed + "\n");
   log(`  rebuilt ${memoryFile} (pointer format)`);
 
-  const SUMMARY_START = "<!-- cortex:summary:start -->";
-  const SUMMARY_END = "<!-- cortex:summary:end -->";
+  const SUMMARY_START = "<!-- phren:summary:start -->";
+  const SUMMARY_END = "<!-- phren:summary:end -->";
 
   for (const project of projects) {
     if (project === "global") continue;
-    const summaryFile = path.join(cortexPath, project, "summary.md");
+    const summaryFile = path.join(phrenPath, project, "summary.md");
     if (!fs.existsSync(summaryFile)) continue;
     const summaryContent = fs.readFileSync(summaryFile, "utf8");
     const projectMemory = path.join(memoryDir, `MEMORY-${project}.md`);

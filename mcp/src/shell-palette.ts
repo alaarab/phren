@@ -3,13 +3,13 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import type { TaskItem, QueueItem } from "./data-access.js";
 import { runLink } from "./link.js";
-import { runCortexUpdate } from "./update.js";
+import { runPhrenUpdate } from "./update.js";
 import {
-  type CortexResult,
+  type PhrenResult,
   EXEC_TIMEOUT_MS,
 } from "./shared.js";
 
-export function resultMsg(r: CortexResult<unknown>): string {
+export function resultMsg(r: PhrenResult<unknown>): string {
   if (!r.ok) return r.error;
   return typeof r.data === "string" ? r.data : JSON.stringify(r.data);
 }
@@ -100,15 +100,15 @@ export function resolveEntryScript(): string {
   return path.resolve(path.dirname(current), "index.js");
 }
 
-export async function defaultRunHooks(cortexPath: string): Promise<string> {
+export async function defaultRunHooks(phrenPath: string): Promise<string> {
   const entry = resolveEntryScript();
   execFileSync(process.execPath, [entry, "hook-session-start"], {
-    cwd: cortexPath,
+    cwd: phrenPath,
     stdio: "ignore",
     timeout: EXEC_TIMEOUT_MS,
   });
   execFileSync(process.execPath, [entry, "hook-stop"], {
-    cwd: cortexPath,
+    cwd: phrenPath,
     stdio: "ignore",
     timeout: EXEC_TIMEOUT_MS,
   });
@@ -116,11 +116,11 @@ export async function defaultRunHooks(cortexPath: string): Promise<string> {
 }
 
 export async function defaultRunUpdate(): Promise<string> {
-  const result = await runCortexUpdate();
+  const result = await runPhrenUpdate();
   return result.message;
 }
 
-export async function defaultRunRelink(cortexPath: string): Promise<string> {
-  await runLink(cortexPath, { register: false, allTools: true });
+export async function defaultRunRelink(phrenPath: string): Promise<string> {
+  await runLink(phrenPath, { register: false, allTools: true });
   return "Relink completed for detected tools.";
 }

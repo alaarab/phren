@@ -9,14 +9,14 @@ import { removeSkillPath, setSkillEnabledAndSync } from "./skill-files.js";
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, profile, withWriteQueue, updateFileInIndex } = ctx;
+  const { phrenPath, profile, withWriteQueue, updateFileInIndex } = ctx;
 
   // ── list_skills ──────────────────────────────────────────────────────────
 
   server.registerTool(
     "list_skills",
     {
-      title: "◆ cortex · skills",
+      title: "◆ phren · skills",
       description: "List all installed skills across global and project scopes.",
       inputSchema: z.object({
         project: z.string().optional().describe("Filter to a specific project. Omit for all."),
@@ -27,8 +27,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       }
 
-      const resolvedSkills = project ? buildSkillManifest(cortexPath, profile, project).skills : null;
-      const rawSkills = project ? null : getAllSkills(cortexPath, profile);
+      const resolvedSkills = project ? buildSkillManifest(phrenPath, profile, project).skills : null;
+      const rawSkills = project ? null : getAllSkills(phrenPath, profile);
       const skills = resolvedSkills || rawSkills || [];
 
       if (!skills.length) {
@@ -78,7 +78,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "read_skill",
     {
-      title: "◆ cortex · read skill",
+      title: "◆ phren · read skill",
       description: "Read a skill file's full contents with parsed frontmatter and validation.",
       inputSchema: z.object({
         name: z.string().describe("Skill name (without .md)."),
@@ -90,7 +90,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       }
 
-      const result = findSkill(cortexPath, profile, project, name);
+      const result = findSkill(phrenPath, profile, project, name);
       if (!result) {
         return mcpResponse({ ok: false, error: `Skill "${name}" not found${project ? ` in "${project}"` : ""}.` });
       }
@@ -115,7 +115,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "write_skill",
     {
-      title: "◆ cortex · write skill",
+      title: "◆ phren · write skill",
       description: "Create or update a skill file with frontmatter validation. Scope: 'global' or a project name.",
       inputSchema: z.object({
         name: z.string().describe("Skill name (without .md)."),
@@ -141,15 +141,15 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       return withWriteQueue(async () => {
         const destDir = scope.toLowerCase() === "global"
-          ? path.join(cortexPath, "global", "skills")
-          : path.join(cortexPath, scope, "skills");
+          ? path.join(phrenPath, "global", "skills")
+          : path.join(phrenPath, scope, "skills");
 
-        if (scope.toLowerCase() !== "global" && !fs.existsSync(path.join(cortexPath, scope))) {
+        if (scope.toLowerCase() !== "global" && !fs.existsSync(path.join(phrenPath, scope))) {
           return mcpResponse({ ok: false, error: `Project "${scope}" not found.` });
         }
 
         fs.mkdirSync(destDir, { recursive: true });
-        const existing = findLocalSkill(cortexPath, scope, safeName);
+        const existing = findLocalSkill(phrenPath, scope, safeName);
         const dest = existing
           ? existing.path
           : path.join(destDir, `${safeName}.md`);
@@ -168,7 +168,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "remove_skill",
     {
-      title: "◆ cortex · remove skill",
+      title: "◆ phren · remove skill",
       description: "Remove a skill file by name.",
       inputSchema: z.object({
         name: z.string().describe("Skill name (without .md)."),
@@ -180,7 +180,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       }
 
-      const result = project ? findLocalSkill(cortexPath, project, name) : findSkill(cortexPath, profile, project, name);
+      const result = project ? findLocalSkill(phrenPath, project, name) : findSkill(phrenPath, profile, project, name);
       if (!result) {
         return mcpResponse({ ok: false, error: `Skill "${name}" not found${project ? ` in "${project}"` : ""}.` });
       }
@@ -203,7 +203,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     server.registerTool(
       action.tool,
       {
-        title: `◆ cortex · ${action.enabled ? "enable" : "disable"} skill`,
+        title: `◆ phren · ${action.enabled ? "enable" : "disable"} skill`,
         description: `${action.verb} a skill without deleting its file.`,
         inputSchema: z.object({
           name: z.string().describe("Skill name (without .md)."),
@@ -215,7 +215,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
         }
 
-        const result = findSkill(cortexPath, profile, project, name);
+        const result = findSkill(phrenPath, profile, project, name);
         if (!result) {
           return mcpResponse({ ok: false, error: `Skill "${name}" not found in "${project}".` });
         }
@@ -224,7 +224,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         return withWriteQueue(async () => {
-          setSkillEnabledAndSync(cortexPath, project, result.name, action.enabled);
+          setSkillEnabledAndSync(phrenPath, project, result.name, action.enabled);
           return mcpResponse({
             ok: true,
             message: `${action.verb}d skill "${result.name}" in ${project}.`,

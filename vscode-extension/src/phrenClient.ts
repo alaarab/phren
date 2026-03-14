@@ -36,7 +36,7 @@ interface McpToolCallResult {
   [key: string]: unknown;
 }
 
-interface CortexToolResponse {
+interface PhrenToolResponse {
   ok?: boolean;
   error?: string;
   message?: string;
@@ -44,7 +44,7 @@ interface CortexToolResponse {
   [key: string]: unknown;
 }
 
-export interface CortexClientOptions {
+export interface PhrenClientOptions {
   mcpServerPath: string;
   storePath: string;
   nodePath?: string;
@@ -66,8 +66,8 @@ export interface SessionHistoryOptions {
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
-export class CortexClient {
-  private readonly options: CortexClientOptions;
+export class PhrenClient {
+  private readonly options: PhrenClientOptions;
   private readonly process: ChildProcessWithoutNullStreams;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly timeoutMs: number;
@@ -78,7 +78,7 @@ export class CortexClient {
   private initialized = false;
   private initializePromise?: Promise<void>;
 
-  constructor(options: CortexClientOptions) {
+  constructor(options: PhrenClientOptions) {
     this.options = options;
     this.timeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -92,14 +92,14 @@ export class CortexClient {
 
     this.process.stderr.on("data", (chunk: Buffer | string) => {
       const message = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
-      console.error(`[cortex-mcp] ${message.trim()}`);
+      console.error(`[phren-mcp] ${message.trim()}`);
     });
 
     this.process.on("exit", (code, signal) => {
       if (this.disposed) {
         return;
       }
-      this.rejectPending(new Error(`cortex MCP process exited (code=${code ?? "null"}, signal=${signal ?? "null"})`));
+      this.rejectPending(new Error(`phren MCP process exited (code=${code ?? "null"}, signal=${signal ?? "null"})`));
     });
 
     this.process.on("error", (error: Error) => {
@@ -159,12 +159,32 @@ export class CortexClient {
     return this.callTool("disable_skill", project ? { name, project } : { name });
   }
 
-  async listHooks(): Promise<unknown> {
-    return this.callTool("list_hooks", {});
+  async listHooks(project?: string): Promise<unknown> {
+    return this.callTool("list_hooks", project ? { project } : {});
   }
 
-  async toggleHooks(enabled: boolean, tool?: string): Promise<unknown> {
-    return this.callTool("toggle_hooks", tool ? { enabled, tool } : { enabled });
+  async toggleHooks(enabled: boolean, tool?: string, project?: string, event?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { enabled };
+    if (tool) args.tool = tool;
+    if (project) args.project = project;
+    if (event) args.event = event;
+    return this.callTool("toggle_hooks", args);
+  }
+
+  async addCustomHook(event: string, command: string, timeout?: number): Promise<unknown> {
+    const args: Record<string, unknown> = { event, command };
+    if (timeout !== undefined) args.timeout = timeout;
+    return this.callTool("add_custom_hook", args);
+  }
+
+  async removeCustomHook(event: string, command?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { event };
+    if (command) args.command = command;
+    return this.callTool("remove_custom_hook", args);
+  }
+
+  async listHookErrors(): Promise<unknown> {
+    return this.callTool("list_hook_errors", {});
   }
 
   async memoryFeedback(key: string, feedback: string): Promise<unknown> {
@@ -185,6 +205,10 @@ export class CortexClient {
 
   async removeTask(project: string, item: string): Promise<unknown> {
     return this.callTool("remove_task", { project, item });
+  }
+
+  async pinTask(project: string, item: string): Promise<unknown> {
+    return this.callTool("pin_task", { project, item });
   }
 
   async pinMemory(project: string, text: string): Promise<unknown> {
@@ -211,14 +235,26 @@ export class CortexClient {
     return this.callTool("edit_queue_item", { project, item, new_text: newText });
   }
 
+  async searchFragments(query: string, project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { query };
+    if (project) args.project = project;
+    return this.callTool("search_fragments", args);
+  }
+
+  async getRelatedDocs(entity: string, project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { entity };
+    if (project) args.project = project;
+    return this.callTool("get_related_docs", args);
+  }
+
   async readGraph(project?: string): Promise<unknown> {
     const args: Record<string, unknown> = {};
     if (project) args.project = project;
     return this.callTool("read_graph", args);
   }
 
-  async crossProjectEntities(): Promise<unknown> {
-    return this.callTool("cross_project_entities", {});
+  async crossProjectFragments(): Promise<unknown> {
+    return this.callTool("cross_project_fragments", {});
   }
 
   async pushChanges(message?: string): Promise<unknown> {
@@ -235,13 +271,29 @@ export class CortexClient {
     return this.callTool("health_check", {});
   }
 
+  async doctorFix(): Promise<unknown> {
+    return this.callTool("doctor_fix", {});
+  }
+
+  async sessionStart(project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = {};
+    if (project) args.project = project;
+    return this.callTool("session_start", args);
+  }
+
+  async sessionEnd(summary?: string): Promise<unknown> {
+    const args: Record<string, unknown> = {};
+    if (summary) args.summary = summary;
+    return this.callTool("session_end", args);
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) {
       return;
     }
     this.disposed = true;
 
-    this.rejectPending(new Error("Cortex client disposed."));
+    this.rejectPending(new Error("Phren client disposed."));
 
     if (!this.process.killed) {
       this.process.kill();
@@ -279,7 +331,7 @@ export class CortexClient {
           protocolVersion,
           capabilities: {},
           clientInfo: {
-            name: "cortex-vscode",
+            name: "phren-vscode",
             version: this.options.clientVersion ?? "0.0.0",
           },
         });
@@ -313,7 +365,7 @@ export class CortexClient {
 
   private async sendRequest<T>(method: string, params: Record<string, unknown>): Promise<T> {
     if (this.disposed) {
-      throw new Error("Cortex client has been disposed.");
+      throw new Error("Phren client has been disposed.");
     }
 
     const id = this.nextId++;
@@ -375,7 +427,7 @@ export class CortexClient {
         const message = JSON.parse(line) as JsonRpcResponse<unknown>;
         this.handleMessage(message);
       } catch (error) {
-        console.error(`[cortex-mcp] Failed to parse JSON-RPC line: ${String(error)}`);
+        console.error(`[phren-mcp] Failed to parse JSON-RPC line: ${String(error)}`);
       }
     }
   }
@@ -417,9 +469,9 @@ export class CortexClient {
   }
 
   private unwrapToolResponse(value: unknown): unknown {
-    const response = asRecord(value) as CortexToolResponse | undefined;
+    const response = asRecord(value) as PhrenToolResponse | undefined;
     if (response?.ok === false) {
-      throw new Error(response.error ?? response.message ?? "Cortex tool call failed.");
+      throw new Error(response.error ?? response.message ?? "Phren tool call failed.");
     }
     return value;
   }

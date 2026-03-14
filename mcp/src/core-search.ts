@@ -7,7 +7,7 @@ import type { DocRow, SqlJsDatabase } from "./shared-index.js";
  * Scans all docs (optionally filtered by project/type), scores each by
  * how many query terms appear in its content, and returns top matches.
  *
- * Shared between the MCP search tool and CLI `cortex search`.
+ * Shared between the MCP search tool and CLI `phren search`.
  */
 export function keywordFallbackSearch(
   db: SqlJsDatabase,

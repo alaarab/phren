@@ -23,7 +23,7 @@
   "runs": [
     {
       "size": 1000,
-      "cortexPath": null,
+      "phrenPath": null,
       "corpusDocs": 1021,
       "generatedFiles": 1000,
       "queries": [
@@ -366,7 +366,7 @@
     },
     {
       "size": 10000,
-      "cortexPath": null,
+      "phrenPath": null,
       "corpusDocs": 10021,
       "generatedFiles": 10000,
       "queries": [
@@ -709,7 +709,7 @@
     },
     {
       "size": 100000,
-      "cortexPath": null,
+      "phrenPath": null,
       "corpusDocs": 100021,
       "generatedFiles": 100000,
       "queries": [

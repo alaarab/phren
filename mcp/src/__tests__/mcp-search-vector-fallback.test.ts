@@ -55,7 +55,7 @@ describe("mcp-search vector fallback", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -97,11 +97,11 @@ describe("mcp-search vector fallback", () => {
       return [{
         columns: ["project", "filename", "type", "content", "path"],
         values: [[
-          "cortex",
+          "phren",
           "summary.md",
           "summary",
           "Semantic opt-in during init should finish at the dependency level",
-          `${tmp.path}/cortex/summary.md`,
+          `${tmp.path}/phren/summary.md`,
         ]],
       }];
     };
@@ -110,7 +110,7 @@ describe("mcp-search vector fallback", () => {
     expect(res.ok).toBe(true);
     expect(vectorFallback).not.toHaveBeenCalled();
     expect(res.data.results).toHaveLength(1);
-    expect(res.data.results[0].project).toBe("cortex");
+    expect(res.data.results[0].project).toBe("phren");
   });
 
   it("applies type filters to vector fallback results", async () => {

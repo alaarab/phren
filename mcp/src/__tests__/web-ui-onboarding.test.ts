@@ -8,24 +8,24 @@ import type { Server } from "http";
 
 describe.sequential("web-ui onboarding repair", () => {
   let tmp: { path: string; cleanup: () => void };
-  let cortexPath: string;
+  let phrenPath: string;
   let homeDir: string;
   let priorHome: string | undefined;
   let priorUserProfile: string | undefined;
   let server: Server | null = null;
 
   beforeEach(() => {
-    tmp = makeTempDir("cortex-web-ui-onboarding-");
-    cortexPath = path.join(tmp.path, ".cortex");
+    tmp = makeTempDir("phren-web-ui-onboarding-");
+    phrenPath = path.join(tmp.path, ".phren");
     homeDir = path.join(tmp.path, "home");
     priorHome = process.env.HOME;
     priorUserProfile = process.env.USERPROFILE;
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
 
-    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
-    fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${os.hostname()}: default\n`);
-    fs.writeFileSync(path.join(cortexPath, "profiles", "default.yaml"), "name: default\nprojects:\n  - global\n");
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${os.hostname()}: default\n`);
+    fs.writeFileSync(path.join(phrenPath, "profiles", "default.yaml"), "name: default\nprojects:\n  - global\n");
   });
 
   afterEach(async () => {
@@ -43,16 +43,14 @@ describe.sequential("web-ui onboarding repair", () => {
   });
 
   it("self-repairs baseline assets before serving requests", async () => {
-    expect(fs.existsSync(path.join(cortexPath, "global", "CLAUDE.md"))).toBe(false);
-    expect(fs.existsSync(path.join(cortexPath, ".sessions"))).toBe(false);
-    expect(fs.existsSync(path.join(cortexPath, ".runtime", "canonical-locks.json"))).toBe(false);
-    expect(fs.existsSync(path.join(cortexPath, ".env"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, ".env"))).toBe(false);
 
-    server = createWebUiServer(cortexPath, undefined, "default");
+    server = createWebUiServer(phrenPath, undefined, "default");
 
-    expect(fs.existsSync(path.join(cortexPath, "global", "CLAUDE.md"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, ".sessions"))).toBe(true);
-    expect(fs.existsSync(path.join(cortexPath, ".runtime", "canonical-locks.json"))).toBe(true);
-    expect(fs.readFileSync(path.join(cortexPath, ".env"), "utf8")).toContain("CORTEX_FEATURE_AUTO_CAPTURE=1");
+    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
+    expect(fs.readFileSync(path.join(phrenPath, ".env"), "utf8")).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
   });
 });

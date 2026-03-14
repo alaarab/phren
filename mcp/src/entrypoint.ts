@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { parseMcpMode, runInit } from "./init.js";
 import { errorMessage } from "./utils.js";
-import { defaultCortexPath, findCortexPath } from "./shared.js";
+import { defaultPhrenPath, findPhrenPath } from "./shared.js";
 import { addProjectFromPath } from "./core-project.js";
 import {
   PROJECT_OWNERSHIP_MODES,
@@ -12,103 +12,106 @@ import {
 } from "./project-config.js";
 
 
-const HELP_TEXT = `cortex - Long-term memory for Claude Code
+const HELP_TEXT = `phren - He remembers so your agent doesn't have to
 
 Usage:
-  cortex                                 Open interactive shell
-  cortex quickstart                      Quick setup: init + project scaffold
-  cortex add [path] [--ownership <mode>] Add current directory (or path) as a cortex project
-  cortex init [--mode shared|project-local] [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--dry-run] [-y]
-                                         Set up cortex and offer to add the current project directory
-  cortex projects list                   List all tracked projects
-  cortex projects configure <name> [--ownership <mode>] [--hooks on|off]
+  phren                                 Open interactive shell
+  phren quickstart                      Quick setup: init + project scaffold
+  phren add [path] [--ownership <mode>] Add current directory (or path) as a project
+  phren init [--mode shared|project-local] [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--dry-run] [-y]
+                                         Set up phren and offer to add the current project directory
+  phren projects list                   List all tracked projects
+  phren projects configure <name> [--ownership <mode>] [--hooks on|off]
                                          Update per-project enrollment and hook settings
-  cortex projects remove <name>          Remove a project (asks for confirmation)
-  cortex detect-skills [--import]        Find untracked skills in ~/.claude/skills/
-  cortex skills list                     List installed skills
-  cortex skills add <project> <path>    Link or copy a skill file into one project
-  cortex skills resolve <project|global> Print the resolved skill manifest for one scope
-  cortex skills doctor <project|global> Diagnose resolved skill visibility + mirror state
-  cortex skills sync <project|global>   Regenerate the resolved mirror for one scope
-  cortex skills remove <project> <name> Remove a project skill by name
-  cortex hooks list [--project <name>]   Show hook tool preferences and optional project overrides
-  cortex hooks enable <tool>             Enable hooks for one tool
-  cortex hooks disable <tool>            Disable hooks for one tool
-  cortex status                          Health, active project, stats
-  cortex search <query> [--project <n>] [--type <t>] [--limit <n>]
-                                         Search your cortex
-  cortex add-finding <project> "..."     Save an insight
-  cortex pin <project> "..."             Pin a canonical memory
-  cortex tasks                           Cross-project task view
-  cortex skill-list                      List installed skills
-  cortex doctor [--fix] [--check-data] [--agents]
+  phren projects remove <name>          Remove a project (asks for confirmation)
+  phren detect-skills [--import]        Find untracked skills in ~/.claude/skills/
+  phren skills list                     List installed skills
+  phren skills add <project> <path>    Link or copy a skill file into one project
+  phren skills resolve <project|global> Print the resolved skill manifest for one scope
+  phren skills doctor <project|global> Diagnose resolved skill visibility + mirror state
+  phren skills sync <project|global>   Regenerate the resolved mirror for one scope
+  phren skills remove <project> <name> Remove a project skill by name
+  phren hooks list [--project <name>]   Show hook tool preferences and optional project overrides
+  phren hooks enable <tool>             Enable hooks for one tool
+  phren hooks disable <tool>            Disable hooks for one tool
+  phren status                          Health, active project, stats
+  phren search <query> [--project <n>] [--type <t>] [--limit <n>]
+                                         Search what phren remembers
+  phren add-finding <project> "..."     Tell phren what you learned
+  phren pin <project> "..."             Pin a canonical memory
+  phren tasks                           Cross-project task view
+  phren skill-list                      List installed skills
+  phren doctor [--fix] [--check-data] [--agents]
                                          Health check and self-heal (--agents: show agent integrations only)
-  cortex web-ui [--port=3499] [--no-open]     Memory web UI
-  cortex debug-injection --prompt "..."  Preview hook-prompt injection output
-  cortex inspect-index [--project <n>]   Inspect FTS index contents for debugging
-  cortex update [--refresh-starter]      Update to latest version
+  phren web-ui [--port=3499] [--no-open]     Memory web UI
+  phren debug-injection --prompt "..."  Preview hook-prompt injection output
+  phren inspect-index [--project <n>]   Inspect FTS index contents for debugging
+  phren update [--refresh-starter]      Update to latest version
+  phren graph [--project <n>] [--limit <n>]
+                                         Show the fragment knowledge graph
+  phren graph link <project> "finding" "fragment"
+                                         Link a finding to a fragment manually
 
 Configuration:
-  cortex config policy [get|set ...]     Retention, TTL, confidence, decay
-  cortex config workflow [get|set ...]   Approval gates, risky-memory thresholds
-  cortex config access [get|set ...]     Role-based permissions
-  cortex config index [get|set ...]      Indexer include/exclude globs
-  cortex config synonyms [list|add|remove] ...
+  phren config policy [get|set ...]     Retention, TTL, confidence, decay
+  phren config workflow [get|set ...]   Risky-memory thresholds
+  phren config index [get|set ...]      Indexer include/exclude globs
+  phren config synonyms [list|add|remove] ...
                                          Manage project learned synonyms
-  cortex config project-ownership [mode] Default ownership for future project enrollments
-  cortex config machines                 Registered machines
-  cortex config profiles                 Profiles and projects
+  phren config project-ownership [mode] Default ownership for future project enrollments
+  phren config machines                 Registered machines
+  phren config profiles                 Profiles and projects
 
 Maintenance:
-  cortex maintain govern [project]       Queue stale/low-value memories for review
-  cortex maintain prune [project]        Delete expired entries
-  cortex maintain consolidate [project]  Deduplicate FINDINGS.md
-  cortex maintain extract [project]      Mine git/GitHub signals
+  phren maintain govern [project]       Queue stale/low-value memories for review
+  phren maintain prune [project]        Delete expired entries
+  phren maintain consolidate [project]  Deduplicate FINDINGS.md
+  phren maintain extract [project]      Mine git/GitHub signals
 
 Setup:
-  cortex mcp-mode [on|off|status]        Toggle MCP integration
-  cortex hooks-mode [on|off|status]      Toggle hook execution
-  cortex verify                          Check init completed OK
-  cortex uninstall                       Remove cortex config and hooks
+  phren mcp-mode [on|off|status]        Toggle MCP integration
+  phren hooks-mode [on|off|status]      Toggle hook execution
+  phren verify                          Check init completed OK
+  phren uninstall                       Remove phren config and hooks
 
 Environment:
-  CORTEX_PATH                Override cortex directory (default: ~/.cortex)
-  CORTEX_PROFILE             Active profile name (otherwise cortex uses machines.yaml when available)
-  CORTEX_DEBUG               Enable debug logging (set to 1)
-  CORTEX_OLLAMA_URL          Ollama base URL (default: http://localhost:11434; set to 'off' to disable)
-  CORTEX_EMBEDDING_API_URL   OpenAI-compatible /embeddings endpoint (cloud alternative to Ollama)
-  CORTEX_EMBEDDING_API_KEY   API key for CORTEX_EMBEDDING_API_URL
-  CORTEX_EMBEDDING_MODEL     Embedding model (default: nomic-embed-text)
-  CORTEX_EXTRACT_MODEL       Ollama model for memory extraction (default: llama3.2)
-  CORTEX_EMBEDDING_PROVIDER  Set to 'api' to use OpenAI API for search_knowledge embeddings
-  CORTEX_FEATURE_AUTO_CAPTURE=1      Extract insights from conversations at session end
-  CORTEX_FEATURE_SEMANTIC_DEDUP=1    LLM-based dedup on add_finding
-  CORTEX_FEATURE_SEMANTIC_CONFLICT=1 LLM-based conflict detection on add_finding
-  CORTEX_FEATURE_HYBRID_SEARCH=0     Disable TF-IDF cosine fallback in search_knowledge
-  CORTEX_FEATURE_AUTO_EXTRACT=0      Disable automatic memory extraction on each prompt
-  CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1  Compact memory index injection
-  CORTEX_LLM_MODEL           LLM model for semantic dedup/conflict (default: gpt-4o-mini)
-  CORTEX_LLM_ENDPOINT        OpenAI-compatible /chat/completions base URL for dedup/conflict
-  CORTEX_LLM_KEY             API key for CORTEX_LLM_ENDPOINT
-  CORTEX_CONTEXT_TOKEN_BUDGET    Max tokens injected per hook-prompt (default: 550)
-  CORTEX_CONTEXT_SNIPPET_LINES   Max lines per injected snippet (default: 6)
-  CORTEX_CONTEXT_SNIPPET_CHARS   Max chars per injected snippet (default: 520)
-  CORTEX_MAX_INJECT_TOKENS       Hard cap on total injected tokens (default: 2000)
-  CORTEX_TASK_PRIORITY        Priorities to include in task injection: high,medium,low (default: high,medium)
-  CORTEX_MEMORY_TTL_DAYS         Override memory TTL for trust filtering
-  CORTEX_HOOK_TIMEOUT_MS         Hook subprocess timeout in ms (default: 14000)
-  CORTEX_FINDINGS_CAP            Max findings per date section before consolidation (default: 20)
-  CORTEX_GH_PR_LIMIT/RUN_LIMIT/ISSUE_LIMIT  GitHub extraction limits (defaults: 40/25/25)
+  PHREN_PATH                Override phren directory (default: ~/.phren)
+  PHREN_PROFILE             Active profile name (otherwise phren uses machines.yaml when available)
+  PHREN_DEBUG               Enable debug logging (set to 1)
+  PHREN_OLLAMA_URL          Ollama base URL (default: http://localhost:11434; set to 'off' to disable)
+  PHREN_EMBEDDING_API_URL   OpenAI-compatible /embeddings endpoint (cloud alternative to Ollama)
+  PHREN_EMBEDDING_API_KEY   API key for PHREN_EMBEDDING_API_URL
+  PHREN_EMBEDDING_MODEL     Embedding model (default: nomic-embed-text)
+  PHREN_EXTRACT_MODEL       Ollama model for memory extraction (default: llama3.2)
+  PHREN_EMBEDDING_PROVIDER  Set to 'api' to use OpenAI API for search_knowledge embeddings
+  PHREN_FEATURE_AUTO_CAPTURE=1      Extract insights from conversations at session end
+  PHREN_FEATURE_SEMANTIC_DEDUP=1    LLM-based dedup on add_finding
+  PHREN_FEATURE_SEMANTIC_CONFLICT=1 LLM-based conflict detection on add_finding
+  PHREN_FEATURE_HYBRID_SEARCH=0     Disable TF-IDF cosine fallback in search_knowledge
+  PHREN_FEATURE_AUTO_EXTRACT=0      Disable automatic memory extraction on each prompt
+  PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1  Compact memory index injection
+  PHREN_LLM_MODEL           LLM model for semantic dedup/conflict (default: gpt-4o-mini)
+  PHREN_LLM_ENDPOINT        OpenAI-compatible /chat/completions base URL for dedup/conflict
+  PHREN_LLM_KEY             API key for PHREN_LLM_ENDPOINT
+  PHREN_CONTEXT_TOKEN_BUDGET    Max tokens injected per hook-prompt (default: 550)
+  PHREN_CONTEXT_SNIPPET_LINES   Max lines per injected snippet (default: 6)
+  PHREN_CONTEXT_SNIPPET_CHARS   Max chars per injected snippet (default: 520)
+  PHREN_MAX_INJECT_TOKENS       Hard cap on total injected tokens (default: 2000)
+  PHREN_TASK_PRIORITY        Priorities to include in task injection: high,medium,low (default: high,medium)
+  PHREN_MEMORY_TTL_DAYS         Override memory TTL for trust filtering
+  PHREN_HOOK_TIMEOUT_MS         Hook subprocess timeout in ms (default: 14000)
+  PHREN_FINDINGS_CAP            Max findings per date section before consolidation (default: 20)
+  PHREN_GH_PR_LIMIT/RUN_LIMIT/ISSUE_LIMIT  GitHub extraction limits (defaults: 40/25/25)
 
 Examples:
-  cortex search "rate limiting"          Search across all projects
-  cortex search "auth" --project my-api  Search within one project
-  cortex add-finding my-app "Redis connections need explicit close in finally blocks"
-  cortex doctor --fix                    Fix common config issues
-  cortex config policy set --ttlDays=90  Change memory retention to 90 days
-  cortex config project-ownership detached
-  cortex maintain govern my-app          Queue stale memories for review
-  cortex status                          Quick health check
+  phren search "rate limiting"          Search across all projects
+  phren search "auth" --project my-api  Search within one project
+  phren add-finding my-app "Redis connections need explicit close in finally blocks"
+  phren doctor --fix                    Fix common config issues
+  phren config policy set --ttlDays=90  Change memory retention to 90 days
+  phren config project-ownership detached
+  phren maintain govern my-app          Queue stale memories for review
+  phren status                          Quick health check
 `;
 
 const CLI_COMMANDS = [
@@ -202,7 +205,7 @@ function parseProactivityFlag(raw: string | undefined): "high" | "medium" | "low
     : undefined;
 }
 
-async function promptProjectOwnership(cortexPath: string, fallback: ProjectOwnershipMode): Promise<ProjectOwnershipMode> {
+async function promptProjectOwnership(phrenPath: string, fallback: ProjectOwnershipMode): Promise<ProjectOwnershipMode> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return fallback;
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -229,21 +232,21 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const positional = getPositionalArgs(argv.slice(1), ["--ownership"]);
     const targetPath = positional[0] || process.cwd();
     const ownershipArg = getOptionValue(argv.slice(1), "--ownership");
-    const cortexPath = defaultCortexPath();
-    const profile = process.env.CORTEX_PROFILE || undefined;
-    if (!fs.existsSync(cortexPath) || !fs.existsSync(path.join(cortexPath, ".governance"))) {
-      console.log("cortex is not set up yet. Run: npx cortex init");
+    const phrenPath = defaultPhrenPath();
+    const profile = (process.env.PHREN_PROFILE) || undefined;
+    if (!fs.existsSync(phrenPath) || !fs.existsSync(path.join(phrenPath, ".governance"))) {
+      console.log("phren is not set up yet. Run: npx phren init");
       return finish(1);
     }
     const ownership = ownershipArg
       ? parseProjectOwnershipMode(ownershipArg)
-      : await promptProjectOwnership(cortexPath, getProjectOwnershipDefault(cortexPath));
+      : await promptProjectOwnership(phrenPath, getProjectOwnershipDefault(phrenPath));
     if (ownershipArg && !ownership) {
       console.error(`Invalid --ownership value "${ownershipArg}". Use one of: ${PROJECT_OWNERSHIP_MODES.join(", ")}`);
       return finish(1);
     }
     try {
-      const added = addProjectFromPath(cortexPath, path.resolve(targetPath), profile, ownership);
+      const added = addProjectFromPath(phrenPath, path.resolve(targetPath), profile, ownership);
       if (!added.ok) {
         console.error(added.error);
         return finish(1);
@@ -332,10 +335,10 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   if (argvCommand === "verify") {
     const { runPostInitVerify, getVerifyOutcomeNote } = await import("./init.js");
     const { getWorkflowPolicy } = await import("./shared-governance.js");
-    const cortexPath = findCortexPath() || defaultCortexPath();
-    const result = runPostInitVerify(cortexPath);
-    console.log(`cortex verify: ${result.ok ? "ok" : "issues found"}`);
-    console.log(`  tasks: ${getWorkflowPolicy(cortexPath).taskMode} mode`);
+    const phrenPath = findPhrenPath() || defaultPhrenPath();
+    const result = runPostInitVerify(phrenPath);
+    console.log(`phren verify: ${result.ok ? "ok" : "issues found"}`);
+    console.log(`  tasks: ${getWorkflowPolicy(phrenPath).taskMode} mode`);
     for (const check of result.checks) {
       console.log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
       if (!check.ok && check.fix) {
@@ -343,9 +346,9 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       }
     }
     if (!result.ok) {
-      const note = getVerifyOutcomeNote(cortexPath, result.checks);
+      const note = getVerifyOutcomeNote(phrenPath, result.checks);
       if (note) console.log(`\nNote: ${note}`);
-      console.log(`\nRun \`npx cortex init\` to fix setup issues.`);
+      console.log(`\nRun \`npx phren init\` to fix setup issues.`);
     }
     return finish(result.ok ? 0 : 1);
   }
@@ -373,7 +376,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "link") {
-    console.error("`cortex link` has been removed. Use `npx cortex init` instead.");
+    console.error("`phren link` has been removed. Use `npx phren init` instead.");
     return finish(1);
   }
 
@@ -391,9 +394,9 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const { runCliCommand } = await import("./cli.js");
     try {
       const { trackCliCommand } = await import("./telemetry.js");
-      trackCliCommand(defaultCortexPath(), argvCommand);
+      trackCliCommand(defaultPhrenPath(), argvCommand);
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli trackCliCommand: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli trackCliCommand: ${errorMessage(err)}\n`);
     }
     await runCliCommand(argvCommand, argv.slice(1));
     return finish();

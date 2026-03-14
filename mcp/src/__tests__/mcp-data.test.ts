@@ -25,9 +25,9 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }
 
-function makeCtx(cortexPath: string, overrides?: Partial<McpContext>): McpContext {
+function makeCtx(phrenPath: string, overrides?: Partial<McpContext>): McpContext {
   return {
-    cortexPath,
+    phrenPath,
     profile: "test",
     db: () => { throw new Error("db not expected"); },
     rebuildIndex: async () => {},
@@ -47,7 +47,7 @@ describe("mcp-data: export/import round-trip", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 
@@ -133,13 +133,13 @@ describe("mcp-data: export/import round-trip", () => {
   });
 
   it("import rejects case-insensitive duplicate project names", async () => {
-    const projectDir = path.join(tmp.path, "Cortex");
+    const projectDir = path.join(tmp.path, "Phren");
     fs.mkdirSync(projectDir, { recursive: true });
-    writeFile(path.join(projectDir, "summary.md"), "# Cortex");
+    writeFile(path.join(projectDir, "summary.md"), "# Phren");
 
     register(server as any, makeCtx(tmp.path));
 
-    const payload = { project: "cortex", summary: "# lowercase" };
+    const payload = { project: "phren", summary: "# lowercase" };
     const res = parseResult(
       await server.call("import_project", { data: JSON.stringify(payload) })
     );
@@ -188,11 +188,11 @@ describe("mcp-data: export/import round-trip", () => {
   it("import canonicalizes uppercase project names to lowercase", async () => {
     register(server as any, makeCtx(tmp.path));
     const res = parseResult(
-      await server.call("import_project", { data: JSON.stringify({ project: "Cortex", summary: "# Cortex" }) })
+      await server.call("import_project", { data: JSON.stringify({ project: "Phren", summary: "# Phren" }) })
     );
     expect(res.ok).toBe(true);
-    expect(res.data.project).toBe("cortex");
-    expect(fs.existsSync(path.join(tmp.path, "cortex"))).toBe(true);
+    expect(res.data.project).toBe("phren");
+    expect(fs.existsSync(path.join(tmp.path, "phren"))).toBe(true);
   });
 
   it("import builds task content from structured data", async () => {
@@ -201,7 +201,7 @@ describe("mcp-data: export/import round-trip", () => {
     const payload = {
       project: "task-test",
       task: {
-        Active: [{ line: "Active task", checked: false, githubIssue: 14, githubUrl: "https://github.com/alaarab/cortex/issues/14" }],
+        Active: [{ line: "Active task", checked: false, githubIssue: 14, githubUrl: "https://github.com/alaarab/phren/issues/14" }],
         Queue: [{ line: "Queued task", checked: false }],
         Done: [{ line: "Done task", checked: true }],
       },
@@ -213,7 +213,7 @@ describe("mcp-data: export/import round-trip", () => {
 
     const task = fs.readFileSync(path.join(tmp.path, "task-test", "tasks.md"), "utf8");
     expect(task).toContain("- [ ] Active task");
-    expect(task).toContain("GitHub: #14 https://github.com/alaarab/cortex/issues/14");
+    expect(task).toContain("GitHub: #14 https://github.com/alaarab/phren/issues/14");
     expect(task).toContain("- [ ] Queued task");
     expect(task).toContain("- [x] Done task");
   });
@@ -223,7 +223,7 @@ describe("mcp-data: export/import round-trip", () => {
     fs.mkdirSync(projectDir, { recursive: true });
     writeFile(
       path.join(projectDir, "tasks.md"),
-      "# gh-task task\n\n## Active\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  GitHub: #14 https://github.com/alaarab/cortex/issues/14\n\n## Queue\n\n## Done\n"
+      "# gh-task task\n\n## Active\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  GitHub: #14 https://github.com/alaarab/phren/issues/14\n\n## Queue\n\n## Done\n"
     );
 
     register(server as any, makeCtx(tmp.path));
@@ -231,7 +231,7 @@ describe("mcp-data: export/import round-trip", () => {
     const res = parseResult(await server.call("export_project", { project: "gh-task" }));
     expect(res.ok).toBe(true);
     expect(res.data.task.Active[0].githubIssue).toBe(14);
-    expect(res.data.task.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    expect(res.data.task.Active[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
 
   it("import builds findings content from learnings array", async () => {
@@ -263,7 +263,7 @@ describe("mcp-data: archive/unarchive", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 
@@ -356,7 +356,7 @@ describe("mcp-data: import rollback on rebuildIndex failure", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 

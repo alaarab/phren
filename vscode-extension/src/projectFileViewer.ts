@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 
-export async function showProjectFile(client: CortexClient, projectName: string, fileName: string): Promise<void> {
+export async function showProjectFile(client: PhrenClient, projectName: string, fileName: string): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
-    "cortex.projectFile",
+    "phren.projectFile",
     `${projectName}/${fileName}`,
     vscode.ViewColumn.One,
     {}

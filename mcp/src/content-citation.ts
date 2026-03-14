@@ -4,6 +4,7 @@ import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 import { errorMessage, runGitOrThrow } from "./utils.js";
 import type { RetentionPolicy } from "./shared-governance.js";
 import { findingIdFromLine } from "./finding-impact.js";
+import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./content-metadata.js";
 
 export interface FindingCitation {
   created_at: string;
@@ -97,7 +98,7 @@ export function inferCitationLocation(repoPath: string, commit: string): { file?
 }
 
 export function buildCitationComment(citation: FindingCitation): string {
-  return `<!-- cortex:cite ${JSON.stringify(citation)} -->`;
+  return `<!-- phren:cite ${JSON.stringify(citation)} -->`;
 }
 
 function readSourceToken(match: RegExpMatchArray | null | undefined): string | undefined {
@@ -123,7 +124,7 @@ export function buildSourceComment(source: FindingProvenance): string {
 }
 
 export function parseSourceComment(line: string): FindingProvenance | null {
-  const sourceMatch = line.match(/<!--\s*source:\s*(.*?)\s*-->/);
+  const sourceMatch = line.match(METADATA_REGEX.source);
   if (!sourceMatch) return null;
 
   const payload = sourceMatch[1];
@@ -156,7 +157,7 @@ export function parseSourceComment(line: string): FindingProvenance | null {
 export function parseCitationComment(line: string): FindingCitation | null {
   // Find opening marker and closing --> to handle multiline/escaped JSON.
   // Uses marker-based extraction instead of regex to support multiline JSON.
-  const markerMatch = line.match(/<!--\s*cortex:cite\s+/);
+  const markerMatch = line.match(METADATA_REGEX.citationMarker);
   if (!markerMatch) return null;
   const jsonStart = markerMatch.index! + markerMatch[0].length;
   const endMarker = line.indexOf("-->", jsonStart);
@@ -333,11 +334,11 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    if (line.includes("<!-- cortex:archive:start -->") || line.includes("<details>")) {
+    if (isArchiveStart(line)) {
       inDetails = true;
       continue;
     }
-    if (line.includes("<!-- cortex:archive:end -->") || line.includes("</details>")) {
+    if (isArchiveEnd(line)) {
       inDetails = false;
       continue;
     }
@@ -364,7 +365,7 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
 
     let effectiveDate = currentDate;
     if (!effectiveDate) {
-      const inlineCreated = line.match(/<!-- created: (\d{4}-\d{2}-\d{2}) -->/);
+      const inlineCreated = line.match(METADATA_REGEX.createdDate);
       if (inlineCreated) {
         effectiveDate = inlineCreated[1];
       } else if (citation?.created_at) {

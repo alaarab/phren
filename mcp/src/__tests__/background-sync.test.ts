@@ -2,23 +2,23 @@ import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { initTestCortexRoot, makeTempDir } from "../test-helpers.js";
+import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 
 describe("handleBackgroundSync", () => {
   let tmp: { path: string; cleanup: () => void };
-  const origCortexPath = process.env.CORTEX_PATH;
+  const origPhrenPath = process.env.PHREN_PATH;
 
   beforeEach(() => {
-    tmp = makeTempDir("cortex-bg-sync-");
+    tmp = makeTempDir("phren-bg-sync-");
     execFileSync("git", ["init"], { cwd: tmp.path, stdio: "ignore" });
     fs.mkdirSync(path.join(tmp.path, ".governance"), { recursive: true });
-    initTestCortexRoot(tmp.path);
-    process.env.CORTEX_PATH = tmp.path;
+    initTestPhrenRoot(tmp.path);
+    process.env.PHREN_PATH = tmp.path;
   });
 
   afterEach(() => {
-    if (origCortexPath === undefined) delete process.env.CORTEX_PATH;
-    else process.env.CORTEX_PATH = origCortexPath;
+    if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+    else process.env.PHREN_PATH = origPhrenPath;
     tmp.cleanup();
   });
 

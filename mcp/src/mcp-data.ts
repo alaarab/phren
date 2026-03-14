@@ -33,12 +33,12 @@ const importPayloadSchema = z.object({
 }).passthrough();
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, withWriteQueue, rebuildIndex } = ctx;
+  const { phrenPath, withWriteQueue, rebuildIndex } = ctx;
 
   server.registerTool(
     "export_project",
     {
-      title: "◆ cortex · export",
+      title: "◆ phren · export",
       description: "Export a project's data (findings, task, summary) as portable JSON for sharing or backup.",
       inputSchema: z.object({
         project: z.string().describe("Project name to export."),
@@ -46,7 +46,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const projectDir = path.join(cortexPath, project);
+      const projectDir = path.join(phrenPath, project);
       if (!fs.existsSync(projectDir)) return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
 
       const exported: Record<string, unknown> = { project, exportedAt: new Date().toISOString(), version: 1 };
@@ -54,16 +54,16 @@ export function register(server: McpServer, ctx: McpContext): void {
       const summaryPath = path.join(projectDir, "summary.md");
       if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
 
-      const learningsResult = readFindings(cortexPath, project);
+      const learningsResult = readFindings(phrenPath, project);
       if (learningsResult.ok) exported.learnings = learningsResult.data;
       const findingsPath = path.join(projectDir, "FINDINGS.md");
       if (fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
 
-      const taskResult = readTasks(cortexPath, project);
+      const taskResult = readTasks(phrenPath, project);
       if (taskResult.ok) {
         exported.task = taskResult.data.items;
         // Also export the raw task file string for lossless round-trip (preserves priority/pinned/stable IDs)
-        const taskRawPath = resolveTaskFilePath(cortexPath, project);
+        const taskRawPath = resolveTaskFilePath(phrenPath, project);
         if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
       }
 
@@ -77,7 +77,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "import_project",
     {
-      title: "◆ cortex · import",
+      title: "◆ phren · import",
       description: "Import project data from a previously exported JSON payload. Creates the project directory if needed.",
       inputSchema: z.object({
         data: z.string().describe("JSON string from a previous export_project call."),
@@ -89,7 +89,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           decoded = JSON.parse(rawData);
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] import_project jsonParse: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project jsonParse: ${err instanceof Error ? err.message : String(err)}\n`);
           return mcpResponse({ ok: false, error: "Invalid JSON input." });
         }
 
@@ -112,7 +112,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok: false, error: `Invalid project name: "${parsed.project}"` });
         }
 
-        const existingProject = findProjectNameCaseInsensitive(cortexPath, projectName);
+        const existingProject = findProjectNameCaseInsensitive(phrenPath, projectName);
         if (existingProject && existingProject !== projectName) {
           return mcpResponse({
             ok: false,
@@ -120,7 +120,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           });
         }
 
-        const projectDir = path.join(cortexPath, projectName);
+        const projectDir = path.join(phrenPath, projectName);
         const overwrite = parsed.overwrite === true;
         if (fs.existsSync(projectDir) && !overwrite) {
           return mcpResponse({
@@ -129,7 +129,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           });
         }
 
-        const stagingRoot = fs.mkdtempSync(path.join(cortexPath, `.cortex-import-${projectName}-`));
+        const stagingRoot = fs.mkdtempSync(path.join(phrenPath, `.phren-import-${projectName}-`));
         const stagedProjectDir = path.join(stagingRoot, projectName);
         const imported: string[] = [];
         const cleanupDir = (dir: string) => {
@@ -204,7 +204,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             imported.push(TASKS_FILENAME);
           }
 
-          const backupDir = overwrite ? path.join(cortexPath, `${projectName}.import-backup-${Date.now()}`) : null;
+          const backupDir = overwrite ? path.join(phrenPath, `${projectName}.import-backup-${Date.now()}`) : null;
 
           try {
             if (overwrite && fs.existsSync(projectDir)) {
@@ -240,9 +240,9 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (overwrite) {
             // Find the backup dir that was created earlier
             try {
-              for (const entry of fs.readdirSync(cortexPath)) {
+              for (const entry of fs.readdirSync(phrenPath)) {
                 if (entry.startsWith(`${projectName}.import-backup-`)) {
-                  const backupPath = path.join(cortexPath, entry);
+                  const backupPath = path.join(phrenPath, entry);
                   if (fs.existsSync(backupPath) && !fs.existsSync(projectDir)) {
                     fs.renameSync(backupPath, projectDir);
                   } else if (fs.existsSync(backupPath)) {
@@ -254,7 +254,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 }
               }
             } catch (err: unknown) {
-              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] import_project backupRestore: ${err instanceof Error ? err.message : String(err)}\n`);
+              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupRestore: ${err instanceof Error ? err.message : String(err)}\n`);
             }
           }
           return mcpResponse({
@@ -267,13 +267,13 @@ export function register(server: McpServer, ctx: McpContext): void {
         // Backup is only deleted after successful rebuild so we can restore on failure
         if (overwrite) {
           try {
-            for (const entry of fs.readdirSync(cortexPath)) {
+            for (const entry of fs.readdirSync(phrenPath)) {
               if (entry.startsWith(`${projectName}.import-backup-`)) {
-                fs.rmSync(path.join(cortexPath, entry), { recursive: true, force: true });
+                fs.rmSync(path.join(phrenPath, entry), { recursive: true, force: true });
               }
             }
           } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] import_project backupCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
         return mcpResponse({
@@ -288,7 +288,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "manage_project",
     {
-      title: "◆ cortex · manage project",
+      title: "◆ phren · manage project",
       description: "Archive or unarchive a project. Archive moves it out of the active index without deleting data (renamed with .archived suffix). Unarchive restores it.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -298,9 +298,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, action }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-      const activeProject = findProjectNameCaseInsensitive(cortexPath, project);
-      const projectDir = path.join(cortexPath, project);
-      const archiveDir = path.join(cortexPath, `${project}.archived`);
+      const activeProject = findProjectNameCaseInsensitive(phrenPath, project);
+      const projectDir = path.join(phrenPath, project);
+      const archiveDir = path.join(phrenPath, `${project}.archived`);
 
       if (action === "archive") {
         if (!fs.existsSync(projectDir)) {
@@ -324,7 +324,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Project "${activeProject}" already exists as an active project.` });
       }
       if (!fs.existsSync(archiveDir)) {
-        const entries = fs.readdirSync(cortexPath).filter((e) => e.endsWith(".archived"));
+        const entries = fs.readdirSync(phrenPath).filter((e) => e.endsWith(".archived"));
         const available = entries.map((e) => e.replace(/\.archived$/, ""));
         return mcpResponse({ ok: false, error: `No archive found for "${project}".`, data: { availableArchives: available } });
       }

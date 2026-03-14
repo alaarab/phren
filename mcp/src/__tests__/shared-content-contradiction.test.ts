@@ -76,8 +76,8 @@ describe("extractDynamicEntities", () => {
   beforeEach(() => { tmp = makeTempDir("dynamic-entities-"); });
   afterEach(() => tmp.cleanup());
 
-  function writeFindings(cortexPath: string, project: string, bullets: string[]) {
-    const dir = path.join(cortexPath, project);
+  function writeFindings(phrenPath: string, project: string, bullets: string[]) {
+    const dir = path.join(phrenPath, project);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "FINDINGS.md"), bullets.map(b => `- ${b}`).join("\n") + "\n");
   }
@@ -158,17 +158,17 @@ describe("checkSemanticConflicts (LLM-based)", () => {
   let tmpDir: string;
   let tmpCleanup: (() => void) | undefined;
 
-  function makeCortex(): string {
-    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-semantic-conflict-"));
+  function makePhren(): string {
+    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-semantic-conflict-"));
     return tmpDir;
   }
 
   beforeEach(() => {
-    process.env.CORTEX_FEATURE_SEMANTIC_CONFLICT = "1";
+    process.env.PHREN_FEATURE_SEMANTIC_CONFLICT = "1";
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_FEATURE_SEMANTIC_CONFLICT;
+    delete process.env.PHREN_FEATURE_SEMANTIC_CONFLICT;
     vi.restoreAllMocks();
     if (tmpCleanup) {
       tmpCleanup();
@@ -177,18 +177,18 @@ describe("checkSemanticConflicts (LLM-based)", () => {
   });
 
   it("returns checked=false when feature flag is off", async () => {
-    delete process.env.CORTEX_FEATURE_SEMANTIC_CONFLICT;
-    const cortex = makeCortex();
-    const result = await checkSemanticConflicts(cortex, "proj", "Never use Redis");
+    delete process.env.PHREN_FEATURE_SEMANTIC_CONFLICT;
+    const phren = makePhren();
+    const result = await checkSemanticConflicts(phren, "proj", "Never use Redis");
     expect(result.checked).toBe(false);
     expect(result.annotations).toHaveLength(0);
   });
 
   it("detects CONFLICT via cached LLM result and adds annotation", async () => {
-    const cortex = makeCortex();
-    const projDir = path.join(cortex, "proj");
+    const phren = makePhren();
+    const projDir = path.join(phren, "proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+    fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
     fs.writeFileSync(
       path.join(projDir, "FINDINGS.md"),
       "# proj Findings\n\n## 2026-01-01\n\n- Always use Docker for production deployments\n"
@@ -199,10 +199,10 @@ describe("checkSemanticConflicts (LLM-based)", () => {
     const existing = "- Always use Docker for production deployments";
     const newFinding = "Never use Docker in production — bare metal is faster";
     const key = crypto.createHash("sha256").update(existing + "|||" + newFinding).digest("hex");
-    const cachePath = path.join(cortex, ".runtime", "conflict-cache.json");
+    const cachePath = path.join(phren, ".runtime", "conflict-cache.json");
     fs.writeFileSync(cachePath, JSON.stringify({ [key]: { result: "CONFLICT", ts: Date.now() } }));
 
-    const result = await checkSemanticConflicts(cortex, "proj", newFinding);
+    const result = await checkSemanticConflicts(phren, "proj", newFinding);
     expect(result.checked).toBe(true);
     expect(result.annotations.length).toBeGreaterThanOrEqual(1);
     expect(result.annotations[0]).toContain("conflicts_with");
@@ -210,27 +210,27 @@ describe("checkSemanticConflicts (LLM-based)", () => {
   });
 
   it("scans older projects beyond the two most recent ones", async () => {
-    const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+    const phren = makePhren();
+    fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
     for (const project of ["proj", "recent-a", "recent-b", "older-proj"]) {
-      fs.mkdirSync(path.join(cortex, project), { recursive: true });
+      fs.mkdirSync(path.join(phren, project), { recursive: true });
     }
 
-    fs.writeFileSync(path.join(cortex, "proj", "FINDINGS.md"), "# proj Findings\n");
-    fs.writeFileSync(path.join(cortex, "recent-a", "FINDINGS.md"), "# recent-a Findings\n\n- Use AWS for compute workloads\n");
-    fs.writeFileSync(path.join(cortex, "recent-b", "FINDINGS.md"), "# recent-b Findings\n\n- Prefer Kubernetes for orchestration\n");
+    fs.writeFileSync(path.join(phren, "proj", "FINDINGS.md"), "# proj Findings\n");
+    fs.writeFileSync(path.join(phren, "recent-a", "FINDINGS.md"), "# recent-a Findings\n\n- Use AWS for compute workloads\n");
+    fs.writeFileSync(path.join(phren, "recent-b", "FINDINGS.md"), "# recent-b Findings\n\n- Prefer Kubernetes for orchestration\n");
     const existing = "- Always use Docker for production deployments";
-    fs.writeFileSync(path.join(cortex, "older-proj", "FINDINGS.md"), `# older-proj Findings\n\n${existing}\n`);
+    fs.writeFileSync(path.join(phren, "older-proj", "FINDINGS.md"), `# older-proj Findings\n\n${existing}\n`);
 
     const crypto = await import("node:crypto");
     const newFinding = "Never use Docker in production — bare metal is faster";
     const key = crypto.createHash("sha256").update(existing + "|||" + newFinding).digest("hex");
     fs.writeFileSync(
-      path.join(cortex, ".runtime", "conflict-cache.json"),
+      path.join(phren, ".runtime", "conflict-cache.json"),
       JSON.stringify({ [key]: { result: "CONFLICT", ts: Date.now() } })
     );
 
-    const result = await checkSemanticConflicts(cortex, "proj", newFinding);
+    const result = await checkSemanticConflicts(phren, "proj", newFinding);
     expect(result.annotations.some((annotation) => annotation.includes("older-proj"))).toBe(true);
   });
 });

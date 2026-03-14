@@ -20,7 +20,7 @@ export interface ParsedCitation {
 export function parseCitations(text: string): ParsedCitation[] {
   const results: ParsedCitation[] = [];
   let m: RegExpExecArray | null;
-  const citeRe = /<!--\s*cortex:cite\s+(\{[\s\S]*?\})\s*-->/g;
+  const citeRe = /<!--\s*phren:cite\s+(\{[\s\S]*?\})\s*-->/g;
   while ((m = citeRe.exec(text)) !== null) {
     const parsed = parseCitationComment(m[0]);
     if (parsed) results.push({ citation: parsed });

@@ -1,9 +1,9 @@
 # Interactive Shell
 
-The cortex shell is a terminal UI for browsing and managing your project store. It launches automatically when you run `cortex` with no arguments in a terminal, or explicitly with `cortex shell`.
+The phren shell is a terminal UI for browsing and managing your project store. It launches automatically when you run `phren` with no arguments in a terminal, or explicitly with `phren shell`.
 
 ```bash
-cortex shell
+phren shell
 ```
 
 ## Views
@@ -34,7 +34,7 @@ Finding lifecycle states (for example superseded/retracted/contradicted) and pro
 
 Shows pending review items from `MEMORY_QUEUE.md`. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date. Triage items with `:mq approve`, `:mq reject`, or `:mq edit`.
 
-If you move from shell to browser triage (`cortex web-ui`), the UI runs loopback-only and enforces auth + CSRF on mutations.
+If you move from shell to browser triage (`phren web-ui`), the UI runs loopback-only and enforces auth + CSRF on mutations.
 
 ### Skills (`s`)
 
@@ -66,7 +66,7 @@ Shows the machines.yaml mapping (hostname to profile) and all profiles with thei
 
 Runs doctor checks and shows results alongside runtime health data: last hook run, last auto-save, last governance run. Offers remediation commands (`:run fix`, `:relink`, `:rerun hooks`, `:update`).
 
-Health data also reflects RBAC identity context (`CORTEX_ACTOR` and local/shared access-control files), review queue pressure, and whether telemetry is enabled.
+Health data also reflects RBAC identity context (`PHREN_ACTOR` and local/shared access-control files), review queue pressure, and whether telemetry is enabled.
 
 ## Navigation
 
@@ -134,7 +134,7 @@ All palette commands start with `:`. You can also type them without the colon pr
 | `:run fix` | Run `doctor --fix` to self-heal configuration |
 | `:relink` | Refresh generated links, context files, and hook wiring |
 | `:rerun hooks` | Execute lifecycle hooks now (session-start + stop) |
-| `:update` | Update cortex to the latest version |
+| `:update` | Update phren to the latest version |
 | `:reset` | Reset shell state to defaults |
 
 ### Pagination

@@ -19,7 +19,7 @@ vi.mock("./shared.js", async (importOriginal) => {
   const orig: any = await importOriginal();
   return {
     ...orig,
-    ensureCortexPath: () => "/tmpcortex-fake",
+    ensurePhrenPath: () => "/tmpphren-fake",
     detectProject: () => "test-proj",
     debugLog: () => {},
     addFindingToFile: vi.fn(),
@@ -189,8 +189,8 @@ describe("ghCachePath", () => {
   it("returns a path in os.tmpdir keyed by repo path hash", () => {
     const p = ghCachePath("/home/user/my-repo");
     expect(p).toContain(os.tmpdir());
-    expect(p).toMatch(/cortex-gh-cache-/);
-    expect(p).toMatch(/cortex-gh-cache-[0-9a-f]{12}-/);
+    expect(p).toMatch(/phren-gh-cache-/);
+    expect(p).toMatch(/phren-gh-cache-[0-9a-f]{12}-/);
   });
 
   it("includes the current date", () => {
@@ -257,7 +257,7 @@ describe("mineGithubCandidates", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-gh-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-gh-test-"));
   });
 
   afterEach(() => {

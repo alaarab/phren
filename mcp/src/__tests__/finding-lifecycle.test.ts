@@ -13,15 +13,15 @@ import {
 
 const PROJECT = "demo";
 
-function seedProject(cortexPath: string): string {
-  const dir = path.join(cortexPath, PROJECT);
+function seedProject(phrenPath: string): string {
+  const dir = path.join(phrenPath, PROJECT);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), "# demo\n");
   return dir;
 }
 
-function findingsPath(cortexPath: string): string {
-  return path.join(cortexPath, PROJECT, "FINDINGS.md");
+function findingsPath(phrenPath: string): string {
+  return path.join(phrenPath, PROJECT, "FINDINGS.md");
 }
 
 describe("finding-lifecycle", () => {
@@ -38,7 +38,7 @@ describe("finding-lifecycle", () => {
 
   it("parses lifecycle status from modern comments and falls back status_updated to created date", () => {
     const line =
-      '- Prefer pooled DB connections <!-- created: 2026-03-10 --> <!-- cortex:status "superseded" --> <!-- cortex:status_reason "new benchmark" --> <!-- cortex:status_ref "Use pgBouncer" -->';
+      '- Prefer pooled DB connections <!-- created: 2026-03-10 --> <!-- phren:status "superseded" --> <!-- phren:status_reason "new benchmark" --> <!-- phren:status_ref "Use pgBouncer" -->';
 
     const parsed = parseFindingLifecycle(line);
     expect(parsed.status).toBe("superseded");
@@ -48,7 +48,7 @@ describe("finding-lifecycle", () => {
   });
 
   it("parses legacy superseded_by and conflicts_with comments", () => {
-    const superseded = '- Old approach <!-- cortex:superseded_by "New approach" 2026-03-11 -->';
+    const superseded = '- Old approach <!-- phren:superseded_by "New approach" 2026-03-11 -->';
     const conflict = '- A config <!-- conflicts_with: "B config" -->';
 
     const supersededParsed = parseFindingLifecycle(superseded);
@@ -75,8 +75,8 @@ describe("finding-lifecycle", () => {
     const line = `- Finding text ${comments}`;
     const stripped = stripLifecycleComments(line);
 
-    expect(comments).toContain('cortex:status "retracted"');
-    expect(comments).toContain('cortex:status_updated "2026-03-12"');
+    expect(comments).toContain('phren:status "retracted"');
+    expect(comments).toContain('phren:status_updated "2026-03-12"');
     expect(stripped).toBe("- Finding text");
   });
 
@@ -100,9 +100,9 @@ describe("finding-lifecycle", () => {
     expect(result.data.status).toBe("superseded");
 
     const content = fs.readFileSync(findingsPath(tmp.path), "utf8");
-    expect(content).toContain('<!-- cortex:superseded_by "Use query builder"');
-    expect(content).toContain('<!-- cortex:status "superseded" -->');
-    expect(content).toContain('<!-- cortex:status_reason "superseded_by" -->');
+    expect(content).toContain('<!-- phren:superseded_by "Use query builder"');
+    expect(content).toContain('<!-- phren:status "superseded" -->');
+    expect(content).toContain('<!-- phren:status_reason "superseded_by" -->');
   });
 
   it("retractFinding writes retracted lifecycle metadata", () => {
@@ -124,8 +124,8 @@ describe("finding-lifecycle", () => {
     expect(result.data.status).toBe("retracted");
 
     const content = fs.readFileSync(findingsPath(tmp.path), "utf8");
-    expect(content).toContain('<!-- cortex:status "retracted" -->');
-    expect(content).toContain('<!-- cortex:status_reason "rotation policy changed" -->');
+    expect(content).toContain('<!-- phren:status "retracted" -->');
+    expect(content).toContain('<!-- phren:status_reason "rotation policy changed" -->');
   });
 
   it("resolveFindingContradiction updates statuses based on resolution", () => {
@@ -156,7 +156,7 @@ describe("finding-lifecycle", () => {
     expect(result.data.finding_b.status).toBe("active");
 
     const content = fs.readFileSync(findingsPath(tmp.path), "utf8");
-    expect(content).toContain('<!-- cortex:status_reason "contradiction_resolved_keep_b" -->');
-    expect(content).toContain('<!-- cortex:superseded_by "Never use Redis pubsub at scale"');
+    expect(content).toContain('<!-- phren:status_reason "contradiction_resolved_keep_b" -->');
+    expect(content).toContain('<!-- phren:superseded_by "Never use Redis pubsub at scale"');
   });
 });

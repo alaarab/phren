@@ -114,14 +114,14 @@ function extractResumptionHint(
 /** Per-connection session map keyed by arbitrary connection ID (if provided). */
 const _sessionMap = new Map<string, string>();
 
-function sessionsDir(cortexPath: string): string {
-  const dir = path.join(cortexPath, ".runtime", "sessions");
+function sessionsDir(phrenPath: string): string {
+  const dir = path.join(phrenPath, ".runtime", "sessions");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-function sessionFileForId(cortexPath: string, sessionId: string): string {
-  return path.join(sessionsDir(cortexPath), `session-${sessionId}.json`);
+function sessionFileForId(phrenPath: string, sessionId: string): string {
+  return path.join(sessionsDir(phrenPath), `session-${sessionId}.json`);
 }
 
 function readSessionStateFile(file: string): SessionState | null {
@@ -137,8 +137,8 @@ function writeSessionStateFile(file: string, state: SessionState): void {
 }
 
 /** Find the most recent *active* (not ended) session file by mtime. */
-function findMostRecentSession(cortexPath: string): { file: string; state: SessionState } | null {
-  const dir = sessionsDir(cortexPath);
+function findMostRecentSession(phrenPath: string): { file: string; state: SessionState } | null {
+  const dir = sessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,
     readSessionStateFile,
@@ -151,8 +151,8 @@ function findMostRecentSession(cortexPath: string): { file: string; state: Sessi
   return { file: best.fullPath, state: best.data };
 }
 
-export function resolveActiveSessionScope(cortexPath: string, project?: string): string | undefined {
-  const dir = sessionsDir(cortexPath);
+export function resolveActiveSessionScope(phrenPath: string, project?: string): string | undefined {
+  const dir = sessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,
     readSessionStateFile,
@@ -178,30 +178,30 @@ export function resolveActiveSessionScope(cortexPath: string, project?: string):
 }
 
 /** Path for the last-summary fast-path file. */
-function lastSummaryPath(cortexPath: string): string {
-  return path.join(sessionsDir(cortexPath), "last-summary.json");
+function lastSummaryPath(phrenPath: string): string {
+  return path.join(sessionsDir(phrenPath), "last-summary.json");
 }
 
 /** Write the last summary for fast retrieval by next session_start. */
-function writeLastSummary(cortexPath: string, summary: string, sessionId: string, project?: string): void {
+function writeLastSummary(phrenPath: string, summary: string, sessionId: string, project?: string): void {
   try {
     const data = { summary, sessionId, project, endedAt: new Date().toISOString() };
-    fs.writeFileSync(lastSummaryPath(cortexPath), JSON.stringify(data, null, 2));
+    fs.writeFileSync(lastSummaryPath(phrenPath), JSON.stringify(data, null, 2));
   } catch (err: unknown) {
     debugError("writeLastSummary", err);
   }
 }
 
 /** Find the most recent session with a summary (including ended sessions). */
-export function findMostRecentSummary(cortexPath: string): string | null {
-  return findMostRecentSummaryWithProject(cortexPath).summary;
+export function findMostRecentSummary(phrenPath: string): string | null {
+  return findMostRecentSummaryWithProject(phrenPath).summary;
 }
 
 /** Find the most recent session with a summary and project context. */
-function findMostRecentSummaryWithProject(cortexPath: string): { summary: string | null; project?: string } {
+function findMostRecentSummaryWithProject(phrenPath: string): { summary: string | null; project?: string } {
   // Fast path: read from dedicated last-summary file
   try {
-    const fastPath = lastSummaryPath(cortexPath);
+    const fastPath = lastSummaryPath(phrenPath);
     if (fs.existsSync(fastPath)) {
       const data = JSON.parse(fs.readFileSync(fastPath, "utf-8")) as { summary?: string; project?: string };
       if (data.summary) return { summary: data.summary, project: data.project };
@@ -211,7 +211,7 @@ function findMostRecentSummaryWithProject(cortexPath: string): { summary: string
   }
 
   // Slow path: scan all session files
-  const dir = sessionsDir(cortexPath);
+  const dir = sessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,
     readSessionStateFile,
@@ -225,10 +225,10 @@ function findMostRecentSummaryWithProject(cortexPath: string): { summary: string
 }
 
 /** Resolve session file from an explicit sessionId or a previously-bound connectionId. */
-function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId?: string): { file: string; state: SessionState } | null {
+function resolveSessionFile(phrenPath: string, sessionId?: string, connectionId?: string): { file: string; state: SessionState } | null {
   const effectiveId = sessionId ?? (connectionId ? _sessionMap.get(connectionId) : undefined);
   if (effectiveId) {
-    const file = sessionFileForId(cortexPath, effectiveId);
+    const file = sessionFileForId(phrenPath, effectiveId);
     const state = readSessionStateFile(file);
     if (!state) return null;
     // Always reject ended sessions — prevents double session_end and stale session_context.
@@ -239,8 +239,8 @@ function resolveSessionFile(cortexPath: string, sessionId?: string, connectionId
 }
 
 /** Remove session files older than 24 hours. */
-function cleanupStaleSessions(cortexPath: string): number {
-  const dir = sessionsDir(cortexPath);
+function cleanupStaleSessions(phrenPath: string): number {
+  const dir = sessionsDir(phrenPath);
   // Scan all session files (keep all, we'll filter and unlink manually)
   const results = scanSessionFiles<SessionState | null>(
     dir,
@@ -268,16 +268,16 @@ function cleanupStaleSessions(cortexPath: string): number {
 }
 
 /** Increment the findingsAdded counter for a session. Falls back to the most relevant active session for the project. */
-export function incrementSessionFindings(cortexPath: string, count = 1, sessionId?: string, project?: string): void {
-  incrementSessionCounter(cortexPath, "findingsAdded", count, sessionId, project);
+export function incrementSessionFindings(phrenPath: string, count = 1, sessionId?: string, project?: string): void {
+  incrementSessionCounter(phrenPath, "findingsAdded", count, sessionId, project);
 }
 
-export function incrementSessionTasksCompleted(cortexPath: string, count = 1, sessionId?: string, project?: string): void {
-  incrementSessionCounter(cortexPath, "tasksCompleted", count, sessionId, project);
+export function incrementSessionTasksCompleted(phrenPath: string, count = 1, sessionId?: string, project?: string): void {
+  incrementSessionCounter(phrenPath, "tasksCompleted", count, sessionId, project);
 }
 
 function incrementSessionCounter(
-  cortexPath: string,
+  phrenPath: string,
   field: "findingsAdded" | "tasksCompleted",
   count = 1,
   sessionId?: string,
@@ -285,13 +285,13 @@ function incrementSessionCounter(
 ): void {
   try {
     const effectiveSessionId = project
-      ? resolveFindingSessionId(cortexPath, project, sessionId)
+      ? resolveFindingSessionId(phrenPath, project, sessionId)
       : sessionId;
     if (!effectiveSessionId) {
       debugLog(`${field} increment called without a resolvable sessionId — skipping`);
       return;
     }
-    const resolved = resolveSessionFile(cortexPath, effectiveSessionId);
+    const resolved = resolveSessionFile(phrenPath, effectiveSessionId);
     if (!resolved) return;
     const { file } = resolved;
     withFileLock(file, () => {
@@ -325,8 +325,8 @@ export interface SessionHistoryEntry {
 }
 
 /** List all sessions (both active and ended) from the sessions directory, sorted newest first. */
-export function listAllSessions(cortexPath: string, limit = 50): SessionHistoryEntry[] {
-  const dir = sessionsDir(cortexPath);
+export function listAllSessions(phrenPath: string, limit = 50): SessionHistoryEntry[] {
+  const dir = sessionsDir(phrenPath);
   // scanSessionFiles returns results sorted by mtime (newest first)
   const results = scanSessionFiles<SessionState>(
     dir,
@@ -377,7 +377,7 @@ export interface SessionArtifactTask {
 }
 
 export function getSessionArtifacts(
-  cortexPath: string,
+  phrenPath: string,
   sessionId: string,
   project?: string,
 ): { findings: SessionArtifactFinding[]; tasks: SessionArtifactTask[] } {
@@ -386,11 +386,11 @@ export function getSessionArtifacts(
   const shortId = sessionId.slice(0, 8);
 
   try {
-    const projectDirs = getProjectDirs(cortexPath);
+    const projectDirs = getProjectDirs(phrenPath);
     const targetProjects = project ? [project] : projectDirs;
     for (const proj of targetProjects) {
       // Findings with matching sessionId
-      const findingsResult = readFindings(cortexPath, proj);
+      const findingsResult = readFindings(phrenPath, proj);
       if (findingsResult.ok) {
         for (const f of findingsResult.data) {
           if (f.sessionId && (f.sessionId === sessionId || f.sessionId.startsWith(shortId))) {
@@ -404,7 +404,7 @@ export function getSessionArtifacts(
         }
       }
       // Tasks with matching sessionId
-      const tasksResult = readTasks(cortexPath, proj);
+      const tasksResult = readTasks(phrenPath, proj);
       if (tasksResult.ok) {
         for (const section of ["Active", "Queue", "Done"] as const) {
           for (const t of tasksResult.data.items[section]) {
@@ -428,16 +428,16 @@ export function getSessionArtifacts(
   return { findings, tasks };
 }
 
-function hasCompletedTasksInSession(cortexPath: string, sessionId: string, project?: string): boolean {
-  const artifacts = getSessionArtifacts(cortexPath, sessionId, project);
+function hasCompletedTasksInSession(phrenPath: string, sessionId: string, project?: string): boolean {
+  const artifacts = getSessionArtifacts(phrenPath, sessionId, project);
   return artifacts.tasks.some((task) => task.section === "Done" && task.checked);
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath } = ctx;
+  const { phrenPath } = ctx;
 
   server.registerTool("session_start", {
-    title: "◆ cortex · session start",
+    title: "◆ phren · session start",
     description: "Mark the start of a new session and retrieve context from prior sessions. Call this at the start of a conversation when not using hooks. Returns prior session summary and recent project findings. The returned sessionId should be passed to session_end and session_context to avoid cross-client collisions.",
     inputSchema: z.object({
       project: z.string().optional().describe("Project to load context for."),
@@ -446,7 +446,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }),
   }, async ({ project, agentScope, connectionId }) => {
     // Clean up stale sessions (>24h)
-    cleanupStaleSessions(cortexPath);
+    cleanupStaleSessions(phrenPath);
 
     const normalizedAgentScope = agentScope === undefined ? undefined : normalizeMemoryScope(agentScope);
     if (agentScope !== undefined && !normalizedAgentScope) {
@@ -454,12 +454,12 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
 
     // Find most recent prior session for context
-    const priorResult = findMostRecentSession(cortexPath);
+    const priorResult = findMostRecentSession(phrenPath);
     const prior = priorResult?.state ?? null;
     // Also check ended sessions for summaries and project context.
     // findMostRecentSession skips ended sessions, so we need a separate lookup
     // to restore project context after a normal session_end.
-    const priorEnded = prior ? null : findMostRecentSummaryWithProject(cortexPath);
+    const priorEnded = prior ? null : findMostRecentSummaryWithProject(phrenPath);
     const priorSummary = prior?.summary ?? priorEnded?.summary ?? null;
     const priorProject = prior?.project ?? priorEnded?.project;
 
@@ -473,7 +473,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       findingsAdded: 0,
       tasksCompleted: 0,
     };
-    const newFile = sessionFileForId(cortexPath, sessionId);
+    const newFile = sessionFileForId(phrenPath, sessionId);
     writeSessionStateFile(newFile, next);
     if (connectionId) _sessionMap.set(connectionId, sessionId);
 
@@ -487,7 +487,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     const activeScope = normalizedAgentScope;
     if (activeProject && isValidProjectName(activeProject)) {
       try {
-        const findings = readFindings(cortexPath, activeProject);
+        const findings = readFindings(phrenPath, activeProject);
         if (findings.ok) {
           const bullets = findings.data
             .filter((entry) => isMemoryScopeVisible(normalizeMemoryScope(entry.scope), activeScope))
@@ -501,7 +501,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         debugError("session_start findingsRead", err);
       }
       try {
-        const tasks = readTasks(cortexPath, activeProject);
+        const tasks = readTasks(phrenPath, activeProject);
         if (tasks.ok) {
           const queueItems = tasks.data.items.Queue
             .filter((entry) => isMemoryScopeVisible(normalizeMemoryScope(entry.scope), activeScope))
@@ -516,7 +516,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
       // Surface extracted preferences/facts for this project
       try {
-        const facts = readExtractedFacts(cortexPath, activeProject).slice(-10);
+        const facts = readExtractedFacts(phrenPath, activeProject).slice(-10);
         if (facts.length > 0) {
           parts.push(`## Preferences (${activeProject})\n${facts.map(f => `- ${f.fact}`).join("\n")}`);
         }
@@ -525,7 +525,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       try {
-          const checkpoints = listTaskCheckpoints(cortexPath, activeProject).slice(0, 3);
+          const checkpoints = listTaskCheckpoints(phrenPath, activeProject).slice(0, 3);
         if (checkpoints.length > 0) {
           const lines: string[] = [];
           for (const checkpoint of checkpoints) {
@@ -554,7 +554,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   });
 
   server.registerTool("session_end", {
-    title: "◆ cortex · session end",
+    title: "◆ phren · session end",
     description: "Mark the end of a session and save a summary for the next session to pick up. Call this before ending a conversation to preserve context. Pass the sessionId returned by session_start, or a stable connectionId bound at session_start.",
     inputSchema: z.object({
       summary: z.string().optional().describe("What was accomplished this session. Shown at the start of the next session."),
@@ -565,7 +565,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     if (!sessionId && !connectionId) {
       return mcpResponse({ ok: false, error: "Pass sessionId or connectionId. Implicit process-global session fallback has been removed." });
     }
-    const resolved = resolveSessionFile(cortexPath, sessionId, connectionId);
+    const resolved = resolveSessionFile(phrenPath, sessionId, connectionId);
     if (!resolved) return mcpResponse({ ok: false, error: "No active session. Call session_start first." });
 
     const { file, state } = resolved;
@@ -595,14 +595,14 @@ export function register(server: McpServer, ctx: McpContext): void {
     // session_start can restore project context even after a normal session_end.
     const effectiveSummary = endedState.summary;
     if (effectiveSummary) {
-      writeLastSummary(cortexPath, effectiveSummary, state.sessionId, endedState.project);
+      writeLastSummary(phrenPath, effectiveSummary, state.sessionId, endedState.project);
     }
 
     if (endedState.project && isValidProjectName(endedState.project)) {
       try {
-        const trackedActiveTask = getActiveTaskForSession(cortexPath, state.sessionId, endedState.project);
+        const trackedActiveTask = getActiveTaskForSession(phrenPath, state.sessionId, endedState.project);
         const activeTask = trackedActiveTask ?? (() => {
-          const tasks = readTasks(cortexPath, endedState.project!);
+          const tasks = readTasks(phrenPath, endedState.project!);
           if (!tasks.ok) return null;
           return tasks.data.items.Active[0] ?? null;
         })();
@@ -614,7 +614,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             activeTask.line,
             activeTask.context || "No prior attempt captured",
           );
-          writeTaskCheckpoint(cortexPath, {
+          writeTaskCheckpoint(phrenPath, {
             project: endedState.project,
             taskId,
             taskText: activeTask.line,
@@ -634,8 +634,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
     try {
       const tasksCompleted = Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0;
-      if (tasksCompleted > 0 || hasCompletedTasksInSession(cortexPath, state.sessionId, endedState.project)) {
-        markImpactEntriesCompletedForSession(cortexPath, state.sessionId, endedState.project);
+      if (tasksCompleted > 0 || hasCompletedTasksInSession(phrenPath, state.sessionId, endedState.project)) {
+        markImpactEntriesCompletedForSession(phrenPath, state.sessionId, endedState.project);
       }
     } catch (err: unknown) {
       debugLog(`impact scoring update failed: ${errorMessage(err)}`);
@@ -644,12 +644,12 @@ export function register(server: McpServer, ctx: McpContext): void {
     const durationMs = new Date(endedState.endedAt!).getTime() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);
 
-    runCustomHooks(cortexPath, "post-session-end", {
-      CORTEX_SESSION_ID: state.sessionId,
-      CORTEX_DURATION_MINS: String(durationMins),
-      CORTEX_FINDINGS_ADDED: String(endedState.findingsAdded),
-      CORTEX_TASKS_COMPLETED: String(Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0),
-      ...(endedState.project ? { CORTEX_PROJECT: endedState.project } : {}),
+    runCustomHooks(phrenPath, "post-session-end", {
+      PHREN_SESSION_ID: state.sessionId,
+      PHREN_DURATION_MINS: String(durationMins),
+      PHREN_FINDINGS_ADDED: String(endedState.findingsAdded),
+      PHREN_TASKS_COMPLETED: String(Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0),
+      ...(endedState.project ? { PHREN_PROJECT: endedState.project } : {}),
     });
 
     return mcpResponse({
@@ -665,7 +665,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   });
 
   server.registerTool("session_context", {
-    title: "◆ cortex · session context",
+    title: "◆ phren · session context",
     description: "Get the current session context -- active project, session duration, findings added, and prior session summary. Pass the sessionId returned by session_start, or a stable connectionId bound at session_start.",
     inputSchema: z.object({
       sessionId: z.string().optional().describe("Session ID to query (returned by session_start)."),
@@ -675,7 +675,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     if (!sessionId && !connectionId) {
       return mcpResponse({ ok: false, error: "Pass sessionId or connectionId. Implicit process-global session fallback has been removed." });
     }
-    const resolved = resolveSessionFile(cortexPath, sessionId, connectionId);
+    const resolved = resolveSessionFile(phrenPath, sessionId, connectionId);
     if (!resolved) return mcpResponse({ ok: false, error: "No active session. Call session_start first.", data: null });
 
     const { state } = resolved;
@@ -697,7 +697,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   });
 
   server.registerTool("session_history", {
-    title: "◆ cortex · session history",
+    title: "◆ phren · session history",
     description: "List past sessions with their duration, findings count, and summary. Optionally drill into a specific session to see all findings and tasks created during it.",
     inputSchema: z.object({
       limit: z.number().optional().describe("Max sessions to return (default 20)."),
@@ -707,11 +707,11 @@ export function register(server: McpServer, ctx: McpContext): void {
   }, async ({ limit, sessionId: targetSessionId, project }) => {
     if (targetSessionId) {
       // Drill into a specific session
-      const sessions = listAllSessions(cortexPath, 200);
+      const sessions = listAllSessions(phrenPath, 200);
       const session = sessions.find(s => s.sessionId === targetSessionId || s.sessionId.startsWith(targetSessionId));
       if (!session) return mcpResponse({ ok: false, error: `Session ${targetSessionId} not found.` });
 
-      const artifacts = getSessionArtifacts(cortexPath, session.sessionId, project);
+      const artifacts = getSessionArtifacts(phrenPath, session.sessionId, project);
       const parts = [
         `Session: ${session.sessionId.slice(0, 8)}`,
         `Project: ${session.project ?? "none"}`,
@@ -738,7 +738,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
 
     // List sessions
-    const sessions = listAllSessions(cortexPath, limit ?? 20);
+    const sessions = listAllSessions(phrenPath, limit ?? 20);
     const filtered = project ? sessions.filter(s => s.project === project) : sessions;
     if (filtered.length === 0) return mcpResponse({ ok: true, message: "No sessions found.", data: [] });
 

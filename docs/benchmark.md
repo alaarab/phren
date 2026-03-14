@@ -1,6 +1,6 @@
 # Benchmark Protocol
 
-This document describes the retrieval benchmark protocol for evaluating cortex's search behavior.
+This document describes the retrieval benchmark protocol for evaluating phren's search behavior.
 
 The important constraint: benchmark numbers only mean anything when the run conditions are published alongside them. If you do not state machine, dataset, cache state, and retrieval mode, treat the result as anecdotal.
 
@@ -63,19 +63,19 @@ Each query result is scored on a 3-point scale:
 ## Running the Harness
 
 ```bash
-# Build cortex first
-cd ~cortex && npm run build
+# Build phren first
+cd ~phren && npm run build
 
 # Run the benchmark
 npx tsx mcp/src/__tests__/benchmark/harness.ts
 
 # Run the live retrieval latency/token benchmark
-npm run bench:retrieval -- --cortex-path ~/.cortex
+npm run bench:retrieval -- --phren-path ~/.phren
 
 # Run the synthetic large-corpus retrieval benchmark
 npm run bench:retrieval:synthetic -- --sizes 1000,10000
 
-# Push to much larger synthetic corpora without touching ~/.cortex
+# Push to much larger synthetic corpora without touching ~/.phren
 npm run bench:retrieval:synthetic -- --sizes 10000,100000 --queries-per-size 16
 
 # Or via vitest
@@ -100,14 +100,14 @@ The synthetic retrieval runner writes JSON with:
 - cold and warm index-build time per corpus size
 - lexical and hybrid retrieval latency per synthetic corpus size
 - exact top-hit counts for deterministic generated queries
-- generated corpus sizes without touching your real `~/.cortex`
+- generated corpus sizes without touching your real `~/.phren`
 
 ## Published Conditions Template
 
 Every benchmark run should publish:
 
 - Machine hostname, platform, CPU architecture, and Node.js version
-- Cortex version or git commit
+- Phren version or git commit
 - Dataset source: toy, LoCoMo-derived, or your own store
 - Corpus size: sessions, findings, and projects indexed
 - Retrieval mode: FTS5-only, shared rerank, or embeddings-enabled
@@ -118,7 +118,7 @@ The bundled runners now emit a `conditions` block in their JSON output. If you p
 
 ## March 9, 2026 Author-Local Retrieval Runs
 
-After the relaxed lexical rescue pass and the long-document overlap fix, the author-local run against the author's `~/.cortex` corpus (139 indexed docs, 10 real queries, Node `v24.13.0`) produced:
+After the relaxed lexical rescue pass and the long-document overlap fix, the author-local run against the author's `~/.phren` corpus (139 indexed docs, 10 real queries, Node `v24.13.0`) produced:
 
 - lexical path: `15.93ms` average total latency, `11.91ms` p50, `16.25ms` p95
 - gated semantic path: `12.90ms` average total latency, `11.59ms` p50, `16.52ms` p95
@@ -146,12 +146,12 @@ Interpretation:
 
 ## Synthetic Large-Corpus Retrieval Runs
 
-The live-store benchmark is useful for real workflow behavior, but it does not answer scaling questions cleanly because every personal cortex store has different shape and hygiene. For scaling work, use the synthetic benchmark:
+The live-store benchmark is useful for real workflow behavior, but it does not answer scaling questions cleanly because every personal phren store has different shape and hygiene. For scaling work, use the synthetic benchmark:
 
-- it creates a temporary cortex root under your temp directory
+- it creates a temporary phren root under your temp directory
 - it models each synthetic memory as its own markdown file so indexed document count scales with simulated memory count
 - it measures both cold index build time and warm retrieval time
-- it never reads or writes your real `~/.cortex` unless you explicitly point it there
+- it never reads or writes your real `~/.phren` unless you explicitly point it there
 
 Recommended sizes:
 
@@ -196,11 +196,11 @@ When publishing synthetic results, include:
 |---|------|-------|-------|-------|
 | | | | | |
 
-*Fill in after running the harness against your cortex instance.*
+*Fill in after running the harness against your phren instance.*
 
 ## LoCoMo / LongMemEval Benchmark
 
-LoCoMo (Long-Context Memory) is a benchmark for evaluating long-term memory retrieval in conversational AI systems. Our adaptation ingests findings into a temporary cortex instance, builds the FTS5 index, and measures recall@k and MRR (Mean Reciprocal Rank) for keyword-based retrieval queries against the ingested content.
+LoCoMo (Long-Context Memory) is a benchmark for evaluating long-term memory retrieval in conversational AI systems. Our adaptation ingests findings into a temporary phren instance, builds the FTS5 index, and measures recall@k and MRR (Mean Reciprocal Rank) for keyword-based retrieval queries against the ingested content.
 
 ### Running
 

@@ -4,8 +4,8 @@ import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import { addFindingToFile } from "../content-learning.js";
 
-function seedProject(cortexPath: string, project = "myapp") {
-  const dir = path.join(cortexPath, project);
+function seedProject(phrenPath: string, project = "myapp") {
+  const dir = path.join(phrenPath, project);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n`);
 }
@@ -19,7 +19,7 @@ describe("typed findings (decision|pitfall|pattern)", () => {
     seedProject(tmp.path);
   });
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 

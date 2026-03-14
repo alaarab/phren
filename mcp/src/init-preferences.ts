@@ -4,7 +4,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, installPreferencesFile } from "./cortex-paths.js";
+import { debugLog, installPreferencesFile } from "./phren-paths.js";
 import { errorMessage } from "./utils.js";
 import type { CustomHookEntry } from "./hooks.js";
 
@@ -12,7 +12,7 @@ export interface InstallPreferences {
   mcpEnabled?: boolean;
   hooksEnabled?: boolean;
   skillsScope?: "global" | "project";
-  projectOwnershipDefault?: "cortex-managed" | "detached" | "repo-managed";
+  projectOwnershipDefault?: "phren-managed" | "detached" | "repo-managed";
   proactivity?: "high" | "medium" | "low";
   proactivityFindings?: "high" | "medium" | "low";
   proactivityTask?: "high" | "medium" | "low";
@@ -23,12 +23,12 @@ export interface InstallPreferences {
   customHooks?: CustomHookEntry[];
 }
 
-function preferencesFile(cortexPath: string): string {
-  return installPreferencesFile(cortexPath);
+function preferencesFile(phrenPath: string): string {
+  return installPreferencesFile(phrenPath);
 }
 
-export function governanceInstallPreferencesFile(cortexPath: string): string {
-  return path.join(cortexPath, ".governance", "install-preferences.json");
+export function governanceInstallPreferencesFile(phrenPath: string): string {
+  return path.join(phrenPath, ".governance", "install-preferences.json");
 }
 
 function readPreferencesFile(file: string): InstallPreferences {
@@ -60,36 +60,36 @@ function writePreferencesFile(file: string, current: InstallPreferences, patch: 
   fs.renameSync(tmpPath, file);
 }
 
-export function readInstallPreferences(cortexPath: string): InstallPreferences {
-  return readPreferencesFile(preferencesFile(cortexPath));
+export function readInstallPreferences(phrenPath: string): InstallPreferences {
+  return readPreferencesFile(preferencesFile(phrenPath));
 }
 
-export function readGovernanceInstallPreferences(cortexPath: string): InstallPreferences {
-  return readPreferencesFile(governanceInstallPreferencesFile(cortexPath));
+export function readGovernanceInstallPreferences(phrenPath: string): InstallPreferences {
+  return readPreferencesFile(governanceInstallPreferencesFile(phrenPath));
 }
 
-export function writeInstallPreferences(cortexPath: string, patch: Partial<InstallPreferences>) {
-  writePreferencesFile(preferencesFile(cortexPath), readInstallPreferences(cortexPath), patch);
+export function writeInstallPreferences(phrenPath: string, patch: Partial<InstallPreferences>) {
+  writePreferencesFile(preferencesFile(phrenPath), readInstallPreferences(phrenPath), patch);
 }
 
-export function writeGovernanceInstallPreferences(cortexPath: string, patch: Partial<InstallPreferences>) {
-  writePreferencesFile(governanceInstallPreferencesFile(cortexPath), readGovernanceInstallPreferences(cortexPath), patch);
+export function writeGovernanceInstallPreferences(phrenPath: string, patch: Partial<InstallPreferences>) {
+  writePreferencesFile(governanceInstallPreferencesFile(phrenPath), readGovernanceInstallPreferences(phrenPath), patch);
 }
 
-export function getMcpEnabledPreference(cortexPath: string): boolean {
-  const prefs = readInstallPreferences(cortexPath);
+export function getMcpEnabledPreference(phrenPath: string): boolean {
+  const prefs = readInstallPreferences(phrenPath);
   return prefs.mcpEnabled !== false;
 }
 
-export function setMcpEnabledPreference(cortexPath: string, enabled: boolean): void {
-  writeInstallPreferences(cortexPath, { mcpEnabled: enabled });
+export function setMcpEnabledPreference(phrenPath: string, enabled: boolean): void {
+  writeInstallPreferences(phrenPath, { mcpEnabled: enabled });
 }
 
-export function getHooksEnabledPreference(cortexPath: string): boolean {
-  const prefs = readInstallPreferences(cortexPath);
+export function getHooksEnabledPreference(phrenPath: string): boolean {
+  const prefs = readInstallPreferences(phrenPath);
   return prefs.hooksEnabled !== false;
 }
 
-export function setHooksEnabledPreference(cortexPath: string, enabled: boolean): void {
-  writeInstallPreferences(cortexPath, { hooksEnabled: enabled });
+export function setHooksEnabledPreference(phrenPath: string, enabled: boolean): void {
+  writeInstallPreferences(phrenPath, { hooksEnabled: enabled });
 }

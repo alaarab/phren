@@ -33,10 +33,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CortexTreeProvider = void 0;
+exports.PhrenTreeProvider = void 0;
 const vscode = __importStar(require("vscode"));
 const profileConfig_1 = require("../profileConfig");
-class CortexTreeProvider {
+class PhrenTreeProvider {
     constructor(client, storePath) {
         this.client = client;
         this.storePath = storePath;
@@ -61,7 +61,7 @@ class CortexTreeProvider {
             return await this.getChildrenInner(element);
         }
         catch (error) {
-            console.error(`[cortex-tree] getChildren crash:`, error, `element:`, JSON.stringify(element));
+            console.error(`[phren-tree] getChildren crash:`, error, `element:`, JSON.stringify(element));
             return [{ kind: "message", label: `Error: ${error instanceof Error ? error.message : String(error)}`, iconId: "warning" }];
         }
     }
@@ -70,6 +70,12 @@ class CortexTreeProvider {
             return this.getRootSections();
         }
         if (element.kind === "rootSection") {
+            if (element.section === "projects") {
+                return this.getProjectNodes();
+            }
+            if (element.section === "machines") {
+                return this.getMachineNodes();
+            }
             if (element.section === "review") {
                 return this.getAggregateQueueSectionGroups();
             }
@@ -145,7 +151,7 @@ class CortexTreeProvider {
             return this.getTreeItemInner(element);
         }
         catch (error) {
-            console.error(`[cortex-tree] getTreeItem crash:`, error, `element:`, JSON.stringify(element));
+            console.error(`[phren-tree] getTreeItem crash:`, error, `element:`, JSON.stringify(element));
             const item = new vscode.TreeItem(`(error: ${error instanceof Error ? error.message : String(error)})`, vscode.TreeItemCollapsibleState.None);
             item.iconPath = themeIcon("warning");
             return item;
@@ -157,28 +163,28 @@ class CortexTreeProvider {
         }
         switch (element.kind) {
             case "rootSection": {
-                const labels = { review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
-                const icons = { review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
+                const labels = { projects: "Projects", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
+                const icons = { projects: "folder-library", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
                 const label = labels[element.section] ?? element.section;
                 if (element.section === "graph") {
                     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
                     item.iconPath = themeIcon(icons[element.section]);
-                    item.id = `cortex.root.${element.section}`;
-                    item.command = { command: "cortex.showGraph", title: "Show Entity Graph" };
-                    item.tooltip = "Open the Cortex entity graph visualization";
+                    item.id = `phren.root.${element.section}`;
+                    item.command = { command: "phren.showGraph", title: "Show Entity Graph" };
+                    item.tooltip = "Open the Phren entity graph visualization";
                     return item;
                 }
                 const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = element.description;
                 item.iconPath = themeIcon(icons[element.section] ?? "symbol-misc");
-                item.id = `cortex.root.${element.section}`;
+                item.id = `phren.root.${element.section}`;
                 return item;
             }
             case "project": {
                 const item = new vscode.TreeItem(element.projectName, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = element.brief ? truncate(element.brief, 72) : undefined;
                 item.iconPath = themeIcon("folder");
-                item.id = `cortex.project.${element.projectName}`;
+                item.id = `phren.project.${element.projectName}`;
                 return item;
             }
             case "category": {
@@ -190,9 +196,9 @@ class CortexTreeProvider {
                 }
                 const item = new vscode.TreeItem(categoryLabel, vscode.TreeItemCollapsibleState.Collapsed);
                 item.iconPath = themeIcon(categoryIconId(cat));
-                item.id = `cortex.category.${element.projectName}.${cat}`;
+                item.id = `phren.category.${element.projectName}.${cat}`;
                 if (cat === "findings") {
-                    item.contextValue = "cortex.category.findings";
+                    item.contextValue = "phren.category.findings";
                 }
                 return item;
             }
@@ -201,7 +207,7 @@ class CortexTreeProvider {
                 const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon("calendar");
-                item.id = `cortex.findingDateGroup.${element.projectName}.${element.date}`;
+                item.id = `phren.findingDateGroup.${element.projectName}.${element.date}`;
                 return item;
             }
             case "sessionDateGroup": {
@@ -209,7 +215,7 @@ class CortexTreeProvider {
                 const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon("calendar");
-                item.id = `cortex.sessionDateGroup.${element.projectName}.${element.date}`;
+                item.id = `phren.sessionDateGroup.${element.projectName}.${element.date}`;
                 return item;
             }
             case "finding": {
@@ -236,8 +242,8 @@ class CortexTreeProvider {
                 }
                 item.tooltip = tooltipLines.join("\n");
                 item.iconPath = themeIcon(iconId);
-                item.id = `cortex.finding.${element.projectName}.${element.id}`;
-                item.contextValue = "cortex.finding";
+                item.id = `phren.finding.${element.projectName}.${element.id}`;
+                item.contextValue = "phren.finding";
                 if (element.supersededBy) {
                     item.description = "(superseded)";
                 }
@@ -248,7 +254,7 @@ class CortexTreeProvider {
                     item.description = "(possible duplicate)";
                 }
                 item.command = {
-                    command: "cortex.openFinding",
+                    command: "phren.openFinding",
                     title: "Open Finding",
                     arguments: [element],
                 };
@@ -259,17 +265,17 @@ class CortexTreeProvider {
                 const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon(sectionIcons[element.section] ?? "list-flat");
-                item.id = `cortex.taskSectionGroup.${element.projectName}.${element.section}`;
+                item.id = `phren.taskSectionGroup.${element.projectName}.${element.section}`;
                 return item;
             }
             case "task": {
                 const item = new vscode.TreeItem(truncate(element.line, 120), vscode.TreeItemCollapsibleState.None);
                 item.tooltip = `${element.section} (${element.id})\n${element.line}`;
                 item.iconPath = themeIcon(taskIconId(element));
-                item.id = `cortex.task.${element.projectName}.${element.id}`;
-                item.contextValue = element.section !== "Done" ? "cortex.task.active" : "cortex.task.done";
+                item.id = `phren.task.${element.projectName}.${element.id}`;
+                item.contextValue = element.section !== "Done" ? "phren.task.active" : "phren.task.done";
                 item.command = {
-                    command: "cortex.openTask",
+                    command: "phren.openTask",
                     title: "Open Task",
                     arguments: [element],
                 };
@@ -280,7 +286,7 @@ class CortexTreeProvider {
                 const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon(queueIcons[element.section] ?? "list-flat");
-                item.id = `cortex.queueSectionGroup.${element.projectName}.${element.section}`;
+                item.id = `phren.queueSectionGroup.${element.projectName}.${element.section}`;
                 return item;
             }
             case "aggregateQueueSectionGroup": {
@@ -288,7 +294,7 @@ class CortexTreeProvider {
                 const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon(queueIcons[element.section] ?? "list-flat");
-                item.id = `cortex.aggregateQueueSectionGroup.${element.section}`;
+                item.id = `phren.aggregateQueueSectionGroup.${element.section}`;
                 return item;
             }
             case "queueItem": {
@@ -296,11 +302,11 @@ class CortexTreeProvider {
                 const confLabel = element.confidence !== undefined ? ` (${Math.round(element.confidence * 100)}%)` : "";
                 item.tooltip = `${element.section} ${element.id}${confLabel}\n${element.date}\n${element.text}`;
                 item.iconPath = themeIcon(element.risky ? "warning" : "mail");
-                item.id = `cortex.queueItem.${element.projectName}.${element.id}`;
+                item.id = `phren.queueItem.${element.projectName}.${element.id}`;
                 item.description = element.showProjectName ? element.projectName : undefined;
-                item.contextValue = "cortex.queue.item";
+                item.contextValue = "phren.queue.item";
                 item.command = {
-                    command: "cortex.openQueueItem",
+                    command: "phren.openQueueItem",
                     title: "Open Queue Item",
                     arguments: [element],
                 };
@@ -310,7 +316,7 @@ class CortexTreeProvider {
                 const label = element.source.charAt(0).toUpperCase() + element.source.slice(1);
                 const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
                 item.iconPath = themeIcon(element.source === "global" ? "globe" : "folder");
-                item.id = `cortex.skillGroup.${element.source}`;
+                item.id = `phren.skillGroup.${element.source}`;
                 return item;
             }
             case "skill": {
@@ -318,10 +324,10 @@ class CortexTreeProvider {
                 item.description = element.enabled ? "enabled" : "disabled";
                 item.tooltip = `${element.name} (${element.source})\n${element.enabled ? "Enabled" : "Disabled"}${element.path ? `\n${element.path}` : ""}`;
                 item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
-                item.id = `cortex.skill.${element.source}.${element.name}`;
-                item.contextValue = element.enabled ? "cortex.skill.enabled" : "cortex.skill.disabled";
+                item.id = `phren.skill.${element.source}.${element.name}`;
+                item.contextValue = element.enabled ? "phren.skill.enabled" : "phren.skill.disabled";
                 item.command = {
-                    command: "cortex.openSkill",
+                    command: "phren.openSkill",
                     title: "Open Skill",
                     arguments: [element.name, element.source],
                 };
@@ -332,10 +338,10 @@ class CortexTreeProvider {
                 item.description = element.enabled ? "enabled" : "disabled";
                 item.tooltip = `${element.tool}: ${element.enabled ? "hooks enabled" : "hooks disabled"}\nClick to toggle`;
                 item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
-                item.id = `cortex.hook.${element.tool}`;
-                item.contextValue = "cortex.hookItem";
+                item.id = `phren.hook.${element.tool}`;
+                item.contextValue = "phren.hookItem";
                 item.command = {
-                    command: "cortex.toggleHook",
+                    command: "phren.toggleHook",
                     title: "Toggle Hook",
                     arguments: [element.tool, element.enabled],
                 };
@@ -344,9 +350,9 @@ class CortexTreeProvider {
             case "referenceFile": {
                 const item = new vscode.TreeItem(element.fileName, vscode.TreeItemCollapsibleState.None);
                 item.iconPath = themeIcon("file");
-                item.id = `cortex.reference.${element.projectName}.${element.fileName}`;
+                item.id = `phren.reference.${element.projectName}.${element.fileName}`;
                 item.command = {
-                    command: "cortex.openProjectFile",
+                    command: "phren.openProjectFile",
                     title: "Open File",
                     arguments: [element.projectName, `reference/${element.fileName}`],
                 };
@@ -375,8 +381,8 @@ class CortexTreeProvider {
                     ...(element.summary ? [`Summary: ${element.summary}`] : []),
                 ].join("\n");
                 item.iconPath = themeIcon(element.status === "active" ? "play-circle" : "history");
-                item.id = `cortex.session.${element.sessionId}`;
-                item.contextValue = "cortex.session";
+                item.id = `phren.session.${element.sessionId}`;
+                item.contextValue = "phren.session";
                 return item;
             }
             case "sessionBucket": {
@@ -385,7 +391,7 @@ class CortexTreeProvider {
                 const item = new vscode.TreeItem(labels[element.bucket], vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon(icons[element.bucket]);
-                item.id = `cortex.sessionBucket.${element.projectName}.${element.sessionId}.${element.bucket}`;
+                item.id = `phren.sessionBucket.${element.projectName}.${element.sessionId}.${element.bucket}`;
                 return item;
             }
             case "projectGroup": {
@@ -394,26 +400,30 @@ class CortexTreeProvider {
                 const item = new vscode.TreeItem(groupLabels[element.group] ?? element.group, vscode.TreeItemCollapsibleState.Collapsed);
                 item.description = `${element.count}`;
                 item.iconPath = themeIcon(groupIcons[element.group] ?? "folder");
-                item.id = `cortex.projectGroup.${element.group}`;
+                item.id = `phren.projectGroup.${element.group}`;
                 return item;
             }
             case "manageItem": {
-                const manageIcons = { health: "heart", profile: "vm", lastSync: "cloud" };
+                const manageIcons = { health: "heart", profile: "vm", machine: "server", lastSync: "cloud" };
                 const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
                 item.description = element.value;
                 item.iconPath = themeIcon(manageIcons[element.item] ?? "info");
-                item.id = `cortex.manage.${element.item}`;
+                item.id = `phren.manage.${element.item}`;
                 if (element.item === "health") {
-                    item.command = { command: "cortex.doctor", title: "Run Doctor" };
-                    item.tooltip = "Click to run Cortex Doctor";
+                    item.command = { command: "phren.doctor", title: "Run Doctor" };
+                    item.tooltip = "Click to run Phren Doctor";
+                }
+                else if (element.item === "machine") {
+                    item.command = { command: "phren.configureMachine", title: "Set Machine Alias" };
+                    item.tooltip = "Click to change this machine alias";
                 }
                 else if (element.item === "profile") {
-                    item.command = { command: "cortex.switchProfile", title: "Configure Profile" };
+                    item.command = { command: "phren.switchProfile", title: "Configure Profile" };
                     item.tooltip = "Click to change this machine's profile mapping";
                 }
                 else if (element.item === "lastSync") {
-                    item.command = { command: "cortex.sync", title: "Sync Now" };
-                    item.tooltip = "Click to sync Cortex";
+                    item.command = { command: "phren.sync", title: "Sync Now" };
+                    item.tooltip = "Click to sync Phren";
                 }
                 return item;
             }
@@ -427,29 +437,9 @@ class CortexTreeProvider {
     }
     // --- Data fetchers ---
     async getRootSections() {
-        // Device projects shown directly at root (no wrapper group).
-        // "Other" projects, review, skills, hooks pushed below.
-        const projects = await this.fetchProjects().catch(() => []);
-        const ctx = this.readDeviceContext();
-        const deviceProjects = ctx.activeProjects.size > 0
-            ? projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()))
-            : projects;
-        const otherProjects = ctx.activeProjects.size > 0
-            ? projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()))
-            : [];
         const nodes = [];
-        // Device projects first — flat, no wrapper
-        for (const p of deviceProjects) {
-            nodes.push({ kind: "project", projectName: p.name, brief: p.brief });
-        }
-        if (deviceProjects.length === 0 && projects.length === 0) {
-            nodes.push({ kind: "message", label: "No projects found", description: "Run cortex init to get started.", iconId: "info" });
-        }
-        // Other projects as a collapsed group
-        if (otherProjects.length > 0) {
-            nodes.push({ kind: "projectGroup", group: "other", count: otherProjects.length });
-        }
-        // Functional sections
+        nodes.push({ kind: "rootSection", section: "projects" });
+        nodes.push({ kind: "rootSection", section: "machines" });
         nodes.push({ kind: "rootSection", section: "review" });
         nodes.push({ kind: "rootSection", section: "skills" });
         nodes.push({ kind: "rootSection", section: "hooks", description: await this.getHookSectionDescription() });
@@ -907,7 +897,7 @@ class CortexTreeProvider {
         try {
             const projects = await this.fetchProjects();
             if (projects.length === 0) {
-                return [{ kind: "message", label: "No projects found", description: "Index projects to populate Cortex.", iconId: "info" }];
+                return [{ kind: "message", label: "No projects found", description: "Index projects to populate Phren.", iconId: "info" }];
             }
             const ctx = this.readDeviceContext();
             if (ctx.activeProjects.size === 0) {
@@ -955,6 +945,12 @@ class CortexTreeProvider {
         const nodes = [];
         nodes.push({ kind: "manageItem", item: "health", label: "Health", value: this.lastHealthOk === true ? "ok" : this.lastHealthOk === false ? "issues" : "..." });
         nodes.push({ kind: "manageItem", item: "lastSync", label: "Sync", value: ctx.lastSync || "(never)" });
+        return nodes;
+    }
+    getMachineNodes() {
+        const ctx = this.readDeviceContext();
+        const nodes = [];
+        nodes.push({ kind: "manageItem", item: "machine", label: "Machine", value: ctx.machine || "(unset)" });
         nodes.push({ kind: "manageItem", item: "profile", label: "Profile", value: `${ctx.machine} → ${ctx.profile || "none"}` });
         return nodes;
     }
@@ -1161,7 +1157,7 @@ class CortexTreeProvider {
         return { kind: "message", label, description, iconId: "warning" };
     }
 }
-exports.CortexTreeProvider = CortexTreeProvider;
+exports.PhrenTreeProvider = PhrenTreeProvider;
 function categoryIconId(category) {
     if (category === "findings") {
         return "list-flat";
@@ -1270,4 +1266,4 @@ function themeIcon(id) {
     }
     return new vscode.ThemeIcon(id);
 }
-//# sourceMappingURL=CortexTreeProvider.js.map
+//# sourceMappingURL=PhrenTreeProvider.js.map

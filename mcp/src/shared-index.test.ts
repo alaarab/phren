@@ -23,38 +23,38 @@ import {
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
 
-function makeCortex(): string {
-  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-index-test-"));
+function makePhren(): string {
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-index-test-"));
   writeFile(
-    path.join(tmpDir, "cortex.root.yaml"),
+    path.join(tmpDir, "phren.root.yaml"),
     yaml.dump({ version: 1, installMode: "shared", syncMode: "managed-git" }, { lineWidth: 1000 })
   );
   return tmpDir;
 }
 
-function makeProject(cortexDir: string, name: string, files: Record<string, string>): void {
-  const dir = path.join(cortexDir, name);
+function makeProject(phrenDir: string, name: string, files: Record<string, string>): void {
+  const dir = path.join(phrenDir, name);
   fs.mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     writeFile(path.join(dir, file), content);
   }
-  if (!Object.prototype.hasOwnProperty.call(files, "cortex.project.yaml")) {
-    writeFile(path.join(dir, "cortex.project.yaml"), yaml.dump({ sourcePath: `/home/user/${name}` }, { lineWidth: 1000 }));
+  if (!Object.prototype.hasOwnProperty.call(files, "phren.project.yaml")) {
+    writeFile(path.join(dir, "phren.project.yaml"), yaml.dump({ sourcePath: `/home/user/${name}` }, { lineWidth: 1000 }));
   }
 }
 
 beforeEach(() => {
-  delete process.env.CORTEX_PATH;
-  delete process.env.CORTEX_PROFILE;
-  delete process.env.CORTEX_DEBUG;
+  delete process.env.PHREN_PATH;
+  delete process.env.PHREN_PROFILE;
+  delete (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG);
   delete process.env.PROJECTS_DIR;
 });
 
 afterEach(() => {
-  delete process.env.CORTEX_PATH;
-  delete process.env.CORTEX_PROFILE;
-  delete process.env.CORTEX_DEBUG;
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_PATH;
+  delete process.env.PHREN_PROFILE;
+  delete (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG);
+  delete process.env.PHREN_ACTOR;
   delete process.env.PROJECTS_DIR;
   if (tmpCleanup) {
     tmpCleanup();
@@ -90,102 +90,102 @@ describe("porterStem", () => {
 
 describe("resolveImports", () => {
   it("replaces @import with file contents", () => {
-    const cortex = makeCortex();
-    writeFile(path.join(cortex, "global", "shared.md"), "shared content here");
+    const phren = makePhren();
+    writeFile(path.join(phren, "global", "shared.md"), "shared content here");
     const content = "before\n@import shared.md\nafter";
-    const result = resolveImports(content, cortex);
+    const result = resolveImports(content, phren);
     expect(result).toContain("shared content here");
     expect(result).toContain("before");
     expect(result).toContain("after");
   });
 
   it("handles missing import file gracefully", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const content = "@import nonexistent.md";
-    const result = resolveImports(content, cortex);
+    const result = resolveImports(content, phren);
     expect(result).toContain("<!-- @import not found: nonexistent.md -->");
   });
 
   it("detects circular imports", () => {
-    const cortex = makeCortex();
-    writeFile(path.join(cortex, "global", "a.md"), "@import b.md");
-    writeFile(path.join(cortex, "global", "b.md"), "@import a.md");
+    const phren = makePhren();
+    writeFile(path.join(phren, "global", "a.md"), "@import b.md");
+    writeFile(path.join(phren, "global", "b.md"), "@import a.md");
     const content = "@import a.md";
-    const result = resolveImports(content, cortex);
+    const result = resolveImports(content, phren);
     expect(result).toContain("<!-- @import cycle:");
   });
 
   it("blocks path traversal", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const content = "@import ../../etc/passwd";
-    const result = resolveImports(content, cortex);
+    const result = resolveImports(content, phren);
     expect(result).toContain("<!-- @import blocked: path traversal -->");
   });
 
   it("respects max import depth", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     // Create a chain of imports deeper than MAX_IMPORT_DEPTH (5)
     for (let i = 0; i < 7; i++) {
       const nextImport = i < 6 ? `@import level${i + 1}.md` : "leaf content";
-      writeFile(path.join(cortex, "global", `level${i}.md`), nextImport);
+      writeFile(path.join(phren, "global", `level${i}.md`), nextImport);
     }
     const content = "@import level0.md";
-    const result = resolveImports(content, cortex);
+    const result = resolveImports(content, phren);
     // At depth 5, imports stop being resolved
     expect(result).not.toContain("leaf content");
   });
 
   it("preserves non-import lines unchanged", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const content = "# Title\nSome text\n- bullet point";
-    const result = resolveImports(content, cortex);
+    const result = resolveImports(content, phren);
     expect(result).toBe(content);
   });
 
   it("resolves nested imports", () => {
-    const cortex = makeCortex();
-    writeFile(path.join(cortex, "global", "outer.md"), "outer\n@import inner.md");
-    writeFile(path.join(cortex, "global", "inner.md"), "inner content");
+    const phren = makePhren();
+    writeFile(path.join(phren, "global", "outer.md"), "outer\n@import inner.md");
+    writeFile(path.join(phren, "global", "inner.md"), "inner content");
     const content = "@import outer.md";
-    const result = resolveImports(content, cortex);
+    const result = resolveImports(content, phren);
     expect(result).toContain("outer");
     expect(result).toContain("inner content");
   });
 
-  it("accepts imports when the cortex root itself is reached through a symlink", () => {
-    const cortex = makeCortex();
-    writeFile(path.join(cortex, "global", "shared.md"), "shared content through symlink");
-    const linkedCortex = path.join(os.tmpdir(), `cortex-index-link-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-    fs.symlinkSync(cortex, linkedCortex, process.platform === "win32" ? "junction" : "dir");
+  it("accepts imports when the phren root itself is reached through a symlink", () => {
+    const phren = makePhren();
+    writeFile(path.join(phren, "global", "shared.md"), "shared content through symlink");
+    const linkedPhren = path.join(os.tmpdir(), `phren-index-link-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    fs.symlinkSync(phren, linkedPhren, process.platform === "win32" ? "junction" : "dir");
     try {
-      const result = resolveImports("@import shared.md", linkedCortex);
+      const result = resolveImports("@import shared.md", linkedPhren);
       expect(result).toContain("shared content through symlink");
       expect(result).not.toContain("blocked: symlink traversal");
     } finally {
-      fs.rmSync(linkedCortex, { force: true, recursive: true });
+      fs.rmSync(linkedPhren, { force: true, recursive: true });
     }
   });
 });
 
 describe("normalizeIndexedContent", () => {
   it("strips finding provenance comments before indexing", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const normalized = normalizeIndexedContent(
       `# proj FINDINGS
 
 ## 2026-03-09
 
 - Safe refactors stay incremental <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex model:gpt-5 -->
-  <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","task_item":"deadbeef"} -->
+  <!-- phren:cite {"created_at":"2026-03-09T10:00:00Z","task_item":"deadbeef"} -->
 `,
       "findings",
-      cortex,
+      phren,
     );
 
     expect(normalized).toContain("Safe refactors stay incremental");
     expect(normalized).not.toContain("created:");
     expect(normalized).not.toContain("source:");
-    expect(normalized).not.toContain("cortex:cite");
+    expect(normalized).not.toContain("phren:cite");
   });
 });
 
@@ -259,66 +259,66 @@ describe("extractSnippet", () => {
 
 describe("detectProject", () => {
   it("detects project from sourcePath prefix", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "myproject", { "SUMMARY.md": "# Summary" });
-    const result = detectProject(cortex, "/home/user/myproject/src");
+    const phren = makePhren();
+    makeProject(phren, "myproject", { "SUMMARY.md": "# Summary" });
+    const result = detectProject(phren, "/home/user/myproject/src");
     expect(result).toBe("myproject");
   });
 
   it("returns null when no project matches", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "myproject", { "SUMMARY.md": "# Summary" });
-    const result = detectProject(cortex, "/home/user/other/src");
+    const phren = makePhren();
+    makeProject(phren, "myproject", { "SUMMARY.md": "# Summary" });
+    const result = detectProject(phren, "/home/user/other/src");
     expect(result).toBeNull();
   });
 
   it("uses exact sourcePath matching for short names too", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "abc", { "SUMMARY.md": "# Summary" });
-    expect(detectProject(cortex, "/home/user/abc")).toBe("abc");
-    expect(detectProject(cortex, "/home/user/abc/src")).toBe("abc");
+    const phren = makePhren();
+    makeProject(phren, "abc", { "SUMMARY.md": "# Summary" });
+    expect(detectProject(phren, "/home/user/abc")).toBe("abc");
+    expect(detectProject(phren, "/home/user/abc/src")).toBe("abc");
   });
 
   it("matches long names by sourcePath prefix", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "myapp", { "SUMMARY.md": "# Summary" });
-    const result = detectProject(cortex, "/home/user/myapp/deep/nested");
+    const phren = makePhren();
+    makeProject(phren, "myapp", { "SUMMARY.md": "# Summary" });
+    const result = detectProject(phren, "/home/user/myapp/deep/nested");
     expect(result).toBe("myapp");
   });
 
   it("uses the stored project name when sourcePath matches", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "MyProject", { "SUMMARY.md": "# Summary" });
-    writeFile(path.join(cortex, "MyProject", "cortex.project.yaml"), yaml.dump({ sourcePath: "/home/user/myproject" }, { lineWidth: 1000 }));
-    const result = detectProject(cortex, "/home/user/myproject/src");
+    const phren = makePhren();
+    makeProject(phren, "MyProject", { "SUMMARY.md": "# Summary" });
+    writeFile(path.join(phren, "MyProject", "phren.project.yaml"), yaml.dump({ sourcePath: "/home/user/myproject" }, { lineWidth: 1000 }));
+    const result = detectProject(phren, "/home/user/myproject/src");
     expect(result).toBe("MyProject");
   });
 });
 
 describe("document source keys", () => {
   it("uses project-relative paths for nested project files", () => {
-    const cortex = makeCortex();
-    const filePath = path.join(cortex, "alpha", "reference", "api", "auth.md");
-    expect(buildSourceDocKey("alpha", filePath, cortex, "auth.md")).toBe("alpha/reference/api/auth.md");
+    const phren = makePhren();
+    const filePath = path.join(phren, "alpha", "reference", "api", "auth.md");
+    expect(buildSourceDocKey("alpha", filePath, phren, "auth.md")).toBe("alpha/reference/api/auth.md");
   });
 
   it("falls back to filename for native memory paths outside the project root", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const filePath = path.join(os.tmpdir(), "native-findings.md");
-    expect(buildSourceDocKey("alpha", filePath, cortex, "FINDINGS.md")).toBe("alpha/FINDINGS.md");
+    expect(buildSourceDocKey("alpha", filePath, phren, "FINDINGS.md")).toBe("alpha/FINDINGS.md");
   });
 
   it("finds docs by canonical source key instead of basename alone", async () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "alpha", {
+    const phren = makePhren();
+    makeProject(phren, "alpha", {
       "reference/api/auth.md": "# API auth",
       "reference/runbooks/auth.md": "# Runbook auth",
     });
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     try {
-      const apiDoc = queryDocBySourceKey(db, cortex, "alpha/reference/api/auth.md");
-      const runbookDoc = queryDocBySourceKey(db, cortex, "alpha/reference/runbooks/auth.md");
+      const apiDoc = queryDocBySourceKey(db, phren, "alpha/reference/api/auth.md");
+      const runbookDoc = queryDocBySourceKey(db, phren, "alpha/reference/runbooks/auth.md");
       expect(apiDoc?.path).toContain(path.join("reference", "api", "auth.md"));
       expect(runbookDoc?.path).toContain(path.join("reference", "runbooks", "auth.md"));
       expect(apiDoc?.path).not.toBe(runbookDoc?.path);
@@ -332,13 +332,13 @@ describe("document source keys", () => {
 
 describe("buildIndex", () => {
   it("builds an FTS index from project files", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "proj", {
       "FINDINGS.md": "- SQLite uses WAL mode for concurrent reads",
       "SUMMARY.md": "# Project Summary\nThis is a test project.",
     });
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     expect(db).toBeDefined();
 
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["SQLite"]);
@@ -348,11 +348,11 @@ describe("buildIndex", () => {
   });
 
   it("indexes files from multiple projects", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "alpha", { "FINDINGS.md": "- Alpha finding about caching" });
-    makeProject(cortex, "beta", { "FINDINGS.md": "- Beta finding about routing" });
-    const db = await buildIndex(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "alpha", { "FINDINGS.md": "- Alpha finding about caching" });
+    makeProject(phren, "beta", { "FINDINGS.md": "- Beta finding about routing" });
+    const db = await buildIndex(phren);
 
     const alphaRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ? AND project = ?", ["caching", "alpha"]);
     expect(alphaRows).not.toBeNull();
@@ -363,12 +363,12 @@ describe("buildIndex", () => {
   });
 
   it("strips <details> blocks from indexed content", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "proj", {
       "FINDINGS.md": "- visible finding\n<details>\nxyzuniquehidden archived content\n</details>\n- another visible one",
     });
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     const hidden = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["xyzuniquehidden"]);
     // "xyzuniquehidden" was inside details, should be stripped
     expect(hidden).toBeNull();
@@ -379,102 +379,102 @@ describe("buildIndex", () => {
   });
 
   it("resolves @import directives during indexing", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    writeFile(path.join(cortex, "global", "shared-snippet.md"), "imported snippet about testing");
-    makeProject(cortex, "proj", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    writeFile(path.join(phren, "global", "shared-snippet.md"), "imported snippet about testing");
+    makeProject(phren, "proj", {
       "CLAUDE.md": "# Config\n@import shared-snippet.md",
     });
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["imported"]);
     expect(rows).not.toBeNull();
     db.close();
   });
 
-  it("indexes repo-owned CLAUDE.md for repo-managed projects instead of the cortex copy", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const projectsDir = path.join(cortex, "..", "repos");
+  it("indexes repo-owned CLAUDE.md for repo-managed projects instead of the phren copy", async () => {
+    const phren = makePhren();
+    grantAdmin(phren);
+    const projectsDir = path.join(phren, "..", "repos");
     process.env.PROJECTS_DIR = projectsDir;
     fs.mkdirSync(path.join(projectsDir, "proj"), { recursive: true });
     writeFile(path.join(projectsDir, "proj", "CLAUDE.md"), "# Repo Instructions\nrepoownedtoken");
 
-    makeProject(cortex, "proj", {
-      "CLAUDE.md": "# Cortex Instructions\ncortexcopytoken",
+    makeProject(phren, "proj", {
+      "CLAUDE.md": "# Phren Instructions\nphrencopytoken",
       "FINDINGS.md": "- searchable finding",
-      "cortex.project.yaml": yaml.dump({ ownership: "repo-managed", sourcePath: path.join(projectsDir, "proj") }, { lineWidth: 1000 }),
+      "phren.project.yaml": yaml.dump({ ownership: "repo-managed", sourcePath: path.join(projectsDir, "proj") }, { lineWidth: 1000 }),
     });
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     const repoRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["repoownedtoken"]);
-    const cortexRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["cortexcopytoken"]);
-    const claudeDoc = queryDocBySourceKey(db, cortex, "proj/CLAUDE.md");
+    const phrenRows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["phrencopytoken"]);
+    const claudeDoc = queryDocBySourceKey(db, phren, "proj/CLAUDE.md");
 
     expect(repoRows).not.toBeNull();
-    expect(cortexRows).toBeNull();
+    expect(phrenRows).toBeNull();
     expect(claudeDoc?.content).toContain("repoownedtoken");
-    expect(claudeDoc?.content).not.toContain("cortexcopytoken");
+    expect(claudeDoc?.content).not.toContain("phrencopytoken");
     db.close();
   });
 
   it("uses cached index on second build with same content", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "- stable content" });
-    const db1 = await buildIndex(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "proj", { "FINDINGS.md": "- stable content" });
+    const db1 = await buildIndex(phren);
     db1.close();
     // Second build should hit cache (no way to assert directly, but should not error)
-    const db2 = await buildIndex(cortex);
+    const db2 = await buildIndex(phren);
     const rows = queryRows(db2, "SELECT * FROM docs WHERE docs MATCH ?", ["stable"]);
     expect(rows).not.toBeNull();
     db2.close();
   });
 
   it("classifies arbitrary reference docs by topic keywords at index time", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "game", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "game", {
       "reference/level-design.md": "# Level Design\n\nShader compilation and frame pacing during combat arenas.\n",
     });
-    const saved = writeProjectTopics(cortex, "game", [
+    const saved = writeProjectTopics(phren, "game", [
       { slug: "rendering", label: "Rendering", description: "Shaders and frames", keywords: ["shader", "frame", "render"] },
       { slug: "gameplay", label: "Gameplay", description: "Gameplay systems", keywords: ["combat", "arena", "pause"] },
       { slug: "general", label: "General", description: "Fallback", keywords: [] },
     ]);
     expect(saved.ok).toBe(true);
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     const rows = queryRows(
       db,
       "SELECT filename, content FROM docs WHERE project = ? AND filename = ? AND type = ?",
       ["game", "level-design.md", "reference"]
     );
     expect(rows).not.toBeNull();
-    expect(String(rows![0][1])).toContain("cortextopicrendering");
+    expect(String(rows![0][1])).toContain("phrentopicrendering");
     db.close();
   });
 
   it("keeps legacy reference/topics/<slug>.md compatibility in index-time topic tagging", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "app", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "app", {
       "reference/topics/database.md": "# Notes\n\nUI layout notes without strong database keywords.\n",
     });
-    const saved = writeProjectTopics(cortex, "app", [
+    const saved = writeProjectTopics(phren, "app", [
       { slug: "database", label: "Database", description: "Storage", keywords: ["query", "schema"] },
       { slug: "frontend", label: "Frontend", description: "UI", keywords: ["ui", "layout"] },
       { slug: "general", label: "General", description: "Fallback", keywords: [] },
     ]);
     expect(saved.ok).toBe(true);
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     const rows = queryRows(
       db,
       "SELECT filename, content FROM docs WHERE project = ? AND filename = ? AND type = ?",
       ["app", "database.md", "reference"]
     );
     expect(rows).not.toBeNull();
-    expect(String(rows![0][1])).toContain("cortextopicdatabase");
+    expect(String(rows![0][1])).toContain("phrentopicdatabase");
     db.close();
   });
 });
@@ -483,30 +483,30 @@ describe("buildIndex", () => {
 
 describe("queryRows", () => {
   it("returns null for no results", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "- something" });
-    const db = await buildIndex(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "proj", { "FINDINGS.md": "- something" });
+    const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["zzzznonexistent"]);
     expect(rows).toBeNull();
     db.close();
   });
 
   it("returns null on SQL error", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "- data" });
-    const db = await buildIndex(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "proj", { "FINDINGS.md": "- data" });
+    const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT * FROM nonexistent_table", []);
     expect(rows).toBeNull();
     db.close();
   });
 
   it("returns array of arrays for valid results", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "- database patterns" });
-    const db = await buildIndex(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "proj", { "FINDINGS.md": "- database patterns" });
+    const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["database"]);
     expect(rows).not.toBeNull();
     expect(Array.isArray(rows)).toBe(true);
@@ -555,10 +555,10 @@ describe("rowToDocWithRowid", () => {
 
 describe("queryDocRows", () => {
   it("returns DocRow objects for matching results", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "- architecture decision records" });
-    const db = await buildIndex(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "proj", { "FINDINGS.md": "- architecture decision records" });
+    const db = await buildIndex(phren);
     const docs = queryDocRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["architecture"]);
     expect(docs).not.toBeNull();
     expect(docs![0].project).toBe("proj");
@@ -567,10 +567,10 @@ describe("queryDocRows", () => {
   });
 
   it("returns null when no matches", async () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "proj", { "FINDINGS.md": "- data" });
-    const db = await buildIndex(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "proj", { "FINDINGS.md": "- data" });
+    const db = await buildIndex(phren);
     const docs = queryDocRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["xyznonexistent"]);
     expect(docs).toBeNull();
     db.close();

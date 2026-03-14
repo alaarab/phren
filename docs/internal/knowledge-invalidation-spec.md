@@ -5,7 +5,7 @@ Last updated: 2026-03-10
 
 ## Problem
 
-Today Cortex only has partial invalidation semantics:
+Today Phren only has partial invalidation semantics:
 
 - `add_finding` can attach `<!-- conflicts_with: "..." -->` when a new finding appears to contradict an older one.
 - `supersedes` can annotate an older finding with `<!-- superseded_by: ... -->`.
@@ -85,7 +85,7 @@ Existing comments remain valid compatibility inputs:
 - `<!-- superseded_by: ... -->` maps to `status=superseded`.
 - `<!-- conflicts_with: "..." -->` maps to `status=contradicted` only when unresolved.
 
-During migration, Cortex should write both the old compatibility comments and the new normalized status fields. Retrieval should read either format.
+During migration, Phren should write both the old compatibility comments and the new normalized status fields. Retrieval should read either format.
 
 ## State Transitions
 
@@ -115,7 +115,7 @@ Rules:
 
 ### Add finding
 
-When a new finding clashes with an older one, Cortex should create a pending resolution instead of only appending a hidden comment.
+When a new finding clashes with an older one, Phren should create a pending resolution instead of only appending a hidden comment.
 
 Expected outcomes:
 

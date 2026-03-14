@@ -1,4 +1,4 @@
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 import { showPreview } from "./previewPanel";
 
 interface SessionData {
@@ -24,7 +24,7 @@ interface SessionTaskView {
   checked: boolean;
 }
 
-export async function showSessionOverview(client: CortexClient, session: SessionData): Promise<void> {
+export async function showSessionOverview(client: PhrenClient, session: SessionData): Promise<void> {
   try {
     const raw = await client.sessionHistory({ sessionId: session.sessionId, project: session.projectName });
     const response = asRecord(raw);

@@ -1,8 +1,22 @@
 import * as fs from "fs";
 import * as path from "path";
-import { CortexError, cortexErr, cortexOk, type CortexResult } from "./cortex-core.js";
+import { PhrenError, phrenErr, phrenOk, type PhrenResult } from "./phren-core.js";
+
+// Phren lifecycle comment prefix. No backward compat.
+const LIFECYCLE_PREFIX = "phren";
 import { withFileLock } from "./governance-locks.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
+import {
+  METADATA_REGEX,
+  parseCreatedDate as parseCreatedDateMeta,
+  parseStatusField,
+  parseStatus,
+  parseSupersession,
+  parseContradiction,
+  parseFindingId as parseFindingIdMeta,
+  stripLifecycleMetadata,
+  stripRelationMetadata,
+} from "./content-metadata.js";
 
 export const FINDING_LIFECYCLE_STATUSES = [
   "active",
@@ -31,22 +45,17 @@ function serializeCommentValue(value: string): string {
 }
 
 function parseCreatedDate(line: string): string | undefined {
-  const created = line.match(/<!--\s*created:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})\s*-->/i)?.[1];
+  const created = parseCreatedDateMeta(line);
   return created ? cleanCommentValue(created) : undefined;
 }
 
 function matchField(line: string, field: "status_updated" | "status_reason" | "status_ref"): string | undefined {
-  const quoted = line.match(new RegExp(`<!--\\s*cortex:${field}\\s+"([^"]+)"\\s*-->`, "i"))?.[1];
-  if (quoted) return cleanCommentValue(quoted);
-  const raw = line.match(new RegExp(`<!--\\s*cortex:${field}\\s+([^>]+?)\\s*-->`, "i"))?.[1];
-  return raw ? cleanCommentValue(raw) : undefined;
+  return parseStatusField(line, field);
 }
 
 export function parseFindingLifecycle(line: string): FindingLifecycleMetadata {
   const created = parseCreatedDate(line);
-  const normalizedStatus = line.match(
-    /<!--\s*cortex:status\s+"?(active|superseded|contradicted|stale|invalid_citation|retracted)"?\s*-->/i
-  )?.[1]?.toLowerCase() as FindingLifecycleStatus | undefined;
+  const normalizedStatus = parseStatus(line) as FindingLifecycleStatus | undefined;
 
   const normalized: FindingLifecycleMetadata = {
     status: normalizedStatus ?? "active",
@@ -57,28 +66,24 @@ export function parseFindingLifecycle(line: string): FindingLifecycleMetadata {
 
   if (normalizedStatus) return normalized;
 
-  const legacySupersededBy =
-    line.match(/<!--\s*cortex:superseded_by\s+"([^"]+)"(?:\s+([0-9]{4}-[0-9]{2}-[0-9]{2}))?\s*-->/i) ??
-    line.match(/<!--\s*superseded_by:\s*"([^"]+)"\s*-->/i);
-  if (legacySupersededBy) {
-    const updated = legacySupersededBy[2] || normalized.status_updated;
+  const supersession = parseSupersession(line);
+  if (supersession) {
+    const updated = supersession.date || normalized.status_updated;
     return {
       status: "superseded",
       status_updated: updated ? cleanCommentValue(updated) : undefined,
       status_reason: normalized.status_reason ?? "superseded_by",
-      status_ref: normalized.status_ref ?? cleanCommentValue(legacySupersededBy[1] || ""),
+      status_ref: normalized.status_ref ?? cleanCommentValue(supersession.ref || ""),
     };
   }
 
-  const legacyConflict =
-    line.match(/<!--\s*cortex:contradicts\s+"([^"]+)"\s*-->/i) ??
-    line.match(/<!--\s*conflicts_with:\s*"([^"]+)"(?:\s*\(from project: [^)]+\))?\s*-->/i);
-  if (legacyConflict) {
+  const contradictionRef = parseContradiction(line);
+  if (contradictionRef) {
     return {
       status: "contradicted",
       status_updated: normalized.status_updated,
       status_reason: normalized.status_reason ?? "conflicts_with",
-      status_ref: normalized.status_ref ?? cleanCommentValue(legacyConflict[1] || ""),
+      status_ref: normalized.status_ref ?? cleanCommentValue(contradictionRef),
     };
   }
 
@@ -91,19 +96,15 @@ export function buildLifecycleComments(
 ): string {
   const status: FindingLifecycleStatus = lifecycle?.status ?? "active";
   const statusUpdated = lifecycle?.status_updated ?? fallbackDate;
-  const parts = [`<!-- cortex:status "${status}" -->`];
-  if (statusUpdated) parts.push(`<!-- cortex:status_updated "${serializeCommentValue(statusUpdated)}" -->`);
-  if (lifecycle?.status_reason) parts.push(`<!-- cortex:status_reason "${serializeCommentValue(lifecycle.status_reason)}" -->`);
-  if (lifecycle?.status_ref) parts.push(`<!-- cortex:status_ref "${serializeCommentValue(lifecycle.status_ref)}" -->`);
+  const parts = [`<!-- ${LIFECYCLE_PREFIX}:status "${status}" -->`];
+  if (statusUpdated) parts.push(`<!-- ${LIFECYCLE_PREFIX}:status_updated "${serializeCommentValue(statusUpdated)}" -->`);
+  if (lifecycle?.status_reason) parts.push(`<!-- ${LIFECYCLE_PREFIX}:status_reason "${serializeCommentValue(lifecycle.status_reason)}" -->`);
+  if (lifecycle?.status_ref) parts.push(`<!-- ${LIFECYCLE_PREFIX}:status_ref "${serializeCommentValue(lifecycle.status_ref)}" -->`);
   return parts.join(" ");
 }
 
 export function stripLifecycleComments(line: string): string {
-  return line
-    .replace(/\s*<!--\s*cortex:status\s+"?(?:active|superseded|contradicted|stale|invalid_citation|retracted)"?\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:status_updated\s+"[^"]+"\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:status_reason\s+"[^"]+"\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:status_ref\s+"[^"]+"\s*-->/gi, "");
+  return stripLifecycleMetadata(line);
 }
 
 export function isInactiveFindingLine(line: string): boolean {
@@ -133,12 +134,7 @@ function normalizeFindingText(value: string): string {
 }
 
 function removeRelationComments(line: string): string {
-  return line
-    .replace(/\s*<!--\s*superseded_by:\s*"[^"]+"\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:superseded_by\s+"[^"]+"(?:\s+[0-9]{4}-[0-9]{2}-[0-9]{2})?\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:supersedes\s+"[^"]+"\s*-->/gi, "")
-    .replace(/\s*<!--\s*conflicts_with:\s*"[^"]+"(?:\s*\(from project:\s*[^)]+\))?\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:contradicts\s+"[^"]+"\s*-->/gi, "");
+  return stripRelationMetadata(line);
 }
 
 function applyLifecycle(
@@ -149,22 +145,22 @@ function applyLifecycle(
 ): string {
   let updated = stripLifecycleComments(removeRelationComments(line)).trimEnd();
   if (opts?.supersededBy) {
-    updated += ` <!-- cortex:superseded_by "${serializeCommentValue(opts.supersededBy)}" ${today} -->`;
+    updated += ` <!-- ${LIFECYCLE_PREFIX}:superseded_by "${serializeCommentValue(opts.supersededBy)}" ${today} -->`;
   }
   if (opts?.supersedes) {
-    updated += ` <!-- cortex:supersedes "${serializeCommentValue(opts.supersedes)}" -->`;
+    updated += ` <!-- ${LIFECYCLE_PREFIX}:supersedes "${serializeCommentValue(opts.supersedes)}" -->`;
   }
   if (opts?.contradicts) {
     const contradictionRef = serializeCommentValue(opts.contradicts);
-    updated += ` <!-- conflicts_with: "${contradictionRef}" --> <!-- cortex:contradicts "${contradictionRef}" -->`;
+    updated += ` <!-- conflicts_with: "${contradictionRef}" --> <!-- ${LIFECYCLE_PREFIX}:contradicts "${contradictionRef}" -->`;
   }
   updated += ` ${buildLifecycleComments(lifecycle, today)}`;
   return updated;
 }
 
-function matchFinding(lines: string[], match: string): CortexResult<MatchedFinding> {
+function matchFinding(lines: string[], match: string): PhrenResult<MatchedFinding> {
   const needleRaw = match.trim();
-  if (!needleRaw) return cortexErr("Finding text cannot be empty.", CortexError.EMPTY_INPUT);
+  if (!needleRaw) return phrenErr("Finding text cannot be empty.", PhrenError.EMPTY_INPUT);
   const needle = normalizeFindingText(needleRaw);
 
   const bulletLines = lines
@@ -188,19 +184,19 @@ function matchFinding(lines: string[], match: string): CortexResult<MatchedFindi
   } else if (exactMatches.length === 1) {
     selected = exactMatches[0];
   } else if (exactMatches.length > 1) {
-    return cortexErr(`"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, CortexError.AMBIGUOUS_MATCH);
+    return phrenErr(`"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
   } else if (partialMatches.length === 1) {
     selected = partialMatches[0];
   } else if (partialMatches.length > 1) {
-    return cortexErr(`"${match}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.`, CortexError.AMBIGUOUS_MATCH);
+    return phrenErr(`"${match}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
   }
 
   if (!selected) {
-    return cortexErr(`No finding matching "${match}".`, CortexError.NOT_FOUND);
+    return phrenErr(`No finding matching "${match}".`, PhrenError.NOT_FOUND);
   }
 
-  const stableId = selected.line.match(/<!--\s*fid:([a-z0-9]{8})\s*-->/i)?.[1];
-  return cortexOk({
+  const stableId = parseFindingIdMeta(selected.line);
+  return phrenOk({
     index: selected.index,
     line: selected.line,
     text: findingTextFromLine(selected.line),
@@ -208,27 +204,27 @@ function matchFinding(lines: string[], match: string): CortexResult<MatchedFindi
   });
 }
 
-function findingsPathForProject(cortexPath: string, project: string): CortexResult<string> {
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}"`, CortexError.INVALID_PROJECT_NAME);
-  const projectDir = safeProjectPath(cortexPath, project);
-  if (!projectDir) return cortexErr(`Invalid project name: "${project}"`, CortexError.INVALID_PROJECT_NAME);
-  if (!fs.existsSync(projectDir)) return cortexErr(`Project "${project}" not found.`, CortexError.PROJECT_NOT_FOUND);
+function findingsPathForProject(phrenPath: string, project: string): PhrenResult<string> {
+  if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}"`, PhrenError.INVALID_PROJECT_NAME);
+  const projectDir = safeProjectPath(phrenPath, project);
+  if (!projectDir) return phrenErr(`Invalid project name: "${project}"`, PhrenError.INVALID_PROJECT_NAME);
+  if (!fs.existsSync(projectDir)) return phrenErr(`Project "${project}" not found.`, PhrenError.PROJECT_NOT_FOUND);
   const findingsPath = path.join(projectDir, "FINDINGS.md");
-  if (!fs.existsSync(findingsPath)) return cortexErr(`No FINDINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
-  return cortexOk(findingsPath);
+  if (!fs.existsSync(findingsPath)) return phrenErr(`No FINDINGS.md found for "${project}".`, PhrenError.FILE_NOT_FOUND);
+  return phrenOk(findingsPath);
 }
 
 export function supersedeFinding(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   findingText: string,
   supersededBy: string
-): CortexResult<{ finding: string; superseded_by: string; status: FindingLifecycleStatus }> {
-  const pathResult = findingsPathForProject(cortexPath, project);
+): PhrenResult<{ finding: string; superseded_by: string; status: FindingLifecycleStatus }> {
+  const pathResult = findingsPathForProject(phrenPath, project);
   if (!pathResult.ok) return pathResult;
   const findingsPath = pathResult.data;
   const ref = supersededBy.trim().slice(0, 60);
-  if (!ref) return cortexErr("superseded_by cannot be empty.", CortexError.EMPTY_INPUT);
+  if (!ref) return phrenErr("superseded_by cannot be empty.", PhrenError.EMPTY_INPUT);
 
   return withFileLock(findingsPath, () => {
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
@@ -243,21 +239,21 @@ export function supersedeFinding(
     );
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     fs.writeFileSync(findingsPath, normalized);
-    return cortexOk({ finding: matched.data.text, superseded_by: ref, status: "superseded" });
+    return phrenOk({ finding: matched.data.text, superseded_by: ref, status: "superseded" });
   });
 }
 
 export function retractFinding(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   findingText: string,
   reason: string
-): CortexResult<{ finding: string; reason: string; status: FindingLifecycleStatus }> {
-  const pathResult = findingsPathForProject(cortexPath, project);
+): PhrenResult<{ finding: string; reason: string; status: FindingLifecycleStatus }> {
+  const pathResult = findingsPathForProject(phrenPath, project);
   if (!pathResult.ok) return pathResult;
   const findingsPath = pathResult.data;
   const reasonText = reason.trim();
-  if (!reasonText) return cortexErr("reason cannot be empty.", CortexError.EMPTY_INPUT);
+  if (!reasonText) return phrenErr("reason cannot be empty.", PhrenError.EMPTY_INPUT);
 
   return withFileLock(findingsPath, () => {
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
@@ -271,22 +267,22 @@ export function retractFinding(
     );
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     fs.writeFileSync(findingsPath, normalized);
-    return cortexOk({ finding: matched.data.text, reason: reasonText, status: "retracted" });
+    return phrenOk({ finding: matched.data.text, reason: reasonText, status: "retracted" });
   });
 }
 
 export function resolveFindingContradiction(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   findingA: string,
   findingB: string,
   resolution: ContradictionResolution
-): CortexResult<{
+): PhrenResult<{
   resolution: ContradictionResolution;
   finding_a: { text: string; status: FindingLifecycleStatus };
   finding_b: { text: string; status: FindingLifecycleStatus };
 }> {
-  const pathResult = findingsPathForProject(cortexPath, project);
+  const pathResult = findingsPathForProject(phrenPath, project);
   if (!pathResult.ok) return pathResult;
   const findingsPath = pathResult.data;
 
@@ -297,7 +293,7 @@ export function resolveFindingContradiction(
     const matchedB = matchFinding(lines, findingB);
     if (!matchedB.ok) return matchedB;
     if (matchedA.data.index === matchedB.data.index) {
-      return cortexErr("finding_a and finding_b refer to the same finding.", CortexError.VALIDATION_ERROR);
+      return phrenErr("finding_a and finding_b refer to the same finding.", PhrenError.VALIDATION_ERROR);
     }
 
     const today = new Date().toISOString().slice(0, 10);
@@ -340,7 +336,7 @@ export function resolveFindingContradiction(
 
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     fs.writeFileSync(findingsPath, normalized);
-    return cortexOk({
+    return phrenOk({
       resolution,
       finding_a: { text: matchedA.data.text, status: statusA },
       finding_b: { text: matchedB.data.text, status: statusB },

@@ -11,16 +11,16 @@ vi.mock("../tasks-github.js", () => ({
   createGithubIssueForTask: vi.fn(() => ({
     ok: true,
     data: {
-      repo: "alaarab/cortex",
+      repo: "alaarab/phren",
       issueNumber: 14,
-      url: "https://github.com/alaarab/cortex/issues/14",
+      url: "https://github.com/alaarab/phren/issues/14",
     },
   })),
   parseGithubIssueUrl: vi.fn((url: string) => {
     const match = url.match(/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/);
     return match ? { repo: match[1], issueNumber: Number.parseInt(match[2], 10), url } : null;
   }),
-  resolveProjectGithubRepo: vi.fn(() => "alaarab/cortex"),
+  resolveProjectGithubRepo: vi.fn(() => "alaarab/phren"),
 }));
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
@@ -43,9 +43,9 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }
 
-function makeCtx(cortexPath: string): McpContext {
+function makeCtx(phrenPath: string): McpContext {
   return {
-    cortexPath,
+    phrenPath,
     profile: "test",
     db: () => { throw new Error("db not expected"); },
     rebuildIndex: async () => {},
@@ -57,7 +57,7 @@ function makeCtx(cortexPath: string): McpContext {
 describe("mcp-tasks GitHub issue tools", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
-  const project = "cortex";
+  const project = "phren";
 
   beforeEach(() => {
     tmp = makeTempDir("mcp-tasks-github-");
@@ -65,7 +65,7 @@ describe("mcp-tasks GitHub issue tools", () => {
     fs.mkdirSync(path.join(tmp.path, project), { recursive: true });
     fs.writeFileSync(
       path.join(tmp.path, project, "tasks.md"),
-      "# cortex task\n\n## Active\n\n## Queue\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  Context: Task items should optionally link to GitHub issues\n\n## Done\n"
+      "# phren task\n\n## Active\n\n## Queue\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  Context: Task items should optionally link to GitHub issues\n\n## Done\n"
     );
     server = makeMockServer();
     register(server as any, makeCtx(tmp.path));
@@ -80,7 +80,7 @@ describe("mcp-tasks GitHub issue tools", () => {
       project,
       item: "bid:deadbeef",
       issue_number: 14,
-      issue_url: "https://github.com/alaarab/cortex/issues/14",
+      issue_url: "https://github.com/alaarab/phren/issues/14",
     }));
     expect(res.ok).toBe(true);
     expect(res.data.githubIssue).toBe(14);
@@ -89,7 +89,7 @@ describe("mcp-tasks GitHub issue tools", () => {
     expect(task.ok).toBe(true);
     if (!task.ok) return;
     expect(task.data.items.Queue[0].githubIssue).toBe(14);
-    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
 
   it("promotes a task into a GitHub issue and links it back", async () => {
@@ -99,7 +99,7 @@ describe("mcp-tasks GitHub issue tools", () => {
     }));
     expect(res.ok).toBe(true);
     expect(res.data.githubIssue).toBe(14);
-    expect(res.data.githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    expect(res.data.githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
 
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);

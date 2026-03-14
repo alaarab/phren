@@ -1,17 +1,17 @@
 ---
-name: cortex-discover
-description: Audit your cortex repo and tell you exactly what needs attention.
+name: phren-discover
+description: Audit your phren repo and tell you exactly what needs attention.
 dependencies:
   - git
   - gh
 ---
-# cortex-discover - Cortex health check
+# phren-discover - Phren health check
 
-> Audit your cortex repo and tell you exactly what needs attention.
+> Audit your phren repo and tell you exactly what needs attention.
 
-Scans your cortex directory for missing files, stale content, skill gaps, and stuck task items. Outputs a concrete, prioritized action list.
+Scans your phren directory for missing files, stale content, skill gaps, and stuck task items. Outputs a concrete, prioritized action list.
 
-**Works standalone.** Just needs a cortex directory.
+**Works standalone.** Just needs a phren directory.
 
 ## When to run
 
@@ -22,22 +22,22 @@ Scans your cortex directory for missing files, stale content, skill gaps, and st
 
 ## What to do
 
-### 1. Find the cortex directory
+### 1. Find the phren directory
 
 ```bash
-CORTEX_DIR="${CORTEX_DIR:-$HOME/.cortex}"
-ls "$CORTEX_DIR" 2>/dev/null
+PHREN_DIR="${PHREN_DIR:-$HOME/.phren}"
+ls "$PHREN_DIR" 2>/dev/null
 ```
 
 If it doesn't exist:
-> "No cortex directory found at ~/.cortex. Run `cortex-init` to set one up."
+> "No phren directory found at ~/.phren. Run `phren-init` to set one up."
 
 ### 2. Scan all projects
 
-For each project directory in `$CORTEX_DIR/*/` (skip `global/`, `profiles/`):
+For each project directory in `$PHREN_DIR/*/` (skip `global/`, `profiles/`):
 
 ```bash
-for dir in "$CORTEX_DIR"/*/; do
+for dir in "$PHREN_DIR"/*/; do
   PROJECT=$(basename "$dir")
   [ "$PROJECT" = "global" ] || [ "$PROJECT" = "profiles" ] && continue
 
@@ -50,10 +50,10 @@ done
 
 ### 3. Check staleness
 
-For projects that are in a git-tracked cortex, check when files were last modified:
+For projects that are in a git-tracked phren, check when files were last modified:
 
 ```bash
-cd "$CORTEX_DIR"
+cd "$PHREN_DIR"
 for dir in */; do
   PROJECT=$(basename "$dir")
   [ "$PROJECT" = "global" ] || [ "$PROJECT" = "profiles" ] && continue
@@ -110,12 +110,12 @@ Watch out:
 Want me to fill this in for myapp?
 ```
 
-If yes, gather the 5 fields from the user and write the file to `$CORTEX_DIR/myapp/summary.md`.
+If yes, gather the 5 fields from the user and write the file to `$PHREN_DIR/myapp/summary.md`.
 
 ### 7. Output the report
 
 ```
-cortex-discover
+phren-discover
 
 ## Section 1: Missing files
 
@@ -169,7 +169,7 @@ The "Top 3" section is the most important part. Make these:
 
 ## Related skills
 
-- `cortex-init`: scaffold missing files for a project
+- `phren-init`: scaffold missing files for a project
 - `add_finding()`: capture findings via MCP (fixes "missing FINDINGS.md")
-- `cortex-consolidate`: synthesize cross-project patterns
+- `phren-consolidate`: synthesize cross-project patterns
 - `/tasks`: work on stuck task items

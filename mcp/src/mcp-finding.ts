@@ -21,10 +21,10 @@ import {
   autoMergeConflicts,
 } from "./shared-content.js";
 import { jaccardTokenize, jaccardSimilarity, stripMetadata } from "./content-dedup.js";
-import type { CortexResult } from "./cortex-core.js";
+import type { PhrenResult } from "./phren-core.js";
 import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings } from "./mcp-session.js";
-import { extractEntityNames } from "./shared-entity-graph.js";
+import { extractFragmentNames } from "./shared-fragment-graph.js";
 import { extractFactFromFinding } from "./mcp-extract-facts.js";
 import { appendChildFinding, readFindings } from "./data-access.js";
 import { getActiveTaskForSession } from "./task-lifecycle.js";
@@ -47,9 +47,9 @@ interface PotentialDuplicate {
   similarity: number;
 }
 
-function findJaccardCandidates(cortexPath: string, project: string, finding: string): PotentialDuplicate[] {
+function findJaccardCandidates(phrenPath: string, project: string, finding: string): PotentialDuplicate[] {
   try {
-    const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
+    const findingsPath = path.join(phrenPath, project, "FINDINGS.md");
     if (!fs.existsSync(findingsPath)) return [];
     const content = fs.readFileSync(findingsPath, "utf8");
     const newClean = stripMetadata(finding).trim();
@@ -100,18 +100,18 @@ function matchesFindingTextSelector(
 
 /** Shared boilerplate for lifecycle mutation tools: validate project → call core fn → update index → map response. */
 function withLifecycleMutation<T>(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   writeQueue: McpContext["withWriteQueue"],
   updateIndex: McpContext["updateFileInIndex"],
-  handler: () => CortexResult<T>,
+  handler: () => PhrenResult<T>,
   mapResponse: (data: T) => { message: string; data: Record<string, unknown> },
 ) {
   if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
   return writeQueue(async () => {
     const result = handler();
     if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-    const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+    const resolvedFindingsDir = safeProjectPath(phrenPath, project);
     if (resolvedFindingsDir) updateIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
     const mapped = mapResponse(result.data);
     return mcpResponse({ ok: true, message: mapped.message, data: mapped.data });
@@ -119,19 +119,19 @@ function withLifecycleMutation<T>(
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, withWriteQueue, updateFileInIndex } = ctx;
+  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
 
   server.registerTool(
     "add_finding",
     {
-      title: "◆ cortex · save finding",
+      title: "◆ phren · save finding",
       description:
-        "Record a single insight to a project's FINDINGS.md. Call this the moment you discover " +
+        "Tell phren a single insight for a project's FINDINGS.md. Call this the moment you discover " +
         "a non-obvious pattern, hit a subtle bug, find a workaround, or learn something that would " +
         "save time in a future session. Do not wait until the end of the session." +
         " Optionally classify with findingType: decision, pitfall, pattern, tradeoff, architecture, or bug.",
       inputSchema: z.object({
-        project: z.string().describe("Project name (must match a directory in your cortex)."),
+        project: z.string().describe("Project name (must match a directory in your phren store)."),
         finding: z.string().describe("The insight, written as a single bullet point. Be specific enough that someone could act on it without extra context."),
         citation: z.object({
           file: z.string().optional().describe("Source file path that supports this finding."),
@@ -160,10 +160,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           const taggedFinding = findingType ? `[${findingType}] ${finding}` : finding;
           // Jaccard "maybe zone" scan — free, no LLM call. Return candidates so the agent decides.
-          const potentialDuplicates = findJaccardCandidates(cortexPath, project, taggedFinding);
-          const semanticConflicts = await checkSemanticConflicts(cortexPath, project, taggedFinding);
-          runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
-          const result = addFindingToFile(cortexPath, project, taggedFinding, citation, {
+          const potentialDuplicates = findJaccardCandidates(phrenPath, project, taggedFinding);
+          const semanticConflicts = await checkSemanticConflicts(phrenPath, project, taggedFinding);
+          runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
+          const result = addFindingToFile(phrenPath, project, taggedFinding, citation, {
             sessionId,
             source,
             scope: normalizedScope,
@@ -180,19 +180,19 @@ export function register(server: McpServer, ctx: McpContext): void {
             return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "skipped" } });
           }
 
-          updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
+          updateFileInIndex(path.join(phrenPath, project, "FINDINGS.md"));
           if (isAdded) {
-            runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
-            incrementSessionFindings(cortexPath, 1, sessionId, project);
-            extractFactFromFinding(cortexPath, project, taggedFinding);
+            runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
+            incrementSessionFindings(phrenPath, 1, sessionId, project);
+            extractFactFromFinding(phrenPath, project, taggedFinding);
             // Bidirectional link: if there's an active task in this session, append this finding to it.
             if (sessionId) {
-              const activeTask = getActiveTaskForSession(cortexPath, sessionId, project);
+              const activeTask = getActiveTaskForSession(phrenPath, sessionId, project);
               if (activeTask) {
                 const taskMatch = activeTask.stableId ? `bid:${activeTask.stableId}` : activeTask.line;
                 // Extract fid from the last written line in FINDINGS.md
                 try {
-                  const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
+                  const findingsPath = path.join(phrenPath, project, "FINDINGS.md");
                   const findingsContent = fs.readFileSync(findingsPath, "utf8");
                   const lines = findingsContent.split("\n");
                   const taggedText = taggedFinding.replace(/^-\s+/, "").trim().slice(0, 60).toLowerCase();
@@ -203,7 +203,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                     if (lineText === taggedText || l.toLowerCase().includes(taggedText.slice(0, 30))) {
                       const fidMatch = l.match(/<!--\s*fid:([a-z0-9]{8})\s*-->/);
                       if (fidMatch) {
-                        appendChildFinding(cortexPath, project, taskMatch, `fid:${fidMatch[1]}`);
+                        appendChildFinding(phrenPath, project, taskMatch, `fid:${fidMatch[1]}`);
                       }
                       break;
                     }
@@ -219,10 +219,10 @@ export function register(server: McpServer, ctx: McpContext): void {
             : (result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)?.[1] ? [result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)![1]] : []);
           const conflictsWith = conflictsWithList[0];
 
-          // Extract entity hints synchronously from the finding text (regex only, no DB).
-          // Full DB entity linking happens on the next index rebuild via updateFileInIndex →
+          // Extract fragment hints synchronously from the finding text (regex only, no DB).
+          // Full DB fragment linking happens on the next index rebuild via updateFileInIndex →
           // extractAndLinkEntities. We surface hints here so callers can see what was detected.
-          const detectedEntities = extractEntityNames(taggedFinding);
+          const detectedFragments = extractFragmentNames(taggedFinding);
 
           return mcpResponse({
             ok: true,
@@ -233,7 +233,7 @@ export function register(server: McpServer, ctx: McpContext): void {
               status: "added",
               ...(conflictsWith ? { conflictsWith } : {}),
               ...(conflictsWithList.length > 0 ? { conflicts: conflictsWithList } : {}),
-              ...(detectedEntities.length > 0 ? { detectedEntities } : {}),
+              ...(detectedFragments.length > 0 ? { detectedFragments } : {}),
               ...(potentialDuplicates.length > 0 ? { potentialDuplicates } : {}),
               scope: normalizedScope,
             }
@@ -251,10 +251,10 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "add_findings",
     {
-      title: "◆ cortex · save findings (bulk)",
-      description: "Record multiple insights to a project's FINDINGS.md in one call.",
+      title: "◆ phren · save findings (bulk)",
+      description: "Tell phren multiple insights for a project's FINDINGS.md in one call.",
       inputSchema: z.object({
-        project: z.string().describe("Project name (must match a directory in your cortex)."),
+        project: z.string().describe("Project name (must match a directory in your phren store)."),
         findings: z.array(z.string()).describe("List of insights to record."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
       }),
@@ -264,34 +264,34 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (findings.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
       if (findings.some((f) => f.length > 5000)) return mcpResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
       return withWriteQueue(async () => {
-        runCustomHooks(cortexPath, "pre-finding", { CORTEX_PROJECT: project });
+        runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
 
         // Jaccard "maybe zone" scan per finding — free, no LLM. Agent sees candidates and decides.
         const allPotentialDuplicates: Array<{ finding: string; candidates: PotentialDuplicate[] }> = [];
         const extraAnnotationsByFinding: string[][] = [];
 
         for (const f of findings) {
-          const candidates = findJaccardCandidates(cortexPath, project, f);
+          const candidates = findJaccardCandidates(phrenPath, project, f);
           if (candidates.length > 0) allPotentialDuplicates.push({ finding: f, candidates });
           try {
-            const conflicts = await checkSemanticConflicts(cortexPath, project, f);
+            const conflicts = await checkSemanticConflicts(phrenPath, project, f);
             extraAnnotationsByFinding.push(conflicts.checked && conflicts.annotations.length > 0 ? conflicts.annotations : []);
           } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] add_findings semanticConflict: ${errorMessage(err)}\n`);
+            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] add_findings semanticConflict: ${errorMessage(err)}\n`);
             extraAnnotationsByFinding.push([]);
           }
         }
 
-        const result = addFindingsToFile(cortexPath, project, findings, {
+        const result = addFindingsToFile(phrenPath, project, findings, {
           extraAnnotationsByFinding,
           sessionId,
         });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, skipped, rejected } = result.data;
         if (added.length > 0) {
-          runCustomHooks(cortexPath, "post-finding", { CORTEX_PROJECT: project });
-          incrementSessionFindings(cortexPath, added.length, sessionId, project);
-          updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
+          runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
+          incrementSessionFindings(phrenPath, added.length, sessionId, project);
+          updateFileInIndex(path.join(phrenPath, project, "FINDINGS.md"));
         }
         const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
         // ok:true whenever the operation completed without error — use counts to distinguish outcomes.
@@ -313,7 +313,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "supersede_finding",
     {
-      title: "◆ cortex · supersede finding",
+      title: "◆ phren · supersede finding",
       description: "Mark an existing finding as superseded and link it to the newer finding text.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -323,8 +323,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, finding_text, superseded_by }) => {
       return withLifecycleMutation(
-        cortexPath, project, withWriteQueue, updateFileInIndex,
-        () => supersedeFinding(cortexPath, project, finding_text, superseded_by),
+        phrenPath, project, withWriteQueue, updateFileInIndex,
+        () => supersedeFinding(phrenPath, project, finding_text, superseded_by),
         (data) => ({
           message: `Marked finding as superseded in ${project}.`,
           data: { project, finding: data.finding, status: data.status, superseded_by: data.superseded_by },
@@ -336,7 +336,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "retract_finding",
     {
-      title: "◆ cortex · retract finding",
+      title: "◆ phren · retract finding",
       description: "Mark an existing finding as retracted and store the reason in lifecycle metadata.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -346,8 +346,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, finding_text, reason }) => {
       return withLifecycleMutation(
-        cortexPath, project, withWriteQueue, updateFileInIndex,
-        () => retractFindingLifecycle(cortexPath, project, finding_text, reason),
+        phrenPath, project, withWriteQueue, updateFileInIndex,
+        () => retractFindingLifecycle(phrenPath, project, finding_text, reason),
         (data) => ({
           message: `Retracted finding in ${project}.`,
           data: { project, finding: data.finding, status: data.status, reason: data.reason },
@@ -359,7 +359,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "resolve_contradiction",
     {
-      title: "◆ cortex · resolve contradiction",
+      title: "◆ phren · resolve contradiction",
       description: "Resolve a contradiction between two findings and update lifecycle status based on the chosen resolution.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -395,8 +395,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         });
       }
       return withLifecycleMutation(
-        cortexPath, project, withWriteQueue, updateFileInIndex,
-        () => resolveFindingContradiction(cortexPath, project, findingText, findingTextOther, resolution),
+        phrenPath, project, withWriteQueue, updateFileInIndex,
+        () => resolveFindingContradiction(phrenPath, project, findingText, findingTextOther, resolution),
         (data) => ({
           message: `Resolved contradiction in ${project} with "${resolution}".`,
           data: {
@@ -415,7 +415,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "get_contradictions",
     {
-      title: "◆ cortex · contradictions",
+      title: "◆ phren · contradictions",
       description: "List unresolved contradictions (findings currently marked with status contradicted).",
       inputSchema: z.object({
         project: z.string().optional().describe("Optional project filter. When omitted, scans all projects."),
@@ -426,7 +426,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (project && !isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const projects = project
         ? [project]
-        : fs.readdirSync(cortexPath, { withFileTypes: true })
+        : fs.readdirSync(phrenPath, { withFileTypes: true })
           .filter((entry) => entry.isDirectory() && !RESERVED_PROJECT_DIRS.has(entry.name) && isValidProjectName(entry.name))
           .map((entry) => entry.name);
 
@@ -442,7 +442,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }> = [];
 
       for (const p of projects) {
-        const result = readFindings(cortexPath, p);
+        const result = readFindings(phrenPath, p);
         if (!result.ok) continue;
         for (const finding of result.data) {
           if (finding.status !== "contradicted") continue;
@@ -477,7 +477,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "remove_finding",
     {
-      title: "◆ cortex · remove finding",
+      title: "◆ phren · remove finding",
       description:
         "Remove a finding from a project's FINDINGS.md by matching text. Use this when a " +
         "previously captured insight turns out to be wrong, outdated, or no longer relevant.",
@@ -489,9 +489,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, finding }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = removeFindingCore(cortexPath, project, finding);
+        const result = removeFindingCore(phrenPath, project, finding);
         if (result.ok) {
-          const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+          const resolvedFindingsDir = safeProjectPath(phrenPath, project);
           if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
         }
         if (!result.ok) return mcpResponse({ ok: false, error: result.message });
@@ -503,7 +503,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "remove_findings",
     {
-      title: "◆ cortex · remove findings (bulk)",
+      title: "◆ phren · remove findings (bulk)",
       description: "Remove multiple findings from a project's FINDINGS.md in one call.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -513,9 +513,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, findings }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = removeFindingsCore(cortexPath, project, findings);
+        const result = removeFindingsCore(phrenPath, project, findings);
         if (result.ok) {
-          const resolvedFindingsDir = safeProjectPath(cortexPath, project);
+          const resolvedFindingsDir = safeProjectPath(phrenPath, project);
           if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
         }
         if (!result.ok) return mcpResponse({ ok: false, error: result.message });
@@ -527,13 +527,13 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "push_changes",
     {
-      title: "◆ cortex · push",
+      title: "◆ phren · push",
       description:
-        "Commit and push any changes in the cortex repo. Call this at the end of a session " +
+        "Commit and push any changes in the phren store. Call this at the end of a session " +
         "or after adding multiple findings/tasks items. Commits all modified files in the " +
-        "cortex directory and pushes if a remote is configured.",
+        "phren directory and pushes if a remote is configured.",
       inputSchema: z.object({
-        message: z.string().optional().describe("Commit message. Defaults to 'update cortex'."),
+        message: z.string().optional().describe("Commit message. Defaults to 'update phren'."),
       }),
     },
     async ({ message }) => {
@@ -543,7 +543,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           "git",
           args,
           {
-            cwd: cortexPath,
+            cwd: phrenPath,
             encoding: "utf8",
             timeout: opts.timeout ?? EXEC_TIMEOUT_MS,
             env: opts.env,
@@ -553,7 +553,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         try {
           const status = runGit(["status", "--porcelain"]);
-          if (!status) return mcpResponse({ ok: true, message: "Nothing to save. Cortex is up to date.", data: { files: 0, pushed: false } });
+          if (!status) return mcpResponse({ ok: true, message: "Nothing to save. Phren is up to date.", data: { files: 0, pushed: false } });
           const files = status.split("\n").filter(Boolean);
           const projectNames = Array.from(
             new Set(
@@ -562,10 +562,10 @@ export function register(server: McpServer, ctx: McpContext): void {
                 .filter((name) => name && !name.startsWith(".") && name !== "profiles")
             )
           );
-          const commitMsg = message || `cortex: save ${files.length} file(s) across ${projectNames.length} project(s)`;
+          const commitMsg = message || `phren: save ${files.length} file(s) across ${projectNames.length} project(s)`;
 
-          runCustomHooks(cortexPath, "pre-save");
-          // Restrict to known cortex file types to avoid staging .env or credential files
+          runCustomHooks(phrenPath, "pre-save");
+          // Restrict to known phren file types to avoid staging .env or credential files
           runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
           runGit(["commit", "-m", commitMsg]);
 
@@ -574,7 +574,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             const remotes = runGit(["remote"]);
             hasRemote = remotes.length > 0;
           } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes remoteCheck: ${errorMessage(err)}\n`);
+            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes remoteCheck: ${errorMessage(err)}\n`);
           }
 
           if (!hasRemote) {
@@ -599,8 +599,8 @@ export function register(server: McpServer, ctx: McpContext): void {
                 try {
                   runGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
                 } catch (pullErr: unknown) {
-                  if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes pullRebase: ${pullErr instanceof Error ? pullErr.message : String(pullErr)}\n`);
-                  const resolved = autoMergeConflicts(cortexPath);
+                  if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes pullRebase: ${pullErr instanceof Error ? pullErr.message : String(pullErr)}\n`);
+                  const resolved = autoMergeConflicts(phrenPath);
                   if (resolved) {
                     try {
                       runGit(["rebase", "--continue"], {
@@ -608,15 +608,15 @@ export function register(server: McpServer, ctx: McpContext): void {
                         env: { ...process.env, GIT_EDITOR: "true" },
                       });
                     } catch (continueErr: unknown) {
-                      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes rebaseContinue: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}\n`);
+                      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseContinue: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}\n`);
                       try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
-                        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes rebaseAbort: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
+                        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseAbort: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
                       }
                       break;
                     }
                   } else {
                     try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
-                      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] push_changes rebaseAbort2: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
+                      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseAbort2: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
                     }
                     break;
                   }
@@ -628,13 +628,13 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
 
           const changedFiles = status.split("\n").filter(Boolean).length;
-          runCustomHooks(cortexPath, "post-save", { CORTEX_FILES_CHANGED: String(changedFiles), CORTEX_PUSHED: String(pushed) });
+          runCustomHooks(phrenPath, "post-save", { PHREN_FILES_CHANGED: String(changedFiles), PHREN_PUSHED: String(pushed) });
           if (pushed) {
             return mcpResponse({ ok: true, message: `Saved ${changedFiles} changed file(s). Pushed to remote.`, data: { files: changedFiles, pushed: true } });
           } else {
             return mcpResponse({
               ok: true,
-              message: `Changes were committed but push failed.\n\nGit error: ${lastPushError}\n\nRun 'git push' manually from your cortex directory.`,
+              message: `Changes were committed but push failed.\n\nGit error: ${lastPushError}\n\nRun 'git push' manually from your phren directory.`,
               data: { files: changedFiles, pushed: false, pushError: lastPushError },
             });
           }

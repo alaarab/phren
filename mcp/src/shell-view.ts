@@ -1,5 +1,5 @@
 /**
- * View rendering functions for the cortex interactive shell.
+ * View rendering functions for the phren interactive shell.
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
  */
 
@@ -50,7 +50,7 @@ import { getScopedSkills } from "./skill-registry.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
-  cortexPath: string;
+  phrenPath: string;
   profile: string;
   state: ShellState;
   currentCursor: () => number;
@@ -168,7 +168,7 @@ interface ProjectDashboardEntry {
 }
 
 function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry[] {
-  const cards = listProjectCards(ctx.cortexPath, ctx.profile);
+  const cards = listProjectCards(ctx.phrenPath, ctx.profile);
   return cards.map((card) => {
     if (card.name === "global") {
       return {
@@ -180,9 +180,9 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
       };
     }
 
-    const task = readTasks(ctx.cortexPath, card.name);
-    const findings = readFindings(ctx.cortexPath, card.name);
-    const review = readReviewQueue(ctx.cortexPath, card.name);
+    const task = readTasks(ctx.phrenPath, card.name);
+    const findings = readFindings(ctx.phrenPath, card.name);
+    const review = readReviewQueue(ctx.phrenPath, card.name);
 
     return {
       ...card,
@@ -195,7 +195,7 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
 }
 
 function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntry[], height: number): string[] {
-  const runtime = readRuntimeHealth(ctx.cortexPath);
+  const runtime = readRuntimeHealth(ctx.phrenPath);
   const scoped = entries.filter((entry) => entry.name !== "global");
   const totals = scoped.reduce((acc, entry) => {
     acc.active += entry.activeCount;
@@ -212,10 +212,10 @@ function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntr
   const findingsPreview = scoped
     .filter((entry) => entry.findingCount > 0)
     .slice(0, 3)
-    .map((entry) => `${style.bold(entry.name)} ${style.dim(`${entry.findingCount} findings`)}`);
+    .map((entry) => `${style.bold(entry.name)} ${style.dim(`${entry.findingCount} fragments`)}`);
 
   const lines = [
-    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
+    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} fragments  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
     ctx.state.project
       ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim("· ↵ opens selected project tasks")}`
       : `  ${style.dim("No project selected yet")}  ${style.dim("· ↵ sets context and opens tasks")}`,
@@ -225,7 +225,7 @@ function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntr
   if (height >= 12) {
     lines.push("");
     lines.push(`  ${style.bold("Task pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active tasks across this profile.")}`);
-    lines.push(`  ${style.bold("Recent findings")}  ${findingsPreview.length ? findingsPreview.join(style.dim("  ·  ")) : style.dim("No findings yet.")}`);
+    lines.push(`  ${style.bold("Recent fragments")}  ${findingsPreview.length ? findingsPreview.join(style.dim("  ·  ")) : style.dim("Nothing yet.")}`);
   }
 
   lines.push("");
@@ -302,6 +302,22 @@ function sectionBullet(title: string): { bullet: string; colorFn: (s: string) =>
   }
 }
 
+function priorityIndicator(priority?: string, isDone?: boolean): string {
+  if (isDone) return style.dim("○");
+  switch (priority) {
+    case "high": return style.boldRed("●");
+    case "medium": return style.yellow("◐");
+    case "low": return style.dim("○");
+    default: return style.dim("·");
+  }
+}
+
+function taskStatusIcon(section: string, checked?: boolean): string {
+  if (checked || section === "Done") return style.dim("✓");
+  if (section === "Active") return style.magenta("◉");
+  return style.dim("☐");
+}
+
 export interface SubsectionsCache {
   project: string;
   /** Keys are stable item IDs (bid hash when present, else "row:N") mapped to subsection name */
@@ -331,7 +347,7 @@ function parseSubsections(taskPath: string, project: string, cache: SubsectionsC
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] buildSubsectionMap: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildSubsectionMap: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   const newCache = { project, map };
   return { map, cache: newCache };
@@ -346,7 +362,7 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
     return { lines: [style.dim("  No project selected — navigate to Projects (← →) and press ↵")], subsectionsCache };
   }
 
-  const result = readTasks(ctx.cortexPath, project);
+  const result = readTasks(ctx.phrenPath, project);
   if (!result.ok) return { lines: [result.error], subsectionsCache };
 
   const parsed = result.data;
@@ -354,9 +370,9 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
     ? [`  ${style.yellow("⚠")}  ${style.yellow(parsed.issues.join("; "))}`, ""]
     : [];
 
-  const taskFile = resolveTaskFilePath(ctx.cortexPath, project)
-    ?? canonicalTaskFilePath(ctx.cortexPath, project)
-    ?? path.join(ctx.cortexPath, project, "tasks.md");
+  const taskFile = resolveTaskFilePath(ctx.phrenPath, project)
+    ?? canonicalTaskFilePath(ctx.phrenPath, project)
+    ?? path.join(ctx.phrenPath, project, "tasks.md");
   const subsResult = parseSubsections(taskFile, project, subsectionsCache);
   const subsections = subsResult.map;
   const newCache = subsResult.cache;
@@ -390,6 +406,7 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
       lastSection = section;
       lastSub = "";
       const { bullet, colorFn } = sectionBullet(section);
+      if (allLines.length > 0) allLines.push("");
       allLines.push(`  ${bullet} ${colorFn(section)}`);
     }
 
@@ -401,26 +418,23 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
 
     if (isSelected) cursorFirstLine = allLines.length;
 
-    const idStr = style.dim(item.id);
-    const pinTag = item.pinned ? ` ${style.boldCyan("[pin]")}` : "";
-    const prioTag = item.priority && !isDone
-      ? ` ${item.priority === "high"
-        ? style.boldRed(`[${item.priority}]`)
-        : item.priority === "medium"
-          ? style.yellow(`[${item.priority}]`)
-          : style.dim(`[${item.priority}]`)}`
+    const prioIcon = priorityIndicator(item.priority, isDone);
+    const statusIcon = taskStatusIcon(section, item.checked);
+    const pinTag = item.pinned ? ` ${style.boldCyan("★")}` : "";
+    const ghTag = item.githubIssue
+      ? ` ${style.dim("[")}${style.cyan(`#${item.githubIssue}`)}${style.dim("]")}`
       : "";
-    const check = item.checked ? style.green("[✓]") : style.dim("[ ]");
     const lineText = isDone ? style.dim(item.line) : item.line;
+    const idStr = style.dim(item.id.padEnd(3));
 
-    let row = `    ${idStr} ${check} ${lineText}${pinTag}${prioTag}`;
+    let row = `    ${prioIcon} ${statusIcon} ${idStr} ${lineText}${pinTag}${ghTag}`;
     row = isSelected && !isDone
       ? formatSelectableLine(row, cols, true)
       : truncateLine(row, cols);
     allLines.push(row);
 
     if (item.context) {
-      const ctxLine = `       ${style.dimItalic("→ " + item.context)}`;
+      const ctxLine = `              ${style.dimItalic("→ " + item.context)}`;
       allLines.push(isSelected && !isDone ? formatSelectableLine(ctxLine, cols, true) : truncateLine(ctxLine, cols));
     }
 
@@ -448,7 +462,7 @@ function renderFindingsView(ctx: ViewContext, cursor: number, height: number): s
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
 
-  const result = readFindings(ctx.cortexPath, project);
+  const result = readFindings(ctx.phrenPath, project);
   if (!result.ok) return [result.error];
 
   const all = result.data;
@@ -459,7 +473,7 @@ function renderFindingsView(ctx: ViewContext, cursor: number, height: number): s
     : all;
 
   if (!filtered.length) {
-    return [style.dim(`  No findings yet. Press ${style.boldCyan("a")} to add one.`)];
+    return [style.dim(`  Nothing here yet. Press ${style.boldCyan("a")} to tell phren something.`)];
   }
 
   const allLines: string[] = [];
@@ -517,7 +531,7 @@ function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: number)
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
 
-  const result = readReviewQueue(ctx.cortexPath, project);
+  const result = readReviewQueue(ctx.phrenPath, project);
   if (!result.ok) return [result.error];
 
   const filtered = ctx.state.filter
@@ -590,8 +604,8 @@ export interface SkillEntry {
   enabled: boolean;
 }
 
-export function getProjectSkills(cortexPath: string, project: string): SkillEntry[] {
-  return getScopedSkills(cortexPath, "", project).map((skill) => ({
+export function getProjectSkills(phrenPath: string, project: string): SkillEntry[] {
+  return getScopedSkills(phrenPath, "", project).map((skill) => ({
     name: skill.name,
     path: skill.path,
     enabled: skill.enabled,
@@ -623,13 +637,13 @@ function renderSkillsView(ctx: ViewContext, cursor: number, height: number): str
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
 
-  const skills = getProjectSkills(ctx.cortexPath, project);
+  const skills = getProjectSkills(ctx.phrenPath, project);
   const filtered = ctx.state.filter
     ? skills.filter((s) => s.name.toLowerCase().includes(ctx.state.filter!.toLowerCase()))
     : skills;
 
   if (!filtered.length) {
-    return [style.dim(`  No skills for ${project}. Use "cortex skills add ${project} <path>" to add one.`)];
+    return [style.dim(`  No skills for ${project}. Use "phren skills add ${project} <path>" to add one.`)];
   }
 
   const allLines: string[] = [];
@@ -687,23 +701,23 @@ export interface HookEntry {
 
 const LIFECYCLE_HOOKS: Array<{ event: string; description: string }> = [
   { event: "UserPromptSubmit", description: "inject context before each prompt" },
-  { event: "Stop",             description: "auto-save findings after each response" },
+  { event: "Stop",             description: "phren saves fragments after each response" },
   { event: "SessionStart",     description: "git pull at session start" },
 ];
 
-export function getHookEntries(cortexPath: string, project?: string | null): HookEntry[] {
-  const prefs = readInstallPreferences(cortexPath);
+export function getHookEntries(phrenPath: string, project?: string | null): HookEntry[] {
+  const prefs = readInstallPreferences(phrenPath);
   const hooksEnabled = prefs.hooksEnabled !== false;
-  const projectConfig = project ? readProjectConfig(cortexPath, project) : undefined;
+  const projectConfig = project ? readProjectConfig(phrenPath, project) : undefined;
   return LIFECYCLE_HOOKS.map((h) => ({
     ...h,
-    enabled: hooksEnabled && isProjectHookEnabled(cortexPath, project, h.event as typeof PROJECT_HOOK_EVENTS[number], projectConfig),
+    enabled: hooksEnabled && isProjectHookEnabled(phrenPath, project, h.event as typeof PROJECT_HOOK_EVENTS[number], projectConfig),
   }));
 }
 
 function renderHooksView(ctx: ViewContext, cursor: number, height: number): string[] {
   const cols = renderWidth();
-  const entries = getHookEntries(ctx.cortexPath, ctx.state.project);
+  const entries = getHookEntries(ctx.phrenPath, ctx.state.project);
   const allEnabled = entries.every((e) => e.enabled);
   const allLines: string[] = [];
   let cursorFirstLine = 0;
@@ -752,9 +766,9 @@ export { writeInstallPreferences } from "./init-preferences.js";
 
 // ── Machines/Profiles view ─────────────────────────────────────────────────
 
-function renderMachinesView(cortexPath: string): string[] {
-  const machines = listMachines(cortexPath);
-  const profiles = listProfiles(cortexPath);
+function renderMachinesView(phrenPath: string): string[] {
+  const machines = listMachines(phrenPath);
+  const profiles = listProfiles(phrenPath);
   const lines: string[] = [];
 
   lines.push(style.bold("  Machines"));
@@ -790,19 +804,19 @@ function renderMachinesView(cortexPath: string): string[] {
 // ── Health view ────────────────────────────────────────────────────────────
 
 function renderHealthView(
-  cortexPath: string,
+  phrenPath: string,
   doctor: DoctorResultLike,
   cursor: number,
   height: number,
   currentScroll: number,
   setScroll: (n: number) => void,
 ): { lines: string[]; lineCount: number } {
-  const runtime = readRuntimeHealth(cortexPath);
+  const runtime = readRuntimeHealth(phrenPath);
   const allLines: string[] = [];
 
   const statusIcon = doctor.ok ? style.green("✓") : style.red("✗");
   const statusLabel = doctor.ok ? style.boldGreen("healthy") : style.boldRed("issues found");
-  allLines.push(`  ${statusIcon}  ${style.bold("cortex")} ${statusLabel}`);
+  allLines.push(`  ${statusIcon}  ${style.bold("phren")} ${statusLabel}`);
   if (doctor.machine) allLines.push(`     ${style.dim("machine:")} ${style.bold(doctor.machine)}`);
   if (doctor.profile) allLines.push(`     ${style.dim("profile:")} ${style.cyan(doctor.profile)}`);
 
@@ -860,7 +874,7 @@ export async function renderShell(
   const filterLabel = ctx.state.filter
     ? `  ${style.dim("·")}  ${style.yellow("/" + ctx.state.filter)}`
     : "";
-  const header = `  ${gradient("◆ cortex")}${projectLabel}${filterLabel}`;
+  const header = `  ${gradient("◆ phren")}${projectLabel}${filterLabel}`;
   const tabBar = renderTabBar(ctx.state);
   const bottomBar = renderBottomBar(ctx.state, navMode, inputCtx, inputBuf);
   const cursor = ctx.currentCursor();
@@ -893,11 +907,11 @@ export async function renderShell(
         contentLines = renderHooksView(ctx, cursor, height);
         break;
       case "Machines/Profiles":
-        contentLines = renderMachinesView(ctx.cortexPath);
+        contentLines = renderMachinesView(ctx.phrenPath);
         break;
       case "Health": {
         const doctor = await doctorSnapshot();
-        const result = renderHealthView(ctx.cortexPath, doctor, cursor, height, ctx.currentScroll(), ctx.setScroll);
+        const result = renderHealthView(ctx.phrenPath, doctor, cursor, height, ctx.currentScroll(), ctx.setScroll);
         contentLines = result.lines;
         setHealthLineCount(result.lineCount);
         break;

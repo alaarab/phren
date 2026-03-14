@@ -29,21 +29,20 @@ export const cliManifest: CapabilityManifest = {
 
     // Search
     "search.fts": { implemented: true, handler: "cli-actions.ts:handleSearch" },
-    "search.entity": { implemented: false, reason: "No entity search CLI command" },
-    "search.related_docs": { implemented: false, reason: "No related docs CLI command" },
+    "search.fragment": { implemented: true, handler: "cli-actions.ts:handleFragmentSearch" },
+    "search.related_docs": { implemented: true, handler: "cli-actions.ts:handleRelatedDocs" },
     "search.history": { implemented: true, handler: "cli-actions.ts:handleSearch --history" },
 
     // Graph
-    "graph.read": { implemented: false, reason: "No graph CLI command" },
+    "graph.read": { implemented: true, handler: "cli-graph.ts:handleGraphRead" },
     "graph.visualize": { implemented: false, reason: "Graph visualization is VS Code / web only" },
-    "graph.link_findings": { implemented: false, reason: "Link findings is MCP-only" },
+    "graph.link_findings": { implemented: true, handler: "cli-graph.ts:handleGraphLink" },
 
     // Config
     "config.proactivity": { implemented: true, handler: "cli-config.ts:handleProactivity" },
     "config.task_mode": { implemented: true, handler: "cli-config.ts:handleConfigTaskMode" },
     "config.retention": { implemented: true, handler: "cli-config.ts:handleRetentionPolicy" },
     "config.workflow": { implemented: true, handler: "cli-config.ts:handleWorkflowPolicy" },
-    "config.access": { implemented: true, handler: "cli-config.ts:handleAccessControl" },
     "config.index": { implemented: true, handler: "cli-config.ts:handleIndexPolicy" },
 
     // Health / Sync / Session

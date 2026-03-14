@@ -1,5 +1,5 @@
 /**
- * Command palette and input handling for the cortex interactive shell.
+ * Command palette and input handling for the phren interactive shell.
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
  */
 
@@ -10,16 +10,13 @@ import {
   addTask,
   addFinding,
   addProjectToProfile,
-  approveQueueItem,
   TaskItem,
   completeTask,
-  editQueueItem,
   listProjectCards,
   pinTask,
   readTasks,
   readFindings,
   readReviewQueue,
-  rejectQueueItem,
   removeFinding,
   removeProjectFromProfile,
   resetShellState,
@@ -55,7 +52,7 @@ import { errorMessage } from "./utils.js";
 
 /** Interface for the shell methods that executePalette needs */
 export interface PaletteHost {
-  cortexPath: string;
+  phrenPath: string;
   profile: string;
   state: ShellState;
   deps: ShellDeps;
@@ -83,10 +80,10 @@ export interface NavigationHost extends PaletteHost {
   setFilter(value: string): void;
 }
 
-function taskFileForProject(cortexPath: string, project: string): string {
-  return resolveTaskFilePath(cortexPath, project)
-    ?? canonicalTaskFilePath(cortexPath, project)
-    ?? path.join(cortexPath, project, "tasks.md");
+function taskFileForProject(phrenPath: string, project: string): string {
+  return resolveTaskFilePath(phrenPath, project)
+    ?? canonicalTaskFilePath(phrenPath, project)
+    ?? path.join(phrenPath, project, "tasks.md");
 }
 
 export async function executePalette(host: PaletteHost, input: string): Promise<void> {
@@ -103,7 +100,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
   if (command === "projects") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return; }
   if (command === "tasks" || command === "task") { host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return; }
-  if (command === "learnings" || command === "findings") { host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Findings`); return; }
+  if (command === "learnings" || command === "findings" || command === "fragments") { host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Fragments`); return; }
   if (command === "memory") { host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return; }
   if (command === "machines") { host.setView("Machines/Profiles"); host.setMessage("  Machines/Profiles"); return; }
   if (command === "health") {
@@ -116,10 +113,10 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
   if (command === "open") {
     const project = parts[1];
     if (!project) { host.setMessage("  Usage: :open <project>"); return; }
-    const cards = listProjectCards(host.cortexPath, host.profile);
+    const cards = listProjectCards(host.phrenPath, host.profile);
     if (!cards.some((c) => c.name === project)) { host.setMessage(`  Unknown project: ${project}`); return; }
     host.state.project = project;
-    saveShellState(host.cortexPath, host.state);
+    saveShellState(host.phrenPath, host.state);
     host.setMessage(`  ${style.green("●")} ${style.boldCyan(project)} — project context set`);
     return;
   }
@@ -133,7 +130,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
         query,
         limit: 6,
         project: host.state.project,
-      }, host.cortexPath, host.profile);
+      }, host.phrenPath, host.profile);
       host.setMessage(result.lines.slice(0, 14).join("\n") || "  No results.");
     } catch (err: unknown) {
       host.setMessage(`  Search failed: ${errorMessage(err)}`);
@@ -149,7 +146,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       return;
     }
     host.state.introMode = mode as ShellState["introMode"];
-    saveShellState(host.cortexPath, host.state);
+    saveShellState(host.phrenPath, host.state);
     host.setMessage(`  Intro mode: ${style.boldCyan(mode)}`);
     return;
   }
@@ -159,7 +156,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!project) return;
     const text = trimmed.slice("add".length).trim();
     if (!text) { host.setMessage("  Usage: :add <task>"); return; }
-    host.setMessage(`  ${resultMsg(addTask(host.cortexPath, project, text))}`);
+    host.setMessage(`  ${resultMsg(addTask(host.phrenPath, project, text))}`);
     return;
   }
 
@@ -171,15 +168,15 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const ids = expandIds(match);
     if (ids.length > 1) {
       host.confirmThen(`Complete ${ids.length} items (${ids.join(", ")})?`, () => {
-        const file = taskFileForProject(host.cortexPath, project);
+        const file = taskFileForProject(host.phrenPath, project);
         host.snapshotForUndo(`complete ${ids.length} items`, file);
-        host.setMessage(ids.map((id) => resultMsg(completeTask(host.cortexPath, project, id))).join("; "));
+        host.setMessage(ids.map((id) => resultMsg(completeTask(host.phrenPath, project, id))).join("; "));
       });
     } else {
       host.confirmThen(`Complete "${match}"?`, () => {
-        const file = taskFileForProject(host.cortexPath, project);
+        const file = taskFileForProject(host.phrenPath, project);
         host.snapshotForUndo(`complete "${match}"`, file);
-        host.setMessage(`  ${resultMsg(completeTask(host.cortexPath, project, match))}`);
+        host.setMessage(`  ${resultMsg(completeTask(host.phrenPath, project, match))}`);
       });
     }
     return;
@@ -194,11 +191,11 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const match = parts.slice(1, -1).join(" ");
     const ids = expandIds(match);
     if (ids.length > 1) {
-      const file = taskFileForProject(host.cortexPath, project);
+      const file = taskFileForProject(host.phrenPath, project);
       host.snapshotForUndo(`move ${ids.length} items to ${section}`, file);
-      host.setMessage(ids.map((id) => resultMsg(updateTask(host.cortexPath, project, id, { section }))).join("; "));
+      host.setMessage(ids.map((id) => resultMsg(updateTask(host.phrenPath, project, id, { section }))).join("; "));
     } else {
-      host.setMessage(`  ${resultMsg(updateTask(host.cortexPath, project, match, { section }))}`);
+      host.setMessage(`  ${resultMsg(updateTask(host.phrenPath, project, match, { section }))}`);
     }
     return;
   }
@@ -211,7 +208,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!["high", "medium", "low"].includes(priorityRaw)) { host.setMessage("  Priority must be high|medium|low"); return; }
     const priority = priorityRaw as "high" | "medium" | "low";
     const match = parts.slice(1, -1).join(" ");
-    host.setMessage(`  ${resultMsg(updateTask(host.cortexPath, project, match, { priority }))}`);
+    host.setMessage(`  ${resultMsg(updateTask(host.phrenPath, project, match, { priority }))}`);
     return;
   }
 
@@ -221,7 +218,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (parts.length < 3) { host.setMessage("  Usage: :context <id|match> <text>"); return; }
     const match = parts[1];
     const context = parts.slice(2).join(" ");
-    host.setMessage(`  ${resultMsg(updateTask(host.cortexPath, project, match, { context }))}`);
+    host.setMessage(`  ${resultMsg(updateTask(host.phrenPath, project, match, { context }))}`);
     return;
   }
 
@@ -229,7 +226,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     if (parts.length < 2) { host.setMessage("  Usage: :pin <id|match>"); return; }
-    host.setMessage(`  ${resultMsg(pinTask(host.cortexPath, project, parts.slice(1).join(" ")))}`);
+    host.setMessage(`  ${resultMsg(pinTask(host.phrenPath, project, parts.slice(1).join(" ")))}`);
     return;
   }
 
@@ -237,14 +234,14 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     if (parts.length < 2) { host.setMessage("  Usage: :unpin <id|match>"); return; }
-    host.setMessage(`  ${resultMsg(unpinTask(host.cortexPath, project, parts.slice(1).join(" ")))}`);
+    host.setMessage(`  ${resultMsg(unpinTask(host.phrenPath, project, parts.slice(1).join(" ")))}`);
     return;
   }
 
   if (command === "work" && parts[1]?.toLowerCase() === "next") {
     const project = host.ensureProjectSelected();
     if (!project) return;
-    host.setMessage(`  ${resultMsg(workNextTask(host.cortexPath, project))}`);
+    host.setMessage(`  ${resultMsg(workNextTask(host.phrenPath, project))}`);
     return;
   }
 
@@ -252,9 +249,9 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     const keep = parts[1] ? Number.parseInt(parts[1], 10) : 30;
-    const file = taskFileForProject(host.cortexPath, project);
+    const file = taskFileForProject(host.phrenPath, project);
     host.snapshotForUndo("tidy", file);
-    host.setMessage(`  ${resultMsg(tidyDoneTasks(host.cortexPath, project, Number.isNaN(keep) ? 30 : keep))}`);
+    host.setMessage(`  ${resultMsg(tidyDoneTasks(host.phrenPath, project, Number.isNaN(keep) ? 30 : keep))}`);
     return;
   }
 
@@ -265,16 +262,16 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (action === "add") {
       const text = trimmed.split(/\s+/).slice(2).join(" ").trim();
       if (!text) { host.setMessage("  Usage: :find add <text>"); return; }
-      host.setMessage(`  ${resultMsg(addFinding(host.cortexPath, project, text))}`);
+      host.setMessage(`  ${resultMsg(addFinding(host.phrenPath, project, text))}`);
       return;
     }
     if (action === "remove") {
       const match = parts.slice(2).join(" ").trim();
       if (!match) { host.setMessage("  Usage: :find remove <id|match>"); return; }
       host.confirmThen(`Remove finding "${match}"?`, () => {
-        const file = path.join(host.cortexPath, project!, "FINDINGS.md");
+        const file = path.join(host.phrenPath, project!, "FINDINGS.md");
         host.snapshotForUndo(`find remove "${match}"`, file);
-        host.setMessage(`  ${resultMsg(removeFinding(host.cortexPath, project!, match))}`);
+        host.setMessage(`  ${resultMsg(removeFinding(host.phrenPath, project!, match))}`);
       });
       return;
     }
@@ -286,48 +283,13 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     const action = (parts[1] || "").toLowerCase();
-    if (action === "approve") {
-      const match = parts.slice(2).join(" ").trim();
-      if (!match) { host.setMessage("  Usage: :mq approve <id|match>"); return; }
-      const ids = expandIds(match);
-      host.setMessage(
-        ids.length > 1
-          ? ids.map((id) => resultMsg(approveQueueItem(host.cortexPath, project, id))).join("; ")
-          : `  ${resultMsg(approveQueueItem(host.cortexPath, project, match))}`,
-      );
-      return;
-    }
-    if (action === "reject") {
-      const match = parts.slice(2).join(" ").trim();
-      if (!match) { host.setMessage("  Usage: :mq reject <id|match>"); return; }
-      const ids = expandIds(match);
-      if (ids.length > 1) {
-        host.confirmThen(`Reject ${ids.length} items (${ids.join(", ")})?`, () => {
-          const file = path.join(host.cortexPath, project!, "MEMORY_QUEUE.md");
-          host.snapshotForUndo(`mq reject ${ids.length} items`, file);
-          host.setMessage(ids.map((id) => resultMsg(rejectQueueItem(host.cortexPath, project!, id))).join("; "));
-        });
-      } else {
-        host.confirmThen(`Reject "${match}"?`, () => {
-          const file = path.join(host.cortexPath, project!, "MEMORY_QUEUE.md");
-          host.snapshotForUndo(`mq reject "${match}"`, file);
-          host.setMessage(`  ${resultMsg(rejectQueueItem(host.cortexPath, project!, match))}`);
-        });
-      }
-      return;
-    }
-    if (action === "edit") {
-      if (parts.length < 4) { host.setMessage("  Usage: :mq edit <id|match> <text>"); return; }
-      host.setMessage(`  ${resultMsg(editQueueItem(host.cortexPath, project, parts[2], parts.slice(3).join(" ")))}`);
-      return;
-    }
-    host.setMessage("  Usage: :mq approve|reject|edit ...");
+    host.setMessage("  Queue approve/reject/edit have been removed. The review queue is now read-only.");
     return;
   }
 
   if (command === "machine" && parts[1]?.toLowerCase() === "map") {
     if (parts.length < 4) { host.setMessage("  Usage: :machine map <hostname> <profile>"); return; }
-    host.setMessage(`  ${resultMsg(setMachineProfile(host.cortexPath, parts[2], parts[3]))}`);
+    host.setMessage(`  ${resultMsg(setMachineProfile(host.phrenPath, parts[2], parts[3]))}`);
     return;
   }
 
@@ -337,11 +299,11 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = parts[3];
     if (!profileName || !project) { host.setMessage("  Usage: :profile add-project|remove-project <profile> <project>"); return; }
     if (action === "add-project") {
-      host.setMessage(`  ${resultMsg(addProjectToProfile(host.cortexPath, profileName, project))}`);
+      host.setMessage(`  ${resultMsg(addProjectToProfile(host.phrenPath, profileName, project))}`);
       return;
     }
     if (action === "remove-project") {
-      host.setMessage(`  ${resultMsg(removeProjectFromProfile(host.cortexPath, profileName, project))}`);
+      host.setMessage(`  ${resultMsg(removeProjectFromProfile(host.phrenPath, profileName, project))}`);
       return;
     }
     host.setMessage("  Usage: :profile add-project|remove-project <profile> <project>");
@@ -350,7 +312,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
   if ((command === "run" && parts[1]?.toLowerCase() === "fix") || command === "doctor") {
     const t0 = Date.now();
-    const doctor = await host.deps.runDoctor(host.cortexPath, true);
+    const doctor = await host.deps.runDoctor(host.phrenPath, true);
     host.healthCache = undefined;
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     host.setMessage(`  doctor --fix: ${doctor.ok ? style.green("ok") : style.red("issues remain")} (${elapsed}s)`);
@@ -359,14 +321,14 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
   if (command === "relink") {
     const t0 = Date.now();
-    const r = await host.deps.runRelink(host.cortexPath);
+    const r = await host.deps.runRelink(host.phrenPath);
     host.setMessage(`  ${r} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     return;
   }
 
   if (command === "rerun" && parts[1]?.toLowerCase() === "hooks") {
     const t0 = Date.now();
-    const r = await host.deps.runHooks(host.cortexPath);
+    const r = await host.deps.runHooks(host.phrenPath);
     host.healthCache = undefined;
     host.setMessage(`  ${r} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     return;
@@ -400,12 +362,12 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!project) return;
     try {
       const t0 = Date.now();
-      const backupPath = path.join(host.cortexPath, project, "FINDINGS.md.bak");
+      const backupPath = path.join(host.phrenPath, project, "FINDINGS.md.bak");
       const backupBefore = fs.existsSync(backupPath) ? fs.statSync(backupPath).mtimeMs : undefined;
-      const result = consolidateProjectFindings(host.cortexPath, project);
+      const result = consolidateProjectFindings(host.phrenPath, project);
       const backupAfter = fs.existsSync(backupPath) ? fs.statSync(backupPath).mtimeMs : undefined;
       const backupNote = result.ok && backupAfter !== undefined && backupAfter !== backupBefore
-        ? `; Updated backup: ${path.relative(host.cortexPath, backupPath).replace(/\\/g, "/")}`
+        ? `; Updated backup: ${path.relative(host.phrenPath, backupPath).replace(/\\/g, "/")}`
         : "";
       host.setMessage(`  ${resultMsg(result)}${backupNote} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     } catch (err: unknown) {
@@ -419,7 +381,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       const lines: string[] = [];
       try {
         const conflicted = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
-          cwd: host.cortexPath, encoding: "utf8", timeout: 10_000,
+          cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
         if (conflicted) {
@@ -429,11 +391,11 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
           }
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] shell status gitStatus: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell status gitStatus: ${errorMessage(err)}\n`);
       }
 
-      const auditPathNew = runtimeFile(host.cortexPath, "audit.log");
-      const auditPathLegacy = path.join(host.cortexPath, ".governance", "audit.log");
+      const auditPathNew = runtimeFile(host.phrenPath, "audit.log");
+      const auditPathLegacy = path.join(host.phrenPath, ".governance", "audit.log");
       const auditPath = fs.existsSync(auditPathNew) ? auditPathNew : auditPathLegacy;
       if (fs.existsSync(auditPath)) {
         const auditLines = fs.readFileSync(auditPath, "utf8").split("\n")
@@ -447,7 +409,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
       const project = host.state.project;
       if (project) {
-        const queueResult = readReviewQueue(host.cortexPath, project);
+        const queueResult = readReviewQueue(host.phrenPath, project);
         if (queueResult.ok) {
           const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
           if (conflictItems.length) {
@@ -472,14 +434,14 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     const project = host.ensureProjectSelected();
     if (!project) return;
     try {
-      const projectDir = path.join(host.cortexPath, project);
+      const projectDir = path.join(host.phrenPath, project);
       const diff = execFileSync("git", ["diff", "--no-color", "--", projectDir], {
-        cwd: host.cortexPath, encoding: "utf8", timeout: 10_000,
+        cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
         stdio: ["ignore", "pipe", "ignore"],
       }).trim();
       if (!diff) {
         const staged = execFileSync("git", ["diff", "--cached", "--no-color", "--", projectDir], {
-          cwd: host.cortexPath, encoding: "utf8", timeout: 10_000,
+          cwd: host.phrenPath, encoding: "utf8", timeout: 10_000,
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
         host.setMessage(staged || "  No uncommitted changes.");
@@ -495,10 +457,10 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
   }
 
   if (command === "reset") {
-    host.setMessage(`  ${resultMsg(resetShellState(host.cortexPath))}`);
-    const newState = loadShellState(host.cortexPath);
+    host.setMessage(`  ${resultMsg(resetShellState(host.phrenPath))}`);
+    const newState = loadShellState(host.phrenPath);
     Object.assign(host.state, newState);
-    const cards = listProjectCards(host.cortexPath, host.profile);
+    const cards = listProjectCards(host.phrenPath, host.profile);
     host.state.project = cards[0]?.name;
     return;
   }
@@ -529,7 +491,7 @@ function suggestCommand(input: string): string | undefined {
   return best;
 }
 
-export function completeInput(line: string, cortexPath: string, profile: string, state: ShellState): string[] {
+export function completeInput(line: string, phrenPath: string, profile: string, state: ShellState): string[] {
   const commands = [
     ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health",
     ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
@@ -554,13 +516,13 @@ export function completeInput(line: string, cortexPath: string, profile: string,
 
   const cmd = parts[0].toLowerCase();
   if (cmd === "open") {
-    return listProjectCards(cortexPath, profile).map((c) => `:open ${c.name}`);
+    return listProjectCards(phrenPath, profile).map((c) => `:open ${c.name}`);
   }
 
   if (["complete", "move", "reprioritize", "context", "pin", "unpin"].includes(cmd)) {
     const project = state.project;
     if (!project) return [];
-    const result = readTasks(cortexPath, project);
+    const result = readTasks(phrenPath, project);
     if (!result.ok) return [];
     return [
       ...result.data.items.Active,
@@ -572,7 +534,7 @@ export function completeInput(line: string, cortexPath: string, profile: string,
   if (cmd === "mq" && ["approve", "reject", "edit"].includes((parts[1] || "").toLowerCase())) {
     const project = state.project;
     if (!project) return [];
-    const result = readReviewQueue(cortexPath, project);
+    const result = readReviewQueue(phrenPath, project);
     if (!result.ok) return [];
     return result.data.map((item) => `:mq ${parts[1].toLowerCase()} ${item.id}`);
   }
@@ -580,7 +542,7 @@ export function completeInput(line: string, cortexPath: string, profile: string,
   if (cmd === "find" && (parts[1] || "").toLowerCase() === "remove") {
     const project = state.project;
     if (!project) return [];
-    const r = readFindings(cortexPath, project);
+    const r = readFindings(phrenPath, project);
     if (!r.ok) return [];
     return r.data.map((item) => `:find remove ${item.id}`);
   }
@@ -591,18 +553,18 @@ export function completeInput(line: string, cortexPath: string, profile: string,
 // ── List items for each view ──────────────────────────────────────────────────
 
 export function getListItems(
-  cortexPath: string, profile: string, state: ShellState, healthLineCount: number,
+  phrenPath: string, profile: string, state: ShellState, healthLineCount: number,
 ): { id?: string; name?: string; text?: string; line?: string }[] {
   switch (state.view) {
     case "Projects": {
-      const cards = listProjectCards(cortexPath, profile);
+      const cards = listProjectCards(phrenPath, profile);
       return state.filter
         ? cards.filter((c) => `${c.name} ${c.summary} ${c.docs.join(" ")}`.toLowerCase().includes(state.filter!.toLowerCase()))
         : cards;
     }
     case "Tasks": {
       if (!state.project) return [];
-      const result = readTasks(cortexPath, state.project);
+      const result = readTasks(phrenPath, state.project);
       if (!result.ok) return [];
       const active = state.filter ? tasksByFilter(result.data.items.Active, state.filter) : result.data.items.Active;
       const queue = state.filter ? tasksByFilter(result.data.items.Queue, state.filter) : result.data.items.Queue;
@@ -610,7 +572,7 @@ export function getListItems(
     }
     case "Findings": {
       if (!state.project) return [];
-      const result = readFindings(cortexPath, state.project);
+      const result = readFindings(phrenPath, state.project);
       if (!result.ok) return [];
       return state.filter
         ? result.data.filter((i) => `${i.id} ${i.date} ${i.text}`.toLowerCase().includes(state.filter!.toLowerCase()))
@@ -618,19 +580,19 @@ export function getListItems(
     }
     case "Review Queue": {
       if (!state.project) return [];
-      const result = readReviewQueue(cortexPath, state.project);
+      const result = readReviewQueue(phrenPath, state.project);
       if (!result.ok) return [];
       return state.filter ? queueByFilter(result.data, state.filter) : result.data;
     }
     case "Skills": {
       if (!state.project) return [];
-      const allSkills = getProjectSkills(cortexPath, state.project).map((s) => ({ name: s.name, text: `${s.enabled ? "enabled" : "disabled"} · ${s.path}` }));
+      const allSkills = getProjectSkills(phrenPath, state.project).map((s) => ({ name: s.name, text: `${s.enabled ? "enabled" : "disabled"} · ${s.path}` }));
       return state.filter
         ? allSkills.filter((s) => `${s.name} ${s.text}`.toLowerCase().includes(state.filter!.toLowerCase()))
         : allSkills;
     }
     case "Hooks": {
-      return getHookEntries(cortexPath).map((e) => ({ name: e.event, text: e.enabled ? "active" : "inactive" }));
+      return getHookEntries(phrenPath).map((e) => ({ name: e.event, text: e.enabled ? "active" : "inactive" }));
     }
     case "Health":
       return Array.from({ length: Math.max(1, healthLineCount) }, (_, i) => ({ id: String(i) }));
@@ -649,16 +611,16 @@ async function activateSelected(host: NavigationHost): Promise<void> {
 
   switch (host.state.view) {
     case "Projects":
-      if (item.name) { host.state.project = item.name; saveShellState(host.cortexPath, host.state); host.setView("Tasks"); host.setMessage(`  ${style.green("●")} ${style.boldCyan(item.name)}`); }
+      if (item.name) { host.state.project = item.name; saveShellState(host.phrenPath, host.state); host.setView("Tasks"); host.setMessage(`  ${style.green("●")} ${style.boldCyan(item.name)}`); }
       break;
     case "Tasks":
       if (item.id) {
         const project = host.ensureProjectSelected();
         if (!project) return;
-        const file = taskFileForProject(host.cortexPath, project);
+        const file = taskFileForProject(host.phrenPath, project);
         host.confirmThen(`Complete ${style.dim(item.id)} "${item.line}"?`, () => {
           host.snapshotForUndo(`complete ${item.id}`, file);
-          const r = completeTask(host.cortexPath, project, item.id!);
+          const r = completeTask(host.phrenPath, project, item.id!);
           host.invalidateSubsectionsCache();
           host.setMessage(`  ${resultMsg(r)}`);
           host.setCursor(Math.max(0, cursor - 1));
@@ -693,12 +655,12 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
       if (key === "a") { host.startInput("add", ""); }
       else if (key === "d" && item?.id) {
         if (!project) { host.setMessage("Select a project first."); return; }
-        const file = taskFileForProject(host.cortexPath, project);
-        const taskResult = readTasks(host.cortexPath, project);
+        const file = taskFileForProject(host.phrenPath, project);
+        const taskResult = readTasks(host.phrenPath, project);
         const isActive = taskResult.ok && taskResult.data.items.Active.some((i: TaskItem) => i.id === item.id);
         const targetSection = isActive ? "Queue" : "Active";
         host.snapshotForUndo(`move ${item.id} → ${targetSection.toLowerCase()}`, file);
-        const r = updateTask(host.cortexPath, project, item.id, { section: targetSection });
+        const r = updateTask(host.phrenPath, project, item.id, { section: targetSection });
         host.invalidateSubsectionsCache();
         host.setMessage(`  ${resultMsg(r)}`);
       }
@@ -708,33 +670,16 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
       else if ((key === "d" || key === "\x7f") && item?.text) {
         if (!project) { host.setMessage("Select a project first."); return; }
         host.confirmThen(`Delete finding ${style.dim(item.id ?? "")}?`, () => {
-          const file = path.join(host.cortexPath, project!, "FINDINGS.md");
+          const file = path.join(host.phrenPath, project!, "FINDINGS.md");
           host.snapshotForUndo(`remove finding ${item.id ?? ''}`, file);
-          const r = removeFinding(host.cortexPath, project!, item.text!);
+          const r = removeFinding(host.phrenPath, project!, item.text!);
           host.setMessage(`  ${resultMsg(r)}`);
           host.setCursor(Math.max(0, cursor - 1));
         });
       }
       break;
     case "Review Queue":
-      if (key === "a" && item?.id) {
-        if (!project) { host.setMessage("Select a project first."); return; }
-        host.confirmThen(`Approve ${style.dim(item.id)} "${item.text}"?`, () => {
-          const r = approveQueueItem(host.cortexPath, project!, item.id!);
-          host.setMessage(`  ${resultMsg(r)}`);
-          host.setCursor(Math.max(0, cursor - 1));
-        });
-      } else if (key === "d" && item?.id) {
-        if (!project) { host.setMessage("Select a project first."); return; }
-        host.confirmThen(`Reject ${style.dim(item.id)} "${item.text}"?`, () => {
-          const r = rejectQueueItem(host.cortexPath, project!, item.id!);
-          host.setMessage(`  ${resultMsg(r)}`);
-          host.setCursor(Math.max(0, cursor - 1));
-        });
-      } else if (key === "e" && item?.id) {
-        host.inputMqId = item.id;
-        host.startInput("mq-edit", item.text || "");
-      }
+      host.setMessage("  Review queue is read-only.");
       break;
     case "Skills":
       if ((key === "d" || key === "\x7f") && item?.name) {
@@ -752,7 +697,7 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
       } else if (key === "t" && item?.name) {
         if (!project) { host.setMessage("Select a project first."); return; }
         const isEnabled = !item.text?.startsWith("disabled");
-        setSkillEnabledAndSync(host.cortexPath, project, item.name, !isEnabled);
+        setSkillEnabledAndSync(host.phrenPath, project, item.name, !isEnabled);
         host.setMessage(`  ${!isEnabled ? "Enabled" : "Disabled"} ${item.name}`);
       } else if (key === "a") {
         if (!project) { host.setMessage("Select a project first."); return; }
@@ -762,7 +707,7 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
     case "Hooks":
       if (key === "a" || key === "d") {
         const enable = key === "a";
-        writeInstallPreferences(host.cortexPath, { hooksEnabled: enable });
+        writeInstallPreferences(host.phrenPath, { hooksEnabled: enable });
         host.setMessage(`  Hooks ${enable ? style.boldGreen("enabled") : style.dim("disabled")} — takes effect next session`);
       }
       break;
@@ -808,7 +753,7 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
   }
   if (key === "p") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
   if (key === "b") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return true; }
-  if (key === "l") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
+  if (key === "l") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Fragments`); return true; }
   if (key === "m") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
   if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
   if (key === "k") { host.setView("Hooks"); host.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
@@ -816,7 +761,7 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
   if (key === "i" && host.state.view === "Projects") {
     const next = host.state.introMode === "always" ? "once-per-version" : host.state.introMode === "off" ? "always" : "off";
     host.state.introMode = next;
-    saveShellState(host.cortexPath, host.state);
+    saveShellState(host.phrenPath, host.state);
     host.setMessage(`  Intro mode: ${style.boldCyan(next)}`);
     return true;
   }

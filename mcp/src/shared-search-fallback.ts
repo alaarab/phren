@@ -10,7 +10,7 @@ import { getPersistentVectorIndex } from "./shared-vector-index.js";
 import * as fs from "fs";
 import * as path from "path";
 
-const HYBRID_SEARCH_FLAG = "CORTEX_FEATURE_HYBRID_SEARCH";
+const HYBRID_SEARCH_FLAG = "PHREN_FEATURE_HYBRID_SEARCH";
 const COSINE_SIMILARITY_MIN = 0.15;
 const COSINE_MAX_CORPUS = 10000;
 const COSINE_CANDIDATE_CAP = 500; // max docs loaded into memory for cosine scoring
@@ -21,18 +21,18 @@ function splitPathSegments(filePath: string): string[] {
 }
 
 export function deriveVectorDocIdentity(
-  cortexPath: string,
+  phrenPath: string,
   fullPath: string
 ): { project: string; filename: string; relFile: string } {
-  const normalizedCortexPath = cortexPath.replace(/[\\/]+/g, "/").replace(/\/+$/, "");
+  const normalizedPhrenPath = phrenPath.replace(/[\\/]+/g, "/").replace(/\/+$/, "");
   const normalizedFullPath = fullPath.replace(/[\\/]+/g, "/");
   let rel = fullPath;
-  if (normalizedFullPath === normalizedCortexPath) {
+  if (normalizedFullPath === normalizedPhrenPath) {
     rel = "";
-  } else if (normalizedFullPath.startsWith(`${normalizedCortexPath}/`)) {
-    rel = normalizedFullPath.slice(normalizedCortexPath.length + 1);
+  } else if (normalizedFullPath.startsWith(`${normalizedPhrenPath}/`)) {
+    rel = normalizedFullPath.slice(normalizedPhrenPath.length + 1);
   } else {
-    const relative = path.relative(cortexPath, fullPath);
+    const relative = path.relative(phrenPath, fullPath);
     if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
       rel = relative;
     }
@@ -193,7 +193,7 @@ function tfidfCosine(docs: string[], query: string, corpusN?: number): number[] 
 /**
  * Cosine fallback search: when FTS5 returns fewer than COSINE_FALLBACK_THRESHOLD results,
  * load all docs and rank by TF-IDF cosine similarity.
- * Only activated when CORTEX_FEATURE_HYBRID_SEARCH=1 and corpus size <= COSINE_MAX_CORPUS.
+ * Only activated when PHREN_FEATURE_HYBRID_SEARCH=1 and corpus size <= COSINE_MAX_CORPUS.
  * Returns DocRow[] ranked by similarity (threshold > COSINE_SIMILARITY_MIN), excluding already-found rowids.
  */
 export function cosineFallback(
@@ -202,7 +202,7 @@ export function cosineFallback(
   excludeRowids: Set<number>,
   limit: number
 ): DocRow[] {
-  // Feature flag guard — default ON; set CORTEX_FEATURE_HYBRID_SEARCH=0 to disable
+  // Feature flag guard — default ON; set PHREN_FEATURE_HYBRID_SEARCH=0 to disable
   const flagVal = process.env[HYBRID_SEARCH_FLAG];
   if (flagVal !== undefined && ["0", "false", "off", "no"].includes(flagVal.trim().toLowerCase())) {
     return [];
@@ -220,7 +220,7 @@ export function cosineFallback(
       totalDocs = Number(statsResult[0].values[0][2] ?? 0);
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback count: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cosineFallback count: ${err instanceof Error ? err.message : String(err)}\n`);
     return [];
   }
 
@@ -246,7 +246,7 @@ export function cosineFallback(
           const ftsRes = db.exec(`SELECT rowid, project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT ${COSINE_CANDIDATE_CAP}`, [safeQ]);
           if (ftsRes?.length && ftsRes[0]?.values?.length) ftsRows.push(...ftsRes[0].values);
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback FTS pre-filter: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cosineFallback FTS pre-filter: ${err instanceof Error ? err.message : String(err)}\n`);
         }
       }
       // If FTS gave fewer than cap, supplement with deterministic rowid windows.
@@ -279,7 +279,7 @@ export function cosineFallback(
             pushRows(loadCosineFallbackWindow(db, minRowid, COSINE_CANDIDATE_CAP - ftsRows.length));
           }
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback deterministicSample: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cosineFallback deterministicSample: ${err instanceof Error ? err.message : String(err)}\n`);
         }
       }
       if (ftsRows.length === 0) return [];
@@ -287,7 +287,7 @@ export function cosineFallback(
       debugLog(`cosineFallback: pre-filtered ${totalDocs} docs to ${allRows.length} candidates`);
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cosineFallback loadDocs: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cosineFallback loadDocs: ${err instanceof Error ? err.message : String(err)}\n`);
     return [];
   }
 
@@ -322,11 +322,11 @@ export function cosineFallback(
 
 /**
  * Vector-based semantic search fallback using pre-computed Ollama embeddings.
- * Only runs when Ollama is configured (CORTEX_OLLAMA_URL is set or defaults).
+ * Only runs when Ollama is configured (PHREN_OLLAMA_URL is set or defaults).
  * Returns DocRow[] sorted by cosine similarity, above 0.5 threshold.
  */
 export async function vectorFallback(
-  cortexPath: string,
+  phrenPath: string,
   query: string,
   excludePaths: Set<string>,
   limit: number,
@@ -334,12 +334,12 @@ export async function vectorFallback(
 ): Promise<DocRow[]> {
   // Run when either Ollama or a cloud embedding endpoint is available
   if (!getOllamaUrl() && !getCloudEmbeddingUrl()) return [];
-  const cache = getEmbeddingCache(cortexPath);
+  const cache = getEmbeddingCache(phrenPath);
   // Ensure the cache is loaded from disk — in hook subprocesses the singleton
   // starts empty because load() is only called in the MCP server / CLI entry.
   if (cache.size() === 0) {
     try { await cache.load(); } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] vectorFallback cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] vectorFallback cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
   if (cache.size() === 0) return [];
@@ -355,7 +355,7 @@ export async function vectorFallback(
     if (excludePaths.has(e.path)) return false;
     if (project) {
       // Allow global docs and docs from the active project
-      const entryProject = deriveVectorDocIdentity(cortexPath, e.path).project;
+      const entryProject = deriveVectorDocIdentity(phrenPath, e.path).project;
       if (entryProject !== project && entryProject !== "global") return false;
     }
     return true;
@@ -363,7 +363,7 @@ export async function vectorFallback(
   if (entries.length === 0) return [];
 
   const eligiblePaths = new Set(entries.map((entry) => entry.path));
-  const vectorIndex = getPersistentVectorIndex(cortexPath);
+  const vectorIndex = getPersistentVectorIndex(phrenPath);
   vectorIndex.ensure(cache.getAllEntries());
   const indexedPaths = vectorIndex.query(model, queryVec, limit, eligiblePaths);
   const candidatePaths = indexedPaths.length > 0 ? new Set(indexedPaths) : eligiblePaths;
@@ -376,7 +376,7 @@ export async function vectorFallback(
     .slice(0, limit);
 
   return scored.map(e => {
-    const { project: entryProject, filename, relFile } = deriveVectorDocIdentity(cortexPath, e.path);
+    const { project: entryProject, filename, relFile } = deriveVectorDocIdentity(phrenPath, e.path);
     // Use the same path-aware classifyFile logic as the indexer so reference/skills/etc.
     // get their correct type instead of always falling back to "other".
     const type = classifyFile(filename, relFile);
@@ -386,10 +386,10 @@ export async function vectorFallback(
     try {
       if (e.path && fs.existsSync(e.path)) {
         const raw = fs.readFileSync(e.path, "utf-8");
-        content = normalizeIndexedContent(raw, type, cortexPath, 10000);
+        content = normalizeIndexedContent(raw, type, phrenPath, 10000);
       }
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] vectorFallback fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] vectorFallback fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
     }
 
     return { project: entryProject, filename, type, content, path: e.path };

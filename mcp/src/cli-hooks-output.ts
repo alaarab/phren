@@ -24,10 +24,10 @@ function buildOneLiner(snippet: string): string {
   return first.slice(0, 79) + "\u2026";
 }
 
-function buildCompactIndex(selected: SelectedSnippet[], cortexPathLocal: string): string[] {
+function buildCompactIndex(selected: SelectedSnippet[], phrenPathLocal: string): string[] {
   const lines: string[] = [];
   for (const { doc, snippet } of selected) {
-    const id = `mem:${getDocSourceKey(doc, cortexPathLocal)}`;
+    const id = `mem:${getDocSourceKey(doc, phrenPathLocal)}`;
     const summary = buildOneLiner(snippet);
     lines.push(`[${id}] ${doc.type}: ${summary}`);
   }
@@ -44,29 +44,29 @@ export function buildHookOutput(
   detectedProject: string | null,
   stage: Record<string, number>,
   tokenBudget: number,
-  cortexPathLocal: string,
+  phrenPathLocal: string,
   sessionId?: string
 ): string[] {
   const projectLabel = detectedProject ? ` \u00b7 ${detectedProject}` : "";
   const resultLabel = selected.length === 1 ? "1 result" : `${selected.length} results`;
-  const statusLine = `\u25c6 cortex${projectLabel} \u00b7 ${resultLabel}`;
+  const statusLine = `\u25c6 phren${projectLabel} \u00b7 ${resultLabel}`;
 
-  const parts: string[] = [statusLine, "<cortex-context>"];
+  const parts: string[] = [statusLine, "<phren-context>"];
   const impactEntries: Array<{ findingId: string; project: string; sessionId: string }> = [];
   const impactSessionId = sessionId ?? "none";
 
-  const useCompactIndex = isFeatureEnabled("CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE", false) && selected.length >= 3;
+  const useCompactIndex = isFeatureEnabled("PHREN_FEATURE_PROGRESSIVE_DISCLOSURE", false) && selected.length >= 3;
 
   if (useCompactIndex) {
     const indexEntries = selected.slice(0, 8);
-    const indexLines = buildCompactIndex(indexEntries, cortexPathLocal);
+    const indexLines = buildCompactIndex(indexEntries, phrenPathLocal);
     parts.push("Context index (use get_memory_detail to expand any entry):");
     for (const line of indexLines) {
       parts.push(line);
     }
     parts.push("");
     for (const injected of indexEntries) {
-      recordInjection(cortexPathLocal, injected.key, sessionId);
+      recordInjection(phrenPathLocal, injected.key, sessionId);
       if (injected.doc.type === "findings") {
         for (const findingId of extractFindingIdsFromSnippet(injected.snippet)) {
           impactEntries.push({
@@ -77,9 +77,9 @@ export function buildHookOutput(
         }
       }
       try {
-        recordRetrieval(cortexPathLocal, `${injected.doc.project}/${injected.doc.filename}`, injected.doc.type);
+        recordRetrieval(phrenPathLocal, `${injected.doc.project}/${injected.doc.filename}`, injected.doc.type);
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] injectContext recordRetrieval: ${err instanceof Error ? err.message : String(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrieval: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   } else {
@@ -116,7 +116,7 @@ export function buildHookOutput(
 
     for (const injected of ordered) {
       const { doc, snippet, key } = injected;
-      recordInjection(cortexPathLocal, key, sessionId);
+      recordInjection(phrenPathLocal, key, sessionId);
       if (doc.type === "findings") {
         for (const findingId of extractFindingIdsFromSnippet(snippet)) {
           impactEntries.push({
@@ -127,29 +127,29 @@ export function buildHookOutput(
         }
       }
       try {
-        recordRetrieval(cortexPathLocal, doc.path ?? doc.filename, doc.type);
+        recordRetrieval(phrenPathLocal, doc.path ?? doc.filename, doc.type);
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] injectContext recordRetrievalOrdered: ${err instanceof Error ? err.message : String(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrievalOrdered: ${err instanceof Error ? err.message : String(err)}\n`);
       }
-      parts.push(`[${getDocSourceKey(doc, cortexPathLocal)}] (${doc.type})`);
+      parts.push(`[${getDocSourceKey(doc, phrenPathLocal)}] (${doc.type})`);
       parts.push(annotateStale(snippet));
       parts.push("");
     }
   }
 
-  logImpact(cortexPathLocal, impactEntries);
+  logImpact(phrenPathLocal, impactEntries);
 
-  parts.push("<cortex-context>");
+  parts.push("<phren-context>");
 
   const changedCount = gitCtx?.changedFiles.size ?? 0;
   if (gitCtx) {
     const fileHits = selected.filter((r) => fileRelevanceBoost(r.doc.path, gitCtx.changedFiles) > 0).length;
     const branchHits = selected.filter((r) => branchMatchBoost(r.doc.content, gitCtx.branch) > 0).length;
     parts.push(
-      `\u25c6 cortex \u00b7 trace: intent=${intent}; reasons=file:${fileHits},branch:${branchHits}; branch=${gitCtx.branch}; changed_files=${changedCount}; tokens\u2248${usedTokens}/${tokenBudget}; stages=index:${stage.indexMs}ms,search:${stage.searchMs}ms,trust:${stage.trustMs}ms,rank:${stage.rankMs}ms,select:${stage.selectMs}ms`
+      `\u25c6 phren \u00b7 trace: intent=${intent}; reasons=file:${fileHits},branch:${branchHits}; branch=${gitCtx.branch}; changed_files=${changedCount}; tokens\u2248${usedTokens}/${tokenBudget}; stages=index:${stage.indexMs}ms,search:${stage.searchMs}ms,trust:${stage.trustMs}ms,rank:${stage.rankMs}ms,select:${stage.selectMs}ms`
     );
   } else {
-    parts.push(`\u25c6 cortex \u00b7 trace: intent=${intent}; reasons=intent-only; tokens\u2248${usedTokens}/${tokenBudget}; stages=index:${stage.indexMs}ms,search:${stage.searchMs}ms,trust:${stage.trustMs}ms,rank:${stage.rankMs}ms,select:${stage.selectMs}ms`);
+    parts.push(`\u25c6 phren \u00b7 trace: intent=${intent}; reasons=intent-only; tokens\u2248${usedTokens}/${tokenBudget}; stages=index:${stage.indexMs}ms,search:${stage.searchMs}ms,trust:${stage.trustMs}ms,rank:${stage.rankMs}ms,select:${stage.selectMs}ms`);
   }
 
   return parts;

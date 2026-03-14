@@ -26,8 +26,8 @@ export type ShellView = ShellState["view"];
 
 export interface ShellDeps {
   runDoctor: typeof runDoctor;
-  runRelink: (cortexPath: string) => Promise<string>;
-  runHooks:  (cortexPath: string) => Promise<string>;
+  runRelink: (phrenPath: string) => Promise<string>;
+  runHooks:  (phrenPath: string) => Promise<string>;
   runUpdate: () => Promise<string>;
 }
 

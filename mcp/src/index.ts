@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as fs from "fs";
 import * as path from "path";
 import {
-  findCortexPathWithArg,
+  findPhrenPathWithArg,
   debugLog,
   runtimeDir,
 } from "./shared.js";
@@ -26,6 +26,7 @@ import { register as registerOps } from "./mcp-ops.js";
 import { register as registerSkills } from "./mcp-skills.js";
 import { register as registerHooks } from "./mcp-hooks.js";
 import { register as registerExtract } from "./mcp-extract.js";
+import { register as registerConfig } from "./mcp-config.js";
 import type { McpContext } from "./mcp-types.js";
 import { errorMessage } from "./utils.js";
 import { runTopLevelCommand } from "./entrypoint.js";
@@ -35,15 +36,15 @@ import { VERSION as PACKAGE_VERSION } from "./package-metadata.js";
 
 const handledTopLevelCommand = await runTopLevelCommand(process.argv.slice(2));
 
-// MCP mode: first non-flag arg is the cortex path. Resolve it lazily so CLI commands
+// MCP mode: first non-flag arg is the phren path. Resolve it lazily so CLI commands
 // like `maintain` are not misinterpreted as a filesystem path after the command has run.
-const cortexArg = handledTopLevelCommand ? undefined : process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
-const cortexPath = handledTopLevelCommand ? "" : findCortexPathWithArg(cortexArg);
+const phrenArg = handledTopLevelCommand ? undefined : process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
+const phrenPath = handledTopLevelCommand ? "" : findPhrenPathWithArg(phrenArg);
 
 const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
 
-function cleanStaleLocks(cortexPath: string): void {
-  const dir = runtimeDir(cortexPath);
+function cleanStaleLocks(phrenPath: string): void {
+  const dir = runtimeDir(phrenPath);
   try {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir)) {
@@ -56,31 +57,31 @@ function cleanStaleLocks(cortexPath: string): void {
           debugLog(`Cleaned stale lock: ${entry}`);
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanStaleLocks statFile: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanStaleLocks statFile: ${errorMessage(err)}\n`);
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanStaleLocks readdir: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanStaleLocks readdir: ${errorMessage(err)}\n`);
   }
 }
 
 async function main() {
-  const profile = resolveRuntimeProfile(cortexPath);
-  cleanStaleLocks(cortexPath);
+  const profile = resolveRuntimeProfile(phrenPath);
+  cleanStaleLocks(phrenPath);
   let db: Awaited<ReturnType<typeof buildIndex>> | null = null;
   let indexReady = false;
   try {
-    db = await buildIndex(cortexPath, profile);
+    db = await buildIndex(phrenPath, profile);
     indexReady = true;
 
     // Load embedding cache and kick off background embedding (fire-and-forget)
     const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
-    const embCache = getEmbeddingCache(cortexPath);
+    const embCache = getEmbeddingCache(phrenPath);
     void startEmbeddingWarmup(db, embCache);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    structuredLog("error", "startup", `Failed to build cortex index: ${msg}`);
-    console.error("Failed to build cortex index at startup:", error);
+    structuredLog("error", "startup", `Failed to build phren index: ${msg}`);
+    console.error("Failed to build phren index at startup:", error);
     process.exit(1);
   }
   let writeQueue: Promise<void> = Promise.resolve();
@@ -88,14 +89,14 @@ async function main() {
   const MAX_QUEUE_DEPTH = 50;
   const WRITE_TIMEOUT_MS = 30_000;
   async function rebuildIndex() {
-    runCustomHooks(cortexPath, "pre-index");
+    runCustomHooks(phrenPath, "pre-index");
     indexReady = false;
     try { db?.close(); } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] rebuildIndex dbClose: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] rebuildIndex dbClose: ${errorMessage(err)}\n`);
     }
-    db = await buildIndex(cortexPath, profile);
+    db = await buildIndex(phrenPath, profile);
     indexReady = true;
-    runCustomHooks(cortexPath, "post-index");
+    runCustomHooks(phrenPath, "post-index");
   }
   async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T> {
     if (writeQueueDepth >= MAX_QUEUE_DEPTH) {
@@ -134,7 +135,7 @@ async function main() {
   }
 
   const server = new McpServer({
-    name: "cortex-mcp",
+    name: "phren-mcp",
     version: PACKAGE_VERSION,
   });
 
@@ -155,13 +156,13 @@ async function main() {
             type: "text" as const,
             text: JSON.stringify({
               ok: false,
-              error: "Index unavailable - check cortex setup",
+              error: "Index unavailable - check phren setup",
             }, null, 2),
           }],
         };
       }
-      try { trackToolCall(cortexPath, registeredName); } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] trackToolCall: ${errorMessage(err)}\n`);
+      try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] trackToolCall: ${errorMessage(err)}\n`);
       }
       return handler(...args);
     };
@@ -170,17 +171,17 @@ async function main() {
 
   // Register all tool handlers from domain modules
   const ctx: McpContext = {
-    cortexPath,
+    phrenPath,
     profile,
     db: () => {
-      if (!db) throw new Error("Index unavailable - check cortex setup");
+      if (!db) throw new Error("Index unavailable - check phren setup");
       return db;
     },
     rebuildIndex,
     withWriteQueue,
     updateFileInIndex: (filePath: string) => {
-      if (!db) throw new Error("Index unavailable - check cortex setup");
-      updateFileInIndexFn(db, filePath, cortexPath);
+      if (!db) throw new Error("Index unavailable - check phren setup");
+      updateFileInIndexFn(db, filePath, phrenPath);
     },
   };
 
@@ -195,15 +196,16 @@ async function main() {
   registerSkills(server, ctx);
   registerHooks(server, ctx);
   registerExtract(server, ctx);
+  registerConfig(server, ctx);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`cortex-mcp running (${cortexPath})`);
+  console.error(`phren-mcp running (${phrenPath})`);
 }
 
 if (!handledTopLevelCommand) {
   main().catch((err) => {
-    console.error("Failed to start cortex-mcp:", err);
+    console.error("Failed to start phren-mcp:", err);
     process.exit(1);
   });
 }

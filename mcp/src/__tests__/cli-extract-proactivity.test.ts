@@ -15,7 +15,7 @@ vi.mock("../shared.js", async (importOriginal) => {
     debugLog: vi.fn(),
     appendAuditLog: vi.fn(),
     EXEC_TIMEOUT_MS: 5000,
-    getCortexPath: () => "/tmpcortex-proactivity-test",
+    getPhrenPath: () => "/tmpphren-proactivity-test",
   };
 });
 
@@ -48,18 +48,18 @@ function gitLog(subject: string, body = "", hash = "abc12345"): string {
 
 describe("cli-extract proactivity gating", () => {
   beforeEach(() => {
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_FINDINGS;
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_FINDINGS;
     vi.clearAllMocks();
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_FINDINGS;
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_FINDINGS;
   });
 
   it("keeps heuristic repo signal capture at high", async () => {
-    process.env.CORTEX_PROACTIVITY_FINDINGS = "high";
+    process.env.PHREN_PROACTIVITY_FINDINGS = "high";
     vi.mocked(runGit).mockImplementation((_cwd, args) => {
       if (args[0] === "rev-parse") return "/repo";
       if (args[0] === "log") {
@@ -78,7 +78,7 @@ describe("cli-extract proactivity gating", () => {
   });
 
   it('requires explicit repo signals at medium', async () => {
-    process.env.CORTEX_PROACTIVITY_FINDINGS = "medium";
+    process.env.PHREN_PROACTIVITY_FINDINGS = "medium";
     vi.mocked(runGit).mockImplementation((_cwd, args) => {
       if (args[0] === "rev-parse") return "/repo";
       if (args[0] === "log") {
@@ -111,7 +111,7 @@ describe("cli-extract proactivity gating", () => {
   });
 
   it("skips repo mining entirely at low", async () => {
-    process.env.CORTEX_PROACTIVITY_FINDINGS = "low";
+    process.env.PHREN_PROACTIVITY_FINDINGS = "low";
     vi.mocked(runGit).mockImplementation((_cwd, args) => {
       if (args[0] === "rev-parse") return "/repo";
       if (args[0] === "log") {
@@ -127,6 +127,6 @@ describe("cli-extract proactivity gating", () => {
 
     expect(appendFindingJournal).not.toHaveBeenCalled();
     expect(appendReviewQueue).not.toHaveBeenCalled();
-    expect(appendAuditLog).toHaveBeenCalledWith("/tmpcortex-proactivity-test", "extract_memories", "project=demo skipped=proactivity_low");
+    expect(appendAuditLog).toHaveBeenCalledWith("/tmpphren-proactivity-test", "extract_memories", "project=demo skipped=proactivity_low");
   });
 });

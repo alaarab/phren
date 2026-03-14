@@ -1,6 +1,6 @@
 # Versioning
 
-cortex follows [Semantic Versioning](https://semver.org/).
+phren follows [Semantic Versioning](https://semver.org/).
 
 ## Version format: MAJOR.MINOR.PATCH
 
@@ -25,14 +25,14 @@ One major version back. When 2.0 ships, 1.x will receive critical bug fixes for 
 ## Checking your version
 
 ```bash
-cortex --version
+phren --version
 ```
 
 The MCP server also reports its version in the `server_info` metadata on startup.
 
 ## Update model
 
-- `cortex update` refreshes the installed package itself. In a local git checkout it pulls, installs, rebuilds, and runs a health check. In a global npm install it updates the package with npm and verifies it is installed.
-- `cortex update --refresh-starter` does the package update and also refreshes shipped starter globals in the same flow.
-- `cortex init --apply-starter-update` still works when you only want to refresh starter globals without doing the broader update step.
-- Generated runtime metadata such as `cortex.SKILL.md` is derived from the live tool registry during link/setup so tool counts and descriptions stay aligned with the code, and shared manifests are emitted with portable versioned `npx` commands to avoid cross-machine path drift.
+- `phren update` refreshes the installed package itself. In a local git checkout it pulls, installs, rebuilds, and runs a health check. In a global npm install it updates the package with npm and verifies it is installed.
+- `phren update --refresh-starter` does the package update and also refreshes shipped starter globals in the same flow.
+- `phren init --apply-starter-update` still works when you only want to refresh starter globals without doing the broader update step.
+- Generated runtime metadata such as `phren.SKILL.md` is derived from the live tool registry during link/setup so tool counts and descriptions stay aligned with the code, and shared manifests are emitted with portable versioned `npx` commands to avoid cross-machine path drift.

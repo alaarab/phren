@@ -112,7 +112,7 @@ export function branchMatchBoost(content: string, branch: string | undefined): n
 let _lowValueRegex: RegExp | null = null;
 let _lowValuePatternKey = "";
 function getLowValuePattern(): RegExp {
-  const key = process.env.CORTEX_LOW_VALUE_PATTERNS || "";
+  const key = (process.env.PHREN_LOW_VALUE_PATTERNS) || "";
   if (_lowValueRegex && _lowValuePatternKey === key) return _lowValueRegex;
   const defaults = ["fixed stuff", "updated things", "misc", "temp", "wip", "todo", "placeholder", "cleanup"];
   const configured = key.split(",").map((s) => s.trim()).filter(Boolean);
@@ -336,7 +336,7 @@ function compactSnippet(snippet: string, maxLines: number, maxChars: number): st
 const PRIORITY_TAG_RE = /\[(high|medium|low)\]/i;
 
 export function filterTaskByPriority(items: string[], allowedPriorities?: string[]): string[] {
-  const envPriorities = process.env.CORTEX_TASK_PRIORITY;
+  const envPriorities = (process.env.PHREN_TASK_PRIORITY);
   const allowed = new Set(
     (allowedPriorities || (envPriorities ? envPriorities.split(",").map(s => s.trim().toLowerCase()) : ["high", "medium"]))
   );
@@ -361,12 +361,12 @@ export function searchDocuments(
   keywords: string,
   detectedProject: string | null,
   searchAllProjects = false,
-  cortexPath?: string
+  phrenPath?: string
 ): DocRow[] | null {
   // Tier 1: FTS5 — run project-scoped and global in one pass, dedup
   const ftsDocs: DocRow[] = [];
   const ftsSeenKeys = new Set<string>();
-  const relaxedQuery = buildRelaxedFtsQuery(keywords || prompt, detectedProject, cortexPath);
+  const relaxedQuery = buildRelaxedFtsQuery(keywords || prompt, detectedProject, phrenPath);
 
   const addFtsRows = (rows: DocRow[] | null) => {
     if (!rows) return;
@@ -419,7 +419,7 @@ export function searchDocuments(
 
 /**
  * Async variant of searchDocuments that also runs real vector search (Tier 3)
- * when cloud embeddings (CORTEX_EMBEDDING_API_URL) or Ollama are available.
+ * when cloud embeddings (PHREN_EMBEDDING_API_URL) or Ollama are available.
  * Falls back to the sync result if vector search is unavailable or fails.
  */
 export async function searchDocumentsAsync(
@@ -429,10 +429,10 @@ export async function searchDocumentsAsync(
   keywords: string,
   detectedProject: string | null,
   searchAllProjects = false,
-  cortexPath?: string
+  phrenPath?: string
 ): Promise<DocRow[] | null> {
   // Sync result (Tier 1 + Tier 2)
-  let syncResult = searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects, cortexPath);
+  let syncResult = searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects, phrenPath);
   if (!syncResult || syncResult.length === 0) {
     const keywordRows = keywordFallbackSearch(
       db,
@@ -442,9 +442,9 @@ export async function searchDocumentsAsync(
     if (keywordRows?.length) syncResult = keywordRows;
   }
 
-  // Tier 3: Real vector search — only if embeddings are available and cortexPath provided
+  // Tier 3: Real vector search — only if embeddings are available and phrenPath provided
   const hasVectorBackend = Boolean(getCloudEmbeddingUrl() || getOllamaUrl());
-  if (!cortexPath || !hasVectorBackend || !shouldRunVectorExpansion(syncResult, `${prompt}\n${keywords}`)) {
+  if (!phrenPath || !hasVectorBackend || !shouldRunVectorExpansion(syncResult, `${prompt}\n${keywords}`)) {
     return syncResult;
   }
 
@@ -452,7 +452,7 @@ export async function searchDocumentsAsync(
     const existingPaths = new Set<string>(
       (syncResult ?? []).map((d) => d.path || `${d.project}/${d.filename}`)
     );
-    const vectorDocs = await vectorFallback(cortexPath, `${prompt}\n${keywords}`, existingPaths, 8, detectedProject);
+    const vectorDocs = await vectorFallback(phrenPath, `${prompt}\n${keywords}`, existingPaths, 8, detectedProject);
     if (vectorDocs.length === 0) return syncResult;
 
     // RRF-merge all three tiers
@@ -462,7 +462,7 @@ export async function searchDocumentsAsync(
     return merged.slice(0, 12);
   } catch (err: unknown) {
     // Vector search failure is non-fatal — return sync result
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
     return syncResult;
   }
 }
@@ -473,7 +473,7 @@ export interface SearchKnowledgeRowsOptions {
   fetchLimit?: number;
   filterProject?: string | null;
   filterType?: string | null;
-  cortexPath: string;
+  phrenPath: string;
 }
 
 export interface SearchKnowledgeRowsResult {
@@ -492,9 +492,9 @@ export async function searchKnowledgeRows(
     fetchLimit = maxResults,
     filterProject,
     filterType,
-    cortexPath,
+    phrenPath,
   } = options;
-  const queryVariants = buildFtsQueryVariants(query, filterProject, cortexPath);
+  const queryVariants = buildFtsQueryVariants(query, filterProject, phrenPath);
   const safeQuery = queryVariants[0] ?? "";
   if (!safeQuery) return { safeQuery, rows: null, usedFallback: false };
 
@@ -586,7 +586,7 @@ export async function searchKnowledgeRows(
       const existingRows = rows ?? [];
       const alreadyFoundPaths = new Set(existingRows.map((row) => row.path));
       const vecRows = await vectorFallback(
-        cortexPath,
+        phrenPath,
         query,
         alreadyFoundPaths,
         Math.max(0, maxResults - existingRows.length),
@@ -598,8 +598,8 @@ export async function searchKnowledgeRows(
         usedFallback = true;
       }
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) {
-        process.stderr.write(`[cortex] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
+        process.stderr.write(`[phren] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   }
@@ -622,11 +622,11 @@ export function applyTrustFilter(
   ttlDays: number,
   minConfidence: number,
   decay: Partial<RetentionPolicy["decay"]>,
-  cortexPath?: string
+  phrenPath?: string
 ): TrustFilterResult {
   const queueItems: TrustFilterQueueItem[] = [];
   const auditEntries: string[] = [];
-  const highImpactFindingIds = cortexPath ? getHighImpactFindings(cortexPath, 3) : undefined;
+  const highImpactFindingIds = phrenPath ? getHighImpactFindings(phrenPath, 3) : undefined;
 
   const filtered = rows
     .map((doc) => {
@@ -682,7 +682,7 @@ export function recencyBoost(docType: string, latestDate: string): number {
 
 function crossProjectAgeMultiplier(doc: DocRow, detectedProject: string | null, latestDate: string): number {
   if (doc.type !== "findings" || !detectedProject || doc.project === detectedProject) return 1;
-  const decayDaysRaw = Number.parseInt(process.env.CORTEX_CROSS_PROJECT_DECAY_DAYS ?? "30", 10);
+  const decayDaysRaw = Number.parseInt((process.env.PHREN_CROSS_PROJECT_DECAY_DAYS) ?? "30", 10);
   const decayDays = Number.isFinite(decayDaysRaw) && decayDaysRaw > 0 ? decayDaysRaw : 30;
   const age = ageInDaysFromDate(latestDate);
   const ageInDays = Number.isFinite(age) ? age : 90;
@@ -694,7 +694,7 @@ export function rankResults(
   intent: string,
   gitCtx: GitContext | null,
   detectedProject: string | null,
-  cortexPathLocal: string,
+  phrenPathLocal: string,
   db: SqlJsDatabase,
   cwd?: string,
   query?: string,
@@ -735,7 +735,7 @@ export function rankResults(
   for (const doc of ranked) {
     // Use getDocSourceKey to build the full project/relFile key, matching what
     // entity_links stores (e.g. project/reference/arch.md, not project/arch.md).
-    const docKey = getDocSourceKey(doc, cortexPathLocal);
+    const docKey = getDocSourceKey(doc, phrenPathLocal);
     if (entityBoost.has(docKey)) entityBoostPaths.add(doc.path);
   }
 
@@ -764,13 +764,13 @@ export function rankResults(
     queryOverlap: number;
   };
   const scored: ScoredDoc[] = ranked.map((doc) => {
-    const globBoost = getProjectGlobBoost(cortexPathLocal, doc.project, cwd, gitCtx?.changedFiles);
+    const globBoost = getProjectGlobBoost(phrenPathLocal, doc.project, cwd, gitCtx?.changedFiles);
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
     const entity = entityBoostPaths.has(doc.path) ? 1.3 : 1;
     const date = getRecentDate(doc);
     const fileRel = fileRelevanceBoost(doc.path, changedFiles);
     const branchMat = branchMatchBoost(doc.content, gitCtx?.branch);
-    const qualityMult = getQualityMultiplier(cortexPathLocal, key);
+    const qualityMult = getQualityMultiplier(phrenPathLocal, key);
     const queryOverlap = queryTokens.length > 0 ? docOverlapScore(queryTokens, doc) : 0;
     const queryOverlapWeight = detectedProject && doc.project === detectedProject
       ? LOCAL_QUERY_OVERLAP_WEIGHT
@@ -799,7 +799,7 @@ export function rankResults(
 
   // Single composite sort on cached values.
   scored.sort((a, b) => {
-    if (isFeatureEnabled("CORTEX_FEATURE_GIT_CONTEXT_FILTER", false)) {
+    if (isFeatureEnabled("PHREN_FEATURE_GIT_CONTEXT_FILTER", false)) {
       if (gitCtx && gitCtx.changedFiles.size > 0) {
         const scoreDiff = (b.fileMatch ? FILE_MATCH_BOOST : 1) - (a.fileMatch ? FILE_MATCH_BOOST : 1);
         if (scoreDiff !== 0) return scoreDiff;
@@ -898,7 +898,7 @@ export function markStaleCitations(snippet: string): string {
                 stale = true;
               }
             } catch (err: unknown) {
-              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
+              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
               stale = true;
             }
           }

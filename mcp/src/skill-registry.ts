@@ -76,7 +76,7 @@ function normalizeAliases(raw: unknown): string[] {
 }
 
 function collectSkills(
-  cortexPath: string,
+  phrenPath: string,
   root: string,
   sourceLabel: string,
   scopeType: "global" | "project",
@@ -106,7 +106,7 @@ function collectSkills(
       path: filePath,
       root: isFolder ? path.dirname(filePath) : filePath,
       description: frontmatter?.description as string | undefined,
-      enabled: isSkillEnabled(cortexPath, sourceLabel, name),
+      enabled: isSkillEnabled(phrenPath, sourceLabel, name),
       command: normalizeCommand(frontmatter?.command, name),
       aliases: normalizeAliases(frontmatter?.aliases),
     });
@@ -115,15 +115,15 @@ function collectSkills(
   return results;
 }
 
-function getGlobalSkills(cortexPath: string): SkillEntry[] {
+function getGlobalSkills(phrenPath: string): SkillEntry[] {
   const seen = new Set<string>();
-  return collectSkills(cortexPath, path.join(cortexPath, "global", "skills"), "global", "global", "canonical", seen);
+  return collectSkills(phrenPath, path.join(phrenPath, "global", "skills"), "global", "global", "canonical", seen);
 }
 
-function getProjectLocalSkills(cortexPath: string, project: string): SkillEntry[] {
+function getProjectLocalSkills(phrenPath: string, project: string): SkillEntry[] {
   const seen = new Set<string>();
-  const projectDir = path.join(cortexPath, project);
-  return collectSkills(cortexPath, path.join(projectDir, "skills"), project, "project", "canonical", seen);
+  const projectDir = path.join(phrenPath, project);
+  return collectSkills(phrenPath, path.join(projectDir, "skills"), project, "project", "canonical", seen);
 }
 
 function skillPriority(skill: SkillEntry): number {
@@ -255,51 +255,51 @@ function toResolvedSkill(skill: SkillEntry): ResolvedSkill {
   };
 }
 
-export function getAllSkills(cortexPath: string, profile: string): SkillEntry[] {
-  const all = getGlobalSkills(cortexPath);
-  for (const dir of getProjectDirs(cortexPath, profile)) {
+export function getAllSkills(phrenPath: string, profile: string): SkillEntry[] {
+  const all = getGlobalSkills(phrenPath);
+  for (const dir of getProjectDirs(phrenPath, profile)) {
     const source = path.basename(dir);
     if (source === "global") continue;
-    all.push(...getProjectLocalSkills(cortexPath, source));
+    all.push(...getProjectLocalSkills(phrenPath, source));
   }
   return all;
 }
 
-export function getLocalSkills(cortexPath: string, scope: string): SkillEntry[] {
-  if (scope.toLowerCase() === "global") return getGlobalSkills(cortexPath);
-  return getProjectLocalSkills(cortexPath, scope);
+export function getLocalSkills(phrenPath: string, scope: string): SkillEntry[] {
+  if (scope.toLowerCase() === "global") return getGlobalSkills(phrenPath);
+  return getProjectLocalSkills(phrenPath, scope);
 }
 
-export function buildSkillManifest(cortexPath: string, profile: string, scope: string, mirrorDir?: string): SkillManifest {
+export function buildSkillManifest(phrenPath: string, profile: string, scope: string, mirrorDir?: string): SkillManifest {
   const manifest = scope.toLowerCase() === "global"
-    ? buildResolvedSkills(getGlobalSkills(cortexPath), mirrorDir)
-    : buildResolvedSkills([...getGlobalSkills(cortexPath), ...getProjectLocalSkills(cortexPath, scope)], mirrorDir);
+    ? buildResolvedSkills(getGlobalSkills(phrenPath), mirrorDir)
+    : buildResolvedSkills([...getGlobalSkills(phrenPath), ...getProjectLocalSkills(phrenPath, scope)], mirrorDir);
   manifest.scope = scope;
   manifest.project = scope.toLowerCase() === "global" ? undefined : scope;
   manifest.generatedAt = new Date().toISOString();
   return manifest;
 }
 
-export function getScopedSkills(cortexPath: string, profile: string, project?: string): ResolvedSkill[] {
-  if (!project) return getAllSkills(cortexPath, profile).map(toResolvedSkill);
-  return buildSkillManifest(cortexPath, profile, project).skills;
+export function getScopedSkills(phrenPath: string, profile: string, project?: string): ResolvedSkill[] {
+  if (!project) return getAllSkills(phrenPath, profile).map(toResolvedSkill);
+  return buildSkillManifest(phrenPath, profile, project).skills;
 }
 
-export function findLocalSkill(cortexPath: string, scope: string, name: string): ResolvedSkill | null {
+export function findLocalSkill(phrenPath: string, scope: string, name: string): ResolvedSkill | null {
   const needle = name.replace(/\.md$/i, "").toLowerCase();
-  const matches = getLocalSkills(cortexPath, scope).filter((skill) => skill.name.toLowerCase() === needle);
+  const matches = getLocalSkills(phrenPath, scope).filter((skill) => skill.name.toLowerCase() === needle);
   if (matches.length === 0) return null;
   return toResolvedSkill(choosePreferredSkill(matches));
 }
 
-export function findSkill(cortexPath: string, profile: string, project: string | undefined, name: string): ResolvedSkill | { error: string } | null {
+export function findSkill(phrenPath: string, profile: string, project: string | undefined, name: string): ResolvedSkill | { error: string } | null {
   const needle = name.replace(/\.md$/i, "").toLowerCase();
   if (project) {
-    const matches = buildSkillManifest(cortexPath, profile, project).skills.filter((skill) => skill.name.toLowerCase() === needle);
+    const matches = buildSkillManifest(phrenPath, profile, project).skills.filter((skill) => skill.name.toLowerCase() === needle);
     return matches[0] || null;
   }
 
-  const matches = getAllSkills(cortexPath, profile).filter((skill) => skill.name.toLowerCase() === needle);
+  const matches = getAllSkills(phrenPath, profile).filter((skill) => skill.name.toLowerCase() === needle);
   if (matches.length === 0) return null;
   if (matches.length > 1) {
     return { error: `Skill '${name}' exists in multiple scopes: ${matches.map((match) => match.source).join(", ")}. Pass project= to disambiguate.` };
@@ -311,10 +311,10 @@ export function renderSkillInstructionsSection(manifest: SkillManifest): string 
   const visible = manifest.skills.filter((skill) => skill.visibleToAgents);
   const disabled = manifest.skills.filter((skill) => !skill.visibleToAgents);
   const lines = [
-    "<!-- cortex:generated-skills -->",
-    "## Available Cortex skills",
+    "<!-- phren:generated-skills -->",
+    "## Available Phren skills",
     "",
-    "These skills are resolved from Cortex source files and mirrored into `.claude/skills/` for agent discovery.",
+    "These skills are resolved from Phren source files and mirrored into `.claude/skills/` for agent discovery.",
     "",
   ];
 

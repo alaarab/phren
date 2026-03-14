@@ -8,7 +8,7 @@
     "dataset": "toy",
     "inputPath": null,
     "embeddingsEnabled": false,
-    "cacheState": "cold temp cortex per session; fresh in-memory FTS index each run",
+    "cacheState": "cold temp phren per session; fresh in-memory FTS index each run",
     "indexMode": "FTS5 only",
     "sessionsRequested": 3,
     "sessionsExecuted": 3,

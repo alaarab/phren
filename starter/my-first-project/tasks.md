@@ -9,11 +9,11 @@
 
 ## Queue
 
-### P1: Cortex setup
+### P1: Phren setup
 
-- [ ] Push this cortex repo to a private GitHub repo for backup
-- [ ] Run `cortex doctor` to verify everything is wired up
-- [ ] Add a second project with `cortex-init <name>` or `cortex shell`
+- [ ] Push this phren repo to a private GitHub repo for backup
+- [ ] Run `phren doctor` to verify everything is wired up
+- [ ] Add a second project with `phren-init <name>` or `phren shell`
 
 ### P2: Nice to have
 
@@ -22,4 +22,4 @@
 
 ## Done
 
-- [x] Run `npx cortex init` to set up cortex
+- [x] Run `npx phren init` to set up phren

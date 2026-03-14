@@ -16,9 +16,9 @@ export interface DeviceContext {
   lastSync: string;
 }
 
-const HOME_CORTEX_DIR = path.join(os.homedir(), ".cortex");
-const MACHINE_ID_PATH = path.join(HOME_CORTEX_DIR, ".machine-id");
-const CONTEXT_PATH = path.join(os.homedir(), ".cortex-context.md");
+const HOME_PHREN_DIR = path.join(os.homedir(), ".phren");
+const MACHINE_ID_PATH = path.join(HOME_PHREN_DIR, ".machine-id");
+const CONTEXT_PATH = path.join(os.homedir(), ".phren-context.md");
 
 export function machineIdPath(): string {
   return MACHINE_ID_PATH;

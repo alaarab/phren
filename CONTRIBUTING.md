@@ -1,12 +1,12 @@
-# Contributing to Cortex
+# Contributing to Phren
 
 Thanks for your interest in contributing. This guide covers what you need to get started.
 
 ## Dev Setup
 
 ```bash
-git clone https://github.com/alaarab/cortex.git
-cd cortex
+git clone https://github.com/alaarab/phren.git
+cd phren
 npm install
 npm run build
 npm test
@@ -27,17 +27,17 @@ The build compiles TypeScript from `mcp/src/` into `mcp/dist/` and marks the ent
 | `mcp/src/shared.ts` | Shared path/runtime helpers and core exports |
 | `mcp/src/cli.ts` | CLI subcommands (search, doctor, shell, etc.) |
 | `mcp/src/utils.ts` | FTS5 sanitization, synonym expansion, keyword extraction |
-| `mcp/src/init.ts` | `npx cortex init`: configures MCP + hooks |
+| `mcp/src/init.ts` | `npx phren init`: configures MCP + hooks |
 | `mcp/src/link.ts` | Profile sync, symlinks, hooks, context |
 | `mcp/src/data-access.ts` | Task CRUD, machine/profile listing, learning management |
 | `mcp/src/mcp-*.ts` | MCP module handlers (search/tasks/findings/memory/data/graph/session/ops/skills/hooks/extract) |
 | `mcp/src/skill-registry.ts` | Skill precedence, alias collision handling, visibility gating, manifest generation |
-| `mcp/src/governance-policy.ts` | RBAC, policy files, actor resolution (`CORTEX_ACTOR` + local access control) |
+| `mcp/src/governance-policy.ts` | RBAC, policy files, actor resolution (`PHREN_ACTOR` + local access control) |
 | `mcp/src/memory-ui-server.ts` | Web UI server, auth/CSRF/CSP/loopback security model |
 | `mcp/src/telemetry.ts` | Opt-in local telemetry collection and summaries |
-| `starter/` | Template files copied to `~/.cortex` on init |
+| `starter/` | Template files copied to `~/.phren` on init |
 | `docs/` | GitHub Pages site and documentation |
-| `skills/` | Cortex slash command definitions |
+| `skills/` | Phren slash command definitions |
 
 ## Running specific tests
 
@@ -105,7 +105,7 @@ docs: update API reference with bulk tools
 
 1. Create a markdown file in `global/skills/your-skill.md`
 2. Follow the existing skill format: name, description, steps
-3. Test locally by running `cortex init` and invoking `/your-skill` in a Claude Code session
+3. Test locally by running `phren init` and invoking `/your-skill` in a Claude Code session
 
 ## Reporting Bugs
 

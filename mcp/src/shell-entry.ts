@@ -1,12 +1,12 @@
 /**
- * Shell entry point: wires CortexShell to stdin/stdout.
+ * Shell entry point: wires PhrenShell to stdin/stdout.
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
  */
 
-import { CortexShell } from "./shell.js";
+import { PhrenShell } from "./shell.js";
 import { style, clearScreen, clearToEnd, shellStartupFrames } from "./shell-render.js";
 import { errorMessage } from "./utils.js";
-import { computeCortexLiveStateToken } from "./shared.js";
+import { computePhrenLiveStateToken } from "./shared.js";
 import { VERSION } from "./init-shared.js";
 import { loadShellState, saveShellState } from "./shell-state-store.js";
 
@@ -45,8 +45,8 @@ async function waitForAnyKeypress(): Promise<void> {
   });
 }
 
-export function resolveStartupIntroPlan(cortexPath: string, version = VERSION): StartupIntroPlan {
-  const state = loadShellState(cortexPath);
+export function resolveStartupIntroPlan(phrenPath: string, version = VERSION): StartupIntroPlan {
+  const state = loadShellState(phrenPath);
   const mode = state.introMode === "always" || state.introMode === "off" ? state.introMode : "once-per-version";
 
   if (mode === "off") {
@@ -61,13 +61,13 @@ export function resolveStartupIntroPlan(cortexPath: string, version = VERSION): 
   return { mode, variant: "final-frame", holdForKeypress: false, dwellMs: 550, markSeen: false };
 }
 
-function markStartupIntroSeen(cortexPath: string, version = VERSION): void {
-  const state = loadShellState(cortexPath);
+function markStartupIntroSeen(phrenPath: string, version = VERSION): void {
+  const state = loadShellState(phrenPath);
   if (state.introSeenVersion === version) return;
-  saveShellState(cortexPath, { ...state, introSeenVersion: version });
+  saveShellState(phrenPath, { ...state, introSeenVersion: version });
 }
 
-async function playStartupIntro(cortexPath: string, plan = resolveStartupIntroPlan(cortexPath)): Promise<void> {
+async function playStartupIntro(phrenPath: string, plan = resolveStartupIntroPlan(phrenPath)): Promise<void> {
   if (!process.stdout.isTTY || plan.variant === "skip") return;
 
   const frames = shellStartupFrames(VERSION);
@@ -90,26 +90,26 @@ async function playStartupIntro(cortexPath: string, plan = resolveStartupIntroPl
   }
 
   if (plan.markSeen) {
-    markStartupIntroSeen(cortexPath);
+    markStartupIntroSeen(phrenPath);
   }
 }
 
 export function startLiveStatePoller({
-  cortexPath,
+  phrenPath,
   shell,
   repaint,
   isExiting = () => false,
   intervalMs = LIVE_STATE_POLL_MS,
-  computeToken = computeCortexLiveStateToken,
+  computeToken = computePhrenLiveStateToken,
 }: {
-  cortexPath: string;
+  phrenPath: string;
   shell: LiveStateHost;
   repaint: () => Promise<void>;
   isExiting?: () => boolean;
   intervalMs?: number;
-  computeToken?: (cortexPath: string) => string;
+  computeToken?: (phrenPath: string) => string;
 }): () => void {
-  let liveStateToken = computeToken(cortexPath);
+  let liveStateToken = computeToken(phrenPath);
   let stopped = false;
   let inFlight = false;
 
@@ -117,7 +117,7 @@ export function startLiveStatePoller({
     if (stopped || inFlight || isExiting()) return;
     inFlight = true;
     try {
-      const nextToken = computeToken(cortexPath);
+      const nextToken = computeToken(phrenPath);
       if (nextToken === liveStateToken) return;
       liveStateToken = nextToken;
       shell.invalidateSubsectionsCache();
@@ -139,14 +139,14 @@ export function startLiveStatePoller({
   };
 }
 
-export async function startShell(cortexPath: string, profile: string): Promise<void> {
-  const shell = new CortexShell(cortexPath, profile);
+export async function startShell(phrenPath: string, profile: string): Promise<void> {
+  const shell = new PhrenShell(phrenPath, profile);
 
   if (!process.stdin.isTTY) {
     const { createInterface } = await import("readline");
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const repaint = async () => { clearScreen(); process.stdout.write(await shell.render()); rl.setPrompt(`\n${style.boldCyan(":cortex>")} `); rl.prompt(); };
-    const stopPoll = startLiveStatePoller({ cortexPath, shell, repaint });
+    const repaint = async () => { clearScreen(); process.stdout.write(await shell.render()); rl.setPrompt(`\n${style.boldCyan(":phren>")} `); rl.prompt(); };
+    const stopPoll = startLiveStatePoller({ phrenPath, shell, repaint });
     await repaint();
     rl.on("line", async (line) => {
       try { const keep = await shell.handleInput(line); if (!keep) { shell.close(); rl.close(); return; } }
@@ -192,7 +192,7 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
     finish();
   };
   const onProcessExit = () => { restoreTerminal(); };
-  const stopPoll = startLiveStatePoller({ cortexPath, shell, repaint, isExiting: () => exiting });
+  const stopPoll = startLiveStatePoller({ phrenPath, shell, repaint, isExiting: () => exiting });
 
   const finish = () => {
     if (cleanedUp) return;
@@ -215,7 +215,7 @@ export async function startShell(cortexPath: string, profile: string): Promise<v
   process.once("exit", onProcessExit);
 
   try {
-    await playStartupIntro(cortexPath);
+    await playStartupIntro(phrenPath);
     await repaint();
     await exitPromise;
   } finally {

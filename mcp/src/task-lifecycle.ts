@@ -49,7 +49,7 @@ const TASK_STOP_WORDS = new Set([
   "because",
   "before",
   "code",
-  "cortex",
+  "phren",
   "current",
   "during",
   "feature",
@@ -78,12 +78,12 @@ const TASK_STOP_WORDS = new Set([
   "work",
 ]);
 
-function taskSessionPath(cortexPath: string, sessionId: string): string {
-  return sessionMarker(cortexPath, `task-${sessionId}.json`);
+function taskSessionPath(phrenPath: string, sessionId: string): string {
+  return sessionMarker(phrenPath, `task-${sessionId}.json`);
 }
 
-function readTaskSessionState(cortexPath: string, sessionId: string): TaskSessionState | null {
-  const file = taskSessionPath(cortexPath, sessionId);
+function readTaskSessionState(phrenPath: string, sessionId: string): TaskSessionState | null {
+  const file = taskSessionPath(phrenPath, sessionId);
   if (!fs.existsSync(file)) return null;
   try {
     return JSON.parse(fs.readFileSync(file, "utf8")) as TaskSessionState;
@@ -93,13 +93,13 @@ function readTaskSessionState(cortexPath: string, sessionId: string): TaskSessio
   }
 }
 
-function writeTaskSessionState(cortexPath: string, state: TaskSessionState): void {
-  const file = taskSessionPath(cortexPath, state.sessionId);
+function writeTaskSessionState(phrenPath: string, state: TaskSessionState): void {
+  const file = taskSessionPath(phrenPath, state.sessionId);
   fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
 }
 
-function clearTaskSessionState(cortexPath: string, sessionId: string): void {
-  const file = taskSessionPath(cortexPath, sessionId);
+function clearTaskSessionState(phrenPath: string, sessionId: string): void {
+  const file = taskSessionPath(phrenPath, sessionId);
   try {
     if (fs.existsSync(file)) fs.unlinkSync(file);
   } catch (err: unknown) {
@@ -107,8 +107,8 @@ function clearTaskSessionState(cortexPath: string, sessionId: string): void {
   }
 }
 
-export function getTaskMode(cortexPath: string): TaskMode {
-  return getWorkflowPolicy(cortexPath).taskMode;
+export function getTaskMode(phrenPath: string): TaskMode {
+  return getWorkflowPolicy(phrenPath).taskMode;
 }
 
 function isActionablePrompt(prompt: string, intent: string): boolean {
@@ -176,14 +176,14 @@ function matchExistingActiveTask(prompt: string, activeItems: TaskItem[]): TaskI
   return null;
 }
 
-function resolveTrackedSessionTask(cortexPath: string, state: TaskSessionState): TaskItem | null {
+function resolveTrackedSessionTask(phrenPath: string, state: TaskSessionState): TaskItem | null {
   const match = state.stableId ? `bid:${state.stableId}` : state.item;
-  const resolved = resolveTaskItem(cortexPath, state.project, match);
+  const resolved = resolveTaskItem(phrenPath, state.project, match);
   return resolved.ok ? resolved.data : null;
 }
 
-function extractGithubMetadata(cortexPath: string, project: string, prompt: string): { github_issue?: number; github_url?: string } {
-  const repo = resolveProjectGithubRepo(cortexPath, project);
+function extractGithubMetadata(phrenPath: string, project: string, prompt: string): { github_issue?: number; github_url?: string } {
+  const repo = resolveProjectGithubRepo(phrenPath, project);
   for (const match of prompt.matchAll(GITHUB_URL_RE)) {
     const parsed = parseGithubIssueUrl(match[0]);
     if (!parsed) continue;
@@ -209,16 +209,16 @@ function buildSuggestionNotice(project: string, line: string, issueMeta: { githu
       ? `Suggested GitHub link: #${issueMeta.github_issue}`
       : "";
   return [
-    "<cortex-notice>",
+    "<phren-notice>",
     `Task suggestion for ${project}:`,
     `- ${line}`,
     ...(githubLine ? [githubLine] : []),
-    "<cortex-notice>",
+    "<phren-notice>",
   ];
 }
 
-function persistTaskAttachment(cortexPath: string, sessionId: string, project: string, item: TaskItem, summary: string, mode: Extract<TaskMode, "suggest" | "auto">): void {
-  writeTaskSessionState(cortexPath, {
+function persistTaskAttachment(phrenPath: string, sessionId: string, project: string, item: TaskItem, summary: string, mode: Extract<TaskMode, "suggest" | "auto">): void {
+  writeTaskSessionState(phrenPath, {
     sessionId,
     project,
     stableId: item.stableId,
@@ -231,14 +231,14 @@ function persistTaskAttachment(cortexPath: string, sessionId: string, project: s
 }
 
 export function handleTaskPromptLifecycle(args: {
-  cortexPath: string;
+  phrenPath: string;
   prompt: string;
   project: string | null;
   sessionId?: string;
   intent: string;
   taskLevel?: ProactivityLevel;
 }): TaskPromptLifecycleResult {
-  const mode = getTaskMode(args.cortexPath);
+  const mode = getTaskMode(args.phrenPath);
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
     return { mode, noticeLines: [] };
   }
@@ -250,20 +250,20 @@ export function handleTaskPromptLifecycle(args: {
   if (!isActionablePrompt(args.prompt, args.intent)) {
     return { mode, noticeLines: [] };
   }
-  const taskLevel = args.taskLevel ?? getProactivityLevelForTask(args.cortexPath);
+  const taskLevel = args.taskLevel ?? getProactivityLevelForTask(args.phrenPath);
   if (mode === "auto" && !shouldAutoCaptureTaskForLevel(taskLevel, args.prompt)) {
     debugLog(`task lifecycle skipped ${args.project}: task proactivity=${taskLevel}`);
     return { mode, noticeLines: [] };
   }
 
-  const parsed = readTasks(args.cortexPath, args.project);
+  const parsed = readTasks(args.phrenPath, args.project);
   if (!parsed.ok) return { mode, noticeLines: [] };
 
   const summary = normalizeTaskSummary(args.prompt);
-  const issueMeta = extractGithubMetadata(args.cortexPath, args.project, args.prompt);
-  const trackedState = readTaskSessionState(args.cortexPath, args.sessionId);
+  const issueMeta = extractGithubMetadata(args.phrenPath, args.project, args.prompt);
+  const trackedState = readTaskSessionState(args.phrenPath, args.sessionId);
   const trackedItem = trackedState && trackedState.project === args.project
-    ? resolveTrackedSessionTask(args.cortexPath, trackedState)
+    ? resolveTrackedSessionTask(args.phrenPath, trackedState)
     : null;
   const activeItems = parsed.data.items.Active;
   const reusable = trackedItem && trackedItem.section === "Active"
@@ -285,7 +285,7 @@ export function handleTaskPromptLifecycle(args: {
     const line = reusable?.line || summary;
     debugLog(`task lifecycle auto→speculative ${args.project}: discovery intent detected`);
     if (!reusable) {
-      addTask(args.cortexPath, args.project, summary, {
+      addTask(args.phrenPath, args.project, summary, {
         createdAt: new Date().toISOString(),
         sessionId: args.sessionId,
         speculative: true,
@@ -299,7 +299,7 @@ export function handleTaskPromptLifecycle(args: {
 
   const targetMatch = reusable?.stableId ? `bid:${reusable.stableId}` : reusable?.id;
   if (!reusable) {
-    const add = addTask(args.cortexPath, args.project, summary, {
+    const add = addTask(args.phrenPath, args.project, summary, {
       createdAt: new Date().toISOString(),
       sessionId: args.sessionId,
     });
@@ -309,7 +309,7 @@ export function handleTaskPromptLifecycle(args: {
     }
   }
 
-  const update = updateTask(args.cortexPath, args.project, targetMatch || summary, {
+  const update = updateTask(args.phrenPath, args.project, targetMatch || summary, {
     section: "active",
     context: summary,
     replace_context: true,
@@ -320,47 +320,47 @@ export function handleTaskPromptLifecycle(args: {
     return { mode, noticeLines: [] };
   }
 
-  const resolved = resolveTaskItem(args.cortexPath, args.project, targetMatch || summary);
+  const resolved = resolveTaskItem(args.phrenPath, args.project, targetMatch || summary);
   if (!resolved.ok) {
     debugLog(`task lifecycle resolve ${args.project}: ${resolved.error}`);
     return { mode, noticeLines: [] };
   }
 
-  persistTaskAttachment(args.cortexPath, args.sessionId, args.project, resolved.data, summary, "auto");
+  persistTaskAttachment(args.phrenPath, args.sessionId, args.project, resolved.data, summary, "auto");
   return {
     mode,
     noticeLines: [
-      "<cortex-notice>",
+      "<phren-notice>",
       `Active task (${args.project}): ${resolved.data.line}`,
-      "<cortex-notice>",
+      "<phren-notice>",
     ],
   };
 }
 
 export function finalizeTaskSession(args: {
-  cortexPath: string;
+  phrenPath: string;
   sessionId?: string;
   status: "clean" | "saved-local" | "saved-pushed" | "error";
   detail: string;
 }): void {
-  if (!args.sessionId || getTaskMode(args.cortexPath) !== "auto") return;
-  const state = readTaskSessionState(args.cortexPath, args.sessionId);
+  if (!args.sessionId || getTaskMode(args.phrenPath) !== "auto") return;
+  const state = readTaskSessionState(args.phrenPath, args.sessionId);
   if (!state || state.mode !== "auto") return;
 
   const match = state.stableId ? `bid:${state.stableId}` : state.item;
   if (args.status === "saved-local" || args.status === "saved-pushed") {
-    const completed = completeTask(args.cortexPath, state.project, match);
+    const completed = completeTask(args.phrenPath, state.project, match);
     if (!completed.ok) {
       debugLog(`task lifecycle complete ${state.project}: ${completed.error}`);
       return;
     }
-    incrementSessionTasksCompleted(args.cortexPath, 1, state.sessionId, state.project);
-    clearTaskSessionState(args.cortexPath, args.sessionId);
+    incrementSessionTasksCompleted(args.phrenPath, 1, state.sessionId, state.project);
+    clearTaskSessionState(args.phrenPath, args.sessionId);
     return;
   }
 
   if (args.status === "error") {
-    const blocked = updateTask(args.cortexPath, state.project, match, {
+    const blocked = updateTask(args.phrenPath, state.project, match, {
       section: "active",
       context: `Blocked: ${args.detail}`,
       replace_context: true,
@@ -369,7 +369,7 @@ export function finalizeTaskSession(args: {
       debugLog(`task lifecycle block ${state.project}: ${blocked.error}`);
       return;
     }
-    writeTaskSessionState(args.cortexPath, {
+    writeTaskSessionState(args.phrenPath, {
       ...state,
       summary: `Blocked: ${args.detail}`,
       updatedAt: new Date().toISOString(),
@@ -378,17 +378,17 @@ export function finalizeTaskSession(args: {
   }
 }
 
-export function clearTaskSession(cortexPath: string, sessionId?: string): void {
+export function clearTaskSession(phrenPath: string, sessionId?: string): void {
   if (!sessionId) return;
-  clearTaskSessionState(cortexPath, sessionId);
+  clearTaskSessionState(phrenPath, sessionId);
 }
 
 /**
  * Return the active TaskItem tracked for a session+project, if any.
  * Used by mcp-finding.ts to link findings to active tasks.
  */
-export function getActiveTaskForSession(cortexPath: string, sessionId: string, project: string): import("./data-tasks.js").TaskItem | null {
-  const state = readTaskSessionState(cortexPath, sessionId);
+export function getActiveTaskForSession(phrenPath: string, sessionId: string, project: string): import("./data-tasks.js").TaskItem | null {
+  const state = readTaskSessionState(phrenPath, sessionId);
   if (!state || state.project !== project) return null;
-  return resolveTrackedSessionTask(cortexPath, state);
+  return resolveTrackedSessionTask(phrenPath, state);
 }

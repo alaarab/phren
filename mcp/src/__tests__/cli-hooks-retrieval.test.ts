@@ -4,16 +4,16 @@ import * as os from "os";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 
-// Set CORTEX_PATH before importing cli-hooks
-const tmpCortex = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-retrieval-test-"));
-process.env.CORTEX_PATH = tmpCortex;
+// Set PHREN_PATH before importing cli-hooks
+const tmpPhren = fs.mkdtempSync(path.join(os.tmpdir(), "phren-retrieval-test-"));
+process.env.PHREN_PATH = tmpPhren;
 
 import { rankResults, searchDocuments } from "../cli-hooks.js";
 import type { DocRow } from "../shared-index.js";
 import { buildRobustFtsQuery } from "../utils.js";
 
 afterEach(() => {
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_ACTOR;
 });
 
 describe("rankResults", () => {
@@ -29,7 +29,7 @@ describe("rankResults", () => {
     ];
 
     // rankResults should not filter out other-project rows, but may reorder them
-    const ranked = rankResults(rows, "general", null, "myapp", tmpCortex, null);
+    const ranked = rankResults(rows, "general", null, "myapp", tmpPhren, null);
     expect(ranked.length).toBeGreaterThanOrEqual(2); // at minimum keeps myapp rows
     // myapp claude should appear (it's the detected project)
     expect(ranked.some(r => r.project === "myapp")).toBe(true);
@@ -41,7 +41,7 @@ describe("rankResults", () => {
       makeDocRow("myapp", "CLAUDE.md", "claude", "# myapp\nSetup instructions"),
     ];
 
-    const ranked = rankResults(rows, "general", null, "myapp", tmpCortex, null);
+    const ranked = rankResults(rows, "general", null, "myapp", tmpPhren, null);
     // findings should rank before claude/non-findings types
     const claudeIdx = ranked.findIndex(r => r.type === "claude");
     const learningsIdx = ranked.findIndex(r => r.type === "findings");
@@ -78,7 +78,7 @@ describe("rankResults", () => {
       "general",
       null,
       null,
-      tmpCortex,
+      tmpPhren,
       null as any,
       undefined,
       "alerts to external webhook instead of discord"
@@ -145,7 +145,7 @@ describe("searchDocuments", () => {
   it("retries with a relaxed FTS query when the strict lexical query misses", () => {
     const strictQuery = buildRobustFtsQuery("semantic search setup during init with ollama");
     const seenQueries: string[] = [];
-    const row = ["cortex", "FINDINGS.md", "findings", "Semantic opt-in during init should finish at the dependency level", "/tmpcortex/FINDINGS.md"];
+    const row = ["phren", "FINDINGS.md", "findings", "Semantic opt-in during init should finish at the dependency level", "/tmpphren/FINDINGS.md"];
     const mockDb = {
       exec: (sql: string, params: any[]) => {
         if (sql.includes("MATCH")) {
@@ -168,7 +168,7 @@ describe("searchDocuments", () => {
       null
     );
 
-    expect(result?.[0]?.path).toBe("/tmpcortex/FINDINGS.md");
+    expect(result?.[0]?.path).toBe("/tmpphren/FINDINGS.md");
     expect(seenQueries).toHaveLength(2);
     expect(seenQueries[1]).toContain(" OR ");
   });

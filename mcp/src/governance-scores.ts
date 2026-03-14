@@ -30,12 +30,12 @@ const DEFAULT_MEMORY_SCORES_FILE: VersionedEntriesFile<EntryScore> = {
   entries: {},
 };
 
-function usageLogFile(cortexPath: string): string {
-  return memoryUsageLogFile(cortexPath);
+function usageLogFile(phrenPath: string): string {
+  return memoryUsageLogFile(phrenPath);
 }
 
-function scoresJournalFile(cortexPath: string): string {
-  return runtimeFile(cortexPath, "scores.jsonl");
+function scoresJournalFile(phrenPath: string): string {
+  return runtimeFile(phrenPath, "scores.jsonl");
 }
 
 function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
@@ -90,8 +90,8 @@ function normalizeVersionedEntries<T>(data: Record<string, unknown>, guard: (val
   };
 }
 
-function readScoresFile(cortexPath: string): Record<string, EntryScore> {
-  const file = memoryScoresFile(cortexPath);
+function readScoresFile(phrenPath: string): Record<string, EntryScore> {
+  const file = memoryScoresFile(phrenPath);
   try {
     if (!fs.existsSync(file)) return { ...DEFAULT_MEMORY_SCORES_FILE.entries };
     if (!validateScoresJson(file)) {
@@ -106,8 +106,8 @@ function readScoresFile(cortexPath: string): Record<string, EntryScore> {
   }
 }
 
-function writeScoresFile(cortexPath: string, scores: Record<string, EntryScore>): void {
-  const file = memoryScoresFile(cortexPath);
+function writeScoresFile(phrenPath: string, scores: Record<string, EntryScore>): void {
+  const file = memoryScoresFile(phrenPath);
   withFileLock(file, () => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmpPath = path.join(path.dirname(file), `.tmp-${crypto.randomUUID()}`);
@@ -123,16 +123,16 @@ let scoresCache: Record<string, EntryScore> | null = null;
 let scoresCachePath: string | null = null;
 let scoresDirty = false;
 
-function appendScoreJournal(cortexPath: string, key: string, delta: ScoreJournalEntry["delta"]): void {
-  const file = scoresJournalFile(cortexPath);
+function appendScoreJournal(phrenPath: string, key: string, delta: ScoreJournalEntry["delta"]): void {
+  const file = scoresJournalFile(phrenPath);
   const entry: ScoreJournalEntry = { key, delta, at: new Date().toISOString() };
   withFileLock(file, () => {
     fs.appendFileSync(file, JSON.stringify(entry) + "\n");
   });
 }
 
-function readScoreJournal(cortexPath: string): ScoreJournalEntry[] {
-  const file = scoresJournalFile(cortexPath);
+function readScoreJournal(phrenPath: string): ScoreJournalEntry[] {
+  const file = scoresJournalFile(phrenPath);
   if (!fs.existsSync(file)) return [];
   try {
     return fs.readFileSync(file, "utf8")
@@ -142,7 +142,7 @@ function readScoreJournal(cortexPath: string): ScoreJournalEntry[] {
         try {
           return JSON.parse(line) as ScoreJournalEntry;
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readScoreJournal parseLine: ${errorMessage(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readScoreJournal parseLine: ${errorMessage(err)}\n`);
           return null;
         }
       })
@@ -155,8 +155,8 @@ function readScoreJournal(cortexPath: string): ScoreJournalEntry[] {
   }
 }
 
-function claimScoreJournal(cortexPath: string): ScoreJournalEntry[] {
-  const file = scoresJournalFile(cortexPath);
+function claimScoreJournal(phrenPath: string): ScoreJournalEntry[] {
+  const file = scoresJournalFile(phrenPath);
   let claimedFile: string | null = null;
   withFileLock(file, () => {
     if (!fs.existsSync(file)) return;
@@ -173,7 +173,7 @@ function claimScoreJournal(cortexPath: string): ScoreJournalEntry[] {
         try {
           return JSON.parse(line) as ScoreJournalEntry;
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] claimScoreJournal parseLine: ${errorMessage(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] claimScoreJournal parseLine: ${errorMessage(err)}\n`);
           return null;
         }
       })
@@ -187,7 +187,7 @@ function claimScoreJournal(cortexPath: string): ScoreJournalEntry[] {
     try {
       fs.unlinkSync(claimedFile);
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] claimScoreJournal unlinkClaim: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] claimScoreJournal unlinkClaim: ${errorMessage(err)}\n`);
     }
   }
 }
@@ -222,28 +222,28 @@ function ensureScoreEntry(scores: Record<string, EntryScore>, key: string): Entr
   return scores[key];
 }
 
-function loadEntryScores(cortexPath: string): Record<string, EntryScore> {
-  const file = memoryScoresFile(cortexPath);
+function loadEntryScores(phrenPath: string): Record<string, EntryScore> {
+  const file = memoryScoresFile(phrenPath);
   if (scoresCache && scoresCachePath === file) return scoresCache;
-  scoresCache = readScoresFile(cortexPath);
+  scoresCache = readScoresFile(phrenPath);
   scoresCachePath = file;
   scoresDirty = false;
   return scoresCache;
 }
 
-function saveEntryScores(cortexPath: string, scores: Record<string, EntryScore>): void {
+function saveEntryScores(phrenPath: string, scores: Record<string, EntryScore>): void {
   scoresCache = scores;
-  scoresCachePath = memoryScoresFile(cortexPath);
+  scoresCachePath = memoryScoresFile(phrenPath);
   scoresDirty = true;
 }
 
-export function flushEntryScores(cortexPath: string): void {
+export function flushEntryScores(phrenPath: string): void {
   // Invalidate journal cache since claimScoreJournal will clear the file
   journalCache = null;
   journalCachePath = null;
-  const journalEntries = claimScoreJournal(cortexPath);
+  const journalEntries = claimScoreJournal(phrenPath);
   if (journalEntries.length > 0) {
-    const scores = loadEntryScores(cortexPath);
+    const scores = loadEntryScores(phrenPath);
     const aggregated = aggregateJournalScores(journalEntries);
     for (const [key, deltas] of Object.entries(aggregated)) {
       const entry = ensureScoreEntry(scores, key);
@@ -256,11 +256,11 @@ export function flushEntryScores(cortexPath: string): void {
         entry.lastUsedAt = deltas.lastUsedAt;
       }
     }
-    saveEntryScores(cortexPath, scores);
+    saveEntryScores(phrenPath, scores);
   }
 
-  if (scoresDirty && scoresCache && scoresCachePath === memoryScoresFile(cortexPath)) {
-    writeScoresFile(cortexPath, scoresCache);
+  if (scoresDirty && scoresCache && scoresCachePath === memoryScoresFile(phrenPath)) {
+    writeScoresFile(phrenPath, scoresCache);
     scoresDirty = false;
   }
 }
@@ -272,10 +272,10 @@ export function entryScoreKey(project: string, filename: string, snippet: string
   return `${project}/${filename}:${digest}`;
 }
 
-export function recordInjection(cortexPath: string, key: string, sessionId?: string): void {
-  appendScoreJournal(cortexPath, key, { impressions: 1 });
+export function recordInjection(phrenPath: string, key: string, sessionId?: string): void {
+  appendScoreJournal(phrenPath, key, { impressions: 1 });
   const session = sessionId || "none";
-  const logFile = usageLogFile(cortexPath);
+  const logFile = usageLogFile(phrenPath);
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   fs.appendFileSync(logFile, `${new Date().toISOString()}\tinject\t${session}\t${key}\n`);
   try {
@@ -292,7 +292,7 @@ export function recordInjection(cortexPath: string, key: string, sessionId?: str
 
 
 export function recordFeedback(
-  cortexPath: string,
+  phrenPath: string,
   key: string,
   feedback: "helpful" | "reprompt" | "regression",
 ): void {
@@ -300,8 +300,8 @@ export function recordFeedback(
   if (feedback === "helpful") delta.helpful = 1;
   if (feedback === "reprompt") delta.repromptPenalty = 1;
   if (feedback === "regression") delta.regressionPenalty = 1;
-  appendScoreJournal(cortexPath, key, delta);
-  appendAuditLog(cortexPath, "memory_feedback", `key=${key} feedback=${feedback}`);
+  appendScoreJournal(phrenPath, key, delta);
+  appendAuditLog(phrenPath, "memory_feedback", `key=${key} feedback=${feedback}`);
 }
 
 
@@ -310,11 +310,11 @@ export function recordFeedback(
 let journalCache: Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }> | null = null;
 let journalCachePath: string | null = null;
 
-function getJournalCache(cortexPath: string): Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }> {
-  const file = scoresJournalFile(cortexPath);
+function getJournalCache(phrenPath: string): Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }> {
+  const file = scoresJournalFile(phrenPath);
   if (journalCache && journalCachePath === file) return journalCache;
   // Build the cache by reading the journal once and aggregating by key
-  const entries = readScoreJournal(cortexPath);
+  const entries = readScoreJournal(phrenPath);
   const cache = new Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }>();
   for (const entry of entries) {
     const cur = cache.get(entry.key) ?? { helpful: 0, repromptPenalty: 0, regressionPenalty: 0, impressions: 0, lastUsedAt: "" };
@@ -330,8 +330,8 @@ function getJournalCache(cortexPath: string): Map<string, { helpful: number; rep
   return cache;
 }
 
-export function getQualityMultiplier(cortexPath: string, key: string): number {
-  const scores = loadEntryScores(cortexPath);
+export function getQualityMultiplier(phrenPath: string, key: string): number {
+  const scores = loadEntryScores(phrenPath);
   const entry = scores[key];
   let helpful = entry ? entry.helpful : 0;
   let repromptPenalty = entry ? entry.repromptPenalty : 0;
@@ -340,7 +340,7 @@ export function getQualityMultiplier(cortexPath: string, key: string): number {
   let lastUsedAt = entry ? entry.lastUsedAt : "";
 
   // Use the cached journal aggregation to avoid O(n×m) reads during ranking
-  const journalAgg = getJournalCache(cortexPath).get(key);
+  const journalAgg = getJournalCache(phrenPath).get(key);
   const hasJournalData = journalAgg !== undefined;
   if (journalAgg) {
     helpful += journalAgg.helpful;

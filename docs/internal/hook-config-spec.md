@@ -3,13 +3,13 @@
 Version: 1.0
 Last updated: 2026-03-06
 
-Cortex registers lifecycle hooks with multiple AI coding tools. Each tool has its own config format. This document specifies the exact schema cortex writes for each tool, the validation rules applied before writing, and the shell wrapper contract.
+Phren registers lifecycle hooks with multiple AI coding tools. Each tool has its own config format. This document specifies the exact schema phren writes for each tool, the validation rules applied before writing, and the shell wrapper contract.
 
 ## Lifecycle Events
 
-Cortex hooks into three lifecycle events across all supported tools:
+Phren hooks into three lifecycle events across all supported tools:
 
-| Cortex Event | Purpose | Claude Code | Copilot CLI | Cursor | Codex |
+| Phren Event | Purpose | Claude Code | Copilot CLI | Cursor | Codex |
 |---|---|---|---|---|---|
 | Session start | git pull, load context | `SessionStart` | `sessionStart` | `sessionStart` | `SessionStart` |
 | Prompt submit | inject search context | `UserPromptSubmit` | `userPromptSubmitted` | `beforeSubmitPrompt` | `UserPromptSubmit` |
@@ -32,7 +32,7 @@ Claude Code hooks are registered directly in the user's settings file under the 
         "hooks": [
           {
             "type": "command",
-            "command": "CORTEX_PATH=\"/path\" node \"/path/to/index.js\" hook-session-start"
+            "command": "PHREN_PATH=\"/path\" node \"/path/to/index.js\" hook-session-start"
           }
         ]
       }
@@ -43,7 +43,7 @@ Claude Code hooks are registered directly in the user's settings file under the 
         "hooks": [
           {
             "type": "command",
-            "command": "CORTEX_PATH=\"/path\" node \"/path/to/index.js\" hook-prompt",
+            "command": "PHREN_PATH=\"/path\" node \"/path/to/index.js\" hook-prompt",
             "timeout": 3
           }
         ]
@@ -55,7 +55,7 @@ Claude Code hooks are registered directly in the user's settings file under the 
         "hooks": [
           {
             "type": "command",
-            "command": "CORTEX_PATH=\"/path\" node \"/path/to/index.js\" hook-stop"
+            "command": "PHREN_PATH=\"/path\" node \"/path/to/index.js\" hook-stop"
           }
         ]
       }
@@ -68,17 +68,17 @@ Claude Code hooks are registered directly in the user's settings file under the 
 - Each event key is an array of hook group objects
 - Hook group: `{ matcher: string, hooks: HookEntry[] }`
 - HookEntry: `{ type: "command", command: string, timeout?: number }`
-- `matcher` is an empty string for cortex hooks (matches all tools)
+- `matcher` is an empty string for phren hooks (matches all tools)
 - `timeout` is seconds (used on `UserPromptSubmit` to avoid blocking)
-- Cortex hooks are identified by presence of `hook-prompt`, `hook-stop`, `hook-session-start`, or `isCortexCommand()` match in the command string
+- Phren hooks are identified by presence of `hook-prompt`, `hook-stop`, `hook-session-start`, or `isPhrenCommand()` match in the command string
 
-**Upsert behavior:** Cortex finds an existing hook group by scanning for known markers in command strings. If found, it replaces in place. If not, it appends.
+**Upsert behavior:** Phren finds an existing hook group by scanning for known markers in command strings. If found, it replaces in place. If not, it appends.
 
-**Removal behavior:** When hooks are disabled, cortex filters out any hook group whose inner hooks match `isCortexCommand()`.
+**Removal behavior:** When hooks are disabled, phren filters out any hook group whose inner hooks match `isPhrenCommand()`.
 
 ### Copilot CLI
 
-**Config file:** `~/.github/hookscortex.json`
+**Config file:** `~/.github/hooksphren.json`
 
 ```jsonc
 {
@@ -108,7 +108,7 @@ Claude Code hooks are registered directly in the user's settings file under the 
 
 **Validation function:** `validateCopilotConfig()` checks all three arrays exist and version is a number.
 
-**Known limitation:** Copilot CLI does not currently expose native hook support matching this schema. Cortex writes the config file speculatively and also installs a session wrapper binary as a fallback.
+**Known limitation:** Copilot CLI does not currently expose native hook support matching this schema. Phren writes the config file speculatively and also installs a session wrapper binary as a fallback.
 
 ### Cursor
 
@@ -132,13 +132,13 @@ Claude Code hooks are registered directly in the user's settings file under the 
 
 **Validation function:** `validateCursorConfig()` checks version is a number and all three command strings exist.
 
-**Merge behavior:** Reads existing `hooks.json` and spreads existing fields before overwriting cortex-managed keys. Preserves user-added fields.
+**Merge behavior:** Reads existing `hooks.json` and spreads existing fields before overwriting phren-managed keys. Preserves user-added fields.
 
 **Known limitation:** Cursor does not currently expose native hook support matching this schema. Session wrapper provides lifecycle guarantees.
 
 ### Codex
 
-**Config file:** `<cortexPath>/codex.json`
+**Config file:** `<phrenPath>/codex.json`
 
 ```jsonc
 {
@@ -172,7 +172,7 @@ Claude Code hooks are registered directly in the user's settings file under the 
 
 ## Session Wrapper Contract
 
-For tools that lack native hook support (Copilot, Cursor, Codex), cortex installs a POSIX shell wrapper at `~/.local/bin/<tool>` that intercepts invocations.
+For tools that lack native hook support (Copilot, Cursor, Codex), phren installs a POSIX shell wrapper at `~/.local/bin/<tool>` that intercepts invocations.
 
 **Wrapper behavior:**
 1. Resolves the real binary (skipping itself via path comparison)
@@ -198,33 +198,33 @@ For tools that lack native hook support (Copilot, Cursor, Codex), cortex install
 Local per-machine hook configs use the local entry script when available:
 
 ```
-CORTEX_PATH="<escaped-path>" node "<entry-script>" <subcommand>
+PHREN_PATH="<escaped-path>" node "<entry-script>" <subcommand>
 ```
 
 Or the npx fallback when the local entry script is not found:
 
 ```
-CORTEX_PATH="<escaped-path>" npx -y cortex@<version> <subcommand>
+PHREN_PATH="<escaped-path>" npx -y phren@<version> <subcommand>
 ```
 
 Shared synced artifacts that may move across machines, such as `codex.json` and
-`cortex.SKILL.md`, use portable versioned npx commands without embedding local
+`phren.SKILL.md`, use portable versioned npx commands without embedding local
 absolute paths:
 
 ```
-npx -y cortex@<version> <subcommand>
+npx -y phren@<version> <subcommand>
 ```
 
 **Subcommands:**
 - `hook-session-start`: git pull, context injection
-- `hook-prompt`: keyword extraction, cortex search, context injection
+- `hook-prompt`: keyword extraction, phren search, context injection
 - `hook-stop`: git add, commit, push
 
 **Path escaping:** Local machine configs escape backslashes (`\\` to `\\\\`) and double quotes (`"` to `\"`).
 
 ## Install Preferences
 
-**File:** `<cortexPath>/.runtime/install-preferences.json`
+**File:** `<phrenPath>/.runtime/install-preferences.json`
 
 ```jsonc
 {
@@ -239,7 +239,7 @@ npx -y cortex@<version> <subcommand>
 |---|---|---|---|
 | `mcpEnabled` | boolean | `true` | Controls MCP server registration |
 | `hooksEnabled` | boolean | `true` | Controls hook config writing and wrapper installation |
-| `installedVersion` | string | - | Last installed cortex version |
+| `installedVersion` | string | - | Last installed phren version |
 | `updatedAt` | string (ISO) | - | Last update timestamp |
 
 When `hooksEnabled` is `false`:
@@ -268,7 +268,7 @@ When `hookTools` is present, each tool key controls whether hooks and wrappers a
 
 ## Per-Project Hook Overrides
 
-Tracked projects can override lifecycle hooks in `<cortexPath>/<project>cortex.project.yaml`:
+Tracked projects can override lifecycle hooks in `<phrenPath>/<project>phren.project.yaml`:
 
 ```yaml
 hooks:
@@ -294,6 +294,6 @@ Every config is validated before being written to disk. If validation fails, the
 | Tool | Hook Config | Wrapper | MCP Config |
 |---|---|---|---|
 | Claude Code | `~/.claude/settings.json` | n/a (native) | `~/.claude/settings.json` |
-| Copilot CLI | `~/.github/hookscortex.json` | `~/.local/bin/copilot` | `~/.github/mcp.json` |
+| Copilot CLI | `~/.github/hooksphren.json` | `~/.local/bin/copilot` | `~/.github/mcp.json` |
 | Cursor | `~/.cursor/hooks.json` | `~/.local/bin/cursor` | `~/.cursor/mcp.json` |
-| Codex | `<cortexPath>/codex.json` | `~/.local/bin/codex` | `~/.codex/config.json` |
+| Codex | `<phrenPath>/codex.json` | `~/.local/bin/codex` | `~/.codex/config.json` |

@@ -100,9 +100,9 @@ function projectFromSourceDoc(sourceDoc: string): string {
   return slash > 0 ? sourceDoc.slice(0, slash) : "";
 }
 
-export function readSyncSnapshot(cortexPath: string) {
+export function readSyncSnapshot(phrenPath: string) {
   try {
-    const runtimeHealth = runtimeHealthFile(cortexPath);
+    const runtimeHealth = runtimeHealthFile(phrenPath);
     if (!fs.existsSync(runtimeHealth)) return {};
     const parsed = JSON.parse(fs.readFileSync(runtimeHealth, "utf8")) as {
       lastAutoSave?: { status?: string; detail?: string };
@@ -130,9 +130,9 @@ export function readSyncSnapshot(cortexPath: string) {
   }
 }
 
-export function isAllowedFilePath(filePath: string, cortexPath: string): boolean {
+export function isAllowedFilePath(filePath: string, phrenPath: string): boolean {
   const resolved = path.resolve(filePath);
-  const allowedRoots = hookConfigRoots(cortexPath);
+  const allowedRoots = hookConfigRoots(phrenPath);
   if (!allowedRoots.some((root) => resolved === root || resolved.startsWith(root + path.sep))) {
     return false;
   }
@@ -162,8 +162,8 @@ export function isAllowedFilePath(filePath: string, cortexPath: string): boolean
   return allowedRealRoots.some((root) => realResolved === root || realResolved.startsWith(root + path.sep));
 }
 
-export function collectSkillsForUI(cortexPath: string, profile = ""): Array<{ name: string; source: string; path: string; enabled: boolean }> {
-  return getAllSkills(cortexPath, profile).map((skill) => ({
+export function collectSkillsForUI(phrenPath: string, profile = ""): Array<{ name: string; source: string; path: string; enabled: boolean }> {
+  return getAllSkills(phrenPath, profile).map((skill) => ({
     name: skill.name,
     source: skill.source,
     path: skill.path,
@@ -171,11 +171,11 @@ export function collectSkillsForUI(cortexPath: string, profile = ""): Array<{ na
   }));
 }
 
-export function getHooksData(cortexPath: string) {
-  const prefs = readInstallPreferences(cortexPath);
+export function getHooksData(phrenPath: string) {
+  const prefs = readInstallPreferences(phrenPath);
   const globalEnabled = prefs.hooksEnabled !== false;
   const toolPrefs = (prefs.hookTools && typeof prefs.hookTools === "object") ? prefs.hookTools : {};
-  const paths = hookConfigPaths(cortexPath);
+  const paths = hookConfigPaths(phrenPath);
 
   const tools = (["claude", "copilot", "cursor", "codex"] as const).map((tool) => ({
     tool,
@@ -184,11 +184,11 @@ export function getHooksData(cortexPath: string) {
     exists: fs.existsSync(paths[tool]),
   }));
 
-  return { globalEnabled, tools, customHooks: readCustomHooks(cortexPath) };
+  return { globalEnabled, tools, customHooks: readCustomHooks(phrenPath) };
 }
 
-export async function buildGraph(cortexPath: string, profile?: string, focusProject?: string): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {
-  const projects = getProjectDirs(cortexPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
+export async function buildGraph(phrenPath: string, profile?: string, focusProject?: string): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {
+  const projects = getProjectDirs(phrenPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];
   const projectSet = new Set(projects);
@@ -198,14 +198,14 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
 
   for (const project of projects) {
     // Load dynamic topics for this project
-    const { topics: projectTopics } = readProjectTopics(cortexPath, project);
+    const { topics: projectTopics } = readProjectTopics(phrenPath, project);
     for (const topic of projectTopics) {
       if (!topicMetaMap.has(topic.slug)) {
         topicMetaMap.set(topic.slug, { slug: topic.slug, label: topic.label });
       }
     }
 
-    const findingsPath = path.join(cortexPath, project, "FINDINGS.md");
+    const findingsPath = path.join(phrenPath, project, "FINDINGS.md");
     if (!fs.existsSync(findingsPath)) {
       nodes.push({
         id: project,
@@ -304,7 +304,7 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
   // ── Tasks ──────────────────────────────────────────────────────────
   try {
     for (const project of projects) {
-      const taskResult = readTasks(cortexPath, project);
+      const taskResult = readTasks(phrenPath, project);
       if (!taskResult.ok) continue;
       const doc = taskResult.data;
       let taskCount = 0;
@@ -339,10 +339,10 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
     // task loading failed — continue with other data sources
   }
 
-  // ── Entities ──────────────────────────────────────────────────────
+  // ── Fragments (entity graph) ───────────────────────────────────────
   let db: SqlJsDatabase | null = null;
   try {
-    db = await buildIndex(cortexPath, profile);
+    db = await buildIndex(phrenPath, profile);
     const rows = queryRows(
       db,
       `SELECT e.id, e.name, e.type, COUNT(DISTINCT el.source_doc) as ref_count
@@ -426,7 +426,7 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
   // ── Reference docs ────────────────────────────────────────────────
   try {
     for (const project of projects) {
-      const refDir = path.join(cortexPath, project, "reference");
+      const refDir = path.join(phrenPath, project, "reference");
       if (!fs.existsSync(refDir) || !fs.statSync(refDir).isDirectory()) continue;
       const files = fs.readdirSync(refDir);
       const MAX_REFS = 20;
@@ -457,7 +457,7 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
   // ── Memory scores ────────────────────────────────────────────────
   let scores: Record<string, EntryScore> = {};
   try {
-    const scoresPath = path.join(cortexPath, ".runtime", "memory-scores.json");
+    const scoresPath = path.join(phrenPath, ".runtime", "memory-scores.json");
     if (fs.existsSync(scoresPath)) {
       const parsed = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
       if (parsed && typeof parsed.entries === "object") {
@@ -489,26 +489,26 @@ export async function buildGraph(cortexPath: string, profile?: string, focusProj
   return { nodes: filteredNodes, links: dedupedLinks, total, scores, topics };
 }
 
-export function recentUsage(cortexPath: string): string[] {
-  const usage = memoryUsageLogFile(cortexPath);
+export function recentUsage(phrenPath: string): string[] {
+  const usage = memoryUsageLogFile(phrenPath);
   if (!fs.existsSync(usage)) return [];
   const lines = fs.readFileSync(usage, "utf8").trim().split("\n").filter(Boolean);
   return lines.slice(-40).reverse();
 }
 
-export function recentAccepted(cortexPath: string): string[] {
-  const audit = path.join(runtimeDir(cortexPath), "audit.log");
+export function recentAccepted(phrenPath: string): string[] {
+  const audit = path.join(runtimeDir(phrenPath), "audit.log");
   if (!fs.existsSync(audit)) return [];
   const lines = fs.readFileSync(audit, "utf8").split("\n").filter((line) => line.includes("approve_memory"));
   return lines.slice(-40).reverse();
 }
 
-export function collectProjectsForUI(cortexPath: string, profile?: string): ProjectInfo[] {
-  const projects = getProjectDirs(cortexPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
+export function collectProjectsForUI(phrenPath: string, profile?: string): ProjectInfo[] {
+  const projects = getProjectDirs(phrenPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
 
   let allowedProjects: Set<string> | null = null;
   try {
-    const contextPath = homePath(".cortex-context.md");
+    const contextPath = homePath(".phren-context.md");
     if (fs.existsSync(contextPath)) {
       const contextContent = fs.readFileSync(contextPath, "utf8");
       const activeMatch = contextContent.match(/Active projects?:\s*(.+)/i);
@@ -518,16 +518,16 @@ export function collectProjectsForUI(cortexPath: string, profile?: string): Proj
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] memory-ui filterByProfile: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] memory-ui filterByProfile: ${errorMessage(err)}\n`);
   }
 
   const results: ProjectInfo[] = [];
   for (const project of projects) {
     if (allowedProjects && !allowedProjects.has(project.toLowerCase())) continue;
 
-    const dir = path.join(cortexPath, project);
+    const dir = path.join(phrenPath, project);
     const findingsPath = path.join(dir, "FINDINGS.md");
-    const taskPath = resolveTaskFilePath(cortexPath, project);
+    const taskPath = resolveTaskFilePath(phrenPath, project);
     const claudeMdPath = path.join(dir, "CLAUDE.md");
     const summaryPath = path.join(dir, "summary.md");
     const refPath = path.join(dir, "reference");

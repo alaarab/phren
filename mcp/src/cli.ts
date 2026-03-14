@@ -1,4 +1,4 @@
-import { getCortexPath } from "./shared.js";
+import { getPhrenPath } from "./shared.js";
 
 // Re-export from split modules so existing test imports keep working
 export {
@@ -45,7 +45,6 @@ import {
   handleIndexPolicy,
   handleRetentionPolicy,
   handleWorkflowPolicy,
-  handleAccessControl,
 } from "./cli-config.js";
 import { parseSearchArgs } from "./cli-search.js";
 import {
@@ -67,24 +66,27 @@ import {
 import {
   handleAddFinding,
   handleDoctor,
+  handleFragmentSearch,
   handleMemoryUi,
   handlePinCanonical,
   handleQualityFeedback,
+  handleRelatedDocs,
   handleSearch,
   handleShell,
   handleStatus,
   handleUpdate,
 } from "./cli-actions.js";
+import { handleGraphNamespace } from "./cli-graph.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 // ── CLI router ───────────────────────────────────────────────────────────────
 
 export async function runCliCommand(command: string, args: string[]) {
-  const getProfile = () => resolveRuntimeProfile(getCortexPath());
+  const getProfile = () => resolveRuntimeProfile(getPhrenPath());
   switch (command) {
     case "search":
       {
-        const opts = parseSearchArgs(getCortexPath(), args);
+        const opts = parseSearchArgs(getPhrenPath(), args);
         if (!opts) return;
         return handleSearch(opts, getProfile());
       }
@@ -124,8 +126,6 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleRetentionPolicy(args);
     case "workflow":
       return handleWorkflowPolicy(args);
-    case "access":
-      return handleAccessControl(args);
     case "web-ui":
       return handleMemoryUi(args);
     case "shell":
@@ -163,8 +163,14 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleDebugInjection(args, getProfile());
     case "inspect-index":
       return handleInspectIndex(args, getProfile());
+    case "search-fragments":
+      return handleFragmentSearch(args, getProfile());
+    case "related-docs":
+      return handleRelatedDocs(args, getProfile());
     case "detect-skills":
       return handleDetectSkills(args, getProfile());
+    case "graph":
+      return handleGraphNamespace(args);
     default:
       console.error(`Unknown command: ${command}`);
       process.exit(1);

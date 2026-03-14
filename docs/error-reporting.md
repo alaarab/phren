@@ -1,6 +1,6 @@
 # Error Reporting Policy
 
-Cortex uses three explicit error-reporting modes:
+Phren uses three explicit error-reporting modes:
 
 ## 1. User-visible failure
 
@@ -30,7 +30,7 @@ Examples:
 
 Behavior:
 - keep the primary operation running
-- write a debug log only when `CORTEX_DEBUG=1`
+- write a debug log only when `PHREN_DEBUG=1`
 - avoid claiming success for the skipped substep in user-facing output
 
 ## 3. Explicitly silent cleanup
@@ -57,4 +57,4 @@ Behavior:
 | Telemetry / analytics | debug-log only best-effort |
 | Terminal restore / temp cleanup | explicitly silent cleanup |
 
-Critical rule: Cortex should not silently discard requested writes. If the user asked for a write and it did not happen, that must be surfaced as a failure.
+Critical rule: Phren should not silently discard requested writes. If the user asked for a write and it did not happen, that must be surfaced as a failure.

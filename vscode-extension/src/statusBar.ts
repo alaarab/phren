@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 
 interface ProjectSummary {
   name: string;
@@ -7,7 +7,7 @@ interface ProjectSummary {
 
 const HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-export class CortexStatusBar implements vscode.Disposable {
+export class PhrenStatusBar implements vscode.Disposable {
   private readonly statusItem: vscode.StatusBarItem;
   private readonly disposables: vscode.Disposable[] = [];
   private activeProjectName?: string;
@@ -15,10 +15,10 @@ export class CortexStatusBar implements vscode.Disposable {
   private healthTimer?: ReturnType<typeof setInterval>;
   private onHealthChanged?: (ok: boolean) => void;
 
-  constructor(private readonly client: CortexClient) {
+  constructor(private readonly client: PhrenClient) {
     this.statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.statusItem.command = "cortex.doctor";
-    this.statusItem.tooltip = "Cortex health — click for Doctor";
+    this.statusItem.command = "phren.doctor";
+    this.statusItem.tooltip = "Phren health — click for Doctor";
 
     this.disposables.push(
       this.statusItem,
@@ -60,13 +60,13 @@ export class CortexStatusBar implements vscode.Disposable {
   async promptForActiveProject(): Promise<string | undefined> {
     const projectNames = await this.fetchProjectNames();
     if (projectNames.length === 0) {
-      await vscode.window.showWarningMessage("No Cortex projects found.");
+      await vscode.window.showWarningMessage("No Phren projects found.");
       return undefined;
     }
 
     const selected = await vscode.window.showQuickPick(projectNames, {
-      title: "Set Active Cortex Project",
-      placeHolder: "Select a Cortex project",
+      title: "Set Active Phren Project",
+      placeHolder: "Select a Phren project",
       canPickMany: false,
     });
     if (!selected) {
@@ -135,8 +135,12 @@ export class CortexStatusBar implements vscode.Disposable {
 
   private render(): void {
     const projectName = this.activeProjectName ?? "No project";
-    const badge = this.healthOk === true ? " [ok]" : this.healthOk === false ? " [!]" : "";
-    this.statusItem.text = `$(database) Cortex: ${projectName}${badge}`;
+    const healthIcon = this.healthOk === true ? "$(pass-filled)" : this.healthOk === false ? "$(error)" : "$(loading~spin)";
+    this.statusItem.text = `$(hubot) ${projectName} ${healthIcon}`;
+    this.statusItem.tooltip = this.healthOk === false
+      ? "Phren is unhealthy — click for Doctor"
+      : `Phren: ${projectName} — click for Doctor`;
+    this.statusItem.color = this.healthOk === false ? "#f44336" : "#B8AED8";
   }
 }
 

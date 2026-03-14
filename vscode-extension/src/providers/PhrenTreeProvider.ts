@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
-import { CortexClient } from "../cortexClient";
+import { PhrenClient } from "../phrenClient";
 import { readDeviceContext } from "../profileConfig";
 
 type TaskSection = "Active" | "Queue" | "Done";
-type CortexCategory = "findings" | "sessions" | "task" | "queue" | "reference";
+type PhrenCategory = "findings" | "sessions" | "task" | "queue" | "reference";
 type SessionBucket = "findings" | "tasks";
 
 interface RootSectionNode {
   kind: "rootSection";
-  section: "review" | "skills" | "hooks" | "graph" | "manage";
+  section: "projects" | "machines" | "review" | "skills" | "hooks" | "graph" | "manage";
   description?: string;
 }
 
@@ -34,7 +34,7 @@ interface ProjectNode {
 interface CategoryNode {
   kind: "category";
   projectName: string;
-  category: CortexCategory;
+  category: PhrenCategory;
 }
 
 interface FindingDateGroupNode {
@@ -89,6 +89,21 @@ interface HookNode {
   kind: "hook";
   tool: string;
   enabled: boolean;
+}
+
+interface CustomHookNode {
+  kind: "customHook";
+  event: string;
+  target: string;
+  isWebhook: boolean;
+  timeout?: number;
+}
+
+interface HookErrorNode {
+  kind: "hookError";
+  timestamp: string;
+  event: string;
+  message: string;
 }
 
 type QueueSection = "Review" | "Stale" | "Conflicts";
@@ -161,7 +176,7 @@ interface MessageNode {
   iconId?: string;
 }
 
-type CortexNode =
+type PhrenNode =
   | RootSectionNode
   | ProjectGroupNode
   | ManageItemNode
@@ -177,6 +192,8 @@ type CortexNode =
   | SkillGroupNode
   | SkillNode
   | HookNode
+  | CustomHookNode
+  | HookErrorNode
   | ReferenceFileNode
   | SessionDateGroupNode
   | SessionNode
@@ -247,15 +264,15 @@ export interface DateFilter {
   label: string;
 }
 
-export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, vscode.Disposable {
-  private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<CortexNode | undefined | null>();
+export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vscode.Disposable {
+  private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<PhrenNode | undefined | null>();
 
   readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
   private dateFilter: DateFilter | undefined;
 
   constructor(
-    private readonly client: CortexClient,
+    private readonly client: PhrenClient,
     private readonly storePath: string,
   ) {}
 
@@ -276,21 +293,27 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
-  async getChildren(element?: CortexNode): Promise<CortexNode[]> {
+  async getChildren(element?: PhrenNode): Promise<PhrenNode[]> {
     try {
       return await this.getChildrenInner(element);
     } catch (error) {
-      console.error(`[cortex-tree] getChildren crash:`, error, `element:`, JSON.stringify(element));
+      console.error(`[phren-tree] getChildren crash:`, error, `element:`, JSON.stringify(element));
       return [{ kind: "message", label: `Error: ${error instanceof Error ? error.message : String(error)}`, iconId: "warning" }];
     }
   }
 
-  private async getChildrenInner(element?: CortexNode): Promise<CortexNode[]> {
+  private async getChildrenInner(element?: PhrenNode): Promise<PhrenNode[]> {
     if (!element) {
       return this.getRootSections();
     }
 
     if (element.kind === "rootSection") {
+      if (element.section === "projects") {
+        return this.getProjectNodes();
+      }
+      if (element.section === "machines") {
+        return this.getMachineNodes();
+      }
       if (element.section === "review") {
         return this.getAggregateQueueSectionGroups();
       }
@@ -374,47 +397,47 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     return [];
   }
 
-  getTreeItem(element: CortexNode): vscode.TreeItem {
+  getTreeItem(element: PhrenNode): vscode.TreeItem {
     try {
       return this.getTreeItemInner(element);
     } catch (error) {
-      console.error(`[cortex-tree] getTreeItem crash:`, error, `element:`, JSON.stringify(element));
+      console.error(`[phren-tree] getTreeItem crash:`, error, `element:`, JSON.stringify(element));
       const item = new vscode.TreeItem(`(error: ${error instanceof Error ? error.message : String(error)})`, vscode.TreeItemCollapsibleState.None);
       item.iconPath = themeIcon("warning");
       return item;
     }
   }
 
-  private getTreeItemInner(element: CortexNode): vscode.TreeItem {
+  private getTreeItemInner(element: PhrenNode): vscode.TreeItem {
     if (!element || !element.kind) {
       return new vscode.TreeItem("(unknown)", vscode.TreeItemCollapsibleState.None);
     }
     switch (element.kind) {
       case "rootSection": {
-        const labels: Record<string, string> = { review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Entity Graph", manage: "Manage" };
-        const icons: Record<string, string> = { review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
+        const labels: Record<string, string> = { projects: "Projects", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Fragment Graph", manage: "Manage" };
+        const icons: Record<string, string> = { projects: "hubot", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
         const label = labels[element.section] ?? element.section;
 
         if (element.section === "graph") {
           const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
           item.iconPath = themeIcon(icons[element.section]);
-          item.id = `cortex.root.${element.section}`;
-          item.command = { command: "cortex.showGraph", title: "Show Entity Graph" };
-          item.tooltip = "Open the Cortex entity graph visualization";
+          item.id = `phren.root.${element.section}`;
+          item.command = { command: "phren.showGraph", title: "Show Entity Graph" };
+          item.tooltip = "Open the Phren entity graph visualization";
           return item;
         }
 
         const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = element.description;
         item.iconPath = themeIcon(icons[element.section] ?? "symbol-misc");
-        item.id = `cortex.root.${element.section}`;
+        item.id = `phren.root.${element.section}`;
         return item;
       }
       case "project": {
         const item = new vscode.TreeItem(element.projectName, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = element.brief ? truncate(element.brief, 72) : undefined;
         item.iconPath = themeIcon("folder");
-        item.id = `cortex.project.${element.projectName}`;
+        item.id = `phren.project.${element.projectName}`;
         return item;
       }
       case "category": {
@@ -425,10 +448,10 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
           categoryLabel += ` [${this.dateFilter.label}]`;
         }
         const item = new vscode.TreeItem(categoryLabel, vscode.TreeItemCollapsibleState.Collapsed);
-        item.iconPath = themeIcon(categoryIconId(cat as CortexCategory));
-        item.id = `cortex.category.${element.projectName}.${cat}`;
+        item.iconPath = themeIcon(categoryIconId(cat as PhrenCategory));
+        item.id = `phren.category.${element.projectName}.${cat}`;
         if (cat === "findings") {
-          item.contextValue = "cortex.category.findings";
+          item.contextValue = "phren.category.findings";
         }
         return item;
       }
@@ -437,7 +460,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon("calendar");
-        item.id = `cortex.findingDateGroup.${element.projectName}.${element.date}`;
+        item.id = `phren.findingDateGroup.${element.projectName}.${element.date}`;
         return item;
       }
       case "sessionDateGroup": {
@@ -445,7 +468,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon("calendar");
-        item.id = `cortex.sessionDateGroup.${element.projectName}.${element.date}`;
+        item.id = `phren.sessionDateGroup.${element.projectName}.${element.date}`;
         return item;
       }
       case "finding": {
@@ -470,8 +493,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         }
         item.tooltip = tooltipLines.join("\n");
         item.iconPath = themeIcon(iconId);
-        item.id = `cortex.finding.${element.projectName}.${element.id}`;
-        item.contextValue = "cortex.finding";
+        item.id = `phren.finding.${element.projectName}.${element.id}`;
+        item.contextValue = "phren.finding";
         if (element.supersededBy) {
           item.description = "(superseded)";
         } else if (element.contradicts?.length) {
@@ -480,7 +503,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
           item.description = "(possible duplicate)";
         }
         item.command = {
-          command: "cortex.openFinding",
+          command: "phren.openFinding",
           title: "Open Finding",
           arguments: [element],
         };
@@ -491,17 +514,17 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon(sectionIcons[element.section] ?? "list-flat");
-        item.id = `cortex.taskSectionGroup.${element.projectName}.${element.section}`;
+        item.id = `phren.taskSectionGroup.${element.projectName}.${element.section}`;
         return item;
       }
       case "task": {
         const item = new vscode.TreeItem(truncate(element.line, 120), vscode.TreeItemCollapsibleState.None);
         item.tooltip = `${element.section} (${element.id})\n${element.line}`;
         item.iconPath = themeIcon(taskIconId(element));
-        item.id = `cortex.task.${element.projectName}.${element.id}`;
-        item.contextValue = element.section !== "Done" ? "cortex.task.active" : "cortex.task.done";
+        item.id = `phren.task.${element.projectName}.${element.id}`;
+        item.contextValue = element.section !== "Done" ? "phren.task.active" : "phren.task.done";
         item.command = {
-          command: "cortex.openTask",
+          command: "phren.openTask",
           title: "Open Task",
           arguments: [element],
         };
@@ -512,7 +535,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon(queueIcons[element.section] ?? "list-flat");
-        item.id = `cortex.queueSectionGroup.${element.projectName}.${element.section}`;
+        item.id = `phren.queueSectionGroup.${element.projectName}.${element.section}`;
         return item;
       }
       case "aggregateQueueSectionGroup": {
@@ -520,7 +543,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon(queueIcons[element.section] ?? "list-flat");
-        item.id = `cortex.aggregateQueueSectionGroup.${element.section}`;
+        item.id = `phren.aggregateQueueSectionGroup.${element.section}`;
         return item;
       }
       case "queueItem": {
@@ -528,11 +551,11 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const confLabel = element.confidence !== undefined ? ` (${Math.round(element.confidence * 100)}%)` : "";
         item.tooltip = `${element.section} ${element.id}${confLabel}\n${element.date}\n${element.text}`;
         item.iconPath = themeIcon(element.risky ? "warning" : "mail");
-        item.id = `cortex.queueItem.${element.projectName}.${element.id}`;
+        item.id = `phren.queueItem.${element.projectName}.${element.id}`;
         item.description = element.showProjectName ? element.projectName : undefined;
-        item.contextValue = "cortex.queue.item";
+        item.contextValue = "phren.queue.item";
         item.command = {
-          command: "cortex.openQueueItem",
+          command: "phren.openQueueItem",
           title: "Open Queue Item",
           arguments: [element],
         };
@@ -542,7 +565,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const label = element.source.charAt(0).toUpperCase() + element.source.slice(1);
         const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
         item.iconPath = themeIcon(element.source === "global" ? "globe" : "folder");
-        item.id = `cortex.skillGroup.${element.source}`;
+        item.id = `phren.skillGroup.${element.source}`;
         return item;
       }
       case "skill": {
@@ -550,10 +573,10 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         item.description = element.enabled ? "enabled" : "disabled";
         item.tooltip = `${element.name} (${element.source})\n${element.enabled ? "Enabled" : "Disabled"}${element.path ? `\n${element.path}` : ""}`;
         item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
-        item.id = `cortex.skill.${element.source}.${element.name}`;
-        item.contextValue = element.enabled ? "cortex.skill.enabled" : "cortex.skill.disabled";
+        item.id = `phren.skill.${element.source}.${element.name}`;
+        item.contextValue = element.enabled ? "phren.skill.enabled" : "phren.skill.disabled";
         item.command = {
-          command: "cortex.openSkill",
+          command: "phren.openSkill",
           title: "Open Skill",
           arguments: [element.name, element.source],
         };
@@ -564,21 +587,41 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         item.description = element.enabled ? "enabled" : "disabled";
         item.tooltip = `${element.tool}: ${element.enabled ? "hooks enabled" : "hooks disabled"}\nClick to toggle`;
         item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
-        item.id = `cortex.hook.${element.tool}`;
-        item.contextValue = "cortex.hookItem";
+        item.id = `phren.hook.${element.tool}`;
+        item.contextValue = "phren.hookItem";
         item.command = {
-          command: "cortex.toggleHook",
+          command: "phren.toggleHook",
           title: "Toggle Hook",
           arguments: [element.tool, element.enabled],
         };
         return item;
       }
+      case "customHook": {
+        const item = new vscode.TreeItem(element.event, vscode.TreeItemCollapsibleState.None);
+        const prefix = element.isWebhook ? "[webhook] " : "";
+        item.description = `${prefix}${element.target}`;
+        item.tooltip = `Custom hook: ${element.event}\n${prefix}${element.target}${element.timeout ? `\nTimeout: ${element.timeout}ms` : ""}`;
+        item.iconPath = themeIcon("zap");
+        item.id = `phren.customHook.${element.event}.${element.target.slice(0, 20)}`;
+        item.contextValue = "phren.customHookItem";
+        return item;
+      }
+      case "hookError": {
+        const item = new vscode.TreeItem(element.event, vscode.TreeItemCollapsibleState.None);
+        const ts = element.timestamp.slice(0, 19).replace("T", " ");
+        item.description = `${ts} - ${element.message.slice(0, 60)}`;
+        item.tooltip = `${element.timestamp}\n${element.event}: ${element.message}`;
+        item.iconPath = themeIcon("warning");
+        item.id = `phren.hookError.${element.timestamp}`;
+        item.contextValue = "phren.hookErrorItem";
+        return item;
+      }
       case "referenceFile": {
         const item = new vscode.TreeItem(element.fileName, vscode.TreeItemCollapsibleState.None);
         item.iconPath = themeIcon("file");
-        item.id = `cortex.reference.${element.projectName}.${element.fileName}`;
+        item.id = `phren.reference.${element.projectName}.${element.fileName}`;
         item.command = {
-          command: "cortex.openProjectFile",
+          command: "phren.openProjectFile",
           title: "Open File",
           arguments: [element.projectName, `reference/${element.fileName}`],
         };
@@ -607,8 +650,8 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
           ...(element.summary ? [`Summary: ${element.summary}`] : []),
         ].join("\n");
         item.iconPath = themeIcon(element.status === "active" ? "play-circle" : "history");
-        item.id = `cortex.session.${element.sessionId}`;
-        item.contextValue = "cortex.session";
+        item.id = `phren.session.${element.sessionId}`;
+        item.contextValue = "phren.session";
         return item;
       }
       case "sessionBucket": {
@@ -617,7 +660,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const item = new vscode.TreeItem(labels[element.bucket], vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon(icons[element.bucket]);
-        item.id = `cortex.sessionBucket.${element.projectName}.${element.sessionId}.${element.bucket}`;
+        item.id = `phren.sessionBucket.${element.projectName}.${element.sessionId}.${element.bucket}`;
         return item;
       }
       case "projectGroup": {
@@ -626,24 +669,27 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         const item = new vscode.TreeItem(groupLabels[element.group] ?? element.group, vscode.TreeItemCollapsibleState.Collapsed);
         item.description = `${element.count}`;
         item.iconPath = themeIcon(groupIcons[element.group] ?? "folder");
-        item.id = `cortex.projectGroup.${element.group}`;
+        item.id = `phren.projectGroup.${element.group}`;
         return item;
       }
       case "manageItem": {
-        const manageIcons: Record<string, string> = { health: "heart", profile: "vm", lastSync: "cloud" };
+        const manageIcons: Record<string, string> = { health: "heart", profile: "vm", machine: "server", lastSync: "cloud" };
         const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
         item.description = element.value;
         item.iconPath = themeIcon(manageIcons[element.item] ?? "info");
-        item.id = `cortex.manage.${element.item}`;
+        item.id = `phren.manage.${element.item}`;
         if (element.item === "health") {
-          item.command = { command: "cortex.doctor", title: "Run Doctor" };
-          item.tooltip = "Click to run Cortex Doctor";
+          item.command = { command: "phren.doctor", title: "Run Doctor" };
+          item.tooltip = "Click to run Phren Doctor";
+        } else if (element.item === "machine") {
+          item.command = { command: "phren.configureMachine", title: "Set Machine Alias" };
+          item.tooltip = "Click to change this machine alias";
         } else if (element.item === "profile") {
-          item.command = { command: "cortex.switchProfile", title: "Configure Profile" };
+          item.command = { command: "phren.switchProfile", title: "Configure Profile" };
           item.tooltip = "Click to change this machine's profile mapping";
         } else if (element.item === "lastSync") {
-          item.command = { command: "cortex.sync", title: "Sync Now" };
-          item.tooltip = "Click to sync Cortex";
+          item.command = { command: "phren.sync", title: "Sync Now" };
+          item.tooltip = "Click to sync Phren";
         }
         return item;
       }
@@ -658,34 +704,10 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
 
   // --- Data fetchers ---
 
-  private async getRootSections(): Promise<CortexNode[]> {
-    // Device projects shown directly at root (no wrapper group).
-    // "Other" projects, review, skills, hooks pushed below.
-    const projects = await this.fetchProjects().catch(() => [] as ProjectSummary[]);
-    const ctx = this.readDeviceContext();
-    const deviceProjects = ctx.activeProjects.size > 0
-      ? projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()))
-      : projects;
-    const otherProjects = ctx.activeProjects.size > 0
-      ? projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()))
-      : [];
-
-    const nodes: CortexNode[] = [];
-
-    // Device projects first — flat, no wrapper
-    for (const p of deviceProjects) {
-      nodes.push({ kind: "project", projectName: p.name, brief: p.brief });
-    }
-    if (deviceProjects.length === 0 && projects.length === 0) {
-      nodes.push({ kind: "message", label: "No projects found", description: "Run cortex init to get started.", iconId: "info" });
-    }
-
-    // Other projects as a collapsed group
-    if (otherProjects.length > 0) {
-      nodes.push({ kind: "projectGroup", group: "other", count: otherProjects.length });
-    }
-
-    // Functional sections
+  private async getRootSections(): Promise<PhrenNode[]> {
+    const nodes: PhrenNode[] = [];
+    nodes.push({ kind: "rootSection", section: "projects" });
+    nodes.push({ kind: "rootSection", section: "machines" });
     nodes.push({ kind: "rootSection", section: "review" });
     nodes.push({ kind: "rootSection", section: "skills" });
     nodes.push({ kind: "rootSection", section: "hooks", description: await this.getHookSectionDescription() });
@@ -721,7 +743,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getFindingDateGroups(projectName: string): Promise<CortexNode[]> {
+  private async getFindingDateGroups(projectName: string): Promise<PhrenNode[]> {
     try {
       let findings = await this.fetchFindings(projectName);
 
@@ -763,7 +785,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getFindingsForDate(projectName: string, date: string): Promise<CortexNode[]> {
+  private async getFindingsForDate(projectName: string, date: string): Promise<PhrenNode[]> {
     try {
       let findings = await this.fetchFindings(projectName);
 
@@ -795,7 +817,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getTaskSectionGroups(projectName: string): Promise<CortexNode[]> {
+  private async getTaskSectionGroups(projectName: string): Promise<PhrenNode[]> {
     try {
       const tasks = await this.fetchTasks(projectName);
       if (tasks.length === 0) {
@@ -803,7 +825,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       }
 
       const sections: TaskSection[] = ["Active", "Queue", "Done"];
-      const groups: CortexNode[] = [];
+      const groups: PhrenNode[] = [];
       for (const section of sections) {
         const count = tasks.filter((t) => t.section === section).length;
         if (count > 0) {
@@ -822,7 +844,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getTasksForSection(projectName: string, section: TaskSection): Promise<CortexNode[]> {
+  private async getTasksForSection(projectName: string, section: TaskSection): Promise<PhrenNode[]> {
     try {
       const tasks = await this.fetchTasks(projectName);
       return tasks
@@ -840,7 +862,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getQueueSectionGroups(projectName: string): Promise<CortexNode[]> {
+  private async getQueueSectionGroups(projectName: string): Promise<PhrenNode[]> {
     try {
       const items = await this.fetchQueueItems(projectName);
       if (items.length === 0) {
@@ -848,7 +870,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       }
 
       const sections: QueueSection[] = ["Review", "Stale", "Conflicts"];
-      const groups: CortexNode[] = [];
+      const groups: PhrenNode[] = [];
       for (const section of sections) {
         const count = items.filter((i) => i.section === section).length;
         if (count > 0) {
@@ -867,7 +889,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getQueueItemsForSection(projectName: string, section: QueueSection): Promise<CortexNode[]> {
+  private async getQueueItemsForSection(projectName: string, section: QueueSection): Promise<PhrenNode[]> {
     try {
       const items = await this.fetchQueueItems(projectName);
       return items
@@ -891,7 +913,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getAggregateQueueSectionGroups(): Promise<CortexNode[]> {
+  private async getAggregateQueueSectionGroups(): Promise<PhrenNode[]> {
     try {
       const items = await this.fetchQueueItems();
       if (items.length === 0) {
@@ -911,7 +933,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getAggregateQueueItemsForSection(section: QueueSection): Promise<CortexNode[]> {
+  private async getAggregateQueueItemsForSection(section: QueueSection): Promise<PhrenNode[]> {
     try {
       const items = await this.fetchQueueItems();
       return items
@@ -935,7 +957,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getSessionDateGroups(projectName: string): Promise<CortexNode[]> {
+  private async getSessionDateGroups(projectName: string): Promise<PhrenNode[]> {
     try {
       const sessions = await this.fetchSessions(projectName);
       if (sessions.length === 0) {
@@ -964,7 +986,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getSessionsForDate(projectName: string, date: string): Promise<CortexNode[]> {
+  private async getSessionsForDate(projectName: string, date: string): Promise<PhrenNode[]> {
     try {
       const sessions = await this.fetchSessions(projectName);
       return sessions
@@ -985,10 +1007,10 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getSessionChildren(session: SessionNode): Promise<CortexNode[]> {
+  private async getSessionChildren(session: SessionNode): Promise<PhrenNode[]> {
     try {
       const artifacts = await this.fetchSessionArtifacts(session.projectName, session.sessionId);
-      const children: CortexNode[] = [];
+      const children: PhrenNode[] = [];
 
       if (artifacts.findings.length > 0) {
         children.push({
@@ -1019,7 +1041,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getSessionBucketChildren(bucket: SessionBucketNode): Promise<CortexNode[]> {
+  private async getSessionBucketChildren(bucket: SessionBucketNode): Promise<PhrenNode[]> {
     try {
       const artifacts = await this.fetchSessionArtifacts(bucket.projectName, bucket.sessionId);
       if (bucket.bucket === "findings") {
@@ -1055,12 +1077,12 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getReferenceNodes(projectName: string): Promise<CortexNode[]> {
+  private async getReferenceNodes(projectName: string): Promise<PhrenNode[]> {
     try {
       const raw = await this.client.getProjectSummary(projectName);
       const data = responseData(raw);
       const files = asArray(data?.files);
-      const refFiles: CortexNode[] = [];
+      const refFiles: PhrenNode[] = [];
 
       for (const entry of files) {
         const record = asRecord(entry);
@@ -1085,7 +1107,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getSkillGroupNodes(): Promise<CortexNode[]> {
+  private async getSkillGroupNodes(): Promise<PhrenNode[]> {
     try {
       const skills = await this.fetchSkills();
       if (skills.length === 0) {
@@ -1110,7 +1132,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getSkillsForGroup(source: string): Promise<CortexNode[]> {
+  private async getSkillsForGroup(source: string): Promise<PhrenNode[]> {
     try {
       const skills = await this.fetchSkills();
       const filtered = skills.filter((s) => s.source === source);
@@ -1129,7 +1151,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getHookNodes(): Promise<CortexNode[]> {
+  private async getHookNodes(): Promise<PhrenNode[]> {
     try {
       const raw = await this.client.listHooks();
       const data = responseData(raw);
@@ -1139,13 +1161,47 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
         return [{ kind: "message", label: "No hooks configured", iconId: "plug" }];
       }
 
-      const nodes: CortexNode[] = [];
+      const nodes: PhrenNode[] = [];
       for (const entry of tools) {
         const record = asRecord(entry);
         const tool = asString(record?.tool);
         if (!tool) { continue; }
         const enabled = asBoolean(record?.enabled) ?? false;
         nodes.push({ kind: "hook", tool, enabled });
+      }
+
+      // Custom hooks
+      const customHooks = asArray(data?.customHooks);
+      for (const entry of customHooks) {
+        const record = asRecord(entry);
+        if (!record) continue;
+        const event = asString(record.event);
+        if (!event) continue;
+        const isWebhook = typeof record.webhook === "string";
+        const target = asString(isWebhook ? record.webhook : record.command) ?? "";
+        const timeout = typeof record.timeout === "number" ? record.timeout : undefined;
+        nodes.push({ kind: "customHook", event, target, isWebhook, timeout });
+      }
+
+      // Hook errors summary
+      try {
+        const errRaw = await this.client.listHookErrors();
+        const errData = responseData(errRaw);
+        const errors = asArray(errData?.errors);
+        if (errors.length > 0) {
+          for (const err of errors.slice(-5)) {
+            const rec = asRecord(err);
+            if (!rec) continue;
+            nodes.push({
+              kind: "hookError",
+              timestamp: asString(rec.timestamp) ?? "",
+              event: asString(rec.event) ?? "",
+              message: asString(rec.message) ?? "",
+            });
+          }
+        }
+      } catch {
+        // Hook errors are optional; ignore failures
       }
 
       return nodes;
@@ -1158,11 +1214,11 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     return readDeviceContext(this.storePath);
   }
 
-  private async getProjectNodes(): Promise<CortexNode[]> {
+  private async getProjectNodes(): Promise<PhrenNode[]> {
     try {
       const projects = await this.fetchProjects();
       if (projects.length === 0) {
-        return [{ kind: "message", label: "No projects found", description: "Index projects to populate Cortex.", iconId: "info" }];
+        return [{ kind: "message", label: "No projects found", description: "Index projects to populate Phren.", iconId: "info" }];
       }
       const ctx = this.readDeviceContext();
       if (ctx.activeProjects.size === 0) {
@@ -1175,7 +1231,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
       }
       const deviceProjects = projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()));
       const otherProjects = projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()));
-      const groups: CortexNode[] = [];
+      const groups: PhrenNode[] = [];
       if (deviceProjects.length > 0) {
         groups.push({ kind: "projectGroup", group: "device", count: deviceProjects.length });
       }
@@ -1188,7 +1244,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private async getProjectNodesForGroup(group: "device" | "other"): Promise<CortexNode[]> {
+  private async getProjectNodesForGroup(group: "device" | "other"): Promise<PhrenNode[]> {
     try {
       const projects = await this.fetchProjects();
       const ctx = this.readDeviceContext();
@@ -1205,11 +1261,18 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
     }
   }
 
-  private getManageNodes(): CortexNode[] {
+  private getManageNodes(): PhrenNode[] {
     const ctx = this.readDeviceContext();
-    const nodes: CortexNode[] = [];
+    const nodes: PhrenNode[] = [];
     nodes.push({ kind: "manageItem", item: "health", label: "Health", value: this.lastHealthOk === true ? "ok" : this.lastHealthOk === false ? "issues" : "..." });
     nodes.push({ kind: "manageItem", item: "lastSync", label: "Sync", value: ctx.lastSync || "(never)" });
+    return nodes;
+  }
+
+  private getMachineNodes(): PhrenNode[] {
+    const ctx = this.readDeviceContext();
+    const nodes: PhrenNode[] = [];
+    nodes.push({ kind: "manageItem", item: "machine", label: "Machine", value: ctx.machine || "(unset)" });
     nodes.push({ kind: "manageItem", item: "profile", label: "Profile", value: `${ctx.machine} → ${ctx.profile || "none"}` });
     return nodes;
   }
@@ -1451,7 +1514,7 @@ export class CortexTreeProvider implements vscode.TreeDataProvider<CortexNode>, 
   }
 }
 
-function categoryIconId(category: CortexCategory): string {
+function categoryIconId(category: PhrenCategory): string {
   if (category === "findings") {
     return "list-flat";
   }
@@ -1558,12 +1621,15 @@ function formatSessionTimeLabel(startedAt: string): string {
   });
 }
 
-function themeIcon(id: string): vscode.ThemeIcon {
+function themeIcon(id: string, color?: string): vscode.ThemeIcon {
   if (id === "folder") {
     return vscode.ThemeIcon.Folder;
   }
   if (id === "file") {
     return vscode.ThemeIcon.File;
+  }
+  if (color) {
+    return new vscode.ThemeIcon(id, new vscode.ThemeColor(color));
   }
   return new vscode.ThemeIcon(id);
 }

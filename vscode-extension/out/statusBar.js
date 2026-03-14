@@ -33,16 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CortexStatusBar = void 0;
+exports.PhrenStatusBar = void 0;
 const vscode = __importStar(require("vscode"));
 const HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-class CortexStatusBar {
+class PhrenStatusBar {
     constructor(client) {
         this.client = client;
         this.disposables = [];
         this.statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-        this.statusItem.command = "cortex.doctor";
-        this.statusItem.tooltip = "Cortex health — click for Doctor";
+        this.statusItem.command = "phren.doctor";
+        this.statusItem.tooltip = "Phren health — click for Doctor";
         this.disposables.push(this.statusItem, vscode.window.onDidChangeActiveTextEditor(() => {
             this.render();
         }));
@@ -73,12 +73,12 @@ class CortexStatusBar {
     async promptForActiveProject() {
         const projectNames = await this.fetchProjectNames();
         if (projectNames.length === 0) {
-            await vscode.window.showWarningMessage("No Cortex projects found.");
+            await vscode.window.showWarningMessage("No Phren projects found.");
             return undefined;
         }
         const selected = await vscode.window.showQuickPick(projectNames, {
-            title: "Set Active Cortex Project",
-            placeHolder: "Select a Cortex project",
+            title: "Set Active Phren Project",
+            placeHolder: "Select a Phren project",
             canPickMany: false,
         });
         if (!selected) {
@@ -140,10 +140,10 @@ class CortexStatusBar {
     render() {
         const projectName = this.activeProjectName ?? "No project";
         const badge = this.healthOk === true ? " [ok]" : this.healthOk === false ? " [!]" : "";
-        this.statusItem.text = `$(database) Cortex: ${projectName}${badge}`;
+        this.statusItem.text = `$(database) Phren: ${projectName}${badge}`;
     }
 }
-exports.CortexStatusBar = CortexStatusBar;
+exports.PhrenStatusBar = PhrenStatusBar;
 function asRecord(value) {
     if (typeof value !== "object" || value === null) {
         return undefined;

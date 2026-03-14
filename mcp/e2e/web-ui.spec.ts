@@ -48,7 +48,7 @@ test.describe.serial("web-ui browser e2e", () => {
   test("navigates the major web-ui surfaces from an isolated temp store", async ({ page }) => {
     await openWebUi(page);
 
-    await expect(page.locator(".header-brand")).toContainText("Cortex");
+    await expect(page.locator(".header-brand")).toContainText("Phren");
     await expect(page.locator(".project-card").filter({ hasText: "repo-a" })).toBeVisible();
     await expect(page.locator(".project-card").filter({ hasText: "repo-b" })).toBeVisible();
 

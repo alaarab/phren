@@ -1,5 +1,5 @@
 /**
- * Structured fact extraction from findings (CORTEX_FEATURE_FACT_EXTRACT=1).
+ * Structured fact extraction from findings (PHREN_FEATURE_FACT_EXTRACT=1).
  * Each new finding is passed to an LLM that extracts a preference or fact
  * ("prefers X", "uses Y", "avoids Z"). Stored in project/preferences.json
  * and surfaced in session_start.
@@ -11,7 +11,7 @@ import { debugLog } from "./shared.js";
 import { safeProjectPath, isFeatureEnabled, errorMessage } from "./utils.js";
 import { callLlm } from "./content-dedup.js";
 
-const FACT_EXTRACT_FLAG = "CORTEX_FEATURE_FACT_EXTRACT";
+const FACT_EXTRACT_FLAG = "PHREN_FEATURE_FACT_EXTRACT";
 const MAX_FACTS = 50;
 
 export interface ExtractedFact {
@@ -20,25 +20,25 @@ export interface ExtractedFact {
   at: string;     // ISO timestamp
 }
 
-function preferencesPath(cortexPath: string, project: string): string | null {
-  const dir = safeProjectPath(cortexPath, project);
+function preferencesPath(phrenPath: string, project: string): string | null {
+  const dir = safeProjectPath(phrenPath, project);
   return dir ? path.join(dir, "preferences.json") : null;
 }
 
-export function readExtractedFacts(cortexPath: string, project: string): ExtractedFact[] {
-  const p = preferencesPath(cortexPath, project);
+export function readExtractedFacts(phrenPath: string, project: string): ExtractedFact[] {
+  const p = preferencesPath(phrenPath, project);
   if (!p) return [];
   try {
     const data = JSON.parse(fs.readFileSync(p, "utf8"));
     return Array.isArray(data) ? data : [];
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readExtractedFacts: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readExtractedFacts: ${errorMessage(err)}\n`);
     return [];
   }
 }
 
-function writeExtractedFacts(cortexPath: string, project: string, facts: ExtractedFact[]): void {
-  const p = preferencesPath(cortexPath, project);
+function writeExtractedFacts(phrenPath: string, project: string, facts: ExtractedFact[]): void {
+  const p = preferencesPath(phrenPath, project);
   if (!p) return;
   try {
     const trimmed = facts.slice(-MAX_FACTS);
@@ -54,10 +54,10 @@ function writeExtractedFacts(cortexPath: string, project: string, facts: Extract
  * Fire-and-forget: extract a structured fact from a new finding using an LLM.
  * Skips silently if the feature flag is off or no LLM is configured.
  */
-export function extractFactFromFinding(cortexPath: string, project: string, finding: string): void {
+export function extractFactFromFinding(phrenPath: string, project: string, finding: string): void {
   if (!isFeatureEnabled(FACT_EXTRACT_FLAG, false)) return;
   // no LLM configured, skip
-  if (!process.env.CORTEX_LLM_ENDPOINT && !process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) return;
+  if (!(process.env.PHREN_LLM_ENDPOINT) && !process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) return;
 
   const prompt =
     `Extract a single user preference, technology choice, or architectural fact from this finding. ` +
@@ -71,11 +71,11 @@ export function extractFactFromFinding(cortexPath: string, project: string, find
       const fact = raw.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
       if (!fact) return;
       // Re-read inside the callback to minimize race window (best-effort; not locked)
-      const existing = readExtractedFacts(cortexPath, project);
+      const existing = readExtractedFacts(phrenPath, project);
       const normalized = fact.toLowerCase();
       if (existing.some(f => f.fact.toLowerCase() === normalized)) return;
       existing.push({ fact, source: finding.slice(0, 120), at: new Date().toISOString() });
-      writeExtractedFacts(cortexPath, project, existing);
+      writeExtractedFacts(phrenPath, project, existing);
     })
     .catch((err: unknown) => {
       debugLog(`extractFactFromFinding: ${errorMessage(err)}`);

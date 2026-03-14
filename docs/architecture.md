@@ -1,4 +1,4 @@
-# Cortex Architecture
+# Phren Architecture
 
 How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
 
@@ -26,14 +26,14 @@ Claude / Copilot / Cursor / Codex
                 |
                 v
 +---------------+---------------+
-| MCP Server (cortex-mcp)       |
+| MCP Server (phren-mcp)       |
 | 60 tools across 11 modules    |
 +---------------+---------------+
                 |
                 v
 +---------------+---------------+
-| Data Layer (~/.cortex or      |
-| <repo>/.cortex)               |
+| Data Layer (~/.phren or      |
+| <repo>/.phren)               |
 | markdown + json + git         |
 +---------------+---------------+
                 |
@@ -47,17 +47,17 @@ Claude / Copilot / Cursor / Codex
 
 ## Install Modes
 
-Cortex has two install modes, rooted by `cortex.root.yaml`:
+Phren has two install modes, rooted by `phren.root.yaml`:
 
-- `shared`: default personal memory at `~/.cortex`, with profiles, machine mappings, user-scoped MCP config, and full Claude lifecycle hooks
-- `project-local`: repo-owned memory at `<repo>/.cortex`, with one primary project, workspace-managed git, and workspace MCP wiring
+- `shared`: default personal memory at `~/.phren`, with profiles, machine mappings, user-scoped MCP config, and full Claude lifecycle hooks
+- `project-local`: repo-owned memory at `<repo>/.phren`, with one primary project, workspace-managed git, and workspace MCP wiring
 
 Runtime path resolution order:
 
 1. explicit CLI path argument
-2. `CORTEX_PATH`
-3. nearest ancestor `.cortex` containing `cortex.root.yaml`
-4. shared root at `~/.cortex` only if it contains `cortex.root.yaml`
+2. `PHREN_PATH`
+3. nearest ancestor `.phren` containing `phren.root.yaml`
+4. shared root at `~/.phren` only if it contains `phren.root.yaml`
 
 ## End-to-End Runtime Loop
 
@@ -101,7 +101,7 @@ This gives Claude full native lifecycle parity while keeping other tools synchro
 
 ## MCP Server Modules
 
-Cortex MCP is split into 11 modules:
+Phren MCP is split into 11 modules:
 
 1. Search and browse
 2. Task management
@@ -131,7 +131,7 @@ Newly documented session continuity tool:
 All state stays local as files (markdown/json), with git as transport in shared mode.
 
 ```
-~/.cortex/
+~/.phren/
   machines.yaml
   profiles/*.yaml
   <project>/
@@ -211,7 +211,7 @@ Skill resolution is deterministic and policy-aware:
 
 Identity and authorization flow:
 
-- actor identity from `CORTEX_ACTOR` (in trusted/test contexts) or OS user identity
+- actor identity from `PHREN_ACTOR` (in trusted/test contexts) or OS user identity
 - shared role policy from `.governance/access-control.json`
 - local fallback/augmentation from `.runtime/access-control.local.json`
 
@@ -226,7 +226,7 @@ Write/policy/delete operations are checked against RBAC before mutation.
 
 ## Web UI Security Model
 
-Web UI (`cortex web-ui`) is hardened by default:
+Web UI (`phren web-ui`) is hardened by default:
 
 - binds only to loopback (`127.0.0.1`)
 - issues random per-run auth token (bearer/query/body)
@@ -241,7 +241,7 @@ Mutating endpoints require both auth and CSRF.
 Telemetry is opt-in and local-only:
 
 - default: disabled
-- enable: `cortex config telemetry on`
+- enable: `phren config telemetry on`
 - storage: `.runtime/telemetry.json`
 - captured data: tool call counts, CLI command counts, session/error counters, last activity
 - no external reporting by default
@@ -252,7 +252,7 @@ Retrieval is optimized for bounded context usage:
 
 - lexical-first FTS5 path handles most queries
 - vector fallback runs only when lexical confidence is weak
-- progressive disclosure keeps injection bounded (`CORTEX_CONTEXT_TOKEN_BUDGET`)
+- progressive disclosure keeps injection bounded (`PHREN_CONTEXT_TOKEN_BUDGET`)
 - task APIs support summary/pagination/single-item fetch patterns
 
 This keeps memory growth and prompt context growth decoupled.

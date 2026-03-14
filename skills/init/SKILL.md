@@ -1,35 +1,35 @@
 ---
 name: init
-description: Set up a new project in cortex with summary, CLAUDE.md, task, and skill templates.
+description: Set up a new project in phren with summary, CLAUDE.md, task, and skill templates.
 dependencies:
   - git
 ---
-# cortex-init - Scaffold a new project
+# phren-init - Scaffold a new project
 
-> Set up a new project in cortex with summary, CLAUDE.md, task, and skill templates.
+> Set up a new project in phren with summary, CLAUDE.md, task, and skill templates.
 
-Add a new project to your cortex instance, or bootstrap cortex itself if you're starting fresh.
+Tell phren about a new project, or bootstrap phren himself if you're starting fresh.
 
 ## Usage
 
 ```
-cortex-init my-new-project    # scaffold a specific project
-cortex-init                   # list existing projects, suggest unconfigured ones
+phren-init my-new-project    # scaffold a specific project
+phren-init                   # list existing projects, suggest unconfigured ones
 ```
 
-## First: find or create the cortex directory
+## First: find or create the phren directory
 
 ```bash
-CORTEX_DIR="${CORTEX_DIR:-$HOME/.cortex}"
-ls "$CORTEX_DIR" 2>/dev/null
+PHREN_DIR="${PHREN_DIR:-$HOME/.phren}"
+ls "$PHREN_DIR" 2>/dev/null
 ```
 
-If the cortex directory doesn't exist, offer to create it:
-> "No cortex repo found. Want me to create one at ~/.cortex? This will set up the base directory structure (global/, profiles/, machines.yaml)."
+If the phren directory doesn't exist, offer to create it:
+> "No phren repo found. Want me to create one at ~/.phren? This will set up the base directory structure (global/, profiles/, machines.yaml)."
 
 If the user says yes, create the base structure:
 ```bash
-mkdir -p "$CORTEX_DIR"/{global/skills,profiles}
+mkdir -p "$PHREN_DIR"/{global/skills,profiles}
 # Create a starter machines.yaml
 # Create a starter profile
 ```
@@ -41,7 +41,7 @@ Then continue with the project scaffolding below.
 ### 1. Check it doesn't already exist
 
 ```bash
-ls "$CORTEX_DIR/<project-name>/" 2>/dev/null
+ls "$PHREN_DIR/<project-name>/" 2>/dev/null
 ```
 
 If it exists, tell the user and ask if they want to reset it or just update specific files.
@@ -49,7 +49,7 @@ If it exists, tell the user and ask if they want to reset it or just update spec
 ### 2. Create the project directory
 
 ```bash
-mkdir -p "$CORTEX_DIR/<project-name>/skills"
+mkdir -p "$PHREN_DIR/<project-name>/skills"
 ```
 
 ### 3. Create summary.md
@@ -111,16 +111,16 @@ Pre-fill from the project's existing README or package.json if available. Leave 
 ```markdown
 # <project-name> skills
 
-Project-specific skills go here. Add `.md` files and Cortex will resolve them together with global skills, then mirror the effective set into the project's `.claude/skills/` directory on sync.
+Project-specific skills go here. Add `.md` files and phren will resolve them together with global skills, then mirror the effective set into the project's `.claude/skills/` directory on sync.
 ```
 
-Write this to `$CORTEX_DIR/<project-name>/skills/README.md`.
+Write this to `$PHREN_DIR/<project-name>/skills/README.md`.
 
 ### 7. Add to profile(s)
 
 Check if profiles exist:
 ```bash
-ls "$CORTEX_DIR/profiles/"*.yaml 2>/dev/null
+ls "$PHREN_DIR/profiles/"*.yaml 2>/dev/null
 ```
 
 If profiles exist, ask: "Which profile should this project be in?" and show the options.
@@ -133,20 +133,20 @@ Then add the project name to the chosen profile's `projects` list.
 ### 8. Commit (if git repo)
 
 ```bash
-cd "$CORTEX_DIR"
+cd "$PHREN_DIR"
 git add <project-name>/
 git add profiles/  # if modified
 git commit -m "add <project-name>"
 git push  # only if remote exists
 ```
 
-If cortex isn't a git repo yet, walk them through the full setup:
+If phren isn't a git repo yet, walk them through the full setup:
 
 ```bash
-cd "$CORTEX_DIR"
+cd "$PHREN_DIR"
 git init
 git add -A
-git commit -m "initial cortex setup"
+git commit -m "initial phren setup"
 ```
 
 Then check if `gh` is available:
@@ -156,61 +156,61 @@ which gh && gh auth status
 ```
 
 If yes, offer to create the GitHub repo:
-> "Your cortex isn't on GitHub yet. Want me to create a private repo and push it? That's what lets you sync across machines."
+> "Your phren isn't on GitHub yet. Want me to create a private repo and push it? That's what lets you sync across machines."
 
 If they say yes:
 ```bash
-gh repo create my-cortex --private --source=. --push
+gh repo create my-phren --private --source=. --push
 ```
 
 If `gh` isn't available, show the manual steps:
 > "Create a private repo at github.com/new, then:
->   git remote add origin git@github.com:YOU/my-cortex.git
+>   git remote add origin git@github.com:YOU/my-phren.git
 >   git push -u origin main
 >
-> Once it's on GitHub, clone it on any machine and run `cortex:sync` to activate."
+> Once it's on GitHub, clone it on any machine and run `phren-sync` to activate."
 
 ### 9. Report
 
 ```
-cortex-init <project-name>
+phren-init <project-name>
 
 Created:
-  $CORTEX_DIR/<project-name>/summary.md
-  $CORTEX_DIR/<project-name>/CLAUDE.md
-  $CORTEX_DIR/<project-name>/tasks.md
-  $CORTEX_DIR/<project-name>/skills/README.md
+  $PHREN_DIR/<project-name>/summary.md
+  $PHREN_DIR/<project-name>/CLAUDE.md
+  $PHREN_DIR/<project-name>/tasks.md
+  $PHREN_DIR/<project-name>/skills/README.md
 
 Added to profile: default
 
-Run cortex-sync to activate on this machine.
+Run phren-sync to activate on this machine.
 ```
 
 ## Without a project name
 
-When user just runs `cortex-init` with no args:
+When user just runs `phren-init` with no args:
 
-1. If cortex directory exists, list all directories that have a `summary.md` (configured projects)
-2. Look for directories in `~/` that look like projects (have package.json, pyproject.toml, Cargo.toml, go.mod, etc.) but don't have a cortex entry
+1. If phren directory exists, list all directories that have a `summary.md` (configured projects)
+2. Look for directories in `~/` that look like projects (have package.json, pyproject.toml, Cargo.toml, go.mod, etc.) but don't have a phren entry
 3. Show both lists and suggest adding unconfigured ones
 
 ```
-cortex-init: project scan
+phren-init: project scan
 
-Configured in cortex:
+Configured in phren:
   myapp, api-server
 
-Found on this machine but not in cortex:
+Found on this machine but not in phren:
   ~/side-project (has package.json)
   ~/experiments/rust-thing (has Cargo.toml)
 
-Run cortex-init <name> to add one.
+Run phren-init <name> to add one.
 ```
 
-If cortex doesn't exist at all, offer to bootstrap it from scratch.
+If phren doesn't exist at all, offer to bootstrap it from scratch.
 
 ## Related skills
 
-- `cortex-sync`: activate the new project on this machine after init
-- `cortex-discover`: find what to build next in a project
+- `phren-sync`: activate the new project on this machine after init
+- `phren-discover`: find what to build next in a project
 - `/tasks`: manage the project's task queue

@@ -1,6 +1,6 @@
 # MCP Context Optimization
 
-How to use cortex MCP tools without flooding your agent's context window.
+How to use phren MCP tools without flooding your agent's context window.
 
 ## The problem
 
@@ -91,7 +91,7 @@ For agents coordinating work across a team:
 
 ## Context injection hooks
 
-The `UserPromptSubmit` hook already does progressive disclosure for search results. When `CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1` is set:
+The `UserPromptSubmit` hook already does progressive disclosure for search results. When `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1` is set:
 
 **1-2 search results:** Full snippets are injected directly into context. Small enough that the overhead is negligible.
 
@@ -107,7 +107,7 @@ This keeps the automatic injection path small and predictable while still surfac
 4. If 3+ results match and progressive disclosure is enabled, the hook emits a compact index instead of full content
 5. The agent reads the index and calls `get_memory_detail(id)` for entries it wants to expand
 
-The token budget for automatic injection is controlled by `CORTEX_CONTEXT_TOKEN_BUDGET` (default: 550). Progressive disclosure makes this budget go further by fitting more result summaries into the same token space.
+The token budget for automatic injection is controlled by `PHREN_CONTEXT_TOKEN_BUDGET` (default: 550). Progressive disclosure makes this budget go further by fitting more result summaries into the same token space.
 
 ## Applying this pattern to other tools
 

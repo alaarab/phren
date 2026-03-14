@@ -1,16 +1,16 @@
 import * as fs from "fs";
 import * as path from "path";
-import { cortexErr, CortexError, cortexOk, type CortexResult, shellStateFile } from "./shared.js";
+import { phrenErr, PhrenError, phrenOk, type PhrenResult, shellStateFile } from "./shared.js";
 import { getRuntimeHealth, withFileLock as withFileLockRaw } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
 
-function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
+function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {
   try {
     return withFileLockRaw(filePath, fn);
   } catch (err: unknown) {
     const msg = errorMessage(err);
     if (msg.includes("could not acquire lock")) {
-      return cortexErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, CortexError.LOCK_TIMEOUT);
+      return phrenErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, PhrenError.LOCK_TIMEOUT);
     }
     throw err;
   }
@@ -30,8 +30,8 @@ export interface ShellState {
 const SHELL_STATE_VERSION = 3;
 const VALID_VIEWS = new Set<ShellState["view"]>(["Projects", "Tasks", "Findings", "Review Queue", "Skills", "Hooks", "Machines/Profiles", "Health"]);
 
-export function loadShellState(cortexPath: string): ShellState {
-  const file = shellStateFile(cortexPath);
+export function loadShellState(phrenPath: string): ShellState {
+  const file = shellStateFile(phrenPath);
   const fallback: ShellState = {
     version: SHELL_STATE_VERSION,
     view: "Projects",
@@ -58,13 +58,13 @@ export function loadShellState(cortexPath: string): ShellState {
       introSeenVersion: typeof raw.introSeenVersion === "string" ? raw.introSeenVersion : undefined,
     };
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] loadShellState parse: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadShellState parse: ${errorMessage(err)}\n`);
     return fallback;
   }
 }
 
-export function saveShellState(cortexPath: string, state: ShellState): void {
-  const file = shellStateFile(cortexPath);
+export function saveShellState(phrenPath: string, state: ShellState): void {
+  const file = shellStateFile(phrenPath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   withSafeLock(file, () => {
     const out: ShellState = {
@@ -78,18 +78,18 @@ export function saveShellState(cortexPath: string, state: ShellState): void {
       introSeenVersion: state.introSeenVersion,
     };
     fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
-    return cortexOk(undefined);
+    return phrenOk(undefined);
   });
 }
 
-export function resetShellState(cortexPath: string): CortexResult<string> {
-  const file = shellStateFile(cortexPath);
+export function resetShellState(phrenPath: string): PhrenResult<string> {
+  const file = shellStateFile(phrenPath);
   return withSafeLock(file, () => {
     if (fs.existsSync(file)) fs.unlinkSync(file);
-    return cortexOk("Shell state reset.");
+    return phrenOk("Shell state reset.");
   });
 }
 
-export function readRuntimeHealth(cortexPath: string) {
-  return getRuntimeHealth(cortexPath);
+export function readRuntimeHealth(phrenPath: string) {
+  return getRuntimeHealth(phrenPath);
 }

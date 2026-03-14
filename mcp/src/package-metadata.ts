@@ -18,7 +18,7 @@ function readPackageJson(): PackageJsonShape {
 
 const PACKAGE_JSON = readPackageJson();
 
-export const PACKAGE_NAME = PACKAGE_JSON.name || "cortex";
+export const PACKAGE_NAME = PACKAGE_JSON.name || "phren";
 export const VERSION = PACKAGE_JSON.version || "0.0.0";
 export const PACKAGE_SPEC = `${PACKAGE_NAME}@${VERSION}`;
 

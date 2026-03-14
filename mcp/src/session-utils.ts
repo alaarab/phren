@@ -13,13 +13,13 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
 }
 
 /**
- * Log an error to stderr when CORTEX_DEBUG is enabled.
- * Centralises the repeated `if (CORTEX_DEBUG) stderr.write(...)` pattern.
+ * Log an error to stderr when PHREN_DEBUG is enabled.
+ * Centralises the repeated `if (PHREN_DEBUG) stderr.write(...)` pattern.
  */
 export function debugError(scope: string, err: unknown): void {
-  if (process.env.CORTEX_DEBUG) {
+  if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
     process.stderr.write(
-      `[cortex] ${scope}: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[phren] ${scope}: ${err instanceof Error ? err.message : String(err)}\n`,
     );
   }
 }

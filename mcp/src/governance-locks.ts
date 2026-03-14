@@ -4,9 +4,9 @@ import { debugLog } from "./shared.js";
 
 // Acquire the file lock, returning true on success or throwing on timeout.
 function acquireFileLock(lockPath: string): void {
-  const maxWait = Number.parseInt(process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS || "5000", 10) || 5000;
-  const pollInterval = Number.parseInt(process.env.CORTEX_FILE_LOCK_POLL_MS || "100", 10) || 100;
-  const staleThreshold = Number.parseInt(process.env.CORTEX_FILE_LOCK_STALE_MS || "30000", 10) || 30000;
+  const maxWait = Number.parseInt(process.env.PHREN_FILE_LOCK_MAX_WAIT_MS || process.env.PHREN_FILE_LOCK_MAX_WAIT_MS || "5000", 10) || 5000;
+  const pollInterval = Number.parseInt((process.env.PHREN_FILE_LOCK_POLL_MS) || "100", 10) || 100;
+  const staleThreshold = Number.parseInt((process.env.PHREN_FILE_LOCK_STALE_MS) || "30000", 10) || 30000;
   const waiter = new Int32Array(new SharedArrayBuffer(4));
   const sleep = (ms: number) => Atomics.wait(waiter, 0, 0, ms);
 
@@ -19,7 +19,7 @@ function acquireFileLock(lockPath: string): void {
       hasLock = true;
       break;
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] acquireFileLock lockWrite: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock lockWrite: ${err instanceof Error ? err.message : String(err)}\n`);
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleThreshold) {
@@ -45,7 +45,7 @@ function acquireFileLock(lockPath: string): void {
           }
         }
       } catch (statErr: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] acquireFileLock staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}\n`);
         sleep(pollInterval);
         waited += pollInterval;
         continue;
@@ -64,7 +64,7 @@ function acquireFileLock(lockPath: string): void {
 
 function releaseFileLock(lockPath: string): void {
   try { fs.unlinkSync(lockPath); } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] releaseFileLock: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] releaseFileLock: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 

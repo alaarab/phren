@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import { runtimeFile, getCortexPath } from "./shared.js";
+import { runtimeFile, getPhrenPath } from "./shared.js";
 import {
   recordFeedback,
   flushEntryScores,
@@ -11,13 +11,33 @@ import { addFinding as addFindingCore } from "./core-finding.js";
 import { runDoctor } from "./link.js";
 import { startWebUi } from "./memory-ui.js";
 import { startShell } from "./shell.js";
-import { runCortexUpdate } from "./update.js";
+import { runPhrenUpdate } from "./update.js";
 import { readRuntimeHealth } from "./data-access.js";
-import { runSearch, type SearchOptions } from "./cli-search.js";
+import { runSearch, runFragmentSearch, parseFragmentSearchArgs, runRelatedDocs, parseRelatedDocsArgs, type SearchOptions } from "./cli-search.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 
 export async function handleSearch(opts: SearchOptions, profile: string) {
-  const result = await runSearch(opts, getCortexPath(), profile);
+  const result = await runSearch(opts, getPhrenPath(), profile);
+  if (result.lines.length > 0) {
+    console.log(result.lines.join("\n"));
+  }
+  if (result.exitCode !== 0) process.exit(result.exitCode);
+}
+
+export async function handleFragmentSearch(args: string[], profile: string) {
+  const opts = parseFragmentSearchArgs(args);
+  if (!opts) return;
+  const result = await runFragmentSearch(opts.query, getPhrenPath(), profile, opts);
+  if (result.lines.length > 0) {
+    console.log(result.lines.join("\n"));
+  }
+  if (result.exitCode !== 0) process.exit(result.exitCode);
+}
+
+export async function handleRelatedDocs(args: string[], profile: string) {
+  const opts = parseRelatedDocsArgs(args);
+  if (!opts) return;
+  const result = await runRelatedDocs(opts.entity, getPhrenPath(), profile, opts);
   if (result.lines.length > 0) {
     console.log(result.lines.join("\n"));
   }
@@ -26,12 +46,12 @@ export async function handleSearch(opts: SearchOptions, profile: string) {
 
 export async function handleAddFinding(project: string, learning: string) {
   if (!project || !learning) {
-    console.error('Usage: cortex add-finding <project> "<insight>"');
+    console.error('Usage: phren add-finding <project> "<insight>"');
     process.exit(1);
   }
 
   try {
-    const result = addFindingCore(getCortexPath(), project, learning);
+    const result = addFindingCore(getPhrenPath(), project, learning);
     if (!result.ok) {
       console.error(result.message);
       process.exit(1);
@@ -45,15 +65,15 @@ export async function handleAddFinding(project: string, learning: string) {
 
 export async function handlePinCanonical(project: string, memory: string) {
   if (!project || !memory) {
-    console.error('Usage: cortex pin <project> "<memory>"');
+    console.error('Usage: phren pin <project> "<memory>"');
     process.exit(1);
   }
-  const result = upsertCanonical(getCortexPath(), project, memory);
+  const result = upsertCanonical(getPhrenPath(), project, memory);
   console.log(result.ok ? result.data : result.error);
 }
 
 export async function handleDoctor(args: string[]) {
-  const profile = resolveRuntimeProfile(getCortexPath());
+  const profile = resolveRuntimeProfile(getPhrenPath());
   const fix = args.includes("--fix");
   const checkData = args.includes("--check-data");
   const agentsOnly = args.includes("--agents");
@@ -85,7 +105,7 @@ export async function handleDoctor(args: string[]) {
       }
       implemented.set(manifest.surface, count);
     }
-    console.log(`cortex doctor --parity: ${total} actions across ${ALL_MANIFESTS.length} surfaces\n`);
+    console.log(`phren doctor --parity: ${total} actions across ${ALL_MANIFESTS.length} surfaces\n`);
     for (const manifest of ALL_MANIFESTS) {
       const count = implemented.get(manifest.surface) || 0;
       console.log(`  ${manifest.surface}: ${count}/${total} implemented (${Math.round(100 * count / total)}%)`);
@@ -102,25 +122,25 @@ export async function handleDoctor(args: string[]) {
     process.exit(0);
   }
 
-  const result = await runDoctor(getCortexPath(), fix, checkData);
+  const result = await runDoctor(getPhrenPath(), fix, checkData);
   if (agentsOnly) {
     const agentChecks = result.checks.filter((check) =>
       check.name.includes("cursor") || check.name.includes("copilot") || check.name.includes("codex") || check.name.includes("windsurf")
     );
-    console.log(`cortex doctor --agents: ${agentChecks.every((check) => check.ok) ? "all configured" : "some not configured"}`);
+    console.log(`phren doctor --agents: ${agentChecks.every((check) => check.ok) ? "all configured" : "some not configured"}`);
     for (const check of agentChecks) {
       console.log(`- ${check.ok ? "ok" : "not configured"} ${check.name}: ${check.detail}`);
     }
     if (agentChecks.length === 0) {
-      console.log("No agent integrations detected. Run `cortex init` to configure.");
+      console.log("No agent integrations detected. Run `phren init` to configure.");
     }
     process.exit(agentChecks.every((check) => check.ok) ? 0 : 1);
   }
 
-  console.log(`cortex doctor: ${result.ok ? "ok" : "issues found"}`);
+  console.log(`phren doctor: ${result.ok ? "ok" : "issues found"}`);
   if (result.machine) console.log(`machine: ${result.machine}`);
   if (result.profile) console.log(`profile: ${result.profile}`);
-  console.log(`tasks: ${getWorkflowPolicy(getCortexPath()).taskMode} mode`);
+  console.log(`tasks: ${getWorkflowPolicy(getPhrenPath()).taskMode} mode`);
   const renderCheckState = (check: { name: string; ok: boolean; detail: string }): "ok" | "fail" | "info" => {
     if (
       check.name === "git-remote" &&
@@ -136,7 +156,7 @@ export async function handleDoctor(args: string[]) {
   }
 
   try {
-    const missFile = runtimeFile(getCortexPath(), "search-misses.jsonl");
+    const missFile = runtimeFile(getPhrenPath(), "search-misses.jsonl");
     if (fs.existsSync(missFile)) {
       const lines = fs.readFileSync(missFile, "utf8").split("\n").filter(Boolean);
       if (lines.length > 0) {
@@ -149,7 +169,7 @@ export async function handleDoctor(args: string[]) {
               tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
             }
           } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor searchMissParse: ${errorMessage(err)}\n`);
+            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissParse: ${errorMessage(err)}\n`);
           }
         }
         const topMisses = [...tokenCounts.entries()]
@@ -164,7 +184,7 @@ export async function handleDoctor(args: string[]) {
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor searchMissAnalysis: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissAnalysis: ${errorMessage(err)}\n`);
   }
 
   try {
@@ -177,34 +197,34 @@ export async function handleDoctor(args: string[]) {
     } else {
       const available = await checkOllamaAvailable();
       if (!available) {
-        console.log(`- warn semantic-search: Ollama not running at ${ollamaUrl} (start Ollama or set CORTEX_OLLAMA_URL=off to disable)`);
+        console.log(`- warn semantic-search: Ollama not running at ${ollamaUrl} (start Ollama or set PHREN_OLLAMA_URL=off to disable)`);
       } else {
         const model = getEmbeddingModel();
         const modelReady = await checkModelAvailable();
         if (!modelReady) {
           console.log(`- warn semantic-search: model ${model} not pulled (run: ollama pull ${model})`);
         } else {
-          const cortexPath = getCortexPath();
-          const cache = getEmbeddingCache(cortexPath);
+          const phrenPath = getPhrenPath();
+          const cache = getEmbeddingCache(phrenPath);
           await cache.load().catch(() => {});
-          const allPaths = listIndexedDocumentPaths(cortexPath, profile || undefined);
+          const allPaths = listIndexedDocumentPaths(phrenPath, profile || undefined);
           const coverage = cache.coverage(allPaths);
           console.log(`- ok  semantic-search: ${model} ready, ${formatEmbeddingCoverage(coverage)}`);
         }
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor ollamaStatus: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor ollamaStatus: ${errorMessage(err)}\n`);
   }
 
   process.exit(result.ok ? 0 : 1);
 }
 
 export async function handleStatus() {
-  const cortexPath = getCortexPath();
-  const profile = resolveRuntimeProfile(cortexPath);
-  const runtime = readRuntimeHealth(cortexPath);
-  console.log("cortex status");
+  const phrenPath = getPhrenPath();
+  const profile = resolveRuntimeProfile(phrenPath);
+  const runtime = readRuntimeHealth(phrenPath);
+  console.log("phren status");
   console.log(`last auto-save: ${runtime.lastAutoSave?.status || "n/a"}${runtime.lastAutoSave?.at ? ` @ ${runtime.lastAutoSave.at}` : ""}`);
   console.log(`last pull: ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
   console.log(`last push: ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
@@ -230,12 +250,12 @@ export async function handleStatus() {
       console.log(`semantic-search: model missing (${model})`);
       return;
     }
-    const cache = getEmbeddingCache(cortexPath);
+    const cache = getEmbeddingCache(phrenPath);
     await cache.load().catch(() => {});
-    const coverage = cache.coverage(listIndexedDocumentPaths(cortexPath, profile || undefined));
+    const coverage = cache.coverage(listIndexedDocumentPaths(phrenPath, profile || undefined));
     console.log(`semantic-search: ${model} ready, ${formatEmbeddingCoverage(coverage)}`);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] handleStatus semanticSearch: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] handleStatus semanticSearch: ${errorMessage(err)}\n`);
   }
 }
 
@@ -243,11 +263,11 @@ export async function handleQualityFeedback(args: string[]) {
   const key = args.find((arg) => arg.startsWith("--key="))?.slice("--key=".length);
   const feedback = args.find((arg) => arg.startsWith("--type="))?.slice("--type=".length) as "helpful" | "reprompt" | "regression" | undefined;
   if (!key || !feedback || !["helpful", "reprompt", "regression"].includes(feedback)) {
-    console.error("Usage: cortex quality-feedback --key=<entry-key> --type=helpful|reprompt|regression");
+    console.error("Usage: phren quality-feedback --key=<entry-key> --type=helpful|reprompt|regression");
     process.exit(1);
   }
-  recordFeedback(getCortexPath(), key, feedback);
-  flushEntryScores(getCortexPath());
+  recordFeedback(getPhrenPath(), key, feedback);
+  flushEntryScores(getPhrenPath());
   console.log(`Recorded feedback: ${feedback} for ${key}`);
 }
 
@@ -256,7 +276,7 @@ export async function handleMemoryUi(args: string[]) {
   const noOpen = args.includes("--no-open");
   const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
   const safePort = Number.isNaN(port) ? 3499 : port;
-  await startWebUi(getCortexPath(), safePort, resolveRuntimeProfile(getCortexPath()), {
+  await startWebUi(getPhrenPath(), safePort, resolveRuntimeProfile(getPhrenPath()), {
     autoOpen: !noOpen,
     allowPortFallback: !portArg,
   });
@@ -264,21 +284,21 @@ export async function handleMemoryUi(args: string[]) {
 
 export async function handleShell(args: string[], profile: string) {
   if (args.includes("--help") || args.includes("-h")) {
-    console.log("Usage: cortex shell");
+    console.log("Usage: phren shell");
     console.log("Interactive shell with views for Projects, Task, Findings, Review Queue, Skills, Hooks, Machines/Profiles, and Health.");
     return;
   }
-  await startShell(getCortexPath(), profile);
+  await startShell(getPhrenPath(), profile);
 }
 
 export async function handleUpdate(args: string[]) {
   if (args.includes("--help") || args.includes("-h")) {
-    console.log("Usage: cortex update [--refresh-starter]");
-    console.log("Updates cortex to the latest version (local git clone when available, otherwise npm global package).");
+    console.log("Usage: phren update [--refresh-starter]");
+    console.log("Updates phren to the latest version (local git clone when available, otherwise npm global package).");
     console.log("Pass --refresh-starter to refresh global starter assets in the same flow.");
     return;
   }
-  const result = await runCortexUpdate({ refreshStarter: args.includes("--refresh-starter") });
+  const result = await runPhrenUpdate({ refreshStarter: args.includes("--refresh-starter") });
   console.log(result.message);
   if (!result.ok) {
     process.exitCode = 1;

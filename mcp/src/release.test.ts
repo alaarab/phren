@@ -21,17 +21,17 @@ describe.sequential("1.10.x release hardening gates", () => {
   let tmpRoot: string;
   let tmpCleanup: () => void;
   let homeDir: string;
-  let cortexPath: string;
+  let phrenPath: string;
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
   const origPath = process.env.PATH;
 
   beforeEach(() => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-release-gates-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-release-gates-"));
     homeDir = path.join(tmpRoot, "home");
-    cortexPath = path.join(tmpRoot, "cortex");
+    phrenPath = path.join(tmpRoot, "phren");
     fs.mkdirSync(homeDir, { recursive: true });
-    fs.mkdirSync(cortexPath, { recursive: true });
+    fs.mkdirSync(phrenPath, { recursive: true });
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
   });
@@ -85,7 +85,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     const linkSkillsTs = fs.readFileSync(path.join(root, "mcp", "src", "link-skills.ts"), "utf8");
     expect(linkSkillsTs).toContain("getToolCount()");
     expect(linkSkillsTs).toContain("renderToolCatalogMarkdown()");
-    expect(getToolCount()).toBe(60);
+    expect(getToolCount()).toBe(58);
   });
 
   it.skipIf(process.platform === "win32")("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {
@@ -99,12 +99,12 @@ describe.sequential("1.10.x release hardening gates", () => {
     }
     process.env.PATH = `${fakeBin}:${origPath || ""}`;
 
-    const configured = configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+    const configured = configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
     expect(configured).toContain("Copilot CLI");
     expect(configured).toContain("Cursor");
     expect(configured).toContain("Codex");
 
-    const copilotHooks = fs.readFileSync(path.join(homeDir, ".github", "hooks", "cortex.json"), "utf8");
+    const copilotHooks = fs.readFileSync(path.join(homeDir, ".github", "hooks", "phren.json"), "utf8");
     expect(copilotHooks).toContain("hook-session-start");
     expect(copilotHooks).toContain("hook-prompt");
     expect(copilotHooks).toContain("hook-stop");
@@ -114,7 +114,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     expect(cursorHooks).toContain("beforeSubmitPrompt");
     expect(cursorHooks).toContain("hook-stop");
 
-    const codexHooks = fs.readFileSync(path.join(cortexPath, "codex.json"), "utf8");
+    const codexHooks = fs.readFileSync(path.join(phrenPath, "codex.json"), "utf8");
     expect(codexHooks).toContain("SessionStart");
     expect(codexHooks).toContain("UserPromptSubmit");
     expect(codexHooks).toContain("Stop");
@@ -128,7 +128,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     }
   });
 
-  it("rewrites existing Claude cortex hooks to the canonical lifecycle commands", () => {
+  it("rewrites existing Claude phren hooks to the canonical lifecycle commands", () => {
     const claudeDir = path.join(homeDir, ".claude");
     fs.mkdirSync(claudeDir, { recursive: true });
     const settingsPath = path.join(claudeDir, "settings.json");
@@ -138,9 +138,9 @@ describe.sequential("1.10.x release hardening gates", () => {
       JSON.stringify(
         {
           hooks: {
-            UserPromptSubmit: [{ matcher: "", hooks: [{ type: "command", command: "npx cortex hook-prompt" }] }],
-            Stop: [{ matcher: "", hooks: [{ type: "command", command: "npx cortex hook-stop" }] }],
-            SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "npx cortex hook-session-start" }] }],
+            UserPromptSubmit: [{ matcher: "", hooks: [{ type: "command", command: "npx phren hook-prompt" }] }],
+            Stop: [{ matcher: "", hooks: [{ type: "command", command: "npx phren hook-stop" }] }],
+            SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "npx phren hook-session-start" }] }],
           },
         },
         null,
@@ -148,7 +148,7 @@ describe.sequential("1.10.x release hardening gates", () => {
       )
     );
 
-    configureClaude(cortexPath, { mcpEnabled: true });
+    configureClaude(phrenPath, { mcpEnabled: true });
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     const prompt = JSON.stringify(cfg.hooks?.UserPromptSubmit || []);
     const stop = JSON.stringify(cfg.hooks?.Stop || []);
@@ -165,9 +165,9 @@ describe.sequential("1.10.x release hardening gates", () => {
     const settingsPath = path.join(claudeDir, "settings.json");
     fs.writeFileSync(settingsPath, JSON.stringify({ hooks: {} }, null, 2));
 
-    configureClaude(cortexPath, { mcpEnabled: true, hooksEnabled: false });
+    configureClaude(phrenPath, { mcpEnabled: true, hooksEnabled: false });
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(cfg.mcpServers?.cortex?.command).toMatch(/^(node|npx)$/);
+    expect(cfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
     const hooksBlob = JSON.stringify(cfg.hooks || {});
     expect(hooksBlob).not.toContain("hook-prompt");
     expect(hooksBlob).not.toContain("hook-stop");

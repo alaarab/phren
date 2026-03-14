@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { commandExists, detectInstalledTools, buildLifecycleCommands, buildSharedLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks } from "./hooks.js";
-import { initTestCortexRoot, makeTempDir } from "./test-helpers.js";
+import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
-import { CortexError, type CortexErrorCode } from "./shared.js";
+import { PhrenError, type PhrenErrorCode } from "./shared.js";
 import { selectSnippets, approximateTokens } from "./shared-retrieval.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -10,8 +10,8 @@ import * as os from "os";
 import * as http from "http";
 import { fileURLToPath } from "url";
 
-function writeInstallPrefs(cortexPath: string, content: string): void {
-  const runtimeDir = path.join(cortexPath, ".runtime");
+function writeInstallPrefs(phrenPath: string, content: string): void {
+  const runtimeDir = path.join(phrenPath, ".runtime");
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, "install-preferences.json"), content);
 }
@@ -54,41 +54,41 @@ describe("hooks", () => {
 
   describe("buildLifecycleCommands", () => {
     it("returns sessionStart, userPromptSubmit, and stop commands", () => {
-      const cmds = buildLifecycleCommands("/tmp/fake-cortex");
+      const cmds = buildLifecycleCommands("/tmp/fake-phren");
       expect(cmds).toHaveProperty("sessionStart");
       expect(cmds).toHaveProperty("userPromptSubmit");
       expect(cmds).toHaveProperty("stop");
     });
 
-    it("includes cortex path in commands", () => {
-      const cmds = buildLifecycleCommands("/tmp/fake-cortex");
-      expect(cmds.sessionStart).toContain("/tmp/fake-cortex");
-      expect(cmds.userPromptSubmit).toContain("/tmp/fake-cortex");
-      expect(cmds.stop).toContain("/tmp/fake-cortex");
+    it("includes phren path in commands", () => {
+      const cmds = buildLifecycleCommands("/tmp/fake-phren");
+      expect(cmds.sessionStart).toContain("/tmp/fake-phren");
+      expect(cmds.userPromptSubmit).toContain("/tmp/fake-phren");
+      expect(cmds.stop).toContain("/tmp/fake-phren");
     });
 
     it("includes hook subcommands in commands", () => {
-      const cmds = buildLifecycleCommands("/tmp/fake-cortex");
+      const cmds = buildLifecycleCommands("/tmp/fake-phren");
       expect(cmds.sessionStart).toContain("hook-session-start");
       expect(cmds.userPromptSubmit).toContain("hook-prompt");
       expect(cmds.stop).toContain("hook-stop");
     });
 
     it("escapes paths with special characters", () => {
-      const cmds = buildLifecycleCommands('/tmp/my "cortex" path');
-      expect(cmds.sessionStart).toContain('\\"cortex\\"');
+      const cmds = buildLifecycleCommands('/tmp/my "phren" path');
+      expect(cmds.sessionStart).toContain('\\"phren\\"');
     });
   });
 
   describe("buildSharedLifecycleCommands", () => {
-    it("uses versioned npx commands without embedding local cortex paths", () => {
+    it("uses versioned npx commands without embedding local phren paths", () => {
       const cmds = buildSharedLifecycleCommands();
-      expect(cmds.sessionStart).toContain("npx -y @alaarab/cortex@");
+      expect(cmds.sessionStart).toContain("npx -y @alaarab/phren@");
       expect(cmds.sessionStart).toContain("hook-session-start");
       expect(cmds.userPromptSubmit).toContain("hook-prompt");
       expect(cmds.stop).toContain("hook-stop");
       expect(cmds.hookTool).toContain("hook-tool");
-      expect(cmds.sessionStart).not.toContain("CORTEX_PATH=");
+      expect(cmds.sessionStart).not.toContain("PHREN_PATH=");
       expect(cmds.sessionStart).not.toContain(".npm/_npx");
     });
   });
@@ -96,7 +96,7 @@ describe("hooks", () => {
   describe("configureAllHooks - config validation", () => {
     let tmpRoot: string;
     let homeDir: string;
-    let cortexPath: string;
+    let phrenPath: string;
     const origHome = process.env.HOME;
     const origUserProfile = process.env.USERPROFILE;
     const origPath = process.env.PATH;
@@ -104,12 +104,12 @@ describe("hooks", () => {
     let tmpCleanup: () => void;
 
     beforeEach(() => {
-      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hooks-test-"));
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-hooks-test-"));
       homeDir = path.join(tmpRoot, "home");
-      cortexPath = path.join(tmpRoot, "cortex");
+      phrenPath = path.join(tmpRoot, "phren");
       fs.mkdirSync(homeDir, { recursive: true });
-      fs.mkdirSync(cortexPath, { recursive: true });
-      initTestCortexRoot(cortexPath);
+      fs.mkdirSync(phrenPath, { recursive: true });
+      initTestPhrenRoot(phrenPath);
       process.env.HOME = homeDir;
       process.env.USERPROFILE = homeDir;
     });
@@ -140,9 +140,9 @@ describe("hooks", () => {
 
     it("writes valid Copilot hook config with correct schema", () => {
       setupFakeBinaries();
-      configureAllHooks(cortexPath, { tools: new Set(["copilot"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["copilot"]) });
 
-      const copilotFile = path.join(homeDir, ".github", "hooks", "cortex.json");
+      const copilotFile = path.join(homeDir, ".github", "hooks", "phren.json");
       expect(fs.existsSync(copilotFile)).toBe(true);
 
       const config = JSON.parse(fs.readFileSync(copilotFile, "utf8"));
@@ -154,13 +154,13 @@ describe("hooks", () => {
       expect(config.hooks.sessionStart[0].bash).toContain("hook-session-start");
       expect(config.hooks.userPromptSubmitted[0].bash).toContain("hook-prompt");
       expect(config.hooks.sessionEnd[0].bash).toContain("hook-stop");
-      expect(config.hooks.sessionStart[0].bash).toContain("CORTEX_HOOK_TOOL");
+      expect(config.hooks.sessionStart[0].bash).toContain("PHREN_HOOK_TOOL");
       expect(config.hooks.sessionStart[0].bash).toContain("copilot");
     });
 
     it("writes valid Cursor hook config with correct schema", () => {
       setupFakeBinaries();
-      configureAllHooks(cortexPath, { tools: new Set(["cursor"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["cursor"]) });
 
       const cursorFile = path.join(homeDir, ".cursor", "hooks.json");
       expect(fs.existsSync(cursorFile)).toBe(true);
@@ -173,15 +173,15 @@ describe("hooks", () => {
       expect(config.sessionStart.command).toContain("hook-session-start");
       expect(config.beforeSubmitPrompt.command).toContain("hook-prompt");
       expect(config.stop.command).toContain("hook-stop");
-      expect(config.sessionStart.command).toContain("CORTEX_HOOK_TOOL");
+      expect(config.sessionStart.command).toContain("PHREN_HOOK_TOOL");
       expect(config.sessionStart.command).toContain("cursor");
     });
 
     it("writes valid Codex hook config with correct schema", () => {
       setupFakeBinaries();
-      configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
 
-      const codexFile = path.join(cortexPath, "codex.json");
+      const codexFile = path.join(phrenPath, "codex.json");
       expect(fs.existsSync(codexFile)).toBe(true);
 
       const config = JSON.parse(fs.readFileSync(codexFile, "utf8"));
@@ -192,7 +192,7 @@ describe("hooks", () => {
       expect(config.hooks.SessionStart[0].command).toContain("hook-session-start");
       expect(config.hooks.UserPromptSubmit[0].command).toContain("hook-prompt");
       expect(config.hooks.Stop[0].command).toContain("hook-stop");
-      expect(config.hooks.SessionStart[0].command).toContain("CORTEX_HOOK_TOOL");
+      expect(config.hooks.SessionStart[0].command).toContain("PHREN_HOOK_TOOL");
       expect(config.hooks.SessionStart[0].command).toContain("codex");
     });
 
@@ -205,7 +205,7 @@ describe("hooks", () => {
         JSON.stringify({ customField: "preserved", version: 0 })
       );
 
-      configureAllHooks(cortexPath, { tools: new Set(["cursor"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["cursor"]) });
 
       const config = JSON.parse(fs.readFileSync(path.join(cursorDir, "hooks.json"), "utf8"));
       expect(config.customField).toBe("preserved");
@@ -214,7 +214,7 @@ describe("hooks", () => {
 
     it("session wrappers use POSIX shebang", () => {
       setupFakeBinaries();
-      configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       for (const tool of ["copilot", "cursor", "codex"]) {
         const wrapper = path.join(homeDir, ".local", "bin", tool);
@@ -231,7 +231,7 @@ describe("hooks", () => {
 
     it("session wrappers use shift instead of bash array slicing", () => {
       setupFakeBinaries();
-      configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
 
       const wrapper = path.join(homeDir, ".local", "bin", "codex");
       if (fs.existsSync(wrapper)) {
@@ -245,14 +245,14 @@ describe("hooks", () => {
       setupFakeBinaries();
 
       // Write preferences with hooks disabled
-      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: false }));
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: false }));
 
-      configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       // Hook configs should still be written
-      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "cortex.json"))).toBe(true);
+      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "phren.json"))).toBe(true);
       expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(true);
-      expect(fs.existsSync(path.join(cortexPath, "codex.json"))).toBe(true);
+      expect(fs.existsSync(path.join(phrenPath, "codex.json"))).toBe(true);
 
       // But wrappers should NOT be installed
       for (const tool of ["copilot", "cursor", "codex"]) {
@@ -264,14 +264,14 @@ describe("hooks", () => {
     it("per-tool hookTools disables wrapper for specific tool only", () => {
       setupFakeBinaries();
 
-      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: true, hookTools: { copilot: true, cursor: false, codex: true } }));
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true, hookTools: { copilot: true, cursor: false, codex: true } }));
 
-      configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       // Configs are still written for all tools
-      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "cortex.json"))).toBe(true);
+      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "phren.json"))).toBe(true);
       expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(true);
-      expect(fs.existsSync(path.join(cortexPath, "codex.json"))).toBe(true);
+      expect(fs.existsSync(path.join(phrenPath, "codex.json"))).toBe(true);
 
       // Wrapper installed for copilot and codex but NOT cursor
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(true);
@@ -282,9 +282,9 @@ describe("hooks", () => {
     it("hookTools defaults to hooksEnabled when key is missing", () => {
       setupFakeBinaries();
 
-      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: true, hookTools: { cursor: false } }));
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true, hookTools: { cursor: false } }));
 
-      configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor"]) });
 
       // copilot not in hookTools, defaults to hooksEnabled=true
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(true);
@@ -295,9 +295,9 @@ describe("hooks", () => {
     it("hookTools ignored when hooksEnabled is false", () => {
       setupFakeBinaries();
 
-      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: false, hookTools: { copilot: true, cursor: true, codex: true } }));
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: false, hookTools: { copilot: true, cursor: true, codex: true } }));
 
-      configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       // All wrappers skipped because hooksEnabled is false
       for (const tool of ["copilot", "cursor", "codex"]) {
@@ -309,9 +309,9 @@ describe("hooks", () => {
       setupFakeBinaries();
 
       // Write preferences with hooks enabled
-      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: true }));
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true }));
 
-      configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
 
       const wrapper = path.join(homeDir, ".local", "bin", "codex");
       expect(fs.existsSync(wrapper)).toBe(true);
@@ -319,7 +319,7 @@ describe("hooks", () => {
 
     it("Set param only configures the specified tools", () => {
       setupFakeBinaries();
-      const configured = configureAllHooks(cortexPath, { tools: new Set(["cursor"]) });
+      const configured = configureAllHooks(phrenPath, { tools: new Set(["cursor"]) });
 
       expect(configured).toContain("Cursor");
       expect(configured).not.toContain("Copilot CLI");
@@ -327,13 +327,13 @@ describe("hooks", () => {
 
       // Only cursor config should exist
       expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(true);
-      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "cortex.json"))).toBe(false);
-      expect(fs.existsSync(path.join(cortexPath, "codex.json"))).toBe(false);
+      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "phren.json"))).toBe(false);
+      expect(fs.existsSync(path.join(phrenPath, "codex.json"))).toBe(false);
     });
 
     it("allTools option configures all three tools", () => {
       setupFakeBinaries();
-      const configured = configureAllHooks(cortexPath, { allTools: true });
+      const configured = configureAllHooks(phrenPath, { allTools: true });
 
       expect(configured).toContain("Copilot CLI");
       expect(configured).toContain("Cursor");
@@ -342,7 +342,7 @@ describe("hooks", () => {
 
     it.skipIf(process.platform === "win32")("wrappers are written to ~/.local/bin/<tool>", () => {
       setupFakeBinaries();
-      configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       for (const tool of ["copilot", "cursor", "codex"]) {
         const expected = path.join(homeDir, ".local", "bin", tool);
@@ -355,7 +355,7 @@ describe("hooks", () => {
 
     it.skipIf(process.platform === "win32")("wrapper content references the real binary", () => {
       setupFakeBinaries();
-      configureAllHooks(cortexPath, { tools: new Set(["codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
 
       const wrapper = path.join(homeDir, ".local", "bin", "codex");
       if (fs.existsSync(wrapper)) {
@@ -368,7 +368,7 @@ describe("hooks", () => {
 
     it("wrapper scripts pass sh -n syntax check", () => {
       setupFakeBinaries();
-      configureAllHooks(cortexPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       const { execFileSync } = require("child_process");
       for (const tool of ["copilot", "cursor", "codex"]) {
@@ -383,7 +383,7 @@ describe("hooks", () => {
     });
 
     it("buildLifecycleCommands references node entry script", () => {
-      const cmds = buildLifecycleCommands(cortexPath);
+      const cmds = buildLifecycleCommands(phrenPath);
       // Should use node with a resolved path to index.js (not npx) when built
       const usesNode = cmds.sessionStart.includes("node ");
       const usesNpx = cmds.sessionStart.includes("npx ");
@@ -452,60 +452,60 @@ describe("hooks", () => {
     it("buildLifecycleCommands uses npx fallback when local entry script is missing", () => {
       if (fs.existsSync(localEntryScript)) fs.rmSync(localEntryScript, { force: true });
 
-      const cmds = buildLifecycleCommands('/tmp/my "cortex" path\\nested');
-      expect(cmds.sessionStart).toMatch(/npx -y @alaarab\/cortex@.+ hook-session-start/);
-      expect(cmds.userPromptSubmit).toMatch(/npx -y @alaarab\/cortex@.+ hook-prompt/);
-      expect(cmds.stop).toMatch(/npx -y @alaarab\/cortex@.+ hook-stop/);
-      expect(cmds.sessionStart).toContain('/tmp/my \\"cortex\\" path\\\\nested');
+      const cmds = buildLifecycleCommands('/tmp/my "phren" path\\nested');
+      expect(cmds.sessionStart).toMatch(/npx -y @alaarab\/phren@.+ hook-session-start/);
+      expect(cmds.userPromptSubmit).toMatch(/npx -y @alaarab\/phren@.+ hook-prompt/);
+      expect(cmds.stop).toMatch(/npx -y @alaarab\/phren@.+ hook-stop/);
+      expect(cmds.sessionStart).toContain('/tmp/my \\"phren\\" path\\\\nested');
     });
 
     it("buildLifecycleCommands uses local node entry script when available", () => {
       fs.writeFileSync(localEntryScript, "// test entry for hooks unit tests\n");
 
-      const cmds = buildLifecycleCommands("/tmpcortex");
+      const cmds = buildLifecycleCommands("/tmpphren");
       expect(cmds.sessionStart).toContain(" node ");
       expect(cmds.userPromptSubmit).toContain(" node ");
       expect(cmds.stop).toContain(" node ");
       expect(cmds.sessionStart).toContain("index.js");
-      expect(cmds.sessionStart).not.toContain("npx cortex");
+      expect(cmds.sessionStart).not.toContain("npx phren");
     });
 
     it("configureAllHooks() ignores stale cursor config without a real cursor binary", () => {
       const tmp = makeTempDir("hooks-config-detect-");
       const tmpRoot = tmp.path;
       const homeDir = path.join(tmpRoot, "home");
-      const cortexPath = path.join(tmpRoot, "cortex");
+      const phrenPath = path.join(tmpRoot, "phren");
       process.env.HOME = homeDir;
       process.env.USERPROFILE = homeDir;
       process.env.PATH = "";
-      fs.mkdirSync(cortexPath, { recursive: true });
+      fs.mkdirSync(phrenPath, { recursive: true });
       fs.mkdirSync(path.join(homeDir, ".cursor"), { recursive: true });
       fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
       fs.mkdirSync(path.join(homeDir, ".local", "share", "gh", "extensions", "gh-copilot"), { recursive: true });
-      fs.mkdirSync(path.join(cortexPath, ".governance"), { recursive: true });
-      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: false }));
+      fs.mkdirSync(path.join(phrenPath, ".governance"), { recursive: true });
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: false }));
 
-      const configured = configureAllHooks(cortexPath);
+      const configured = configureAllHooks(phrenPath);
       expect(configured).toEqual(["Copilot CLI", "Codex"]);
 
-      const lifecycle = buildLifecycleCommands(cortexPath);
+      const lifecycle = buildLifecycleCommands(phrenPath);
       const sharedLifecycle = buildSharedLifecycleCommands();
-      const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "cortex.json"), "utf8"));
+      const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "phren.json"), "utf8"));
       expect(copilot.hooks.sessionStart[0].bash).toContain(lifecycle.sessionStart);
       expect(copilot.hooks.userPromptSubmitted[0].bash).toContain(lifecycle.userPromptSubmit);
       expect(copilot.hooks.sessionEnd[0].bash).toContain(lifecycle.stop);
-      expect(copilot.hooks.sessionStart[0].bash).toContain("CORTEX_HOOK_TOOL");
+      expect(copilot.hooks.sessionStart[0].bash).toContain("PHREN_HOOK_TOOL");
       expect(copilot.hooks.sessionStart[0].bash).toContain("copilot");
 
       expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(false);
 
-      const codex = JSON.parse(fs.readFileSync(path.join(cortexPath, "codex.json"), "utf8"));
+      const codex = JSON.parse(fs.readFileSync(path.join(phrenPath, "codex.json"), "utf8"));
       expect(codex.hooks.SessionStart[0].command).toContain(sharedLifecycle.sessionStart);
       expect(codex.hooks.UserPromptSubmit[0].command).toContain(sharedLifecycle.userPromptSubmit);
       expect(codex.hooks.Stop[0].command).toContain(sharedLifecycle.stop);
-      expect(codex.hooks.SessionStart[0].command).toContain("CORTEX_HOOK_TOOL");
+      expect(codex.hooks.SessionStart[0].command).toContain("PHREN_HOOK_TOOL");
       expect(codex.hooks.SessionStart[0].command).toContain("codex");
-      expect(codex.hooks.SessionStart[0].command).not.toContain(cortexPath);
+      expect(codex.hooks.SessionStart[0].command).not.toContain(phrenPath);
       expect(codex.hooks.SessionStart[0].command).not.toContain(".npm/_npx");
 
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(false);
@@ -519,13 +519,13 @@ describe("hooks", () => {
   describe("custom integration hooks (#218)", () => {
     let tmpRoot: string;
     let tmpCleanup: () => void;
-    let cortexPath: string;
+    let phrenPath: string;
 
     beforeEach(() => {
-      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-custom-hooks-test-"));
-      cortexPath = path.join(tmpRoot, "cortex");
-      fs.mkdirSync(path.join(cortexPath, ".runtime"), { recursive: true });
-      initTestCortexRoot(cortexPath);
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-custom-hooks-test-"));
+      phrenPath = path.join(tmpRoot, "phren");
+      fs.mkdirSync(path.join(phrenPath, ".runtime"), { recursive: true });
+      initTestPhrenRoot(phrenPath);
     });
 
     afterEach(() => {
@@ -533,23 +533,23 @@ describe("hooks", () => {
     });
 
     it("readCustomHooks returns empty array when no preferences file exists", () => {
-      fs.rmSync(path.join(cortexPath, ".governance"), { recursive: true, force: true });
-      expect(readCustomHooks(cortexPath)).toEqual([]);
+      fs.rmSync(path.join(phrenPath, ".governance"), { recursive: true, force: true });
+      expect(readCustomHooks(phrenPath)).toEqual([]);
     });
 
     it("readCustomHooks returns empty array when customHooks is not set", () => {
-      writeInstallPrefs(cortexPath, JSON.stringify({ hooksEnabled: true }));
-      expect(readCustomHooks(cortexPath)).toEqual([]);
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true }));
+      expect(readCustomHooks(phrenPath)).toEqual([]);
     });
 
     it("readCustomHooks parses valid custom hooks", () => {
-      writeInstallPrefs(cortexPath, JSON.stringify({
+      writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "echo saving" },
             { event: "post-search", command: "echo searched", timeout: 3000 },
           ],
         }));
-      const hooks = readCustomHooks(cortexPath);
+      const hooks = readCustomHooks(phrenPath);
       expect(hooks).toHaveLength(2);
       expect(hooks[0].event).toBe("pre-save");
       expect(hooks[0].command).toBe("echo saving");
@@ -557,7 +557,7 @@ describe("hooks", () => {
     });
 
     it("readCustomHooks filters out invalid events", () => {
-      writeInstallPrefs(cortexPath, JSON.stringify({
+      writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "echo ok" },
             { event: "invalid-event", command: "echo bad" },
@@ -565,43 +565,43 @@ describe("hooks", () => {
             { command: "echo no-event" },
           ],
         }));
-      const hooks = readCustomHooks(cortexPath);
+      const hooks = readCustomHooks(phrenPath);
       expect(hooks).toHaveLength(1);
       expect(hooks[0].event).toBe("pre-save");
     });
 
     it("runCustomHooks runs matching hooks and returns count", () => {
-      writeInstallPrefs(cortexPath, JSON.stringify({
+      writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
             { event: "post-finding", command: "touch post-finding-ran" },
             { event: "pre-save", command: "echo not-this-one" },
           ],
         }));
-      const result = runCustomHooks(cortexPath, "post-finding");
+      const result = runCustomHooks(phrenPath, "post-finding");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(0);
-      expect(fs.existsSync(path.join(cortexPath, "post-finding-ran"))).toBe(true);
+      expect(fs.existsSync(path.join(phrenPath, "post-finding-ran"))).toBe(true);
     });
 
     it("runCustomHooks passes environment variables", () => {
       if (process.platform === "win32") return; // echo $VAR is POSIX sh syntax; cmd.exe does not expand $VAR
-      const envFile = path.join(cortexPath, "env-check.txt");
-      writeInstallPrefs(cortexPath, JSON.stringify({
+      const envFile = path.join(phrenPath, "env-check.txt");
+      writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
-            { event: "post-search", command: `echo $CORTEX_QUERY > "${envFile}"` },
+            { event: "post-search", command: `echo $PHREN_QUERY > "${envFile}"` },
           ],
         }));
-      runCustomHooks(cortexPath, "post-search", { CORTEX_QUERY: "test-query" });
+      runCustomHooks(phrenPath, "post-search", { PHREN_QUERY: "test-query" });
       expect(fs.readFileSync(envFile, "utf8").trim()).toBe("test-query");
     });
 
     it("runCustomHooks captures errors from failing commands", () => {
-      writeInstallPrefs(cortexPath, JSON.stringify({
+      writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "exit 1" },
           ],
         }));
-      const result = runCustomHooks(cortexPath, "pre-save");
+      const result = runCustomHooks(phrenPath, "pre-save");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0].message).toContain("pre-save");
@@ -609,12 +609,12 @@ describe("hooks", () => {
     });
 
     it("runCustomHooks returns 0 when no hooks match the event", () => {
-      writeInstallPrefs(cortexPath, JSON.stringify({
+      writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
             { event: "pre-save", command: "echo something" },
           ],
         }));
-      const result = runCustomHooks(cortexPath, "post-search");
+      const result = runCustomHooks(phrenPath, "post-search");
       expect(result.ran).toBe(0);
       expect(result.errors).toHaveLength(0);
     });
@@ -639,12 +639,12 @@ describe("hooks", () => {
       if (!redirectAddress || typeof redirectAddress === "string") throw new Error("failed to bind redirect server");
 
       try {
-        writeInstallPrefs(cortexPath, JSON.stringify({
+        writeInstallPrefs(phrenPath, JSON.stringify({
             customHooks: [
               { event: "post-search", webhook: `http://127.0.0.1:${redirectAddress.port}/redirect` },
             ],
           }));
-        const result = runCustomHooks(cortexPath, "post-search");
+        const result = runCustomHooks(phrenPath, "post-search");
         expect(result.ran).toBe(1);
         expect(result.errors).toHaveLength(0);
         await new Promise((resolve) => setTimeout(resolve, 150));
@@ -659,13 +659,13 @@ describe("hooks", () => {
   describe("runCustomHooks error structure", () => {
     let tmpRoot: string;
     let tmpCleanup: () => void;
-    let cortexPath: string;
+    let phrenPath: string;
 
     beforeEach(() => {
-      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hooks-error-structure-test-"));
-      cortexPath = path.join(tmpRoot, "cortex");
-      fs.mkdirSync(path.join(cortexPath, ".runtime"), { recursive: true });
-      initTestCortexRoot(cortexPath);
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-hooks-error-structure-test-"));
+      phrenPath = path.join(tmpRoot, "phren");
+      fs.mkdirSync(path.join(phrenPath, ".runtime"), { recursive: true });
+      initTestPhrenRoot(phrenPath);
     });
 
     afterEach(() => {
@@ -673,12 +673,12 @@ describe("hooks", () => {
     });
 
     it("returns HookError[] with code and message properties, not plain strings", () => {
-      writeInstallPrefs(cortexPath, JSON.stringify({
+      writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
             { event: "pre-index", command: "exit 42" },
           ],
         }));
-      const result = runCustomHooks(cortexPath, "pre-index");
+      const result = runCustomHooks(phrenPath, "pre-index");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(1);
 
@@ -693,43 +693,44 @@ describe("hooks", () => {
     });
 
     it("successful hooks produce no errors", () => {
-      writeInstallPrefs(cortexPath, JSON.stringify({
+      writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
             { event: "post-save", command: "true" },
           ],
         }));
-      const result = runCustomHooks(cortexPath, "post-save");
+      const result = runCustomHooks(phrenPath, "post-save");
       expect(result.ran).toBe(1);
       expect(result.errors).toHaveLength(0);
     });
 
-    it("failed hook writes to debug log when CORTEX_DEBUG is set", () => {
-      const origDebug = process.env.CORTEX_DEBUG;
-      const origCortexPath = process.env.CORTEX_PATH;
+    it("failed hook writes to debug log when PHREN_DEBUG is set", () => {
+      const origDebug = process.env.PHREN_DEBUG;
+      const origPhrenPath = process.env.PHREN_PATH;
       try {
-        // Enable debug logging and point to our temp dir
-        process.env.CORTEX_DEBUG = "1";
-        process.env.CORTEX_PATH = cortexPath;
+        // debugLog() still reads PHREN_DEBUG and getPhrenPath() still reads PHREN_PATH
+        // until phren-paths.ts is fully renamed to phren
+        process.env.PHREN_DEBUG = "1";
+        process.env.PHREN_PATH = phrenPath;
 
-        writeInstallPrefs(cortexPath, JSON.stringify({
+        writeInstallPrefs(phrenPath, JSON.stringify({
             customHooks: [
               { event: "pre-finding", command: "exit 99" },
             ],
           }));
 
-        runCustomHooks(cortexPath, "pre-finding");
+        runCustomHooks(phrenPath, "pre-finding");
 
         // Check that debug.log was written
-        const debugLogPath = path.join(cortexPath, ".runtime", "debug.log");
+        const debugLogPath = path.join(phrenPath, ".runtime", "debug.log");
         expect(fs.existsSync(debugLogPath)).toBe(true);
         const logContent = fs.readFileSync(debugLogPath, "utf8");
         expect(logContent).toContain("runCustomHooks");
         expect(logContent).toContain("pre-finding");
       } finally {
-        if (origDebug === undefined) delete process.env.CORTEX_DEBUG;
-        else process.env.CORTEX_DEBUG = origDebug;
-        if (origCortexPath === undefined) delete process.env.CORTEX_PATH;
-        else process.env.CORTEX_PATH = origCortexPath;
+        if (origDebug === undefined) delete process.env.PHREN_DEBUG;
+        else process.env.PHREN_DEBUG = origDebug;
+        if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+        else process.env.PHREN_PATH = origPhrenPath;
       }
     });
   });
@@ -806,37 +807,37 @@ describe("Stop-word bigrams (buildRobustFtsQuery)", () => {
   });
 });
 
-describe("Git-context filter opt-in (CORTEX_FEATURE_GIT_CONTEXT_FILTER)", () => {
-  const origEnv = process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
+describe("Git-context filter opt-in (PHREN_FEATURE_GIT_CONTEXT_FILTER)", () => {
+  const origEnv = process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
 
   afterEach(() => {
     if (origEnv === undefined) {
-      delete process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
+      delete process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
     } else {
-      process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = origEnv;
+      process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = origEnv;
     }
   });
 
   it("env var is not set by default", () => {
-    delete process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
+    delete process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
     // Without the env var, git-context filtering should be disabled
     // We verify the env var check pattern works correctly
-    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER).toBeUndefined();
-    // The guard `process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === 'true'` evaluates false
-    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
+    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER).toBeUndefined();
+    // The guard `process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === 'true'` evaluates false
+    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
   });
 
   it("env var set to 'true' enables the filter", () => {
-    process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = "true";
-    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(true);
+    process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = "true";
+    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(true);
   });
 
   it("env var set to other values does not enable the filter", () => {
-    process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = "1";
-    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
+    process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = "1";
+    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
 
-    process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = "yes";
-    expect(process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
+    process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = "yes";
+    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
   });
 });
 
@@ -878,7 +879,7 @@ describe("Token budget overflow after reorder (selectSnippets)", () => {
   });
 });
 
-describe("CortexError codes (shared.ts)", () => {
+describe("PhrenError codes (shared.ts)", () => {
   it("exports all expected error code values as strings", () => {
     const expectedCodes = [
       "NOT_FOUND",
@@ -890,8 +891,8 @@ describe("CortexError codes (shared.ts)", () => {
     ];
 
     for (const code of expectedCodes) {
-      expect(CortexError).toHaveProperty(code);
-      expect(typeof (CortexError as Record<string, unknown>)[code]).toBe("string");
+      expect(PhrenError).toHaveProperty(code);
+      expect(typeof (PhrenError as Record<string, unknown>)[code]).toBe("string");
     }
   });
 
@@ -912,7 +913,7 @@ describe("CortexError codes (shared.ts)", () => {
       "NETWORK_ERROR",
     ];
 
-    const actualKeys = Object.keys(CortexError);
+    const actualKeys = Object.keys(PhrenError);
     for (const code of allCodes) {
       expect(actualKeys).toContain(code);
     }
@@ -921,17 +922,17 @@ describe("CortexError codes (shared.ts)", () => {
   });
 
   it("values are the same as their keys (const enum pattern)", () => {
-    for (const [key, value] of Object.entries(CortexError)) {
+    for (const [key, value] of Object.entries(PhrenError)) {
       expect(key).toBe(value);
     }
   });
 
-  it("CortexError is frozen (as const)", () => {
+  it("PhrenError is frozen (as const)", () => {
     // as const makes the object readonly at compile time;
     // verify the values are stable string literals
-    expect(CortexError.NOT_FOUND).toBe("NOT_FOUND");
-    expect(CortexError.VALIDATION_ERROR).toBe("VALIDATION_ERROR");
-    expect(CortexError.INDEX_ERROR).toBe("INDEX_ERROR");
-    expect(CortexError.NETWORK_ERROR).toBe("NETWORK_ERROR");
+    expect(PhrenError.NOT_FOUND).toBe("NOT_FOUND");
+    expect(PhrenError.VALIDATION_ERROR).toBe("VALIDATION_ERROR");
+    expect(PhrenError.INDEX_ERROR).toBe("INDEX_ERROR");
+    expect(PhrenError.NETWORK_ERROR).toBe("NETWORK_ERROR");
   });
 });

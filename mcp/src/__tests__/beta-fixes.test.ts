@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
-import { escapeRegex, escapeLike } from "../shared-entity-graph.js";
+import { escapeRegex, escapeLike } from "../shared-fragment-graph.js";
 import { applyTrustFilter, markStaleCitations } from "../shared-retrieval.js";
 import { autoArchiveToReference, countActiveFindings } from "../content-archive.js";
 import type { DocRow } from "../shared-index.js";
@@ -57,7 +57,7 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 
@@ -122,14 +122,14 @@ describe("markStaleCitations", () => {
   it("appends [stale citation] when cited file does not exist", () => {
     const snippet = [
       "- Some finding about a deleted file",
-      `  <!-- cortex:cite {"created_at":"2025-01-01","file":"/nonexistent/path/deleted.ts"} -->`,
+      `  <!-- phren:cite {"created_at":"2025-01-01","file":"/nonexistent/path/deleted.ts"} -->`,
     ].join("\n");
 
     const result = markStaleCitations(snippet);
     expect(result).toContain("[stale citation]");
     expect(result).toContain("- Some finding about a deleted file [stale citation]");
     // The citation comment line should be skipped
-    expect(result).not.toContain("cortex:cite");
+    expect(result).not.toContain("phren:cite");
   });
 
   it("does not mark citation when cited file exists", () => {
@@ -137,12 +137,12 @@ describe("markStaleCitations", () => {
     const existingFile = __filename;
     const snippet = [
       "- Finding with valid citation",
-      `  <!-- cortex:cite {"created_at":"2025-01-01","file":"${existingFile.replace(/\\/g, "\\\\")}"} -->`,
+      `  <!-- phren:cite {"created_at":"2025-01-01","file":"${existingFile.replace(/\\/g, "\\\\")}"} -->`,
     ].join("\n");
 
     const result = markStaleCitations(snippet);
     expect(result).not.toContain("[stale citation]");
-    expect(result).toContain("cortex:cite");
+    expect(result).toContain("phren:cite");
   });
 
   it("passes through lines without citations unchanged", () => {
@@ -158,8 +158,8 @@ describe("autoArchiveToReference guards", () => {
   let tmp: { path: string; cleanup: () => void };
   const PROJECT = "archivetest";
 
-  function seedProject(cortexPath: string) {
-    const dir = path.join(cortexPath, PROJECT);
+  function seedProject(phrenPath: string) {
+    const dir = path.join(phrenPath, PROJECT);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "summary.md"), `# ${PROJECT}\n`);
   }
@@ -171,7 +171,7 @@ describe("autoArchiveToReference guards", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 

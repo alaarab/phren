@@ -1,10 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, runtimeFile, cortexOk, cortexErr, CortexError, appendAuditLog, tryUnlink, type CortexResult } from "./shared.js";
+import { debugLog, runtimeFile, phrenOk, phrenErr, PhrenError, appendAuditLog, tryUnlink, type PhrenResult } from "./shared.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import { withFileLock } from "./shared-governance.js";
 import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "./project-topics.js";
+import { isCitationLine, isArchiveStart, isArchiveEnd, stripComments } from "./content-metadata.js";
 
 /**
  * Count active (non-archived) finding entries in FINDINGS.md content.
@@ -15,8 +16,8 @@ export function countActiveFindings(content: string): number {
   let inArchive = false;
   let count = 0;
   for (const line of content.split("\n")) {
-    if (line.includes("<!-- cortex:archive:start -->") || line.includes("<details>")) { inArchive = true; continue; }
-    if (line.includes("<!-- cortex:archive:end -->") || line.includes("</details>")) { inArchive = false; continue; }
+    if (isArchiveStart(line)) { inArchive = true; continue; }
+    if (isArchiveEnd(line)) { inArchive = false; continue; }
     if (!inArchive && line.startsWith("- ")) count++;
   }
   return count;
@@ -40,8 +41,8 @@ function parseActiveEntries(content: string): ParsedEntry[] {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (line.includes("<!-- cortex:archive:start -->") || line.includes("<details>")) { inArchive = true; continue; }
-    if (line.includes("<!-- cortex:archive:end -->") || line.includes("</details>")) { inArchive = false; continue; }
+    if (isArchiveStart(line)) { inArchive = true; continue; }
+    if (isArchiveEnd(line)) { inArchive = false; continue; }
     if (inArchive) continue;
 
     const heading = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
@@ -49,7 +50,7 @@ function parseActiveEntries(content: string): ParsedEntry[] {
 
     if (line.startsWith("- ") && currentDate) {
       const next = lines[i + 1] || "";
-      const hasCitation = /^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->/.test(next);
+      const hasCitation = isCitationLine(next);
       entries.push({
         date: currentDate,
         bullet: line,
@@ -74,7 +75,7 @@ function parseActiveEntries(content: string): ParsedEntry[] {
  */
 function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
   if (!fs.existsSync(referenceDir)) return false;
-  const normalizedBullet = bullet.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().toLowerCase();
+  const normalizedBullet = stripComments(bullet).replace(/^-\s+/, "").trim().toLowerCase();
   if (!normalizedBullet) return false;
   try {
     const stack = [referenceDir];
@@ -90,13 +91,13 @@ function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
         const content = fs.readFileSync(fullPath, "utf8");
         for (const line of content.split("\n")) {
           if (!line.startsWith("- ")) continue;
-          const normalizedLine = line.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().toLowerCase();
+          const normalizedLine = stripComments(line).replace(/^-\s+/, "").trim().toLowerCase();
           if (normalizedLine === normalizedBullet) return true;
         }
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] isDuplicateInReference: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isDuplicateInReference: ${errorMessage(err)}\n`);
   }
   return false;
 }
@@ -107,20 +108,20 @@ function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
  * Returns the number of entries archived.
  */
 export function autoArchiveToReference(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   keepCount: number,
-): CortexResult<number> {
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+): PhrenResult<number> {
+  if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
+  const resolvedDir = safeProjectPath(phrenPath, project);
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const learningsPath = path.join(resolvedDir, "FINDINGS.md");
-  if (!fs.existsSync(learningsPath)) return cortexOk(0);
+  if (!fs.existsSync(learningsPath)) return phrenOk(0);
 
   // Consolidation lock to prevent concurrent runs for the same project (atomic create via wx flag).
   // Use a project-specific lock so consolidating multiple projects in parallel is allowed.
   const STALE_LOCK_MS = 600_000; // 10 min
-  const lockFile = runtimeFile(cortexPath, `consolidation-${project}.lock`);
+  const lockFile = runtimeFile(phrenPath, `consolidation-${project}.lock`);
   try {
     fs.writeFileSync(lockFile, String(Date.now()), { flag: "wx" });
   } catch (e: unknown) {
@@ -128,7 +129,7 @@ export function autoArchiveToReference(
       try {
         const stat = fs.statSync(lockFile);
         if (Date.now() - stat.mtimeMs < STALE_LOCK_MS) {
-          return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
+          return phrenErr("Consolidation already running", PhrenError.LOCK_TIMEOUT);
         }
         // Stale lock: delete then re-create atomically with wx.
         tryUnlink(lockFile);
@@ -136,10 +137,10 @@ export function autoArchiveToReference(
         try {
           fs.writeFileSync(lockFile, String(Date.now()), { flag: "wx" });
         } catch (wxErr: unknown) {
-          if ((wxErr as NodeJS.ErrnoException).code === "EEXIST") return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT);
+          if ((wxErr as NodeJS.ErrnoException).code === "EEXIST") return phrenErr("Consolidation already running", PhrenError.LOCK_TIMEOUT);
           throw wxErr;
         }
-      } catch { return cortexErr("Consolidation already running", CortexError.LOCK_TIMEOUT); }
+      } catch { return phrenErr("Consolidation already running", PhrenError.LOCK_TIMEOUT); }
     } else { throw e; }
   }
 
@@ -149,13 +150,13 @@ export function autoArchiveToReference(
   return withFileLock(learningsPath, () => {
   const content = fs.readFileSync(learningsPath, "utf8");
   const entries = parseActiveEntries(content);
-  if (entries.length <= keepCount) return cortexOk(0);
+  if (entries.length <= keepCount) return phrenOk(0);
 
   const toArchive = entries.slice(0, entries.length - keepCount);
 
   // Guard: skip entries already present in reference tier (prevent double-archive)
   const referenceDir = path.join(resolvedDir, "reference");
-  const { topics } = readProjectTopics(cortexPath, project);
+  const { topics } = readProjectTopics(phrenPath, project);
   const today = new Date().toISOString().slice(0, 10);
   const actuallyArchived: ParsedEntry[] = [];
   for (const entry of toArchive) {
@@ -180,7 +181,7 @@ export function autoArchiveToReference(
 
   const successfulTopics = new Set<string>();
   for (const [topicSlug, topicEntries] of byTopic) {
-    const filePath = topicReferencePath(cortexPath, project, topicSlug);
+    const filePath = topicReferencePath(phrenPath, project, topicSlug);
     const topic = topics.find((item) => item.slug === topicSlug) ?? topics.find((item) => item.slug === "general");
     if (!filePath || !topic) continue;
     try {
@@ -247,16 +248,16 @@ export function autoArchiveToReference(
   const skippedCount = alreadyArchivedEntries.length;
   const failedTopics = [...byTopic.keys()].filter(t => !successfulTopics.has(t));
   appendAuditLog(
-    cortexPath,
+    phrenPath,
     "auto_archive_reference",
     `project=${project} archived=${successfullyArchived.length} skipped_duplicates=${skippedCount}${failedTopics.length ? ` failed_topics=${failedTopics.join(",")}` : ""} topics=${[...successfulTopics].join(",")}`
   );
 
-  return cortexOk(safeToRemove.length);
+  return phrenOk(safeToRemove.length);
   });
   } finally {
     try { fs.unlinkSync(lockFile); } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] autoArchiveToReference unlockFile: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] autoArchiveToReference unlockFile: ${errorMessage(err)}\n`);
     }
   }
 }

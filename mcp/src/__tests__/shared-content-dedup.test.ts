@@ -34,7 +34,7 @@ describe("isDuplicateFinding", () => {
   });
 
   it("skips superseded entries when checking duplicates", () => {
-    const existing = '- Old approach to auth <!-- cortex:status "superseded" -->\n- Use parameterized queries for SQL';
+    const existing = '- Old approach to auth <!-- phren:status "superseded" -->\n- Use parameterized queries for SQL';
     expect(isDuplicateFinding(existing, "- Old approach to auth with minor changes")).toBe(false);
   });
 });
@@ -67,13 +67,13 @@ describe("addFindingsToFile rejects secrets", () => {
   let tmpDir: string;
   let tmpCleanup: (() => void) | undefined;
 
-  function makeCortex(): string {
-    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-bulk-secrets-"));
+  function makePhren(): string {
+    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-bulk-secrets-"));
     return tmpDir;
   }
 
-  function makeProject(cortexDir: string, name: string, files: Record<string, string>): void {
-    const dir = path.join(cortexDir, name);
+  function makeProject(phrenDir: string, name: string, files: Record<string, string>): void {
+    const dir = path.join(phrenDir, name);
     fs.mkdirSync(dir, { recursive: true });
     for (const [file, content] of Object.entries(files)) {
       fs.writeFileSync(path.join(dir, file), content);
@@ -81,7 +81,7 @@ describe("addFindingsToFile rejects secrets", () => {
   }
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     if (tmpCleanup) {
       tmpCleanup();
       tmpCleanup = undefined;
@@ -89,11 +89,11 @@ describe("addFindingsToFile rejects secrets", () => {
   });
 
   it("puts secret-containing findings in rejected[], not added[]", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "myproj", { "summary.md": "# myproj\n" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "myproj", { "summary.md": "# myproj\n" });
 
-    const result = addFindingsToFile(cortex, "myproj", [
+    const result = addFindingsToFile(phren, "myproj", [
       "Always use parameterized queries",
       "Use AKIAIOSFODNN7EXAMPLE for the API",
       "Cache invalidation is hard",
@@ -113,18 +113,18 @@ describe("checkSemanticDedup", () => {
   let tmpDir: string;
   let tmpCleanup: (() => void) | undefined;
 
-  function makeCortex(): string {
-    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-semantic-dedup-"));
+  function makePhren(): string {
+    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-semantic-dedup-"));
     return tmpDir;
   }
 
   beforeEach(() => {
-    process.env.CORTEX_FEATURE_SEMANTIC_DEDUP = "1";
+    process.env.PHREN_FEATURE_SEMANTIC_DEDUP = "1";
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_FEATURE_SEMANTIC_DEDUP;
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+    delete process.env.PHREN_ACTOR;
     vi.restoreAllMocks();
     if (tmpCleanup) {
       tmpCleanup();
@@ -133,19 +133,19 @@ describe("checkSemanticDedup", () => {
   });
 
   it("returns false when feature flag is off", async () => {
-    delete process.env.CORTEX_FEATURE_SEMANTIC_DEDUP;
-    const cortex = makeCortex();
-    const result = await checkSemanticDedup(cortex, "proj", "some finding");
+    delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+    const phren = makePhren();
+    const result = await checkSemanticDedup(phren, "proj", "some finding");
     expect(result).toBe(false);
   });
 
   it("uses cache on second call (cache hit)", async () => {
-    process.env.CORTEX_FEATURE_SEMANTIC_DEDUP = "1";
-    const cortex = makeCortex();
+    process.env.PHREN_FEATURE_SEMANTIC_DEDUP = "1";
+    const phren = makePhren();
     // Create project with a finding that has moderate Jaccard overlap
-    const projDir = path.join(cortex, "proj");
+    const projDir = path.join(phren, "proj");
     fs.mkdirSync(projDir, { recursive: true });
-    fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+    fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
     // a and b: Jaccard ~0.4 (4 shared tokens: always/restart/server/environment out of 10 union)
     // jaccardTokenize(a) = {always,restart,server,after,changing,environment,configuration} = 7
     // jaccardTokenize(b) = {always,restart,server,when,modifying,environment,variables} = 7
@@ -160,13 +160,13 @@ describe("checkSemanticDedup", () => {
     // Pre-populate the cache with a result
     const crypto = await import("node:crypto");
     const key = crypto.createHash("sha256").update(a + "|||" + b).digest("hex");
-    const cachePath = path.join(cortex, ".runtime", "dedup-cache.json");
+    const cachePath = path.join(phren, ".runtime", "dedup-cache.json");
     fs.writeFileSync(cachePath, JSON.stringify({ [key]: { result: true, ts: Date.now() } }));
 
     // This should return true from cache without calling Anthropic
-    const result = await checkSemanticDedup(cortex, "proj", a);
+    const result = await checkSemanticDedup(phren, "proj", a);
     expect(result).toBe(true);
 
-    delete process.env.CORTEX_FEATURE_SEMANTIC_DEDUP;
+    delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
   });
 });

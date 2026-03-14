@@ -72,7 +72,7 @@ describe("searchDocumentsAsync vector gating", () => {
       ["proj", "three.md", "summary", "alpha beta gamma", "/tmp/three.md"],
     ]);
 
-    await searchDocumentsAsync(db, "\"alpha\"", "alpha beta gamma", "alpha beta gamma", null, true, "/tmpcortex");
+    await searchDocumentsAsync(db, "\"alpha\"", "alpha beta gamma", "alpha beta gamma", null, true, "/tmpphren");
 
     expect(vectorFallback).not.toHaveBeenCalled();
   });
@@ -89,7 +89,7 @@ describe("searchDocumentsAsync vector gating", () => {
       "semantic search setup during init with ollama",
       null,
       true,
-      "/tmpcortex"
+      "/tmpphren"
     );
 
     expect(vectorFallback).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe("searchDocumentsAsync vector gating", () => {
   it("runs vector fallback when lexical retrieval is empty", async () => {
     const db = makeDb([]);
 
-    await searchDocumentsAsync(db, "\"webhook\"", "external webhook alerts discord", "external webhook alerts discord", null, true, "/tmpcortex");
+    await searchDocumentsAsync(db, "\"webhook\"", "external webhook alerts discord", "external webhook alerts discord", null, true, "/tmpphren");
 
     expect(vectorFallback).toHaveBeenCalledOnce();
   });
@@ -117,11 +117,11 @@ describe("searchDocumentsAsync vector gating", () => {
           return [{
             columns: ["project", "filename", "type", "content", "path"],
             values: [[
-              "cortex",
+              "phren",
               "FINDINGS.md",
               "findings",
               "Semantic opt-in during init should finish at the dependency level",
-              "/tmpcortex/FINDINGS.md",
+              "/tmpphren/FINDINGS.md",
             ]],
           }];
         }
@@ -138,10 +138,10 @@ describe("searchDocumentsAsync vector gating", () => {
       "semantic search setup during init ollama",
       null,
       true,
-      "/tmpcortex"
+      "/tmpphren"
     );
 
-    expect(rows?.[0]?.path).toBe("/tmpcortex/FINDINGS.md");
+    expect(rows?.[0]?.path).toBe("/tmpphren/FINDINGS.md");
     expect(vectorFallback).not.toHaveBeenCalled();
   });
 });

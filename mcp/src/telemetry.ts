@@ -20,18 +20,18 @@ interface TelemetryData {
   stats: UsageStats;
 }
 
-// In-memory buffers keyed by cortexPath to batch disk writes
+// In-memory buffers keyed by phrenPath to batch disk writes
 // Keeping per-path buffers avoids silently losing events when the active path changes.
 const buffers = new Map<string, TelemetryData>();
 const pendingCounts = new Map<string, number>();
 const FLUSH_THRESHOLD = 10;
 
-function telemetryPath(cortexPath: string): string {
-  return path.join(runtimeDir(cortexPath), "telemetry.json");
+function telemetryPath(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "telemetry.json");
 }
 
-function loadFromDisk(cortexPath: string): TelemetryData {
-  const file = telemetryPath(cortexPath);
+function loadFromDisk(phrenPath: string): TelemetryData {
+  const file = telemetryPath(phrenPath);
   const defaults: TelemetryData = {
     config: { enabled: false },
     stats: { toolCalls: {}, cliCommands: {}, errors: 0, sessions: 0, lastActive: "" },
@@ -44,45 +44,45 @@ function loadFromDisk(cortexPath: string): TelemetryData {
       stats: { ...defaults.stats, ...raw.stats },
     };
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] telemetry loadFromDisk: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] telemetry loadFromDisk: ${err instanceof Error ? err.message : String(err)}\n`);
     return defaults;
   }
 }
 
-function loadTelemetry(cortexPath: string): TelemetryData {
-  const cached = buffers.get(cortexPath);
+function loadTelemetry(phrenPath: string): TelemetryData {
+  const cached = buffers.get(phrenPath);
   if (cached) return cached;
-  const data = loadFromDisk(cortexPath);
-  buffers.set(cortexPath, data);
+  const data = loadFromDisk(phrenPath);
+  buffers.set(phrenPath, data);
   return data;
 }
 
-function saveTelemetry(cortexPath: string, data: TelemetryData): void {
-  buffers.set(cortexPath, data);
-  const pending = (pendingCounts.get(cortexPath) ?? 0) + 1;
-  pendingCounts.set(cortexPath, pending);
+function saveTelemetry(phrenPath: string, data: TelemetryData): void {
+  buffers.set(phrenPath, data);
+  const pending = (pendingCounts.get(phrenPath) ?? 0) + 1;
+  pendingCounts.set(phrenPath, pending);
   if (pending >= FLUSH_THRESHOLD) {
-    flushTelemetryForPath(cortexPath);
+    flushTelemetryForPath(phrenPath);
   }
 }
 
-function flushTelemetryForPath(cortexPath: string): void {
-  const data = buffers.get(cortexPath);
-  const pending = pendingCounts.get(cortexPath) ?? 0;
+function flushTelemetryForPath(phrenPath: string): void {
+  const data = buffers.get(phrenPath);
+  const pending = pendingCounts.get(phrenPath) ?? 0;
   if (!data || pending === 0) return;
-  const file = telemetryPath(cortexPath);
+  const file = telemetryPath(phrenPath);
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] telemetry flush: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] telemetry flush: ${err instanceof Error ? err.message : String(err)}\n`);
   }
-  pendingCounts.set(cortexPath, 0);
+  pendingCounts.set(phrenPath, 0);
 }
 
 export function flushTelemetry(): void {
-  for (const cortexPath of buffers.keys()) {
-    flushTelemetryForPath(cortexPath);
+  for (const phrenPath of buffers.keys()) {
+    flushTelemetryForPath(phrenPath);
   }
 }
 
@@ -94,60 +94,60 @@ function ensureExitHook(): void {
   process.on("exit", () => flushTelemetry());
 }
 
-export function isTelemetryEnabled(cortexPath: string): boolean {
-  return loadTelemetry(cortexPath).config.enabled;
+export function isTelemetryEnabled(phrenPath: string): boolean {
+  return loadTelemetry(phrenPath).config.enabled;
 }
 
-export function setTelemetryEnabled(cortexPath: string, enabled: boolean): void {
-  const data = loadTelemetry(cortexPath);
+export function setTelemetryEnabled(phrenPath: string, enabled: boolean): void {
+  const data = loadTelemetry(phrenPath);
   data.config.enabled = enabled;
   if (enabled && !data.config.enabledAt) {
     data.config.enabledAt = new Date().toISOString();
   }
   // Config changes flush immediately
-  buffers.set(cortexPath, data);
-  pendingCounts.set(cortexPath, 1);
-  flushTelemetryForPath(cortexPath);
+  buffers.set(phrenPath, data);
+  pendingCounts.set(phrenPath, 1);
+  flushTelemetryForPath(phrenPath);
 }
 
-export function trackToolCall(cortexPath: string, toolName: string): void {
-  const data = loadTelemetry(cortexPath);
+export function trackToolCall(phrenPath: string, toolName: string): void {
+  const data = loadTelemetry(phrenPath);
   if (!data.config.enabled) return;
   ensureExitHook();
   data.stats.toolCalls[toolName] = (data.stats.toolCalls[toolName] || 0) + 1;
   data.stats.lastActive = new Date().toISOString();
-  saveTelemetry(cortexPath, data);
+  saveTelemetry(phrenPath, data);
 }
 
-export function trackCliCommand(cortexPath: string, command: string): void {
-  const data = loadTelemetry(cortexPath);
+export function trackCliCommand(phrenPath: string, command: string): void {
+  const data = loadTelemetry(phrenPath);
   if (!data.config.enabled) return;
   ensureExitHook();
   data.stats.cliCommands[command] = (data.stats.cliCommands[command] || 0) + 1;
   data.stats.lastActive = new Date().toISOString();
-  saveTelemetry(cortexPath, data);
+  saveTelemetry(phrenPath, data);
 }
 
-export function trackError(cortexPath: string): void {
-  const data = loadTelemetry(cortexPath);
+export function trackError(phrenPath: string): void {
+  const data = loadTelemetry(phrenPath);
   if (!data.config.enabled) return;
   ensureExitHook();
   data.stats.errors += 1;
-  saveTelemetry(cortexPath, data);
+  saveTelemetry(phrenPath, data);
 }
 
-export function trackSession(cortexPath: string): void {
-  const data = loadTelemetry(cortexPath);
+export function trackSession(phrenPath: string): void {
+  const data = loadTelemetry(phrenPath);
   if (!data.config.enabled) return;
   ensureExitHook();
   data.stats.sessions += 1;
   data.stats.lastActive = new Date().toISOString();
-  saveTelemetry(cortexPath, data);
+  saveTelemetry(phrenPath, data);
 }
 
-export function getTelemetrySummary(cortexPath: string): string {
-  const data = loadTelemetry(cortexPath);
-  if (!data.config.enabled) return "Telemetry: disabled (opt in with 'cortex config telemetry on')";
+export function getTelemetrySummary(phrenPath: string): string {
+  const data = loadTelemetry(phrenPath);
+  if (!data.config.enabled) return "Telemetry: disabled (opt in with 'phren config telemetry on')";
 
   const topTools = Object.entries(data.stats.toolCalls)
     .sort(([, a], [, b]) => b - a)
@@ -172,13 +172,13 @@ export function getTelemetrySummary(cortexPath: string): string {
   return lines.join("\n");
 }
 
-export function resetTelemetry(cortexPath: string): void {
-  const data = loadTelemetry(cortexPath);
+export function resetTelemetry(phrenPath: string): void {
+  const data = loadTelemetry(phrenPath);
   data.stats = { toolCalls: {}, cliCommands: {}, errors: 0, sessions: 0, lastActive: "" };
   // Reset flushes immediately
-  buffers.set(cortexPath, data);
-  pendingCounts.set(cortexPath, 1);
-  flushTelemetryForPath(cortexPath);
+  buffers.set(phrenPath, data);
+  pendingCounts.set(phrenPath, 1);
+  flushTelemetryForPath(phrenPath);
 }
 
 // Reset internal buffer state (for testing)

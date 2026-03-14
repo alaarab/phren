@@ -31,18 +31,18 @@ describe("provider adapter path resolution", () => {
     expect(result.targetDir).toBe("/mnt/c/Users/Tester/AppData/Roaming/Code/User");
   });
 
-  it("keeps Codex hook config rooted in cortexPath even when HOME points elsewhere", () => {
-    const cortexPath = "/tmpcortex-store";
+  it("keeps Codex hook config rooted in phrenPath even when HOME points elsewhere", () => {
+    const phrenPath = "/tmpphren-store";
     const env = {
       HOME: "/Users/tester",
       USERPROFILE: "C:\\Users\\Tester",
     } as NodeJS.ProcessEnv;
 
-    const hookPaths = hookConfigPaths(cortexPath);
-    expect(hookPaths.codex).toBe(path.join(cortexPath, "codex.json"));
+    const hookPaths = hookConfigPaths(phrenPath);
+    expect(hookPaths.codex).toBe(path.join(phrenPath, "codex.json"));
 
-    const codex = resolveCodexMcpConfig(cortexPath, () => false, env);
-    expect(codex.jsonCandidates.at(-1)).toBe(path.join(cortexPath, "codex.json"));
+    const codex = resolveCodexMcpConfig(phrenPath, () => false, env);
+    expect(codex.jsonCandidates.at(-1)).toBe(path.join(phrenPath, "codex.json"));
     expect(codex.tomlPath).toBe("/Users/tester/.codex/config.toml");
   });
 });

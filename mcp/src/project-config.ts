@@ -6,7 +6,7 @@ import { readInstallPreferences } from "./init-preferences.js";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
 
-export const PROJECT_OWNERSHIP_MODES = ["cortex-managed", "detached", "repo-managed"] as const;
+export const PROJECT_OWNERSHIP_MODES = ["phren-managed", "detached", "repo-managed"] as const;
 export type ProjectOwnershipMode = typeof PROJECT_OWNERSHIP_MODES[number];
 
 export interface ProjectMcpServerEntry {
@@ -37,7 +37,7 @@ type ProjectHookConfig = NonNullable<ProjectConfig["hooks"]>;
 export function parseProjectOwnershipMode(raw: string | undefined | null): ProjectOwnershipMode | undefined {
   if (!raw) return undefined;
   const normalized = raw.trim().toLowerCase();
-  if (normalized === "cortex" || normalized === "managed") return "cortex-managed";
+  if (normalized === "phren" || normalized === "managed" || normalized === "phren") return "phren-managed";
   if (normalized === "repo" || normalized === "external") return "repo-managed";
   if (PROJECT_OWNERSHIP_MODES.includes(normalized as ProjectOwnershipMode)) {
     return normalized as ProjectOwnershipMode;
@@ -45,12 +45,12 @@ export function parseProjectOwnershipMode(raw: string | undefined | null): Proje
   return undefined;
 }
 
-export function projectConfigPath(cortexPath: string, project: string): string {
-  return path.join(cortexPath, project, "cortex.project.yaml");
+export function projectConfigPath(phrenPath: string, project: string): string {
+  return path.join(phrenPath, project, "phren.project.yaml");
 }
 
-export function readProjectConfig(cortexPath: string, project: string): ProjectConfig {
-  const configPath = projectConfigPath(cortexPath, project);
+export function readProjectConfig(phrenPath: string, project: string): ProjectConfig {
+  const configPath = projectConfigPath(phrenPath, project);
   if (!fs.existsSync(configPath)) return {};
   try {
     const parsed = yaml.load(fs.readFileSync(configPath, "utf8"), { schema: yaml.CORE_SCHEMA });
@@ -61,9 +61,9 @@ export function readProjectConfig(cortexPath: string, project: string): ProjectC
   }
 }
 
-export function writeProjectConfig(cortexPath: string, project: string, patch: Partial<ProjectConfig>): ProjectConfig {
-  const configPath = projectConfigPath(cortexPath, project);
-  const current = readProjectConfig(cortexPath, project);
+export function writeProjectConfig(phrenPath: string, project: string, patch: Partial<ProjectConfig>): ProjectConfig {
+  const configPath = projectConfigPath(phrenPath, project);
+  const current = readProjectConfig(phrenPath, project);
   const next: ProjectConfig = {
     ...current,
     ...patch,
@@ -75,17 +75,17 @@ export function writeProjectConfig(cortexPath: string, project: string, patch: P
   return next;
 }
 
-export function getProjectSourcePath(cortexPath: string, project: string, config?: ProjectConfig): string | undefined {
-  const raw = (config ?? readProjectConfig(cortexPath, project)).sourcePath;
+export function getProjectSourcePath(phrenPath: string, project: string, config?: ProjectConfig): string | undefined {
+  const raw = (config ?? readProjectConfig(phrenPath, project)).sourcePath;
   return typeof raw === "string" && raw.trim() ? path.resolve(raw) : undefined;
 }
 
-export function getProjectOwnershipDefault(cortexPath: string): ProjectOwnershipMode {
-  return parseProjectOwnershipMode(readInstallPreferences(cortexPath).projectOwnershipDefault) ?? "cortex-managed";
+export function getProjectOwnershipDefault(phrenPath: string): ProjectOwnershipMode {
+  return parseProjectOwnershipMode(readInstallPreferences(phrenPath).projectOwnershipDefault) ?? "phren-managed";
 }
 
-export function getProjectOwnershipMode(cortexPath: string, project: string, config?: ProjectConfig): ProjectOwnershipMode {
-  return parseProjectOwnershipMode((config ?? readProjectConfig(cortexPath, project)).ownership) ?? "cortex-managed";
+export function getProjectOwnershipMode(phrenPath: string, project: string, config?: ProjectConfig): ProjectOwnershipMode {
+  return parseProjectOwnershipMode((config ?? readProjectConfig(phrenPath, project)).ownership) ?? "phren-managed";
 }
 
 function normalizeHookConfig(config?: ProjectConfig): ProjectHookConfig {
@@ -94,13 +94,13 @@ function normalizeHookConfig(config?: ProjectConfig): ProjectHookConfig {
 }
 
 export function isProjectHookEnabled(
-  cortexPath: string,
+  phrenPath: string,
   project: string | null | undefined,
   event: ProjectHookEvent,
   config?: ProjectConfig,
 ): boolean {
   if (!project) return true;
-  const hooks = normalizeHookConfig(config ?? readProjectConfig(cortexPath, project));
+  const hooks = normalizeHookConfig(config ?? readProjectConfig(phrenPath, project));
   const eventValue = hooks[event];
   if (typeof eventValue === "boolean") return eventValue;
   if (typeof hooks.enabled === "boolean") return hooks.enabled;
@@ -108,12 +108,12 @@ export function isProjectHookEnabled(
 }
 
 export function writeProjectHookConfig(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   patch: Partial<ProjectHookConfig>,
 ): ProjectConfig {
-  const current = readProjectConfig(cortexPath, project);
-  return writeProjectConfig(cortexPath, project, {
+  const current = readProjectConfig(phrenPath, project);
+  return writeProjectConfig(phrenPath, project, {
     hooks: {
       ...normalizeHookConfig(current),
       ...patch,

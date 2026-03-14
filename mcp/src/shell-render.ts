@@ -123,10 +123,10 @@ export function wrapSegments(
   return lines.slice(0, maxLines).join("\n");
 }
 
-// ── Cortex theme ────────────────────────────────────────────────────────────
+// ── Phren theme ────────────────────────────────────────────────────────────
 
 // Neural gradient palette: purple → blue → cyan (256-color ANSI)
-const CORTEX_GRADIENT = [
+const PHREN_GRADIENT = [
   "\x1b[38;5;93m",   // vivid purple
   "\x1b[38;5;99m",   // purple-blue
   "\x1b[38;5;105m",  // blue-purple
@@ -137,7 +137,7 @@ const CORTEX_GRADIENT = [
 ];
 
 // Apply gradient coloring across non-whitespace characters
-export function gradient(text: string, colors: string[] = CORTEX_GRADIENT): string {
+export function gradient(text: string, colors: string[] = PHREN_GRADIENT): string {
   const plain = stripAnsi(text);
   const chars = [...plain];
   const nonSpaceCount = chars.filter(ch => !/\s/.test(ch)).length;
@@ -157,13 +157,24 @@ export function gradient(text: string, colors: string[] = CORTEX_GRADIENT): stri
 }
 
 // Block-letter logo for startup animation
-const CORTEX_LOGO = [
+const PHREN_LOGO = [
   " ██████╗ ██████╗ ██████╗ ████████╗███████╗██╗  ██╗",
   "██╔════╝██╔═══██╗██╔══██╗╚══██╔══╝██╔════╝╚██╗██╔╝",
   "██║     ██║   ██║██████╔╝   ██║   █████╗   ╚███╔╝ ",
   "██║     ██║   ██║██╔══██╗   ██║   ██╔══╝   ██╔██╗ ",
   "╚██████╗╚██████╔╝██║  ██║   ██║   ███████╗██╔╝ ╚██╗",
   " ╚═════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝",
+];
+
+// Compact phren character for startup (imported inline to avoid circular deps)
+const PHREN_STARTUP = [
+  "\x1b[96m        ✦\x1b[0m",
+  "\x1b[38;5;57m   ▄\x1b[35m██████\x1b[38;5;57m▄\x1b[0m",
+  "\x1b[35m  ██\x1b[95m▓▓\x1b[35m██\x1b[95m▓▓\x1b[35m██\x1b[0m",
+  "\x1b[35m  █\x1b[38;5;57m◆\x1b[35m██\x1b[38;5;57m◆\x1b[35m███\x1b[0m",
+  "\x1b[35m  ██\x1b[2m\x1b[35m▽\x1b[0m\x1b[35m████\x1b[95m█\x1b[0m",
+  "\x1b[38;5;57m   ▀\x1b[35m██████\x1b[38;5;57m▀\x1b[0m",
+  "\x1b[38;5;57m    ██  ██\x1b[0m",
 ];
 
 // ── Line-based viewport: edge-triggered scroll (stable, no jumpiness) ─────────
@@ -209,7 +220,7 @@ export function shellHelpText(): string {
     hdr("View-specific keys"),
     `  ${style.bold("Projects")}     ${k("↵")} ${d("open project tasks")}  ${k("i")} ${d("cycle intro mode")}`,
     `  ${style.bold("Tasks")}        ${k("a")} ${d("add task")}  ${k("d")} ${d("toggle active/queue")}  ${k("↵")} ${d("mark complete")}`,
-    `  ${style.bold("Findings")}    ${k("a")} ${d("add finding")}  ${k("d")} ${d("delete selected")}`,
+    `  ${style.bold("Fragments")}   ${k("a")} ${d("tell phren")}  ${k("d")} ${d("delete selected")}`,
     `  ${style.bold("Review Queue")} ${k("a")} ${d("approve")}  ${k("r")} ${d("reject")}  ${k("e")} ${d("edit")}`,
     `  ${style.bold("Skills")}       ${k("t")} ${d("toggle enabled")}  ${k("d")} ${d("remove")}`,
     "",
@@ -253,21 +264,22 @@ export function shellStartupFrames(version: string): string[] {
   const versionBadge = badge(`v${version}`, style.boldBlue);
 
   if (cols >= 56) {
-    const logo = CORTEX_LOGO.map(line => "  " + gradient(line));
+    const logo = PHREN_LOGO.map(line => "  " + gradient(line));
+    const phren = PHREN_STARTUP.map(line => "  " + line);
     const sep = gradient("━".repeat(Math.min(52, cols)));
 
     return [
-      // Frame 1: Top half of logo emerging
-      ["", ...logo.slice(0, 3), "", `  ${versionBadge}  ${tagline}`, ""].join("\n"),
-      // Frame 2: Full logo materializes
-      ["", ...logo, "", `  ${versionBadge}  ${tagline}`, ""].join("\n"),
+      // Frame 1: Phren appears
+      ["", ...phren, "", `  ${versionBadge}  ${tagline}`, ""].join("\n"),
+      // Frame 2: Full logo materializes with phren
+      ["", ...phren, "", ...logo, "", `  ${versionBadge}  ${tagline}`, ""].join("\n"),
       // Frame 3: Complete with brand separator
-      ["", ...logo, `  ${sep}`, `  ${gradient("◆")} ${style.bold("cortex")}  ${versionBadge}  ${tagline}`, ""].join("\n"),
+      ["", ...phren, "", ...logo, `  ${sep}`, `  ${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`, ""].join("\n"),
     ];
   }
 
   // Narrow terminal: progressive text reveal with gradient
-  const stages = ["c", "cor", "cortex"];
+  const stages = ["c", "cor", "phren"];
   const spinners = ["◜", "◠", "◝"];
   return stages.map((stage, i) => [
     "",

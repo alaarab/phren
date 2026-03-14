@@ -10,7 +10,7 @@ describe("mergeFindings", () => {
       "## 2025-01-15",
       "",
       "- Use batch API calls for performance",
-      '<!-- cortex:cite {"file":"api.ts","line":42} -->',
+      '<!-- phren:cite {"file":"api.ts","line":42} -->',
       "- Cache invalidation needs TTL",
       "",
     ].join("\n");
@@ -21,7 +21,7 @@ describe("mergeFindings", () => {
       "## 2025-01-15",
       "",
       "- Retry logic must use exponential backoff",
-      '<!-- cortex:cite {"file":"retry.ts","line":10} -->',
+      '<!-- phren:cite {"file":"retry.ts","line":10} -->',
       "",
     ].join("\n");
 
@@ -33,8 +33,8 @@ describe("mergeFindings", () => {
     expect(merged).toContain("- Retry logic must use exponential backoff");
 
     // Provenance comments must survive
-    expect(merged).toContain('<!-- cortex:cite {"file":"api.ts","line":42} -->');
-    expect(merged).toContain('<!-- cortex:cite {"file":"retry.ts","line":10} -->');
+    expect(merged).toContain('<!-- phren:cite {"file":"api.ts","line":42} -->');
+    expect(merged).toContain('<!-- phren:cite {"file":"retry.ts","line":10} -->');
   });
 
   it("deduplicates by bullet text, keeping ours provenance", () => {
@@ -44,7 +44,7 @@ describe("mergeFindings", () => {
       "## 2025-01-15",
       "",
       "- Same finding in both",
-      '<!-- cortex:cite {"file":"ours.ts","line":1} -->',
+      '<!-- phren:cite {"file":"ours.ts","line":1} -->',
       "",
     ].join("\n");
 
@@ -54,7 +54,7 @@ describe("mergeFindings", () => {
       "## 2025-01-15",
       "",
       "- Same finding in both",
-      '<!-- cortex:cite {"file":"theirs.ts","line":99} -->',
+      '<!-- phren:cite {"file":"theirs.ts","line":99} -->',
       "",
     ].join("\n");
 
@@ -65,8 +65,8 @@ describe("mergeFindings", () => {
     expect(matches).toHaveLength(1);
 
     // Ours provenance wins
-    expect(merged).toContain('<!-- cortex:cite {"file":"ours.ts","line":1} -->');
-    expect(merged).not.toContain('<!-- cortex:cite {"file":"theirs.ts","line":99} -->');
+    expect(merged).toContain('<!-- phren:cite {"file":"ours.ts","line":1} -->');
+    expect(merged).not.toContain('<!-- phren:cite {"file":"theirs.ts","line":99} -->');
   });
 
   it("handles multi-line provenance comments", () => {
@@ -76,8 +76,8 @@ describe("mergeFindings", () => {
       "## 2025-02-01",
       "",
       "- Complex finding with metadata",
-      '<!-- cortex:cite {"file":"a.ts","line":5} -->',
-      "<!-- cortex:confidence 0.9 -->",
+      '<!-- phren:cite {"file":"a.ts","line":5} -->',
+      "<!-- phren:confidence 0.9 -->",
       "",
     ].join("\n");
 
@@ -93,8 +93,8 @@ describe("mergeFindings", () => {
     const merged = mergeFindings(ours, theirs);
 
     expect(merged).toContain("- Complex finding with metadata");
-    expect(merged).toContain('<!-- cortex:cite {"file":"a.ts","line":5} -->');
-    expect(merged).toContain("<!-- cortex:confidence 0.9 -->");
+    expect(merged).toContain('<!-- phren:cite {"file":"a.ts","line":5} -->');
+    expect(merged).toContain("<!-- phren:confidence 0.9 -->");
     expect(merged).toContain("- Another finding");
   });
 
@@ -105,7 +105,7 @@ describe("mergeFindings", () => {
       "## 2025-01-15",
       "",
       "- Finding A",
-      '<!-- cortex:cite {"file":"a.ts"} -->',
+      '<!-- phren:cite {"file":"a.ts"} -->',
       "",
     ].join("\n");
 
@@ -115,7 +115,7 @@ describe("mergeFindings", () => {
       "## 2025-01-16",
       "",
       "- Finding B",
-      '<!-- cortex:cite {"file":"b.ts"} -->',
+      '<!-- phren:cite {"file":"b.ts"} -->',
       "",
     ].join("\n");
 
@@ -126,8 +126,8 @@ describe("mergeFindings", () => {
     expect(merged).toContain("## 2025-01-15");
     expect(merged).toContain("- Finding A");
     expect(merged).toContain("- Finding B");
-    expect(merged).toContain('<!-- cortex:cite {"file":"a.ts"} -->');
-    expect(merged).toContain('<!-- cortex:cite {"file":"b.ts"} -->');
+    expect(merged).toContain('<!-- phren:cite {"file":"a.ts"} -->');
+    expect(merged).toContain('<!-- phren:cite {"file":"b.ts"} -->');
 
     // Newer date first
     const idx16 = merged.indexOf("## 2025-01-16");
@@ -212,7 +212,7 @@ describe("isValidProjectName edge cases", () => {
     expect(isValidProjectName("my-project")).toBe(true);
   });
 
-  it("accepts 'cortex_01'", () => {
-    expect(isValidProjectName("cortex_01")).toBe(true);
+  it("accepts 'phren_01'", () => {
+    expect(isValidProjectName("phren_01")).toBe(true);
   });
 });

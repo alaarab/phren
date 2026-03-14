@@ -1,31 +1,19 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
-import { appendAuditLog, canonicalLocksFile, debugLog, getProjectDirs, isRecord, runtimeFile, runtimeHealthFile, withDefaults, cortexErr, CortexError, cortexOk, type CortexResult, resolveFindingsPath } from "./shared.js";
+import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "./shared.js";
 import { withFileLock } from "./governance-locks.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { runCustomHooks } from "./hooks.js";
+import {
+  METADATA_REGEX,
+  isCitationLine,
+  isArchiveStart as isArchiveStartMeta,
+  isArchiveEnd as isArchiveEndMeta,
+  stripLifecycleMetadata as stripLifecycleMetadataMeta,
+} from "./content-metadata.js";
 
 export const MAX_QUEUE_ENTRY_LENGTH = 500;
-
-type MemoryRole = "admin" | "maintainer" | "contributor" | "viewer";
-type MemoryAction = "read" | "write" | "queue" | "pin" | "policy" | "delete";
-
-interface AccessControl {
-  schemaVersion?: number;
-  admins?: string[];
-  maintainers?: string[];
-  contributors?: string[];
-  viewers?: string[];
-}
-
-export interface AccessControlPatch {
-  admins?: string[];
-  maintainers?: string[];
-  contributors?: string[];
-  viewers?: string[];
-}
 
 export interface RetentionPolicy {
   schemaVersion?: number;
@@ -43,7 +31,6 @@ export interface RetentionPolicy {
 
 export interface WorkflowPolicy {
   schemaVersion?: number;
-  requireMaintainerApproval: boolean;
   lowConfidenceThreshold: number;
   riskySections: Array<"Review" | "Stale" | "Conflicts">;
   taskMode: "off" | "manual" | "suggest" | "auto";
@@ -84,17 +71,6 @@ export interface RuntimeHealth {
   };
 }
 
-interface CanonicalLock {
-  hash: string;
-  snapshot: string;
-  updatedAt: string;
-}
-
-interface VersionedEntriesFile<T> {
-  schemaVersion?: number;
-  entries: Record<string, T>;
-}
-
 export const GOVERNANCE_SCHEMA_VERSION = 1;
 
 const DEFAULT_POLICY: RetentionPolicy = {
@@ -113,7 +89,6 @@ const DEFAULT_POLICY: RetentionPolicy = {
 
 const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-  requireMaintainerApproval: false,
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
   taskMode: "auto",
@@ -127,41 +102,21 @@ const DEFAULT_INDEX_POLICY: IndexPolicy = {
   includeHidden: false,
 };
 
-const DEFAULT_ACCESS: AccessControl = {
-  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-  admins: [],
-  maintainers: [],
-  contributors: [],
-  viewers: [],
-};
-
 const DEFAULT_RUNTIME_HEALTH: RuntimeHealth = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
 };
 
-const DEFAULT_CANONICAL_LOCKS_FILE: VersionedEntriesFile<CanonicalLock> = {
-  schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-  entries: {},
-};
-
-const LOCAL_ACCESS_FILE = "access-control.local.json";
-
-function governanceDir(cortexPath: string): string {
-  return path.join(cortexPath, ".governance");
+function governanceDir(phrenPath: string): string {
+  return path.join(phrenPath, ".governance");
 }
 
 type GovernanceSchema =
-  | "access-control"
   | "retention-policy"
   | "workflow-policy"
   | "index-policy";
 
-function govFile(cortexPath: string, schema: GovernanceSchema): string {
-  return path.join(governanceDir(cortexPath), GOVERNANCE_REGISTRY[schema].file);
-}
-
-function localAccessFile(cortexPath: string): string {
-  return runtimeFile(cortexPath, LOCAL_ACCESS_FILE);
+function govFile(phrenPath: string, schema: GovernanceSchema): string {
+  return path.join(governanceDir(phrenPath), GOVERNANCE_REGISTRY[schema].file);
 }
 
 function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
@@ -190,27 +145,7 @@ function cleanStringArray(value: unknown, fallback: string[]): string[] {
   return cleaned.length ? cleaned : [...fallback];
 }
 
-function isCanonicalLock(value: unknown): value is CanonicalLock {
-  if (!isRecord(value)) return false;
-  return typeof value.hash === "string"
-    && typeof value.snapshot === "string"
-    && typeof value.updatedAt === "string";
-}
-
-function isVersionedEntries(data: Record<string, unknown>): boolean {
-  return "entries" in data || "schemaVersion" in data;
-}
-
-function entriesObject(data: Record<string, unknown>): Record<string, unknown> {
-  if (isRecord(data.entries)) return data.entries;
-  return data;
-}
-
 const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unknown>) => boolean> = {
-  "access-control": (data) =>
-    hasValidSchemaVersion(data) && ["admins", "maintainers", "contributors", "viewers"].every(
-      (key) => !(key in data) || isStringArray(data[key]),
-    ),
   "retention-policy": (data) =>
     hasValidSchemaVersion(data)
     && ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"].every(
@@ -223,7 +158,6 @@ const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unkn
     })()),
   "workflow-policy": (data) =>
     hasValidSchemaVersion(data)
-    && (!("requireMaintainerApproval" in data) || typeof data.requireMaintainerApproval === "boolean")
     && (!("lowConfidenceThreshold" in data) || isFiniteNumber(data.lowConfidenceThreshold))
     && (!("riskySections" in data) || isStringArray(data.riskySections))
     && (!("taskMode" in data) || ["off", "manual", "suggest", "auto"].includes(String(data.taskMode))),
@@ -241,12 +175,6 @@ interface GovernanceRegistryEntry {
 }
 
 const GOVERNANCE_REGISTRY: Record<GovernanceSchema, GovernanceRegistryEntry> = {
-  "access-control": {
-    file: "access-control.json",
-    validate: GOVERNANCE_VALIDATORS["access-control"],
-    defaults: () => ({ ...DEFAULT_ACCESS }),
-    normalize: (data) => normalizeAccessControl(data) as unknown as Record<string, unknown>,
-  },
   "retention-policy": {
     file: "retention-policy.json",
     validate: GOVERNANCE_VALIDATORS["retention-policy"],
@@ -328,16 +256,6 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
   return normalized;
 }
 
-function normalizeAccessControl(data: Record<string, unknown>): AccessControl {
-  return {
-    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-    admins: cleanStringArray(data.admins, DEFAULT_ACCESS.admins || []),
-    maintainers: cleanStringArray(data.maintainers, DEFAULT_ACCESS.maintainers || []),
-    contributors: cleanStringArray(data.contributors, DEFAULT_ACCESS.contributors || []),
-    viewers: cleanStringArray(data.viewers, DEFAULT_ACCESS.viewers || []),
-  };
-}
-
 function normalizeRetentionPolicy(data: Record<string, unknown>): RetentionPolicy {
   const decay = isRecord(data.decay) ? data.decay : {};
   return {
@@ -368,7 +286,6 @@ function normalizeWorkflowPolicy(data: Record<string, unknown>): WorkflowPolicy 
     : DEFAULT_WORKFLOW_POLICY.findingSensitivity;
   return {
     schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-    requireMaintainerApproval: pickBoolean(data.requireMaintainerApproval, DEFAULT_WORKFLOW_POLICY.requireMaintainerApproval),
     lowConfidenceThreshold: pickNumber(data.lowConfidenceThreshold, DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold),
     riskySections: riskySections.length ? riskySections : [...DEFAULT_WORKFLOW_POLICY.riskySections],
     taskMode,
@@ -385,14 +302,6 @@ function normalizeIndexPolicy(data: Record<string, unknown>): IndexPolicy {
   };
 }
 
-function normalizeVersionedEntries<T>(data: Record<string, unknown>, guard: (value: unknown) => value is T): VersionedEntriesFile<T> {
-  const out: Record<string, T> = {};
-  for (const [key, value] of Object.entries(entriesObject(data))) {
-    if (guard(value)) out[key] = value;
-  }
-  return { schemaVersion: GOVERNANCE_SCHEMA_VERSION, entries: out };
-}
-
 function readJsonFile<T>(filePath: string, fallback: T): T {
   try {
     if (!fs.existsSync(filePath)) return fallback;
@@ -405,7 +314,7 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Record<string, unknown>;
     const fileVersion = schema ? extractGovernanceVersion(schema, parsed) : (typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 0);
     if (fileVersion > GOVERNANCE_SCHEMA_VERSION) {
-      debugLog(`Warning: ${filePath} has schemaVersion ${fileVersion}, expected <= ${GOVERNANCE_SCHEMA_VERSION}. Consider updating cortex.`);
+      debugLog(`Warning: ${filePath} has schemaVersion ${fileVersion}, expected <= ${GOVERNANCE_SCHEMA_VERSION}. Consider updating phren.`);
     }
     return parsed as T;
   } catch (err: unknown) {
@@ -428,150 +337,13 @@ function writeJsonFile(filePath: string, data: unknown): void {
   });
 }
 
-function allowEnvironmentActorOverride(): boolean {
-  return process.env.CORTEX_TRUST_ENV_ACTOR === "1"
-    || process.env.VITEST_WORKER_ID !== undefined
-    || process.env.NODE_ENV === "test";
-}
-
-function actorName(): string {
-  if (allowEnvironmentActorOverride()) {
-    const envActor = process.env.CORTEX_ACTOR?.trim();
-    if (envActor) return envActor;
-  }
-  try {
-    return os.userInfo().username;
-  } catch (err: unknown) {
-    debugLog(`actorName: os.userInfo() failed, using "unknown": ${errorMessage(err)}`);
-    return "unknown";
-  }
-}
-
-export function getCurrentActor(): string {
-  return actorName();
-}
-
-function roleFromAccessControl(acl: AccessControl, actor: string): MemoryRole | null {
-  if ((acl.admins || []).includes(actor)) return "admin";
-  if ((acl.maintainers || []).includes(actor)) return "maintainer";
-  if ((acl.contributors || []).includes(actor)) return "contributor";
-  if ((acl.viewers || []).includes(actor)) return "viewer";
-  return null;
-}
-
-function hasAnyAssignedRole(acl: AccessControl): boolean {
-  return [...(acl.admins || []), ...(acl.maintainers || []), ...(acl.contributors || []), ...(acl.viewers || [])].length > 0;
-}
-
-function getLocalAccessControl(cortexPath: string): AccessControl {
-  const parsed = readJsonFile<Record<string, unknown>>(localAccessFile(cortexPath), {});
-  if (!isRecord(parsed)) return { ...DEFAULT_ACCESS };
-  return normalizeAccessControl(parsed);
-}
-
-function writeLocalAccessControl(cortexPath: string, next: AccessControl): void {
-  const file = localAccessFile(cortexPath);
-  withFileLock(file, () => {
-    writeJsonFileUnlocked(file, next);
-  });
-}
-
-export function ensureLocalActorAccess(cortexPath: string, actor: string = actorName()): { updated: boolean; role?: MemoryRole; reason?: string } {
-  const normalizedActor = actor.trim();
-  if (!normalizedActor || normalizedActor === "unknown") {
-    return { updated: false, reason: "actor-unavailable" };
-  }
-
-  const aclPath = govFile(cortexPath, "access-control");
-  if (!fs.existsSync(aclPath)) return { updated: false, reason: "shared-acl-missing" };
-  if (!validateGovernanceJson(aclPath, "access-control")) {
-    return { updated: false, reason: "shared-acl-invalid" };
-  }
-
-  const sharedAcl = getAccessControl(cortexPath);
-  if (!hasAnyAssignedRole(sharedAcl)) return { updated: false, reason: "shared-acl-open" };
-  if (roleFromAccessControl(sharedAcl, normalizedActor)) {
-    return { updated: false, reason: "shared-role-present" };
-  }
-
-  const localAcl = getLocalAccessControl(cortexPath);
-  if (roleFromAccessControl(localAcl, normalizedActor)) {
-    return { updated: false, reason: "local-role-present" };
-  }
-
-  const next: AccessControl = {
-    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-    admins: [...(localAcl.admins || [])],
-    maintainers: Array.from(new Set([...(localAcl.maintainers || []), normalizedActor])).sort(),
-    contributors: [...(localAcl.contributors || [])],
-    viewers: [...(localAcl.viewers || [])],
-  };
-  writeLocalAccessControl(cortexPath, next);
-  appendAuditLog(cortexPath, "ensure_local_actor_access", JSON.stringify({ actor: normalizedActor, role: "maintainer", file: LOCAL_ACCESS_FILE }));
-  return { updated: true, role: "maintainer" };
-}
-
-function resolveRole(cortexPath: string, actor: string = actorName()): MemoryRole {
-  const aclPath = govFile(cortexPath, "access-control");
-  // If the ACL file does not exist, treat as open access (no ACL configured).
-  if (!fs.existsSync(aclPath)) return "admin";
-  // If the file exists but fails validation, fail closed — return least-privilege role.
-  if (!validateGovernanceJson(aclPath, "access-control")) {
-    debugLog(`resolveRole: ${aclPath} failed validation, failing closed (viewer)`);
-    return "viewer";
-  }
-  const acl = readJsonFile<AccessControl>(aclPath, DEFAULT_ACCESS);
-  if (!hasAnyAssignedRole(acl)) return "admin"; // ACL file present but empty — open access
-  const sharedRole = roleFromAccessControl(acl, actor);
-  if (sharedRole) return sharedRole;
-  const localRole = roleFromAccessControl(getLocalAccessControl(cortexPath), actor);
-  if (localRole) return localRole;
-  return "viewer";
-}
-
-function can(role: MemoryRole, action: MemoryAction): boolean {
-  if (role === "admin") return true;
-  if (role === "maintainer") return action !== "policy";
-  if (role === "contributor") return action === "read" || action === "write" || action === "queue";
-  return action === "read";
-}
-
-export function checkPermission(cortexPath: string, action: MemoryAction, actor?: string): string | null {
-  const role = resolveRole(cortexPath, actor);
-  if (can(role, action)) return null;
-  return `Permission denied for ${actor || actorName()} (role=${role}) on action=${action}.`;
-}
-
-export function getAccessControl(cortexPath: string): AccessControl {
-  const parsed = readJsonFile<Partial<AccessControl>>(govFile(cortexPath, "access-control"), {});
-  return withDefaults(parsed, DEFAULT_ACCESS);
-}
-
-export function updateAccessControl(cortexPath: string, patch: AccessControlPatch): CortexResult<AccessControl> {
-  const denial = checkPermission(cortexPath, "policy");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  const current = getAccessControl(cortexPath);
-  const next: AccessControl = {
-    schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
-    admins: patch.admins ?? current.admins ?? [],
-    maintainers: patch.maintainers ?? current.maintainers ?? [],
-    contributors: patch.contributors ?? current.contributors ?? [],
-    viewers: patch.viewers ?? current.viewers ?? [],
-  };
-  writeJsonFile(govFile(cortexPath, "access-control"), next);
-  appendAuditLog(cortexPath, "update_access", JSON.stringify(next));
-  return cortexOk(next);
-}
-
-export function getRetentionPolicy(cortexPath: string): RetentionPolicy {
-  const parsed = readJsonFile<Partial<RetentionPolicy>>(govFile(cortexPath, "retention-policy"), {});
+export function getRetentionPolicy(phrenPath: string): RetentionPolicy {
+  const parsed = readJsonFile<Partial<RetentionPolicy>>(govFile(phrenPath, "retention-policy"), {});
   return withDefaults(parsed, DEFAULT_POLICY);
 }
 
-export function updateRetentionPolicy(cortexPath: string, patch: Partial<RetentionPolicy>): CortexResult<RetentionPolicy> {
-  const denial = checkPermission(cortexPath, "policy");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  const current = getRetentionPolicy(cortexPath);
+export function updateRetentionPolicy(phrenPath: string, patch: Partial<RetentionPolicy>): PhrenResult<RetentionPolicy> {
+  const current = getRetentionPolicy(phrenPath);
   const next: RetentionPolicy = {
     ...current,
     ...patch,
@@ -580,13 +352,13 @@ export function updateRetentionPolicy(cortexPath: string, patch: Partial<Retenti
       ...(patch.decay || {}),
     },
   };
-  writeJsonFile(govFile(cortexPath, "retention-policy"), next);
-  appendAuditLog(cortexPath, "update_policy", JSON.stringify(next));
-  return cortexOk(next);
+  writeJsonFile(govFile(phrenPath, "retention-policy"), next);
+  appendAuditLog(phrenPath, "update_policy", JSON.stringify(next));
+  return phrenOk(next);
 }
 
-export function getWorkflowPolicy(cortexPath: string): WorkflowPolicy {
-  const parsed = readJsonFile<Partial<WorkflowPolicy>>(govFile(cortexPath, "workflow-policy"), {});
+export function getWorkflowPolicy(phrenPath: string): WorkflowPolicy {
+  const parsed = readJsonFile<Partial<WorkflowPolicy>>(govFile(phrenPath, "workflow-policy"), {});
   const merged = withDefaults(parsed, DEFAULT_WORKFLOW_POLICY);
   const validSections = new Set(["Review", "Stale", "Conflicts"]);
   merged.riskySections = merged.riskySections.filter((section) => validSections.has(section));
@@ -600,10 +372,8 @@ export function getWorkflowPolicy(cortexPath: string): WorkflowPolicy {
   return merged;
 }
 
-export function updateWorkflowPolicy(cortexPath: string, patch: Partial<WorkflowPolicy>): CortexResult<WorkflowPolicy> {
-  const denial = checkPermission(cortexPath, "policy");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  const current = getWorkflowPolicy(cortexPath);
+export function updateWorkflowPolicy(phrenPath: string, patch: Partial<WorkflowPolicy>): PhrenResult<WorkflowPolicy> {
+  const current = getWorkflowPolicy(phrenPath);
   const riskySections = Array.isArray(patch.riskySections)
     ? patch.riskySections.filter((section): section is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(section)))
     : current.riskySections;
@@ -615,19 +385,18 @@ export function updateWorkflowPolicy(cortexPath: string, patch: Partial<Workflow
     : current.findingSensitivity;
   const next: WorkflowPolicy = {
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
-    requireMaintainerApproval: patch.requireMaintainerApproval ?? current.requireMaintainerApproval,
     lowConfidenceThreshold: patch.lowConfidenceThreshold ?? current.lowConfidenceThreshold,
     riskySections: riskySections.length ? riskySections : current.riskySections,
     taskMode,
     findingSensitivity,
   };
-  writeJsonFile(govFile(cortexPath, "workflow-policy"), next);
-  appendAuditLog(cortexPath, "update_workflow_policy", JSON.stringify(next));
-  return cortexOk(next);
+  writeJsonFile(govFile(phrenPath, "workflow-policy"), next);
+  appendAuditLog(phrenPath, "update_workflow_policy", JSON.stringify(next));
+  return phrenOk(next);
 }
 
-export function getIndexPolicy(cortexPath: string): IndexPolicy {
-  const parsed = readJsonFile<Partial<IndexPolicy>>(govFile(cortexPath, "index-policy"), {});
+export function getIndexPolicy(phrenPath: string): IndexPolicy {
+  const parsed = readJsonFile<Partial<IndexPolicy>>(govFile(phrenPath, "index-policy"), {});
   const merged = withDefaults(parsed, DEFAULT_INDEX_POLICY);
   merged.includeGlobs = merged.includeGlobs.filter((glob) => typeof glob === "string" && glob.trim().length > 0);
   merged.excludeGlobs = merged.excludeGlobs.filter((glob) => typeof glob === "string" && glob.trim().length > 0);
@@ -636,10 +405,8 @@ export function getIndexPolicy(cortexPath: string): IndexPolicy {
   return merged;
 }
 
-export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy>): CortexResult<IndexPolicy> {
-  const denial = checkPermission(cortexPath, "policy");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  const current = getIndexPolicy(cortexPath);
+export function updateIndexPolicy(phrenPath: string, patch: Partial<IndexPolicy>): PhrenResult<IndexPolicy> {
+  const current = getIndexPolicy(phrenPath);
   const next: IndexPolicy = {
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     includeGlobs: Array.isArray(patch.includeGlobs)
@@ -650,19 +417,19 @@ export function updateIndexPolicy(cortexPath: string, patch: Partial<IndexPolicy
       : current.excludeGlobs,
     includeHidden: patch.includeHidden ?? current.includeHidden,
   };
-  writeJsonFile(govFile(cortexPath, "index-policy"), next);
-  appendAuditLog(cortexPath, "update_index_policy", JSON.stringify(next));
-  return cortexOk(next);
+  writeJsonFile(govFile(phrenPath, "index-policy"), next);
+  appendAuditLog(phrenPath, "update_index_policy", JSON.stringify(next));
+  return phrenOk(next);
 }
 
-export function getRuntimeHealth(cortexPath: string): RuntimeHealth {
-  const parsed = readJsonFile<Record<string, unknown>>(runtimeHealthFile(cortexPath), {});
+export function getRuntimeHealth(phrenPath: string): RuntimeHealth {
+  const parsed = readJsonFile<Record<string, unknown>>(runtimeHealthFile(phrenPath), {});
   if (!isRecord(parsed)) return { ...DEFAULT_RUNTIME_HEALTH };
   return normalizeRuntimeHealth(parsed);
 }
 
-export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHealth>): RuntimeHealth {
-  const file = runtimeHealthFile(cortexPath);
+export function updateRuntimeHealth(phrenPath: string, patch: Partial<RuntimeHealth>): RuntimeHealth {
+  const file = runtimeHealthFile(phrenPath);
   return withFileLock(file, () => {
     const parsed = readJsonFile<Record<string, unknown>>(file, {});
     const current = isRecord(parsed) ? normalizeRuntimeHealth(parsed) : { ...DEFAULT_RUNTIME_HEALTH };
@@ -677,31 +444,6 @@ export function updateRuntimeHealth(cortexPath: string, patch: Partial<RuntimeHe
     writeJsonFileUnlocked(file, next);
     return next;
   });
-}
-
-export function loadCanonicalLocks(cortexPath: string): Record<string, CanonicalLock> {
-  const parsed = readJsonFile<Record<string, unknown>>(canonicalLocksFile(cortexPath), {});
-  if (!isRecord(parsed)) return {};
-  return normalizeVersionedEntries(parsed, isCanonicalLock).entries;
-}
-
-function saveCanonicalLocks(cortexPath: string, locks: Record<string, CanonicalLock>) {
-  writeJsonFile(canonicalLocksFile(cortexPath), {
-    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-    entries: locks,
-  } satisfies VersionedEntriesFile<CanonicalLock>);
-}
-
-/** Save canonical locks without acquiring a file lock (caller must hold the lock). */
-export function saveCanonicalLocksUnlocked(cortexPath: string, locks: Record<string, CanonicalLock>) {
-  writeJsonFileUnlocked(canonicalLocksFile(cortexPath), {
-    schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-    entries: locks,
-  } satisfies VersionedEntriesFile<CanonicalLock>);
-}
-
-export function hashContent(content: string): string {
-  return crypto.createHash("sha256").update(content).digest("hex");
 }
 
 function normalizeBulletForQueue(line: string): string {
@@ -724,35 +466,33 @@ function cleanQueueEntryText(raw: string): string {
 export function normalizeQueueEntryText(
   raw: string,
   opts: { truncate?: boolean } = {},
-): CortexResult<{ text: string; truncated: boolean }> {
+): PhrenResult<{ text: string; truncated: boolean }> {
   const cleaned = cleanQueueEntryText(raw);
-  if (!cleaned) return cortexErr("Memory text cannot be empty.", CortexError.EMPTY_INPUT);
+  if (!cleaned) return phrenErr("Memory text cannot be empty.", PhrenError.EMPTY_INPUT);
   if (cleaned.length <= MAX_QUEUE_ENTRY_LENGTH) {
-    return cortexOk({ text: cleaned, truncated: false });
+    return phrenOk({ text: cleaned, truncated: false });
   }
   if (!opts.truncate) {
-    return cortexErr(
+    return phrenErr(
       `Memory text exceeds maximum length of ${MAX_QUEUE_ENTRY_LENGTH} characters (got ${cleaned.length}). Shorten it before saving.`,
-      CortexError.VALIDATION_ERROR,
+      PhrenError.VALIDATION_ERROR,
     );
   }
-  return cortexOk({
+  return phrenOk({
     text: cleaned.slice(0, MAX_QUEUE_ENTRY_LENGTH - 1).trimEnd() + "…",
     truncated: true,
   });
 }
 
 export function appendReviewQueue(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   section: "Review" | "Stale" | "Conflicts",
   entries: string[],
-): CortexResult<number> {
-  const denial = checkPermission(cortexPath, "queue");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+): PhrenResult<number> {
+  if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
+  const resolvedDir = safeProjectPath(phrenPath, project);
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const queuePath = path.join(resolvedDir, "MEMORY_QUEUE.md");
   const today = new Date().toISOString().slice(0, 10);
 
@@ -765,7 +505,7 @@ export function appendReviewQueue(
     }
     normalized.push(sanitized.data.text);
   }
-  if (normalized.length === 0) return cortexOk(0);
+  if (normalized.length === 0) return phrenOk(0);
 
   return withFileLock(queuePath, () => {
     let content = "";
@@ -792,25 +532,23 @@ export function appendReviewQueue(
       const line = `- [${today}] ${entry}`;
       if (!existing.has(line)) toInsert.push(line);
     }
-    if (!toInsert.length) return cortexOk(0);
+    if (!toInsert.length) return phrenOk(0);
 
     lines.splice(insertAt, 0, ...toInsert, "");
     fs.writeFileSync(queuePath, lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
-    return cortexOk(toInsert.length);
+    return phrenOk(toInsert.length);
   });
 }
 
-export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?: boolean): CortexResult<string> {
-  const denial = checkPermission(cortexPath, "delete");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  const policy = getRetentionPolicy(cortexPath);
-  if (project && !isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
+export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: boolean): PhrenResult<string> {
+  const policy = getRetentionPolicy(phrenPath);
+  if (project && !isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const dirs = project
     ? (() => {
-      const resolvedProject = safeProjectPath(cortexPath, project);
+      const resolvedProject = safeProjectPath(phrenPath, project);
       return resolvedProject ? [resolvedProject] : [];
     })()
-    : getProjectDirs(cortexPath).filter((dir) => path.basename(dir) !== "global");
+    : getProjectDirs(phrenPath).filter((dir) => path.basename(dir) !== "global");
   let pruned = 0;
   const cutoffDays = policy.retentionDays;
   const dryRunDetails: string[] = [];
@@ -827,14 +565,14 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
 
       for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
-        // Detect archive block start (both <details> and cortex:archive:start markers)
-        if (line.includes("<!-- cortex:archive:start -->") || line.includes("<details>")) {
+        // Detect archive block start (both <details> and phren:archive:start markers)
+        if (isArchiveStartMeta(line)) {
           inArchive = true;
           next.push(line);
           continue;
         }
         // Detect archive block end
-        if (line.includes("<!-- cortex:archive:end -->") || line.includes("</details>")) {
+        if (isArchiveEndMeta(line)) {
           inArchive = false;
           next.push(line);
           continue;
@@ -851,13 +589,13 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
             pruned++;
             if (dryRun) dryRunDetails.push(`[${path.basename(dir)}] ${line.slice(0, 80)}`);
             const nextLine = lines[index + 1] || "";
-            if (nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
+            if (isCitationLine(nextLine)) {
               index++;
             }
             continue;
           }
         }
-        if (line.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/)) {
+        if (isCitationLine(line)) {
           const previous = next.length ? next[next.length - 1] : "";
           if (!previous.startsWith("- ")) continue;
         }
@@ -873,82 +611,44 @@ export function pruneDeadMemories(cortexPath: string, project?: string, dryRun?:
 
   if (dryRun) {
     const summary = `[dry-run] Would prune ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
-    return cortexOk(dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary);
+    return phrenOk(dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary);
   }
 
-  appendAuditLog(cortexPath, "prune_memories", `project=${project || "all"} pruned=${pruned}`);
-  return cortexOk(`Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`);
-}
-
-export function enforceCanonicalLocks(cortexPath: string, project?: string): string {
-  const locks = loadCanonicalLocks(cortexPath);
-  const projects = project
-    ? [project]
-    : getProjectDirs(cortexPath).map((dir) => path.basename(dir)).filter((name) => name !== "global");
-  let restored = 0;
-  let checked = 0;
-
-  for (const projectName of projects) {
-    const file = path.join(cortexPath, projectName, "CANONICAL_MEMORIES.md");
-    if (!fs.existsSync(file)) continue;
-    checked++;
-    const content = fs.readFileSync(file, "utf8");
-    const key = `${projectName}/CANONICAL_MEMORIES.md`;
-    const lock = locks[key];
-    if (!lock) {
-      locks[key] = { hash: hashContent(content), snapshot: content, updatedAt: new Date().toISOString() };
-      continue;
-    }
-    const currentHash = hashContent(content);
-    if (currentHash === lock.hash) continue;
-    withFileLock(file, () => fs.writeFileSync(file, lock.snapshot));
-    appendReviewQueue(cortexPath, projectName, "Conflicts", ["Canonical memory drift detected and auto-restored"]);
-    appendAuditLog(cortexPath, "canonical_restore", `project=${projectName}`);
-    restored++;
-  }
-
-  saveCanonicalLocks(cortexPath, locks);
-  return `Canonical locks checked=${checked}, restored=${restored}`;
+  appendAuditLog(phrenPath, "prune_memories", `project=${project || "all"} pruned=${pruned}`);
+  return phrenOk(`Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`);
 }
 
 function mergeLifecycleAndIdComments(primary: string, fallback: string): string {
   const extract = (line: string, pattern: RegExp): string | undefined => line.match(pattern)?.[0];
-  const strip = (line: string): string => line
-    .replace(/\s*<!--\s*fid:[a-z0-9]{8}\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:status\s+"?(?:active|superseded|contradicted|stale|invalid_citation|retracted)"?\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:status_updated\s+"[^"]+"\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:status_reason\s+"[^"]+"\s*-->/gi, "")
-    .replace(/\s*<!--\s*cortex:status_ref\s+"[^"]+"\s*-->/gi, "");
+  const strip = (line: string): string => {
+    let result = line.replace(/\s*<!--\s*fid:[a-z0-9]{8}\s*-->/gi, "");
+    result = stripLifecycleMetadataMeta(result);
+    return result;
+  };
 
-  const fid = extract(primary, /<!--\s*fid:[a-z0-9]{8}\s*-->/i) ?? extract(fallback, /<!--\s*fid:[a-z0-9]{8}\s*-->/i);
-  const status = extract(primary, /<!--\s*cortex:status\s+"?(?:active|superseded|contradicted|stale|invalid_citation|retracted)"?\s*-->/i)
-    ?? extract(fallback, /<!--\s*cortex:status\s+"?(?:active|superseded|contradicted|stale|invalid_citation|retracted)"?\s*-->/i);
-  const statusUpdated = extract(primary, /<!--\s*cortex:status_updated\s+"[^"]+"\s*-->/i)
-    ?? extract(fallback, /<!--\s*cortex:status_updated\s+"[^"]+"\s*-->/i);
-  const statusReason = extract(primary, /<!--\s*cortex:status_reason\s+"[^"]+"\s*-->/i)
-    ?? extract(fallback, /<!--\s*cortex:status_reason\s+"[^"]+"\s*-->/i);
-  const statusRef = extract(primary, /<!--\s*cortex:status_ref\s+"[^"]+"\s*-->/i)
-    ?? extract(fallback, /<!--\s*cortex:status_ref\s+"[^"]+"\s*-->/i);
+  const fid = extract(primary, METADATA_REGEX.findingId) ?? extract(fallback, METADATA_REGEX.findingId);
+  const status = extract(primary, METADATA_REGEX.status) ?? extract(fallback, METADATA_REGEX.status);
+  const statusUpdated = extract(primary, METADATA_REGEX.statusUpdated) ?? extract(fallback, METADATA_REGEX.statusUpdated);
+  const statusReason = extract(primary, METADATA_REGEX.statusReason) ?? extract(fallback, METADATA_REGEX.statusReason);
+  const statusRef = extract(primary, METADATA_REGEX.statusRef) ?? extract(fallback, METADATA_REGEX.statusRef);
 
   const base = strip(primary).trimEnd();
   const suffix = [fid, status, statusUpdated, statusReason, statusRef].filter((part): part is string => Boolean(part));
   return suffix.length > 0 ? `${base} ${suffix.join(" ")}` : base;
 }
 
-export function consolidateProjectFindings(cortexPath: string, project: string, dryRun?: boolean): CortexResult<string> {
-  const denial = checkPermission(cortexPath, "delete");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const file = resolveFindingsPath(path.join(cortexPath, project));
-  if (!file) return cortexErr(`No FINDINGS.md found for "${project}".`, CortexError.FILE_NOT_FOUND);
+export function consolidateProjectFindings(phrenPath: string, project: string, dryRun?: boolean): PhrenResult<string> {
+  if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
+  const file = resolveFindingsPath(path.join(phrenPath, project));
+  if (!file) return phrenErr(`No FINDINGS.md found for "${project}".`, PhrenError.FILE_NOT_FOUND);
 
   // Q23: wrap entire read-modify-write in per-file lock to prevent races with concurrent finding writers
-  const result = withFileLock(file, (): CortexResult<string> => {
+  const result = withFileLock(file, (): PhrenResult<string> => {
     const raw = fs.readFileSync(file, "utf8");
     const lines = raw.split("\n");
 
     // Q12: Separate the file into "active" lines and verbatim archive/details blocks.
-    // Archive blocks (<!-- cortex:archive:start/end --> and <details>...</details>) are
+    // Archive blocks (<!-- phren:archive:start/end --> and <details>...</details>) are
     // collected verbatim and appended unchanged after the consolidated active section.
     const archiveBlocks: string[] = [];
     const activeLines: string[] = [];
@@ -956,14 +656,14 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
     let currentArchiveBlock: string[] = [];
 
     for (const line of lines) {
-      const isArchiveStart = line.includes("<!-- cortex:archive:start -->") || line.includes("<details>");
-      const isArchiveEnd = line.includes("<!-- cortex:archive:end -->") || line.includes("</details>");
+      const archiveStart = isArchiveStartMeta(line);
+      const archiveEnd = isArchiveEndMeta(line);
 
-      if (!inArchive && isArchiveStart) {
+      if (!inArchive && archiveStart) {
         inArchive = true;
         currentArchiveBlock = [line];
         // If the start and end are on the same line, close immediately
-        if (isArchiveEnd && line.includes("<!-- cortex:archive:start -->") && line.includes("<!-- cortex:archive:end -->")) {
+        if (archiveEnd && isArchiveStartMeta(line) && isArchiveEndMeta(line)) {
           archiveBlocks.push(...currentArchiveBlock);
           currentArchiveBlock = [];
           inArchive = false;
@@ -972,7 +672,7 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
       }
       if (inArchive) {
         currentArchiveBlock.push(line);
-        if (isArchiveEnd) {
+        if (archiveEnd) {
           archiveBlocks.push(...currentArchiveBlock);
           currentArchiveBlock = [];
           inArchive = false;
@@ -1002,9 +702,9 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
       }
       if (line.startsWith("- ") && currentDate) {
         totalBullets++;
-        const key = line.trim().toLowerCase().replace(/<!--\s*fid:[a-z0-9]{8}\s*-->/g, "").replace(/\s+/g, " ");
+        const key = line.trim().toLowerCase().replace(METADATA_REGEX.findingId, "").replace(/\s+/g, " ");
         const nextLine = activeLines[index + 1] || "";
-        const citation = nextLine.match(/^\s*<!--\s*cortex:cite\s+\{.*\}\s*-->\s*$/) ? nextLine : undefined;
+        const citation = isCitationLine(nextLine) ? nextLine : undefined;
         const trimmedBullet = line.trimEnd();
         const existing = byDate.get(currentDate)?.get(key);
         if (!existing) {
@@ -1022,7 +722,7 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
     const duplicatesRemoved = totalBullets - uniqueBullets;
 
     if (dryRun) {
-      return cortexOk(`[dry-run] ${project}: ${totalBullets} bullets, ${duplicatesRemoved} duplicate(s) would be removed, ${dates.length} date section(s).`);
+      return phrenOk(`[dry-run] ${project}: ${totalBullets} bullets, ${duplicatesRemoved} duplicate(s) would be removed, ${dates.length} date section(s).`);
     }
 
     // Reconstruct: consolidated active section first, then verbatim archive blocks
@@ -1047,13 +747,13 @@ export function consolidateProjectFindings(cortexPath: string, project: string, 
     const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpFile, out.join("\n").trimEnd() + "\n");
     fs.renameSync(tmpFile, file);
-    appendAuditLog(cortexPath, "consolidate_project", `project=${project} dates=${dates.length}`);
-    return cortexOk(`Consolidated findings for ${project}.`);
+    appendAuditLog(phrenPath, "consolidate_project", `project=${project} dates=${dates.length}`);
+    return phrenOk(`Consolidated findings for ${project}.`);
   });
   // Fire post-consolidate hook outside the file lock to avoid deadlock
   // if the hook command reads or writes FINDINGS.md.
   if (result.ok) {
-    runCustomHooks(cortexPath, "post-consolidate", { CORTEX_PROJECT: project });
+    runCustomHooks(phrenPath, "post-consolidate", { PHREN_PROJECT: project });
   }
   return result;
 }

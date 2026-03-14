@@ -3,10 +3,10 @@ import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import {
-  cortexErr,
-  CortexError,
-  cortexOk,
-  type CortexResult,
+  phrenErr,
+  PhrenError,
+  phrenOk,
+  type PhrenResult,
   forwardErr,
   getProjectDirs,
   readRootManifest,
@@ -16,13 +16,13 @@ import { withFileLock as withFileLockRaw } from "./shared-governance.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
 import { TASK_FILE_ALIASES } from "./data-tasks.js";
 
-function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
+function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {
   try {
     return withFileLockRaw(filePath, fn);
   } catch (err: unknown) {
     const msg = errorMessage(err);
     if (msg.includes("could not acquire lock")) {
-      return cortexErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, CortexError.LOCK_TIMEOUT);
+      return phrenErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, PhrenError.LOCK_TIMEOUT);
     }
     throw err;
   }
@@ -40,45 +40,45 @@ export interface ProjectCard {
   docs: string[];
 }
 
-export function resolveActiveProfile(cortexPath: string, requestedProfile?: string): CortexResult<string | undefined> {
-  const manifest = readRootManifest(cortexPath);
+export function resolveActiveProfile(phrenPath: string, requestedProfile?: string): PhrenResult<string | undefined> {
+  const manifest = readRootManifest(phrenPath);
   if (manifest?.installMode === "project-local") {
-    return cortexOk(undefined);
+    return phrenOk(undefined);
   }
 
   if (requestedProfile) {
-    const profiles = listProfiles(cortexPath);
+    const profiles = listProfiles(phrenPath);
     if (!profiles.ok) return forwardErr(profiles);
     const exists = profiles.data.some((entry) => entry.name === requestedProfile);
-    if (!exists) return cortexErr(`Profile "${requestedProfile}" not found.`, CortexError.NOT_FOUND);
-    return cortexOk(requestedProfile);
+    if (!exists) return phrenErr(`Profile "${requestedProfile}" not found.`, PhrenError.NOT_FOUND);
+    return phrenOk(requestedProfile);
   }
 
-  const machines = listMachines(cortexPath);
+  const machines = listMachines(phrenPath);
   if (machines.ok) {
-    const profiles = listProfiles(cortexPath);
-    if (!profiles.ok) return cortexOk(undefined);
+    const profiles = listProfiles(phrenPath);
+    if (!profiles.ok) return phrenOk(undefined);
     const candidates = [getMachineName(), defaultMachineName()].filter((value, index, values) => value && values.indexOf(value) === index);
     for (const machineName of candidates) {
       const mapped = machines.data[machineName];
       if (!mapped) continue;
       const exists = profiles.data.some((entry) => entry.name === mapped);
-      if (exists) return cortexOk(mapped);
+      if (exists) return phrenOk(mapped);
     }
   }
 
-  const profiles = listProfiles(cortexPath);
-  if (!profiles.ok) return cortexOk(undefined);
-  return cortexOk(profiles.data[0]?.name);
+  const profiles = listProfiles(phrenPath);
+  if (!profiles.ok) return phrenOk(undefined);
+  return phrenOk(profiles.data[0]?.name);
 }
 
-export function listMachines(cortexPath: string): CortexResult<Record<string, string>> {
-  const machinesPath = path.join(cortexPath, "machines.yaml");
-  if (!fs.existsSync(machinesPath)) return cortexErr(`machines.yaml not found. Run 'npx cortex init' to set up your cortex.`, CortexError.FILE_NOT_FOUND);
+export function listMachines(phrenPath: string): PhrenResult<Record<string, string>> {
+  const machinesPath = path.join(phrenPath, "machines.yaml");
+  if (!fs.existsSync(machinesPath)) return phrenErr(`machines.yaml not found. Run 'npx phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
   try {
     const raw = fs.readFileSync(machinesPath, "utf8");
     const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return cortexErr(`machines.yaml is empty or not valid YAML. Check the file format or run 'cortex doctor --fix'.`, CortexError.MALFORMED_YAML);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return phrenErr(`machines.yaml is empty or not valid YAML. Check the file format or run 'phren doctor --fix'.`, PhrenError.MALFORMED_YAML);
 
     const cleaned: Record<string, string> = {};
     for (const [machine, profile] of Object.entries(parsed as Record<string, unknown>)) {
@@ -86,15 +86,15 @@ export function listMachines(cortexPath: string): CortexResult<Record<string, st
       if (typeof profile !== "string" || !profile.trim()) continue;
       cleaned[machine] = profile;
     }
-    return cortexOk(cleaned);
+    return phrenOk(cleaned);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] listMachines yaml parse: ${errorMessage(err)}\n`);
-    return cortexErr(`Could not parse machines.yaml. Check the file for syntax errors or run 'cortex doctor --fix'.`, CortexError.MALFORMED_YAML);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listMachines yaml parse: ${errorMessage(err)}\n`);
+    return phrenErr(`Could not parse machines.yaml. Check the file for syntax errors or run 'phren doctor --fix'.`, PhrenError.MALFORMED_YAML);
   }
 }
 
-function writeMachines(cortexPath: string, data: Record<string, string>): void {
-  const machinesPath = path.join(cortexPath, "machines.yaml");
+function writeMachines(phrenPath: string, data: Record<string, string>): void {
+  const machinesPath = path.join(phrenPath, "machines.yaml");
   const backupPath = `${machinesPath}.bak`;
   const existing = fs.existsSync(machinesPath) ? fs.readFileSync(machinesPath, "utf8") : "";
   if (fs.existsSync(machinesPath)) fs.copyFileSync(machinesPath, backupPath);
@@ -113,28 +113,28 @@ function writeMachines(cortexPath: string, data: Record<string, string>): void {
   fs.renameSync(tmpPath, machinesPath);
 }
 
-export function setMachineProfile(cortexPath: string, machine: string, profile: string): CortexResult<string> {
-  if (!machine || !profile) return cortexErr(`Both machine name and profile name are required. Example: :machine map my-laptop personal`, CortexError.EMPTY_INPUT);
+export function setMachineProfile(phrenPath: string, machine: string, profile: string): PhrenResult<string> {
+  if (!machine || !profile) return phrenErr(`Both machine name and profile name are required. Example: :machine map my-laptop personal`, PhrenError.EMPTY_INPUT);
 
-  const profiles = listProfiles(cortexPath);
+  const profiles = listProfiles(phrenPath);
   if (profiles.ok) {
     const exists = profiles.data.some((entry) => entry.name === profile);
-    if (!exists) return cortexErr(`Profile "${profile}" does not exist. Check available profiles in the profiles/ directory.`, CortexError.NOT_FOUND);
+    if (!exists) return phrenErr(`Profile "${profile}" does not exist. Check available profiles in the profiles/ directory.`, PhrenError.NOT_FOUND);
   }
 
-  const machinesPath = path.join(cortexPath, "machines.yaml");
+  const machinesPath = path.join(phrenPath, "machines.yaml");
   return withSafeLock(machinesPath, () => {
-    const current = listMachines(cortexPath);
+    const current = listMachines(phrenPath);
     const data = current.ok ? current.data : {};
     data[machine] = profile;
-    writeMachines(cortexPath, data);
-    return cortexOk(`Mapped machine ${machine} -> ${profile}.`);
+    writeMachines(phrenPath, data);
+    return phrenOk(`Mapped machine ${machine} -> ${profile}.`);
   });
 }
 
-export function listProfiles(cortexPath: string): CortexResult<ProfileInfo[]> {
-  const profilesDir = path.join(cortexPath, "profiles");
-  if (!fs.existsSync(profilesDir)) return cortexErr(`No profiles/ directory found. Run 'npx cortex init' to set up your cortex.`, CortexError.FILE_NOT_FOUND);
+export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
+  const profilesDir = path.join(phrenPath, "profiles");
+  if (!fs.existsSync(profilesDir)) return phrenErr(`No profiles/ directory found. Run 'npx phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
   const files = fs.readdirSync(profilesDir).filter((file) => file.endsWith(".yaml")).sort();
   const profiles: ProfileInfo[] = [];
 
@@ -154,12 +154,12 @@ export function listProfiles(cortexPath: string): CortexResult<ProfileInfo[]> {
         : [];
       profiles.push({ name, file: full, projects });
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] listProfiles yamlParse: ${errorMessage(err)}\n`);
-      return cortexErr(`profiles/${file}`, CortexError.MALFORMED_YAML);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listProfiles yamlParse: ${errorMessage(err)}\n`);
+      return phrenErr(`profiles/${file}`, PhrenError.MALFORMED_YAML);
     }
   }
 
-  return cortexOk(profiles);
+  return phrenOk(profiles);
 }
 
 function writeProfile(file: string, name: string, projects: string[]): void {
@@ -172,40 +172,40 @@ function writeProfile(file: string, name: string, projects: string[]): void {
   fs.renameSync(tmpPath, file);
 }
 
-export function addProjectToProfile(cortexPath: string, profile: string, project: string): CortexResult<string> {
-  if (!isValidProjectName(project)) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
-  const profiles = listProfiles(cortexPath);
+export function addProjectToProfile(phrenPath: string, profile: string, project: string): PhrenResult<string> {
+  if (!isValidProjectName(project)) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
+  const profiles = listProfiles(phrenPath);
   if (!profiles.ok) return forwardErr(profiles);
   const current = profiles.data.find((entry) => entry.name === profile);
-  if (!current) return cortexErr(`Profile "${profile}" not found.`, CortexError.NOT_FOUND);
+  if (!current) return phrenErr(`Profile "${profile}" not found.`, PhrenError.NOT_FOUND);
 
   return withSafeLock(current.file, () => {
-    const refreshed = listProfiles(cortexPath);
+    const refreshed = listProfiles(phrenPath);
     if (!refreshed.ok) return forwardErr(refreshed);
     const latest = refreshed.data.find((entry) => entry.name === profile);
-    if (!latest) return cortexErr(`Profile "${profile}" not found.`, CortexError.NOT_FOUND);
+    if (!latest) return phrenErr(`Profile "${profile}" not found.`, PhrenError.NOT_FOUND);
 
     const projects = latest.projects.includes(project) ? latest.projects : [...latest.projects, project];
     writeProfile(latest.file, latest.name, projects);
-    return cortexOk(`Added ${project} to profile ${profile}.`);
+    return phrenOk(`Added ${project} to profile ${profile}.`);
   });
 }
 
-export function removeProjectFromProfile(cortexPath: string, profile: string, project: string): CortexResult<string> {
-  const profiles = listProfiles(cortexPath);
+export function removeProjectFromProfile(phrenPath: string, profile: string, project: string): PhrenResult<string> {
+  const profiles = listProfiles(phrenPath);
   if (!profiles.ok) return forwardErr(profiles);
   const current = profiles.data.find((entry) => entry.name === profile);
-  if (!current) return cortexErr(`Profile "${profile}" not found.`, CortexError.NOT_FOUND);
+  if (!current) return phrenErr(`Profile "${profile}" not found.`, PhrenError.NOT_FOUND);
 
   return withSafeLock(current.file, () => {
-    const refreshed = listProfiles(cortexPath);
+    const refreshed = listProfiles(phrenPath);
     if (!refreshed.ok) return forwardErr(refreshed);
     const latest = refreshed.data.find((entry) => entry.name === profile);
-    if (!latest) return cortexErr(`Profile "${profile}" not found.`, CortexError.NOT_FOUND);
+    if (!latest) return phrenErr(`Profile "${profile}" not found.`, PhrenError.NOT_FOUND);
 
     const projects = latest.projects.filter((entry) => entry !== project);
     writeProfile(latest.file, latest.name, projects);
-    return cortexOk(`Removed ${project} from profile ${profile}.`);
+    return phrenOk(`Removed ${project} from profile ${profile}.`);
   });
 }
 
@@ -229,12 +229,12 @@ function buildProjectCard(dir: string): ProjectCard {
   return { name, summary, docs };
 }
 
-export function listProjectCards(cortexPath: string, profile?: string): ProjectCard[] {
-  const dirs = getProjectDirs(cortexPath, profile).sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
+export function listProjectCards(phrenPath: string, profile?: string): ProjectCard[] {
+  const dirs = getProjectDirs(phrenPath, profile).sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
   const cards: ProjectCard[] = dirs.map(buildProjectCard);
 
   // Prepend global as a pinned entry so it's always accessible from the shell
-  const globalDir = path.join(cortexPath, "global");
+  const globalDir = path.join(phrenPath, "global");
   if (fs.existsSync(globalDir)) {
     cards.unshift(buildProjectCard(globalDir));
   }

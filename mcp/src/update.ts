@@ -29,12 +29,12 @@ export interface UpdateResult {
   message: string;
 }
 
-interface RunCortexUpdateOptions {
+interface RunPhrenUpdateOptions {
   refreshStarter?: boolean;
 }
 
-function cleanupStarterRefreshArtifacts(cortexPath: string): number {
-  const runtimeRoot = path.join(cortexPath, ".runtime", "starter-updates");
+function cleanupStarterRefreshArtifacts(phrenPath: string): number {
+  const runtimeRoot = path.join(phrenPath, ".runtime", "starter-updates");
   if (!fs.existsSync(runtimeRoot)) return 0;
   let removed = 0;
   for (const entry of fs.readdirSync(runtimeRoot, { recursive: true })) {
@@ -52,7 +52,7 @@ function cleanupStarterRefreshArtifacts(cortexPath: string): number {
 
 function maybeRefreshStarter(root: string, builtEntry: string, refreshStarter: boolean): string {
   if (!refreshStarter) {
-    return " Run `cortex update --refresh-starter` to refresh global starter assets.";
+    return " Run `phren update --refresh-starter` to refresh global starter assets.";
   }
   run(process.execPath, [builtEntry, "init", "--apply-starter-update", "-y"], root);
   const cleaned = cleanupStarterRefreshArtifacts(root);
@@ -61,7 +61,7 @@ function maybeRefreshStarter(root: string, builtEntry: string, refreshStarter: b
     : " Refreshed starter assets.";
 }
 
-export async function runCortexUpdate(opts: RunCortexUpdateOptions = {}): Promise<UpdateResult> {
+export async function runPhrenUpdate(opts: RunPhrenUpdateOptions = {}): Promise<UpdateResult> {
   const root = packageRootFromRuntime();
   const hasGit = fs.existsSync(path.join(root, ".git"));
   const builtEntry = path.join(root, "mcp", "dist", "index.js");
@@ -75,7 +75,7 @@ export async function runCortexUpdate(opts: RunCortexUpdateOptions = {}): Promis
           process.stderr.write(`Note: uncommitted changes detected, autostash will preserve them.\n`);
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] runCortexUpdate gitStatus: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] runPhrenUpdate gitStatus: ${errorMessage(err)}\n`);
       }
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
       run(shellCommand("npm"), ["install"], root);
@@ -83,7 +83,7 @@ export async function runCortexUpdate(opts: RunCortexUpdateOptions = {}): Promis
         run(shellCommand("npm"), ["run", "build"], root);
         run(process.execPath, [builtEntry, "--health"], root);
         const starterMessage = maybeRefreshStarter(root, builtEntry, Boolean(opts.refreshStarter));
-        return { ok: true, message: `Updated local cortex repo at ${root}${pull ? ` (${pull})` : ""}.${starterMessage} Rebuilt and verified CLI health.` };
+        return { ok: true, message: `Updated local phren repo at ${root}${pull ? ` (${pull})` : ""}.${starterMessage} Rebuilt and verified CLI health.` };
       } catch (err: unknown) {
         const detail = errorMessage(err);
         return { ok: false, message: `Local repo updated but rebuild/health check failed: ${detail}` };
@@ -98,7 +98,7 @@ export async function runCortexUpdate(opts: RunCortexUpdateOptions = {}): Promis
     run(shellCommand("npm"), ["install", "-g", `${PACKAGE_NAME}@latest`]);
     run(shellCommand("npm"), ["list", "-g", PACKAGE_NAME, "--depth=0"]);
     const starterMessage = maybeRefreshStarter(root, builtEntry, Boolean(opts.refreshStarter));
-    return { ok: true, message: `Updated cortex via npm global install (@latest) and verified the package is installed.${starterMessage}` };
+    return { ok: true, message: `Updated phren via npm global install (@latest) and verified the package is installed.${starterMessage}` };
   } catch (err: unknown) {
     const detail = errorMessage(err);
     return { ok: false, message: `Global update failed: ${detail}. Try manually: npm install -g ${PACKAGE_SPEC}` };

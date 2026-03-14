@@ -44,19 +44,19 @@ function readEmbeddingMapFromDisk(filePath: string): EmbeddingMap {
 }
 
 export class EmbeddingCache {
-  private cortexPath: string;
+  private phrenPath: string;
   private cache: Map<string, EmbeddingEntry> = new Map();
   private dirty = false;
   private dirtyUpserts = new Set<string>();
   private dirtyDeletes = new Set<string>();
 
-  constructor(cortexPath: string) {
-    this.cortexPath = cortexPath;
+  constructor(phrenPath: string) {
+    this.phrenPath = phrenPath;
   }
 
   async load(): Promise<void> {
     if (this.dirty) return;
-    const filePath = runtimeFile(this.cortexPath, "embeddings.json");
+    const filePath = runtimeFile(this.phrenPath, "embeddings.json");
     try {
       const data = readEmbeddingMapFromDisk(filePath);
       this.cache = new Map(Object.entries(data));
@@ -93,7 +93,7 @@ export class EmbeddingCache {
 
   async flush(): Promise<void> {
     if (!this.dirty) return;
-    const filePath = runtimeFile(this.cortexPath, "embeddings.json");
+    const filePath = runtimeFile(this.phrenPath, "embeddings.json");
     try {
       withFileLock(filePath, () => {
         let data: EmbeddingMap = {};
@@ -150,13 +150,13 @@ export function formatEmbeddingCoverage(coverage: EmbeddingCoverage): string {
   return `${coverage.embedded}/${coverage.total} docs embedded (${coverage.pct}% warm, ${coverage.missingPct}% cold)`;
 }
 
-// Module-level singleton per cortexPath
+// Module-level singleton per phrenPath
 const cacheInstances = new Map<string, EmbeddingCache>();
 
-export function getEmbeddingCache(cortexPath: string): EmbeddingCache {
-  const existing = cacheInstances.get(cortexPath);
+export function getEmbeddingCache(phrenPath: string): EmbeddingCache {
+  const existing = cacheInstances.get(phrenPath);
   if (existing) return existing;
-  const instance = new EmbeddingCache(cortexPath);
-  cacheInstances.set(cortexPath, instance);
+  const instance = new EmbeddingCache(phrenPath);
+  cacheInstances.set(phrenPath, instance);
   return instance;
 }
