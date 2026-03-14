@@ -83,7 +83,7 @@ describe("hooks", () => {
   describe("buildSharedLifecycleCommands", () => {
     it("uses versioned npx commands without embedding local phren paths", () => {
       const cmds = buildSharedLifecycleCommands();
-      expect(cmds.sessionStart).toContain("npx -y @alaarab/phren@");
+      expect(cmds.sessionStart).toContain("npx -y @phren/cli@");
       expect(cmds.sessionStart).toContain("hook-session-start");
       expect(cmds.userPromptSubmit).toContain("hook-prompt");
       expect(cmds.stop).toContain("hook-stop");
@@ -453,9 +453,9 @@ describe("hooks", () => {
       if (fs.existsSync(localEntryScript)) fs.rmSync(localEntryScript, { force: true });
 
       const cmds = buildLifecycleCommands('/tmp/my "phren" path\\nested');
-      expect(cmds.sessionStart).toMatch(/npx -y @alaarab\/phren@.+ hook-session-start/);
-      expect(cmds.userPromptSubmit).toMatch(/npx -y @alaarab\/phren@.+ hook-prompt/);
-      expect(cmds.stop).toMatch(/npx -y @alaarab\/phren@.+ hook-stop/);
+      expect(cmds.sessionStart).toMatch(/npx -y @phren\/cli@.+ hook-session-start/);
+      expect(cmds.userPromptSubmit).toMatch(/npx -y @phren\/cli@.+ hook-prompt/);
+      expect(cmds.stop).toMatch(/npx -y @phren\/cli@.+ hook-stop/);
       expect(cmds.sessionStart).toContain('/tmp/my \\"phren\\" path\\\\nested');
     });
 

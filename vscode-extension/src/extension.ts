@@ -29,7 +29,7 @@ let client: PhrenClient | undefined;
 let outputChannel: vscode.OutputChannel;
 
 const GLOBAL_PHREN_STORE_PATH = path.join(os.homedir(), ".phren");
-const PHREN_PACKAGE_NAME = "@alaarab/phren";
+const PHREN_PACKAGE_NAME = "@phren/cli";
 const ONBOARDING_COMPLETE_SETTING = "onboardingComplete";
 
 interface CommandResult {

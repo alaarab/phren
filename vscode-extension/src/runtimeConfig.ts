@@ -15,7 +15,7 @@ export interface ResolvedRuntimeConfig {
   storePath: string;
 }
 
-const PACKAGE_NAMES = ["@alaarab/phren", "phren", "@alaarab/phren", "phren"];
+const PACKAGE_NAMES = ["@phren/cli", "phren", "@phren/cli", "phren"];
 const MCP_ENTRYPOINT_RELATIVE_PATH = path.join("mcp", "dist", "index.js");
 
 export function resolveRuntimeConfig(config: ConfigSource): ResolvedRuntimeConfig {
