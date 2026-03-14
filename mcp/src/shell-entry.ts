@@ -4,7 +4,8 @@
  */
 
 import { PhrenShell } from "./shell.js";
-import { style, clearScreen, clearToEnd, shellStartupFrames } from "./shell-render.js";
+import { style, clearScreen, clearToEnd, shellStartupFrames, gradient, badge } from "./shell-render.js";
+import { createPhrenAnimator, PHREN_ART_RIGHT } from "./phren-art.js";
 import { errorMessage } from "./utils.js";
 import { computePhrenLiveStateToken } from "./shared.js";
 import { VERSION } from "./init-shared.js";
@@ -82,12 +83,56 @@ async function playStartupIntro(phrenPath: string, plan = resolveStartupIntroPla
     }
   }
 
-  renderIntroFrame(frames[frames.length - 1], renderHint);
-  if (plan.holdForKeypress) {
-    await waitForAnyKeypress();
-  } else if (plan.dwellMs > 0) {
-    await sleep(plan.dwellMs);
+  // Start animated phren during loading
+  const animator = createPhrenAnimator({ facing: "right" });
+  animator.start();
+
+  const cols = process.stdout.columns || 80;
+  const tagline = style.dim("local memory for working agents");
+  const versionBadge = badge(`v${VERSION}`, style.boldBlue);
+  const logoLines = [
+    "██████╗ ██╗  ██╗██████╗ ███████╗███╗   ██╗",
+    "██╔══██╗██║  ██║██╔══██╗██╔════╝████╗  ██║",
+    "██████╔╝███████║██████╔╝█████╗  ██╔██╗ ██║",
+    "██╔═══╝ ██╔══██║██╔══██╗██╔══╝  ██║╚██╗██║",
+    "██║     ██║  ██║██║  ██║███████╗██║ ╚████║",
+    "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝",
+  ].map(l => gradient(l));
+  const infoLine = `${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`;
+
+  function renderAnimatedFrame(hint?: string): void {
+    const phrenLines = animator.getFrame();
+    const rightSide = ["", "", ...logoLines, "", infoLine];
+    const charWidth = 26;
+    const maxLines = Math.max(phrenLines.length, rightSide.length);
+    const merged: string[] = [""];
+    for (let i = 0; i < maxLines; i++) {
+      const left = (i < phrenLines.length ? phrenLines[i] : "").padEnd(charWidth);
+      const right = i < rightSide.length ? rightSide[i] : "";
+      merged.push(left + right);
+    }
+    if (hint) merged.push("", `  ${hint}`);
+    merged.push("");
+    renderIntroFrame(merged.join("\n"));
   }
+
+  // Animate during dwell/loading period
+  if (plan.holdForKeypress) {
+    const animInterval = setInterval(() => renderAnimatedFrame(renderHint), 200);
+    renderAnimatedFrame(renderHint);
+    await waitForAnyKeypress();
+    clearInterval(animInterval);
+  } else if (plan.dwellMs > 0) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < plan.dwellMs) {
+      renderAnimatedFrame(renderHint);
+      await sleep(200);
+    }
+  } else {
+    renderAnimatedFrame(renderHint);
+  }
+
+  animator.stop();
 
   if (plan.markSeen) {
     markStartupIntroSeen(phrenPath);
