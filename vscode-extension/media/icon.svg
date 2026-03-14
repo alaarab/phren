@@ -1,160 +1,416 @@
-<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <!-- Brain body gradient - brighter purple to match pixel art -->
-    <radialGradient id="brainBody" cx="45%" cy="38%" r="55%">
-      <stop offset="0%" stop-color="#B8AED8"/>
-      <stop offset="25%" stop-color="#9B8DC8"/>
-      <stop offset="55%" stop-color="#7B68AE"/>
-      <stop offset="80%" stop-color="#5B4B8A"/>
-      <stop offset="100%" stop-color="#3D3270"/>
-    </radialGradient>
-    <!-- Highlight gradient for brain folds -->
-    <radialGradient id="brainHighlight" cx="55%" cy="30%" r="45%">
-      <stop offset="0%" stop-color="#CFC6E8" stop-opacity="0.5"/>
-      <stop offset="100%" stop-color="#9B8DC8" stop-opacity="0"/>
-    </radialGradient>
-    <!-- Sparkle glow -->
-    <radialGradient id="sparkleGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#4DFFFF" stop-opacity="0.5"/>
-      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0"/>
-    </radialGradient>
-    <!-- Dark outline for brain edge -->
-    <radialGradient id="brainEdge" cx="45%" cy="40%" r="55%">
-      <stop offset="70%" stop-color="#7B68AE" stop-opacity="0"/>
-      <stop offset="95%" stop-color="#2D2255" stop-opacity="0.6"/>
-      <stop offset="100%" stop-color="#1a1333" stop-opacity="0.8"/>
-    </radialGradient>
-  </defs>
-
-  <!-- Dark background circle -->
-  <circle cx="64" cy="64" r="62" fill="#12122a"/>
-  <circle cx="64" cy="64" r="62" stroke="#3D3270" stroke-width="1.5" stroke-opacity="0.4"/>
-
-  <!-- Subtle purple ambient glow behind brain -->
-  <ellipse cx="60" cy="58" rx="38" ry="36" fill="#7B68AE" opacity="0.08"/>
-
-  <!-- Ground shadow -->
-  <ellipse cx="58" cy="109" rx="24" ry="3.5" fill="#9B8DC8" opacity="0.2"/>
-
-  <!-- === LEGS === -->
-  <!-- Left leg -->
-  <rect x="40" y="92" width="10" height="13" rx="2" fill="#5B4B8A"/>
-  <rect x="38" y="101" width="13" height="6" rx="2" fill="#3D3270"/>
-  <!-- Right leg -->
-  <rect x="58" y="92" width="10" height="13" rx="2" fill="#5B4B8A"/>
-  <rect x="56" y="101" width="13" height="6" rx="2" fill="#3D3270"/>
-
-  <!-- === BRAIN BODY === -->
-  <!-- Main brain blob -->
-  <path d="
-    M 30 58
-    C 28 42, 34 28, 48 22
-    C 54 19, 62 18, 70 20
-    C 78 22, 86 28, 90 38
-    C 94 48, 92 62, 88 72
-    C 84 82, 76 90, 64 92
-    C 52 94, 40 88, 34 78
-    C 28 70, 28 64, 30 58
-    Z
-  " fill="url(#brainBody)"/>
-
-  <!-- Brain highlight overlay -->
-  <path d="
-    M 30 58
-    C 28 42, 34 28, 48 22
-    C 54 19, 62 18, 70 20
-    C 78 22, 86 28, 90 38
-    C 94 48, 92 62, 88 72
-    C 84 82, 76 90, 64 92
-    C 52 94, 40 88, 34 78
-    C 28 70, 28 64, 30 58
-    Z
-  " fill="url(#brainHighlight)"/>
-
-  <!-- Dark edge definition -->
-  <path d="
-    M 30 58
-    C 28 42, 34 28, 48 22
-    C 54 19, 62 18, 70 20
-    C 78 22, 86 28, 90 38
-    C 94 48, 92 62, 88 72
-    C 84 82, 76 90, 64 92
-    C 52 94, 40 88, 34 78
-    C 28 70, 28 64, 30 58
-    Z
-  " fill="url(#brainEdge)"/>
-
-  <!-- === BRAIN FOLDS (wrinkly texture) === -->
-  <!-- Main horizontal fold -->
-  <path d="M 38 38 C 48 34, 62 36, 72 32 C 78 30, 84 34, 86 38"
-        stroke="#5B4B8A" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.6"/>
-  <!-- Upper fold -->
-  <path d="M 42 30 C 52 26, 64 27, 76 25"
-        stroke="#3D3270" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.45"/>
-  <!-- Mid fold -->
-  <path d="M 34 50 C 44 46, 56 48, 68 44 C 76 42, 82 46, 88 50"
-        stroke="#5B4B8A" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.5"/>
-  <!-- Lower fold -->
-  <path d="M 36 62 C 46 58, 58 60, 70 56 C 78 54, 84 58, 88 62"
-        stroke="#5B4B8A" stroke-width="1.8" stroke-linecap="round" fill="none" opacity="0.35"/>
-  <!-- Vertical fold left -->
-  <path d="M 46 26 C 44 36, 42 48, 40 60"
-        stroke="#3D3270" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.3"/>
-  <!-- Vertical fold right -->
-  <path d="M 74 24 C 78 34, 80 46, 82 58"
-        stroke="#3D3270" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.3"/>
-
-  <!-- Light highlights on brain surface -->
-  <path d="M 56 24 C 60 22, 66 23, 68 26"
-        stroke="#CFC6E8" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.6"/>
-  <path d="M 72 34 C 78 32, 82 36, 84 40"
-        stroke="#CFC6E8" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.5"/>
-  <path d="M 50 44 C 56 42, 62 43, 66 46"
-        stroke="#B8AED8" stroke-width="1.8" stroke-linecap="round" fill="none" opacity="0.45"/>
-  <!-- Extra top-right bright patch -->
-  <path d="M 66 28 C 72 26, 78 30, 82 34"
-        stroke="#CFC6E8" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.35"/>
-
-  <!-- === FACE === -->
-  <!-- Left eye - diamond shape -->
-  <path d="M 44 66 L 48 62 L 52 66 L 48 70 Z" fill="#12122a"/>
-  <!-- Right eye - diamond shape, slightly larger -->
-  <path d="M 58 66 L 63 61 L 68 66 L 63 71 Z" fill="#12122a"/>
-  <!-- Eye shine - left -->
-  <rect x="45" y="63" width="3" height="3" rx="0.5" fill="#FFFFFF" opacity="0.85"/>
-  <!-- Eye shine - right -->
-  <rect x="59.5" y="62" width="3" height="3" rx="0.5" fill="#FFFFFF" opacity="0.85"/>
-
-  <!-- Smile - small V shape -->
-  <path d="M 50 76 L 53 79 L 56 76" stroke="#3D3270" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-
-  <!-- === CYAN SPARKLE === -->
-  <!-- Sparkle glow background -->
-  <circle cx="94" cy="18" r="10" fill="url(#sparkleGlow)"/>
-  <!-- 4-pointed star sparkle -->
-  <path d="
-    M 94 10
-    L 96 16
-    L 102 18
-    L 96 20
-    L 94 26
-    L 92 20
-    L 86 18
-    L 92 16
-    Z
-  " fill="#00E5FF"/>
-  <!-- Inner bright core -->
-  <path d="
-    M 94 14
-    L 95 17
-    L 98 18
-    L 95 19
-    L 94 22
-    L 93 19
-    L 90 18
-    L 93 17
-    Z
-  " fill="#4DFFFF"/>
-  <!-- Sparkle center dot -->
-  <circle cx="94" cy="18" r="1.5" fill="#FFFFFF" opacity="0.95"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <circle cx="64" cy="64" r="64" fill="#12122a"/>
+  <g fill="rgb(40,211,242)">
+    <rect x="85.3" y="26.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(27,210,241)">
+    <rect x="96.0" y="26.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(40,41,142)">
+    <rect x="53.3" y="32.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(41,43,144)">
+    <rect x="58.7" y="32.0" width="5.3" height="5.3"/>
+    <rect x="74.7" y="32.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(43,44,147)">
+    <rect x="69.3" y="32.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(38,39,142)">
+    <rect x="42.7" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(153,140,248)">
+    <rect x="48.0" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(152,146,247)">
+    <rect x="53.3" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(93,67,243)">
+    <rect x="58.7" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(157,147,250)">
+    <rect x="64.0" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(156,146,249)">
+    <rect x="69.3" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(145,147,247)">
+    <rect x="74.7" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(155,146,248)">
+    <rect x="80.0" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(41,40,141)">
+    <rect x="85.3" y="37.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(150,132,250)">
+    <rect x="42.7" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(154,143,250)">
+    <rect x="48.0" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(104,75,249)">
+    <rect x="53.3" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(156,142,251)">
+    <rect x="58.7" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(156,149,248)">
+    <rect x="64.0" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(157,150,248)">
+    <rect x="69.3" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(151,130,250)">
+    <rect x="74.7" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(149,145,247)">
+    <rect x="80.0" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(155,143,248)">
+    <rect x="85.3" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(41,41,146)">
+    <rect x="90.7" y="42.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(39,39,132)">
+    <rect x="37.3" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(151,133,250)">
+    <rect x="42.7" y="48.0" width="5.3" height="5.3"/>
+    <rect x="58.7" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(148,129,251)">
+    <rect x="48.0" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(156,145,248)">
+    <rect x="53.3" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(92,68,236)">
+    <rect x="58.7" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(85,70,220)">
+    <rect x="64.0" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(157,151,248)">
+    <rect x="69.3" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(86,61,235)">
+    <rect x="74.7" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(105,83,245)">
+    <rect x="80.0" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(191,189,251)">
+    <rect x="85.3" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(153,135,250)">
+    <rect x="90.7" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(71,68,183)">
+    <rect x="96.0" y="48.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(12,31,109)">
+    <rect x="32.0" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(82,67,225)">
+    <rect x="37.3" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(143,122,252)">
+    <rect x="42.7" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(94,67,244)">
+    <rect x="48.0" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(152,144,249)">
+    <rect x="53.3" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(154,143,248)">
+    <rect x="58.7" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(157,153,248)">
+    <rect x="64.0" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(84,61,230)">
+    <rect x="69.3" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(152,139,250)">
+    <rect x="74.7" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(95,71,239)">
+    <rect x="80.0" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(92,68,237)">
+    <rect x="85.3" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(151,139,250)">
+    <rect x="90.7" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(67,61,181)">
+    <rect x="96.0" y="53.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(148,132,250)">
+    <rect x="32.0" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(144,126,251)">
+    <rect x="37.3" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(156,143,251)">
+    <rect x="42.7" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(149,132,251)">
+    <rect x="48.0" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(150,132,251)">
+    <rect x="53.3" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(152,134,250)">
+    <rect x="64.0" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(152,139,247)">
+    <rect x="69.3" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(106,93,246)">
+    <rect x="74.7" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(155,141,250)">
+    <rect x="80.0" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(158,141,248)">
+    <rect x="85.3" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(116,101,251)">
+    <rect x="90.7" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(36,41,131)">
+    <rect x="96.0" y="58.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(141,122,250)">
+    <rect x="32.0" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(21,32,101)">
+    <rect x="37.3" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(146,126,251)">
+    <rect x="42.7" y="64.0" width="5.3" height="5.3"/>
+    <rect x="53.3" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(146,128,250)">
+    <rect x="48.0" y="64.0" width="5.3" height="5.3"/>
+    <rect x="58.7" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(158,149,250)">
+    <rect x="53.3" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(22,31,104)">
+    <rect x="58.7" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(152,137,250)">
+    <rect x="64.0" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(150,142,249)">
+    <rect x="69.3" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(152,138,250)">
+    <rect x="74.7" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(154,140,251)">
+    <rect x="80.0" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(116,104,252)">
+    <rect x="85.3" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(127,111,251)">
+    <rect x="90.7" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(92,85,242)">
+    <rect x="96.0" y="64.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(146,128,248)">
+    <rect x="32.0" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(154,132,250)">
+    <rect x="37.3" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(145,123,251)">
+    <rect x="42.7" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(145,125,250)">
+    <rect x="48.0" y="69.3" width="5.3" height="5.3"/>
+    <rect x="42.7" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(146,123,248)">
+    <rect x="53.3" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(152,132,248)">
+    <rect x="58.7" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(151,133,251)">
+    <rect x="64.0" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(135,121,250)">
+    <rect x="69.3" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(119,99,247)">
+    <rect x="74.7" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(108,93,249)">
+    <rect x="80.0" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(117,100,251)">
+    <rect x="85.3" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(125,110,250)">
+    <rect x="90.7" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(93,81,242)">
+    <rect x="96.0" y="69.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(10,28,98)">
+    <rect x="32.0" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(147,128,251)">
+    <rect x="37.3" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(48,39,174)">
+    <rect x="48.0" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(111,94,250)">
+    <rect x="64.0" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(122,109,250)">
+    <rect x="69.3" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(120,107,251)">
+    <rect x="74.7" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(121,100,250)">
+    <rect x="80.0" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(92,66,240)">
+    <rect x="85.3" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(117,92,249)">
+    <rect x="90.7" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(7,37,110)">
+    <rect x="96.0" y="74.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(77,59,222)">
+    <rect x="37.3" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(100,82,243)">
+    <rect x="42.7" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(136,120,250)">
+    <rect x="48.0" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(102,86,245)">
+    <rect x="53.3" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(103,86,245)">
+    <rect x="58.7" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(116,102,249)">
+    <rect x="64.0" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(114,103,247)">
+    <rect x="69.3" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(86,74,229)">
+    <rect x="74.7" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(106,93,244)">
+    <rect x="80.0" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(36,25,138)">
+    <rect x="85.3" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(83,73,231)">
+    <rect x="90.7" y="80.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(18,22,101)">
+    <rect x="42.7" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(19,24,101)">
+    <rect x="48.0" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(66,51,207)">
+    <rect x="53.3" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(95,83,244)">
+    <rect x="58.7" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(72,59,210)">
+    <rect x="64.0" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(115,96,250)">
+    <rect x="69.3" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(117,104,249)">
+    <rect x="74.7" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(119,104,249)">
+    <rect x="80.0" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(23,21,110)">
+    <rect x="85.3" y="85.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(69,51,218)">
+    <rect x="53.3" y="90.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(26,24,106)">
+    <rect x="58.7" y="90.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(58,46,198)">
+    <rect x="69.3" y="90.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(20,31,99)">
+    <rect x="74.7" y="90.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(26,29,111)">
+    <rect x="80.0" y="90.7" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(24,29,112)">
+    <rect x="48.0" y="96.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(105,91,248)">
+    <rect x="53.3" y="96.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(9,30,102)">
+    <rect x="58.7" y="96.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(12,31,104)">
+    <rect x="64.0" y="96.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(112,102,250)">
+    <rect x="69.3" y="96.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(15,41,120)">
+    <rect x="74.7" y="96.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(160,169,250)">
+    <rect x="80.0" y="96.0" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(156,157,248)">
+    <rect x="48.0" y="101.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(155,157,248)">
+    <rect x="53.3" y="101.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(157,158,248)">
+    <rect x="58.7" y="101.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(158,161,248)">
+    <rect x="64.0" y="101.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(158,160,248)">
+    <rect x="69.3" y="101.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(158,162,248)">
+    <rect x="74.7" y="101.3" width="5.3" height="5.3"/>
+  </g>
+  <g fill="rgb(158,163,247)">
+    <rect x="80.0" y="101.3" width="5.3" height="5.3"/>
+  </g>
 </svg>

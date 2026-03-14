@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <circle cx="64" cy="64" r="64" fill="#12122a"/>
+  <style>@keyframes phren-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}#phren-body{animation:phren-bob 3s ease-in-out infinite}</style>
+  <g id="phren-body">
   <g fill="rgb(40,211,242)">
     <rect x="85.3" y="26.7" width="5.3" height="5.3"/>
   </g>
@@ -412,5 +413,6 @@
   </g>
   <g fill="rgb(158,163,247)">
     <rect x="80.0" y="101.3" width="5.3" height="5.3"/>
+  </g>
   </g>
 </svg>
