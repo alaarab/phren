@@ -1,10 +1,12 @@
 import * as fs from "fs";
+import { statSync } from "fs";
 import * as path from "path";
 import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 import { errorMessage, runGitOrThrow } from "./utils.js";
 import type { RetentionPolicy } from "./shared-governance.js";
 import { findingIdFromLine } from "./finding-impact.js";
 import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./content-metadata.js";
+import { FINDING_TYPE_DECAY, extractFindingType } from "./finding-lifecycle.js";
 
 export interface FindingCitation {
   created_at: string;
@@ -297,6 +299,16 @@ function confidenceForAge(ageDays: number, decay: RetentionPolicy["decay"]): num
   return d120; // don't decay further past d120; TTL handles final expiry
 }
 
+function wasFileModifiedAfter(filePath: string, findingDate: string): boolean {
+  try {
+    const stat = statSync(filePath);
+    const fileModified = stat.mtime.toISOString().slice(0, 10);
+    return fileModified > findingDate;
+  } catch {
+    return false; // File doesn't exist or can't stat — handled by citation validation
+  }
+}
+
 export function filterTrustedFindings(content: string, ttlDays: number): string {
   return filterTrustedFindingsDetailed(content, { ttlDays }).content;
 }
@@ -391,11 +403,43 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
       confidence = DEFAULT_UNDATED_CONFIDENCE;
     }
 
+    // Type-specific decay adjustment
+    const findingType = extractFindingType(line);
+    if (findingType) {
+      const typeConfig = FINDING_TYPE_DECAY[findingType];
+      if (typeConfig) {
+        // Override max age for this type
+        if (effectiveDate && typeConfig.maxAgeDays !== Infinity) {
+          const age = ageDaysForDate(effectiveDate);
+          if (age !== null && age > typeConfig.maxAgeDays) {
+            issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
+            if (citation) i++;
+            continue;
+          }
+        }
+        // Apply type-specific decay multiplier
+        confidence *= typeConfig.decayMultiplier;
+        // Decisions and anti-patterns get a floor boost (never drop below 0.6)
+        if (typeConfig.maxAgeDays === Infinity) {
+          confidence = Math.max(confidence, 0.6);
+        }
+      }
+    }
+
     if (citation && !validateFindingCitation(citation)) {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "invalid_citation" });
       i++;
       continue;
     }
+
+    // If cited file was modified after finding was created, lower confidence
+    if (citation && effectiveDate && citation.file) {
+      const fileModifiedAfterFinding = wasFileModifiedAfter(citation.file, effectiveDate);
+      if (fileModifiedAfterFinding) {
+        confidence *= 0.7; // File changed since finding was written — may be stale
+      }
+    }
+
     if (!citation) confidence *= 0.8;
     const provenance = parseSourceComment(line)?.source ?? "unknown";
     if (provenance === "human") confidence *= 1.1;

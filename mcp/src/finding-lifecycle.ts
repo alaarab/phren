@@ -18,6 +18,25 @@ import {
   stripRelationMetadata,
 } from "./content-metadata.js";
 
+export const FINDING_TYPE_DECAY: Record<string, { maxAgeDays: number; decayMultiplier: number }> = {
+  'pattern':      { maxAgeDays: 365, decayMultiplier: 1.0 },   // Slow decay, long-lived
+  'decision':     { maxAgeDays: Infinity, decayMultiplier: 1.0 }, // Never decays
+  'pitfall':      { maxAgeDays: 365, decayMultiplier: 1.0 },   // Slow decay
+  'anti-pattern': { maxAgeDays: Infinity, decayMultiplier: 1.0 }, // Never decays
+  'observation':  { maxAgeDays: 14, decayMultiplier: 0.7 },    // Fast decay, short-lived
+  'workaround':   { maxAgeDays: 60, decayMultiplier: 0.85 },   // Medium decay
+  'bug':          { maxAgeDays: 30, decayMultiplier: 0.8 },     // Medium-fast decay
+  'tooling':      { maxAgeDays: 180, decayMultiplier: 0.95 },  // Medium-slow decay
+  'context':      { maxAgeDays: 30, decayMultiplier: 0.75 },   // Fast decay (contextual facts)
+};
+
+export function extractFindingType(line: string): string | null {
+  const match = line.match(/\[(\w[\w-]*)\]/);
+  if (!match) return null;
+  const tag = match[1].toLowerCase();
+  return tag in FINDING_TYPE_DECAY ? tag : null;
+}
+
 export const FINDING_LIFECYCLE_STATUSES = [
   "active",
   "superseded",
