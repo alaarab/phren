@@ -87,8 +87,8 @@ describe("corrupted file recovery", () => {
     expect(result.data).toHaveLength(0);
   });
 
-  it("handles MEMORY_QUEUE.md with no section headers", () => {
-    fs.writeFileSync(path.join(projectDir, "MEMORY_QUEUE.md"), "# chaos Queue\n\n- [2026-03-05] orphan item\n");
+  it("handles review.md with no section headers", () => {
+    fs.writeFileSync(path.join(projectDir, "review.md"), "# chaos Queue\n\n- [2026-03-05] orphan item\n");
     const result = readReviewQueue(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -97,8 +97,8 @@ describe("corrupted file recovery", () => {
     expect(result.data[0].section).toBe("Review");
   });
 
-  it("handles empty MEMORY_QUEUE.md", () => {
-    fs.writeFileSync(path.join(projectDir, "MEMORY_QUEUE.md"), "");
+  it("handles empty review.md", () => {
+    fs.writeFileSync(path.join(projectDir, "review.md"), "");
     const result = readReviewQueue(tmpDir, PROJECT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;

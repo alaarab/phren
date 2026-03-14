@@ -85,7 +85,7 @@ describe("TTL enforcement", () => {
     expect(result.projects).toBe(1);
   });
 
-  it("queue transition: non-dry-run writes memory queue", async () => {
+  it("queue transition: non-dry-run writes review queue", async () => {
     const phren = makePhren();
     grantAdmin(phren);
     makeProject(phren, "proj", { "FINDINGS.md": "- fixed stuff\n" });

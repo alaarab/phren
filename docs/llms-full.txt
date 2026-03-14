@@ -56,7 +56,7 @@ MCP Tools (60 across 11 modules):
     session_history(limit?, sessionId?, project?) - list past sessions or drill into a specific session
 
   Memory quality:
-    pin_memory(project, memory) - write canonical/pinned memory that bypasses decay
+    pin_memory(project, memory) - write a truth into truths.md that bypasses decay
     memory_feedback(key, feedback) - record helpful/reprompt/regression outcomes
 
   Data management:
@@ -105,7 +105,7 @@ CLI Commands:
   phren shell                         - explicit shell mode
   phren search <query>                - FTS5 search with synonym expansion
   phren add-finding <project> "..."   - append a finding from the terminal
-  phren pin <project> "..."           - promote canonical memory
+  phren pin <project> "..."           - pin a finding
   phren tasks                      - cross-project task view
   phren skill-list                    - list installed skills
   phren doctor [--fix] [--agents]     - health checks with optional self-heal
@@ -163,7 +163,7 @@ Key File Locations:
   ~/.phren/<project>/reference/topics/ - machine-managed topic docs for archived findings
   ~/.phren/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
   ~/.phren/<project>/tasks.md        - task queue across sessions
-  ~/.phren/<project>/MEMORY_QUEUE.md - items pending human review
+  ~/.phren/<project>/review.md - items pending human review
   ~/.phren/.runtime/                 - audit.log, search history, caches
   ~/.phren/.runtime/access-control.local.json - local RBAC role augmentation
   ~/.phren/.runtime/telemetry.json   - opt-in local telemetry counters

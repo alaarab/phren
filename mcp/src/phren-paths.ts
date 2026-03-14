@@ -469,7 +469,7 @@ export function computePhrenLiveStateToken(phrenPath: string): string {
   for (const projectDir of projectDirs) {
     const project = path.basename(projectDir);
     parts.push(`project:${project}`);
-    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "tasks.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md", "topic-config.json", "phren.project.yaml"]) {
+    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "tasks.md", "review.md", "truths.md", "topic-config.json", "phren.project.yaml"]) {
       pushFileToken(parts, path.join(projectDir, file));
     }
     pushDirTokens(parts, path.join(projectDir, "reference"));

@@ -65,7 +65,7 @@ export async function handleAddFinding(project: string, learning: string) {
 
 export async function handlePinCanonical(project: string, memory: string) {
   if (!project || !memory) {
-    console.error('Usage: phren pin <project> "<memory>"');
+    console.error('Usage: phren pin <project> "<truth>"');
     process.exit(1);
   }
   const result = upsertCanonical(getPhrenPath(), project, memory);

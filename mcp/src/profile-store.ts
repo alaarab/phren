@@ -222,7 +222,7 @@ function buildProjectCard(dir: string): ProjectCard {
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("#")) || "";
-  const docs = ["CLAUDE.md", "FINDINGS.md", "summary.md", "MEMORY_QUEUE.md"]
+  const docs = ["CLAUDE.md", "FINDINGS.md", "summary.md", "review.md"]
     .filter((file) => fs.existsSync(path.join(dir, file)));
   const taskFile = TASK_FILE_ALIASES.find((file) => fs.existsSync(path.join(dir, file)));
   if (taskFile) docs.push(taskFile);

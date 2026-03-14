@@ -213,7 +213,7 @@ describe("applyTrustFilter", () => {
   beforeEach(() => {
     ({ path: phrenDir, cleanup: phrenCleanup } = makeTempDir("phren-trust-"));
     write(path.join(phrenDir, "testproj", "summary.md"), "# testproj\n");
-    write(path.join(phrenDir, "testproj", "MEMORY_QUEUE.md"), "# testproj Memory Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n\n");
+    write(path.join(phrenDir, "testproj", "review.md"), "# testproj Review Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n\n");
     write(path.join(phrenDir, ".governance", "audit.log"), "");
   });
 

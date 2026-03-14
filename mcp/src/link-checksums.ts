@@ -41,7 +41,7 @@ export function updateFileChecksums(phrenPath: string, profileName?: string): { 
   const tracked: string[] = [];
   const dirs = getProjectDirs(phrenPath, profileName);
   for (const dir of dirs) {
-    for (const name of ["FINDINGS.md", ...TASK_FILE_ALIASES, "CANONICAL_MEMORIES.md"]) {
+    for (const name of ["FINDINGS.md", ...TASK_FILE_ALIASES, "truths.md"]) {
       const full = path.join(dir, name);
       if (!fs.existsSync(full)) continue;
       const rel = path.relative(phrenPath, full).replace(/\\/g, "/");

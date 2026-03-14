@@ -38,7 +38,7 @@ Usage:
   phren search <query> [--project <n>] [--type <t>] [--limit <n>]
                                          Search what phren remembers
   phren add-finding <project> "..."     Tell phren what you learned
-  phren pin <project> "..."             Pin a canonical memory
+  phren pin <project> "..."             Save a truth
   phren tasks                           Cross-project task view
   phren skill-list                      List installed skills
   phren doctor [--fix] [--check-data] [--agents]

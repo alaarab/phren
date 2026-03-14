@@ -661,9 +661,9 @@ describe("removeFinding", () => {
   });
 });
 
-describe("memory queue helpers", () => {
+describe("review queue helpers", () => {
   beforeEach(() => {
-    const queue = `# testproject Memory Queue
+    const queue = `# testproject Review Queue
 
 ## Review
 
@@ -677,7 +677,7 @@ describe("memory queue helpers", () => {
 
 - [2026-03-02] conflicting guidance
 `;
-    fs.writeFileSync(path.join(projectDir, "MEMORY_QUEUE.md"), queue);
+    fs.writeFileSync(path.join(projectDir, "review.md"), queue);
   });
 
   it("readReviewQueue parses sections and confidence", () => {
@@ -693,7 +693,7 @@ describe("memory queue helpers", () => {
     const secondProjectDir = path.join(tmpDir, "bravo");
     fs.mkdirSync(secondProjectDir, { recursive: true });
     fs.writeFileSync(
-      path.join(secondProjectDir, "MEMORY_QUEUE.md"),
+      path.join(secondProjectDir, "review.md"),
       [
         "# bravo Review Queue",
         "",

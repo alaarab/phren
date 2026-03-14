@@ -118,8 +118,8 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "reference.md": "reference",
   "tasks.md": "task",
   "changelog.md": "changelog",
-  "canonical_memories.md": "canonical",
-  "memory_queue.md": "memory-queue",
+  "truths.md": "canonical",
+  "review.md": "review-queue",
 };
 
 function pathHasSegment(relPath: string, segment: string): boolean {

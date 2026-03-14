@@ -14,7 +14,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 | `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 60 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
-| `mcp/src/shared-governance.ts` | Config: policy/access/workflow config, memory queue, audit log |
+| `mcp/src/shared-governance.ts` | Config: policy/access/workflow config, review queue, audit log |
 | `mcp/src/shared-index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
 | `mcp/src/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, config commands |
 | `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
@@ -90,7 +90,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `auto_extract_findings(context)` : extract findings from conversation context automatically
 
 **Memory quality:**
-- `pin_memory(project, memory)` : write canonical/pinned memory entries
+- `pin_memory(project, memory)` : write a truth into truths.md (never decays, always injects)
 - `memory_feedback(key, feedback)` : record helpful/reprompt/regression outcomes
 
 **Data management:**
@@ -135,7 +135,7 @@ phren search <query> [--project <n>]  Search knowledge base
 phren search --history                Show recent searches
 phren search --from-history <n>       Re-run search #n from history
 phren add-finding <project> "..."     Tell phren what you learned
-phren pin <project> "..."             Pin canonical memory
+phren pin <project> "..."             Save a truth
 phren task                         Cross-project task view
 phren sessions [session-id]           Session history; drill into a session
 phren skill-list                      List installed skills (alias for skills list)
@@ -260,6 +260,7 @@ Use `runtimeFile(phrenPath, name)` and `sessionMarker(phrenPath, name)` helpers 
 | `PHREN_EXTRACT_MODEL` | `llama3.2` | Ollama model used for memory extraction (`phren maintain extract`). |
 | `PHREN_EMBEDDING_PROVIDER` | — | Set to `api` to enable OpenAI API embedding fallback in `search_knowledge` (requires `OPENAI_API_KEY`). |
 | `PHREN_FEATURE_HYBRID_SEARCH` | enabled | Set to `0` to disable TF-IDF cosine fallback in `search_knowledge`. |
+| `PHREN_FEATURE_QUERY_CORRELATION` | disabled | Set to `'1'` to enable query-to-finding correlation learning. Tracks which queries led to selected snippets and uses that to boost recurring query patterns in ranking. JSONL append, last-500 window, no database. |
 
 **Feature flags:**
 | Variable | Default | Description |

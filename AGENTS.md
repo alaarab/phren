@@ -69,7 +69,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `push_changes(message?)` : commit and push phren changes
 
 **Memory quality:**
-- `pin_memory(project, memory)` : write canonical/pinned memory entries
+- `pin_memory(project, memory)` : write a truth into truths.md (never decays, always injects)
 - `memory_feedback(key, feedback)` : record helpful/reprompt/regression outcomes
 
 **Data management:**
@@ -99,7 +99,7 @@ phren search <query> [--project <n>]  Search knowledge base
 phren search --history                Show recent searches
 phren search --from-history <n>       Re-run search #n from history
 phren add-finding <project> "..."     Save an insight
-phren pin <project> "..."             Pin canonical memory
+phren pin <project> "..."             Save a truth
 phren tasks                           Cross-project task view
 phren skill-list                      List installed skills
 phren doctor [--fix]                  Health check and self-heal

@@ -8,7 +8,7 @@ phren uses environment variables as feature flags to control optional behaviors.
 
 Controls automatic memory extraction during the `hook-prompt` lifecycle hook. When enabled, phren mines git history and GitHub signals (PRs, CI runs, issues) for memory candidates once per session per project.
 
-Phren runs this in the background during the UserPromptSubmit hook. He writes candidates to MEMORY_QUEUE.md for your review rather than directly to FINDINGS.md. The confidence threshold for auto-acceptance is controlled by `PHREN_MEMORY_AUTO_ACCEPT` (default: 0.75).
+Phren runs this in the background during the UserPromptSubmit hook. He writes candidates to review.md for your review rather than directly to FINDINGS.md. The confidence threshold for auto-acceptance is controlled by `PHREN_MEMORY_AUTO_ACCEPT` (default: 0.75).
 
 **When to disable:**
 - In CI environments or automated pipelines where git/GitHub lookups add unwanted latency

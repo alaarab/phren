@@ -308,6 +308,12 @@ export async function handleHookPrompt() {
     stage.selectMs = Date.now() - tSelect0;
     if (!selected.length) process.exit(0);
 
+    // Log query-to-finding correlations for future pre-warming (gated by env var)
+    try {
+      const { logCorrelations: logCorr } = await import("./query-correlation.js");
+      logCorr(getPhrenPath(), keywords, selected, sessionId);
+    } catch { /* non-fatal */ }
+
     // Injection budget: cap total injected tokens across all content
     const maxInjectTokens = clampInt(process.env.PHREN_MAX_INJECT_TOKENS, 2000, 200, 20000);
     let budgetSelected = selected;

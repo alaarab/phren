@@ -281,7 +281,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Consolidation lock file to prevent concurrent runs
 - `@import` path traversal security check
 - CI workflow with `npm publish --dry-run` gate
-- TUI shell: confirmation step for Memory Queue approve/reject, toggle task items between Active/Queue
+- TUI shell: confirmation step for Review Queue approve/reject, toggle task items between Active/Queue
 - Porter stemming for FTS5 tokenizer
 - Hybrid search (cosine fallback) enabled by default
 - Local ONNX embedding via @xenova/transformers (no API key required)
@@ -304,7 +304,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - writeQueue counter decrement happens before promise resolves
 - computePhrenHash now includes global/*.md and policy files
 - Synchronous stdin read in hook-prompt no longer blocks event loop
-- "Memory" label inconsistencies (now "Memory Queue" everywhere)
+- "Memory" label inconsistencies (now "Review Queue" everywhere)
 - Node engine bumped to >=20.0.0 to match CI matrix
 - timing-safe auth token comparison in memory-ui
 - push_changes restricted to known file types
@@ -394,10 +394,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - Queue approval policy enforcement:
-  - Memory queue approve/reject/edit flows now consistently enforce role permissions.
+  - Review queue approve/reject/edit flows now consistently enforce role permissions.
   - Risky queue approvals now require maintainer/admin role consistently across shell and memory UI.
 - Input validation:
-  - Memory queue edit flow now rejects empty replacement text.
+  - Review queue edit flow now rejects empty replacement text.
 
 ## [1.10.0] - 2026-03-06
 
@@ -466,8 +466,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - Governance and quality controls:
-  - Canonical/pinned memory support via `CANONICAL_MEMORIES.md` and `pin_memory` (MCP) / `pin-memory` (CLI).
-  - Governance queue + audit trail via `MEMORY_QUEUE.md` and `.phren-audit.log`.
+  - Truths support via `truths.md` and `pin_memory` (MCP) / `pin` (CLI).
+  - Governance queue + audit trail via `review.md` and `.phren-audit.log`.
   - Governance/policy/admin APIs:
     - MCP: `govern_memories`, `memory_policy`, `memory_access`, `prune_memories`, `consolidate_memories`, `memory_feedback`
     - CLI: `govern-memories`, `memory-policy`, `memory-access`, `prune-memories`, `consolidate-memories`, `quality-feedback`
@@ -525,7 +525,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - Automatic candidate extraction:
   - New CLI command `extract-memories [project]` mines git history and GitHub PR/review/CI/issue signals when `gh` is available.
-  - High-confidence candidates are auto-written to `LEARNINGS.md`; lower-confidence items are queued in `MEMORY_QUEUE.md` for review.
+  - High-confidence candidates are auto-written to `LEARNINGS.md`; lower-confidence items are queued in `review.md` for review.
 
 ## [1.8.0] - 2026-03-05
 

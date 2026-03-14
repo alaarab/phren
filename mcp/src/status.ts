@@ -51,7 +51,7 @@ function countBullets(filePath: string): number {
 }
 
 function countQueueItems(phrenPath: string, project: string): number {
-  const queueFile = path.join(phrenPath, project, "MEMORY_QUEUE.md");
+  const queueFile = path.join(phrenPath, project, "review.md");
   return countBullets(queueFile);
 }
 

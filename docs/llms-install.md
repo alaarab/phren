@@ -88,7 +88,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `pin_memory` | `project`, `memory` | Promote an important memory into CANONICAL_MEMORIES.md for priority retrieval. |
+| `pin_memory` | `project`, `memory` | Write a truth into truths.md — never decays, always injected. |
 | `memory_feedback` | `key`, `feedback` | Record whether an injected memory was `helpful`, a `reprompt`, or a `regression`. |
 
 ### Data Management
@@ -213,9 +213,9 @@ Findings can include source citations (`file:line@commit`). The trust filter val
 Finding lifecycle metadata is stored inline and updated by lifecycle tools (`supersede_finding`, `retract_finding`, `resolve_contradiction`).
 Impact scoring tracks which finding IDs were injected into context and marks successful outcomes when session tasks are completed, boosting retrieval priority for repeatedly useful findings.
 
-### Canonical Locks
+### Truth Locks
 
-Entries in `CANONICAL_MEMORIES.md` are protected from pruning and decay. Use `pin_memory` to promote high-value findings that should persist indefinitely.
+Entries in `truths.md` are protected from pruning and decay. Use `pin_memory` to save high-value findings that should persist indefinitely.
 
 ### Audit Trail
 

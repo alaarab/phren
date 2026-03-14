@@ -235,14 +235,14 @@ export async function handlePruneMemories(args: string[] = []) {
     }
     if (expiredEntries.length > 0 && dryRun) {
       for (const entry of expiredEntries) {
-        console.log(`[dry-run] [${project}] Would move to MEMORY_QUEUE: ${entry.slice(0, 120)}`);
+        console.log(`[dry-run] [${project}] Would move to review queue: ${entry.slice(0, 120)}`);
       }
     }
   }
 
   if (ttlExpired > 0) {
     const verb = dryRun ? "Would move" : "Moved";
-    console.log(`${verb} ${ttlExpired} TTL-expired entr${ttlExpired === 1 ? "y" : "ies"} to MEMORY_QUEUE.md`);
+    console.log(`${verb} ${ttlExpired} TTL-expired entr${ttlExpired === 1 ? "y" : "ies"} to review.md`);
   }
 
   if (dryRun) return;

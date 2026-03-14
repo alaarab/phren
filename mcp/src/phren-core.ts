@@ -114,7 +114,7 @@ export type FindingTag = FindingType;
 export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TYPES);
 
 /** Document types in the FTS index */
-export const DOC_TYPES = ["claude", "findings", "reference", "skills", "summary", "task", "changelog", "canonical", "memory-queue", "skill", "other"] as const;
+export const DOC_TYPES = ["claude", "findings", "reference", "skills", "summary", "task", "changelog", "canonical", "review-queue", "skill", "other"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 
 // ── Cache eviction helper ────────────────────────────────────────────────────

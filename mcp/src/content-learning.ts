@@ -282,17 +282,17 @@ export function upsertCanonical(phrenPath: string, project: string, memory: stri
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
-  const canonicalPath = path.join(resolvedDir, "CANONICAL_MEMORIES.md");
+  const canonicalPath = path.join(resolvedDir, "truths.md");
   const today = new Date().toISOString().slice(0, 10);
   const bullet = memory.startsWith("- ") ? memory : `- ${memory}`;
   withFileLock(canonicalPath, () => {
     if (!fs.existsSync(canonicalPath)) {
-      fs.writeFileSync(canonicalPath, `# ${project} Canonical Memories\n\n## Pinned\n\n${bullet} _(pinned ${today})_\n`);
+      fs.writeFileSync(canonicalPath, `# ${project} Pinned Findings\n\n## Pinned\n\n${bullet} _(added ${today})_\n`);
     } else {
       const existing = fs.readFileSync(canonicalPath, "utf8");
-      const line = `${bullet} _(pinned ${today})_`;
+      const line = `${bullet} _(added ${today})_`;
       if (!existing.includes(bullet)) {
-        const updated = existing.includes("## Pinned")
+        const updated = existing.includes("## Truths")
           ? existing.replace("## Pinned", `## Pinned\n\n${line}`)
           : `${existing.trimEnd()}\n\n## Pinned\n\n${line}\n`;
         const content = updated.endsWith("\n") ? updated : updated + "\n";
@@ -304,7 +304,7 @@ export function upsertCanonical(phrenPath: string, project: string, memory: stri
   });
 
   appendAuditLog(phrenPath, "pin_memory", `project=${project} memory=${JSON.stringify(memory)}`);
-  return phrenOk(`Pinned canonical memory in ${project}.`);
+  return phrenOk(`Truth saved in ${project}.`);
 }
 
 export function addFindingToFile(

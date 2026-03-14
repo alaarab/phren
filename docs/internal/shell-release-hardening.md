@@ -5,7 +5,7 @@
 - [x] `npm test` passes including `shell.test.ts`.
 - [x] `phren` no-arg TTY opens shell.
 - [x] Non-TTY invocation still works for MCP mode.
-- [x] Task/findings/memory queue writes are parity-checked with MCP tools.
+- [x] Task/findings/review queue writes are parity-checked with MCP tools.
 - [x] Session persistence survives restart and stale-state migration.
 - [x] Health remediation commands run without shell crash.
 - [x] `phren update` and `:update` flows are documented.

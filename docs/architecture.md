@@ -139,8 +139,8 @@ All state stays local as files (markdown/json), with git as transport in shared 
     summary.md
     FINDINGS.md
     tasks.md
-    MEMORY_QUEUE.md
-    CANONICAL_MEMORIES.md
+    review.md
+    truths.md
     reference/
     skills/
   global/

@@ -94,7 +94,7 @@ Phren should be read as a system in the same design space as prior memory work s
 \section{Phren Architecture}
 \label{sec:arch}
 
-The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Phren now supports two install modes rooted by \texttt{phren.root.yaml}: \textbf{shared} (\texttt{\textasciitilde/.phren/}) and \textbf{project-local} (\texttt{<repo>/.phren/}). In both modes, markdown and JSON files remain the source of truth for \textbf{findings}, \textbf{tasks}, \textbf{canonical memories}, \textbf{fragment links}, and \textbf{session checkpoints}; the FTS5 index is a local cache. The diagram below shows the current runtime loop.
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Phren now supports two install modes rooted by \texttt{phren.root.yaml}: \textbf{shared} (\texttt{\textasciitilde/.phren/}) and \textbf{project-local} (\texttt{<repo>/.phren/}). In both modes, markdown and JSON files remain the source of truth for \textbf{findings}, \textbf{tasks}, \textbf{truths}, \textbf{fragment links}, and \textbf{session checkpoints}; the FTS5 index is a local cache. The diagram below shows the current runtime loop.
 
 \vspace{0.2em}
 \begin{center}
@@ -187,7 +187,7 @@ This matters most in multi-tool coding sessions where search, task lookup, revie
 
 \subsection{Governance}
 \label{sec:governance}
-The governance engine \cite{phren-shared} provides four configurable policy layers: retention and TTL (default 120-day decay, 365-day retention), workflow approval gates for risky queue items, role-based access control (admin/maintainer/contributor/viewer with 6 action types), and canonical locks protecting pinned memories from bulk overwrites. All governance events are appended to a timestamped audit log. These controls exist to contain familiar failure modes: stale memory, unreviewed risky writes, accidental overwrites, and unaudited shared-store drift.
+The governance engine \cite{phren-shared} provides four configurable policy layers: retention and TTL (default 120-day decay, 365-day retention), workflow approval gates for risky queue items, role-based access control (admin/maintainer/contributor/viewer with 6 action types), and canonical locks protecting truths from bulk overwrites. All governance events are appended to a timestamped audit log. These controls exist to contain familiar failure modes: stale memory, unreviewed risky writes, accidental overwrites, and unaudited shared-store drift.
 
 \subsection{Finding Lifecycle, Provenance, and Impact}
 Finding records now include normalized lifecycle metadata and provenance tracking. The lifecycle status set is \texttt{active}, \texttt{superseded}, \texttt{contradicted}, \texttt{stale}, \texttt{invalid\_citation}, and \texttt{retracted}, with status updates and reasons persisted inline in finding metadata comments. Provenance is carried through a typed \texttt{source} field (\texttt{human}, \texttt{agent}, \texttt{hook}, \texttt{extract}, \texttt{consolidation}, \texttt{unknown}).

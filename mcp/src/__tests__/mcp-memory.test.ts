@@ -17,7 +17,7 @@ function seedProject(phrenPath: string, project = PROJECT) {
 }
 
 function canonicalPath(project = PROJECT) {
-  return path.join(tmp.path, project, "CANONICAL_MEMORIES.md");
+  return path.join(tmp.path, project, "truths.md");
 }
 
 beforeEach(() => {
@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe("pin_memory MCP tool", () => {
-  it("creates CANONICAL_MEMORIES.md in the project", () => {
+  it("creates truths.md in the project", () => {
     expect(fs.existsSync(canonicalPath())).toBe(false);
     const r = upsertCanonical(tmp.path, PROJECT, "Always use UTC for timestamps");
     expect(r.ok).toBe(true);
@@ -40,19 +40,19 @@ describe("pin_memory MCP tool", () => {
 
     const content = fs.readFileSync(canonicalPath(), "utf-8");
     expect(content).toContain("Always use UTC for timestamps");
-    expect(content).toContain("## Pinned");
+    expect(content).toContain("## Truths");
   });
 
-  it("appends to existing CANONICAL_MEMORIES.md without duplicating", () => {
-    upsertCanonical(tmp.path, PROJECT, "First canonical memory");
-    upsertCanonical(tmp.path, PROJECT, "Second canonical memory");
+  it("appends to existing truths.md without duplicating", () => {
+    upsertCanonical(tmp.path, PROJECT, "First truth");
+    upsertCanonical(tmp.path, PROJECT, "Second truth");
 
     const content = fs.readFileSync(canonicalPath(), "utf-8");
-    expect(content).toContain("First canonical memory");
-    expect(content).toContain("Second canonical memory");
+    expect(content).toContain("First truth");
+    expect(content).toContain("Second truth");
   });
 
-  it("does not duplicate an already-pinned memory", () => {
+  it("does not duplicate an already-saved truth", () => {
     upsertCanonical(tmp.path, PROJECT, "Do not duplicate me");
     upsertCanonical(tmp.path, PROJECT, "Do not duplicate me");
 
@@ -71,11 +71,11 @@ describe("pin_memory MCP tool", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("includes pinned date in the entry", () => {
+  it("includes added date in the entry", () => {
     upsertCanonical(tmp.path, PROJECT, "Memory with date");
     const content = fs.readFileSync(canonicalPath(), "utf-8");
     const today = new Date().toISOString().slice(0, 10);
-    expect(content).toContain(`pinned ${today}`);
+    expect(content).toContain(`added ${today}`);
   });
 });
 

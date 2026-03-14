@@ -80,8 +80,8 @@ describe("mcp-search: project filter", () => {
 
   it("project-filtered search uses the shared reranker and injects canonical context", async () => {
     writeFile(
-      path.join(tmp.path, "project-a", "CANONICAL_MEMORIES.md"),
-      "# project-a Canonical Memories\n\n- Prefer canonical memory before ad hoc findings when working in project-a.\n"
+      path.join(tmp.path, "project-a", "truths.md"),
+      "# project-a Truths\n\n- Prefer truths before ad hoc findings when working in project-a.\n"
     );
     db.close();
     db = await buildIndex(tmp.path);

@@ -32,7 +32,7 @@ Finding lifecycle states (for example superseded/retracted/contradicted) and pro
 
 ### Review Queue (`m`)
 
-Shows pending review items from `MEMORY_QUEUE.md`. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date. Triage items with `:mq approve`, `:mq reject`, or `:mq edit`.
+Shows pending review items from `review.md`. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date. Triage items with `:mq approve`, `:mq reject`, or `:mq edit`.
 
 If you move from shell to browser triage (`phren web-ui`), the UI runs loopback-only and enforces auth + CSRF on mutations.
 

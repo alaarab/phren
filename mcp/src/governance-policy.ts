@@ -493,7 +493,7 @@ export function appendReviewQueue(
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
-  const queuePath = path.join(resolvedDir, "MEMORY_QUEUE.md");
+  const queuePath = path.join(resolvedDir, "review.md");
   const today = new Date().toISOString().slice(0, 10);
 
   const normalized: string[] = [];

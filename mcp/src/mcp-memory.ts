@@ -21,10 +21,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · pin memory",
       description:
-        "Promote an important memory into CANONICAL_MEMORIES.md so retrieval prioritizes it.",
+        "Write a truth — a high-confidence, always-inject entry in truths.md that never decays.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        memory: z.string().describe("Canonical memory text to pin."),
+        memory: z.string().describe("Truth text."),
       }),
     },
     async ({ project, memory }) => {
@@ -33,7 +33,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = upsertCanonical(phrenPath, project, memory);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         // Update FTS index so newly pinned memory is immediately searchable
-        const canonicalPath = path.join(phrenPath, project, "CANONICAL_MEMORIES.md");
+        const canonicalPath = path.join(phrenPath, project, "truths.md");
         updateFileInIndex(canonicalPath);
         return mcpResponse({ ok: true, message: result.data, data: { project, memory } });
       });

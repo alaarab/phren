@@ -28,7 +28,7 @@ Ship an interactive `phren` shell that makes task/findings/memory operations fas
   - helpers: `work next`, `tidy`.
 - Findings writes:
   - add and remove.
-- Memory queue triage:
+- Review queue triage:
   - approve, reject, edit.
 - Health actions:
   - `run fix`, `relink`, `rerun hooks`, `update`.
@@ -45,7 +45,7 @@ Ship an interactive `phren` shell that makes task/findings/memory operations fas
 - Keyboard map and command palette are visible in help.
 - Selected project persists across views and sessions.
 - Task updates in shell are reflected in `tasks.md` and MCP tools.
-- Findings and memory queue actions mutate markdown safely.
+- Findings and review queue actions mutate markdown safely.
 - Health view shows doctor checks + runtime health and remediation actions.
 - Test coverage includes navigation, writes, triage, health, stale-state regression.
 

@@ -352,7 +352,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · get review queue",
       description:
-        "List all items in a project's memory review queue (MEMORY_QUEUE.md), or across all projects when omitted. " +
+        "List all items in a project's review queue (review.md), or across all projects when omitted. " +
         "Returns items with their id, section (Review/Stale/Conflicts), date, text, confidence, and risky flag.",
       inputSchema: z.object({
         project: z.string().optional().describe("Project name. Omit to read the review queue across all projects in the active profile."),

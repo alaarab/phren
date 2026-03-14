@@ -21,9 +21,9 @@ function seedProject(root: string): void {
     ].join("\n")
   );
   write(
-    path.join(root, "demo", "MEMORY_QUEUE.md"),
+    path.join(root, "demo", "review.md"),
     [
-      "# demo Memory Queue",
+      "# demo Review Queue",
       "",
       "## Review",
       "",

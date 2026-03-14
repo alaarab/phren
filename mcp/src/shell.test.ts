@@ -51,9 +51,9 @@ function seedPhren(root: string): TempContext {
     ].join("\n")
   );
   write(
-    path.join(root, project, "MEMORY_QUEUE.md"),
+    path.join(root, project, "review.md"),
     [
-      "# demo Memory Queue",
+      "# demo Review Queue",
       "",
       "## Review",
       "",
@@ -384,7 +384,7 @@ describe("PhrenShell", () => {
     expect(output).toContain("Relink done");
   });
 
-  it("groups memory queue items by section with headers", async () => {
+  it("groups review queue items by section with headers", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
     await shell.handleInput("m");

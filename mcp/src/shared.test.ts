@@ -653,23 +653,23 @@ describe("consolidateProjectFindings", () => {
 });
 
 describe("upsertCanonical", () => {
-  it("creates CANONICAL_MEMORIES.md with pinned content", () => {
+  it("creates truths.md with truth content", () => {
     const phren = makePhren();
     makeProject(phren, "pinproj", { "summary.md": "# pinproj" });
 
     const result = upsertCanonical(phren, "pinproj", "Always run tests before pushing");
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Pinned");
+    if (result.ok) expect(result.data).toContain("Truth");
 
     const canonical = fs.readFileSync(
-      path.join(phren, "pinproj", "CANONICAL_MEMORIES.md"),
+      path.join(phren, "pinproj", "truths.md"),
       "utf8"
     );
     expect(canonical).toContain("Always run tests before pushing");
-    expect(canonical).toContain("## Pinned");
+    expect(canonical).toContain("## Truths");
   });
 
-  it("does not duplicate an existing pinned memory", () => {
+  it("does not duplicate an existing truth", () => {
     const phren = makePhren();
     makeProject(phren, "dupproj", { "summary.md": "# dupproj" });
 
@@ -677,7 +677,7 @@ describe("upsertCanonical", () => {
     upsertCanonical(phren, "dupproj", "Unique insight");
 
     const canonical = fs.readFileSync(
-      path.join(phren, "dupproj", "CANONICAL_MEMORIES.md"),
+      path.join(phren, "dupproj", "truths.md"),
       "utf8"
     );
     const matches = canonical.match(/Unique insight/g);
@@ -1578,7 +1578,7 @@ describe("getRuntimeHealth and updateRuntimeHealth", () => {
 // --- appendReviewQueue ---
 
 describe("appendReviewQueue", () => {
-  it("creates MEMORY_QUEUE.md if it does not exist", () => {
+  it("creates review.md if it does not exist", () => {
     const phren = makePhren();
     grantAdmin(phren);
     makeProject(phren, "queueproj", { "summary.md": "# queueproj\n" });
@@ -1586,7 +1586,7 @@ describe("appendReviewQueue", () => {
     const result = appendReviewQueue(phren, "queueproj", "Stale", ["Old memory"]);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toBe(1);
-    const content = fs.readFileSync(path.join(phren, "queueproj", "MEMORY_QUEUE.md"), "utf8");
+    const content = fs.readFileSync(path.join(phren, "queueproj", "review.md"), "utf8");
     expect(content).toContain("## Stale");
     expect(content).toContain("Old memory");
   });
@@ -1629,7 +1629,7 @@ describe("appendReviewQueue", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const content = fs.readFileSync(path.join(phren, "sanitizequeue", "MEMORY_QUEUE.md"), "utf8");
+    const content = fs.readFileSync(path.join(phren, "sanitizequeue", "review.md"), "utf8");
     expect(content).toContain('Line one Line two "quoted" text');
     expect(content).not.toContain("<!-- source: injected -->");
     expect(content).not.toContain("\0");

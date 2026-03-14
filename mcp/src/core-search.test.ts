@@ -125,7 +125,7 @@ describe("rankResults", () => {
       path: "/test/remote-canonical.md",
       project: "other",
       type: "canonical",
-      filename: "CANONICAL_MEMORIES.md",
+      filename: "truths.md",
       content: "general platform guidance about account behavior and some login notes",
     });
 

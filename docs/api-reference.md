@@ -29,7 +29,7 @@ Search the user's personal project store using FTS5 full-text search with synony
 | `query` | string | yes | Search query. Supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes. |
 | `limit` | number | no | Max results to return (1-20, default 5). |
 | `project` | string | no | Filter results to a specific project. |
-| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `reference`, `skills`, `summary`, `task`, `changelog`, `canonical`, `memory-queue`, `skill`, `other`. |
+| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `reference`, `skills`, `summary`, `task`, `changelog`, `canonical`, `review-queue`, `skill`, `other`. |
 | `tag` | enum | no | Filter findings by type tag: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
 | `since` | string | no | Filter findings by creation date. Formats: `7d`, `30d`, `YYYY-MM`, `YYYY-MM-DD`. |
 | `status` | enum | no | Filter findings by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
@@ -325,12 +325,12 @@ Finding lifecycle and impact scoring notes:
 
 ### `pin_memory`
 
-Promote an important memory into CANONICAL_MEMORIES.md so retrieval prioritizes it.
+Write a truth into truths.md — a high-confidence entry that never decays and always injects.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `memory` | string | yes | Canonical memory text to pin. |
+| `memory` | string | yes | Truth text. |
 
 ### `memory_feedback`
 

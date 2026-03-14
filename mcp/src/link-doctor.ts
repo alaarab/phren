@@ -566,7 +566,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      for (const mdFile of ["FINDINGS.md", ...TASK_FILE_ALIASES, "MEMORY_QUEUE.md", "CLAUDE.md", "REFERENCE.md"]) {
+      for (const mdFile of ["FINDINGS.md", ...TASK_FILE_ALIASES, "review.md", "CLAUDE.md", "REFERENCE.md"]) {
         const filePath = path.join(projectDir, mdFile);
         if (!fs.existsSync(filePath)) continue;
         const content = fs.readFileSync(filePath, "utf8");

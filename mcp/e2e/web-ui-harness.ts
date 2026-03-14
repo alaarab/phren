@@ -162,9 +162,9 @@ function seedProjectFixtures(phrenDir: string): void {
     "# General\n\nGeneral topic reference.\n",
   );
   writeFile(
-    path.join(phrenDir, "repo-a", "MEMORY_QUEUE.md"),
+    path.join(phrenDir, "repo-a", "review.md"),
     [
-      "# repo-a Memory Queue",
+      "# repo-a Review Queue",
       "",
       "## Review",
       "",

@@ -181,9 +181,9 @@ describe.sequential("workflow integration", () => {
     expect(JSON.stringify(searchRes.data.results)).toContain("Workflow coverage proves repo-c");
 
     fs.writeFileSync(
-      path.join(phrenPath, "repo-c", "MEMORY_QUEUE.md"),
+      path.join(phrenPath, "repo-c", "review.md"),
       [
-        "# repo-c Memory Queue",
+        "# repo-c Review Queue",
         "",
         "## Review",
         "",

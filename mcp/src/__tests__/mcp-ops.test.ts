@@ -159,7 +159,7 @@ describe("mcp-ops: get_review_queue", () => {
     const alphaDir = path.join(tmp.path, "alpha");
     fs.mkdirSync(alphaDir, { recursive: true });
     fs.writeFileSync(
-      path.join(alphaDir, "MEMORY_QUEUE.md"),
+      path.join(alphaDir, "review.md"),
       [
         "# alpha Review Queue",
         "",
@@ -187,7 +187,7 @@ describe("mcp-ops: get_review_queue", () => {
     fs.mkdirSync(alphaDir, { recursive: true });
     fs.mkdirSync(bravoDir, { recursive: true });
     fs.writeFileSync(
-      path.join(alphaDir, "MEMORY_QUEUE.md"),
+      path.join(alphaDir, "review.md"),
       [
         "# alpha Review Queue",
         "",
@@ -202,7 +202,7 @@ describe("mcp-ops: get_review_queue", () => {
       ].join("\n"),
     );
     fs.writeFileSync(
-      path.join(bravoDir, "MEMORY_QUEUE.md"),
+      path.join(bravoDir, "review.md"),
       [
         "# bravo Review Queue",
         "",

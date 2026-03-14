@@ -95,17 +95,17 @@ describe("handleGovernMemories", () => {
     expect(result.reviewCount).toBeGreaterThanOrEqual(1);
   });
 
-  it("dry-run does not write audit log or memory queue", async () => {
+  it("dry-run does not write audit log or review queue", async () => {
     const phren = makePhren();
     grantAdmin(phren);
     makeProject(phren, "proj", { "FINDINGS.md": "- fixed stuff\n" });
     const { handleGovernMemories } = await importGovern(phren);
     await handleGovernMemories("proj", true, true);
-    const queuePath = path.join(phren, "proj", "MEMORY_QUEUE.md");
+    const queuePath = path.join(phren, "proj", "review.md");
     expect(fs.existsSync(queuePath)).toBe(false);
   });
 
-  it("non-dry-run writes memory queue and audit log", async () => {
+  it("non-dry-run writes review queue and audit log", async () => {
     const phren = makePhren();
     grantAdmin(phren);
     makeProject(phren, "proj", { "FINDINGS.md": "- fixed stuff\n" });

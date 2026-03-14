@@ -241,9 +241,9 @@ export function safeProjectPath(base: string, ...segments: string[]): string | n
   return resolved;
 }
 
-// Memory queue section types and file path helper, shared by data-access.ts and shared.ts.
+// Review queue section types and file path helper, shared by data-access.ts and shared.ts.
 export type QueueSection = "Review" | "Stale" | "Conflicts";
-const QUEUE_FILENAME = "MEMORY_QUEUE.md";
+const QUEUE_FILENAME = "review.md";
 
 export function queueFilePath(phrenPath: string, project: string): string {
   if (!isValidProjectName(project)) {

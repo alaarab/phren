@@ -22,9 +22,9 @@ function seedProject(root: string): void {
     ].join("\n")
   );
   write(
-    path.join(root, "demo", "MEMORY_QUEUE.md"),
+    path.join(root, "demo", "review.md"),
     [
-      "# demo Memory Queue",
+      "# demo Review Queue",
       "",
       "## Review",
       "",
@@ -407,9 +407,9 @@ describe.sequential("web-ui HTML escaping", () => {
       "# xss-test FINDINGS\n"
     );
     write(
-      path.join(tmpRoot, "xss-test", "MEMORY_QUEUE.md"),
+      path.join(tmpRoot, "xss-test", "review.md"),
       [
-        "# xss-test Memory Queue",
+        "# xss-test Review Queue",
         "",
         "## Review",
         "",
@@ -597,7 +597,7 @@ describe.sequential("web-ui missing project/line validation", () => {
 
   it("GET / page shows no items when queue is empty", async () => {
     // Remove the queue file
-    fs.unlinkSync(path.join(tmpRoot, "demo", "MEMORY_QUEUE.md"));
+    fs.unlinkSync(path.join(tmpRoot, "demo", "review.md"));
     const res = await httpGet(port, "/");
     expect(res.status).toBe(200);
     expect(res.body).toContain("No memories waiting for review");
@@ -838,7 +838,7 @@ describe.sequential("web-ui project-content validation", () => {
   it("GET /api/project-content rejects non-whitelisted files", async () => {
     const res = await httpGet(
       port,
-      "/api/project-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("MEMORY_QUEUE.md")
+      "/api/project-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("review.md")
     );
     expect(res.status).toBe(400);
     const data = JSON.parse(res.body);

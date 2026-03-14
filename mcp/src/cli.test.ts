@@ -384,18 +384,18 @@ describe("CLI integration: pin", () => {
 
   afterEach(() => cleanup());
 
-  it("writes a pinned memory to CANONICAL_MEMORIES.md", () => {
+  it("writes a truth to truths.md", () => {
     const { stdout, exitCode } = runCli(
       ["pin", "test-proj", "always use UTC timestamps"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
 
-    const canonicalPath = path.join(phrenDir, "test-proj", "CANONICAL_MEMORIES.md");
+    const canonicalPath = path.join(phrenDir, "test-proj", "truths.md");
     expect(fs.existsSync(canonicalPath)).toBe(true);
     const content = fs.readFileSync(canonicalPath, "utf8");
     expect(content).toContain("always use UTC timestamps");
-    expect(content).toContain("pinned");
+    expect(content).toContain("added");
   });
 
   it("exits with error when project or memory is missing", () => {
@@ -475,7 +475,7 @@ describe("CLI integration: search edge cases", () => {
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# alpha FINDINGS\n\n## 2025-06-01\n\n- caching layer timeout fix\n- database connection pool sizing\n");
     fs.writeFileSync(path.join(projDir, "summary.md"), "# alpha\n\n**What:** A caching project\n");
     fs.writeFileSync(path.join(projDir, "tasks.md"), "# alpha Task\n\n## Active\n\n- Implement retry logic\n\n## Queue\n\n- Refactor config loader\n\n## Done\n\n- Initial setup\n");
-    fs.writeFileSync(path.join(projDir, "CANONICAL_MEMORIES.md"), "# Canonical\n\n- Always use UTC timestamps (pinned)\n");
+    fs.writeFileSync(path.join(projDir, "truths.md"), "# Truths\n\n- Always use UTC timestamps (pinned)\n");
     fs.writeFileSync(path.join(projDir, "CLAUDE.md"), "# alpha\n\nProject-level instructions for alpha.\n");
   });
 
@@ -826,7 +826,7 @@ describe("CLI integration: maintain subcommands", () => {
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-dry FINDINGS\n\n## 2020-01-01\n\n- wip\n- temp note\n");
 
-    const queuePath = path.join(projDir, "MEMORY_QUEUE.md");
+    const queuePath = path.join(projDir, "review.md");
     expect(fs.existsSync(queuePath)).toBe(false);
 
     const { stdout, exitCode } = runCli(
@@ -1201,20 +1201,20 @@ describe("CLI integration: pin edge cases", () => {
 
   afterEach(() => cleanup());
 
-  it("creates CANONICAL_MEMORIES.md with pinned content", () => {
+  it("creates truths.md with truth content", () => {
     const { exitCode } = runCli(
       ["pin", "pin-proj", "never commit secrets to version control"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
 
-    const canonical = path.join(phrenDir, "pin-proj", "CANONICAL_MEMORIES.md");
+    const canonical = path.join(phrenDir, "pin-proj", "truths.md");
     expect(fs.existsSync(canonical)).toBe(true);
     const content = fs.readFileSync(canonical, "utf8");
     expect(content).toContain("never commit secrets to version control");
   });
 
-  it("pinning same memory twice is idempotent", () => {
+  it("saving same truth twice is idempotent", () => {
     runCli(
       ["pin", "pin-proj", "always validate input at boundaries"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
@@ -1224,7 +1224,7 @@ describe("CLI integration: pin edge cases", () => {
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
 
-    const canonical = path.join(phrenDir, "pin-proj", "CANONICAL_MEMORIES.md");
+    const canonical = path.join(phrenDir, "pin-proj", "truths.md");
     const content = fs.readFileSync(canonical, "utf8");
     // Should appear exactly once in the file
     const matches = content.match(/always validate input at boundaries/g);

@@ -47,7 +47,7 @@ Every finding has a confidence score. The score degrades over time in four steps
 
 Entries below 0.35 are suppressed entirely and move to the review queue instead of being injected. Entries with file/line/commit citations hold their score longer than uncited ones.
 
-You can pin a memory with `pin_memory` to make it never decay. Pinned entries live in `CANONICAL_MEMORIES.md` and always inject regardless of age.
+You can save a truth with `pin_memory` to make it never decay. Truths live in `truths.md` and always inject regardless of age.
 
 All thresholds are configurable via `phren config policy`.
 
@@ -57,7 +57,7 @@ All thresholds are configurable via `phren config policy`.
 phren web-ui
 ```
 
-Opens a browser-based interface at `localhost:3499` (configurable with `--port`). From there you can approve, reject, or edit entries in the memory queue and inspect project memory without starting an agent session.
+Opens a browser-based interface at `localhost:3499` (configurable with `--port`). From there you can approve, reject, or edit entries in the review queue and inspect project memory without starting an agent session.
 
 You can filter by machine, model, and project. Useful when you're running agents across multiple machines and want to triage what each one produced.
 
@@ -94,7 +94,7 @@ Security defaults for `phren web-ui`:
 **Manual:**
 - Running `/phren-consolidate` when findings pile up and you want patterns surfaced
 - Running `phren maintain govern` to queue low-value or stale entries for review
-- Pinning canonical memories that should never decay
+- Pinning findings that should never decay
 
 In practice, well-configured agents save findings automatically as they work. You review the queue periodically to keep quality high, and run consolidation intentionally when the findings file starts to get repetitive.
 

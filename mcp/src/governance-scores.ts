@@ -295,6 +295,7 @@ export function recordFeedback(
   phrenPath: string,
   key: string,
   feedback: "helpful" | "reprompt" | "regression",
+  sessionId?: string,
 ): void {
   const delta: ScoreJournalEntry["delta"] = {};
   if (feedback === "helpful") delta.helpful = 1;
@@ -302,6 +303,14 @@ export function recordFeedback(
   if (feedback === "regression") delta.regressionPenalty = 1;
   appendScoreJournal(phrenPath, key, delta);
   appendAuditLog(phrenPath, "memory_feedback", `key=${key} feedback=${feedback}`);
+  // When feedback is "helpful", mark correlated query entries for future boost
+  if (feedback === "helpful" && sessionId) {
+    import("./query-correlation.js").then(({ markCorrelationsHelpful: markHelpful }) => {
+      const colonIdx = key.indexOf(":");
+      const docKey = colonIdx >= 0 ? key.slice(0, colonIdx) : key;
+      markHelpful(phrenPath, sessionId, docKey);
+    }).catch(() => { /* non-fatal */ });
+  }
 }
 
 
