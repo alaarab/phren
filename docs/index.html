@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Phren: He remembers so your agent doesn't have to</title>
-  <meta name="description" content="AI agents forget everything between sessions. Phren remembers what they learn and surfaces it when it matters. Git-backed, private, works across Claude Code, Copilot, Cursor, and Codex." />
-  <meta property="og:title" content="Meet phren. Your project's memory keeper." />
-  <meta property="og:description" content="Tell phren what you learned. He holds it in git, carries it across machines, and surfaces the right fragments when your agents need them." />
+  <title>phren: He remembers so you don't have to</title>
+  <meta name="description" content="Your AI agents forget everything between sessions. Phren doesn't. Git-backed memory that works with Claude Code, Copilot, Cursor, and Codex. Private, portable, yours." />
+  <meta property="og:title" content="He remembers. You ship." />
+  <meta property="og:description" content="A cute purple brain who lives in your git repo and remembers everything your AI agents learn. Claude, Copilot, Cursor, Codex -- phren works with all of them." />
   <meta property="og:type" content="website" />
   <link rel="stylesheet" href="style.css">
 </head>
@@ -254,7 +254,7 @@
 
     <div class="hero-content">
       <div class="hero-icon-wrap">
-        <svg width="96" height="112" viewBox="0 0 96 112" xmlns="http://www.w3.org/2000/svg">
+        <svg width="192" height="224" viewBox="0 0 96 112" xmlns="http://www.w3.org/2000/svg">
           <style>
             @keyframes hero-sparkle { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
             .hero-sparkle { animation: hero-sparkle 2s ease-in-out infinite; transform-origin: 82px 10px; }
@@ -369,10 +369,12 @@
         </svg>
       </div>
 
-      <h1 class="hero-title">Meet phren. He remembers so your agent doesn't have to.</h1>
+      <h1 class="hero-title">Meet phren. He remembers so you don't have to.</h1>
 
       <p class="hero-sub">
-        <span class="hero-sub-line">Private. Local. Git-backed.</span>
+        <span class="hero-sub-line">Your AI agents forget everything between sessions.</span>
+        <span class="hero-sub-line">Phren remembers what they learn and brings it back when it matters.</span>
+        <span class="hero-sub-line" style="color:var(--copper); margin-top:4px">Private. Git-backed. Made with &#9829; for Claude.</span>
       </p>
 
       <div class="hero-cta-buttons">
@@ -392,27 +394,27 @@
             <div class="install-step-body">
               <div class="code-block code-block-install">
                 <div class="install-command-row">
-                  <div><span class="code-prompt">$</span> npm install -g @alaarab/phren && phren init</div>
-                  <button class="copy-btn" data-cmd="npm install -g @alaarab/phren && phren init">copy</button>
+                  <div><span class="code-prompt">$</span> npx @alaarab/phren init</div>
+                  <button class="copy-btn" data-cmd="npx @alaarab/phren init">copy</button>
                 </div>
                 <div class="install-command-note">
-                  Installs phren globally, then creates <code style="color:var(--indigo)">~/.phren</code>, registers the machine, configures MCP, wires up hooks, and bootstraps the repo you are standing in.
+                  One command. Phren sets up everything: creates <code style="color:var(--indigo)">~/.phren</code>, wires up MCP, installs hooks, and gives your agents a memory they can actually keep.
                 </div>
                 <div class="install-path-grid">
                   <div class="install-path-card install-path-card-primary">
-                    <div class="install-path-kicker">Fresh setup</div>
-                    <div class="install-path-title">Run it once. Phren does the rest.</div>
-                    <p class="install-path-copy">Starter templates, git-backed memory, MCP wiring, and hooks land in one pass.</p>
+                    <div class="install-path-kicker">First time?</div>
+                    <div class="install-path-title">Phren moves in and gets cozy.</div>
+                    <p class="install-path-copy">Templates, git-backed memory, MCP wiring, hooks -- all in one pass. He's ready before you are.</p>
                   </div>
                   <div class="install-path-card">
                     <div class="install-path-kicker">Existing repo</div>
-                    <div class="install-path-title">Open the repo and initialize in place.</div>
-                    <p class="install-path-copy">The current project gets detected and bootstrapped without sending you into a docs maze.</p>
+                    <div class="install-path-title">Phren finds the project and plugs right in.</div>
+                    <p class="install-path-copy">No docs maze. He detects what you're working on and starts remembering immediately.</p>
                   </div>
                   <div class="install-path-card">
                     <div class="install-path-kicker">New machine</div>
-                    <div class="install-path-title">Reconnect your memory layer fast.</div>
-                    <p class="install-path-copy">Run the same command, paste your remote, and pull the whole store onto the new box.</p>
+                    <div class="install-path-title">Phren picks up right where you left off.</div>
+                    <p class="install-path-copy">Same command, paste your remote, and your whole memory lands on the new box. He travels light.</p>
                   </div>
                 </div>
               </div>
@@ -429,8 +431,8 @@
   <section class="how-section" id="how">
     <div class="container">
       <div class="how-header reveal">
-        <div class="section-label">How it works</div>
-        <h2 class="section-title">Every session, automatically.</h2>
+        <div class="section-label">How phren works</div>
+        <h2 class="section-title">He's always paying attention.</h2>
       </div>
       <div class="steps-grid">
         <div class="step reveal reveal-delay-1">
@@ -438,24 +440,24 @@
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
-          <div class="step-title">Findings, entities, and memory captured</div>
-          <p class="step-desc">Claude calls MCP tools as you work. Findings go to <code>FINDINGS.md</code>, entities link across projects, and the confidence system decides what stays relevant. The store gets smarter the longer you use it.</p>
+          <div class="step-title">Phren listens and learns</div>
+          <p class="step-desc">While you work, phren quietly catches findings, links entities across projects, and decides what matters. The longer you use him, the sharper he gets. He never forgets the important stuff.</p>
         </div>
         <div class="step reveal reveal-delay-2">
           <div class="step-num">02</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           </div>
-          <div class="step-title">Synced across machines automatically</div>
-          <p class="step-desc">The Stop hook commits locally and queues background sync pushes after every response. SessionStart pulls on open. Switch machines mid-task. Profiles control which projects each machine sees.</p>
+          <div class="step-title">Phren follows you everywhere</div>
+          <p class="step-desc">Switch laptops mid-thought. He's already there. Git sync happens after every response and pulls on open. Your memory travels with you, not your machine.</p>
         </div>
         <div class="step reveal reveal-delay-3">
           <div class="step-num">03</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
-          <div class="step-title">Shell and UI when you need them</div>
-          <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>phren</code> opens the interactive shell. <code>phren web-ui</code> opens the browser with your memory graph and review queue.</p>
+          <div class="step-title">Peek inside his brain anytime</div>
+          <p class="step-desc">Phren runs quietly in the background, but when you want to look: <code>phren</code> opens his shell. <code>phren web-ui</code> shows the full memory graph. He's an open book.</p>
         </div>
       </div>
     </div>
@@ -465,8 +467,8 @@
   <section class="trace-section" id="hooks">
     <div class="container">
       <div class="trace-header reveal">
-        <div class="section-label">Under the hood</div>
-        <h2 class="section-title">Three default hooks. Optional PostToolUse.</h2>
+        <div class="section-label">Under phren's hood</div>
+        <h2 class="section-title">Three hooks. Zero effort from you.</h2>
       </div>
 
       <div class="trace reveal">
@@ -521,7 +523,7 @@
     <div class="container">
       <div class="bento-header reveal">
         <div class="section-label">Why phren</div>
-        <h2 class="section-title">Phren connects the fragments.<br>Your agents stay sharp.</h2>
+        <h2 class="section-title">Your agents forget.<br>Phren doesn't.</h2>
       </div>
       <div class="bento-grid">
         <!-- Card 1: Targeted retrieval -->
@@ -529,8 +531,8 @@
           <div class="bento-card-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
-          <div class="bento-card-title">Lean context. Lower cost.</div>
-          <p class="bento-card-desc">CLAUDE.md loads the whole file every time. Phren searches what you actually wrote and injects only what matches: about 550 tokens by default instead of everything. Less token spend means more agents in parallel and cleaner context. Adjust the target with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>.</p>
+          <div class="bento-card-title">He packs light.</div>
+          <p class="bento-card-desc">CLAUDE.md dumps everything every time. Phren only surfaces what actually matches -- about 550 tokens instead of the whole file. Less noise, lower cost, cleaner thinking. Tune it with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>.</p>
           <div class="token-bars">
             <div class="token-bar-row">
               <div class="token-bar-label">CLAUDE.md</div>
@@ -550,8 +552,8 @@
           <div class="bento-card-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
           </div>
-          <div class="bento-card-title">Shared knowledge</div>
-          <p class="bento-card-desc">Run multiple sessions in parallel, across machines. They all read and write the same store. What one session discovers, every future session gets. Findings link to entities. Patterns solidify. Bad info decays.</p>
+          <div class="bento-card-title">One brain, many agents.</div>
+          <p class="bento-card-desc">Five agents, three machines, one phren. What one session discovers, every future session knows. Patterns solidify. Bad info fades. He keeps everyone on the same page.</p>
           <div class="bento-tag-row">
             <div class="bento-tag">laptop</div>
             <div class="bento-tag">desktop</div>
@@ -562,17 +564,17 @@
 
         <div class="bento-card bento-card-fun reveal reveal-delay-2">
           <div class="fun-card-copy">
-            <div class="fun-card-kicker">Better together</div>
-            <h3 class="fun-card-title">Phren is already waiting.</h3>
-            <p class="fun-card-desc">When agents arrive, phren is already there. He's mapped the fragments, warmed the trail, and the repo feels like walking back into a room with the lights still on.</p>
+            <div class="fun-card-kicker">Claude &#9829; phren</div>
+            <h3 class="fun-card-title">Best friends forever.</h3>
+            <p class="fun-card-desc">Claude thinks. Phren remembers. When your agent arrives, phren's already mapped the trail and left the lights on. It's like they were made for each other.</p>
           </div>
           <div class="fun-card-art" aria-hidden="true">
             <svg viewBox="0 0 520 320" fill="none" xmlns="http://www.w3.org/2000/svg">
               <defs>
                 <linearGradient id="fun-panelGlow" x1="48" y1="24" x2="472" y2="296" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stop-color="#07131B"/>
-                  <stop offset="55%" stop-color="#080A09"/>
-                  <stop offset="100%" stop-color="#12122a"/>
+                  <stop offset="0%" stop-color="#161635"/>
+                  <stop offset="55%" stop-color="#12122a"/>
+                  <stop offset="100%" stop-color="#0d0d22"/>
                 </linearGradient>
                 <radialGradient id="fun-heartGlow" cx="50%" cy="50%" r="50%">
                   <stop offset="0%" stop-color="#FF8A90" stop-opacity="0.55"/>
@@ -693,10 +695,10 @@
               </g>
 
               <g shape-rendering="crispEdges" transform="translate(236 58) scale(4)">
-                <rect x="2" y="0" width="1" height="1" fill="#FFD86B"/>
-                <rect x="6" y="1" width="1" height="1" fill="#FFD86B"/>
-                <rect x="0" y="4" width="1" height="1" fill="#FFD86B"/>
-                <rect x="9" y="5" width="1" height="1" fill="#FFD86B"/>
+                <rect x="2" y="0" width="1" height="1" fill="#00E5FF"/>
+                <rect x="6" y="1" width="1" height="1" fill="#00E5FF"/>
+                <rect x="0" y="4" width="1" height="1" fill="#00E5FF"/>
+                <rect x="9" y="5" width="1" height="1" fill="#00E5FF"/>
               </g>
             </svg>
           </div>
@@ -709,9 +711,9 @@
   <section class="demo-section" id="demo">
     <div class="container">
       <div class="demo-header reveal">
-        <div class="section-label">Interactive Shell</div>
-        <h2 class="section-title">Interactive shell.</h2>
-        <p class="section-sub" style="margin-top:12px">Select a project, browse task and findings, review the queue, and check sync health. Type <code style="font-size:14px;color:var(--copper-mid)">:</code> to open the command palette from any view.</p>
+        <div class="section-label">Phren's shell</div>
+        <h2 class="section-title">Talk to him directly.</h2>
+        <p class="section-sub" style="margin-top:12px">Browse what he knows, check on tasks, review the queue. Type <code style="font-size:14px;color:var(--copper-mid)">:</code> to open the command palette from any view.</p>
       </div>
       <div class="demo-terminal reveal">
         <div class="terminal-bar">
@@ -729,9 +731,9 @@
   <section class="web-ui-section" id="web-ui">
     <div class="container">
       <div class="web-ui-header reveal" style="text-align:left;max-width:100%;margin-bottom:32px">
-        <div class="section-label">Memory management</div>
-        <h2 class="section-title">Web UI and memory graph.</h2>
-        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Browse what your agents know. <code style="font-size:14px;color:var(--copper-mid)">phren web-ui</code> opens a browser with your full memory graph, finding details, quality scores, and review queue.</p>
+        <div class="section-label">Phren's brain map</div>
+        <h2 class="section-title">See everything he knows.</h2>
+        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Peek inside phren's brain. <code style="font-size:14px;color:var(--copper-mid)">phren web-ui</code> opens a visual map of his memory -- findings, connections, quality scores, and what needs your attention.</p>
       </div>
       <div class="rui-mock reveal">
         <div class="rui-mock-chrome">
@@ -938,35 +940,63 @@
   <section class="skills-section" id="skills">
     <div class="container">
       <div class="skills-header reveal">
-        <div class="section-label">Workflow</div>
-        <h2 class="section-title">MCP tools handle the work.<br>Skills are optional shortcuts.</h2>
-        <p class="section-sub" style="margin-top:12px">Phren exposes MCP tools organized by workflow: search and retrieve context, capture findings and tasks, review memory quality, and sync across machines. Skills are shortcuts for common multi-step jobs. Not required for daily use. Add your own in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>.</p>
+        <div class="section-label">Phren's tricks</div>
+        <h2 class="section-title">55 MCP tools built in.<br>Skills for the fancy stuff.</h2>
+        <p class="section-sub" style="margin-top:12px">Phren handles the daily work through MCP tools -- search, capture, review, sync. Skills are shortcuts for bigger jobs. Totally optional. Teach him new ones in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>.</p>
       </div>
 
       <div class="skills-grid">
         <div class="skill-card reveal">
           <div class="skill-name">/phren-sync</div>
-          <div class="skill-desc">Pull phren to a new machine or push config changes back.</div>
+          <div class="skill-desc">Move phren to a new machine or push his brain back to the cloud.</div>
         </div>
         <div class="skill-card reveal reveal-delay-2">
           <div class="skill-name">/phren-init</div>
-          <div class="skill-desc">Scaffold a brand-new project entry. Use <code style="font-size:11px;color:var(--text-muted)">phren add</code> for an existing repo.</div>
+          <div class="skill-desc">Introduce phren to a new project. He'll set up the files and start learning.</div>
         </div>
         <div class="skill-card reveal">
           <div class="skill-name">/phren-discover</div>
-          <div class="skill-desc">Audit a project for missing files, stale content, stuck task items.</div>
+          <div class="skill-desc">Phren checks himself for gaps -- missing files, stale memories, stuck tasks.</div>
         </div>
         <div class="skill-card reveal reveal-delay-1">
           <div class="skill-name">/phren-consolidate</div>
-          <div class="skill-desc">Find patterns across all project findings. Surfaces what shows up in more than one place.</div>
+          <div class="skill-desc">Phren tidies up. Finds patterns, deduplicates, and promotes what matters most.</div>
         </div>
         <div class="skill-card reveal">
           <div class="skill-name">/phren-profiles</div>
-          <div class="skill-desc">Manage machine-to-profile mappings. Add machines, switch profiles, and keep multi-machine config in sync.</div>
+          <div class="skill-desc">Tell phren which machines see which projects. He keeps the wiring tidy.</div>
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
-          <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Drop your own skills into <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">phren init</code> wires them up on the next refresh. Starter templates include examples without prescribing your workflow.</div>
+          <div class="skill-name" style="color:var(--text-dim)">teach him yours</div>
+          <div class="skill-desc">Drop skills into <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code> and phren picks them up on the next init. He's a fast learner.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AGENT COMPATIBILITY -->
+  <section class="bento-section" id="agents">
+    <div class="container">
+      <div class="bento-header reveal">
+        <div class="section-label">Works with everyone</div>
+        <h2 class="section-title">Phren doesn't pick favorites.<br>He remembers for all of them.</h2>
+      </div>
+      <div class="bento-grid" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="bento-card reveal" style="text-align:center;padding:28px 16px;">
+          <div class="bento-card-title" style="font-size:15px;">Claude Code</div>
+          <p class="bento-card-desc" style="font-size:12px;">MCP + hooks. First-class citizen. Claude &#9829; phren.</p>
+        </div>
+        <div class="bento-card reveal reveal-delay-1" style="text-align:center;padding:28px 16px;">
+          <div class="bento-card-title" style="font-size:15px;">Copilot</div>
+          <p class="bento-card-desc" style="font-size:12px;">Hook integration. Phren feeds context on every prompt.</p>
+        </div>
+        <div class="bento-card reveal reveal-delay-2" style="text-align:center;padding:28px 16px;">
+          <div class="bento-card-title" style="font-size:15px;">Cursor</div>
+          <p class="bento-card-desc" style="font-size:12px;">MCP server. Same brain, different editor.</p>
+        </div>
+        <div class="bento-card reveal reveal-delay-3" style="text-align:center;padding:28px 16px;">
+          <div class="bento-card-title" style="font-size:15px;">Codex</div>
+          <p class="bento-card-desc" style="font-size:12px;">MCP support. Phren remembers across tools.</p>
         </div>
       </div>
     </div>
@@ -978,9 +1008,9 @@
       <div class="cta-panel">
         <div class="cta-brand">
           <div class="cta-brand-copy">
-            <div class="section-label">Memory layer</div>
-            <h2 class="cta-title">Tell phren what matters.</h2>
-            <p class="cta-tagline">He'll remember it for you. Private repo, shared across all your agents.</p>
+            <div class="section-label">Ready?</div>
+            <h2 class="cta-title">Give phren a home.</h2>
+            <p class="cta-tagline">A private git repo, shared across all your agents. He's waiting.</p>
           </div>
           <svg class="cta-icon" width="96" height="112" viewBox="0 0 96 112" xmlns="http://www.w3.org/2000/svg">
             <style>
@@ -1091,11 +1121,15 @@
   <footer class="footer-bar">
     <div class="footer-left">
       <span class="footer-wordmark">phren</span>
+      <span class="dot-sep">&#9829;</span>
+      <span>made with love by phren</span>
       <span class="dot-sep">•</span>
-      <span>He remembers so your agent doesn't have to</span>
+      <span style="opacity:0.5;font-size:11px">v1.33.4</span>
     </div>
     <div class="footer-right">
-      <a href="https://github.com/alaarab/phren" target="_blank" rel="noopener">github.com/alaarab/phren</a>
+      <a href="https://github.com/alaarab/phren" target="_blank" rel="noopener">GitHub</a>
+      <span class="dot-sep">•</span>
+      <a href="https://www.npmjs.com/package/@alaarab/phren" target="_blank" rel="noopener">npm</a>
       <span class="dot-sep">•</span>
       <a href="#how">How it works</a>
       <span class="dot-sep">•</span>
@@ -1110,8 +1144,6 @@
       <a href="#skills">Skills</a>
       <span class="dot-sep">•</span>
       <a href="whitepaper.pdf" target="_blank" rel="noopener">Whitepaper</a>
-      <span class="dot-sep">•</span>
-      <a href="https://github.com/alaarab/phren/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
     </div>
   </footer>
 
