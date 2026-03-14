@@ -256,18 +256,41 @@ export function shellStartupFrames(version: string): string[] {
   const tagline = style.dim("local memory for working agents");
   const versionBadge = badge(`v${version}`, style.boldBlue);
 
+  if (cols >= 72) {
+    // Side-by-side: phren character on left, logo text on right
+    const phrenLines = PHREN_STARTUP;
+    const logoLines = PHREN_LOGO.map(line => gradient(line));
+    const infoLine = `${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`;
+
+    // Logo is 6 lines, pad to align vertically with character center
+    const rightSide = [
+      "", "", ...logoLines, "", infoLine,
+    ];
+
+    // Merge side by side: character left (26 cols), logo right
+    const charWidth = 26;
+    const maxLines = Math.max(phrenLines.length, rightSide.length);
+    const merged: string[] = [""];
+    for (let i = 0; i < maxLines; i++) {
+      const left = (i < phrenLines.length ? phrenLines[i] : "").padEnd(charWidth);
+      const right = i < rightSide.length ? rightSide[i] : "";
+      merged.push(left + right);
+    }
+    merged.push("");
+
+    return [
+      // Frame 1: Logo with character side by side immediately
+      merged.join("\n"),
+    ];
+  }
+
   if (cols >= 56) {
+    // Medium terminal: stacked but compact
     const logo = PHREN_LOGO.map(line => "  " + gradient(line));
-    const phren = PHREN_STARTUP.map(line => "  " + line);
     const sep = gradient("━".repeat(Math.min(52, cols)));
 
     return [
-      // Frame 1: Phren appears
-      ["", ...phren, "", `  ${versionBadge}  ${tagline}`, ""].join("\n"),
-      // Frame 2: Full logo materializes with phren
-      ["", ...phren, "", ...logo, "", `  ${versionBadge}  ${tagline}`, ""].join("\n"),
-      // Frame 3: Complete with brand separator
-      ["", ...phren, "", ...logo, `  ${sep}`, `  ${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`, ""].join("\n"),
+      ["", ...logo, `  ${sep}`, `  ${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`, ""].join("\n"),
     ];
   }
 
