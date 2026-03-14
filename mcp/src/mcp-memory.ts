@@ -32,7 +32,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = upsertCanonical(phrenPath, project, memory);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        // Update FTS index so newly pinned memory is immediately searchable
+        // Update FTS index so newly added truth is immediately searchable
         const canonicalPath = path.join(phrenPath, project, "truths.md");
         updateFileInIndex(canonicalPath);
         return mcpResponse({ ok: true, message: result.data, data: { project, memory } });
