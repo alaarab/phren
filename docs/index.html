@@ -632,13 +632,15 @@
         <h2 class="section-title">One brain. Every agent.</h2>
         <p class="section-sub" style="max-width:560px;margin:0 auto;">MCP and hooks. Same <span class="kw-memory">memory</span>, same <span class="kw-finding">findings</span>, no matter which tool you're in.</p>
       </div>
-      <div style="display:flex;align-items:center;justify-content:center;gap:32px;flex-wrap:wrap;margin-top:40px;" class="reveal">
-        <span style="font-size:15px;font-weight:600;color:var(--text);padding:10px 20px;border:1px solid rgba(255,255,255,0.09);border-radius:8px;background:var(--bg-1);">Claude Code</span>
-        <span style="font-size:15px;font-weight:600;color:var(--text);padding:10px 20px;border:1px solid rgba(255,255,255,0.09);border-radius:8px;background:var(--bg-1);">Copilot</span>
-        <span style="font-size:15px;font-weight:600;color:var(--text);padding:10px 20px;border:1px solid rgba(255,255,255,0.09);border-radius:8px;background:var(--bg-1);">Cursor</span>
-        <span style="font-size:15px;font-weight:600;color:var(--text);padding:10px 20px;border:1px solid rgba(255,255,255,0.09);border-radius:8px;background:var(--bg-1);">Codex</span>
-        <span style="font-size:15px;font-weight:600;color:var(--text);padding:10px 20px;border:1px solid rgba(255,255,255,0.09);border-radius:8px;background:var(--bg-1);">VS Code</span>
-        <span style="font-size:15px;font-weight:600;color:var(--text);padding:10px 20px;border:1px solid rgba(255,255,255,0.09);border-radius:8px;background:var(--bg-1);">CLI</span>
+      <div class="agent-carousel reveal" style="position:relative;height:52px;overflow:hidden;margin-top:40px;">
+        <div class="agent-carousel-track" id="agent-carousel">
+          <span class="agent-pill">Claude Code</span>
+          <span class="agent-pill">Copilot</span>
+          <span class="agent-pill">Cursor</span>
+          <span class="agent-pill">Codex</span>
+          <span class="agent-pill">VS Code</span>
+          <span class="agent-pill">CLI</span>
+        </div>
       </div>
     </div>
   </section>
@@ -651,7 +653,7 @@
           <div class="cta-brand-copy">
             <div class="section-label">Ready?</div>
             <h2 class="cta-title">Your <span class="kw-memory">memory</span>, your repo.</h2>
-            <p class="cta-tagline">No API calls to retrieve your <span class="kw-memory">memory</span>. No cloud. No third party. <span class="kw-finding">Findings</span> tagged with <span class="kw-session">sessions</span>, linked to <span class="kw-task">tasks</span>, tracked by trust scores. All in a git repo you own.</p>
+            <p class="cta-tagline">No API calls to retrieve your <span class="kw-memory">memory</span>. No cloud. No third party. <span class="kw-finding">Findings</span> tagged with <span class="kw-session">sessions</span>, linked to <span class="kw-task">tasks</span>, tracked by trust scores. <span class="kw-memory">Memory</span> in your custody. Where it belongs.</p>
           </div>
           <img class="cta-icon" src="phren-website.svg" alt="phren" width="96" height="112" style="image-rendering: pixelated">
         </div>

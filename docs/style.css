@@ -1921,6 +1921,89 @@ a:focus-visible, button:focus-visible {
   border-radius: 4px;
 }
 
+/* --- AGENT CAROUSEL --- */
+.agent-carousel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-carousel-track {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 52px;
+}
+
+.agent-pill {
+  position: absolute;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 10px 24px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: var(--bg-1);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-200px);
+  animation: agent-swoop 8.4s ease-in-out infinite;
+}
+
+.agent-pill:nth-child(1) { animation-delay: 0s; }
+.agent-pill:nth-child(2) { animation-delay: 1.4s; }
+.agent-pill:nth-child(3) { animation-delay: 2.8s; }
+.agent-pill:nth-child(4) { animation-delay: 4.2s; }
+.agent-pill:nth-child(5) { animation-delay: 5.6s; }
+.agent-pill:nth-child(6) { animation-delay: 7.0s; }
+
+@keyframes agent-swoop {
+  0% {
+    opacity: 0;
+    transform: translateX(-280px) scale(0.9);
+  }
+  3% {
+    opacity: 0.6;
+    transform: translateX(-80px) scale(0.95);
+  }
+  8% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    text-shadow: 0 0 12px rgba(0,229,255,0.3);
+  }
+  14% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    text-shadow: 0 0 12px rgba(0,229,255,0.3);
+  }
+  20% {
+    opacity: 0.6;
+    transform: translateX(280px) scale(0.9);
+    text-shadow: none;
+  }
+  22%, 100% {
+    opacity: 0;
+    transform: translateX(280px) scale(0.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-pill {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    position: static;
+    margin: 4px;
+  }
+  .agent-carousel-track {
+    flex-wrap: wrap;
+    gap: 8px;
+    height: auto;
+  }
+}
+
 /* --- KEYWORD GLOW --- */
 /* Memory / core concept — warm gold pulse */
 .kw-memory {
