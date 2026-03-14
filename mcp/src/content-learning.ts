@@ -27,6 +27,7 @@ import {
 } from "./finding-context.js";
 import {
   buildLifecycleComments,
+  extractFindingType,
   parseFindingLifecycle,
   stripLifecycleComments,
   type FindingLifecycleMetadata,
@@ -168,6 +169,17 @@ function resolveFindingCitationInput(
   return phrenOk(Object.keys(resolved).length > 0 ? resolved : undefined);
 }
 
+export function autoDetectFindingType(text: string): string | null {
+  const lower = text.toLowerCase();
+  if (/\b(we decided|decision:|chose .+ over|went with)\b/.test(lower)) return 'decision';
+  if (/\b(bug:|bug in|found a bug|broken|crashes|fails when)\b/.test(lower)) return 'bug';
+  if (/\b(workaround:|work around|temporary fix|hack:)\b/.test(lower)) return 'workaround';
+  if (/\b(pattern:|always .+ before|never .+ without|best practice)\b/.test(lower)) return 'pattern';
+  if (/\b(pitfall:|gotcha:|watch out|careful with|trap:)\b/.test(lower)) return 'pitfall';
+  if (/\b(currently|as of|right now|at the moment|observation:)\b/.test(lower)) return 'context';
+  return null;
+}
+
 function prepareFinding(
   learning: string,
   project: string,
@@ -187,10 +199,17 @@ function prepareFinding(
 
   const today = (nowIso ?? new Date().toISOString()).slice(0, 10);
   const { text: tagNormalized, warning: tagWarning } = normalizeObservationTags(learning);
-  const normalizedLearning = resolveCoref(tagNormalized, {
+  let normalizedLearning = resolveCoref(tagNormalized, {
     project,
     file: citationInput?.file,
   });
+  const existingType = extractFindingType('- ' + normalizedLearning);
+  if (!existingType) {
+    const detected = autoDetectFindingType(normalizedLearning);
+    if (detected) {
+      normalizedLearning = `[${detected}] ${normalizedLearning}`;
+    }
+  }
   const fid = crypto.randomBytes(4).toString("hex");
   const fidComment = `<!-- fid:${fid} -->`;
   const createdComment = `<!-- created: ${today} -->`;

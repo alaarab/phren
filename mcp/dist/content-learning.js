@@ -11,7 +11,7 @@ import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCo
 import { validateFindingsFormat, validateFinding } from "./content-validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./content-archive.js";
 import { resolveAutoFindingTaskItem, resolveFindingTaskReference, resolveFindingSessionId, } from "./finding-context.js";
-import { buildLifecycleComments, parseFindingLifecycle, stripLifecycleComments, } from "./finding-lifecycle.js";
+import { buildLifecycleComments, extractFindingType, parseFindingLifecycle, stripLifecycleComments, } from "./finding-lifecycle.js";
 import { METADATA_REGEX, } from "./content-metadata.js";
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;
@@ -107,6 +107,22 @@ function resolveFindingCitationInput(phrenPath, project, citationInput) {
     }
     return phrenOk(Object.keys(resolved).length > 0 ? resolved : undefined);
 }
+export function autoDetectFindingType(text) {
+    const lower = text.toLowerCase();
+    if (/\b(we decided|decision:|chose .+ over|went with)\b/.test(lower))
+        return 'decision';
+    if (/\b(bug:|bug in|found a bug|broken|crashes|fails when)\b/.test(lower))
+        return 'bug';
+    if (/\b(workaround:|work around|temporary fix|hack:)\b/.test(lower))
+        return 'workaround';
+    if (/\b(pattern:|always .+ before|never .+ without|best practice)\b/.test(lower))
+        return 'pattern';
+    if (/\b(pitfall:|gotcha:|watch out|careful with|trap:)\b/.test(lower))
+        return 'pitfall';
+    if (/\b(currently|as of|right now|at the moment|observation:)\b/.test(lower))
+        return 'context';
+    return null;
+}
 function prepareFinding(learning, project, fullHistory, extraAnnotations, citationInput, source, nowIso, inferredRepo, headCommit, phrenPath) {
     const secretType = scanForSecrets(learning);
     if (secretType) {
@@ -114,10 +130,17 @@ function prepareFinding(learning, project, fullHistory, extraAnnotations, citati
     }
     const today = (nowIso ?? new Date().toISOString()).slice(0, 10);
     const { text: tagNormalized, warning: tagWarning } = normalizeObservationTags(learning);
-    const normalizedLearning = resolveCoref(tagNormalized, {
+    let normalizedLearning = resolveCoref(tagNormalized, {
         project,
         file: citationInput?.file,
     });
+    const existingType = extractFindingType('- ' + normalizedLearning);
+    if (!existingType) {
+        const detected = autoDetectFindingType(normalizedLearning);
+        if (detected) {
+            normalizedLearning = `[${detected}] ${normalizedLearning}`;
+        }
+    }
     const fid = crypto.randomBytes(4).toString("hex");
     const fidComment = `<!-- fid:${fid} -->`;
     const createdComment = `<!-- created: ${today} -->`;

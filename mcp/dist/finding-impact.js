@@ -144,6 +144,29 @@ export function getHighImpactFindings(phrenPath, minSurfaceCount = 3) {
     };
     return new Set(ids);
 }
+export function getImpactSurfaceCounts(phrenPath, minSurfaces = 1) {
+    const file = impactLogFile(phrenPath);
+    if (!fs.existsSync(file))
+        return new Map();
+    const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+    const counts = new Map();
+    for (const line of lines) {
+        try {
+            const entry = JSON.parse(line);
+            if (entry.findingId) {
+                counts.set(entry.findingId, (counts.get(entry.findingId) ?? 0) + 1);
+            }
+        }
+        catch { }
+    }
+    // Filter by minimum
+    const filtered = new Map();
+    for (const [id, count] of counts) {
+        if (count >= minSurfaces)
+            filtered.set(id, count);
+    }
+    return filtered;
+}
 export function markImpactEntriesCompletedForSession(phrenPath, sessionId, project) {
     if (!sessionId)
         return 0;

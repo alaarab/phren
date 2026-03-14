@@ -294,6 +294,7 @@ export function filterTrustedFindingsDetailed(content, opts) {
         ...(options.decay || {}),
     };
     const highImpactFindingIds = options.highImpactFindingIds;
+    const impactCounts = options.impactCounts;
     const project = options.project;
     const lines = content.split("\n");
     const out = [];
@@ -413,7 +414,11 @@ export function filterTrustedFindingsDetailed(content, opts) {
         if (project && highImpactFindingIds?.size) {
             const findingId = findingIdFromLine(line);
             if (highImpactFindingIds.has(findingId)) {
-                confidence *= 1.15;
+                // Get surface count for graduated boost
+                const surfaceCount = impactCounts?.get(findingId) ?? 3;
+                // Log-scaled: 3→1.15x, 10→1.28x, 30→1.38x, capped at 1.4x
+                const boost = Math.min(1.4, 1 + 0.1 * Math.log2(Math.max(3, surfaceCount)));
+                confidence *= boost;
                 // Decay resistance: confirmed findings decay 3x slower
                 if (effectiveDate) {
                     const realAge = ageDaysForDate(effectiveDate);
