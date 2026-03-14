@@ -169,7 +169,7 @@ function findMostRecentSummaryWithProject(phrenPath) {
         if (fs.existsSync(fastPath)) {
             const data = JSON.parse(fs.readFileSync(fastPath, "utf-8"));
             if (data.summary)
-                return { summary: data.summary, project: data.project };
+                return { summary: data.summary, project: data.project, endedAt: data.endedAt };
         }
     }
     catch (err) {
@@ -181,7 +181,7 @@ function findMostRecentSummaryWithProject(phrenPath) {
     if (results.length === 0)
         return { summary: null };
     const best = results[0]; // already sorted newest-mtime-first
-    return { summary: best.data.summary, project: best.data.project };
+    return { summary: best.data.summary, project: best.data.project, endedAt: best.data.endedAt };
 }
 /** Resolve session file from an explicit sessionId or a previously-bound connectionId. */
 function resolveSessionFile(phrenPath, sessionId, connectionId) {
@@ -338,6 +338,45 @@ function hasCompletedTasksInSession(phrenPath, sessionId, project) {
     const artifacts = getSessionArtifacts(phrenPath, sessionId, project);
     return artifacts.tasks.some((task) => task.section === "Done" && task.checked);
 }
+/** Compute what changed since the last session ended. */
+export function computeSessionDiff(phrenPath, project, lastSessionEnd) {
+    const projectDir = path.join(phrenPath, project);
+    const findingsPath = path.join(projectDir, "FINDINGS.md");
+    if (!fs.existsSync(findingsPath))
+        return { newFindings: 0, superseded: 0, tasksCompleted: 0 };
+    const content = fs.readFileSync(findingsPath, "utf8");
+    const lines = content.split("\n");
+    let currentDate = null;
+    let newFindings = 0;
+    let superseded = 0;
+    const cutoff = lastSessionEnd.slice(0, 10);
+    for (const line of lines) {
+        const dateMatch = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+        if (dateMatch) {
+            currentDate = dateMatch[1];
+            continue;
+        }
+        if (!line.startsWith("- ") || !currentDate)
+            continue;
+        if (currentDate >= cutoff) {
+            newFindings++;
+            if (line.includes('status "superseded"'))
+                superseded++;
+        }
+    }
+    // Count completed tasks since last session
+    const tasksPath = path.join(projectDir, "TASKS.md");
+    let tasksCompleted = 0;
+    if (fs.existsSync(tasksPath)) {
+        const taskContent = fs.readFileSync(tasksPath, "utf8");
+        const doneMatch = taskContent.match(/## Done[\s\S]*/);
+        if (doneMatch) {
+            const doneLines = doneMatch[0].split("\n").filter(l => l.startsWith("- "));
+            tasksCompleted = doneLines.length;
+        }
+    }
+    return { newFindings, superseded, tasksCompleted };
+}
 export function register(server, ctx) {
     const { phrenPath } = ctx;
     server.registerTool("session_start", {
@@ -364,6 +403,7 @@ export function register(server, ctx) {
         const priorEnded = prior ? null : findMostRecentSummaryWithProject(phrenPath);
         const priorSummary = prior?.summary ?? priorEnded?.summary ?? null;
         const priorProject = prior?.project ?? priorEnded?.project;
+        const priorEndedAt = prior?.endedAt ?? priorEnded?.endedAt;
         // Create new session with unique ID in its own file
         const sessionId = crypto.randomUUID();
         const next = {
@@ -445,6 +485,25 @@ export function register(server, ctx) {
             }
             catch (err) {
                 debugError("session_start checkpointsRead", err);
+            }
+        }
+        // Compute context diff since last session
+        if (activeProject && isValidProjectName(activeProject) && priorEndedAt) {
+            try {
+                const diff = computeSessionDiff(phrenPath, activeProject, priorEndedAt);
+                if (diff.newFindings > 0 || diff.superseded > 0 || diff.tasksCompleted > 0) {
+                    const diffParts = [];
+                    if (diff.newFindings > 0)
+                        diffParts.push(`${diff.newFindings} new finding${diff.newFindings === 1 ? "" : "s"}`);
+                    if (diff.superseded > 0)
+                        diffParts.push(`${diff.superseded} superseded`);
+                    if (diff.tasksCompleted > 0)
+                        diffParts.push(`${diff.tasksCompleted} task${diff.tasksCompleted === 1 ? "" : "s"} in done`);
+                    parts.push(`## Since last session\n${diffParts.join(", ")}.`);
+                }
+            }
+            catch (err) {
+                debugError("session_start contextDiff", err);
             }
         }
         const message = parts.length > 0

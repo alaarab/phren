@@ -5,7 +5,7 @@ import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 import { errorMessage, runGitOrThrow } from "./utils.js";
 import { findingIdFromLine } from "./finding-impact.js";
 import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./content-metadata.js";
-import { FINDING_TYPE_DECAY, extractFindingType } from "./finding-lifecycle.js";
+import { FINDING_TYPE_DECAY, extractFindingType, parseFindingLifecycle } from "./finding-lifecycle.js";
 export const FINDING_PROVENANCE_SOURCES = [
     "human",
     "agent",
@@ -412,9 +412,25 @@ export function filterTrustedFindingsDetailed(content, opts) {
             confidence *= 0.9;
         if (project && highImpactFindingIds?.size) {
             const findingId = findingIdFromLine(line);
-            if (highImpactFindingIds.has(findingId))
+            if (highImpactFindingIds.has(findingId)) {
                 confidence *= 1.15;
+                // Decay resistance: confirmed findings decay 3x slower
+                if (effectiveDate) {
+                    const realAge = ageDaysForDate(effectiveDate);
+                    if (realAge !== null) {
+                        const slowedAge = Math.floor(realAge / 3);
+                        confidence = Math.max(confidence, confidenceForAge(slowedAge, decay));
+                    }
+                }
+            }
         }
+        const lifecycle = parseFindingLifecycle(line);
+        if (lifecycle?.status === "superseded")
+            confidence *= 0.25;
+        if (lifecycle?.status === "retracted")
+            confidence *= 0.1;
+        if (lifecycle?.status === "contradicted")
+            confidence *= 0.4;
         confidence = Math.max(0, Math.min(1, confidence));
         if (confidence < minConfidence) {
             issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });

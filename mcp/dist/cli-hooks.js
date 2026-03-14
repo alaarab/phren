@@ -150,6 +150,26 @@ export async function handleHookPrompt() {
     if (!keywords)
         process.exit(0);
     debugLog(`hook-prompt keywords: "${keywords}"`);
+    // Session momentum: track topic frequencies within the session
+    let hotTopics = [];
+    if (sessionId) {
+        const topicFile = sessionMarker(getPhrenPath(), `topics-${sessionId}.json`);
+        let sessionTopics = {};
+        try {
+            if (fs.existsSync(topicFile)) {
+                sessionTopics = JSON.parse(fs.readFileSync(topicFile, 'utf8'));
+            }
+        }
+        catch { /* ignore parse errors */ }
+        for (const kw of keywordEntries) {
+            sessionTopics[kw] = (sessionTopics[kw] ?? 0) + 1;
+        }
+        fs.writeFileSync(topicFile, JSON.stringify(sessionTopics));
+        // Find hot topics (3+ mentions this session)
+        hotTopics = Object.entries(sessionTopics)
+            .filter(([, count]) => count >= 3)
+            .map(([topic]) => topic);
+    }
     const tIndex0 = Date.now();
     const db = await buildIndex(getPhrenPath(), profile);
     stage.indexMs = Date.now() - tIndex0;
@@ -197,20 +217,18 @@ export async function handleHookPrompt() {
         stage.rankMs = Date.now() - tRank0;
         if (!rows.length)
             process.exit(0);
-        const safeTokenBudget = clampInt(process.env.PHREN_CONTEXT_TOKEN_BUDGET, 550, 180, 10000);
+        let safeTokenBudget = clampInt(process.env.PHREN_CONTEXT_TOKEN_BUDGET, 550, 180, 10000);
         const safeLineBudget = clampInt(process.env.PHREN_CONTEXT_SNIPPET_LINES, 6, 2, 100);
         const safeCharBudget = clampInt(process.env.PHREN_CONTEXT_SNIPPET_CHARS, 520, 120, 10000);
+        // Session momentum: boost token budget for hot topics
+        if (hotTopics.length > 0) {
+            safeTokenBudget = Math.min(Math.floor(safeTokenBudget * 1.3), parseInt(process.env.PHREN_MAX_INJECT_TOKENS ?? '2000', 10));
+        }
         const tSelect0 = Date.now();
         const { selected, usedTokens } = selectSnippets(rows, keywords, safeTokenBudget, safeLineBudget, safeCharBudget);
         stage.selectMs = Date.now() - tSelect0;
         if (!selected.length)
             process.exit(0);
-        // Log query-to-finding correlations for future pre-warming (gated by env var)
-        try {
-            const { logCorrelations: logCorr } = await import("./query-correlation.js");
-            logCorr(getPhrenPath(), keywords, selected, sessionId);
-        }
-        catch { /* non-fatal */ }
         // Injection budget: cap total injected tokens across all content
         const maxInjectTokens = clampInt(process.env.PHREN_MAX_INJECT_TOKENS, 2000, 200, 20000);
         let budgetSelected = selected;
