@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Long-term memory for AI agents. Stored as markdown in a git repo you own.",
   "type": "module",
   "bin": {

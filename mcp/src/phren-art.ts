@@ -17,23 +17,23 @@ const MID_PURPLE = `${ESC}38;5;98m`;    // mid tone
 const NAVY = `${ESC}38;5;18m`;          // darkest outline
 
 /**
- * Phren ASCII art (~11 lines tall, ~20 cols wide).
- * Matches the pixel-art PNG: round purple brain with wrinkle texture,
- * diamond eyes, cute smile, stubby legs, cyan sparkle.
- * Uses Unicode half-blocks and ANSI 256-color for shading depth.
+ * Phren truecolor art (24px wide, generated from phren-transparent.png).
+ * Uses half-block ▀ with RGB foreground+background for pixel-faithful rendering.
+ * Requires truecolor terminal (most modern terminals support it).
  */
 export const PHREN_ART = [
-  `                  ${CYAN}✦${RESET}`,
-  `       ${NAVY}▄${DARK_PURPLE}▄▄${PURPLE}████${DARK_PURPLE}▄▄${NAVY}▄${RESET}`,
-  `     ${NAVY}▄${PURPLE}██${LIGHT_PURPLE}▓▓${PURPLE}██${LIGHT_PURPLE}▓▓${PURPLE}██${NAVY}▄${RESET}`,
-  `    ${NAVY}█${PURPLE}██${LIGHT_PURPLE}░${BRIGHT_PURPLE}▓${PURPLE}██${LIGHT_PURPLE}░${BRIGHT_PURPLE}▓${PURPLE}███${NAVY}█${RESET}`,
-  `   ${NAVY}█${PURPLE}███${MID_PURPLE}▄${PURPLE}████${MID_PURPLE}▄${PURPLE}███${NAVY}█${RESET}`,
-  `   ${NAVY}█${PURPLE}█${NAVY}◆${PURPLE}██${DARK_PURPLE}▀${PURPLE}██${NAVY}◆${PURPLE}████${NAVY}█${RESET}`,
-  `   ${NAVY}█${PURPLE}███${DIM}${PURPLE}ᵥ${RESET}${PURPLE}██████${BRIGHT_PURPLE}█${NAVY}█${RESET}`,
-  `    ${NAVY}█${PURPLE}██████████${NAVY}█${RESET}`,
-  `     ${NAVY}▀${DARK_PURPLE}▀${PURPLE}████████${DARK_PURPLE}▀${NAVY}▀${RESET}`,
-  `       ${DARK_PURPLE}██${RESET}    ${DARK_PURPLE}██${RESET}`,
-  `      ${NAVY}▀▀▀${RESET}  ${NAVY}▀▀▀${RESET}`,
+  "                        ",
+  "                        ",
+  "                \x1b[38;2;40;211;242m▄\x1b[0m \x1b[38;2;27;210;241m▄\x1b[0m     ",
+  "        \x1b[38;2;38;39;142m▄\x1b[0m\x1b[38;2;153;140;248m▄\x1b[0m\x1b[38;2;40;41;142m\x1b[48;2;152;146;247m▀\x1b[0m\x1b[38;2;41;43;144m\x1b[48;2;93;67;243m▀\x1b[0m\x1b[38;2;157;147;250m▄\x1b[0m\x1b[38;2;43;44;147m\x1b[48;2;156;146;249m▀\x1b[0m\x1b[38;2;41;43;144m\x1b[48;2;145;147;247m▀\x1b[0m\x1b[38;2;155;146;248m▄\x1b[0m\x1b[38;2;41;40;141m▄\x1b[0m       ",
+  "       \x1b[38;2;39;39;132m▄\x1b[0m\x1b[38;2;150;132;250m\x1b[48;2;151;133;250m▀\x1b[0m\x1b[38;2;154;143;250m\x1b[48;2;148;129;251m▀\x1b[0m\x1b[38;2;104;75;249m\x1b[48;2;156;145;248m▀\x1b[0m\x1b[38;2;156;142;251m\x1b[48;2;92;68;236m▀\x1b[0m\x1b[38;2;156;149;248m\x1b[48;2;85;70;220m▀\x1b[0m\x1b[38;2;157;150;248m\x1b[48;2;157;151;248m▀\x1b[0m\x1b[38;2;151;130;250m\x1b[48;2;86;61;235m▀\x1b[0m\x1b[38;2;149;145;247m\x1b[48;2;105;83;245m▀\x1b[0m\x1b[38;2;155;143;248m\x1b[48;2;191;189;251m▀\x1b[0m\x1b[38;2;41;41;146m\x1b[48;2;153;135;250m▀\x1b[0m\x1b[38;2;71;68;183m▄\x1b[0m     ",
+  "      \x1b[38;2;12;31;109m\x1b[48;2;148;132;250m▀\x1b[0m\x1b[38;2;82;67;225m\x1b[48;2;144;126;251m▀\x1b[0m\x1b[38;2;143;122;252m\x1b[48;2;156;143;251m▀\x1b[0m\x1b[38;2;94;67;244m\x1b[48;2;149;132;251m▀\x1b[0m\x1b[38;2;152;144;249m\x1b[48;2;150;132;251m▀\x1b[0m\x1b[38;2;154;143;248m\x1b[48;2;151;133;250m▀\x1b[0m\x1b[38;2;157;153;248m\x1b[48;2;152;134;250m▀\x1b[0m\x1b[38;2;84;61;230m\x1b[48;2;152;139;247m▀\x1b[0m\x1b[38;2;152;139;250m\x1b[48;2;106;93;246m▀\x1b[0m\x1b[38;2;95;71;239m\x1b[48;2;155;141;250m▀\x1b[0m\x1b[38;2;92;68;237m\x1b[48;2;158;141;248m▀\x1b[0m\x1b[38;2;151;139;250m\x1b[48;2;116;101;251m▀\x1b[0m\x1b[38;2;67;61;181m\x1b[48;2;36;41;131m▀\x1b[0m     ",
+  "      \x1b[38;2;141;122;250m\x1b[48;2;146;128;248m▀\x1b[0m\x1b[38;2;21;32;101m\x1b[48;2;154;132;250m▀\x1b[0m\x1b[38;2;146;126;251m\x1b[48;2;145;123;251m▀\x1b[0m\x1b[38;2;146;128;250m\x1b[48;2;145;125;250m▀\x1b[0m\x1b[38;2;158;149;250m\x1b[48;2;146;123;248m▀\x1b[0m\x1b[38;2;22;31;104m\x1b[48;2;152;132;248m▀\x1b[0m\x1b[38;2;152;137;250m\x1b[48;2;151;133;251m▀\x1b[0m\x1b[38;2;150;142;249m\x1b[48;2;135;121;250m▀\x1b[0m\x1b[38;2;152;138;250m\x1b[48;2;119;99;247m▀\x1b[0m\x1b[38;2;154;140;251m\x1b[48;2;108;93;249m▀\x1b[0m\x1b[38;2;116;104;252m\x1b[48;2;117;100;251m▀\x1b[0m\x1b[38;2;127;111;251m\x1b[48;2;125;110;250m▀\x1b[0m\x1b[38;2;92;85;242m\x1b[48;2;93;81;242m▀\x1b[0m     ",
+  "      \x1b[38;2;10;28;98m▀\x1b[0m\x1b[38;2;147;128;251m\x1b[48;2;77;59;222m▀\x1b[0m\x1b[38;2;145;125;250m\x1b[48;2;100;82;243m▀\x1b[0m\x1b[38;2;48;39;174m\x1b[48;2;136;120;250m▀\x1b[0m\x1b[38;2;146;126;251m\x1b[48;2;102;86;245m▀\x1b[0m\x1b[38;2;146;128;250m\x1b[48;2;103;86;245m▀\x1b[0m\x1b[38;2;111;94;250m\x1b[48;2;116;102;249m▀\x1b[0m\x1b[38;2;122;109;250m\x1b[48;2;114;103;247m▀\x1b[0m\x1b[38;2;120;107;251m\x1b[48;2;86;74;229m▀\x1b[0m\x1b[38;2;121;100;250m\x1b[48;2;106;93;244m▀\x1b[0m\x1b[38;2;92;66;240m\x1b[48;2;36;25;138m▀\x1b[0m\x1b[38;2;117;92;249m\x1b[48;2;83;73;231m▀\x1b[0m\x1b[38;2;7;37;110m▀\x1b[0m     ",
+  "        \x1b[38;2;18;22;101m▀\x1b[0m\x1b[38;2;19;24;101m▀\x1b[0m\x1b[38;2;66;51;207m\x1b[48;2;69;51;218m▀\x1b[0m\x1b[38;2;95;83;244m\x1b[48;2;26;24;106m▀\x1b[0m\x1b[38;2;72;59;210m▀\x1b[0m\x1b[38;2;115;96;250m\x1b[48;2;58;46;198m▀\x1b[0m\x1b[38;2;117;104;249m\x1b[48;2;20;31;99m▀\x1b[0m\x1b[38;2;119;104;249m\x1b[48;2;26;29;111m▀\x1b[0m\x1b[38;2;23;21;110m▀\x1b[0m       ",
+  "         \x1b[38;2;24;29;112m\x1b[48;2;156;157;248m▀\x1b[0m\x1b[38;2;105;91;248m\x1b[48;2;155;157;248m▀\x1b[0m\x1b[38;2;9;30;102m\x1b[48;2;157;158;248m▀\x1b[0m\x1b[38;2;12;31;104m\x1b[48;2;158;161;248m▀\x1b[0m\x1b[38;2;112;102;250m\x1b[48;2;158;160;248m▀\x1b[0m\x1b[38;2;15;41;120m\x1b[48;2;158;162;248m▀\x1b[0m\x1b[38;2;160;169;250m\x1b[48;2;158;163;247m▀\x1b[0m        ",
+  "                        ",
+  "                        ",
 ];
 
 /** Single-line compact phren for inline use */

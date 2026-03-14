@@ -166,20 +166,9 @@ const PHREN_LOGO = [
   "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝",
 ];
 
-// Compact phren character for startup (matches phren-art.ts PHREN_ART)
-const PHREN_STARTUP = [
-  "                  \x1b[96m✦\x1b[0m",
-  "       \x1b[38;5;18m▄\x1b[38;5;57m▄▄\x1b[35m████\x1b[38;5;57m▄▄\x1b[38;5;18m▄\x1b[0m",
-  "     \x1b[38;5;18m▄\x1b[35m██\x1b[38;5;141m▓▓\x1b[35m██\x1b[38;5;141m▓▓\x1b[35m██\x1b[38;5;18m▄\x1b[0m",
-  "    \x1b[38;5;18m█\x1b[35m██\x1b[38;5;141m░\x1b[95m▓\x1b[35m██\x1b[38;5;141m░\x1b[95m▓\x1b[35m███\x1b[38;5;18m█\x1b[0m",
-  "   \x1b[38;5;18m█\x1b[35m███\x1b[38;5;98m▄\x1b[35m████\x1b[38;5;98m▄\x1b[35m███\x1b[38;5;18m█\x1b[0m",
-  "   \x1b[38;5;18m█\x1b[35m█\x1b[38;5;18m◆\x1b[35m██\x1b[38;5;57m▀\x1b[35m██\x1b[38;5;18m◆\x1b[35m████\x1b[38;5;18m█\x1b[0m",
-  "   \x1b[38;5;18m█\x1b[35m███\x1b[2m\x1b[35mᵥ\x1b[0m\x1b[35m██████\x1b[95m█\x1b[38;5;18m█\x1b[0m",
-  "    \x1b[38;5;18m█\x1b[35m██████████\x1b[38;5;18m█\x1b[0m",
-  "     \x1b[38;5;18m▀\x1b[38;5;57m▀\x1b[35m████████\x1b[38;5;57m▀\x1b[38;5;18m▀\x1b[0m",
-  "       \x1b[38;5;57m██\x1b[0m    \x1b[38;5;57m██\x1b[0m",
-  "      \x1b[38;5;18m▀▀▀\x1b[0m  \x1b[38;5;18m▀▀▀\x1b[0m",
-];
+// Compact phren character for startup (uses PHREN_ART from phren-art.ts via import)
+import { PHREN_ART as PHREN_STARTUP_ART } from "./phren-art.js";
+const PHREN_STARTUP = PHREN_STARTUP_ART;
 
 // ── Line-based viewport: edge-triggered scroll (stable, no jumpiness) ─────────
 
