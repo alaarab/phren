@@ -1,19 +1,19 @@
 {
-  "name": "cortex-vscode",
-  "displayName": "Cortex VS Code",
-  "description": "Browse, search, and manage Cortex knowledge directly from VS Code.",
+  "name": "phren-vscode",
+  "displayName": "Phren",
+  "description": "Browse, search, and manage Phren knowledge directly from VS Code.",
   "version": "0.4.0",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/alaarab/cortex.git",
+    "url": "https://github.com/alaarab/phren.git",
     "directory": "vscode-extension"
   },
-  "homepage": "https://github.com/alaarab/cortex/tree/main/vscode-extension",
+  "homepage": "https://github.com/alaarab/phren/tree/main/vscode-extension",
   "bugs": {
-    "url": "https://github.com/alaarab/cortex/issues"
+    "url": "https://github.com/alaarab/phren/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -22,155 +22,166 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:cortex.explorer"
+    "onView:phren.explorer"
   ],
   "keywords": [
-    "cortex",
+    "phren",
     "knowledge",
     "memory",
     "mcp",
     "agent"
   ],
+  "icon": "media/icon.png",
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "cortex.search",
-        "title": "Cortex: Search Knowledge",
+        "command": "phren.search",
+        "title": "Phren: Search Knowledge",
         "icon": "$(search)"
       },
       {
-        "command": "cortex.showGraph",
-        "title": "Cortex: Show Entity Graph",
+        "command": "phren.showGraph",
+        "title": "Phren: Show Entity Graph",
         "icon": "$(type-hierarchy)"
       },
       {
-        "command": "cortex.refresh",
-        "title": "Cortex: Refresh",
+        "command": "phren.refresh",
+        "title": "Phren: Refresh",
         "icon": "$(refresh)"
       },
       {
-        "command": "cortex.addFinding",
-        "title": "Cortex: Add Finding"
+        "command": "phren.addFinding",
+        "title": "Phren: Add Finding"
       },
       {
-        "command": "cortex.setActiveProject",
-        "title": "Cortex: Set Active Project"
+        "command": "phren.setActiveProject",
+        "title": "Phren: Set Active Project"
       },
       {
-        "command": "cortex.openFinding",
-        "title": "Cortex: Open Finding"
+        "command": "phren.openFinding",
+        "title": "Phren: Open Finding"
       },
       {
-        "command": "cortex.openProjectFile",
-        "title": "Cortex: Open Project File"
+        "command": "phren.openProjectFile",
+        "title": "Phren: Open Project File"
       },
       {
-        "command": "cortex.openSkill",
-        "title": "Cortex: Open Skill"
+        "command": "phren.openSkill",
+        "title": "Phren: Open Skill"
       },
       {
-        "command": "cortex.toggleSkill",
-        "title": "Cortex: Toggle Skill"
+        "command": "phren.toggleSkill",
+        "title": "Phren: Toggle Skill"
       },
       {
-        "command": "cortex.toggleHook",
-        "title": "Cortex: Toggle Hook"
+        "command": "phren.toggleHook",
+        "title": "Phren: Toggle Hook"
       },
       {
-        "command": "cortex.openTask",
-        "title": "Cortex: Open Task"
+        "command": "phren.openTask",
+        "title": "Phren: Open Task"
       },
       {
-        "command": "cortex.openQueueItem",
-        "title": "Cortex: Open Queue Item"
+        "command": "phren.openQueueItem",
+        "title": "Phren: Open Queue Item"
       },
       {
-        "command": "cortex.openSessionOverview",
-        "title": "Cortex: Open Session Overview",
+        "command": "phren.openSessionOverview",
+        "title": "Phren: Open Session Overview",
         "icon": "$(preview)"
       },
       {
-        "command": "cortex.copySessionId",
-        "title": "Cortex: Copy Session ID",
+        "command": "phren.copySessionId",
+        "title": "Phren: Copy Session ID",
         "icon": "$(copy)"
       },
       {
-        "command": "cortex.filterFindingsByDate",
-        "title": "Cortex: Filter Findings by Date",
+        "command": "phren.filterFindingsByDate",
+        "title": "Phren: Filter Findings by Date",
         "icon": "$(calendar)"
       },
       {
-        "command": "cortex.sync",
-        "title": "Cortex: Sync",
+        "command": "phren.sync",
+        "title": "Phren: Sync",
         "icon": "$(cloud-upload)"
       },
       {
-        "command": "cortex.doctor",
-        "title": "Cortex: Doctor",
+        "command": "phren.doctor",
+        "title": "Phren: Doctor",
         "icon": "$(checklist)"
       },
       {
-        "command": "cortex.hooksStatus",
-        "title": "Cortex: Hooks Status"
+        "command": "phren.hooksStatus",
+        "title": "Phren: Hooks Status"
       },
       {
-        "command": "cortex.toggleHooksCommand",
-        "title": "Cortex: Toggle Hooks"
+        "command": "phren.toggleHooksCommand",
+        "title": "Phren: Toggle Hooks"
       },
       {
-        "command": "cortex.manageProject",
-        "title": "Cortex: Manage Project"
+        "command": "phren.manageProject",
+        "title": "Phren: Manage Project"
       },
       {
-        "command": "cortex.uninstall",
-        "title": "Cortex: Uninstall Cortex"
+        "command": "phren.uninstall",
+        "title": "Phren: Uninstall Phren"
       },
       {
-        "command": "cortex.switchProfile",
-        "title": "Cortex: Set This Machine's Profile"
+        "command": "phren.switchProfile",
+        "title": "Phren: Set This Machine's Profile"
       },
       {
-        "command": "cortex.configureMachine",
-        "title": "Cortex: Set Machine Alias"
+        "command": "phren.configureMachine",
+        "title": "Phren: Set Machine Alias"
       },
       {
-        "command": "cortex.openMachinesConfig",
-        "title": "Cortex: Open machines.yaml"
+        "command": "phren.openMachinesConfig",
+        "title": "Phren: Open machines.yaml"
       },
       {
-        "command": "cortex.addTask",
-        "title": "Cortex: Add Task",
+        "command": "phren.addTask",
+        "title": "Phren: Add Task",
         "icon": "$(add)"
       },
       {
-        "command": "cortex.completeTask",
-        "title": "Cortex: Complete Task",
+        "command": "phren.completeTask",
+        "title": "Phren: Complete Task",
         "icon": "$(check)"
       },
       {
-        "command": "cortex.removeTask",
-        "title": "Cortex: Delete Task",
+        "command": "phren.removeTask",
+        "title": "Phren: Delete Task",
         "icon": "$(trash)"
       },
       {
-        "command": "cortex.removeFinding",
-        "title": "Cortex: Remove Finding",
+        "command": "phren.pinTask",
+        "title": "Phren: Pin Task",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "phren.updateTask",
+        "title": "Phren: Update Task",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "phren.removeFinding",
+        "title": "Phren: Remove Finding",
         "icon": "$(trash)"
       },
       {
-        "command": "cortex.rejectQueueItem",
-        "title": "Cortex: Reject Queue Item",
+        "command": "phren.rejectQueueItem",
+        "title": "Phren: Reject Queue Item",
         "icon": "$(trash)"
       },
       {
-        "command": "cortex.pinMemory",
-        "title": "Cortex: Pin Memory"
+        "command": "phren.pinMemory",
+        "title": "Phren: Pin Memory"
       }
     ],
     "keybindings": [
       {
-        "command": "cortex.search",
+        "command": "phren.search",
         "key": "ctrl+shift+k",
         "mac": "cmd+shift+k"
       }
@@ -178,71 +189,81 @@
     "menus": {
       "editor/context": [
         {
-          "command": "cortex.addFinding",
+          "command": "phren.addFinding",
           "when": "editorHasSelection"
         }
       ],
       "view/item/context": [
         {
-          "command": "cortex.filterFindingsByDate",
-          "when": "viewItem == cortex.category.findings",
+          "command": "phren.filterFindingsByDate",
+          "when": "viewItem == phren.category.findings",
           "group": "inline"
         },
         {
-          "command": "cortex.toggleHook",
-          "when": "viewItem == cortex.hookItem",
+          "command": "phren.toggleHook",
+          "when": "viewItem == phren.hookItem",
           "group": "inline"
         },
         {
-          "command": "cortex.completeTask",
-          "when": "viewItem == cortex.task.active",
+          "command": "phren.completeTask",
+          "when": "viewItem == phren.task.active",
           "group": "inline"
         },
         {
-          "command": "cortex.removeTask",
-          "when": "viewItem == cortex.task.active || viewItem == cortex.task.done",
+          "command": "phren.removeTask",
+          "when": "viewItem == phren.task.active || viewItem == phren.task.done",
           "group": "inline"
         },
         {
-          "command": "cortex.removeFinding",
-          "when": "viewItem == cortex.finding",
+          "command": "phren.updateTask",
+          "when": "viewItem == phren.task.active",
           "group": "inline"
         },
         {
-          "command": "cortex.rejectQueueItem",
-          "when": "viewItem == cortex.queue.item",
+          "command": "phren.pinTask",
+          "when": "viewItem == phren.task.active",
           "group": "inline"
         },
         {
-          "command": "cortex.openSessionOverview",
-          "when": "viewItem == cortex.session",
+          "command": "phren.removeFinding",
+          "when": "viewItem == phren.finding",
           "group": "inline"
         },
         {
-          "command": "cortex.copySessionId",
-          "when": "viewItem == cortex.session",
+          "command": "phren.rejectQueueItem",
+          "when": "viewItem == phren.queue.item",
+          "group": "inline"
+        },
+        {
+          "command": "phren.openSessionOverview",
+          "when": "viewItem == phren.session",
+          "group": "inline"
+        },
+        {
+          "command": "phren.copySessionId",
+          "when": "viewItem == phren.session",
           "group": "navigation"
         }
       ],
       "view/title": [
         {
-          "command": "cortex.showGraph",
-          "when": "view == cortex.explorer",
+          "command": "phren.showGraph",
+          "when": "view == phren.explorer",
           "group": "navigation"
         },
         {
-          "command": "cortex.search",
-          "when": "view == cortex.explorer",
+          "command": "phren.search",
+          "when": "view == phren.explorer",
           "group": "navigation"
         },
         {
-          "command": "cortex.refresh",
-          "when": "view == cortex.explorer",
+          "command": "phren.refresh",
+          "when": "view == phren.explorer",
           "group": "navigation"
         },
         {
-          "command": "cortex.sync",
-          "when": "view == cortex.explorer",
+          "command": "phren.sync",
+          "when": "view == phren.explorer",
           "group": "navigation"
         }
       ]
@@ -250,16 +271,16 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "cortex",
-          "title": "Cortex",
-          "icon": "media/cortex.svg"
+          "id": "phren",
+          "title": "Phren",
+          "icon": "media/phren-activity.svg"
         }
       ]
     },
     "views": {
-      "cortex": [
+      "phren": [
         {
-          "id": "cortex.explorer",
+          "id": "phren.explorer",
           "name": "Explorer"
         }
       ]
@@ -268,25 +289,25 @@
       {
         "title": "Setup",
         "properties": {
-          "cortex.mcpServerPath": {
+          "phren.mcpServerPath": {
             "type": "string",
             "default": "",
             "order": 1,
-            "markdownDescription": "Absolute path to the Cortex MCP server entrypoint (`index.js`). Leave blank to auto-detect from a global `npm install -g cortex`."
+            "markdownDescription": "Absolute path to the Phren MCP server entrypoint (`index.js`). Leave blank to auto-detect from a global `npm install -g phren`."
           },
-          "cortex.nodePath": {
+          "phren.nodePath": {
             "type": "string",
             "default": "node",
             "order": 2,
             "markdownDescription": "Path to the Node.js binary used to spawn the MCP server. VS Code's built-in Electron binary won't work — this must point to a real `node` install."
           },
-          "cortex.storePath": {
+          "phren.storePath": {
             "type": "string",
             "default": "",
             "order": 3,
-            "markdownDescription": "Path to the Cortex store directory (where projects, findings, and config live). Leave blank to use `~/.cortex`."
+            "markdownDescription": "Path to the Phren store directory (where projects, findings, and config live). Leave blank to use `~/.phren`."
           },
-          "cortex.onboardingComplete": {
+          "phren.onboardingComplete": {
             "type": "boolean",
             "default": false,
             "order": 4,
@@ -297,7 +318,7 @@
       {
         "title": "Capture Behavior",
         "properties": {
-          "cortex.findingSensitivity": {
+          "phren.findingSensitivity": {
             "type": "string",
             "enum": ["minimal", "conservative", "balanced", "aggressive"],
             "default": "balanced",
@@ -308,21 +329,21 @@
               "Balanced — Save non-obvious patterns, decisions, pitfalls, and bugs worth remembering. Auto-capture up to 10 per session. Best for: most projects.",
               "Aggressive — Save everything worth remembering, err on the side of capturing. Auto-capture up to 20 per session. Best for: complex projects with many contributors."
             ],
-            "markdownDescription": "**Master control for how aggressively Cortex captures findings.** This sets the session cap (how many findings can be auto-captured per session) and the agent instruction (what kinds of insights to save). Higher levels capture more but may produce noise; lower levels are quieter but may miss useful patterns."
+            "markdownDescription": "**Master control for how aggressively Phren captures findings.** This sets the session cap (how many findings can be auto-captured per session) and the agent instruction (what kinds of insights to save). Higher levels capture more but may produce noise; lower levels are quieter but may miss useful patterns."
           },
-          "cortex.proactivity": {
+          "phren.proactivity": {
             "type": "string",
             "enum": ["high", "medium", "low"],
             "default": "high",
             "order": 2,
             "enumDescriptions": [
-              "High — Always auto-capture findings and tasks without waiting for explicit signals. Cortex actively monitors conversations for insights worth saving.",
+              "High — Always auto-capture findings and tasks without waiting for explicit signals. Phren actively monitors conversations for insights worth saving.",
               "Medium — Only auto-capture when explicit signals are detected (e.g. words like 'add finding', 'worth remembering', tags like [decision], [pitfall]). Quieter but still responsive.",
-              "Low — Never auto-capture. Cortex only saves findings and tasks when you explicitly use a command or MCP tool. Fully manual."
+              "Low — Never auto-capture. Phren only saves findings and tasks when you explicitly use a command or MCP tool. Fully manual."
             ],
-            "markdownDescription": "**Global proactivity level** for both findings and tasks. Controls whether Cortex auto-captures insights or waits for explicit signals. Override per-type with the findings and tasks settings below."
+            "markdownDescription": "**Global proactivity level** for both findings and tasks. Controls whether Phren auto-captures insights or waits for explicit signals. Override per-type with the findings and tasks settings below."
           },
-          "cortex.proactivityFindings": {
+          "phren.proactivityFindings": {
             "type": "string",
             "enum": ["high", "medium", "low"],
             "default": "high",
@@ -332,9 +353,9 @@
               "Medium — Only capture findings when explicit signals detected (e.g. 'remember this', [decision] tags).",
               "Low — Never auto-capture findings. Only saved via explicit add_finding calls."
             ],
-            "markdownDescription": "**Override proactivity for findings only.** When set, this takes priority over the global `#cortex.proactivity#` for finding capture. Leave at the same level as global proactivity if you don't need a separate override."
+            "markdownDescription": "**Override proactivity for findings only.** When set, this takes priority over the global `#phren.proactivity#` for finding capture. Leave at the same level as global proactivity if you don't need a separate override."
           },
-          "cortex.proactivityTasks": {
+          "phren.proactivityTasks": {
             "type": "string",
             "enum": ["high", "medium", "low"],
             "default": "high",
@@ -344,9 +365,9 @@
               "Medium — Only capture tasks when explicit signals detected (e.g. 'add this to tasks', 'put that on the todo list').",
               "Low — Never auto-capture tasks. Only created via explicit add_task calls."
             ],
-            "markdownDescription": "**Override proactivity for tasks only.** When set, this takes priority over the global `#cortex.proactivity#` for task capture. Leave at the same level as global proactivity if you don't need a separate override."
+            "markdownDescription": "**Override proactivity for tasks only.** When set, this takes priority over the global `#phren.proactivity#` for task capture. Leave at the same level as global proactivity if you don't need a separate override."
           },
-          "cortex.taskMode": {
+          "phren.taskMode": {
             "type": "string",
             "enum": ["off", "manual", "suggest", "auto"],
             "default": "auto",
@@ -359,47 +380,47 @@
             ],
             "markdownDescription": "**Task automation mode.** Controls how the agent interacts with the task system. Separate from proactivity — this controls the agent's permission to create/manage tasks, while proactivity controls *when* it tries to."
           },
-          "cortex.autoExtract": {
+          "phren.autoExtract": {
             "type": "boolean",
             "default": true,
             "order": 6,
-            "markdownDescription": "**Extract insights from project context on each prompt.** When enabled, the hook-prompt pipeline scans the current project for keywords and injects relevant cortex findings into the agent's context. Disable if you want cortex to be purely manual (search_knowledge only)."
+            "markdownDescription": "**Extract insights from project context on each prompt.** When enabled, the hook-prompt pipeline scans the current project for keywords and injects relevant phren findings into the agent's context. Disable if you want phren to be purely manual (search_knowledge only)."
           },
-          "cortex.autoCapture": {
+          "phren.autoCapture": {
             "type": "boolean",
             "default": false,
             "order": 7,
-            "markdownDescription": "**Extract insights from conversation transcripts at session end.** When enabled, cortex analyzes the full conversation after a session ends and captures findings it missed during the session. Useful for catching patterns that only become apparent in retrospect. Requires an active LLM endpoint."
+            "markdownDescription": "**Extract insights from conversation transcripts at session end.** When enabled, phren analyzes the full conversation after a session ends and captures findings it missed during the session. Useful for catching patterns that only become apparent in retrospect. Requires an active LLM endpoint."
           }
         }
       },
       {
         "title": "Hooks & Integration",
         "properties": {
-          "cortex.hooksEnabled": {
+          "phren.hooksEnabled": {
             "type": "boolean",
             "default": true,
             "order": 1,
-            "markdownDescription": "**Master switch for cortex hooks.** When disabled, no hooks fire on prompts, session starts, or stops — cortex becomes a passive MCP server that only responds when explicitly called. Hooks handle: context injection (SessionStart), knowledge retrieval (UserPromptSubmit), and auto-save (Stop)."
+            "markdownDescription": "**Master switch for phren hooks.** When disabled, no hooks fire on prompts, session starts, or stops — phren becomes a passive MCP server that only responds when explicitly called. Hooks handle: context injection (SessionStart), knowledge retrieval (UserPromptSubmit), and auto-save (Stop)."
           }
         }
       },
       {
         "title": "Semantic Analysis (Offline)",
         "properties": {
-          "cortex.semanticDedup": {
+          "phren.semanticDedup": {
             "type": "boolean",
             "default": false,
             "order": 1,
-            "markdownDescription": "**Semantic duplicate detection for offline maintenance.** Used by `cortex maintain consolidate` and `cortex maintain extract` when no agent session is active. Detects findings that say the same thing in different words and merges them.\n\n- **Live sessions**: Dedup uses the active agent (Claude/GPT) at no extra cost.\n- **Batch mode**: Uses a separate LLM call per finding group. Results cached 24h.\n- **Cost**: ~$0.01/batch-session with Haiku."
+            "markdownDescription": "**Semantic duplicate detection for offline maintenance.** Used by `phren maintain consolidate` and `phren maintain extract` when no agent session is active. Detects findings that say the same thing in different words and merges them.\n\n- **Live sessions**: Dedup uses the active agent (Claude/GPT) at no extra cost.\n- **Batch mode**: Uses a separate LLM call per finding group. Results cached 24h.\n- **Cost**: ~$0.01/batch-session with Haiku."
           },
-          "cortex.semanticConflict": {
+          "phren.semanticConflict": {
             "type": "boolean",
             "default": false,
             "order": 2,
-            "markdownDescription": "**Semantic conflict detection for offline maintenance.** Used by `cortex maintain consolidate` and `cortex maintain extract` when no agent session is active. Detects findings that contradict each other (e.g. 'always use X' vs 'never use X') and annotates them.\n\n- **Live sessions**: Conflict detection uses the active agent at no extra cost.\n- **Batch mode**: Uses a separate LLM call per finding group. Results cached 24h.\n- **Cost**: ~$0.01/batch-session with Haiku."
+            "markdownDescription": "**Semantic conflict detection for offline maintenance.** Used by `phren maintain consolidate` and `phren maintain extract` when no agent session is active. Detects findings that contradict each other (e.g. 'always use X' vs 'never use X') and annotates them.\n\n- **Live sessions**: Conflict detection uses the active agent at no extra cost.\n- **Batch mode**: Uses a separate LLM call per finding group. Results cached 24h.\n- **Cost**: ~$0.01/batch-session with Haiku."
           },
-          "cortex.llmModel": {
+          "phren.llmModel": {
             "type": "string",
             "default": "",
             "order": 3,
@@ -419,7 +440,7 @@
               "GPT-4o mini — cost-effective OpenAI alternative for batch operations",
               "GPT-4o — expensive for batch operations; not recommended"
             ],
-            "markdownDescription": "**LLM model for offline cortex operations** (`consolidate`, `extract`). Only used when semantic dedup or conflict detection is enabled above.\n\n- **Live sessions**: The active agent handles dedup/conflict — this setting is ignored.\n- **Batch mode**: This model runs the analysis. Haiku is recommended for cost.\n- Sets the `CORTEX_LLM_MODEL` environment variable."
+            "markdownDescription": "**LLM model for offline phren operations** (`consolidate`, `extract`). Only used when semantic dedup or conflict detection is enabled above.\n\n- **Live sessions**: The active agent handles dedup/conflict — this setting is ignored.\n- **Batch mode**: This model runs the analysis. Haiku is recommended for cost.\n- Sets the `PHREN_LLM_MODEL` environment variable."
           }
         }
       }

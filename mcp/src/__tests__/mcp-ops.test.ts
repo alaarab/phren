@@ -39,7 +39,7 @@ describe("mcp-ops: get_consolidation_status", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "",
       db: () => { throw new Error("unused"); },
       rebuildIndex: async () => {},
@@ -50,7 +50,7 @@ describe("mcp-ops: get_consolidation_status", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 
@@ -141,7 +141,7 @@ describe("mcp-ops: get_review_queue", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "",
       db: () => { throw new Error("unused"); },
       rebuildIndex: async () => {},
@@ -242,7 +242,7 @@ describe("mcp-ops: health_check", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test-profile",
       db: () => { throw new Error("unused"); },
       rebuildIndex: async () => {},
@@ -253,7 +253,7 @@ describe("mcp-ops: health_check", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     process.env.HOME = origHome;
     process.env.USERPROFILE = origUserProfile;
     tmp.cleanup();
@@ -264,7 +264,7 @@ describe("mcp-ops: health_check", () => {
     expect(res.ok).toBe(true);
     expect(typeof res.data.version).toBe("string");
     expect(res.data.version.length).toBeGreaterThan(0);
-    expect(res.data.cortexPath).toBe(tmp.path);
+    expect(res.data.phrenPath).toBe(tmp.path);
     expect(typeof res.data.mcpEnabled).toBe("boolean");
     expect(typeof res.data.hooksEnabled).toBe("boolean");
     expect(typeof res.data.projectCount).toBe("number");
@@ -313,7 +313,7 @@ describe("mcp-ops: add_project", () => {
     fs.writeFileSync(path.join(tmp.path, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "work",
       db: () => { throw new Error("unused"); },
       rebuildIndex: async () => {},
@@ -324,7 +324,7 @@ describe("mcp-ops: add_project", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 
@@ -332,7 +332,7 @@ describe("mcp-ops: add_project", () => {
     const res = parseResult(await server.call("add_project", { path: repoDir }));
     expect(res.ok).toBe(true);
     expect(res.data.project).toBe("repo");
-    expect(res.data.ownership).toBe("cortex-managed");
+    expect(res.data.ownership).toBe("phren-managed");
     expect(fs.readFileSync(path.join(tmp.path, "profiles", "work.yaml"), "utf8")).toContain("- repo");
     expect(fs.readFileSync(path.join(tmp.path, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
   });
@@ -346,7 +346,7 @@ describe("mcp-ops: add_project", () => {
     expect(res.ok).toBe(true);
     expect(res.data.ownership).toBe("repo-managed");
     expect(fs.existsSync(path.join(tmp.path, "repo-managed", "CLAUDE.md"))).toBe(false);
-    expect(fs.readFileSync(path.join(tmp.path, "repo-managed", "cortex.project.yaml"), "utf8")).toContain("ownership: repo-managed");
+    expect(fs.readFileSync(path.join(tmp.path, "repo-managed", "phren.project.yaml"), "utf8")).toContain("ownership: repo-managed");
   });
 
   it("requires an explicit path", async () => {
@@ -368,7 +368,7 @@ describe("mcp-ops: list_hook_errors", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "",
       db: () => { throw new Error("unused"); },
       rebuildIndex: async () => {},
@@ -379,7 +379,7 @@ describe("mcp-ops: list_hook_errors", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 
@@ -408,7 +408,7 @@ describe("mcp-ops: list_hook_errors", () => {
     expect(res.ok).toBe(true);
     expect(res.data.errors).toHaveLength(0);
     expect(res.message).toContain("No error entries found");
-    expect(res.message).toContain("CORTEX_DEBUG=1");
+    expect(res.message).toContain("PHREN_DEBUG=1");
   });
 
   it("respects limit parameter", async () => {

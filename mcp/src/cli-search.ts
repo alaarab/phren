@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { runtimeFile } from "./shared.js";
-import { buildIndex, extractSnippet, queryDocRows } from "./shared-index.js";
+import { buildIndex, extractSnippet, queryDocRows, queryRows, queryEntityLinks, queryDocBySourceKey, logEntityMiss } from "./shared-index.js";
 import { buildFtsQueryVariants, errorMessage, isValidProjectName } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
 
@@ -39,12 +39,12 @@ const SEARCH_TYPES = new Set([
   "other",
 ]);
 
-function historyFile(cortexPath: string): string {
-  return runtimeFile(cortexPath, "search-history.jsonl");
+function historyFile(phrenPath: string): string {
+  return runtimeFile(phrenPath, "search-history.jsonl");
 }
 
-export function readSearchHistory(cortexPath: string): SearchHistoryEntry[] {
-  const file = historyFile(cortexPath);
+export function readSearchHistory(phrenPath: string): SearchHistoryEntry[] {
+  const file = historyFile(phrenPath);
   if (!fs.existsSync(file)) return [];
   try {
     return fs.readFileSync(file, "utf8")
@@ -52,22 +52,22 @@ export function readSearchHistory(cortexPath: string): SearchHistoryEntry[] {
       .filter(Boolean)
       .map((line) => JSON.parse(line) as SearchHistoryEntry);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readSearchHistory: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readSearchHistory: ${errorMessage(err)}\n`);
     return [];
   }
 }
 
 function printSearchUsage() {
   console.error("Usage:");
-  console.error("  cortex search <query> [--project <name>] [--type <type>] [--limit <n>] [--all]");
-  console.error("  cortex search --project <name> [--type <type>] [--limit <n>] [--all]");
-  console.error("  cortex search --history                    Show recent searches");
-  console.error("  cortex search --from-history <n>           Re-run search #n from history");
+  console.error("  phren search <query> [--project <name>] [--type <type>] [--limit <n>] [--all]");
+  console.error("  phren search --project <name> [--type <type>] [--limit <n>] [--all]");
+  console.error("  phren search --history                    Show recent searches");
+  console.error("  phren search --from-history <n>           Re-run search #n from history");
   console.error("  type: claude|summary|findings|reference|task|changelog|canonical|memory-queue|skill|other");
 }
 
 function validateAndNormalizeSearchOptions(
-  cortexPath: string,
+  phrenPath: string,
   queryParts: string[],
   project: string | undefined,
   type: string | undefined,
@@ -81,7 +81,7 @@ function validateAndNormalizeSearchOptions(
   }
 
   if (fromHistory !== undefined) {
-    const history = readSearchHistory(cortexPath);
+    const history = readSearchHistory(phrenPath);
     if (fromHistory > history.length || fromHistory < 1) {
       console.error(`No search at position ${fromHistory}. History has ${history.length} entries.`);
       process.exit(1);
@@ -126,7 +126,7 @@ function validateAndNormalizeSearchOptions(
   };
 }
 
-export function parseSearchArgs(cortexPath: string, args: string[]): SearchOptions | null {
+export function parseSearchArgs(phrenPath: string, args: string[]): SearchOptions | null {
   const queryParts: string[] = [];
   let project: string | undefined;
   let type: string | undefined;
@@ -203,12 +203,12 @@ export function parseSearchArgs(cortexPath: string, args: string[]): SearchOptio
     queryParts.push(arg);
   }
 
-  return validateAndNormalizeSearchOptions(cortexPath, queryParts, project, type, limit, showHistory, fromHistory, searchAll);
+  return validateAndNormalizeSearchOptions(phrenPath, queryParts, project, type, limit, showHistory, fromHistory, searchAll);
 }
 
-function recordSearchQuery(cortexPath: string, opts: SearchOptions): void {
+function recordSearchQuery(phrenPath: string, opts: SearchOptions): void {
   if (!opts.query) return;
-  const file = historyFile(cortexPath);
+  const file = historyFile(phrenPath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const entry: SearchHistoryEntry = {
     query: opts.query,
@@ -216,14 +216,14 @@ function recordSearchQuery(cortexPath: string, opts: SearchOptions): void {
     ...(opts.type && { type: opts.type }),
     ts: new Date().toISOString(),
   };
-  let entries = readSearchHistory(cortexPath);
+  let entries = readSearchHistory(phrenPath);
   entries.push(entry);
   if (entries.length > MAX_HISTORY) entries = entries.slice(-MAX_HISTORY);
   fs.writeFileSync(file, entries.map((item) => JSON.stringify(item)).join("\n") + "\n");
 }
 
-function formatSearchHistoryLines(cortexPath: string): string[] {
-  const entries = readSearchHistory(cortexPath);
+function formatSearchHistoryLines(phrenPath: string): string[] {
+  const entries = readSearchHistory(phrenPath);
   if (!entries.length) return ["No search history."];
 
   const lines = ["Recent searches:", ""];
@@ -240,15 +240,15 @@ function formatSearchHistoryLines(cortexPath: string): string[] {
 
 export async function runSearch(
   opts: SearchOptions,
-  cortexPath: string,
+  phrenPath: string,
   profile: string,
 ): Promise<{ lines: string[]; exitCode: number }> {
   if (opts.showHistory) {
-    return { lines: formatSearchHistoryLines(cortexPath), exitCode: 0 };
+    return { lines: formatSearchHistoryLines(phrenPath), exitCode: 0 };
   }
 
-  recordSearchQuery(cortexPath, opts);
-  const db = await buildIndex(cortexPath, profile);
+  recordSearchQuery(phrenPath, opts);
+  const db = await buildIndex(phrenPath, profile);
 
   try {
     let sql = "SELECT project, filename, type, content, path FROM docs";
@@ -257,7 +257,7 @@ export async function runSearch(
     let queryVariants: string[] = [];
 
     if (opts.query) {
-      queryVariants = buildFtsQueryVariants(opts.query, opts.project, cortexPath);
+      queryVariants = buildFtsQueryVariants(opts.query, opts.project, phrenPath);
       const safeQuery = queryVariants[0] ?? "";
       if (!safeQuery) {
         return { lines: ["Query empty after sanitization."], exitCode: 1 };
@@ -303,9 +303,9 @@ export async function runSearch(
       if (opts.query) {
         try {
           const { logSearchMiss } = await import("./mcp-search.js");
-          logSearchMiss(cortexPath, opts.query, opts.project);
+          logSearchMiss(phrenPath, opts.query, opts.project);
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] search logSearchMiss: ${errorMessage(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search logSearchMiss: ${errorMessage(err)}\n`);
         }
       }
       const scope = [
@@ -333,4 +333,158 @@ export async function runSearch(
   } catch (err: unknown) {
     return { lines: [`Search error: ${errorMessage(err)}`], exitCode: 1 };
   }
+}
+
+// ── Fragment search (parity with MCP search_fragments) ────────────────────
+
+export async function runFragmentSearch(
+  query: string,
+  phrenPath: string,
+  profile: string,
+  opts: { project?: string; limit?: number },
+): Promise<{ lines: string[]; exitCode: number }> {
+  if (!query.trim()) {
+    return { lines: ["Usage: phren search-fragments <query> [--project <name>] [--limit <n>]"], exitCode: 1 };
+  }
+
+  const db = await buildIndex(phrenPath, profile);
+  const max = opts.limit ?? 10;
+  const pattern = `%${query.toLowerCase()}%`;
+
+  let sql: string;
+  let params: (string | number)[];
+
+  if (opts.project) {
+    sql = `
+      SELECT e.name, e.type, COUNT(el.source_id) as ref_count
+      FROM entities e
+      LEFT JOIN entity_links el ON el.target_id = e.id
+      WHERE e.name LIKE ? AND el.source_doc LIKE ?
+      GROUP BY e.id, e.name, e.type
+      ORDER BY ref_count DESC
+      LIMIT ?
+    `;
+    params = [pattern, `${opts.project}/%`, max];
+  } else {
+    sql = `
+      SELECT e.name, e.type, COUNT(el.source_id) as ref_count
+      FROM entities e
+      LEFT JOIN entity_links el ON el.target_id = e.id
+      WHERE e.name LIKE ?
+      GROUP BY e.id, e.name, e.type
+      ORDER BY ref_count DESC
+      LIMIT ?
+    `;
+    params = [pattern, max];
+  }
+
+  const rows = queryRows(db, sql, params);
+  if (!rows || rows.length === 0) {
+    logEntityMiss(phrenPath, query, "cli_search_fragments", opts.project);
+    return { lines: [`No fragments matching "${query}".`], exitCode: 0 };
+  }
+
+  const lines: string[] = [`Fragments matching "${query}" (${rows.length} result(s)):\n`];
+  for (const r of rows) {
+    const name = String(r[0]);
+    const type = String(r[1]);
+    const refCount = Number(r[2]);
+    lines.push(`  ${name} (${type}) — ${refCount} reference(s)`);
+  }
+
+  return { lines, exitCode: 0 };
+}
+
+export function parseFragmentSearchArgs(args: string[]): { query: string; project?: string; limit?: number } | null {
+  const queryParts: string[] = [];
+  let project: string | undefined;
+  let limit: number | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--help" || arg === "-h") {
+      console.error("Usage: phren search-fragments <query> [--project <name>] [--limit <n>]");
+      return null;
+    }
+    if (arg === "--project" && args[i + 1]) {
+      project = args[++i];
+      continue;
+    }
+    if (arg === "--limit" && args[i + 1]) {
+      limit = Number.parseInt(args[++i], 10);
+      continue;
+    }
+    if (!arg.startsWith("-")) {
+      queryParts.push(arg);
+    }
+  }
+
+  return { query: queryParts.join(" "), project, limit };
+}
+
+// ── Related docs (parity with MCP get_related_docs) ───────────────────────
+
+export async function runRelatedDocs(
+  entity: string,
+  phrenPath: string,
+  profile: string,
+  opts: { project?: string; limit?: number },
+): Promise<{ lines: string[]; exitCode: number }> {
+  if (!entity.trim()) {
+    return { lines: ["Usage: phren related-docs <fragment-name> [--project <name>] [--limit <n>]"], exitCode: 1 };
+  }
+
+  const db = await buildIndex(phrenPath, profile);
+  const max = opts.limit ?? 10;
+
+  const links = queryEntityLinks(db, entity.toLowerCase());
+  let relatedDocs = links.related.filter(r => r.includes("/"));
+
+  if (opts.project) {
+    relatedDocs = relatedDocs.filter(d => d.startsWith(`${opts.project}/`));
+  }
+
+  relatedDocs = relatedDocs.slice(0, max);
+
+  if (relatedDocs.length === 0) {
+    logEntityMiss(phrenPath, entity, "cli_related_docs", opts.project);
+    return { lines: [`No docs found referencing fragment "${entity}".`], exitCode: 0 };
+  }
+
+  const lines: string[] = [`Docs referencing "${entity}" (${relatedDocs.length} result(s)):\n`];
+  for (const doc of relatedDocs) {
+    const docRow = queryDocBySourceKey(db, phrenPath, doc);
+    const snippet = docRow?.content ? docRow.content.slice(0, 120).replace(/\n/g, " ").trim() : "";
+    lines.push(`  [${doc}]`);
+    if (snippet) lines.push(`    ${snippet}...`);
+  }
+
+  return { lines, exitCode: 0 };
+}
+
+export function parseRelatedDocsArgs(args: string[]): { entity: string; project?: string; limit?: number } | null {
+  const entityParts: string[] = [];
+  let project: string | undefined;
+  let limit: number | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--help" || arg === "-h") {
+      console.error("Usage: phren related-docs <fragment-name> [--project <name>] [--limit <n>]");
+      return null;
+    }
+    if (arg === "--project" && args[i + 1]) {
+      project = args[++i];
+      continue;
+    }
+    if (arg === "--limit" && args[i + 1]) {
+      limit = Number.parseInt(args[++i], 10);
+      continue;
+    }
+    if (!arg.startsWith("-")) {
+      entityParts.push(arg);
+    }
+  }
+
+  return { entity: entityParts.join(" "), project, limit };
 }

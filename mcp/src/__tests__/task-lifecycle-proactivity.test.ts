@@ -50,29 +50,29 @@ describe("task lifecycle suppression", () => {
     grantAdmin(tmp.path);
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "auto",
     }, null, 2) + "\n");
     writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
-    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/cortex\n");
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_TASKS;
+    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/phren\n");
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_TASKS;
+    delete process.env.PHREN_ACTOR;
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_TASKS;
     tmp.cleanup();
   });
 
   it("suppresses task when prompt contains don't create a task", () => {
-    process.env.CORTEX_PROACTIVITY_TASKS = "high";
+    process.env.PHREN_PROACTIVITY_TASKS = "high";
 
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "implement the feature but don't create a task for this",
       project,
       sessionId: "session-suppress-1",
@@ -90,10 +90,10 @@ describe("task lifecycle suppression", () => {
   });
 
   it("suppresses task when prompt contains no task", () => {
-    process.env.CORTEX_PROACTIVITY_TASKS = "high";
+    process.env.PHREN_PROACTIVITY_TASKS = "high";
 
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "no task, just fix the lint warning in utils.ts",
       project,
       sessionId: "session-suppress-2",
@@ -120,29 +120,29 @@ describe("task lifecycle task proactivity gating", () => {
     grantAdmin(tmp.path);
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "auto",
     }, null, 2) + "\n");
     writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
-    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/cortex\n");
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_TASKS;
+    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/phren\n");
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_TASKS;
+    delete process.env.PHREN_ACTOR;
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_TASKS;
     tmp.cleanup();
   });
 
   it("keeps automatic task capture at high", () => {
-    process.env.CORTEX_PROACTIVITY_TASKS = "high";
+    process.env.PHREN_PROACTIVITY_TASKS = "high";
 
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Implement automatic task management for hooks",
       project,
       sessionId: "session-high",
@@ -161,10 +161,10 @@ describe("task lifecycle task proactivity gating", () => {
   });
 
   it('requires an explicit "add to task" signal at medium', () => {
-    process.env.CORTEX_PROACTIVITY_TASKS = "medium";
+    process.env.PHREN_PROACTIVITY_TASKS = "medium";
 
     const blocked = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Implement automatic task management for hooks",
       project,
       sessionId: "session-medium-blocked",
@@ -181,7 +181,7 @@ describe("task lifecycle task proactivity gating", () => {
     expect(task.data.items.Active).toHaveLength(0);
 
     const allowed = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Please add this to task: wire proactivity level checks",
       project,
       sessionId: "session-medium-allowed",
@@ -200,10 +200,10 @@ describe("task lifecycle task proactivity gating", () => {
   });
 
   it("disables automatic task capture at low", () => {
-    process.env.CORTEX_PROACTIVITY_TASKS = "low";
+    process.env.PHREN_PROACTIVITY_TASKS = "low";
 
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Add task: wire proactivity level checks",
       project,
       sessionId: "session-low",

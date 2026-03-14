@@ -40,8 +40,8 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
-const cortexClient_1 = require("./cortexClient");
-const CortexTreeProvider_1 = require("./providers/CortexTreeProvider");
+const phrenClient_1 = require("./phrenClient");
+const PhrenTreeProvider_1 = require("./providers/PhrenTreeProvider");
 const searchQuickPick_1 = require("./searchQuickPick");
 const statusBar_1 = require("./statusBar");
 const graphWebview_1 = require("./graphWebview");
@@ -55,60 +55,60 @@ const runtimeConfig_1 = require("./runtimeConfig");
 const profileConfig_1 = require("./profileConfig");
 let client;
 let outputChannel;
-const GLOBAL_CORTEX_STORE_PATH = path.join(os.homedir(), ".cortex");
-const CORTEX_PACKAGE_NAME = "@alaarab/cortex";
+const GLOBAL_PHREN_STORE_PATH = path.join(os.homedir(), ".phren");
+const PHREN_PACKAGE_NAME = "@alaarab/phren";
 const ONBOARDING_COMPLETE_SETTING = "onboardingComplete";
 async function activate(context) {
-    outputChannel = vscode.window.createOutputChannel("Cortex");
+    outputChannel = vscode.window.createOutputChannel("Phren");
     context.subscriptions.push(outputChannel);
-    outputChannel.appendLine("Cortex extension activating...");
-    const config = vscode.workspace.getConfiguration("cortex");
+    outputChannel.appendLine("Phren extension activating...");
+    const config = vscode.workspace.getConfiguration("phren");
     await runOnboardingIfNeeded(config);
-    const runtimeConfig = (0, runtimeConfig_1.resolveRuntimeConfig)(vscode.workspace.getConfiguration("cortex"));
-    outputChannel.appendLine(`Cortex store path: ${runtimeConfig.storePath}`);
+    const runtimeConfig = (0, runtimeConfig_1.resolveRuntimeConfig)(vscode.workspace.getConfiguration("phren"));
+    outputChannel.appendLine(`Phren store path: ${runtimeConfig.storePath}`);
     outputChannel.appendLine(`Node path: ${runtimeConfig.nodePath}`);
-    outputChannel.appendLine(`MCP server path: ${runtimeConfig.mcpServerPath ?? "(not found; configure cortex.mcpServerPath or install Cortex globally)"}`);
+    outputChannel.appendLine(`MCP server path: ${runtimeConfig.mcpServerPath ?? "(not found; configure phren.mcpServerPath or install Phren globally)"}`);
     if (!runtimeConfig.mcpServerPath) {
-        const choice = await vscode.window.showErrorMessage("Cortex MCP server entrypoint could not be auto-detected. Set cortex.mcpServerPath or install Cortex globally.", "Open Settings");
+        const choice = await vscode.window.showErrorMessage("Phren MCP server entrypoint could not be auto-detected. Set phren.mcpServerPath or install Phren globally.", "Open Settings");
         if (choice === "Open Settings") {
-            await vscode.commands.executeCommand("workbench.action.openSettings", "cortex.mcpServerPath");
+            await vscode.commands.executeCommand("workbench.action.openSettings", "phren.mcpServerPath");
         }
         return;
     }
     if (!(0, runtimeConfig_1.pathExists)(runtimeConfig.mcpServerPath)) {
         const basename = path.basename(runtimeConfig.mcpServerPath);
-        const choice = await vscode.window.showErrorMessage(`Configured Cortex MCP server entrypoint does not exist: ${basename}`, "Open Settings");
+        const choice = await vscode.window.showErrorMessage(`Configured Phren MCP server entrypoint does not exist: ${basename}`, "Open Settings");
         if (choice === "Open Settings") {
-            await vscode.commands.executeCommand("workbench.action.openSettings", "cortex.mcpServerPath");
+            await vscode.commands.executeCommand("workbench.action.openSettings", "phren.mcpServerPath");
         }
         return;
     }
-    const cortexClient = new cortexClient_1.CortexClient({
+    const phrenClient = new phrenClient_1.PhrenClient({
         mcpServerPath: runtimeConfig.mcpServerPath,
         storePath: runtimeConfig.storePath,
         nodePath: runtimeConfig.nodePath,
         clientVersion: context.extension.packageJSON.version,
     });
-    client = cortexClient;
-    const treeDataProvider = new CortexTreeProvider_1.CortexTreeProvider(cortexClient, runtimeConfig.storePath);
-    const treeView = vscode.window.createTreeView("cortex.explorer", {
+    client = phrenClient;
+    const treeDataProvider = new PhrenTreeProvider_1.PhrenTreeProvider(phrenClient, runtimeConfig.storePath);
+    const treeView = vscode.window.createTreeView("phren.explorer", {
         treeDataProvider,
     });
-    const statusBar = new statusBar_1.CortexStatusBar(cortexClient);
+    const statusBar = new statusBar_1.PhrenStatusBar(phrenClient);
     statusBar.setOnHealthChanged((ok) => treeDataProvider.setHealthStatus(ok));
     context.subscriptions.push(treeDataProvider, treeView, statusBar);
-    const setActiveProjectDisposable = vscode.commands.registerCommand("cortex.setActiveProject", async () => {
+    const setActiveProjectDisposable = vscode.commands.registerCommand("phren.setActiveProject", async () => {
         try {
             await statusBar.promptForActiveProject();
         }
         catch (error) {
-            await vscode.window.showErrorMessage(`Failed to load Cortex projects: ${toErrorMessage(error)}`);
+            await vscode.window.showErrorMessage(`Failed to load Phren projects: ${toErrorMessage(error)}`);
         }
     });
-    const addFindingDisposable = vscode.commands.registerCommand("cortex.addFinding", async () => {
+    const addFindingDisposable = vscode.commands.registerCommand("phren.addFinding", async () => {
         const activeProject = statusBar.getActiveProjectName();
         if (!activeProject) {
-            await vscode.window.showWarningMessage("No active Cortex project selected.");
+            await vscode.window.showWarningMessage("No active Phren project selected.");
             return;
         }
         const findingText = await vscode.window.showInputBox({ prompt: "Enter finding text" });
@@ -117,7 +117,7 @@ async function activate(context) {
             return;
         }
         try {
-            await cortexClient.addFinding(activeProject, trimmedFindingText);
+            await phrenClient.addFinding(activeProject, trimmedFindingText);
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Finding added to ${activeProject}`);
         }
@@ -125,59 +125,59 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to add finding: ${toErrorMessage(error)}`);
         }
     });
-    const searchDisposable = vscode.commands.registerCommand("cortex.search", async () => {
+    const searchDisposable = vscode.commands.registerCommand("phren.search", async () => {
         try {
-            await (0, searchQuickPick_1.showSearchQuickPick)(cortexClient);
+            await (0, searchQuickPick_1.showSearchQuickPick)(phrenClient);
         }
         catch (error) {
-            await vscode.window.showErrorMessage(`Failed to search Cortex knowledge: ${toErrorMessage(error)}`);
+            await vscode.window.showErrorMessage(`Failed to search Phren knowledge: ${toErrorMessage(error)}`);
         }
     });
-    const showGraphDisposable = vscode.commands.registerCommand("cortex.showGraph", async () => {
+    const showGraphDisposable = vscode.commands.registerCommand("phren.showGraph", async () => {
         try {
-            await (0, graphWebview_1.showGraphWebview)(cortexClient, context);
+            await (0, graphWebview_1.showGraphWebview)(phrenClient, context);
         }
         catch (error) {
-            await vscode.window.showErrorMessage(`Failed to show Cortex graph: ${toErrorMessage(error)}`);
+            await vscode.window.showErrorMessage(`Failed to show Phren graph: ${toErrorMessage(error)}`);
         }
     });
-    const refreshDisposable = vscode.commands.registerCommand("cortex.refresh", async () => {
+    const refreshDisposable = vscode.commands.registerCommand("phren.refresh", async () => {
         treeDataProvider.refresh();
         try {
             await statusBar.initialize();
         }
         catch (error) {
-            await vscode.window.showErrorMessage(`Failed to refresh Cortex extension state: ${toErrorMessage(error)}`);
+            await vscode.window.showErrorMessage(`Failed to refresh Phren extension state: ${toErrorMessage(error)}`);
         }
     });
     const refreshTree = () => treeDataProvider.refresh();
-    const openFindingDisposable = vscode.commands.registerCommand("cortex.openFinding", (finding) => {
-        (0, findingViewer_1.showFindingDetail)(cortexClient, finding, refreshTree);
+    const openFindingDisposable = vscode.commands.registerCommand("phren.openFinding", (finding) => {
+        (0, findingViewer_1.showFindingDetail)(phrenClient, finding, refreshTree);
     });
-    const openProjectFileDisposable = vscode.commands.registerCommand("cortex.openProjectFile", async (projectName, fileName) => {
+    const openProjectFileDisposable = vscode.commands.registerCommand("phren.openProjectFile", async (projectName, fileName) => {
         try {
-            await (0, projectFileViewer_1.showProjectFile)(cortexClient, projectName, fileName);
+            await (0, projectFileViewer_1.showProjectFile)(phrenClient, projectName, fileName);
         }
         catch (error) {
             await vscode.window.showErrorMessage(`Failed to open project file: ${toErrorMessage(error)}`);
         }
     });
-    const openSkillDisposable = vscode.commands.registerCommand("cortex.openSkill", async (skillName, skillSource) => {
+    const openSkillDisposable = vscode.commands.registerCommand("phren.openSkill", async (skillName, skillSource) => {
         try {
-            await (0, skillEditor_1.showSkillEditor)(cortexClient, skillName, skillSource);
+            await (0, skillEditor_1.showSkillEditor)(phrenClient, skillName, skillSource);
         }
         catch (error) {
             await vscode.window.showErrorMessage(`Failed to open skill: ${toErrorMessage(error)}`);
         }
     });
-    const toggleSkillDisposable = vscode.commands.registerCommand("cortex.toggleSkill", async (skillName, skillSource, currentlyEnabled) => {
+    const toggleSkillDisposable = vscode.commands.registerCommand("phren.toggleSkill", async (skillName, skillSource, currentlyEnabled) => {
         try {
             const project = skillSource === "global" ? undefined : skillSource;
             if (currentlyEnabled) {
-                await cortexClient.disableSkill(skillName, project);
+                await phrenClient.disableSkill(skillName, project);
             }
             else {
-                await cortexClient.enableSkill(skillName, project);
+                await phrenClient.enableSkill(skillName, project);
             }
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Skill "${skillName}" ${currentlyEnabled ? "disabled" : "enabled"}.`);
@@ -186,11 +186,11 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to toggle skill: ${toErrorMessage(error)}`);
         }
     });
-    const toggleHookDisposable = vscode.commands.registerCommand("cortex.toggleHook", async (toolOrNode, currentlyEnabled) => {
+    const toggleHookDisposable = vscode.commands.registerCommand("phren.toggleHook", async (toolOrNode, currentlyEnabled) => {
         try {
             const tool = typeof toolOrNode === "string" ? toolOrNode : toolOrNode.tool;
             const enabled = typeof toolOrNode === "string" ? currentlyEnabled : toolOrNode.enabled;
-            await cortexClient.toggleHooks(!enabled, tool);
+            await phrenClient.toggleHooks(!enabled, tool);
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Hooks for "${tool}" ${enabled ? "disabled" : "enabled"}.`);
         }
@@ -198,21 +198,21 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to toggle hook: ${toErrorMessage(error)}`);
         }
     });
-    const openTaskDisposable = vscode.commands.registerCommand("cortex.openTask", (task) => {
-        (0, taskViewer_1.showTaskDetail)(cortexClient, task, refreshTree);
+    const openTaskDisposable = vscode.commands.registerCommand("phren.openTask", (task) => {
+        (0, taskViewer_1.showTaskDetail)(phrenClient, task, refreshTree);
     });
-    const openQueueItemDisposable = vscode.commands.registerCommand("cortex.openQueueItem", (item) => {
-        (0, queueViewer_1.showQueueItemDetail)(cortexClient, item, refreshTree);
+    const openQueueItemDisposable = vscode.commands.registerCommand("phren.openQueueItem", (item) => {
+        (0, queueViewer_1.showQueueItemDetail)(phrenClient, item, refreshTree);
     });
-    const openSessionOverviewDisposable = vscode.commands.registerCommand("cortex.openSessionOverview", async (session) => {
+    const openSessionOverviewDisposable = vscode.commands.registerCommand("phren.openSessionOverview", async (session) => {
         try {
-            await (0, sessionViewer_1.showSessionOverview)(cortexClient, session);
+            await (0, sessionViewer_1.showSessionOverview)(phrenClient, session);
         }
         catch (error) {
             await vscode.window.showErrorMessage(`Failed to open session overview: ${toErrorMessage(error)}`);
         }
     });
-    const copySessionIdDisposable = vscode.commands.registerCommand("cortex.copySessionId", async (session) => {
+    const copySessionIdDisposable = vscode.commands.registerCommand("phren.copySessionId", async (session) => {
         try {
             await vscode.env.clipboard.writeText(session.sessionId);
             await vscode.window.showInformationMessage(`Copied session ID ${session.sessionId.slice(0, 8)}.`);
@@ -222,10 +222,10 @@ async function activate(context) {
         }
     });
     // --- Add Task command ---
-    const addTaskDisposable = vscode.commands.registerCommand("cortex.addTask", async () => {
+    const addTaskDisposable = vscode.commands.registerCommand("phren.addTask", async () => {
         let project = statusBar.getActiveProjectName();
         if (!project) {
-            const projectsRaw = await cortexClient.listProjects();
+            const projectsRaw = await phrenClient.listProjects();
             const projectsData = asRecord(asRecord(projectsRaw)?.data);
             const projects = asArraySafe(projectsData?.projects);
             const projectNames = [];
@@ -236,7 +236,7 @@ async function activate(context) {
                     projectNames.push(name);
             }
             if (projectNames.length === 0) {
-                await vscode.window.showWarningMessage("No Cortex projects found.");
+                await vscode.window.showWarningMessage("No Phren projects found.");
                 return;
             }
             project = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project" });
@@ -248,7 +248,7 @@ async function activate(context) {
         if (!trimmedTaskText)
             return;
         try {
-            await cortexClient.addTask(project, trimmedTaskText);
+            await phrenClient.addTask(project, trimmedTaskText);
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Task added to ${project}`);
         }
@@ -257,9 +257,9 @@ async function activate(context) {
         }
     });
     // --- Complete Task command (from tree view context menu) ---
-    const completeTaskDisposable = vscode.commands.registerCommand("cortex.completeTask", async (task) => {
+    const completeTaskDisposable = vscode.commands.registerCommand("phren.completeTask", async (task) => {
         try {
-            await cortexClient.completeTask(task.projectName, task.line);
+            await phrenClient.completeTask(task.projectName, task.line);
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Task "${task.id}" marked complete.`);
         }
@@ -267,16 +267,16 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to complete task: ${toErrorMessage(error)}`);
         }
     });
-    const removeTaskDisposable = vscode.commands.registerCommand("cortex.removeTask", async (task) => {
+    const removeTaskDisposable = vscode.commands.registerCommand("phren.removeTask", async (task) => {
         if (!task) {
-            await vscode.window.showWarningMessage("Remove Task is available from the Cortex explorer context menu.");
+            await vscode.window.showWarningMessage("Remove Task is available from the Phren explorer context menu.");
             return;
         }
         const confirmed = await vscode.window.showWarningMessage(`Delete task "${task.id}"?`, { modal: true, detail: task.line }, "Delete");
         if (confirmed !== "Delete")
             return;
         try {
-            await cortexClient.removeTask(task.projectName, task.line);
+            await phrenClient.removeTask(task.projectName, task.line);
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Task "${task.id}" deleted.`);
         }
@@ -285,14 +285,14 @@ async function activate(context) {
         }
     });
     // --- Remove Finding command ---
-    const removeFindingDisposable = vscode.commands.registerCommand("cortex.removeFinding", async (finding) => {
+    const removeFindingDisposable = vscode.commands.registerCommand("phren.removeFinding", async (finding) => {
         if (finding) {
             // Called from tree view context menu
             const confirmed = await vscode.window.showWarningMessage(`Remove finding "${finding.id}"?`, { modal: true }, "Remove");
             if (confirmed !== "Remove")
                 return;
             try {
-                await cortexClient.removeFinding(finding.projectName, finding.text);
+                await phrenClient.removeFinding(finding.projectName, finding.text);
                 treeDataProvider.refresh();
                 await vscode.window.showInformationMessage(`Finding "${finding.id}" removed.`);
             }
@@ -305,7 +305,7 @@ async function activate(context) {
             const activeProject = statusBar.getActiveProjectName();
             let project = activeProject;
             if (!project) {
-                const projectsRaw = await cortexClient.listProjects();
+                const projectsRaw = await phrenClient.listProjects();
                 const projectsData = asRecord(asRecord(projectsRaw)?.data);
                 const projects = asArraySafe(projectsData?.projects);
                 const projectNames = [];
@@ -323,7 +323,7 @@ async function activate(context) {
             if (!findingText?.trim())
                 return;
             try {
-                await cortexClient.removeFinding(project, findingText.trim());
+                await phrenClient.removeFinding(project, findingText.trim());
                 treeDataProvider.refresh();
                 await vscode.window.showInformationMessage("Finding removed.");
             }
@@ -332,16 +332,16 @@ async function activate(context) {
             }
         }
     });
-    const rejectQueueItemDisposable = vscode.commands.registerCommand("cortex.rejectQueueItem", async (item) => {
+    const rejectQueueItemDisposable = vscode.commands.registerCommand("phren.rejectQueueItem", async (item) => {
         if (!item) {
-            await vscode.window.showWarningMessage("Reject Queue Item is available from the Cortex explorer context menu.");
+            await vscode.window.showWarningMessage("Reject Queue Item is available from the Phren explorer context menu.");
             return;
         }
         const confirmed = await vscode.window.showWarningMessage(`Reject queue item "${item.id}"?`, { modal: true, detail: item.text }, "Reject");
         if (confirmed !== "Reject")
             return;
         try {
-            await cortexClient.rejectQueueItem(item.projectName, item.text);
+            await phrenClient.rejectQueueItem(item.projectName, item.text);
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Queue item "${item.id}" rejected.`);
         }
@@ -350,10 +350,10 @@ async function activate(context) {
         }
     });
     // --- Pin Memory command ---
-    const pinMemoryDisposable = vscode.commands.registerCommand("cortex.pinMemory", async () => {
+    const pinMemoryDisposable = vscode.commands.registerCommand("phren.pinMemory", async () => {
         let project = statusBar.getActiveProjectName();
         if (!project) {
-            const projectsRaw = await cortexClient.listProjects();
+            const projectsRaw = await phrenClient.listProjects();
             const projectsData = asRecord(asRecord(projectsRaw)?.data);
             const projects = asArraySafe(projectsData?.projects);
             const projectNames = [];
@@ -364,7 +364,7 @@ async function activate(context) {
                     projectNames.push(name);
             }
             if (projectNames.length === 0) {
-                await vscode.window.showWarningMessage("No Cortex projects found.");
+                await vscode.window.showWarningMessage("No Phren projects found.");
                 return;
             }
             project = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project" });
@@ -376,34 +376,34 @@ async function activate(context) {
         if (!trimmedMemoryText)
             return;
         try {
-            await cortexClient.pinMemory(project, trimmedMemoryText);
+            await phrenClient.pinMemory(project, trimmedMemoryText);
             await vscode.window.showInformationMessage(`Memory pinned to ${project}`);
         }
         catch (error) {
             await vscode.window.showErrorMessage(`Failed to pin memory: ${toErrorMessage(error)}`);
         }
     });
-    const syncDisposable = vscode.commands.registerCommand("cortex.sync", async () => {
+    const syncDisposable = vscode.commands.registerCommand("phren.sync", async () => {
         try {
-            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Cortex: Syncing...", cancellable: false }, async () => {
-                await cortexClient.pushChanges();
+            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Phren: Syncing...", cancellable: false }, async () => {
+                await phrenClient.pushChanges();
             });
             treeDataProvider.refresh();
             // Re-poll health immediately so the status bar updates
             await statusBar.initialize();
-            await vscode.window.showInformationMessage("Cortex: Sync complete.");
+            await vscode.window.showInformationMessage("Phren: Sync complete.");
         }
         catch (error) {
-            await vscode.window.showErrorMessage(`Cortex sync failed: ${toErrorMessage(error)}`);
+            await vscode.window.showErrorMessage(`Phren sync failed: ${toErrorMessage(error)}`);
         }
     });
     // --- Doctor command ---
-    const doctorDisposable = vscode.commands.registerCommand("cortex.doctor", async () => {
+    const doctorDisposable = vscode.commands.registerCommand("phren.doctor", async () => {
         try {
-            const raw = await cortexClient.healthCheck();
+            const raw = await phrenClient.healthCheck();
             const data = asRecord(asRecord(raw)?.data);
             outputChannel.clear();
-            outputChannel.appendLine("=== Cortex Doctor ===");
+            outputChannel.appendLine("=== Phren Doctor ===");
             outputChannel.appendLine("");
             if (data) {
                 if (data.version)
@@ -455,16 +455,16 @@ async function activate(context) {
             outputChannel.show(true);
         }
         catch (error) {
-            await vscode.window.showErrorMessage(`Cortex doctor failed: ${toErrorMessage(error)}`);
+            await vscode.window.showErrorMessage(`Phren doctor failed: ${toErrorMessage(error)}`);
         }
     });
     // --- Hooks Status command ---
-    const hooksStatusDisposable = vscode.commands.registerCommand("cortex.hooksStatus", async () => {
+    const hooksStatusDisposable = vscode.commands.registerCommand("phren.hooksStatus", async () => {
         try {
-            const raw = await cortexClient.listHooks();
+            const raw = await phrenClient.listHooks();
             const data = asRecord(asRecord(raw)?.data);
             outputChannel.clear();
-            outputChannel.appendLine("=== Cortex Hooks Status ===");
+            outputChannel.appendLine("=== Phren Hooks Status ===");
             outputChannel.appendLine("");
             if (data) {
                 if (data.globalEnabled !== undefined) {
@@ -505,9 +505,9 @@ async function activate(context) {
         }
     });
     // --- Toggle Hooks command ---
-    const toggleHooksCommandDisposable = vscode.commands.registerCommand("cortex.toggleHooksCommand", async () => {
+    const toggleHooksCommandDisposable = vscode.commands.registerCommand("phren.toggleHooksCommand", async () => {
         try {
-            const raw = await cortexClient.listHooks();
+            const raw = await phrenClient.listHooks();
             const data = asRecord(asRecord(raw)?.data);
             const tools = asArraySafe(data?.tools);
             const picks = [];
@@ -531,7 +531,7 @@ async function activate(context) {
             if (!choice)
                 return;
             const currentlyEnabled = choice.description === "enabled";
-            await cortexClient.toggleHooks(!currentlyEnabled, choice.label);
+            await phrenClient.toggleHooks(!currentlyEnabled, choice.label);
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Hooks for "${choice.label}" ${currentlyEnabled ? "disabled" : "enabled"}.`);
         }
@@ -540,9 +540,9 @@ async function activate(context) {
         }
     });
     // --- Manage Project command ---
-    const manageProjectDisposable = vscode.commands.registerCommand("cortex.manageProject", async () => {
+    const manageProjectDisposable = vscode.commands.registerCommand("phren.manageProject", async () => {
         try {
-            const projectsRaw = await cortexClient.listProjects();
+            const projectsRaw = await phrenClient.listProjects();
             const projectsData = asRecord(asRecord(projectsRaw)?.data);
             const projects = asArraySafe(projectsData?.projects);
             const projectNames = [];
@@ -566,7 +566,7 @@ async function activate(context) {
             if (!actionChoice)
                 return;
             const action = actionChoice.label.toLowerCase();
-            await cortexClient.manageProject(projectChoice, action);
+            await phrenClient.manageProject(projectChoice, action);
             treeDataProvider.refresh();
             await vscode.window.showInformationMessage(`Project "${projectChoice}" ${action}d.`);
         }
@@ -574,34 +574,34 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to manage project: ${toErrorMessage(error)}`);
         }
     });
-    const uninstallDisposable = vscode.commands.registerCommand("cortex.uninstall", async () => {
-        const proceed = await vscode.window.showWarningMessage("Uninstall Cortex from this machine?", {
+    const uninstallDisposable = vscode.commands.registerCommand("phren.uninstall", async () => {
+        const proceed = await vscode.window.showWarningMessage("Uninstall Phren from this machine?", {
             modal: true,
-            detail: "This removes Cortex MCP entries from editor configs, uninstalls the global npm package, and resets VS Code Cortex settings.",
-        }, "Uninstall Cortex");
-        if (proceed !== "Uninstall Cortex") {
+            detail: "This removes Phren MCP entries from editor configs, uninstalls the global npm package, and resets VS Code Phren settings.",
+        }, "Uninstall Phren");
+        if (proceed !== "Uninstall Phren") {
             return;
         }
-        const deleteStoreChoice = await vscode.window.showWarningMessage(`Also delete ${GLOBAL_CORTEX_STORE_PATH}?`, {
+        const deleteStoreChoice = await vscode.window.showWarningMessage(`Also delete ${GLOBAL_PHREN_STORE_PATH}?`, {
             modal: true,
-            detail: "This permanently deletes Cortex memory and project data on this machine.",
-        }, "Delete ~/.cortex", "Keep Data");
-        const deleteStore = deleteStoreChoice === "Delete ~/.cortex";
-        const summary = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Cortex: Uninstalling...", cancellable: false }, async (progress) => {
-            progress.report({ message: "Clearing Cortex MCP entries from editor configs..." });
-            const cleanupResult = clearCortexMcpEntries();
-            progress.report({ message: `Running npm uninstall -g ${CORTEX_PACKAGE_NAME}...` });
-            const npmResult = uninstallGlobalCortexPackage();
-            progress.report({ message: "Resetting VS Code Cortex extension settings..." });
-            const resetResult = await resetCortexExtensionSettings(context);
+            detail: "This permanently deletes Phren memory and project data on this machine.",
+        }, "Delete ~/.phren", "Keep Data");
+        const deleteStore = deleteStoreChoice === "Delete ~/.phren";
+        const summary = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Phren: Uninstalling...", cancellable: false }, async (progress) => {
+            progress.report({ message: "Clearing Phren MCP entries from editor configs..." });
+            const cleanupResult = clearPhrenMcpEntries();
+            progress.report({ message: `Running npm uninstall -g ${PHREN_PACKAGE_NAME}...` });
+            const npmResult = uninstallGlobalPhrenPackage();
+            progress.report({ message: "Resetting VS Code Phren extension settings..." });
+            const resetResult = await resetPhrenExtensionSettings(context);
             let storeRemoval = { removed: false, skipped: true };
             if (deleteStore) {
-                progress.report({ message: `Deleting ${GLOBAL_CORTEX_STORE_PATH}...` });
-                storeRemoval = removeCortexStore(GLOBAL_CORTEX_STORE_PATH);
+                progress.report({ message: `Deleting ${GLOBAL_PHREN_STORE_PATH}...` });
+                storeRemoval = removePhrenStore(GLOBAL_PHREN_STORE_PATH);
             }
             return { cleanupResult, npmResult, resetResult, storeRemoval };
         });
-        outputChannel.appendLine("=== Cortex Uninstall ===");
+        outputChannel.appendLine("=== Phren Uninstall ===");
         for (const filePath of summary.cleanupResult.cleanedFiles) {
             outputChannel.appendLine(`Cleaned MCP entry: ${filePath}`);
         }
@@ -619,7 +619,7 @@ async function activate(context) {
         }
         if (deleteStore) {
             if (summary.storeRemoval.removed) {
-                outputChannel.appendLine(`Removed ${GLOBAL_CORTEX_STORE_PATH}`);
+                outputChannel.appendLine(`Removed ${GLOBAL_PHREN_STORE_PATH}`);
             }
             else if (summary.storeRemoval.error) {
                 outputChannel.appendLine(`Warning: ${summary.storeRemoval.error}`);
@@ -630,18 +630,18 @@ async function activate(context) {
         if (!summary.npmResult.ok)
             failedSteps.push("global npm uninstall");
         if (summary.storeRemoval.error)
-            failedSteps.push("~/.cortex deletion");
+            failedSteps.push("~/.phren deletion");
         if (summary.resetResult.warnings.length > 0)
             failedSteps.push("settings reset (partial)");
         treeDataProvider.refresh();
         if (failedSteps.length > 0) {
-            await vscode.window.showWarningMessage(`Cortex uninstall finished with warnings (${failedSteps.join(", ")}). See the Cortex output channel for details.`);
+            await vscode.window.showWarningMessage(`Phren uninstall finished with warnings (${failedSteps.join(", ")}). See the Phren output channel for details.`);
             outputChannel.show(true);
             return;
         }
-        await vscode.window.showInformationMessage(`Cortex uninstall complete. Removed ${summary.cleanupResult.cleanedFiles.length} MCP entr${summary.cleanupResult.cleanedFiles.length === 1 ? "y" : "ies"}${deleteStore ? " and deleted ~/.cortex" : ""}.`);
+        await vscode.window.showInformationMessage(`Phren uninstall complete. Removed ${summary.cleanupResult.cleanedFiles.length} MCP entr${summary.cleanupResult.cleanedFiles.length === 1 ? "y" : "ies"}${deleteStore ? " and deleted ~/.phren" : ""}.`);
     });
-    const openMachinesConfigDisposable = vscode.commands.registerCommand("cortex.openMachinesConfig", async () => {
+    const openMachinesConfigDisposable = vscode.commands.registerCommand("phren.openMachinesConfig", async () => {
         try {
             const machinesPath = (0, profileConfig_1.machinesConfigPath)(runtimeConfig.storePath);
             if (!fs.existsSync(machinesPath)) {
@@ -667,16 +667,16 @@ async function activate(context) {
         }
     };
     // --- Set this machine's profile mapping ---
-    const switchProfileDisposable = vscode.commands.registerCommand("cortex.switchProfile", async () => {
+    const switchProfileDisposable = vscode.commands.registerCommand("phren.switchProfile", async () => {
         try {
             const machine = (0, profileConfig_1.readMachineName)();
             const current = (0, profileConfig_1.readDeviceContext)(runtimeConfig.storePath);
             const profiles = (0, profileConfig_1.listProfileConfigs)(runtimeConfig.storePath);
             if (profiles.length === 0) {
-                await vscode.window.showInformationMessage("No profiles found in the Cortex store.", "Open machines.yaml")
+                await vscode.window.showInformationMessage("No profiles found in the Phren store.", "Open machines.yaml")
                     .then(async (choice) => {
                     if (choice === "Open machines.yaml") {
-                        await vscode.commands.executeCommand("cortex.openMachinesConfig");
+                        await vscode.commands.executeCommand("phren.openMachinesConfig");
                     }
                 });
                 return;
@@ -698,7 +698,7 @@ async function activate(context) {
             }
             const machinesPath = (0, profileConfig_1.setMachineProfile)(runtimeConfig.storePath, machine, choice.label);
             treeDataProvider.refresh();
-            await promptForReload(`Mapped machine "${machine}" to profile "${choice.label}" in machines.yaml. Reload VS Code to restart the Cortex backend on the new profile.`, {
+            await promptForReload(`Mapped machine "${machine}" to profile "${choice.label}" in machines.yaml. Reload VS Code to restart the Phren backend on the new profile.`, {
                 label: "Open machines.yaml",
                 run: async () => {
                     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(machinesPath));
@@ -710,12 +710,12 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to update machine profile mapping: ${toErrorMessage(error)}`);
         }
     });
-    const configureMachineDisposable = vscode.commands.registerCommand("cortex.configureMachine", async () => {
+    const configureMachineDisposable = vscode.commands.registerCommand("phren.configureMachine", async () => {
         try {
             const currentMachine = (0, profileConfig_1.readMachineName)();
             const nextMachine = await vscode.window.showInputBox({
                 title: "Set machine alias",
-                prompt: "Stored in ~/.cortex/.machine-id and used to look up this machine in machines.yaml",
+                prompt: "Stored in ~/.phren/.machine-id and used to look up this machine in machines.yaml",
                 value: currentMachine,
                 validateInput: (value) => value.trim() ? null : "Machine name cannot be empty",
             });
@@ -729,10 +729,10 @@ async function activate(context) {
             }
             (0, profileConfig_1.writeMachineName)(normalized);
             treeDataProvider.refresh();
-            await promptForReload(`Saved machine alias "${normalized}" to ${(0, profileConfig_1.machineIdPath)()}. Reload VS Code so Cortex resolves the new machine identity.`, {
+            await promptForReload(`Saved machine alias "${normalized}" to ${(0, profileConfig_1.machineIdPath)()}. Reload VS Code so Phren resolves the new machine identity.`, {
                 label: "Open machines.yaml",
                 run: async () => {
-                    await vscode.commands.executeCommand("cortex.openMachinesConfig");
+                    await vscode.commands.executeCommand("phren.openMachinesConfig");
                 },
             });
         }
@@ -740,7 +740,7 @@ async function activate(context) {
             await vscode.window.showErrorMessage(`Failed to update machine alias: ${toErrorMessage(error)}`);
         }
     });
-    const filterFindingsByDateDisposable = vscode.commands.registerCommand("cortex.filterFindingsByDate", async () => {
+    const filterFindingsByDateDisposable = vscode.commands.registerCommand("phren.filterFindingsByDate", async () => {
         const current = treeDataProvider.getDateFilter();
         const picks = [
             { label: "Today", description: "Show only today's findings" },
@@ -792,31 +792,31 @@ async function activate(context) {
         }
     });
     context.subscriptions.push(setActiveProjectDisposable, addFindingDisposable, searchDisposable, showGraphDisposable, refreshDisposable, openFindingDisposable, openProjectFileDisposable, openSkillDisposable, toggleSkillDisposable, toggleHookDisposable, openTaskDisposable, openQueueItemDisposable, openSessionOverviewDisposable, copySessionIdDisposable, filterFindingsByDateDisposable, switchProfileDisposable, configureMachineDisposable, openMachinesConfigDisposable, syncDisposable, doctorDisposable, hooksStatusDisposable, toggleHooksCommandDisposable, manageProjectDisposable, uninstallDisposable, addTaskDisposable, completeTaskDisposable, removeTaskDisposable, removeFindingDisposable, rejectQueueItemDisposable, pinMemoryDisposable);
-    // --- Sync VS Code settings to cortex preference files ---
+    // --- Sync VS Code settings to phren preference files ---
     syncSettingsToPreferences(runtimeConfig.storePath, config);
     const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(async (e) => {
-        if (e.affectsConfiguration("cortex.proactivity") ||
-            e.affectsConfiguration("cortex.proactivityFindings") ||
-            e.affectsConfiguration("cortex.proactivityTasks") ||
-            e.affectsConfiguration("cortex.autoExtract") ||
-            e.affectsConfiguration("cortex.autoCapture") ||
-            e.affectsConfiguration("cortex.taskMode") ||
-            e.affectsConfiguration("cortex.hooksEnabled") ||
-            e.affectsConfiguration("cortex.semanticDedup") ||
-            e.affectsConfiguration("cortex.semanticConflict") ||
-            e.affectsConfiguration("cortex.llmModel") ||
-            e.affectsConfiguration("cortex.findingSensitivity")) {
-            const updated = vscode.workspace.getConfiguration("cortex");
+        if (e.affectsConfiguration("phren.proactivity") ||
+            e.affectsConfiguration("phren.proactivityFindings") ||
+            e.affectsConfiguration("phren.proactivityTasks") ||
+            e.affectsConfiguration("phren.autoExtract") ||
+            e.affectsConfiguration("phren.autoCapture") ||
+            e.affectsConfiguration("phren.taskMode") ||
+            e.affectsConfiguration("phren.hooksEnabled") ||
+            e.affectsConfiguration("phren.semanticDedup") ||
+            e.affectsConfiguration("phren.semanticConflict") ||
+            e.affectsConfiguration("phren.llmModel") ||
+            e.affectsConfiguration("phren.findingSensitivity")) {
+            const updated = vscode.workspace.getConfiguration("phren");
             syncSettingsToPreferences(runtimeConfig.storePath, updated);
-            outputChannel.appendLine("Cortex settings synced to preference files.");
+            outputChannel.appendLine("Phren settings synced to preference files.");
             // Notify when semantic features are toggled on
             const semanticDedup = updated.get("semanticDedup", false);
             const semanticConflict = updated.get("semanticConflict", false);
             const llmModel = updated.get("llmModel", "") || "claude-haiku-4-5-20251001 (default)";
             const expensiveModels = ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-4o"];
             const isExpensive = expensiveModels.some(m => llmModel.includes(m));
-            if (e.affectsConfiguration("cortex.semanticDedup") && semanticDedup) {
-                const msg = `Cortex: Semantic dedup enabled for offline batch operations (consolidate, extract). Model: ${llmModel}. ~$0.01/batch-session with Haiku. Live dedup uses the active agent — no extra cost.`;
+            if (e.affectsConfiguration("phren.semanticDedup") && semanticDedup) {
+                const msg = `Phren: Semantic dedup enabled for offline batch operations (consolidate, extract). Model: ${llmModel}. ~$0.01/batch-session with Haiku. Live dedup uses the active agent — no extra cost.`;
                 if (isExpensive) {
                     await vscode.window.showWarningMessage(`${msg} Warning: expensive model selected — Haiku recommended for batch operations.`);
                 }
@@ -824,8 +824,8 @@ async function activate(context) {
                     await vscode.window.showInformationMessage(msg);
                 }
             }
-            if (e.affectsConfiguration("cortex.semanticConflict") && semanticConflict) {
-                const msg = `Cortex: Semantic conflict detection enabled for offline batch operations (consolidate, extract). Model: ${llmModel}. ~$0.01/batch-session with Haiku. Live conflict detection uses the active agent — no extra cost.`;
+            if (e.affectsConfiguration("phren.semanticConflict") && semanticConflict) {
+                const msg = `Phren: Semantic conflict detection enabled for offline batch operations (consolidate, extract). Model: ${llmModel}. ~$0.01/batch-session with Haiku. Live conflict detection uses the active agent — no extra cost.`;
                 if (isExpensive) {
                     await vscode.window.showWarningMessage(`${msg} Warning: expensive model selected — Haiku recommended for batch operations.`);
                 }
@@ -833,14 +833,14 @@ async function activate(context) {
                     await vscode.window.showInformationMessage(msg);
                 }
             }
-            if (e.affectsConfiguration("cortex.llmModel") && isExpensive && (semanticDedup || semanticConflict)) {
-                await vscode.window.showWarningMessage(`Cortex: "${llmModel}" is expensive for offline batch operations. Haiku is recommended and costs ~10x less.`, "Switch to Haiku").then(async (choice) => {
+            if (e.affectsConfiguration("phren.llmModel") && isExpensive && (semanticDedup || semanticConflict)) {
+                await vscode.window.showWarningMessage(`Phren: "${llmModel}" is expensive for offline batch operations. Haiku is recommended and costs ~10x less.`, "Switch to Haiku").then(async (choice) => {
                     if (choice === "Switch to Haiku") {
                         await updated.update("llmModel", "claude-haiku-4-5-20251001", vscode.ConfigurationTarget.Global);
                     }
                 });
             }
-            if (e.affectsConfiguration("cortex.findingSensitivity")) {
+            if (e.affectsConfiguration("phren.findingSensitivity")) {
                 const sensitivity = updated.get("findingSensitivity", "balanced");
                 const descriptions = {
                     minimal: "Only save findings when explicitly asked. No auto-capture.",
@@ -849,7 +849,7 @@ async function activate(context) {
                     aggressive: "Save everything worth remembering. Auto-capture: 20/session.",
                 };
                 const desc = descriptions[sensitivity] ?? "";
-                await vscode.window.showInformationMessage(`Cortex: Finding sensitivity set to "${sensitivity}". ${desc}`);
+                await vscode.window.showInformationMessage(`Phren: Finding sensitivity set to "${sensitivity}". ${desc}`);
             }
         }
     });
@@ -860,7 +860,7 @@ async function activate(context) {
     }
     catch (error) {
         outputChannel.appendLine(`Status bar init failed: ${toErrorMessage(error)}`);
-        await vscode.window.showErrorMessage(`Failed to initialize active Cortex project: ${toErrorMessage(error)}`);
+        await vscode.window.showErrorMessage(`Failed to initialize active Phren project: ${toErrorMessage(error)}`);
     }
 }
 async function deactivate() {
@@ -887,52 +887,52 @@ async function runOnboardingIfNeeded(config) {
     if (completed) {
         return;
     }
-    outputChannel.appendLine("Running first-time Cortex onboarding...");
+    outputChannel.appendLine("Running first-time Phren onboarding...");
     try {
-        const globallyInstalled = await isGlobalCortexInstalled();
+        const globallyInstalled = await isGlobalPhrenInstalled();
         if (!globallyInstalled) {
-            const installChoice = await vscode.window.showInformationMessage("Cortex is not installed globally. Install it now to enable the extension backend?", "Install Cortex", "Skip");
-            if (installChoice === "Install Cortex") {
-                const result = await runCommandWithProgress("Installing Cortex globally...", getNpmCommand(), ["install", "-g", CORTEX_PACKAGE_NAME]);
+            const installChoice = await vscode.window.showInformationMessage("Phren is not installed globally. Install it now to enable the extension backend?", "Install Phren", "Skip");
+            if (installChoice === "Install Phren") {
+                const result = await runCommandWithProgress("Installing Phren globally...", getNpmCommand(), ["install", "-g", PHREN_PACKAGE_NAME]);
                 if (result.ok) {
-                    await vscode.window.showInformationMessage("Cortex global install complete.");
+                    await vscode.window.showInformationMessage("Phren global install complete.");
                 }
                 else {
-                    await vscode.window.showErrorMessage(`Cortex install failed: ${summarizeCommandError(result)}`);
+                    await vscode.window.showErrorMessage(`Phren install failed: ${summarizeCommandError(result)}`);
                 }
             }
         }
-        if (!(0, runtimeConfig_1.pathExists)(GLOBAL_CORTEX_STORE_PATH)) {
-            const initChoice = await vscode.window.showInformationMessage(`${GLOBAL_CORTEX_STORE_PATH} was not found. Initialize Cortex now?`, "Initialize Cortex", "Skip");
-            if (initChoice === "Initialize Cortex") {
-                const result = await runCommandWithProgress("Initializing Cortex store...", getNpxCommand(), [CORTEX_PACKAGE_NAME, "init", "--yes"]);
+        if (!(0, runtimeConfig_1.pathExists)(GLOBAL_PHREN_STORE_PATH)) {
+            const initChoice = await vscode.window.showInformationMessage(`${GLOBAL_PHREN_STORE_PATH} was not found. Initialize Phren now?`, "Initialize Phren", "Skip");
+            if (initChoice === "Initialize Phren") {
+                const result = await runCommandWithProgress("Initializing Phren store...", getNpxCommand(), [PHREN_PACKAGE_NAME, "init", "--yes"]);
                 if (result.ok) {
-                    await vscode.window.showInformationMessage("Cortex store initialized.");
+                    await vscode.window.showInformationMessage("Phren store initialized.");
                 }
                 else {
-                    await vscode.window.showErrorMessage(`Cortex init failed: ${summarizeCommandError(result)}`);
+                    await vscode.window.showErrorMessage(`Phren init failed: ${summarizeCommandError(result)}`);
                 }
             }
         }
-        if (!hasCortexMcpEntry()) {
-            const configureChoice = await vscode.window.showInformationMessage("Cortex MCP entry is missing in ~/.claude/settings.json. Configure it now?", "Configure MCP", "Skip");
+        if (!hasPhrenMcpEntry()) {
+            const configureChoice = await vscode.window.showInformationMessage("Phren MCP entry is missing in ~/.claude/settings.json. Configure it now?", "Configure MCP", "Skip");
             if (configureChoice === "Configure MCP") {
-                const result = await runCommandWithProgress("Configuring Cortex MCP entry...", getNpxCommand(), [CORTEX_PACKAGE_NAME, "init", "--yes"]);
+                const result = await runCommandWithProgress("Configuring Phren MCP entry...", getNpxCommand(), [PHREN_PACKAGE_NAME, "init", "--yes"]);
                 if (result.ok) {
-                    await vscode.window.showInformationMessage("Cortex MCP configuration updated.");
+                    await vscode.window.showInformationMessage("Phren MCP configuration updated.");
                 }
                 else {
-                    await vscode.window.showErrorMessage(`Cortex MCP configuration failed: ${summarizeCommandError(result)}`);
+                    await vscode.window.showErrorMessage(`Phren MCP configuration failed: ${summarizeCommandError(result)}`);
                 }
             }
         }
         const workspaceFolder = getPrimaryWorkspaceFolderPath();
         if (workspaceFolder) {
-            const addProjectChoice = await vscode.window.showInformationMessage(`Track this workspace in Cortex?\n${workspaceFolder}`, "Track Project", "Skip");
+            const addProjectChoice = await vscode.window.showInformationMessage(`Track this workspace in Phren?\n${workspaceFolder}`, "Track Project", "Skip");
             if (addProjectChoice === "Track Project") {
-                const result = await runCommandWithProgress("Adding workspace to Cortex projects...", getNpxCommand(), [CORTEX_PACKAGE_NAME, "add", workspaceFolder]);
+                const result = await runCommandWithProgress("Adding workspace to Phren projects...", getNpxCommand(), [PHREN_PACKAGE_NAME, "add", workspaceFolder]);
                 if (result.ok) {
-                    await vscode.window.showInformationMessage("Workspace added to Cortex projects.");
+                    await vscode.window.showInformationMessage("Workspace added to Phren projects.");
                 }
                 else {
                     await vscode.window.showErrorMessage(`Failed to add project: ${summarizeCommandError(result)}`);
@@ -943,18 +943,18 @@ async function runOnboardingIfNeeded(config) {
     finally {
         try {
             await config.update(ONBOARDING_COMPLETE_SETTING, true, vscode.ConfigurationTarget.Global);
-            outputChannel.appendLine("Cortex onboarding complete (cortex.onboardingComplete=true).");
+            outputChannel.appendLine("Phren onboarding complete (phren.onboardingComplete=true).");
         }
         catch (error) {
             outputChannel.appendLine(`Failed to persist onboarding flag: ${toErrorMessage(error)}`);
         }
     }
 }
-async function isGlobalCortexInstalled() {
-    const result = await runCommand(getNpmCommand(), ["list", "-g", CORTEX_PACKAGE_NAME, "--json"]);
+async function isGlobalPhrenInstalled() {
+    const result = await runCommand(getNpmCommand(), ["list", "-g", PHREN_PACKAGE_NAME, "--json"]);
     const parsed = safeParseJson(result.stdout);
     const dependencies = asRecord(parsed?.dependencies);
-    const packageEntry = dependencies ? dependencies[CORTEX_PACKAGE_NAME] : undefined;
+    const packageEntry = dependencies ? dependencies[PHREN_PACKAGE_NAME] : undefined;
     return Boolean(packageEntry);
 }
 function getNpmCommand() {
@@ -970,7 +970,7 @@ function getPrimaryWorkspaceFolderPath() {
     }
     return folders[0]?.uri.fsPath;
 }
-function hasCortexMcpEntry() {
+function hasPhrenMcpEntry() {
     const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
     if (!fs.existsSync(settingsPath)) {
         return false;
@@ -980,7 +980,7 @@ function hasCortexMcpEntry() {
         const json = safeParseJson(raw);
         const mcpServers = asRecord(json?.mcpServers);
         const servers = asRecord(json?.servers);
-        return Boolean(mcpServers?.cortex || servers?.cortex);
+        return Boolean(mcpServers?.phren || servers?.phren);
     }
     catch (error) {
         outputChannel.appendLine(`Failed to read ${settingsPath}: ${toErrorMessage(error)}`);
@@ -1037,7 +1037,7 @@ function summarizeCommandError(result) {
     }
     return result.status === null ? "failed to start command" : `exit code ${result.status}`;
 }
-function clearCortexMcpEntries() {
+function clearPhrenMcpEntries() {
     const cleanedFiles = [];
     const warnings = [];
     const candidateFiles = getMcpConfigCandidateFiles();
@@ -1089,8 +1089,8 @@ function removeMcpServerAtPath(filePath) {
         if (!root || typeof root !== "object" || Array.isArray(root))
             continue;
         const objectRoot = root;
-        if (Object.prototype.hasOwnProperty.call(objectRoot, "cortex")) {
-            delete objectRoot.cortex;
+        if (Object.prototype.hasOwnProperty.call(objectRoot, "phren")) {
+            delete objectRoot.phren;
             removed = true;
         }
     }
@@ -1104,16 +1104,16 @@ function removeTomlMcpServer(filePath) {
     if (!fs.existsSync(filePath))
         return false;
     const content = fs.readFileSync(filePath, "utf8");
-    const sectionRe = /^\[mcp_servers\.cortex\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
+    const sectionRe = /^\[mcp_servers\.phren\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
     if (!sectionRe.test(content))
         return false;
     const next = content.replace(sectionRe, "").replace(/\n{3,}/g, "\n\n");
     fs.writeFileSync(filePath, next, "utf8");
     return true;
 }
-function uninstallGlobalCortexPackage() {
+function uninstallGlobalPhrenPackage() {
     try {
-        const result = (0, child_process_1.spawnSync)("npm", ["uninstall", "-g", CORTEX_PACKAGE_NAME], {
+        const result = (0, child_process_1.spawnSync)("npm", ["uninstall", "-g", PHREN_PACKAGE_NAME], {
             encoding: "utf8",
             stdio: ["ignore", "pipe", "pipe"],
         });
@@ -1133,7 +1133,7 @@ function uninstallGlobalCortexPackage() {
         };
     }
 }
-function removeCortexStore(storePath) {
+function removePhrenStore(storePath) {
     if (!fs.existsSync(storePath))
         return { removed: false, skipped: true };
     try {
@@ -1144,17 +1144,17 @@ function removeCortexStore(storePath) {
         return { removed: false, skipped: false, error: toErrorMessage(error) };
     }
 }
-async function resetCortexExtensionSettings(context) {
+async function resetPhrenExtensionSettings(context) {
     const warnings = [];
     const resetKeys = [];
-    const config = vscode.workspace.getConfiguration("cortex");
+    const config = vscode.workspace.getConfiguration("phren");
     const packageJson = context.extension.packageJSON;
     const contributes = asRecord(packageJson.contributes);
     const configuration = asRecord(contributes?.configuration);
     const properties = asRecord(configuration?.properties) ?? {};
-    const keys = Object.keys(properties).filter((key) => key.startsWith("cortex."));
+    const keys = Object.keys(properties).filter((key) => key.startsWith("phren."));
     for (const key of keys) {
-        const section = key.slice("cortex.".length);
+        const section = key.slice("phren.".length);
         try {
             await config.update(section, undefined, vscode.ConfigurationTarget.Global);
             resetKeys.push(key);
@@ -1166,7 +1166,7 @@ async function resetCortexExtensionSettings(context) {
     return { resetKeys, warnings };
 }
 /**
- * Synchronous file lock matching the protocol used by the cortex MCP server
+ * Synchronous file lock matching the protocol used by the phren MCP server
  * (governance-locks.ts). Lock file is `filePath + ".lock"`, created with the
  * O_EXCL flag. Both processes must use this convention for mutual exclusion to work.
  */

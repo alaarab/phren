@@ -6,6 +6,7 @@ import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { countActiveFindings } from "./content-archive.js";
 import { isTaskFileName } from "./data-tasks.js";
+import { METADATA_REGEX } from "./content-metadata.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;
@@ -54,7 +55,7 @@ export function getProjectConsolidationStatus(dir: string): ConsolidationStatus 
   const lastConsolidated = markerMatch ? markerMatch[1] : null;
 
   // Count entries since last consolidated marker, skipping both <details> and
-  // <!-- cortex:archive:start/end --> blocks via countActiveFindings.
+  // <!-- phren:archive:start/end --> blocks via countActiveFindings.
   const contentSinceMarker = markerMatch
     ? content.slice(content.indexOf(markerMatch[0]) + markerMatch[0].length)
     : content;
@@ -84,8 +85,8 @@ export function getProjectConsolidationStatus(dir: string): ConsolidationStatus 
  * Check which projects have enough new findings to warrant consolidation.
  * Returns projects that exceed the entry or time thresholds.
  */
-export function checkConsolidationNeeded(cortexPath: string, profile?: string): ConsolidationNeeded[] {
-  const projectDirs = getProjectDirs(cortexPath, profile);
+export function checkConsolidationNeeded(phrenPath: string, profile?: string): ConsolidationNeeded[] {
+  const projectDirs = getProjectDirs(phrenPath, profile);
   const results: ConsolidationNeeded[] = [];
 
   for (const dir of projectDirs) {
@@ -189,7 +190,7 @@ export function extractConflictVersions(content: string): { ours: string; theirs
 
 // Parse FINDINGS.md into a map of date -> finding blocks.
 // Each finding is a bullet line plus any immediately following HTML comment lines
-// (e.g. <!-- cortex:cite {...} -->). These are stored as multi-line strings and
+// (e.g. <!-- phren:cite {...} -->). These are stored as multi-line strings and
 // deduplicated by the bullet text only, preserving provenance comments.
 function parseFindingsEntries(content: string): Map<string, string[]> {
   const entries = new Map<string, string[]>();
@@ -238,14 +239,14 @@ function parseFindingsEntries(content: string): Map<string, string[]> {
 // Extract the bullet text from a finding block (first line) for dedup purposes
 function findingBulletText(block: string): string {
   // Strip stable finding ID so two entries with different fids but same text are considered duplicates during merge.
-  return block.split("\n")[0].replace(/<!--\s*fid:[a-z0-9]{8}\s*-->/g, "").replace(/\s+/g, " ").trim();
+  return block.split("\n")[0].replace(METADATA_REGEX.findingId, "").replace(/\s+/g, " ").trim();
 }
 
 /**
  * Extract non-entry preamble content from a FINDINGS.md string.
  * Returns lines that appear before the first date section heading (## YYYY-MM-DD)
  * and are not the title line, so things like <!-- consolidated: ... --> markers
- * and <details>cortex:archive blocks are preserved during merge.
+ * and <details>phren:archive blocks are preserved during merge.
  */
 function extractFindingsPreamble(content: string): string[] {
   const lines = content.split("\n");
@@ -461,11 +462,11 @@ export function mergeTask(ours: string, theirs: string): string {
  * Attempt to auto-resolve git conflicts in FINDINGS.md and tasks.md files.
  * Returns true if all conflicts were resolved, false if any remain.
  */
-export function autoMergeConflicts(cortexPath: string): boolean {
+export function autoMergeConflicts(phrenPath: string): boolean {
   let conflictedFiles: string[];
   try {
     const out = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
-      cwd: cortexPath,
+      cwd: phrenPath,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_MS,
@@ -481,7 +482,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
   let allResolved = true;
 
   for (const relFile of conflictedFiles) {
-    const fullPath = path.join(cortexPath, relFile);
+    const fullPath = path.join(phrenPath, relFile);
     const filename = path.basename(relFile).toLowerCase();
 
     const canAutoMerge = filename === "findings.md" || isTaskFileName(filename);
@@ -503,7 +504,7 @@ export function autoMergeConflicts(cortexPath: string): boolean {
       const tmpMergePath = fullPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpMergePath, merged);
       fs.renameSync(tmpMergePath, fullPath);
-      execFileSync("git", ["add", "--", relFile], { cwd: cortexPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
+      execFileSync("git", ["add", "--", relFile], { cwd: phrenPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: unknown) {
       debugLog(`Failed to auto-merge ${relFile}: ${errorMessage(err)}`);

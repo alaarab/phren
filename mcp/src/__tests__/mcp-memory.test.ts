@@ -10,8 +10,8 @@ const PROJECT = "myapp";
 
 let tmp: { path: string; cleanup: () => void };
 
-function seedProject(cortexPath: string, project = PROJECT) {
-  const dir = path.join(cortexPath, project);
+function seedProject(phrenPath: string, project = PROJECT) {
+  const dir = path.join(phrenPath, project);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n`);
 }
@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_ACTOR;
   tmp.cleanup();
 });
 
@@ -130,7 +130,7 @@ describe("memory_feedback MCP tool", () => {
     expect(parsed.weight).toBe(-0.5);
   });
 
-  it("does not throw when called with fresh cortex dir", () => {
+  it("does not throw when called with fresh phren dir", () => {
     expect(() => {
       recordFeedback(tmp.path, "myapp/FINDINGS.md:new", "helpful");
       flushEntryScores(tmp.path);

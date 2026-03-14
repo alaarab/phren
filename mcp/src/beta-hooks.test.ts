@@ -3,9 +3,9 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-// Set CORTEX_PATH before importing to satisfy top-level ensureCortexPath().
-const tmpCortex = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-beta-test-"));
-process.env.CORTEX_PATH = tmpCortex;
+// Set PHREN_PATH before importing to satisfy top-level ensurePhrenPath().
+const tmpPhren = fs.mkdtempSync(path.join(os.tmpdir(), "phren-beta-test-"));
+process.env.PHREN_PATH = tmpPhren;
 
 import {
   rankResults,
@@ -31,7 +31,7 @@ describe("rankResults: file-match boost (not filter)", () => {
       makeDoc("proj", "b.md", "findings", "- another insight about testing", "/proj/b.md"),
     ];
     const gitCtx = { branch: "main", changedFiles: new Set(["src/foo.ts"]) };
-    const ranked = rankResults(rows, "general", gitCtx, null, tmpCortex, null);
+    const ranked = rankResults(rows, "general", gitCtx, null, tmpPhren, null);
     expect(ranked.length).toBe(2);
   });
 
@@ -41,7 +41,7 @@ describe("rankResults: file-match boost (not filter)", () => {
       makeDoc("proj", "b.md", "findings", "- insight about foo.ts", "/proj/foo.ts"),
     ];
     const gitCtx = { branch: "main", changedFiles: new Set(["foo.ts"]) };
-    const ranked = rankResults(rows, "general", gitCtx, null, tmpCortex, null);
+    const ranked = rankResults(rows, "general", gitCtx, null, tmpPhren, null);
     expect(ranked.length).toBe(2);
     // The file-matching result should be first
     expect(ranked[0].path).toBe("/proj/foo.ts");
@@ -53,7 +53,7 @@ describe("rankResults: file-match boost (not filter)", () => {
       makeDoc("proj", "b.md", "findings", "- insight two", "/b.md"),
       makeDoc("proj", "c.md", "findings", "- insight three", "/c.md"),
     ];
-    const ranked = rankResults(rows, "general", null, null, tmpCortex, null);
+    const ranked = rankResults(rows, "general", null, null, tmpPhren, null);
     expect(ranked.length).toBe(3);
   });
 });
@@ -65,7 +65,7 @@ describe("getProjectGlobBoost", () => {
 
   beforeEach(() => {
     clearProjectGlobCache();
-    projDir = path.join(tmpCortex, "glob-proj");
+    projDir = path.join(tmpPhren, "glob-proj");
     fs.mkdirSync(projDir, { recursive: true });
   });
 
@@ -74,13 +74,13 @@ describe("getProjectGlobBoost", () => {
   });
 
   it("returns 1.0 when no CLAUDE.md exists", () => {
-    const boost = getProjectGlobBoost(tmpCortex, "glob-proj", "/some/dir", undefined);
+    const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "/some/dir", undefined);
     expect(boost).toBe(1.0);
   });
 
   it("returns 1.0 when CLAUDE.md has no frontmatter", () => {
     fs.writeFileSync(path.join(projDir, "CLAUDE.md"), "# Project\n\nNo frontmatter here.\n");
-    const boost = getProjectGlobBoost(tmpCortex, "glob-proj", "/some/dir", undefined);
+    const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "/some/dir", undefined);
     expect(boost).toBe(1.0);
   });
 
@@ -89,7 +89,7 @@ describe("getProjectGlobBoost", () => {
       path.join(projDir, "CLAUDE.md"),
       '---\nglobs:\n  - "src/**/*.ts"\n---\n# Project\n'
     );
-    const boost = getProjectGlobBoost(tmpCortex, "glob-proj", "src/foo/bar.ts", undefined);
+    const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "src/foo/bar.ts", undefined);
     expect(boost).toBe(1.3);
   });
 
@@ -98,7 +98,7 @@ describe("getProjectGlobBoost", () => {
       path.join(projDir, "CLAUDE.md"),
       '---\nglobs:\n  - "lib/**/*.py"\n---\n# Project\n'
     );
-    const boost = getProjectGlobBoost(tmpCortex, "glob-proj", "src/foo.ts", undefined);
+    const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "src/foo.ts", undefined);
     expect(boost).toBe(0.7);
   });
 
@@ -107,7 +107,7 @@ describe("getProjectGlobBoost", () => {
       path.join(projDir, "CLAUDE.md"),
       '---\nglobs:\n  - "*.ts"\n---\n# Project\n'
     );
-    const boost = getProjectGlobBoost(tmpCortex, "glob-proj", "/unrelated", new Set(["foo.ts"]));
+    const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "/unrelated", new Set(["foo.ts"]));
     expect(boost).toBe(1.3);
   });
 
@@ -116,7 +116,7 @@ describe("getProjectGlobBoost", () => {
       path.join(projDir, "CLAUDE.md"),
       '---\nglobs: ["src/**", "lib/**"]\n---\n# Project\n'
     );
-    const boost = getProjectGlobBoost(tmpCortex, "glob-proj", "src/index.ts", undefined);
+    const boost = getProjectGlobBoost(tmpPhren, "glob-proj", "src/index.ts", undefined);
     expect(boost).toBe(1.3);
   });
 });
@@ -130,16 +130,16 @@ describe("parseCitations", () => {
 
   it("parses multiple citations", () => {
     const text = [
-      'See <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/a.ts","line":1} -->',
-      'and <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/b.ts","line":2} -->',
+      'See <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/a.ts","line":1} -->',
+      'and <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/b.ts","line":2} -->',
     ].join(" ");
     const citations = parseCitations(text);
     expect(citations).toHaveLength(2);
     expect(citations.every(c => c.citation)).toBe(true);
   });
 
-  it("parses cortex citation comments", () => {
-    const citations = parseCitations('Insight <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/demo.ts","line":3} -->');
+  it("parses phren citation comments", () => {
+    const citations = parseCitations('Insight <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/tmp/demo.ts","line":3} -->');
     expect(citations).toEqual([
       {
         citation: {
@@ -157,7 +157,7 @@ describe("validateCitation", () => {
 
   beforeEach(() => {
     clearCitationValidCache();
-    tmpFile = path.join(tmpCortex, "cite-test.txt");
+    tmpFile = path.join(tmpPhren, "cite-test.txt");
     fs.writeFileSync(tmpFile, "line one\nline two\nline three\n");
   });
 
@@ -175,7 +175,7 @@ describe("validateCitation", () => {
     })).toBe(true);
   });
 
-  it("returns false for cortex citations pointing to missing files", () => {
+  it("returns false for phren citations pointing to missing files", () => {
     expect(validateCitation({
       citation: {
         created_at: "2026-03-01T00:00:00.000Z",
@@ -190,7 +190,7 @@ describe("annotateStale", () => {
   let tmpFile: string;
 
   beforeEach(() => {
-    tmpFile = path.join(tmpCortex, "stale-test.txt");
+    tmpFile = path.join(tmpPhren, "stale-test.txt");
     fs.writeFileSync(tmpFile, "content here\n");
   });
 
@@ -202,8 +202,8 @@ describe("annotateStale", () => {
     expect(annotateStale("plain text")).toBe("plain text");
   });
 
-  it("marks cortex citation comments stale when validation fails", () => {
-    const result = annotateStale('insight <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/no/such/file.ts","line":1} -->');
+  it("marks phren citation comments stale when validation fails", () => {
+    const result = annotateStale('insight <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/no/such/file.ts","line":1} -->');
     expect(result).toContain("[citation stale]");
   });
 });

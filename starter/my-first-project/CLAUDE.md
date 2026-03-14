@@ -18,7 +18,7 @@
 
 ## Project skills
 
-Source skills live in the cortex project `skills/` directory. Cortex resolves global + project-local skills and mirrors the effective set into repo-local `.claude/skills/`.
+Source skills live in the phren project `skills/` directory. Phren resolves global + project-local skills and mirrors the effective set into repo-local `.claude/skills/`.
 
 ## Architecture
 
@@ -46,4 +46,4 @@ src/
 
 <!-- Tip: If this file grows past ~100 lines, split it using @import directives.
      Example: @CLAUDE-architecture.md, @CLAUDE-commands.md, @CLAUDE-conventions.md
-     See cortex README for details. -->
+     See phren README for details. -->

@@ -4,9 +4,9 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-// Set CORTEX_PATH before importing cli.ts to satisfy its top-level ensureCortexPath().
-const tmpCortex = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-hook-test-"));
-process.env.CORTEX_PATH = tmpCortex;
+// Set PHREN_PATH before importing cli.ts to satisfy its top-level ensurePhrenPath().
+const tmpPhren = fs.mkdtempSync(path.join(os.tmpdir(), "phren-hook-test-"));
+process.env.PHREN_PATH = tmpPhren;
 
 import {
   parseHookInput,
@@ -96,32 +96,32 @@ describe("selectSnippets", () => {
 });
 
 describe("buildHookOutput", () => {
-  let cortexDir: string;
-  let cortexCleanup: () => void;
+  let phrenDir: string;
+  let phrenCleanup: () => void;
 
   beforeEach(() => {
-    ({ path: cortexDir, cleanup: cortexCleanup } = makeTempDir("cortex-hookout-"));
-    write(path.join(cortexDir, ".runtime", "memory-scores.json"), "{}");
+    ({ path: phrenDir, cleanup: phrenCleanup } = makeTempDir("phren-hookout-"));
+    write(path.join(phrenDir, ".runtime", "memory-scores.json"), "{}");
   });
 
   afterEach(() => {
-    cortexCleanup();
+    phrenCleanup();
   });
 
-  it("includes status line, cortex-context tags, and trace", () => {
+  it("includes status line, phren-context tags, and trace", () => {
     const selected: SelectedSnippet[] = [{
       doc: { project: "myproj", filename: "FINDINGS.md", type: "findings", content: "some content", path: "/path" },
       snippet: "- insight here",
       key: "myproj:FINDINGS.md:abc",
     }];
     const stage = { indexMs: 10, searchMs: 20, trustMs: 5, rankMs: 3, selectMs: 2 };
-    const parts = buildHookOutput(selected, 80, "general", null, "myproj", stage, 550, cortexDir);
+    const parts = buildHookOutput(selected, 80, "general", null, "myproj", stage, 550, phrenDir);
 
-    expect(parts[0]).toContain("cortex");
+    expect(parts[0]).toContain("phren");
     expect(parts[0]).toContain("myproj");
     expect(parts[0]).toContain("1 result");
-    expect(parts[1]).toBe("<cortex-context>");
-    expect(parts).toContain("<cortex-context>");
+    expect(parts[1]).toBe("<phren-context>");
+    expect(parts).toContain("<phren-context>");
     const trace = parts.find((p) => p.includes("trace:"));
     expect(trace).toBeDefined();
     expect(trace).toContain("intent=general");
@@ -136,7 +136,7 @@ describe("buildHookOutput", () => {
     }];
     const gitCtx = { branch: "feature/test", changedFiles: new Set(["src/main.ts"]) };
     const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
-    const parts = buildHookOutput(selected, 80, "debug", gitCtx, null, stage, 550, cortexDir);
+    const parts = buildHookOutput(selected, 80, "debug", gitCtx, null, stage, 550, phrenDir);
 
     const trace = parts.find((p) => p.includes("trace:"));
     expect(trace).toContain("branch=feature/test");
@@ -150,7 +150,7 @@ describe("buildHookOutput", () => {
       { doc: { project: "b", filename: "f2.md", type: "summary", content: "c2", path: "/f2" }, snippet: "s2", key: "k2" },
     ];
     const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
-    const parts = buildHookOutput(selected, 100, "general", null, null, stage, 550, cortexDir);
+    const parts = buildHookOutput(selected, 100, "general", null, null, stage, 550, phrenDir);
 
     expect(parts[0]).toContain("2 results");
     expect(parts.some((p) => p.includes("[a/f1.md]"))).toBe(true);
@@ -158,7 +158,7 @@ describe("buildHookOutput", () => {
   });
 
   it("uses project-relative memory ids in compact index output", () => {
-    process.env.CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE = "1";
+    process.env.PHREN_FEATURE_PROGRESSIVE_DISCLOSURE = "1";
     const selected: SelectedSnippet[] = [
       {
         doc: {
@@ -166,7 +166,7 @@ describe("buildHookOutput", () => {
           filename: "auth.md",
           type: "reference",
           content: "first",
-          path: path.join(cortexDir, "alpha", "reference", "api", "auth.md"),
+          path: path.join(phrenDir, "alpha", "reference", "api", "auth.md"),
         },
         snippet: "# API auth",
         key: "k1",
@@ -177,7 +177,7 @@ describe("buildHookOutput", () => {
           filename: "auth.md",
           type: "reference",
           content: "second",
-          path: path.join(cortexDir, "alpha", "reference", "runbooks", "auth.md"),
+          path: path.join(phrenDir, "alpha", "reference", "runbooks", "auth.md"),
         },
         snippet: "# Runbook auth",
         key: "k2",
@@ -188,7 +188,7 @@ describe("buildHookOutput", () => {
           filename: "summary.md",
           type: "summary",
           content: "third",
-          path: path.join(cortexDir, "alpha", "summary.md"),
+          path: path.join(phrenDir, "alpha", "summary.md"),
         },
         snippet: "# Summary",
         key: "k3",
@@ -197,28 +197,28 @@ describe("buildHookOutput", () => {
     const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
 
     try {
-      const parts = buildHookOutput(selected, 100, "general", null, null, stage, 550, cortexDir);
+      const parts = buildHookOutput(selected, 100, "general", null, null, stage, 550, phrenDir);
       expect(parts.some((p) => p.includes("[mem:alpha/reference/api/auth.md]"))).toBe(true);
       expect(parts.some((p) => p.includes("[mem:alpha/reference/runbooks/auth.md]"))).toBe(true);
     } finally {
-      delete process.env.CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE;
+      delete process.env.PHREN_FEATURE_PROGRESSIVE_DISCLOSURE;
     }
   });
 });
 
 describe("applyTrustFilter", () => {
-  let cortexDir: string;
-  let cortexCleanup: () => void;
+  let phrenDir: string;
+  let phrenCleanup: () => void;
 
   beforeEach(() => {
-    ({ path: cortexDir, cleanup: cortexCleanup } = makeTempDir("cortex-trust-"));
-    write(path.join(cortexDir, "testproj", "summary.md"), "# testproj\n");
-    write(path.join(cortexDir, "testproj", "MEMORY_QUEUE.md"), "# testproj Memory Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n\n");
-    write(path.join(cortexDir, ".governance", "audit.log"), "");
+    ({ path: phrenDir, cleanup: phrenCleanup } = makeTempDir("phren-trust-"));
+    write(path.join(phrenDir, "testproj", "summary.md"), "# testproj\n");
+    write(path.join(phrenDir, "testproj", "MEMORY_QUEUE.md"), "# testproj Memory Queue\n\n## Review\n\n## Stale\n\n## Conflicts\n\n");
+    write(path.join(phrenDir, ".governance", "audit.log"), "");
   });
 
   afterEach(() => {
-    cortexCleanup();
+    phrenCleanup();
   });
 
   it("passes through non-findings rows unchanged", () => {
@@ -238,7 +238,7 @@ describe("applyTrustFilter", () => {
       "## 2026-03-01",
       "",
       `- Fresh finding`,
-      `  <!-- cortex:cite {"created_at":"2026-03-01T00:00:00.000Z"} -->`,
+      `  <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z"} -->`,
       "",
     ].join("\n");
 
@@ -259,7 +259,7 @@ describe("applyTrustFilter", () => {
       "## 2020-01-01",
       "",
       `- Ancient finding`,
-      `  <!-- cortex:cite {"created_at":"2020-01-01T00:00:00.000Z"} -->`,
+      `  <!-- phren:cite {"created_at":"2020-01-01T00:00:00.000Z"} -->`,
       "",
     ].join("\n");
 
@@ -278,16 +278,16 @@ describe("applyTrustFilter", () => {
 });
 
 describe("trackSessionMetrics", () => {
-  let cortexDir: string;
-  let cortexCleanup: () => void;
+  let phrenDir: string;
+  let phrenCleanup: () => void;
 
   beforeEach(() => {
-    ({ path: cortexDir, cleanup: cortexCleanup } = makeTempDir("cortex-metrics-"));
-    write(path.join(cortexDir, ".runtime", "memory-scores.json"), "{}");
+    ({ path: phrenDir, cleanup: phrenCleanup } = makeTempDir("phren-metrics-"));
+    write(path.join(phrenDir, ".runtime", "memory-scores.json"), "{}");
   });
 
   afterEach(() => {
-    cortexCleanup();
+    phrenCleanup();
   });
 
   it("creates session metrics file and tracks prompts", () => {
@@ -296,9 +296,9 @@ describe("trackSessionMetrics", () => {
       snippet: "snippet",
       key: "proj:f.md:abc",
     }];
-    trackSessionMetrics(cortexDir, "session-1", selected);
+    trackSessionMetrics(phrenDir, "session-1", selected);
 
-    const metricsFile = path.join(cortexDir, ".runtime", "session-metrics.json");
+    const metricsFile = path.join(phrenDir, ".runtime", "session-metrics.json");
     expect(fs.existsSync(metricsFile)).toBe(true);
 
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
@@ -313,18 +313,18 @@ describe("trackSessionMetrics", () => {
       snippet: "snippet",
       key: "proj:f.md:abc",
     }];
-    trackSessionMetrics(cortexDir, "session-2", selected);
-    trackSessionMetrics(cortexDir, "session-2", selected);
-    trackSessionMetrics(cortexDir, "session-2", selected);
+    trackSessionMetrics(phrenDir, "session-2", selected);
+    trackSessionMetrics(phrenDir, "session-2", selected);
+    trackSessionMetrics(phrenDir, "session-2", selected);
 
-    const metricsFile = path.join(cortexDir, ".runtime", "session-metrics.json");
+    const metricsFile = path.join(phrenDir, ".runtime", "session-metrics.json");
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
     expect(metrics["session-2"].prompts).toBe(3);
     expect(metrics["session-2"].keys["proj:f.md:abc"]).toBe(3);
   });
 
   it("prunes sessions older than 30 days", () => {
-    const metricsFile = path.join(cortexDir, ".runtime", "session-metrics.json");
+    const metricsFile = path.join(phrenDir, ".runtime", "session-metrics.json");
     const oldDate = new Date(Date.now() - 40 * 86400000).toISOString();
     write(metricsFile, JSON.stringify({
       "old-session": { prompts: 5, keys: {}, lastChangedCount: 0, lastKeys: [], lastSeen: oldDate },
@@ -335,7 +335,7 @@ describe("trackSessionMetrics", () => {
       snippet: "s",
       key: "k",
     }];
-    trackSessionMetrics(cortexDir, "new-session", selected);
+    trackSessionMetrics(phrenDir, "new-session", selected);
 
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
     expect(metrics["old-session"]).toBeUndefined();
@@ -344,13 +344,13 @@ describe("trackSessionMetrics", () => {
 });
 
 describe("filterTaskByPriority", () => {
-  const savedEnv = process.env.CORTEX_TASK_PRIORITY;
+  const savedEnv = process.env.PHREN_TASK_PRIORITY;
 
   afterEach(() => {
     if (savedEnv === undefined) {
-      delete process.env.CORTEX_TASK_PRIORITY;
+      delete process.env.PHREN_TASK_PRIORITY;
     } else {
-      process.env.CORTEX_TASK_PRIORITY = savedEnv;
+      process.env.PHREN_TASK_PRIORITY = savedEnv;
     }
   });
 
@@ -372,8 +372,8 @@ describe("filterTaskByPriority", () => {
     expect(result[1]).toContain("[medium]");
   });
 
-  it("filters based on CORTEX_TASK_PRIORITY env var", () => {
-    process.env.CORTEX_TASK_PRIORITY = "high";
+  it("filters based on PHREN_TASK_PRIORITY env var", () => {
+    process.env.PHREN_TASK_PRIORITY = "high";
     const items = [
       "- [high] Critical fix",
       "- [medium] Nice to have",

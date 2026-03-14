@@ -1,16 +1,16 @@
 # Cross-Agent Setup Guide
 
-cortex supports two install modes:
+phren supports two install modes:
 
-- `shared`: user-scoped personal memory rooted at `~/.cortex`
-- `project-local`: repo-scoped memory rooted at `<repo>/.cortex`
+- `shared`: user-scoped personal memory rooted at `~/.phren`
+- `project-local`: repo-scoped memory rooted at `<repo>/.phren`
 
-`cortex init` configures integrations differently depending on that mode.
+`phren init` configures integrations differently depending on that mode.
 
 ```bash
-cortex status          # see which agents are active on this machine
-cortex doctor --agents # check which integrations are configured vs missing
-cortex init            # add or fix any missing agent configurations
+phren status          # see which agents are active on this machine
+phren doctor --agents # check which integrations are configured vs missing
+phren init            # add or fix any missing agent configurations
 ```
 
 ## Feature Matrix
@@ -27,7 +27,7 @@ Hooks (UserPromptSubmit, Stop, SessionStart, PostToolUse) are only supported by 
 
 ## Claude Code
 
-Claude Code is the primary target. `cortex init` configures both MCP and lifecycle hooks.
+Claude Code is the primary target. `phren init` configures both MCP and lifecycle hooks.
 
 **Config locations:**
 - MCP server: `~/.claude.json` and `~/.claude/settings.json`
@@ -37,9 +37,9 @@ Claude Code is the primary target. `cortex init` configures both MCP and lifecyc
 ```json
 {
   "mcpServers": {
-    "cortex": {
+    "phren": {
       "command": "node",
-      "args": ["/path/to/cortex/mcp/dist/index.js", "/path/to/.cortex"],
+      "args": ["/path/to/phren/mcp/dist/index.js", "/path/to/.phren"],
       "env": {}
     }
   }
@@ -54,21 +54,21 @@ Claude Code is the primary target. `cortex init` configures both MCP and lifecyc
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "node /path/to/cortex/mcp/dist/index.js hook-prompt"
+        "command": "node /path/to/phren/mcp/dist/index.js hook-prompt"
       }]
     }],
     "Stop": [{
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "node /path/to/cortex/mcp/dist/index.js hook-stop"
+        "command": "node /path/to/phren/mcp/dist/index.js hook-stop"
       }]
     }],
     "SessionStart": [{
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "node /path/to/cortex/mcp/dist/index.js hook-session-start"
+        "command": "node /path/to/phren/mcp/dist/index.js hook-session-start"
       }]
     }]
   }
@@ -78,7 +78,7 @@ Claude Code is the primary target. `cortex init` configures both MCP and lifecyc
 **Common pitfalls:**
 - The `args` array must use the resolved path to `index.js`, not `npx`. Using `npx` causes cold-start timeouts.
 - Hooks must use absolute paths. Relative paths fail when the working directory changes.
-- If hooks stop working after an update, run `cortex init` again to refresh the paths.
+- If hooks stop working after an update, run `phren init` again to refresh the paths.
 
 ## Cursor
 
@@ -93,9 +93,9 @@ Cursor supports MCP servers via `mcp.json`. Hooks are not supported.
 ```json
 {
   "mcpServers": {
-    "cortex": {
+    "phren": {
       "command": "node",
-      "args": ["/path/to/cortex/mcp/dist/index.js", "/path/to/.cortex"]
+      "args": ["/path/to/phren/mcp/dist/index.js", "/path/to/.phren"]
     }
   }
 }
@@ -119,9 +119,9 @@ VS Code with GitHub Copilot extension supports MCP servers.
 ```json
 {
   "servers": {
-    "cortex": {
+    "phren": {
       "command": "node",
-      "args": ["/path/to/cortex/mcp/dist/index.js", "/path/to/.cortex"]
+      "args": ["/path/to/phren/mcp/dist/index.js", "/path/to/.phren"]
     }
   }
 }
@@ -138,16 +138,16 @@ Project-local mode writes workspace MCP instead of user MCP:
 
 - config file: `<repo>/.vscode/mcp.json`
 - server root key: `servers`
-- cortex path: `${workspaceFolder}/.cortex`
+- phren path: `${workspaceFolder}/.phren`
 
 Example:
 
 ```json
 {
   "servers": {
-    "cortex": {
+    "phren": {
       "command": "node",
-      "args": ["/path/to/cortex/mcp/dist/index.js", "${workspaceFolder}/.cortex"]
+      "args": ["/path/to/phren/mcp/dist/index.js", "${workspaceFolder}/.phren"]
     }
   }
 }
@@ -167,46 +167,46 @@ Codex CLI supports MCP via config files.
 ```json
 {
   "mcpServers": {
-    "cortex": {
+    "phren": {
       "command": "node",
-      "args": ["/path/to/cortex/mcp/dist/index.js", "/path/to/.cortex"]
+      "args": ["/path/to/phren/mcp/dist/index.js", "/path/to/.phren"]
     }
   }
 }
 ```
 
 **Common pitfalls:**
-- Codex may use either JSON or TOML config. `cortex init` handles both formats.
+- Codex may use either JSON or TOML config. `phren init` handles both formats.
 - No hook support; use MCP tools directly.
 
 ## Windsurf
 
-Windsurf is not currently auto-configured by `cortex init`. Manual setup:
+Windsurf is not currently auto-configured by `phren init`. Manual setup:
 
 1. Find your Windsurf MCP config file (check Windsurf documentation for the exact path).
-2. Add the cortex MCP server entry using the same format as Cursor:
+2. Add the phren MCP server entry using the same format as Cursor:
 ```json
 {
   "mcpServers": {
-    "cortex": {
+    "phren": {
       "command": "node",
-      "args": ["/path/to/cortex/mcp/dist/index.js", "/path/to/.cortex"]
+      "args": ["/path/to/phren/mcp/dist/index.js", "/path/to/.phren"]
     }
   }
 }
 ```
-3. Replace `/path/to/cortex` with the actual path (find it with `which cortex` or `npm root -g`).
-4. Replace `/path/to/.cortex` with your cortex data directory (usually `~/.cortex`).
+3. Replace `/path/to/phren` with the actual path (find it with `which phren` or `npm root -g`).
+4. Replace `/path/to/.phren` with your phren data directory (usually `~/.phren`).
 
 ## Verifying Setup
 
 After configuration, run:
 ```bash
-cortex verify    # checks MCP config and hook registration
-cortex doctor    # health check with optional --fix
-cortex status    # shows active project and stats
+phren verify    # checks MCP config and hook registration
+phren doctor    # health check with optional --fix
+phren status    # shows active project and stats
 ```
 
 ## Updating
 
-When cortex is updated, run `cortex init` again to refresh MCP paths and hook commands for all configured IDEs. The init process is idempotent and will not overwrite your data.
+When phren is updated, run `phren init` again to refresh MCP paths and hook commands for all configured IDEs. The init process is idempotent and will not overwrite your data.

@@ -10,9 +10,9 @@ export function clearProjectGlobCache(): void {
   projectGlobCache.clear();
 }
 
-function parseProjectGlobs(cortexPathLocal: string, project: string): string[] | null {
+function parseProjectGlobs(phrenPathLocal: string, project: string): string[] | null {
   if (projectGlobCache.has(project)) return projectGlobCache.get(project)!;
-  const claudeMdPath = path.join(cortexPathLocal, project, "CLAUDE.md");
+  const claudeMdPath = path.join(phrenPathLocal, project, "CLAUDE.md");
   let globs: string[] | null = null;
   try {
     if (fs.existsSync(claudeMdPath)) {
@@ -42,7 +42,7 @@ function parseProjectGlobs(cortexPathLocal: string, project: string): string[] |
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] getProjectGlobs: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] getProjectGlobs: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   projectGlobCache.set(project, globs);
   capCache(projectGlobCache);
@@ -62,12 +62,12 @@ function simpleGlobMatch(pattern: string, filePath: string): boolean {
 }
 
 export function getProjectGlobBoost(
-  cortexPathLocal: string,
+  phrenPathLocal: string,
   project: string,
   cwd: string | undefined,
   changedFiles: Set<string> | undefined
 ): number {
-  const globs = parseProjectGlobs(cortexPathLocal, project);
+  const globs = parseProjectGlobs(phrenPathLocal, project);
   if (!globs) return 1.0;
 
   const paths: string[] = [];

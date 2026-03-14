@@ -104,12 +104,12 @@ describe.sequential("web-ui auth token protection", () => {
   let server: http.Server | null = null;
   let port = 0;
   let authToken: string;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-auth-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "test-auth-token-secret";
     server = createWebUiServer(tmpRoot, { authToken });
@@ -127,8 +127,8 @@ describe.sequential("web-ui auth token protection", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -152,12 +152,12 @@ describe.sequential("web-ui auth token protection", () => {
   });
 
   it("succeeds with correct auth token", async () => {
-    const res = await postForm(port, "/approve", {
+    const res = await postForm(port, "/api/hook-toggle", {
       _auth: authToken,
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(200);
   });
 
   it("GET / returns 401 without auth token", async () => {
@@ -208,13 +208,13 @@ describe.sequential("web-ui graph API", () => {
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
   let port = 0;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-graph-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-graph-"));
     seedProject(tmpRoot);
     seedSecondProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     server = createWebUiServer(tmpRoot);
     await new Promise<void>((resolve) => {
@@ -231,8 +231,8 @@ describe.sequential("web-ui graph API", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -349,7 +349,7 @@ describe.sequential("web-ui profile scoping", () => {
   const priorUserProfile = process.env.USERPROFILE;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-profile-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-profile-"));
     process.env.HOME = tmpRoot;
     process.env.USERPROFILE = tmpRoot;
     seedProject(tmpRoot);
@@ -395,11 +395,11 @@ describe.sequential("web-ui HTML escaping", () => {
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
   let port = 0;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-xss-"));
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-xss-"));
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     // Seed with XSS-like content in queue
     write(
@@ -436,8 +436,8 @@ describe.sequential("web-ui HTML escaping", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -463,12 +463,12 @@ describe.sequential("web-ui combined CSRF + auth", () => {
   let port = 0;
   let csrfTokens: Map<string, number>;
   let authToken: string;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-csrf-auth-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-csrf-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     csrfTokens = new Map<string, number>();
     authToken = "combined-auth-token";
@@ -487,8 +487,8 @@ describe.sequential("web-ui combined CSRF + auth", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -519,13 +519,13 @@ describe.sequential("web-ui combined CSRF + auth", () => {
   it("succeeds when both auth and CSRF are correct", async () => {
     await httpGet(port, "/?_auth=" + encodeURIComponent(authToken));
     const token = [...csrfTokens.keys()][0];
-    const res = await postForm(port, "/approve", {
+    const res = await postForm(port, "/api/hook-toggle", {
       _auth: authToken,
       _csrf: token,
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(200);
   });
 });
 
@@ -534,12 +534,12 @@ describe.sequential("web-ui missing project/line validation", () => {
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
   let port = 0;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-val-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-val-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     server = createWebUiServer(tmpRoot);
     await new Promise<void>((resolve) => {
@@ -556,8 +556,8 @@ describe.sequential("web-ui missing project/line validation", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -588,7 +588,7 @@ describe.sequential("web-ui missing project/line validation", () => {
   it("GET / page contains expected UI elements", async () => {
     const res = await httpGet(port, "/");
     expect(res.status).toBe(200);
-    expect(res.body).toContain("Cortex Dashboard");
+    expect(res.body).toContain("phren");
     expect(res.body).toContain("Review");
     expect(res.body).toContain("Graph");
     expect(res.body).toContain("Approve");
@@ -611,12 +611,12 @@ describe.sequential("web-ui skill-save auth protection (Q13)", () => {
   let port = 0;
   let authToken: string;
   let csrfTokens: Map<string, number>;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-skill-auth-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-skill-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "skill-auth-token";
     csrfTokens = new Map<string, number>();
@@ -635,8 +635,8 @@ describe.sequential("web-ui skill-save auth protection (Q13)", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -776,7 +776,7 @@ describe.sequential("web-ui skill-save auth protection (Q13)", () => {
   });
 
   it("POST /api/skill-save rejects symlink traversal for new files", async () => {
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-skill-escape-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-skill-escape-"));
     const linkRoot = path.join(tmpRoot, "global", "skills", "escape");
     fs.mkdirSync(path.dirname(linkRoot), { recursive: true });
     fs.symlinkSync(outsideDir, linkRoot, "dir");
@@ -807,12 +807,12 @@ describe.sequential("web-ui project-content validation", () => {
   let server: http.Server | null = null;
   let port = 0;
   let authToken: string;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-project-content-auth-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-project-content-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "project-content-auth-token";
     server = createWebUiServer(tmpRoot, { authToken });
@@ -830,8 +830,8 @@ describe.sequential("web-ui project-content validation", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -864,10 +864,10 @@ describe.sequential("web-ui project topics and reference APIs", () => {
   let server: http.Server | null = null;
   let port = 0;
   let authToken: string;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-project-topics-auth-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-project-topics-auth-"));
     seedProject(tmpRoot);
     write(
       path.join(tmpRoot, "demo", "reference", "frontend.md"),
@@ -888,7 +888,7 @@ describe.sequential("web-ui project topics and reference APIs", () => {
         "This is hand-written prose and should not be migrated automatically.",
       ].join("\n")
     );
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "project-topics-auth-token";
     server = createWebUiServer(tmpRoot, { authToken });
@@ -906,8 +906,8 @@ describe.sequential("web-ui project topics and reference APIs", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -985,7 +985,7 @@ describe.sequential("web-ui project topics and reference APIs", () => {
     expect(allowed.status).toBe(200);
     const data = JSON.parse(allowed.body);
     expect(data.ok).toBe(true);
-    expect(data.content).toContain("cortex:auto-topic");
+    expect(data.content).toContain("phren:auto-topic");
   });
 
   it("POST /api/project-topics/reclassify migrates eligible legacy topic docs and reports skips", async () => {
@@ -1019,12 +1019,12 @@ describe.sequential("web-ui hook-toggle auth protection (Q13)", () => {
   let port = 0;
   let authToken: string;
   let csrfTokens: Map<string, number>;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-hook-auth-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-hook-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "hook-auth-token";
     csrfTokens = new Map<string, number>();
@@ -1043,8 +1043,8 @@ describe.sequential("web-ui hook-toggle auth protection (Q13)", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -1097,12 +1097,12 @@ describe.sequential("web-ui JSON API auth for approve/reject/edit (Q13)", () => 
   let port = 0;
   let authToken: string;
   let csrfTokens: Map<string, number>;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-json-api-auth-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-json-api-auth-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     grantAdmin(tmpRoot);
     authToken = "json-api-auth-token";
     csrfTokens = new Map<string, number>();
@@ -1121,8 +1121,8 @@ describe.sequential("web-ui JSON API auth for approve/reject/edit (Q13)", () => 
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -1151,57 +1151,26 @@ describe.sequential("web-ui JSON API auth for approve/reject/edit (Q13)", () => 
     expect(res.status).toBe(401);
   });
 
-  it("POST /api/approve succeeds with correct auth", async () => {
+  it("POST /api/hook-toggle succeeds with correct auth", async () => {
     const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
     expect(csrfRes.status).toBe(200);
     const csrf = JSON.parse(csrfRes.body).token as string;
-    const res = await postForm(port, "/api/approve", {
+    const res = await postForm(port, "/api/hook-toggle", {
       _auth: authToken,
       _csrf: csrf,
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
     expect(res.status).toBe(200);
     const data = JSON.parse(res.body);
     expect(data.ok).toBe(true);
   });
 
-  it("POST /api/reject succeeds with correct auth", async () => {
-    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
-    expect(csrfRes.status).toBe(200);
-    const csrf = JSON.parse(csrfRes.body).token as string;
-    const res = await postForm(port, "/api/reject", {
+  it("POST /api/hook-toggle rejects missing CSRF when auth is correct", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
       _auth: authToken,
-      _csrf: csrf,
-      project: "demo",
-      line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
-    });
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
-    expect(data.ok).toBe(true);
-  });
-
-  it("POST /api/edit succeeds with correct auth", async () => {
-    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
-    expect(csrfRes.status).toBe(200);
-    const csrf = JSON.parse(csrfRes.body).token as string;
-    const res = await postForm(port, "/api/edit", {
-      _auth: authToken,
-      _csrf: csrf,
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
-      new_text: "Updated workflow-safe memory",
-    });
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
-    expect(data.ok).toBe(true);
-  });
-
-  it("POST /api/approve rejects missing CSRF when auth is correct", async () => {
-    const res = await postForm(port, "/api/approve", {
-      _auth: authToken,
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
     expect(res.status).toBe(403);
     expect(JSON.parse(res.body).error).toContain("CSRF");

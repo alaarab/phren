@@ -8,7 +8,7 @@ import { ROOT as PACKAGE_ROOT, VERSION } from "./package-metadata.js";
 export const ROOT = PACKAGE_ROOT;
 export { VERSION };
 export const STARTER_DIR = path.join(ROOT, "starter");
-export const DEFAULT_CORTEX_PATH = homePath(".cortex");
+export const DEFAULT_PHREN_PATH = homePath(".phren");
 
 export function resolveEntryScript(): string {
   return path.join(ROOT, "mcp", "dist", "index.js");

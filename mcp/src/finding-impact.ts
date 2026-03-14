@@ -96,8 +96,8 @@ function parseImpactLine(line: string): FindingImpactEntry | null {
   }
 }
 
-function readImpactSummary(cortexPath: string): ParsedImpactSummary {
-  const file = impactLogFile(cortexPath);
+function readImpactSummary(phrenPath: string): ParsedImpactSummary {
+  const file = impactLogFile(phrenPath);
   const surfaceCountByFinding = new Map<string, number>();
   const completedByFinding = new Set<string>();
 
@@ -125,19 +125,19 @@ function readImpactSummary(cortexPath: string): ParsedImpactSummary {
   };
 }
 
-function appendImpact(cortexPath: string, entries: FindingImpactEntry[]): void {
+function appendImpact(phrenPath: string, entries: FindingImpactEntry[]): void {
   if (entries.length === 0) return;
-  const file = impactLogFile(cortexPath);
+  const file = impactLogFile(phrenPath);
   withFileLock(file, () => {
     const lines = entries.map((entry) => JSON.stringify(entry));
     fs.appendFileSync(file, lines.join("\n") + "\n");
   });
 }
 
-export function logImpact(cortexPath: string, entries: ImpactLogInput[]): void {
+export function logImpact(phrenPath: string, entries: ImpactLogInput[]): void {
   if (entries.length === 0) return;
   const timestamp = nowIso();
-  appendImpact(cortexPath, entries.map((entry) => ({
+  appendImpact(phrenPath, entries.map((entry) => ({
     findingId: entry.findingId,
     project: entry.project,
     sessionId: entry.sessionId,
@@ -146,8 +146,8 @@ export function logImpact(cortexPath: string, entries: ImpactLogInput[]): void {
   })));
 }
 
-export function getHighImpactFindings(cortexPath: string, minSurfaceCount = 3): Set<string> {
-  const file = impactLogFile(cortexPath);
+export function getHighImpactFindings(phrenPath: string, minSurfaceCount = 3): Set<string> {
+  const file = impactLogFile(phrenPath);
   let stat: fs.Stats | null = null;
   try {
     stat = fs.existsSync(file) ? fs.statSync(file) : null;
@@ -166,7 +166,7 @@ export function getHighImpactFindings(cortexPath: string, minSurfaceCount = 3): 
     return new Set(highImpactCache.ids);
   }
 
-  const summary = readImpactSummary(cortexPath);
+  const summary = readImpactSummary(phrenPath);
   const ids = new Set<string>();
   for (const [findingId, surfaceCount] of summary.surfaceCountByFinding.entries()) {
     if (surfaceCount >= minSurfaceCount && summary.completedByFinding.has(findingId)) {
@@ -184,9 +184,9 @@ export function getHighImpactFindings(cortexPath: string, minSurfaceCount = 3): 
   return new Set(ids);
 }
 
-export function markImpactEntriesCompletedForSession(cortexPath: string, sessionId: string, project?: string): number {
+export function markImpactEntriesCompletedForSession(phrenPath: string, sessionId: string, project?: string): number {
   if (!sessionId) return 0;
-  const file = impactLogFile(cortexPath);
+  const file = impactLogFile(phrenPath);
   if (!fs.existsSync(file)) return 0;
 
   const updated = withFileLock(file, () => {

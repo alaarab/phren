@@ -1,5 +1,5 @@
 /**
- * CLI orchestrator for cortex init, mcp-mode, hooks-mode, and uninstall.
+ * CLI orchestrator for phren init, mcp-mode, hooks-mode, and uninstall.
  * Delegates to focused helpers in init-config, init-setup, and init-preferences.
  */
 import * as fs from "fs";
@@ -16,7 +16,7 @@ import {
   homeDir,
   homePath,
   expandHomePath,
-  findCortexPath,
+  findPhrenPath,
   readRootManifest,
   writeRootManifest,
   type InstallMode,
@@ -88,7 +88,7 @@ import {
   logMcpTargetStatus,
   removeMcpServerAtPath,
   removeTomlMcpServer,
-  isCortexCommand,
+  isPhrenCommand,
   patchJsonFile,
 } from "./init-config.js";
 import type { ToolStatus } from "./init-config.js";
@@ -123,7 +123,7 @@ import {
   inferInitScaffoldFromRepo,
 } from "./init-setup.js";
 
-import { DEFAULT_CORTEX_PATH, STARTER_DIR, VERSION, log, confirmPrompt } from "./init-shared.js";
+import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, confirmPrompt } from "./init-shared.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
@@ -191,7 +191,6 @@ export interface InitOptions {
   projectOwnershipDefault?: ProjectOwnershipMode;
   findingsProactivity?: ProactivityLevel;
   taskProactivity?: ProactivityLevel;
-  requireMaintainerApproval?: boolean;
   lowConfidenceThreshold?: number;
   riskySections?: WorkflowRiskSection[];
   taskMode?: "off" | "manual" | "suggest" | "auto";
@@ -211,7 +210,7 @@ export interface InitOptions {
   _walkthroughDomain?: InitProjectDomain;
   /** Set by walkthrough to seed adaptive project scaffold from current repo content */
   _walkthroughInferredScaffold?: InferredInitScaffold;
-  /** Set by walkthrough when user enables auto-capture; triggers writing ~/.cortex/.env */
+  /** Set by walkthrough when user enables auto-capture; triggers writing ~/.phren/.env */
   _walkthroughAutoCapture?: boolean;
   /** Set by walkthrough when user opts into local semantic search */
   _walkthroughSemanticSearch?: boolean;
@@ -219,13 +218,13 @@ export interface InitOptions {
   _walkthroughSemanticDedup?: boolean;
   /** Set by walkthrough when user enables LLM conflict detection */
   _walkthroughSemanticConflict?: boolean;
-  /** Set by walkthrough when user provides a git clone URL for existing cortex */
+  /** Set by walkthrough when user provides a git clone URL for existing phren */
   _walkthroughCloneUrl?: string;
   /** Set by walkthrough when the user wants the current repo enrolled immediately */
   _walkthroughBootstrapCurrentProject?: boolean;
   /** Set by walkthrough for the ownership mode selected for the current repo */
   _walkthroughBootstrapOwnership?: ProjectOwnershipMode;
-  /** Set by walkthrough to select where cortex data is stored */
+  /** Set by walkthrough to select where phren data is stored */
   _walkthroughStorageChoice?: StorageLocationChoice;
   /** Set by walkthrough to pass resolved storage path to init logic */
   _walkthroughStoragePath?: string;
@@ -237,11 +236,11 @@ function normalizedBootstrapProjectName(projectPath: string): string {
   return path.basename(projectPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 }
 
-function getPendingBootstrapTarget(cortexPath: string, opts: InitOptions): { path: string; mode: "explicit" | "detected" } | null {
-  const cwdProject = detectProjectDir(process.cwd(), cortexPath);
+function getPendingBootstrapTarget(phrenPath: string, opts: InitOptions): { path: string; mode: "explicit" | "detected" } | null {
+  const cwdProject = detectProjectDir(process.cwd(), phrenPath);
   if (!cwdProject) return null;
   const projectName = normalizedBootstrapProjectName(cwdProject);
-  if (isProjectTracked(cortexPath, projectName)) return null;
+  if (isProjectTracked(phrenPath, projectName)) return null;
   return { path: cwdProject, mode: "detected" };
 }
 
@@ -268,21 +267,21 @@ function parseRiskySectionsAnswer(raw: string | undefined | null, fallback: Work
   return Array.from(new Set(parsed));
 }
 
-function hasInstallMarkers(cortexPath: string): boolean {
-  return fs.existsSync(cortexPath) && (
-    fs.existsSync(path.join(cortexPath, "machines.yaml")) ||
-    fs.existsSync(path.join(cortexPath, ".governance")) ||
-    fs.existsSync(path.join(cortexPath, "global"))
+function hasInstallMarkers(phrenPath: string): boolean {
+  return fs.existsSync(phrenPath) && (
+    fs.existsSync(path.join(phrenPath, "machines.yaml")) ||
+    fs.existsSync(path.join(phrenPath, ".governance")) ||
+    fs.existsSync(path.join(phrenPath, "global"))
   );
 }
 
-function resolveInitCortexPath(opts: InitOptions): string {
-  const raw = opts._walkthroughStoragePath || process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
+function resolveInitPhrenPath(opts: InitOptions): string {
+  const raw = opts._walkthroughStoragePath || (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
   return path.resolve(expandHomePath(raw));
 }
 
-function detectRepoRootForStorage(cortexPath: string): string | null {
-  return detectProjectDir(process.cwd(), cortexPath);
+function detectRepoRootForStorage(phrenPath: string): string | null {
+  return detectProjectDir(process.cwd(), phrenPath);
 }
 
 type WalkthroughChoice<T extends string> = {
@@ -438,7 +437,7 @@ async function createWalkthroughPrompts(): Promise<WalkthroughPromptUi> {
 }
 
 // Interactive walkthrough for first-time init
-async function runWalkthrough(cortexPath: string): Promise<{
+async function runWalkthrough(phrenPath: string): Promise<{
   storageChoice: StorageLocationChoice;
   storagePath: string;
   storageRepoRoot?: string;
@@ -449,7 +448,6 @@ async function runWalkthrough(cortexPath: string): Promise<{
   projectOwnershipDefault: ProjectOwnershipMode;
   findingsProactivity: ProactivityLevel;
   taskProactivity: ProactivityLevel;
-  requireMaintainerApproval: boolean;
   lowConfidenceThreshold: number;
   riskySections: WorkflowRiskSection[];
   taskMode: "off" | "manual" | "suggest" | "auto";
@@ -482,30 +480,27 @@ async function runWalkthrough(cortexPath: string): Promise<{
     }
   };
 
+  const { renderPhrenArt } = await import("./phren-art.js");
   log("");
-  log(style.header("  _____ ____  _____ _______ ________  ______"));
-  log(style.header(" / ____/ __ \\|  __ \\__   __|  ____\\ \\/ /___"));
-  log(style.header("| |   | |  | | |__) | | |  | |__   \\  /    "));
-  log(style.header("| |   | |  | |  _  /  | |  |  __|  /  \\    "));
-  log(style.header("| |___| |__| | | \\ \\  | |  | |____/ /\\ \\   "));
-  log(style.header(" \\_____\\____/|_|  \\_\\ |_|  |______/_/  \\_\\  "));
+  log(renderPhrenArt("  "));
+  log("");
 
   printSection("Welcome");
   log("Let's set up persistent memory for your AI agents.");
   log("Every option can be changed later.\n");
 
   printSection("Storage Location");
-  log("Where should cortex store data?");
+  log("Where should phren store data?");
   const storageChoice = await prompts.select<StorageLocationChoice>(
     "Storage location",
     [
       {
         value: "global",
-        name: "global (~/.cortex/ - default, shared across projects)",
+        name: "global (~/.phren/ - default, shared across projects)",
       },
       {
         value: "project",
-        name: "per-project (<repo>/.cortex/ - scoped to this repo, add to .gitignore)",
+        name: "per-project (<repo>/.phren/ - scoped to this repo, add to .gitignore)",
       },
       {
         value: "custom",
@@ -515,22 +510,22 @@ async function runWalkthrough(cortexPath: string): Promise<{
     "global"
   );
 
-  let storagePath = path.resolve(homePath(".cortex"));
+  let storagePath = path.resolve(homePath(".phren"));
   let storageRepoRoot: string | undefined;
   if (storageChoice === "project") {
-    const repoRoot = detectRepoRootForStorage(cortexPath);
+    const repoRoot = detectRepoRootForStorage(phrenPath);
     if (!repoRoot) {
       throw new Error("Per-project storage requires running init from a repository directory.");
     }
     storageRepoRoot = repoRoot;
-    storagePath = path.join(repoRoot, ".cortex");
+    storagePath = path.join(repoRoot, ".phren");
   } else if (storageChoice === "custom") {
-    const customInput = await prompts.input("Custom cortex path", cortexPath);
-    storagePath = path.resolve(expandHomePath(customInput || cortexPath));
+    const customInput = await prompts.input("Custom phren path", phrenPath);
+    storagePath = path.resolve(expandHomePath(customInput || phrenPath));
   }
 
-  printSection("Existing Cortex");
-  log("If you've already set up cortex on another machine, paste the git clone URL.");
+  printSection("Existing Phren");
+  log("If you've already set up phren on another machine, paste the git clone URL.");
   log("Otherwise, leave blank.");
   const cloneAnswer = await prompts.input("Clone URL (leave blank to skip)");
   if (cloneAnswer) {
@@ -542,10 +537,9 @@ async function runWalkthrough(cortexPath: string): Promise<{
       profile: "personal",
       mcp: "on" as McpMode,
       hooks: "on" as McpMode,
-      projectOwnershipDefault: "cortex-managed" as ProjectOwnershipMode,
+      projectOwnershipDefault: "phren-managed" as ProjectOwnershipMode,
       findingsProactivity: "high" as ProactivityLevel,
       taskProactivity: "high" as ProactivityLevel,
-      requireMaintainerApproval: false,
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"] as WorkflowRiskSection[],
       taskMode: "auto" as const,
@@ -565,7 +559,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
       `Profile: ${cloneConfig.profile}`,
       "MCP: enabled",
       "Hooks: enabled",
-      "Project ownership default: cortex-managed",
+      "Project ownership default: phren-managed",
       "Task mode: auto",
       "Domain: software",
     ]);
@@ -611,45 +605,45 @@ async function runWalkthrough(cortexPath: string): Promise<{
 
   printSection("Project Ownership");
   log("Choose who owns repo-facing instruction files for projects you add.");
-  log("  cortex-managed: Cortex may mirror CLAUDE.md / AGENTS.md into the repo");
-  log("  detached: Cortex keeps its own docs but does not write into the repo");
+  log("  phren-managed: Phren may mirror CLAUDE.md / AGENTS.md into the repo");
+  log("  detached: Phren keeps its own docs but does not write into the repo");
   log("  repo-managed: keep the repo's existing CLAUDE/AGENTS files as canonical");
-  log("  Change later: npx cortex config project-ownership <mode>");
+  log("  Change later: npx phren config project-ownership <mode>");
   const projectOwnershipDefault = await prompts.select<ProjectOwnershipMode>(
     "Default project ownership",
     [
       { value: "detached", name: "detached (default)" },
-      { value: "cortex-managed", name: "cortex-managed" },
+      { value: "phren-managed", name: "phren-managed" },
       { value: "repo-managed", name: "repo-managed" },
     ],
     "detached"
   );
 
   printSection("MCP");
-  log("MCP mode registers cortex as a tool server so your AI agent can call it");
+  log("MCP mode registers phren as a tool server so your AI agent can call it");
   log("directly: search memory, manage tasks, save findings, etc.");
   log("  Recommended for: Claude Code, Cursor, Copilot CLI, Codex");
   log("  Alternative: hooks-only mode (read-only context injection, any agent)");
-  log("  Change later: npx cortex mcp-mode on|off");
+  log("  Change later: npx phren mcp-mode on|off");
   const mcp: McpMode = (await prompts.confirm("Enable MCP?", true)) ? "on" : "off";
 
   printSection("Hooks");
   log("Hooks run shell commands at session start, prompt submit, and session end.");
   log("  - SessionStart: git pull (keeps memory in sync across machines)");
-  log("  - UserPromptSubmit: searches cortex and injects relevant context");
+  log("  - UserPromptSubmit: searches phren and injects relevant context");
   log("  - Stop: commits and pushes any new findings after each response");
   log("  What they touch: ~/.claude/settings.json (hooks section only)");
-  log("  Change later: npx cortex hooks-mode on|off");
+  log("  Change later: npx phren hooks-mode on|off");
   const hooks: McpMode = (await prompts.confirm("Enable hooks?", true)) ? "on" : "off";
 
   printSection("Semantic Search (Optional)");
-  log("Cortex can use a local embedding model for semantic (fuzzy) search via Ollama.");
+  log("Phren can use a local embedding model for semantic (fuzzy) search via Ollama.");
   log("  Best fit: paraphrase-heavy or weak-lexical queries.");
   log("  Skip it if you mostly search by filenames, symbols, commands, or exact phrases.");
   log("  - Model: nomic-embed-text (274 MB, one-time download)");
   log("  - Ollama runs locally, no cloud, no cost");
   log("  - Falls back to FTS5 keyword search if disabled or unavailable");
-  log("  Change later: set CORTEX_OLLAMA_URL=off to disable");
+  log("  Change later: set PHREN_OLLAMA_URL=off to disable");
   let ollamaEnabled = false;
   try {
     const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared-ollama.js");
@@ -676,25 +670,25 @@ async function runWalkthrough(cortexPath: string): Promise<{
         ollamaEnabled = await prompts.confirm("Enable semantic search (Ollama not installed yet)?", false);
         if (ollamaEnabled) {
           log(style.success("  Semantic search enabled — will activate once Ollama is running."));
-          log("  To disable: set CORTEX_OLLAMA_URL=off in your shell profile");
+          log("  To disable: set PHREN_OLLAMA_URL=off in your shell profile");
         }
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] init ollamaCheck: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaCheck: ${errorMessage(err)}\n`);
   }
 
   printSection("Auto-Capture (Optional)");
-  log("After each session, cortex scans the conversation for insight-signal phrases");
+  log("After each session, phren scans the conversation for insight-signal phrases");
   log("(\"always\", \"never\", \"pitfall\", \"gotcha\", etc.) and saves them automatically.");
   log("  - Runs silently in the Stop hook; captured findings go to FINDINGS.md");
   log("  - You can review and remove any auto-captured entry at any time");
-  log("  - Can be toggled: set CORTEX_FEATURE_AUTO_CAPTURE=0 to disable");
+  log("  - Can be toggled: set PHREN_FEATURE_AUTO_CAPTURE=0 to disable");
   const autoCaptureEnabled = await prompts.confirm("Enable auto-capture?", true);
   let findingsProactivity: ProactivityLevel = "high";
   if (autoCaptureEnabled) {
-    log("  Findings capture level controls how eager cortex is to save lessons automatically.");
-    log("  Change later: npx cortex config proactivity.findings <high|medium|low>");
+    log("  Findings capture level controls how eager phren is to save lessons automatically.");
+    log("  Change later: npx phren config proactivity.findings <high|medium|low>");
     findingsProactivity = await prompts.select<ProactivityLevel>(
       "Findings capture level",
       [
@@ -709,12 +703,12 @@ async function runWalkthrough(cortexPath: string): Promise<{
   }
 
   printSection("Task Management");
-  log("Choose how cortex handles tasks as you work.");
+  log("Choose how phren handles tasks as you work.");
   log("  auto (recommended): captures tasks naturally as you work, links findings to tasks");
   log("  suggest: proposes tasks but waits for approval before writing");
   log("  manual: tasks are fully manual — you add them yourself");
   log("  off: never touch tasks automatically");
-  log("  Change later: npx cortex config workflow set --taskMode=<mode>");
+  log("  Change later: npx phren config workflow set --taskMode=<mode>");
   const taskMode = await prompts.select<"off" | "manual" | "suggest" | "auto">(
     "Task mode",
     [
@@ -727,11 +721,11 @@ async function runWalkthrough(cortexPath: string): Promise<{
   );
   let taskProactivity: ProactivityLevel = "high";
   if (taskMode === "auto" || taskMode === "suggest") {
-    log("  Task proactivity controls how much evidence cortex needs before capturing tasks.");
+    log("  Task proactivity controls how much evidence phren needs before capturing tasks.");
     log("  high (recommended): captures tasks as they come up naturally");
     log("  medium: only when you explicitly mention a task");
     log("  low: minimal auto-capture");
-    log("  Change later: npx cortex config proactivity.tasks <high|medium|low>");
+    log("  Change later: npx phren config proactivity.tasks <high|medium|low>");
     taskProactivity = await prompts.select<ProactivityLevel>(
       "Task proactivity",
       [
@@ -745,11 +739,9 @@ async function runWalkthrough(cortexPath: string): Promise<{
 
   printSection("Workflow Guardrails");
   log("Choose how strict review gates should be for risky or low-confidence writes.");
-  log("  requireMaintainerApproval: queue risky/low-confidence writes for review");
   log("  lowConfidenceThreshold: confidence cutoff used to mark writes as risky");
   log("  riskySections: sections always treated as risky");
-  log("  Change later: npx cortex config workflow set --requireMaintainerApproval=true --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts");
-  const requireMaintainerApproval = await prompts.confirm("Require maintainer approval for risky writes?", false);
+  log("  Change later: npx phren config workflow set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts");
   const thresholdAnswer = await prompts.input("Low-confidence threshold [0.0-1.0]", "0.7");
   const lowConfidenceThreshold = parseLowConfidenceThreshold(thresholdAnswer, 0.7);
   const riskySectionsAnswer = await prompts.input("Risky sections [Review,Stale,Conflicts]", "Stale,Conflicts");
@@ -757,11 +749,11 @@ async function runWalkthrough(cortexPath: string): Promise<{
 
   // Only offer semantic dedup/conflict when an LLM endpoint is explicitly configured.
   // These features call /chat/completions, not an embedding endpoint, so we gate on
-  // CORTEX_LLM_ENDPOINT (primary) or the presence of a known API key as a fallback.
-  // CORTEX_EMBEDDING_API_URL alone is NOT sufficient — it only enables embeddings,
+  // PHREN_LLM_ENDPOINT (primary) or the presence of a known API key as a fallback.
+  // PHREN_EMBEDDING_API_URL alone is NOT sufficient — it only enables embeddings,
   // not the LLM chat call that callLlm() makes.
   const hasLlmApi = Boolean(
-    process.env.CORTEX_LLM_ENDPOINT ||
+    (process.env.PHREN_LLM_ENDPOINT) ||
     process.env.ANTHROPIC_API_KEY ||
     process.env.OPENAI_API_KEY
   );
@@ -771,8 +763,8 @@ async function runWalkthrough(cortexPath: string): Promise<{
 
   if (hasLlmApi) {
     printSection("LLM-Powered Memory Quality (Optional)");
-    log("Cortex can use an LLM to catch near-duplicate or conflicting findings.");
-    log("  Requires: CORTEX_LLM_ENDPOINT or ANTHROPIC_API_KEY/OPENAI_API_KEY set");
+    log("Phren can use an LLM to catch near-duplicate or conflicting findings.");
+    log("  Requires: PHREN_LLM_ENDPOINT or ANTHROPIC_API_KEY/OPENAI_API_KEY set");
 
     log("");
     log("Semantic dedup: before saving a finding, ask the LLM whether it means the");
@@ -785,17 +777,18 @@ async function runWalkthrough(cortexPath: string): Promise<{
     semanticConflictEnabled = await prompts.confirm("Enable LLM-powered conflict detection?", false);
 
     if (semanticDedupEnabled || semanticConflictEnabled) {
-      const currentModel = process.env.CORTEX_LLM_MODEL || "gpt-4o-mini / claude-haiku-4-5-20251001 (default)";
+      const currentModel = (process.env.PHREN_LLM_MODEL) || "gpt-4o-mini / claude-haiku-4-5-20251001 (default)";
       log("");
       log("  Cost note: each semantic check is ~80 input + ~5 output tokens, cached 24h.");
       log(`  Current model: ${currentModel}`);
-      const isExpensive = process.env.CORTEX_LLM_MODEL && /opus|sonnet|gpt-4(?!o-mini)/i.test(process.env.CORTEX_LLM_MODEL);
+      const llmModel = (process.env.PHREN_LLM_MODEL);
+      const isExpensive = llmModel && /opus|sonnet|gpt-4(?!o-mini)/i.test(llmModel);
       if (isExpensive) {
-        log(style.warning(`  Warning: ${process.env.CORTEX_LLM_MODEL} is 20x more expensive than Haiku for yes/no checks.`));
-        log("  Consider: CORTEX_LLM_MODEL=claude-haiku-4-5-20251001");
+        log(style.warning(`  Warning: ${llmModel} is 20x more expensive than Haiku for yes/no checks.`));
+        log("  Consider: PHREN_LLM_MODEL=claude-haiku-4-5-20251001");
       } else {
         log("  With Haiku: fractions of a cent/session. With Opus: ~$0.20/session for heavy use.");
-        log("  Tip: set CORTEX_LLM_MODEL=claude-haiku-4-5-20251001 to keep costs low.");
+        log("  Tip: set PHREN_LLM_MODEL=claude-haiku-4-5-20251001 to keep costs low.");
       }
     }
   }
@@ -806,7 +799,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   log("  conservative — decisions and pitfalls only");
   log("  balanced     — non-obvious patterns, decisions, pitfalls, bugs (recommended)");
   log("  aggressive   — everything worth remembering, err on the side of capturing");
-  log("  Change later: npx cortex config finding-sensitivity <level>");
+  log("  Change later: npx phren config finding-sensitivity <level>");
   const findingSensitivity = await prompts.select<"minimal" | "conservative" | "balanced" | "aggressive">(
     "Finding sensitivity",
     [
@@ -819,16 +812,16 @@ async function runWalkthrough(cortexPath: string): Promise<{
   );
 
   printSection("GitHub Sync");
-  log(`Cortex stores memory as plain Markdown files in a git repo (${storagePath}).`);
+  log(`Phren stores memory as plain Markdown files in a git repo (${storagePath}).`);
   log("Push it to a private GitHub repo to sync memory across machines.");
   log("  Hooks will auto-commit + push after every session and pull on start.");
-  log("  Skip this if you just want to try cortex locally first.");
+  log("  Skip this if you just want to try phren locally first.");
   const githubAnswer = await prompts.input("GitHub username (leave blank to skip)");
   const githubUsername = githubAnswer || undefined;
   let githubRepo: string | undefined;
   if (githubUsername) {
-    const repoAnswer = await prompts.input("Repo name", "my-cortex");
-    githubRepo = repoAnswer || "my-cortex";
+    const repoAnswer = await prompts.input("Repo name", "my-phren");
+    githubRepo = repoAnswer || "my-phren";
   }
 
   let bootstrapCurrentProject = false;
@@ -838,10 +831,10 @@ async function runWalkthrough(cortexPath: string): Promise<{
     const detectedProjectName = path.basename(detectedProject);
     printSection("Current Project");
     log(`Detected project: ${detectedProjectName}`);
-    bootstrapCurrentProject = await prompts.confirm("Add this project to cortex now?", true);
+    bootstrapCurrentProject = await prompts.confirm("Add this project to phren now?", true);
     if (!bootstrapCurrentProject) {
       bootstrapCurrentProject = false;
-      log(style.warning(`  Skipped. Later: cd ${detectedProject} && npx cortex add`));
+      log(style.warning(`  Skipped. Later: cd ${detectedProject} && npx phren add`));
     } else {
       bootstrapOwnership = await prompts.select<ProjectOwnershipMode>(
         "Ownership for detected project",
@@ -868,14 +861,13 @@ async function runWalkthrough(cortexPath: string): Promise<{
     `Findings capture level: ${findingsProactivity}`,
     `Task mode: ${taskMode}`,
     `Task proactivity: ${taskProactivity}`,
-    `Maintainer approval for risky writes: ${requireMaintainerApproval ? "enabled" : "disabled"}`,
     `Low-confidence threshold: ${lowConfidenceThreshold}`,
     `Risky sections: ${riskySections.join(", ")}`,
     `Finding sensitivity: ${findingSensitivity}`,
     `Semantic search: ${ollamaEnabled ? "enabled" : "disabled"}`,
     `Semantic dedup: ${semanticDedupEnabled ? "enabled" : "disabled"}`,
     `Semantic conflict detection: ${semanticConflictEnabled ? "enabled" : "disabled"}`,
-    `GitHub sync: ${githubUsername ? `${githubUsername}/${githubRepo ?? "my-cortex"}` : "skipped"}`,
+    `GitHub sync: ${githubUsername ? `${githubUsername}/${githubRepo ?? "my-phren"}` : "skipped"}`,
     `Add detected project: ${bootstrapCurrentProject ? `yes (${bootstrapOwnership ?? projectOwnershipDefault})` : "no"}`,
   ];
   if (inferredScaffold) {
@@ -894,7 +886,6 @@ async function runWalkthrough(cortexPath: string): Promise<{
     projectOwnershipDefault,
     findingsProactivity,
     taskProactivity,
-    requireMaintainerApproval,
     lowConfidenceThreshold,
     riskySections,
     taskMode,
@@ -916,7 +907,7 @@ async function runWalkthrough(cortexPath: string): Promise<{
   };
 }
 
-export async function warmSemanticSearch(cortexPath: string, profile?: string): Promise<string> {
+export async function warmSemanticSearch(phrenPath: string, profile?: string): Promise<string> {
   const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("./shared-ollama.js");
   const ollamaUrl = getOllamaUrl();
   if (!ollamaUrl) return "Semantic search: disabled.";
@@ -934,11 +925,11 @@ export async function warmSemanticSearch(cortexPath: string, profile?: string): 
   const { backgroundEmbedMissingDocs } = await import("./startup-embedding.js");
   const { getPersistentVectorIndex } = await import("./shared-vector-index.js");
 
-  const db = await buildIndex(cortexPath, profile);
+  const db = await buildIndex(phrenPath, profile);
   try {
-    const cache = getEmbeddingCache(cortexPath);
+    const cache = getEmbeddingCache(phrenPath);
     await cache.load().catch(() => {});
-    const allPaths = listIndexedDocumentPaths(cortexPath, profile);
+    const allPaths = listIndexedDocumentPaths(phrenPath, profile);
     const before = cache.coverage(allPaths);
     if (before.missing > 0) {
       await backgroundEmbedMissingDocs(db, cache);
@@ -946,7 +937,7 @@ export async function warmSemanticSearch(cortexPath: string, profile?: string): 
     await cache.load().catch(() => {});
     const after = cache.coverage(allPaths);
     if (cache.size() > 0) {
-      getPersistentVectorIndex(cortexPath).ensure(cache.getAllEntries());
+      getPersistentVectorIndex(phrenPath).ensure(cache.getAllEntries());
     }
     if (after.total === 0) {
       return `Semantic search ready (${model}), but there are no indexed docs yet.`;
@@ -960,9 +951,9 @@ export async function warmSemanticSearch(cortexPath: string, profile?: string): 
   }
 }
 
-function applyOnboardingPreferences(cortexPath: string, opts: InitOptions): void {
+function applyOnboardingPreferences(phrenPath: string, opts: InitOptions): void {
   if (opts.projectOwnershipDefault) {
-    writeInstallPreferences(cortexPath, { projectOwnershipDefault: opts.projectOwnershipDefault });
+    writeInstallPreferences(phrenPath, { projectOwnershipDefault: opts.projectOwnershipDefault });
   }
   const runtimePatch: {
     proactivityFindings?: ProactivityLevel;
@@ -971,7 +962,7 @@ function applyOnboardingPreferences(cortexPath: string, opts: InitOptions): void
   if (opts.findingsProactivity) runtimePatch.proactivityFindings = opts.findingsProactivity;
   if (opts.taskProactivity) runtimePatch.proactivityTask = opts.taskProactivity;
   if (Object.keys(runtimePatch).length > 0) {
-    writeInstallPreferences(cortexPath, runtimePatch);
+    writeInstallPreferences(phrenPath, runtimePatch);
   }
   const governancePatch: {
     proactivityFindings?: ProactivityLevel;
@@ -980,42 +971,40 @@ function applyOnboardingPreferences(cortexPath: string, opts: InitOptions): void
   if (opts.findingsProactivity) governancePatch.proactivityFindings = opts.findingsProactivity;
   if (opts.taskProactivity) governancePatch.proactivityTask = opts.taskProactivity;
   if (Object.keys(governancePatch).length > 0) {
-    writeGovernanceInstallPreferences(cortexPath, governancePatch);
+    writeGovernanceInstallPreferences(phrenPath, governancePatch);
   }
   const workflowPatch: {
-    requireMaintainerApproval?: boolean;
     lowConfidenceThreshold?: number;
     riskySections?: WorkflowRiskSection[];
     taskMode?: "off" | "manual" | "suggest" | "auto";
     findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
   } = {};
-  if (typeof opts.requireMaintainerApproval === "boolean") workflowPatch.requireMaintainerApproval = opts.requireMaintainerApproval;
   if (typeof opts.lowConfidenceThreshold === "number") workflowPatch.lowConfidenceThreshold = opts.lowConfidenceThreshold;
   if (Array.isArray(opts.riskySections)) workflowPatch.riskySections = opts.riskySections;
   if (opts.taskMode) workflowPatch.taskMode = opts.taskMode;
   if (opts.findingSensitivity) workflowPatch.findingSensitivity = opts.findingSensitivity;
   if (Object.keys(workflowPatch).length > 0) {
-    updateWorkflowPolicy(cortexPath, workflowPatch);
+    updateWorkflowPolicy(phrenPath, workflowPatch);
   }
 }
 
-function writeWalkthroughEnvDefaults(cortexPath: string, opts: InitOptions): string[] {
-  const envFile = path.join(cortexPath, ".env");
-  let envContent = fs.existsSync(envFile) ? fs.readFileSync(envFile, "utf8") : "# cortex feature flags — generated by init\n";
+function writeWalkthroughEnvDefaults(phrenPath: string, opts: InitOptions): string[] {
+  const envFile = path.join(phrenPath, ".env");
+  let envContent = fs.existsSync(envFile) ? fs.readFileSync(envFile, "utf8") : "# phren feature flags — generated by init\n";
   const envFlags: { flag: string; label: string }[] = [];
   const autoCaptureChoice = opts._walkthroughAutoCapture;
-  const hasAutoCaptureFlag = /^\s*CORTEX_FEATURE_AUTO_CAPTURE=.*$/m.test(envContent);
+  const hasAutoCaptureFlag = /^\s*PHREN_FEATURE_AUTO_CAPTURE=.*$/m.test(envContent);
   if (typeof autoCaptureChoice === "boolean") {
     envFlags.push({
-      flag: `CORTEX_FEATURE_AUTO_CAPTURE=${autoCaptureChoice ? "1" : "0"}`,
+      flag: `PHREN_FEATURE_AUTO_CAPTURE=${autoCaptureChoice ? "1" : "0"}`,
       label: `Auto-capture ${autoCaptureChoice ? "enabled" : "disabled"}`,
     });
   } else if (autoCaptureChoice !== false && !hasAutoCaptureFlag) {
     // Default to enabled on fresh installs and non-walkthrough init.
-    envFlags.push({ flag: "CORTEX_FEATURE_AUTO_CAPTURE=1", label: "Auto-capture enabled" });
+    envFlags.push({ flag: "PHREN_FEATURE_AUTO_CAPTURE=1", label: "Auto-capture enabled" });
   }
-  if (opts._walkthroughSemanticDedup) envFlags.push({ flag: "CORTEX_FEATURE_SEMANTIC_DEDUP=1", label: "Semantic dedup" });
-  if (opts._walkthroughSemanticConflict) envFlags.push({ flag: "CORTEX_FEATURE_SEMANTIC_CONFLICT=1", label: "Conflict detection" });
+  if (opts._walkthroughSemanticDedup) envFlags.push({ flag: "PHREN_FEATURE_SEMANTIC_DEDUP=1", label: "Semantic dedup" });
+  if (opts._walkthroughSemanticConflict) envFlags.push({ flag: "PHREN_FEATURE_SEMANTIC_CONFLICT=1", label: "Conflict detection" });
 
   if (envFlags.length === 0) return [];
   let changed = false;
@@ -1049,7 +1038,7 @@ function writeWalkthroughEnvDefaults(cortexPath: string, opts: InitOptions): str
 
 function collectRepairedAssetLabels(repaired: ReturnType<typeof repairPreexistingInstall>): string[] {
   const repairedAssets: string[] = [];
-  if (repaired.createdContextFile) repairedAssets.push("~/.cortex-context.md");
+  if (repaired.createdContextFile) repairedAssets.push("~/.phren-context.md");
   if (repaired.createdRootMemory) repairedAssets.push("generated MEMORY.md");
   repairedAssets.push(...repaired.createdGlobalAssets);
   repairedAssets.push(...repaired.createdRuntimeAssets);
@@ -1058,19 +1047,19 @@ function collectRepairedAssetLabels(repaired: ReturnType<typeof repairPreexistin
   return repairedAssets;
 }
 
-function applyProjectStorageBindings(repoRoot: string, cortexPath: string): string[] {
+function applyProjectStorageBindings(repoRoot: string, phrenPath: string): string[] {
   const updates: string[] = [];
-  if (ensureGitignoreEntry(repoRoot, ".cortex/")) {
-    updates.push(`${path.join(repoRoot, ".gitignore")} (.cortex/)`);
+  if (ensureGitignoreEntry(repoRoot, ".phren/")) {
+    updates.push(`${path.join(repoRoot, ".gitignore")} (.phren/)`);
   }
-  if (upsertProjectEnvVar(repoRoot, "CORTEX_PATH", cortexPath)) {
-    updates.push(`${path.join(repoRoot, ".env")} (CORTEX_PATH=${cortexPath})`);
+  if (upsertProjectEnvVar(repoRoot, "PHREN_PATH", phrenPath)) {
+    updates.push(`${path.join(repoRoot, ".env")} (PHREN_PATH=${phrenPath})`);
   }
   return updates;
 }
 
 async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
-  const detectedRoot = detectProjectDir(process.cwd(), path.join(process.cwd(), ".cortex")) || process.cwd();
+  const detectedRoot = detectProjectDir(process.cwd(), path.join(process.cwd(), ".phren")) || process.cwd();
   const hasWorkspaceMarker =
     fs.existsSync(path.join(detectedRoot, ".git")) ||
     fs.existsSync(path.join(detectedRoot, "CLAUDE.md")) ||
@@ -1081,14 +1070,14 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
   }
 
   const workspaceRoot = path.resolve(detectedRoot);
-  const cortexPath = path.join(workspaceRoot, ".cortex");
-  const existingManifest = readRootManifest(cortexPath);
+  const phrenPath = path.join(workspaceRoot, ".phren");
+  const existingManifest = readRootManifest(phrenPath);
   if (existingManifest && existingManifest.installMode !== "project-local") {
-    throw new Error(`Refusing to reuse non-local cortex root at ${cortexPath}`);
+    throw new Error(`Refusing to reuse non-local phren root at ${phrenPath}`);
   }
 
   const ownershipDefault = opts.projectOwnershipDefault
-    ?? (existingManifest ? getProjectOwnershipDefault(cortexPath) : "detached");
+    ?? (existingManifest ? getProjectOwnershipDefault(phrenPath) : "detached");
   if (!existingManifest && !opts.projectOwnershipDefault) {
     opts.projectOwnershipDefault = ownershipDefault;
   }
@@ -1099,7 +1088,7 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
     log("\nInit dry run. No files will be written.\n");
     log(`Mode: project-local`);
     log(`Workspace root: ${workspaceRoot}`);
-    log(`Cortex root: ${cortexPath}`);
+    log(`Phren root: ${phrenPath}`);
     log(`Project: ${projectName}`);
     log(`VS Code workspace MCP: ${mcpEnabled ? "on" : "off"}`);
     log(`Hooks: unsupported in project-local mode`);
@@ -1107,22 +1096,22 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
     return;
   }
 
-  fs.mkdirSync(cortexPath, { recursive: true });
-  writeRootManifest(cortexPath, {
+  fs.mkdirSync(phrenPath, { recursive: true });
+  writeRootManifest(phrenPath, {
     version: 1,
     installMode: "project-local",
     syncMode: "workspace-git",
     workspaceRoot,
     primaryProject: projectName,
   });
-  ensureGovernanceFiles(cortexPath);
-  repairPreexistingInstall(cortexPath);
-  fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
-  fs.mkdirSync(path.join(cortexPath, ".runtime"), { recursive: true });
-  fs.mkdirSync(path.join(cortexPath, ".sessions"), { recursive: true });
-  if (!fs.existsSync(path.join(cortexPath, ".gitignore"))) {
+  ensureGovernanceFiles(phrenPath);
+  repairPreexistingInstall(phrenPath);
+  fs.mkdirSync(path.join(phrenPath, "global", "skills"), { recursive: true });
+  fs.mkdirSync(path.join(phrenPath, ".runtime"), { recursive: true });
+  fs.mkdirSync(path.join(phrenPath, ".sessions"), { recursive: true });
+  if (!fs.existsSync(path.join(phrenPath, ".gitignore"))) {
     atomicWriteText(
-      path.join(cortexPath, ".gitignore"),
+      path.join(phrenPath, ".gitignore"),
       [
         ".runtime/",
         ".sessions/",
@@ -1132,16 +1121,16 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
       ].join("\n")
     );
   }
-  if (!fs.existsSync(path.join(cortexPath, "global", "CLAUDE.md"))) {
+  if (!fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))) {
     atomicWriteText(
-      path.join(cortexPath, "global", "CLAUDE.md"),
-      "# Global Context\n\nRepo-local Cortex instructions shared across this workspace.\n"
+      path.join(phrenPath, "global", "CLAUDE.md"),
+      "# Global Context\n\nRepo-local Phren instructions shared across this workspace.\n"
     );
   }
 
-  const created = bootstrapFromExisting(cortexPath, workspaceRoot, { ownership: ownershipDefault });
-  applyOnboardingPreferences(cortexPath, opts);
-  writeInstallPreferences(cortexPath, {
+  const created = bootstrapFromExisting(phrenPath, workspaceRoot, { ownership: ownershipDefault });
+  applyOnboardingPreferences(phrenPath, opts);
+  writeInstallPreferences(phrenPath, {
     mcpEnabled,
     hooksEnabled: false,
     skillsScope: opts.skillsScope ?? "global",
@@ -1149,13 +1138,13 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
   });
 
   try {
-    const vscodeResult = configureVSCode(cortexPath, { mcpEnabled, scope: "workspace" });
+    const vscodeResult = configureVSCode(phrenPath, { mcpEnabled, scope: "workspace" });
     logMcpTargetStatus("VS Code", vscodeResult, existingManifest ? "Updated" : "Configured");
   } catch (err: unknown) {
     debugLog(`configureVSCode(workspace) failed: ${errorMessage(err)}`);
   }
 
-  log(`\n${existingManifest ? "Updated" : "Created"} project-local cortex at ${cortexPath}`);
+  log(`\n${existingManifest ? "Updated" : "Created"} project-local phren at ${phrenPath}`);
   log(`  Workspace root: ${workspaceRoot}`);
   log(`  Project: ${created.project}`);
   log(`  Ownership: ${created.ownership}`);
@@ -1163,7 +1152,7 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
   log(`  Hooks: off (unsupported in project-local mode)`);
   log(`  VS Code MCP: ${mcpEnabled ? "workspace on" : "workspace off"}`);
 
-  const verify = runPostInitVerify(cortexPath);
+  const verify = runPostInitVerify(phrenPath);
   log(`\nVerifying setup...`);
   for (const check of verify.checks) {
     log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
@@ -1175,12 +1164,12 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
  * @param verb - label used in log messages, e.g. "Updated" or "Configured"
  */
 function configureMcpTargets(
-  cortexPath: string,
+  phrenPath: string,
   opts: { mcpEnabled: boolean; hooksEnabled: boolean },
   verb: "Configured" | "Updated",
 ): void {
   try {
-    const status = configureClaude(cortexPath, { mcpEnabled: opts.mcpEnabled, hooksEnabled: opts.hooksEnabled });
+    const status = configureClaude(phrenPath, { mcpEnabled: opts.mcpEnabled, hooksEnabled: opts.hooksEnabled });
     if (status === "disabled" || status === "already_disabled") {
       log(`  ${verb} Claude Code hooks (MCP disabled)`);
     } else {
@@ -1191,26 +1180,26 @@ function configureMcpTargets(
   }
 
   try {
-    const vscodeResult = configureVSCode(cortexPath, { mcpEnabled: opts.mcpEnabled });
+    const vscodeResult = configureVSCode(phrenPath, { mcpEnabled: opts.mcpEnabled });
     logMcpTargetStatus("VS Code", vscodeResult, verb);
   } catch (err: unknown) {
     debugLog(`configureVSCode failed: ${errorMessage(err)}`);
   }
 
   try {
-    logMcpTargetStatus("Cursor", configureCursorMcp(cortexPath, { mcpEnabled: opts.mcpEnabled }), verb);
+    logMcpTargetStatus("Cursor", configureCursorMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }), verb);
   } catch (err: unknown) {
     debugLog(`configureCursorMcp failed: ${errorMessage(err)}`);
   }
 
   try {
-    logMcpTargetStatus("Copilot CLI", configureCopilotMcp(cortexPath, { mcpEnabled: opts.mcpEnabled }), verb);
+    logMcpTargetStatus("Copilot CLI", configureCopilotMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }), verb);
   } catch (err: unknown) {
     debugLog(`configureCopilotMcp failed: ${errorMessage(err)}`);
   }
 
   try {
-    logMcpTargetStatus("Codex", configureCodexMcp(cortexPath, { mcpEnabled: opts.mcpEnabled }), verb);
+    logMcpTargetStatus("Codex", configureCodexMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }), verb);
   } catch (err: unknown) {
     debugLog(`configureCodexMcp failed: ${errorMessage(err)}`);
   }
@@ -1220,14 +1209,14 @@ function configureMcpTargets(
  * Configure hooks if enabled, or log a disabled message.
  * @param verb - label used in log messages, e.g. "Updated" or "Configured"
  */
-function configureHooksIfEnabled(cortexPath: string, hooksEnabled: boolean, verb: string): void {
+function configureHooksIfEnabled(phrenPath: string, hooksEnabled: boolean, verb: string): void {
   if (hooksEnabled) {
     try {
-      const hooked = configureAllHooks(cortexPath, { allTools: true });
+      const hooked = configureAllHooks(phrenPath, { allTools: true });
       if (hooked.length) log(`  ${verb} hooks: ${hooked.join(", ")}`);
     } catch (err: unknown) { debugLog(`configureAllHooks failed: ${errorMessage(err)}`); }
   } else {
-    log(`  Hooks are disabled by preference (run: npx cortex hooks-mode on)`);
+    log(`  Hooks are disabled by preference (run: npx phren hooks-mode on)`);
   }
 }
 
@@ -1236,18 +1225,18 @@ export async function runInit(opts: InitOptions = {}) {
     await runProjectLocalInit(opts);
     return;
   }
-  let cortexPath = resolveInitCortexPath(opts);
+  let phrenPath = resolveInitPhrenPath(opts);
   const dryRun = Boolean(opts.dryRun);
-  let hasExistingInstall = hasInstallMarkers(cortexPath);
+  let hasExistingInstall = hasInstallMarkers(phrenPath);
 
   // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
   if (!hasExistingInstall && !dryRun && !opts.yes && process.stdin.isTTY && process.stdout.isTTY) {
-    const answers = await runWalkthrough(cortexPath);
+    const answers = await runWalkthrough(phrenPath);
     opts._walkthroughStorageChoice = answers.storageChoice;
     opts._walkthroughStoragePath = answers.storagePath;
     opts._walkthroughStorageRepoRoot = answers.storageRepoRoot;
-    cortexPath = resolveInitCortexPath(opts);
-    hasExistingInstall = hasInstallMarkers(cortexPath);
+    phrenPath = resolveInitPhrenPath(opts);
+    hasExistingInstall = hasInstallMarkers(phrenPath);
     opts.machine = opts.machine || answers.machine;
     opts.profile = opts.profile || answers.profile;
     opts.mcp = opts.mcp || answers.mcp;
@@ -1255,7 +1244,6 @@ export async function runInit(opts: InitOptions = {}) {
     opts.projectOwnershipDefault = opts.projectOwnershipDefault || answers.projectOwnershipDefault;
     opts.findingsProactivity = opts.findingsProactivity || answers.findingsProactivity;
     opts.taskProactivity = opts.taskProactivity || answers.taskProactivity;
-    if (typeof opts.requireMaintainerApproval !== "boolean") opts.requireMaintainerApproval = answers.requireMaintainerApproval;
     if (typeof opts.lowConfidenceThreshold !== "number") opts.lowConfidenceThreshold = answers.lowConfidenceThreshold;
     if (!Array.isArray(opts.riskySections)) opts.riskySections = answers.riskySections;
     opts.taskMode = opts.taskMode || answers.taskMode;
@@ -1271,7 +1259,7 @@ export async function runInit(opts: InitOptions = {}) {
     }
     if (!answers.ollamaEnabled) {
       // User explicitly declined Ollama — note it but don't set env (they can set it themselves)
-      process.env._CORTEX_WALKTHROUGH_OLLAMA_SKIP = "1";
+      process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP = "1";
     } else {
       opts._walkthroughSemanticSearch = true;
     }
@@ -1292,13 +1280,13 @@ export async function runInit(opts: InitOptions = {}) {
 
   // If the walkthrough provided a clone URL, clone it and treat as existing install
   if (opts._walkthroughCloneUrl) {
-    log(`\nCloning existing cortex from ${opts._walkthroughCloneUrl}...`);
+    log(`\nCloning existing phren from ${opts._walkthroughCloneUrl}...`);
     try {
-      execFileSync("git", ["clone", opts._walkthroughCloneUrl, cortexPath], {
+      execFileSync("git", ["clone", opts._walkthroughCloneUrl, phrenPath], {
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 60_000,
       });
-      log(`  Cloned to ${cortexPath}`);
+      log(`  Cloned to ${phrenPath}`);
       // Re-check: the cloned repo should now be treated as an existing install
       hasExistingInstall = true;
     } catch (e: unknown) {
@@ -1307,19 +1295,19 @@ export async function runInit(opts: InitOptions = {}) {
     }
   }
 
-  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
-  const hooksEnabled = opts.hooks ? opts.hooks === "on" : getHooksEnabledPreference(cortexPath);
+  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(phrenPath);
+  const hooksEnabled = opts.hooks ? opts.hooks === "on" : getHooksEnabledPreference(phrenPath);
   const skillsScope: SkillsScope = opts.skillsScope ?? "global";
   const storageChoice = opts._walkthroughStorageChoice;
   const storageRepoRoot = opts._walkthroughStorageRepoRoot;
   const ownershipDefault = opts.projectOwnershipDefault
-    ?? (hasExistingInstall ? getProjectOwnershipDefault(cortexPath) : "detached");
+    ?? (hasExistingInstall ? getProjectOwnershipDefault(phrenPath) : "detached");
   if (!hasExistingInstall && !opts.projectOwnershipDefault) {
     opts.projectOwnershipDefault = ownershipDefault;
   }
   const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
   const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
-  const pendingBootstrap = getPendingBootstrapTarget(cortexPath, opts);
+  const pendingBootstrap = getPendingBootstrapTarget(phrenPath, opts);
   let shouldBootstrapCurrentProject = opts._walkthroughBootstrapCurrentProject === true;
   let bootstrapOwnership = opts._walkthroughBootstrapOwnership ?? ownershipDefault;
 
@@ -1340,10 +1328,10 @@ export async function runInit(opts: InitOptions = {}) {
       log(style.header("Current Project"));
       log(style.header("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
       log(`Detected project: ${detectedProjectName}`);
-      shouldBootstrapCurrentProject = await prompts.confirm("Add this project to cortex now?", true);
+      shouldBootstrapCurrentProject = await prompts.confirm("Add this project to phren now?", true);
       if (!shouldBootstrapCurrentProject) {
         shouldBootstrapCurrentProject = false;
-        log(style.warning(`  Skipped. Later: cd ${pendingBootstrap.path} && npx cortex add`));
+        log(style.warning(`  Skipped. Later: cd ${pendingBootstrap.path} && npx phren add`));
       } else {
         bootstrapOwnership = await prompts.select<ProjectOwnershipMode>(
           "Ownership for detected project",
@@ -1362,14 +1350,14 @@ export async function runInit(opts: InitOptions = {}) {
   if (dryRun) {
     log("\nInit dry run. No files will be written.\n");
     if (storageChoice) {
-      log(`Storage location: ${storageChoice} (${cortexPath})`);
+      log(`Storage location: ${storageChoice} (${phrenPath})`);
       if (storageChoice === "project" && storageRepoRoot) {
-        log(`  Would update ${path.join(storageRepoRoot, ".gitignore")} with .cortex/`);
-        log(`  Would set CORTEX_PATH in ${path.join(storageRepoRoot, ".env")}`);
+        log(`  Would update ${path.join(storageRepoRoot, ".gitignore")} with .phren/`);
+        log(`  Would set PHREN_PATH in ${path.join(storageRepoRoot, ".env")}`);
       }
     }
     if (hasExistingInstall) {
-      log(`cortex install detected at ${cortexPath}`);
+      log(`phren install detected at ${phrenPath}`);
       log(`Would update configuration for the existing install:\n`);
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
@@ -1389,9 +1377,9 @@ export async function runInit(opts: InitOptions = {}) {
       return;
     }
 
-    log(`No existing cortex install found at ${cortexPath}`);
-    log(`Would create a new cortex install:\n`);
-    log(`  Copy starter files to ${cortexPath} (or create minimal structure)`);
+    log(`No existing phren install found at ${phrenPath}`);
+    log(`Would create a new phren install:\n`);
+    log(`  Copy starter files to ${phrenPath} (or create minimal structure)`);
     log(`  Update machines.yaml for machine "${opts.machine || getMachineName()}"`);
     log(`  Create/update config files`);
     log(`  MCP mode: ${mcpLabel}`);
@@ -1412,28 +1400,28 @@ export async function runInit(opts: InitOptions = {}) {
     if (!storageRepoRoot) {
       throw new Error("Per-project storage requires a detected repository root.");
     }
-    const storageChanges = applyProjectStorageBindings(storageRepoRoot, cortexPath);
+    const storageChanges = applyProjectStorageBindings(storageRepoRoot, phrenPath);
     for (const change of storageChanges) {
       log(`  Updated storage binding: ${change}`);
     }
   }
 
   if (hasExistingInstall) {
-      writeRootManifest(cortexPath, {
+      writeRootManifest(phrenPath, {
         version: 1,
         installMode: "shared",
         syncMode: "managed-git",
       });
-      ensureGovernanceFiles(cortexPath);
-      const repaired = repairPreexistingInstall(cortexPath);
-      applyOnboardingPreferences(cortexPath, opts);
-      const existingGitRepo = ensureLocalGitRepo(cortexPath);
-      log(`\ncortex already exists at ${cortexPath}`);
+      ensureGovernanceFiles(phrenPath);
+      const repaired = repairPreexistingInstall(phrenPath);
+      applyOnboardingPreferences(phrenPath, opts);
+      const existingGitRepo = ensureLocalGitRepo(phrenPath);
+      log(`\nphren already exists at ${phrenPath}`);
       log(`Updating configuration...\n`);
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
       log(`  Default project ownership: ${ownershipDefault}`);
-      log(`  Task mode: ${getWorkflowPolicy(cortexPath).taskMode}`);
+      log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
       log(`  Git repo: ${existingGitRepo.detail}`);
 
       // Confirmation prompt before writing config
@@ -1452,24 +1440,24 @@ export async function runInit(opts: InitOptions = {}) {
       }
 
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
-      configureMcpTargets(cortexPath, { mcpEnabled, hooksEnabled }, "Updated");
-      configureHooksIfEnabled(cortexPath, hooksEnabled, "Updated");
+      configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled }, "Updated");
+      configureHooksIfEnabled(phrenPath, hooksEnabled, "Updated");
 
-      const prefs = readInstallPreferences(cortexPath);
+      const prefs = readInstallPreferences(phrenPath);
       const previousVersion = prefs.installedVersion;
       if (isVersionNewer(VERSION, previousVersion)) {
         log(`\n  Starter template update available: v${previousVersion} -> v${VERSION}`);
-        log(`  Run \`npx cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+        log(`  Run \`npx phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
       }
       if (opts.applyStarterUpdate) {
-        const updated = applyStarterTemplateUpdates(cortexPath);
+        const updated = applyStarterTemplateUpdates(phrenPath);
         if (updated.length) {
           log(`  Applied starter template updates (${updated.length} file${updated.length === 1 ? "" : "s"}).`);
         } else {
           log(`  No starter template updates were applied (starter files not found).`);
         }
       }
-      writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION });
+      writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION });
       if (repaired.removedLegacyProjects > 0) {
         log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);
       }
@@ -1480,14 +1468,14 @@ export async function runInit(opts: InitOptions = {}) {
 
       // Post-update verification
       log(`\nVerifying setup...`);
-      const verify = runPostInitVerify(cortexPath);
+      const verify = runPostInitVerify(phrenPath);
       for (const check of verify.checks) {
         log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
       }
 
       if (pendingBootstrap && shouldBootstrapCurrentProject) {
         try {
-          const created = bootstrapFromExisting(cortexPath, pendingBootstrap.path, {
+          const created = bootstrapFromExisting(phrenPath, pendingBootstrap.path, {
             profile: opts.profile,
             ownership: bootstrapOwnership,
           });
@@ -1497,22 +1485,22 @@ export async function runInit(opts: InitOptions = {}) {
         }
       }
 
-      for (const envLabel of writeWalkthroughEnvDefaults(cortexPath, opts)) {
+      for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts)) {
         log(`  ${envLabel}`);
       }
 
-      log(`\ncortex updated successfully`);
+      log(`\n\x1b[95m◆\x1b[0m phren updated successfully`);
       log(`\nNext steps:`);
-      log(`  1. Start a new Claude session in your project directory — cortex injects context automatically`);
-      log(`  2. Run \`npx cortex doctor\` to verify everything is wired correctly`);
-      log(`  3. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.tasks\``);
-      log(`  4. After your first week, run cortex-discover to surface gaps in your project knowledge`);
-      log(`  5. After working across projects, run cortex-consolidate to find cross-project patterns`);
+      log(`  1. Start a new Claude session in your project directory — phren injects context automatically`);
+      log(`  2. Run \`npx phren doctor\` to verify everything is wired correctly`);
+      log(`  3. Change defaults anytime: \`npx phren config project-ownership\`, \`npx phren config workflow\`, \`npx phren config proactivity.findings\`, \`npx phren config proactivity.tasks\``);
+      log(`  4. After your first week, run phren-discover to surface gaps in your project knowledge`);
+      log(`  5. After working across projects, run phren-consolidate to find cross-project patterns`);
       log(``);
       return;
   }
 
-  log("\nSetting up cortex...\n");
+  log("\nSetting up phren...\n");
 
   const walkthroughProject = opts._walkthroughProject;
   if (walkthroughProject) {
@@ -1532,12 +1520,12 @@ export async function runInit(opts: InitOptions = {}) {
 
   // Determine if CWD is a project that should be bootstrapped instead of
   // creating a dummy "my-first-project".
-  const cwdProjectPath = !walkthroughProject ? detectProjectDir(process.cwd(), cortexPath) : null;
+  const cwdProjectPath = !walkthroughProject ? detectProjectDir(process.cwd(), phrenPath) : null;
   const useTemplateProject = Boolean(walkthroughProject) || Boolean(opts.template);
   const firstProjectName = walkthroughProject || "my-first-project";
   const firstProjectDomain: InitProjectDomain = opts._walkthroughDomain ?? "software";
 
-  // Copy bundled starter to ~/.cortex
+  // Copy bundled starter to ~/.phren
   function copyDir(src: string, dest: string) {
     fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
@@ -1555,15 +1543,15 @@ export async function runInit(opts: InitOptions = {}) {
   }
 
   if (fs.existsSync(STARTER_DIR)) {
-    copyDir(STARTER_DIR, cortexPath);
-    writeRootManifest(cortexPath, {
+    copyDir(STARTER_DIR, phrenPath);
+    writeRootManifest(phrenPath, {
       version: 1,
       installMode: "shared",
       syncMode: "managed-git",
     });
     if (useTemplateProject) {
       const targetProject = walkthroughProject || firstProjectName;
-      const projectDir = path.join(cortexPath, targetProject);
+      const projectDir = path.join(phrenPath, targetProject);
       const templateApplied = Boolean(opts.template && applyTemplate(projectDir, opts.template, targetProject));
       if (templateApplied) {
         log(`  Applied "${opts.template}" template to ${targetProject}`);
@@ -1571,7 +1559,7 @@ export async function runInit(opts: InitOptions = {}) {
       ensureProjectScaffold(projectDir, targetProject, firstProjectDomain, opts._walkthroughInferredScaffold);
 
       const targetProfile = opts.profile || "default";
-      const addToProfile = addProjectToProfile(cortexPath, targetProfile, targetProject);
+      const addToProfile = addProjectToProfile(phrenPath, targetProfile, targetProject);
       if (!addToProfile.ok) {
         debugLog(`fresh init addProjectToProfile failed for ${targetProfile}/${targetProject}: ${addToProfile.error}`);
       }
@@ -1581,22 +1569,22 @@ export async function runInit(opts: InitOptions = {}) {
       }
       log(`  Seeded project "${targetProject}"`);
     }
-    log(`  Created cortex v${VERSION} \u2192 ${cortexPath}`);
+    log(`  Created phren v${VERSION} \u2192 ${phrenPath}`);
   } else {
     log(`  Starter not found in package, creating minimal structure...`);
-    writeRootManifest(cortexPath, {
+    writeRootManifest(phrenPath, {
       version: 1,
       installMode: "shared",
       syncMode: "managed-git",
     });
-    fs.mkdirSync(path.join(cortexPath, "global", "skills"), { recursive: true });
-    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(phrenPath, "global", "skills"), { recursive: true });
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
     atomicWriteText(
-      path.join(cortexPath, "global", "CLAUDE.md"),
+      path.join(phrenPath, "global", "CLAUDE.md"),
       `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`
     );
     if (useTemplateProject) {
-      const projectDir = path.join(cortexPath, firstProjectName);
+      const projectDir = path.join(phrenPath, firstProjectName);
       if (opts.template && applyTemplate(projectDir, opts.template, firstProjectName)) {
         log(`  Applied "${opts.template}" template to ${firstProjectName}`);
       }
@@ -1607,7 +1595,7 @@ export async function runInit(opts: InitOptions = {}) {
       ? `  - global\n  - ${firstProjectName}`
       : `  - global`;
     atomicWriteText(
-      path.join(cortexPath, "profiles", `${profileName}.yaml`),
+      path.join(phrenPath, "profiles", `${profileName}.yaml`),
       `name: ${profileName}\ndescription: Default profile\nprojects:\n${profileProjects}\n`
     );
   }
@@ -1615,7 +1603,7 @@ export async function runInit(opts: InitOptions = {}) {
   // If CWD is a project dir, bootstrap it now when onboarding or defaults allow it.
   if (cwdProjectPath && shouldBootstrapCurrentProject) {
     try {
-      const created = bootstrapFromExisting(cortexPath, cwdProjectPath, {
+      const created = bootstrapFromExisting(phrenPath, cwdProjectPath, {
         profile: opts.profile,
         ownership: bootstrapOwnership,
       });
@@ -1630,16 +1618,16 @@ export async function runInit(opts: InitOptions = {}) {
   // Persist the local machine alias and map it to the selected profile.
   const effectiveMachine = opts.machine?.trim() || getMachineName();
   persistMachineName(effectiveMachine);
-  updateMachinesYaml(cortexPath, effectiveMachine, opts.profile);
-  ensureGovernanceFiles(cortexPath);
-  const repaired = repairPreexistingInstall(cortexPath);
-  applyOnboardingPreferences(cortexPath, opts);
-  const localGitRepo = ensureLocalGitRepo(cortexPath);
+  updateMachinesYaml(phrenPath, effectiveMachine, opts.profile);
+  ensureGovernanceFiles(phrenPath);
+  const repaired = repairPreexistingInstall(phrenPath);
+  applyOnboardingPreferences(phrenPath, opts);
+  const localGitRepo = ensureLocalGitRepo(phrenPath);
   log(`  Updated machines.yaml with machine "${effectiveMachine}"`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
   log(`  Default project ownership: ${ownershipDefault}`);
-  log(`  Task mode: ${getWorkflowPolicy(cortexPath).taskMode}`);
+  log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
   log(`  Git repo: ${localGitRepo.detail}`);
   if (repaired.removedLegacyProjects > 0) {
     log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);
@@ -1663,26 +1651,26 @@ export async function runInit(opts: InitOptions = {}) {
   }
 
   // Configure MCP for all detected AI coding tools and hooks
-  configureMcpTargets(cortexPath, { mcpEnabled, hooksEnabled }, "Configured");
-  configureHooksIfEnabled(cortexPath, hooksEnabled, "Configured");
+  configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled }, "Configured");
+  configureHooksIfEnabled(phrenPath, hooksEnabled, "Configured");
 
-  writeInstallPreferences(cortexPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION });
+  writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION });
 
   // Post-init verification
   log(`\nVerifying setup...`);
-  const verify = runPostInitVerify(cortexPath);
+  const verify = runPostInitVerify(phrenPath);
   for (const check of verify.checks) {
     log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
   }
 
   log(`\nWhat was created:`);
-  log(`  ${cortexPath}/global/CLAUDE.md    Global instructions loaded in every session`);
-  log(`  ${cortexPath}/global/skills/      Cortex slash commands`);
-  log(`  ${cortexPath}/profiles/           Machine-to-project mappings`);
-  log(`  ${cortexPath}/.governance/        Memory quality settings and config`);
+  log(`  ${phrenPath}/global/CLAUDE.md    Global instructions loaded in every session`);
+  log(`  ${phrenPath}/global/skills/      Phren slash commands`);
+  log(`  ${phrenPath}/profiles/           Machine-to-project mappings`);
+  log(`  ${phrenPath}/.governance/        Memory quality settings and config`);
 
   // Ollama status summary (skip if already covered in walkthrough)
-  const walkthroughCoveredOllama = Boolean(process.env._CORTEX_WALKTHROUGH_OLLAMA_SKIP) || (!hasExistingInstall && !opts.yes);
+  const walkthroughCoveredOllama = Boolean(process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP) || (!hasExistingInstall && !opts.yes);
   if (!walkthroughCoveredOllama) {
     try {
       const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared-ollama.js");
@@ -1699,42 +1687,42 @@ export async function runInit(opts: InitOptions = {}) {
         } else {
           log("\n  Tip: Install Ollama for semantic search (optional).");
           log("  https://ollama.com → then: ollama pull nomic-embed-text");
-          log("  (Set CORTEX_OLLAMA_URL=off to hide this message)");
+          log("  (Set PHREN_OLLAMA_URL=off to hide this message)");
         }
       }
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] init ollamaInstallHint: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaInstallHint: ${errorMessage(err)}\n`);
     }
   }
 
-  for (const envLabel of writeWalkthroughEnvDefaults(cortexPath, opts)) {
+  for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts)) {
     log(`  ${envLabel}`);
   }
 
   if (opts._walkthroughSemanticSearch) {
     log(`\nWarming semantic search...`);
     try {
-      log(`  ${await warmSemanticSearch(cortexPath, opts.profile)}`);
+      log(`  ${await warmSemanticSearch(phrenPath, opts.profile)}`);
     } catch (err: unknown) {
       log(`  Semantic search warmup failed: ${errorMessage(err)}`);
     }
   }
 
-  log(`\ncortex initialized`);
+  log(`\n\x1b[95m◆\x1b[0m phren initialized`);
   log(`\nNext steps:`);
   let step = 1;
-  log(`  ${step++}. Start a new Claude session in your project directory — cortex injects context automatically`);
-  log(`  ${step++}. Run \`npx cortex doctor\` to verify everything is wired correctly`);
-  log(`  ${step++}. Change defaults anytime: \`npx cortex config project-ownership\`, \`npx cortex config workflow\`, \`npx cortex config proactivity.findings\`, \`npx cortex config proactivity.tasks\``);
+  log(`  ${step++}. Start a new Claude session in your project directory — phren injects context automatically`);
+  log(`  ${step++}. Run \`npx phren doctor\` to verify everything is wired correctly`);
+  log(`  ${step++}. Change defaults anytime: \`npx phren config project-ownership\`, \`npx phren config workflow\`, \`npx phren config proactivity.findings\`, \`npx phren config proactivity.tasks\``);
 
   const gh = opts._walkthroughGithub;
   if (gh) {
     const remote = gh.username
       ? `git@github.com:${gh.username}/${gh.repo}.git`
       : `git@github.com:YOUR_USERNAME/${gh.repo}.git`;
-    log(`  ${step++}. Push your cortex to GitHub (private repo recommended):`);
-    log(`     cd ${cortexPath}`);
-    log(`     git add . && git commit -m "Initial cortex setup"`);
+    log(`  ${step++}. Push your phren to GitHub (private repo recommended):`);
+    log(`     cd ${phrenPath}`);
+    log(`     git add . && git commit -m "Initial phren setup"`);
     if (gh.username) {
       log(`     gh repo create ${gh.username}/${gh.repo} --private --source=. --push`);
       log(`     # or manually: git remote add origin ${remote} && git push -u origin main`);
@@ -1744,35 +1732,35 @@ export async function runInit(opts: InitOptions = {}) {
     }
   } else {
     log(`  ${step++}. Push to GitHub for cross-machine sync (private repo recommended):`);
-    log(`     cd ${cortexPath}`);
-    log(`     git add . && git commit -m "Initial cortex setup"`);
-    log(`     git remote add origin git@github.com:YOUR_USERNAME/my-cortex.git`);
+    log(`     cd ${phrenPath}`);
+    log(`     git add . && git commit -m "Initial phren setup"`);
+    log(`     git remote add origin git@github.com:YOUR_USERNAME/my-phren.git`);
     log(`     git push -u origin main`);
   }
 
-  log(`  ${step++}. Add more projects: cd ~/your-project && npx cortex add`);
+  log(`  ${step++}. Add more projects: cd ~/your-project && npx phren add`);
 
   if (!mcpEnabled) {
-    log(`  ${step++}. Turn MCP on: npx cortex mcp-mode on`);
+    log(`  ${step++}. Turn MCP on: npx phren mcp-mode on`);
   }
-  log(`  ${step++}. After your first week, run cortex-discover to surface gaps in your project knowledge`);
-  log(`  ${step++}. After working across projects, run cortex-consolidate to find cross-project patterns`);
-  log(`\n  Read ${cortexPath}/README.md for a guided tour of each file.`);
+  log(`  ${step++}. After your first week, run phren-discover to surface gaps in your project knowledge`);
+  log(`  ${step++}. After working across projects, run phren-consolidate to find cross-project patterns`);
+  log(`\n  Read ${phrenPath}/README.md for a guided tour of each file.`);
 
   log(``);
 }
 
 export async function runMcpMode(modeArg?: string) {
-  const cortexPath = findCortexPath() || process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
-  const manifest = readRootManifest(cortexPath);
+  const phrenPath = findPhrenPath() || (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
+  const manifest = readRootManifest(phrenPath);
   const normalizedArg = modeArg?.trim().toLowerCase();
   if (!normalizedArg || normalizedArg === "status") {
-    const current = getMcpEnabledPreference(cortexPath);
-    const hooks = getHooksEnabledPreference(cortexPath);
+    const current = getMcpEnabledPreference(phrenPath);
+    const hooks = getHooksEnabledPreference(phrenPath);
     log(`MCP mode: ${current ? "on (recommended)" : "off (hooks-only fallback)"}`);
     log(`Hooks mode: ${hooks ? "on (active)" : "off (disabled)"}`);
-    log(`Change mode: npx cortex mcp-mode on|off`);
-    log(`Hooks toggle: npx cortex hooks-mode on|off`);
+    log(`Change mode: npx phren mcp-mode on|off`);
+    log(`Hooks toggle: npx phren hooks-mode on|off`);
     return;
   }
   const mode = parseMcpMode(normalizedArg);
@@ -1782,8 +1770,8 @@ export async function runMcpMode(modeArg?: string) {
   const enabled = mode === "on";
 
   if (manifest?.installMode === "project-local") {
-    const vscodeStatus = configureVSCode(cortexPath, { mcpEnabled: enabled, scope: "workspace" });
-    setMcpEnabledPreference(cortexPath, enabled);
+    const vscodeStatus = configureVSCode(phrenPath, { mcpEnabled: enabled, scope: "workspace" });
+    setMcpEnabledPreference(phrenPath, enabled);
     log(`MCP mode set to ${mode}.`);
     log(`VS Code status: ${vscodeStatus}`);
     log(`Project-local mode only configures workspace VS Code MCP.`);
@@ -1795,14 +1783,14 @@ export async function runMcpMode(modeArg?: string) {
   let cursorStatus: ToolStatus = "no_cursor";
   let copilotStatus: ToolStatus = "no_copilot";
   let codexStatus: ToolStatus = "no_codex";
-  try { claudeStatus = configureClaude(cortexPath, { mcpEnabled: enabled }) ?? claudeStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureClaude failed: ${errorMessage(err)}`); }
-  try { vscodeStatus = configureVSCode(cortexPath, { mcpEnabled: enabled }) ?? vscodeStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureVSCode failed: ${errorMessage(err)}`); }
-  try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled: enabled }) ?? cursorStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCursorMcp failed: ${errorMessage(err)}`); }
-  try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled: enabled }) ?? copilotStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCopilotMcp failed: ${errorMessage(err)}`); }
-  try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled: enabled }) ?? codexStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCodexMcp failed: ${errorMessage(err)}`); }
+  try { claudeStatus = configureClaude(phrenPath, { mcpEnabled: enabled }) ?? claudeStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureClaude failed: ${errorMessage(err)}`); }
+  try { vscodeStatus = configureVSCode(phrenPath, { mcpEnabled: enabled }) ?? vscodeStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureVSCode failed: ${errorMessage(err)}`); }
+  try { cursorStatus = configureCursorMcp(phrenPath, { mcpEnabled: enabled }) ?? cursorStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCursorMcp failed: ${errorMessage(err)}`); }
+  try { copilotStatus = configureCopilotMcp(phrenPath, { mcpEnabled: enabled }) ?? copilotStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCopilotMcp failed: ${errorMessage(err)}`); }
+  try { codexStatus = configureCodexMcp(phrenPath, { mcpEnabled: enabled }) ?? codexStatus; } catch (err: unknown) { debugLog(`mcp-mode: configureCodexMcp failed: ${errorMessage(err)}`); }
 
   // Persist preference only after config writes have been attempted
-  setMcpEnabledPreference(cortexPath, enabled);
+  setMcpEnabledPreference(phrenPath, enabled);
 
   log(`MCP mode set to ${mode}.`);
   log(`Claude status: ${claudeStatus}`);
@@ -1814,13 +1802,13 @@ export async function runMcpMode(modeArg?: string) {
 }
 
 export async function runHooksMode(modeArg?: string) {
-  const cortexPath = findCortexPath() || process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
-  const manifest = readRootManifest(cortexPath);
+  const phrenPath = findPhrenPath() || (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
+  const manifest = readRootManifest(phrenPath);
   const normalizedArg = modeArg?.trim().toLowerCase();
   if (!normalizedArg || normalizedArg === "status") {
-    const current = getHooksEnabledPreference(cortexPath);
+    const current = getHooksEnabledPreference(phrenPath);
     log(`Hooks mode: ${current ? "on (active)" : "off (disabled)"}`);
-    log(`Change mode: npx cortex hooks-mode on|off`);
+    log(`Change mode: npx phren hooks-mode on|off`);
     return;
   }
   const mode = parseMcpMode(normalizedArg);
@@ -1836,15 +1824,15 @@ export async function runHooksMode(modeArg?: string) {
 
   let claudeStatus: ToolStatus = "no_settings";
   try {
-    claudeStatus = configureClaude(cortexPath, {
-      mcpEnabled: getMcpEnabledPreference(cortexPath),
+    claudeStatus = configureClaude(phrenPath, {
+      mcpEnabled: getMcpEnabledPreference(phrenPath),
       hooksEnabled: enabled,
     }) ?? claudeStatus;
   } catch (err: unknown) { debugLog(`hooks-mode: configureClaude failed: ${errorMessage(err)}`); }
 
   if (enabled) {
     try {
-      const hooked = configureAllHooks(cortexPath, { allTools: true });
+      const hooked = configureAllHooks(phrenPath, { allTools: true });
       if (hooked.length) log(`Updated hooks: ${hooked.join(", ")}`);
     } catch (err: unknown) { debugLog(`hooks-mode: configureAllHooks failed: ${errorMessage(err)}`); }
   } else {
@@ -1852,7 +1840,7 @@ export async function runHooksMode(modeArg?: string) {
   }
 
   // Persist preference only after config writes have been attempted
-  setHooksEnabledPreference(cortexPath, enabled);
+  setHooksEnabledPreference(phrenPath, enabled);
 
   log(`Hooks mode set to ${mode}.`);
   log(`Claude status: ${claudeStatus}`);
@@ -1860,26 +1848,26 @@ export async function runHooksMode(modeArg?: string) {
 }
 
 export async function runUninstall() {
-  const cortexPath = findCortexPath();
-  const manifest = cortexPath ? readRootManifest(cortexPath) : null;
-  if (manifest?.installMode === "project-local" && cortexPath) {
-    log("\nUninstalling project-local cortex...\n");
-    const workspaceRoot = manifest.workspaceRoot || path.dirname(cortexPath);
+  const phrenPath = findPhrenPath();
+  const manifest = phrenPath ? readRootManifest(phrenPath) : null;
+  if (manifest?.installMode === "project-local" && phrenPath) {
+    log("\nUninstalling project-local phren...\n");
+    const workspaceRoot = manifest.workspaceRoot || path.dirname(phrenPath);
     const workspaceMcp = path.join(workspaceRoot, ".vscode", "mcp.json");
     try {
       if (removeMcpServerAtPath(workspaceMcp)) {
-        log(`  Removed cortex from VS Code workspace MCP config (${workspaceMcp})`);
+        log(`  Removed phren from VS Code workspace MCP config (${workspaceMcp})`);
       }
     } catch (err: unknown) {
       debugLog(`uninstall local vscode cleanup failed: ${errorMessage(err)}`);
     }
-    fs.rmSync(cortexPath, { recursive: true, force: true });
-    log(`  Removed ${cortexPath}`);
-    log("\nProject-local cortex uninstalled.");
+    fs.rmSync(phrenPath, { recursive: true, force: true });
+    log(`  Removed ${phrenPath}`);
+    log("\nProject-local phren uninstalled.");
     return;
   }
 
-  log("\nUninstalling cortex...\n");
+  log("\nUninstalling phren...\n");
 
   const home = homeDir();
   const machineFile = machineFilePath();
@@ -1890,7 +1878,7 @@ export async function runUninstall() {
   if (fs.existsSync(claudeJsonPath)) {
     try {
       if (removeMcpServerAtPath(claudeJsonPath)) {
-        log(`  Removed cortex MCP server from ~/.claude.json`);
+        log(`  Removed phren MCP server from ~/.claude.json`);
       }
     } catch (e) {
       log(`  Warning: could not update ~/.claude.json (${e})`);
@@ -1903,23 +1891,23 @@ export async function runUninstall() {
       patchJsonFile(settingsPath, (data) => {
         const hooksMap = isRecord(data.hooks) ? data.hooks as HookMap : (data.hooks = {} as HookMap);
         // Remove MCP server
-        if (data.mcpServers?.cortex) {
-          delete data.mcpServers.cortex;
-          log(`  Removed cortex MCP server from Claude Code settings`);
+        if (data.mcpServers?.phren) {
+          delete data.mcpServers.phren;
+          log(`  Removed phren MCP server from Claude Code settings`);
         }
 
-        // Remove hooks containing cortex references
+        // Remove hooks containing phren references
         for (const hookEvent of ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const) {
           const hooks = hooksMap[hookEvent] as HookEntry[] | undefined;
           if (!Array.isArray(hooks)) continue;
           const before = hooks.length;
           hooksMap[hookEvent] = hooks.filter(
             (h: HookEntry) => !h.hooks?.some(
-              (hook) => typeof hook.command === "string" && isCortexCommand(hook.command)
+              (hook) => typeof hook.command === "string" && isPhrenCommand(hook.command)
             )
           );
           const removed = before - (hooksMap[hookEvent] as HookEntry[]).length;
-          if (removed > 0) log(`  Removed ${removed} cortex hook(s) from ${hookEvent}`);
+          if (removed > 0) log(`  Removed ${removed} phren hook(s) from ${hookEvent}`);
         }
       });
     } catch (e) {
@@ -1934,7 +1922,7 @@ export async function runUninstall() {
   for (const mcpFile of vsCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
-        log(`  Removed cortex from VS Code MCP config (${mcpFile})`);
+        log(`  Removed phren from VS Code MCP config (${mcpFile})`);
       }
     } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${errorMessage(err)}`); }
   }
@@ -1944,7 +1932,7 @@ export async function runUninstall() {
   for (const mcpFile of cursorCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
-        log(`  Removed cortex from Cursor MCP config (${mcpFile})`);
+        log(`  Removed phren from Cursor MCP config (${mcpFile})`);
       }
     } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${errorMessage(err)}`); }
   }
@@ -1954,7 +1942,7 @@ export async function runUninstall() {
   for (const mcpFile of copilotCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
-        log(`  Removed cortex from Copilot CLI MCP config (${mcpFile})`);
+        log(`  Removed phren from Copilot CLI MCP config (${mcpFile})`);
       }
     } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${errorMessage(err)}`); }
   }
@@ -1963,21 +1951,21 @@ export async function runUninstall() {
   const codexToml = path.join(home, ".codex", "config.toml");
   try {
     if (removeTomlMcpServer(codexToml)) {
-      log(`  Removed cortex from Codex MCP config (${codexToml})`);
+      log(`  Removed phren from Codex MCP config (${codexToml})`);
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${codexToml}: ${errorMessage(err)}`); }
 
-  const codexCandidates = codexJsonCandidates(process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH);
+  const codexCandidates = codexJsonCandidates((process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
   for (const mcpFile of codexCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
-        log(`  Removed cortex from Codex MCP config (${mcpFile})`);
+        log(`  Removed phren from Codex MCP config (${mcpFile})`);
       }
     } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${errorMessage(err)}`); }
   }
 
   // Remove Copilot hooks file (written by configureAllHooks)
-  const copilotHooksFile = hookConfigPath("copilot", process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH);
+  const copilotHooksFile = hookConfigPath("copilot", (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
   try {
     if (fs.existsSync(copilotHooksFile)) {
       fs.unlinkSync(copilotHooksFile);
@@ -1985,28 +1973,28 @@ export async function runUninstall() {
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${copilotHooksFile}: ${errorMessage(err)}`); }
 
-  // Remove cortex entries from Cursor hooks file (may contain non-cortex entries)
-  const cursorHooksFile = hookConfigPath("cursor", process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH);
+  // Remove phren entries from Cursor hooks file (may contain non-phren entries)
+  const cursorHooksFile = hookConfigPath("cursor", (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
   try {
     if (fs.existsSync(cursorHooksFile)) {
       const raw = JSON.parse(fs.readFileSync(cursorHooksFile, "utf8"));
       let changed = false;
       for (const key of ["sessionStart", "beforeSubmitPrompt", "stop"]) {
-        if (raw[key]?.command && typeof raw[key].command === "string" && isCortexCommand(raw[key].command)) {
+        if (raw[key]?.command && typeof raw[key].command === "string" && isPhrenCommand(raw[key].command)) {
           delete raw[key];
           changed = true;
         }
       }
       if (changed) {
         atomicWriteText(cursorHooksFile, JSON.stringify(raw, null, 2));
-        log(`  Removed cortex entries from Cursor hooks (${cursorHooksFile})`);
+        log(`  Removed phren entries from Cursor hooks (${cursorHooksFile})`);
       }
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${cursorHooksFile}: ${errorMessage(err)}`); }
 
-  // Remove Codex hooks file in cortex path
-  const uninstallCortexPath = process.env.CORTEX_PATH || DEFAULT_CORTEX_PATH;
-  const codexHooksFile = hookConfigPath("codex", uninstallCortexPath);
+  // Remove Codex hooks file in phren path
+  const uninstallPhrenPath = (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
+  const codexHooksFile = hookConfigPath("codex", uninstallPhrenPath);
   try {
     if (fs.existsSync(codexHooksFile)) {
       fs.unlinkSync(codexHooksFile);
@@ -2020,9 +2008,9 @@ export async function runUninstall() {
     const wrapperPath = path.join(localBinDir, tool);
     try {
       if (fs.existsSync(wrapperPath)) {
-        // Only remove if it's a cortex wrapper (check for CORTEX_PATH marker)
+        // Only remove if it's a phren wrapper (check for PHREN_PATH marker)
         const content = fs.readFileSync(wrapperPath, "utf8");
-        if (content.includes("CORTEX_PATH") && content.includes("cortex")) {
+        if (content.includes("PHREN_PATH") && content.includes("phren")) {
           fs.unlinkSync(wrapperPath);
           log(`  Removed ${tool} session wrapper (${wrapperPath})`);
         }
@@ -2037,16 +2025,16 @@ export async function runUninstall() {
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${machineFile}: ${errorMessage(err)}`); }
 
-  if (cortexPath && fs.existsSync(cortexPath)) {
+  if (phrenPath && fs.existsSync(phrenPath)) {
     try {
-      fs.rmSync(cortexPath, { recursive: true, force: true });
-      log(`  Removed cortex root (${cortexPath})`);
+      fs.rmSync(phrenPath, { recursive: true, force: true });
+      log(`  Removed phren root (${phrenPath})`);
     } catch (err: unknown) {
-      debugLog(`uninstall: cleanup failed for ${cortexPath}: ${errorMessage(err)}`);
-      log(`  Warning: could not remove cortex root (${cortexPath})`);
+      debugLog(`uninstall: cleanup failed for ${phrenPath}: ${errorMessage(err)}`);
+      log(`  Warning: could not remove phren root (${phrenPath})`);
     }
   }
 
-  log(`\nCortex config, hooks, and installed data removed.`);
+  log(`\nPhren config, hooks, and installed data removed.`);
   log(`Restart your agent(s) to apply changes.\n`);
 }

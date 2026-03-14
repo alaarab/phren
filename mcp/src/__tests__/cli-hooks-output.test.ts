@@ -5,7 +5,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-const TEST_CORTEX_PATH = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-hooks-output-"));
+const TEST_PHREN_PATH = fs.mkdtempSync(path.join(os.tmpdir(), "phren-hooks-output-"));
 
 function makeSnippet(overrides: Partial<SelectedSnippet> = {}): SelectedSnippet {
   return {
@@ -35,14 +35,14 @@ describe("cli-hooks-output", () => {
         "test-project",
         { indexMs: 1, searchMs: 2, trustMs: 3, rankMs: 4, selectMs: 5 },
         500,
-        TEST_CORTEX_PATH
+        TEST_PHREN_PATH
       );
 
-      expect(parts[0]).toContain("cortex");
+      expect(parts[0]).toContain("phren");
       expect(parts[0]).toContain("test-project");
       expect(parts[0]).toContain("1 result");
-      expect(parts[1]).toBe("<cortex-context>");
-      expect(parts[parts.length - 2]).toBe("<cortex-context>");
+      expect(parts[1]).toBe("<phren-context>");
+      expect(parts[parts.length - 2]).toBe("<phren-context>");
       expect(parts[parts.length - 1]).toContain("trace:");
     });
 
@@ -56,7 +56,7 @@ describe("cli-hooks-output", () => {
         "test-project",
         { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 },
         1000,
-        TEST_CORTEX_PATH
+        TEST_PHREN_PATH
       );
       expect(parts[0]).toContain("2 results");
     });
@@ -71,7 +71,7 @@ describe("cli-hooks-output", () => {
         "test-project",
         { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 },
         500,
-        TEST_CORTEX_PATH
+        TEST_PHREN_PATH
       );
       const trace = parts[parts.length - 1];
       expect(trace).toContain("branch=feature/auth");
@@ -87,7 +87,7 @@ describe("cli-hooks-output", () => {
         null,
         { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 },
         500,
-        TEST_CORTEX_PATH
+        TEST_PHREN_PATH
       );
       expect(parts[0]).not.toContain(" \u00b7 test-project");
     });
@@ -109,7 +109,7 @@ describe("cli-hooks-output", () => {
         "test-project",
         { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 },
         100, // very tight budget
-        TEST_CORTEX_PATH
+        TEST_PHREN_PATH
       );
       // Should have fewer snippet blocks than input
       const snippetBlocks = parts.filter(p => p.startsWith("["));

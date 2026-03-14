@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { CortexShell } from "./shell.js";
+import { PhrenShell } from "./shell.js";
 import { readTasks, readFindings, readReviewQueue, loadShellState } from "./data-access.js";
 import { writeFile as write, makeTempDir } from "./test-helpers.js";
 import { shellStartupFrames, stripAnsi } from "./shell-render.js";
@@ -12,7 +12,7 @@ interface TempContext {
   project: string;
 }
 
-function seedCortex(root: string): TempContext {
+function seedPhren(root: string): TempContext {
   const project = "demo";
   write(
     path.join(root, project, "summary.md"),
@@ -46,7 +46,7 @@ function seedCortex(root: string): TempContext {
       "## 2026-03-01",
       "",
       "- Existing finding",
-      "  <!-- cortex:cite {\"created_at\":\"2026-03-01T00:00:00.000Z\"} -->",
+      "  <!-- phren:cite {\"created_at\":\"2026-03-01T00:00:00.000Z\"} -->",
       "",
     ].join("\n")
   );
@@ -81,9 +81,9 @@ function seedCortex(root: string): TempContext {
   return { root, project };
 }
 
-function createShell(cortexPath: string) {
-  return new CortexShell(cortexPath, "", {
-    runDoctor: async (_cortexPath: string, fix?: boolean) => ({
+function createShell(phrenPath: string) {
+  return new PhrenShell(phrenPath, "", {
+    runDoctor: async (_phrenPath: string, fix?: boolean) => ({
       ok: !fix,
       machine: "machine-a",
       profile: "personal",
@@ -94,7 +94,7 @@ function createShell(cortexPath: string) {
     } as any),
     runRelink: async () => "Relink ok",
     runHooks: async () => "Hooks rerun",
-    runUpdate: async () => "Updated cortex",
+    runUpdate: async () => "Updated phren",
   });
 }
 
@@ -113,15 +113,15 @@ async function withTerminalSize<T>(rows: number, columns: number, run: () => Pro
   }
 }
 
-describe("CortexShell", () => {
+describe("PhrenShell", () => {
   let dir: string;
   let dirCleanup: () => void;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(() => {
-    ({ path: dir, cleanup: dirCleanup } = makeTempDir("cortex-shell-test-"));
-    seedCortex(dir);
-    process.env.CORTEX_ACTOR = "shell-test-admin";
+    ({ path: dir, cleanup: dirCleanup } = makeTempDir("phren-shell-test-"));
+    seedPhren(dir);
+    process.env.PHREN_ACTOR = "shell-test-admin";
     write(
       path.join(dir, ".governance", "access-control.json"),
       JSON.stringify({
@@ -134,8 +134,8 @@ describe("CortexShell", () => {
   });
 
   afterEach(() => {
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     dirCleanup();
   });
 
@@ -162,7 +162,7 @@ describe("CortexShell", () => {
     const output = await shell.render();
     expect(output).toContain("◉ Projects");
     expect(output).toContain("Task pulse");
-    expect(output).toContain("Recent findings");
+    expect(output).toContain("Recent fragments");
     expect(output).toContain("No project selected yet");
   });
 
@@ -244,20 +244,12 @@ describe("CortexShell", () => {
     if (findings.ok) expect(findings.data.some((entry) => entry.text.includes("Shell can write findings"))).toBe(false);
   });
 
-  it("triages memory queue entries with approve/reject/edit", async () => {
+  it("queue triage commands return read-only messages", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
-    await shell.handleInput(":mq edit M1 keep this memory updated");
     await shell.handleInput(":mq approve M1");
-    await shell.handleInput(":mq reject stale memory");
-    await shell.handleInput("y");
-
-    const queue = readReviewQueue(dir, "demo");
-    expect(queue.ok).toBe(true);
-    if (queue.ok) expect(queue.data.length).toBe(0);
-
-    const findings = readFindings(dir, "demo");
-    if (findings.ok) expect(findings.data.some((entry) => entry.text.includes("keep this memory updated"))).toBe(true);
+    const output = await shell.render();
+    expect(output).toContain("removed");
   });
 
   it("renders health dashboard and supports remediation commands", async () => {
@@ -274,7 +266,7 @@ describe("CortexShell", () => {
 
     await shell.handleInput(":update");
     output = await shell.render();
-    expect(output).toContain("Updated cortex");
+    expect(output).toContain("Updated phren");
   });
 
   it("falls back to the default shell view when persisted state is invalid", async () => {
@@ -328,14 +320,14 @@ describe("CortexShell", () => {
     const frames = shellStartupFrames("1.18.0");
     expect(frames).toHaveLength(3);
     expect(frames[0]).toContain("local memory for working agents");
-    expect(frames[2]).toContain("cortex");
+    expect(frames[2]).toContain("phren");
     expect(frames[2]).toContain("v1.18.0");
   });
 
   it(":govern and :consolidate require a selected project", async () => {
-    const tmp = makeTempDir("cortex-shell-empty-");
+    const tmp = makeTempDir("phren-shell-empty-");
     try {
-      const shell = new CortexShell(tmp.path, "", {
+      const shell = new PhrenShell(tmp.path, "", {
         runDoctor: async () => ({ ok: true, checks: [] }) as any,
         runRelink: async () => "ok",
         runHooks: async () => "ok",
@@ -376,7 +368,7 @@ describe("CortexShell", () => {
       relinkResolve = () => resolve("Relink done");
     });
 
-    const shell = new CortexShell(dir, "", {
+    const shell = new PhrenShell(dir, "", {
       runDoctor: async () => ({ ok: true, checks: [] }) as any,
       runRelink: async () => relinkPromise,
       runHooks: async () => "ok",

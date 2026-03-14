@@ -24,7 +24,7 @@ export const ACTION_KEYS = [
 
   // Search
   "search.fts",
-  "search.entity",
+  "search.fragment",
   "search.related_docs",
   "search.history",
 
@@ -38,7 +38,6 @@ export const ACTION_KEYS = [
   "config.task_mode",
   "config.retention",
   "config.workflow",
-  "config.access",
   "config.index",
 
   // Health / Sync / Session

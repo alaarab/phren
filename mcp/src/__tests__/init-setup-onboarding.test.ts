@@ -15,17 +15,17 @@ import {
 
 describe("init setup onboarding helpers", () => {
   let tmp: { path: string; cleanup: () => void };
-  let cortexPath: string;
+  let phrenPath: string;
   let projectRoot: string;
 
   beforeEach(() => {
     tmp = makeTempDir("init-setup-onboarding-");
-    cortexPath = path.join(tmp.path, ".cortex");
+    phrenPath = path.join(tmp.path, ".phren");
     projectRoot = path.join(tmp.path, "app");
-    fs.mkdirSync(path.join(cortexPath, "profiles"), { recursive: true });
-    fs.writeFileSync(path.join(cortexPath, "machines.yaml"), `${os.hostname()}: work\n`);
-    fs.writeFileSync(path.join(cortexPath, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - app-api\n");
-    fs.writeFileSync(path.join(cortexPath, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${os.hostname()}: work\n`);
+    fs.writeFileSync(path.join(phrenPath, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - app-api\n");
+    fs.writeFileSync(path.join(phrenPath, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
     fs.mkdirSync(path.join(projectRoot, ".git"), { recursive: true });
     fs.writeFileSync(path.join(projectRoot, "CLAUDE.md"), "# app\n\nApp project.\n");
   });
@@ -37,7 +37,7 @@ describe("init setup onboarding helpers", () => {
   it("detects the repo root from nested directories", () => {
     const nestedDir = path.join(projectRoot, "packages", "web");
     fs.mkdirSync(nestedDir, { recursive: true });
-    expect(detectProjectDir(nestedDir, cortexPath)).toBe(projectRoot);
+    expect(detectProjectDir(nestedDir, phrenPath)).toBe(projectRoot);
   });
 
   it("detects an AGENTS.md-rooted project before git is initialized", () => {
@@ -46,20 +46,20 @@ describe("init setup onboarding helpers", () => {
     fs.mkdirSync(nestedDir, { recursive: true });
     fs.writeFileSync(path.join(codexRoot, "AGENTS.md"), "# codex-app\n");
 
-    expect(detectProjectDir(nestedDir, cortexPath)).toBe(codexRoot);
+    expect(detectProjectDir(nestedDir, phrenPath)).toBe(codexRoot);
   });
 
   it("checks tracking against the active profile when provided", () => {
-    expect(isProjectTracked(cortexPath, "app", "work")).toBe(false);
-    expect(isProjectTracked(cortexPath, "app-api", "personal")).toBe(true);
+    expect(isProjectTracked(phrenPath, "app", "work")).toBe(false);
+    expect(isProjectTracked(phrenPath, "app-api", "personal")).toBe(true);
   });
 
   it("adds the exact project to the selected profile without substring collisions", () => {
-    const projectResult = bootstrapFromExisting(cortexPath, projectRoot, "work");
+    const projectResult = bootstrapFromExisting(phrenPath, projectRoot, "work");
     expect(projectResult.project).toBe("app");
 
-    const personal = fs.readFileSync(path.join(cortexPath, "profiles", "personal.yaml"), "utf8");
-    const work = fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8");
+    const personal = fs.readFileSync(path.join(phrenPath, "profiles", "personal.yaml"), "utf8");
+    const work = fs.readFileSync(path.join(phrenPath, "profiles", "work.yaml"), "utf8");
 
     expect(personal).toContain("app-api");
     expect(personal).not.toMatch(/\n\s*-\s+app\n/);
@@ -67,47 +67,47 @@ describe("init setup onboarding helpers", () => {
   });
 
   it("falls back to the machine-mapped profile when none is provided", () => {
-    const projectResult = bootstrapFromExisting(cortexPath, projectRoot);
+    const projectResult = bootstrapFromExisting(phrenPath, projectRoot);
 
     expect(projectResult.project).toBe("app");
-    expect(fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8")).toMatch(/\n\s*-\s+app\n/);
-    expect(fs.readFileSync(path.join(cortexPath, "profiles", "personal.yaml"), "utf8")).not.toMatch(/\n\s*-\s+app\n/);
+    expect(fs.readFileSync(path.join(phrenPath, "profiles", "work.yaml"), "utf8")).toMatch(/\n\s*-\s+app\n/);
+    expect(fs.readFileSync(path.join(phrenPath, "profiles", "personal.yaml"), "utf8")).not.toMatch(/\n\s*-\s+app\n/);
   });
 
   it("does not overwrite an existing summary when re-adding a project", () => {
-    bootstrapFromExisting(cortexPath, projectRoot, "work");
-    const summaryPath = path.join(cortexPath, "app", "summary.md");
+    bootstrapFromExisting(phrenPath, projectRoot, "work");
+    const summaryPath = path.join(phrenPath, "app", "summary.md");
     fs.writeFileSync(summaryPath, "# app\n\nCurated summary.\n");
 
-    bootstrapFromExisting(cortexPath, projectRoot, "work");
+    bootstrapFromExisting(phrenPath, projectRoot, "work");
 
     expect(fs.readFileSync(summaryPath, "utf8")).toContain("Curated summary.");
     expect(fs.readFileSync(summaryPath, "utf8")).not.toContain("Bootstrapped from");
   });
 
   it("does not overwrite an existing CLAUDE.md when re-adding a project", () => {
-    bootstrapFromExisting(cortexPath, projectRoot, "work");
-    const claudePath = path.join(cortexPath, "app", "CLAUDE.md");
-    fs.writeFileSync(claudePath, "# app\n\nCurated cortex CLAUDE.\n");
+    bootstrapFromExisting(phrenPath, projectRoot, "work");
+    const claudePath = path.join(phrenPath, "app", "CLAUDE.md");
+    fs.writeFileSync(claudePath, "# app\n\nCurated phren CLAUDE.\n");
 
-    bootstrapFromExisting(cortexPath, projectRoot, "work");
+    bootstrapFromExisting(phrenPath, projectRoot, "work");
 
-    expect(fs.readFileSync(claudePath, "utf8")).toContain("Curated cortex CLAUDE.");
+    expect(fs.readFileSync(claudePath, "utf8")).toContain("Curated phren CLAUDE.");
     expect(fs.readFileSync(claudePath, "utf8")).not.toContain("App project.");
   });
 
-  it("supports repo-managed ownership without creating a competing cortex CLAUDE.md", () => {
-    const result = bootstrapFromExisting(cortexPath, projectRoot, { profile: "work", ownership: "repo-managed" });
+  it("supports repo-managed ownership without creating a competing phren CLAUDE.md", () => {
+    const result = bootstrapFromExisting(phrenPath, projectRoot, { profile: "work", ownership: "repo-managed" });
 
     expect(result.project).toBe("app");
     expect(result.ownership).toBe("repo-managed");
     expect(result.claudePath).toBe(path.join(projectRoot, "CLAUDE.md"));
-    expect(fs.existsSync(path.join(cortexPath, "app", "CLAUDE.md"))).toBe(false);
-    expect(fs.readFileSync(path.join(cortexPath, "app", "cortex.project.yaml"), "utf8")).toContain("ownership: repo-managed");
+    expect(fs.existsSync(path.join(phrenPath, "app", "CLAUDE.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(phrenPath, "app", "phren.project.yaml"), "utf8")).toContain("ownership: repo-managed");
   });
 
   it("writes domain topic-config entries in BuiltinTopic shape", () => {
-    const projectDir = path.join(cortexPath, "mixlab");
+    const projectDir = path.join(phrenPath, "mixlab");
     ensureProjectScaffold(projectDir, "mixlab", "music");
 
     const config = JSON.parse(fs.readFileSync(path.join(projectDir, "topic-config.json"), "utf8"));
@@ -123,7 +123,7 @@ describe("init setup onboarding helpers", () => {
   });
 
   it("defaults topic-config domain to software when no domain is provided", () => {
-    const projectDir = path.join(cortexPath, "default-domain");
+    const projectDir = path.join(phrenPath, "default-domain");
     ensureProjectScaffold(projectDir, "default-domain");
 
     const config = JSON.parse(fs.readFileSync(path.join(projectDir, "topic-config.json"), "utf8"));
@@ -151,7 +151,7 @@ describe("init setup onboarding helpers", () => {
   });
 
   it("uses inferred scaffold for topic-config and CLAUDE scaffold", () => {
-    const projectDir = path.join(cortexPath, "adaptive");
+    const projectDir = path.join(phrenPath, "adaptive");
     ensureProjectScaffold(projectDir, "adaptive", "software", {
       domain: "software",
       topics: [
@@ -172,23 +172,23 @@ describe("init setup onboarding helpers", () => {
     expect(claude).toContain("README.md");
   });
 
-  it("adds .cortex/ to repo .gitignore once", () => {
-    expect(ensureGitignoreEntry(projectRoot, ".cortex/")).toBe(true);
-    expect(ensureGitignoreEntry(projectRoot, ".cortex/")).toBe(false);
+  it("adds .phren/ to repo .gitignore once", () => {
+    expect(ensureGitignoreEntry(projectRoot, ".phren/")).toBe(true);
+    expect(ensureGitignoreEntry(projectRoot, ".phren/")).toBe(false);
     const gitignore = fs.readFileSync(path.join(projectRoot, ".gitignore"), "utf8");
-    expect(gitignore).toContain(".cortex/");
-    expect((gitignore.match(/\.cortex\//g) || []).length).toBe(1);
+    expect(gitignore).toContain(".phren/");
+    expect((gitignore.match(/\.phren\//g) || []).length).toBe(1);
   });
 
-  it("upserts CORTEX_PATH in project .env", () => {
-    const target = path.join(projectRoot, ".cortex");
-    expect(upsertProjectEnvVar(projectRoot, "CORTEX_PATH", target)).toBe(true);
-    expect(fs.readFileSync(path.join(projectRoot, ".env"), "utf8")).toContain(`CORTEX_PATH=${target}`);
+  it("upserts PHREN_PATH in project .env", () => {
+    const target = path.join(projectRoot, ".phren");
+    expect(upsertProjectEnvVar(projectRoot, "PHREN_PATH", target)).toBe(true);
+    expect(fs.readFileSync(path.join(projectRoot, ".env"), "utf8")).toContain(`PHREN_PATH=${target}`);
 
-    const next = path.join(projectRoot, ".cortex-custom");
-    expect(upsertProjectEnvVar(projectRoot, "CORTEX_PATH", next)).toBe(true);
+    const next = path.join(projectRoot, ".phren-custom");
+    expect(upsertProjectEnvVar(projectRoot, "PHREN_PATH", next)).toBe(true);
     const envFile = fs.readFileSync(path.join(projectRoot, ".env"), "utf8");
-    expect(envFile).toContain(`CORTEX_PATH=${next}`);
-    expect(envFile).not.toMatch(new RegExp(`^CORTEX_PATH=${target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+    expect(envFile).toContain(`PHREN_PATH=${next}`);
+    expect(envFile).not.toMatch(new RegExp(`^PHREN_PATH=${target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
   });
 });

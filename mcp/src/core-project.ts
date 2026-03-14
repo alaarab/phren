@@ -1,5 +1,5 @@
 import * as path from "path";
-import { cortexErr, cortexOk, readRootManifest, type CortexResult } from "./shared.js";
+import { phrenErr, phrenOk, readRootManifest, type PhrenResult } from "./shared.js";
 import { bootstrapFromExisting } from "./init-setup.js";
 import { resolveActiveProfile } from "./profile-store.js";
 import type { ProjectOwnershipMode } from "./project-config.js";
@@ -19,40 +19,40 @@ export interface AddedProjectData {
 }
 
 export function addProjectFromPath(
-  cortexPath: string,
+  phrenPath: string,
   targetPath: string | undefined,
   requestedProfile?: string,
   ownership?: ProjectOwnershipMode,
-): CortexResult<AddedProjectData> {
+): PhrenResult<AddedProjectData> {
   if (!targetPath) {
-    return cortexErr("Path is required. Pass the current project directory explicitly to avoid adding the wrong working directory.");
+    return phrenErr("Path is required. Pass the current project directory explicitly to avoid adding the wrong working directory.");
   }
 
-  const activeProfile = resolveActiveProfile(cortexPath, requestedProfile);
+  const activeProfile = resolveActiveProfile(phrenPath, requestedProfile);
   if (!activeProfile.ok) return activeProfile;
 
-  const manifest = readRootManifest(cortexPath);
+  const manifest = readRootManifest(phrenPath);
   const resolvedPath = path.resolve(targetPath);
   if (manifest?.installMode === "project-local") {
     const workspaceRoot = path.resolve(manifest.workspaceRoot || "");
     const matchesWorkspace = resolvedPath === workspaceRoot || resolvedPath.startsWith(workspaceRoot + path.sep);
     if (!matchesWorkspace) {
-      return cortexErr(`Project-local cortex can only add the owning workspace: ${workspaceRoot}`);
+      return phrenErr(`Project-local phren can only add the owning workspace: ${workspaceRoot}`);
     }
   }
   const selectedProfile = activeProfile.data;
-  const added = bootstrapFromExisting(cortexPath, resolvedPath, { profile: selectedProfile, ownership });
+  const added = bootstrapFromExisting(phrenPath, resolvedPath, { profile: selectedProfile, ownership });
 
-  return cortexOk({
+  return phrenOk({
     project: added.project,
     path: resolvedPath,
     profile: selectedProfile ?? null,
     ownership: added.ownership,
     files: {
       claude: added.claudePath,
-      summary: path.join(cortexPath, added.project, "summary.md"),
-      findings: path.join(cortexPath, added.project, "FINDINGS.md"),
-      task: path.join(cortexPath, added.project, TASKS_FILENAME),
+      summary: path.join(phrenPath, added.project, "summary.md"),
+      findings: path.join(phrenPath, added.project, "FINDINGS.md"),
+      task: path.join(phrenPath, added.project, TASKS_FILENAME),
     },
   });
 }

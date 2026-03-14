@@ -3,16 +3,16 @@ import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
-import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
-import { CortexError, isRecord } from "./cortex-core.js";
+import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
+import { PhrenError, isRecord } from "./phren-core.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 
-bootstrapCortexDotEnv();
+bootstrapPhrenDotEnv();
 
 export type InstallMode = "shared" | "project-local";
 export type SyncMode = "managed-git" | "workspace-git";
 
-export interface CortexRootManifest {
+export interface PhrenRootManifest {
   version: 1;
   installMode: InstallMode;
   syncMode: SyncMode;
@@ -20,11 +20,11 @@ export interface CortexRootManifest {
   primaryProject?: string;
 }
 
-export interface InstallContext extends CortexRootManifest {
-  cortexPath: string;
+export interface InstallContext extends PhrenRootManifest {
+  phrenPath: string;
 }
 
-export const ROOT_MANIFEST_FILENAME = "cortex.root.yaml";
+export const ROOT_MANIFEST_FILENAME = "phren.root.yaml";
 
 export function homeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || os.homedir();
@@ -40,12 +40,12 @@ export function expandHomePath(input: string): string {
   return input;
 }
 
-export function defaultCortexPath(): string {
-  return expandHomePath(process.env.CORTEX_PATH || homePath(".cortex"));
+export function defaultPhrenPath(): string {
+  return expandHomePath(process.env.PHREN_PATH || homePath(".phren"));
 }
 
-export function rootManifestPath(cortexPath: string): string {
-  return path.join(cortexPath, ROOT_MANIFEST_FILENAME);
+export function rootManifestPath(phrenPath: string): string {
+  return path.join(phrenPath, ROOT_MANIFEST_FILENAME);
 }
 
 export function atomicWriteText(filePath: string, content: string): void {
@@ -63,7 +63,7 @@ function isSyncMode(value: unknown): value is SyncMode {
   return value === "managed-git" || value === "workspace-git";
 }
 
-function normalizeManifest(raw: unknown): CortexRootManifest | null {
+function normalizeManifest(raw: unknown): PhrenRootManifest | null {
   if (!isRecord(raw)) return null;
   const version = Number(raw.version);
   const installMode = raw.installMode;
@@ -90,41 +90,41 @@ function normalizeManifest(raw: unknown): CortexRootManifest | null {
   };
 }
 
-export function readRootManifest(cortexPath: string): CortexRootManifest | null {
-  const manifestFile = rootManifestPath(cortexPath);
+export function readRootManifest(phrenPath: string): PhrenRootManifest | null {
+  const manifestFile = rootManifestPath(phrenPath);
   if (!fs.existsSync(manifestFile)) return null;
   try {
     const parsed = yaml.load(fs.readFileSync(manifestFile, "utf8"), { schema: yaml.CORE_SCHEMA });
     return normalizeManifest(parsed);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readRootManifest: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readRootManifest: ${errorMessage(err)}\n`);
     return null;
   }
 }
 
-export function writeRootManifest(cortexPath: string, manifest: CortexRootManifest): void {
+export function writeRootManifest(phrenPath: string, manifest: PhrenRootManifest): void {
   const normalized = normalizeManifest(manifest);
   if (!normalized) {
-    throw new Error(`${CortexError.VALIDATION_ERROR}: invalid cortex root manifest for ${cortexPath}`);
+    throw new Error(`${PhrenError.VALIDATION_ERROR}: invalid phren root manifest for ${phrenPath}`);
   }
-  atomicWriteText(rootManifestPath(cortexPath), yaml.dump(normalized, { lineWidth: 1000 }));
+  atomicWriteText(rootManifestPath(phrenPath), yaml.dump(normalized, { lineWidth: 1000 }));
 }
 
-export function resolveInstallContext(cortexPath: string): InstallContext {
-  const resolvedPath = path.resolve(cortexPath);
+export function resolveInstallContext(phrenPath: string): InstallContext {
+  const resolvedPath = path.resolve(phrenPath);
   const manifest = readRootManifest(resolvedPath);
   if (!manifest) {
-    throw new Error(`${CortexError.NOT_FOUND}: cortex root manifest not found: ${rootManifestPath(resolvedPath)}`);
+    throw new Error(`${PhrenError.NOT_FOUND}: phren root manifest not found: ${rootManifestPath(resolvedPath)}`);
   }
-  return { cortexPath: resolvedPath, ...manifest };
+  return { phrenPath: resolvedPath, ...manifest };
 }
 
 function requireDirectory(resolved: string, label: string): string {
   if (!fs.existsSync(resolved)) {
-    throw new Error(`${CortexError.NOT_FOUND}: ${label} not found: ${resolved}`);
+    throw new Error(`${PhrenError.NOT_FOUND}: ${label} not found: ${resolved}`);
   }
   if (!fs.statSync(resolved).isDirectory()) {
-    throw new Error(`${CortexError.VALIDATION_ERROR}: ${label} is not a directory: ${resolved}`);
+    throw new Error(`${PhrenError.VALIDATION_ERROR}: ${label} is not a directory: ${resolved}`);
   }
   return resolved;
 }
@@ -139,15 +139,15 @@ function hasInstallMarkers(candidate: string): boolean {
     || fs.existsSync(path.join(candidate, "global"));
 }
 
-function isCortexRootCandidate(candidate: string): boolean {
+function isPhrenRootCandidate(candidate: string): boolean {
   return hasRootManifest(candidate) || hasInstallMarkers(candidate);
 }
 
-export function findNearestCortexPath(startDir: string = process.cwd()): string | null {
+export function findNearestPhrenPath(startDir: string = process.cwd()): string | null {
   let current = path.resolve(startDir);
   while (true) {
-    const localCandidate = path.join(current, ".cortex");
-    if (isCortexRootCandidate(localCandidate)) return localCandidate;
+    const localCandidate = path.join(current, ".phren");
+    if (isPhrenRootCandidate(localCandidate)) return localCandidate;
     const parent = path.dirname(current);
     if (parent === current) break;
     current = parent;
@@ -156,42 +156,42 @@ export function findNearestCortexPath(startDir: string = process.cwd()): string 
 }
 
 function sharedRootCandidate(): string {
-  return homePath(".cortex");
+  return homePath(".phren");
 }
 
-let cachedCortexPath: string | null | undefined;
-let cachedCortexPathKey: string | undefined;
+let cachedPhrenPath: string | null | undefined;
+let cachedPhrenPathKey: string | undefined;
 
-export function findCortexPath(): string | null {
+export function findPhrenPath(): string | null {
   const cacheKey = [
-    process.env.CORTEX_PATH ?? "",
+    ((process.env.PHREN_PATH || process.env.PHREN_PATH) ?? ""),
     process.env.HOME ?? "",
     process.env.USERPROFILE ?? "",
     process.cwd(),
   ].join("|");
-  if (cachedCortexPath !== undefined && cachedCortexPathKey === cacheKey) return cachedCortexPath;
-  cachedCortexPathKey = cacheKey;
+  if (cachedPhrenPath !== undefined && cachedPhrenPathKey === cacheKey) return cachedPhrenPath;
+  cachedPhrenPathKey = cacheKey;
 
-  const envVal = process.env.CORTEX_PATH?.trim();
+  const envVal = (process.env.PHREN_PATH || process.env.PHREN_PATH)?.trim();
   if (envVal) {
     const resolved = path.resolve(expandHomePath(envVal));
-    cachedCortexPath = isCortexRootCandidate(resolved) ? resolved : null;
-    return cachedCortexPath;
+    cachedPhrenPath = isPhrenRootCandidate(resolved) ? resolved : null;
+    return cachedPhrenPath;
   }
 
-  const nearest = findNearestCortexPath();
+  const nearest = findNearestPhrenPath();
   if (nearest) {
-    cachedCortexPath = nearest;
+    cachedPhrenPath = nearest;
     return nearest;
   }
 
   const shared = sharedRootCandidate();
-  cachedCortexPath = isCortexRootCandidate(shared) ? shared : null;
-  return cachedCortexPath;
+  cachedPhrenPath = isPhrenRootCandidate(shared) ? shared : null;
+  return cachedPhrenPath;
 }
 
-export function ensureCortexPath(): string {
-  const existing = findCortexPath();
+export function ensurePhrenPath(): string {
+  const existing = findPhrenPath();
   if (existing) return existing;
   const defaultPath = sharedRootCandidate();
   fs.mkdirSync(defaultPath, { recursive: true });
@@ -200,9 +200,9 @@ export function ensureCortexPath(): string {
     installMode: "shared",
     syncMode: "managed-git",
   });
-  cachedCortexPath = defaultPath;
-  cachedCortexPathKey = [
-    process.env.CORTEX_PATH ?? "",
+  cachedPhrenPath = defaultPath;
+  cachedPhrenPathKey = [
+    ((process.env.PHREN_PATH || process.env.PHREN_PATH) ?? ""),
     process.env.HOME ?? "",
     process.env.USERPROFILE ?? "",
     process.cwd(),
@@ -210,31 +210,31 @@ export function ensureCortexPath(): string {
   return defaultPath;
 }
 
-export function findCortexPathWithArg(arg?: string): string {
+export function findPhrenPathWithArg(arg?: string): string {
   if (arg) {
-    const resolved = requireDirectory(path.resolve(expandHomePath(arg)), "cortex path");
+    const resolved = requireDirectory(path.resolve(expandHomePath(arg)), "phren path");
     if (!hasRootManifest(resolved)) {
-      throw new Error(`${CortexError.NOT_FOUND}: cortex root manifest not found: ${rootManifestPath(resolved)}`);
+      throw new Error(`${PhrenError.NOT_FOUND}: phren root manifest not found: ${rootManifestPath(resolved)}`);
     }
     return resolved;
   }
-  const existing = findCortexPath();
+  const existing = findPhrenPath();
   if (existing) return existing;
-  throw new Error(`${CortexError.NOT_FOUND}: cortex root not found. Run 'npx cortex init'.`);
+  throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'npx phren init'.`);
 }
 
-export function isProjectLocalMode(cortexPath: string): boolean {
+export function isProjectLocalMode(phrenPath: string): boolean {
   try {
-    return resolveInstallContext(cortexPath).installMode === "project-local";
+    return resolveInstallContext(phrenPath).installMode === "project-local";
   } catch {
     return false;
   }
 }
 
 // Centralized runtime path helpers. All ephemeral/runtime files go in
-// subdirectories to keep the cortex root clean.
-export function runtimeDir(cortexPath: string): string {
-  return path.join(cortexPath, ".runtime");
+// subdirectories to keep the phren root clean.
+export function runtimeDir(phrenPath: string): string {
+  return path.join(phrenPath, ".runtime");
 }
 
 /** Unlink a file, ignoring ENOENT. Rethrows any other error. */
@@ -246,13 +246,13 @@ export function tryUnlink(filePath: string): void {
   }
 }
 
-export function sessionsDir(cortexPath: string): string {
-  return path.join(cortexPath, ".sessions");
+export function sessionsDir(phrenPath: string): string {
+  return path.join(phrenPath, ".sessions");
 }
 
 const runtimeDirsMade = new Set<string>();
-export function runtimeFile(cortexPath: string, name: string): string {
-  const dir = runtimeDir(cortexPath);
+export function runtimeFile(phrenPath: string, name: string): string {
+  const dir = runtimeDir(phrenPath);
   if (!runtimeDirsMade.has(dir)) {
     fs.mkdirSync(dir, { recursive: true });
     runtimeDirsMade.add(dir);
@@ -260,46 +260,42 @@ export function runtimeFile(cortexPath: string, name: string): string {
   return path.join(dir, name);
 }
 
-export function installPreferencesFile(cortexPath: string): string {
-  return path.join(runtimeDir(cortexPath), "install-preferences.json");
+export function installPreferencesFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "install-preferences.json");
 }
 
-export function runtimeHealthFile(cortexPath: string): string {
-  return path.join(runtimeDir(cortexPath), "runtime-health.json");
+export function runtimeHealthFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "runtime-health.json");
 }
 
-export function canonicalLocksFile(cortexPath: string): string {
-  return path.join(runtimeDir(cortexPath), "canonical-locks.json");
+export function shellStateFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "shell-state.json");
 }
 
-export function shellStateFile(cortexPath: string): string {
-  return path.join(runtimeDir(cortexPath), "shell-state.json");
+export function sessionMetricsFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "session-metrics.json");
 }
 
-export function sessionMetricsFile(cortexPath: string): string {
-  return path.join(runtimeDir(cortexPath), "session-metrics.json");
+export function memoryScoresFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "memory-scores.json");
 }
 
-export function memoryScoresFile(cortexPath: string): string {
-  return path.join(runtimeDir(cortexPath), "memory-scores.json");
+export function memoryUsageLogFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "memory-usage.log");
 }
 
-export function memoryUsageLogFile(cortexPath: string): string {
-  return path.join(runtimeDir(cortexPath), "memory-usage.log");
-}
-
-export function sessionMarker(cortexPath: string, name: string): string {
-  const dir = sessionsDir(cortexPath);
+export function sessionMarker(phrenPath: string, name: string): string {
+  const dir = sessionsDir(phrenPath);
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, name);
 }
 
-// Debug logging is best-effort and only writes when a cortex root already exists.
+// Debug logging is best-effort and only writes when a phren root already exists.
 export function debugLog(msg: string): void {
-  if (!process.env.CORTEX_DEBUG) return;
-  const cortexPath = findCortexPath();
-  if (!cortexPath) return;
-  const logFile = runtimeFile(cortexPath, "debug.log");
+  if (!(process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) return;
+  const phrenPath = findPhrenPath();
+  if (!phrenPath) return;
+  const logFile = runtimeFile(phrenPath, "debug.log");
   try {
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
   } catch {
@@ -307,12 +303,12 @@ export function debugLog(msg: string): void {
   }
 }
 
-export function appendIndexEvent(cortexPath: string, event: Record<string, unknown>): void {
+export function appendIndexEvent(phrenPath: string, event: Record<string, unknown>): void {
   try {
-    const file = runtimeFile(cortexPath, "index-events.jsonl");
+    const file = runtimeFile(phrenPath, "index-events.jsonl");
     fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendIndexEvent: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendIndexEvent: ${errorMessage(err)}\n`);
   }
 }
 
@@ -336,82 +332,82 @@ export function normalizeProjectNameForCreate(name: string): string {
   return name.trim().toLowerCase();
 }
 
-export function findProjectNameCaseInsensitive(cortexPath: string, name: string): string | null {
+export function findProjectNameCaseInsensitive(phrenPath: string, name: string): string | null {
   const needle = name.toLowerCase();
   try {
-    for (const entry of fs.readdirSync(cortexPath, { withFileTypes: true })) {
+    for (const entry of fs.readdirSync(phrenPath, { withFileTypes: true })) {
       if (!isProjectDirEntry(entry)) continue;
       if (entry.name.toLowerCase() === needle) return entry.name;
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
   }
   return null;
 }
 
-function getLocalProjectDirs(cortexPath: string, manifest: CortexRootManifest): string[] {
+function getLocalProjectDirs(phrenPath: string, manifest: PhrenRootManifest): string[] {
   const primaryProject = manifest.primaryProject;
   if (!primaryProject || !isValidProjectName(primaryProject)) return [];
-  const projectPath = safeProjectPath(cortexPath, primaryProject);
+  const projectPath = safeProjectPath(phrenPath, primaryProject);
   if (!projectPath || !fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory()) return [];
-  const visible = fs.readdirSync(cortexPath, { withFileTypes: true }).filter(isProjectDirEntry).map((entry) => entry.name);
+  const visible = fs.readdirSync(phrenPath, { withFileTypes: true }).filter(isProjectDirEntry).map((entry) => entry.name);
   if (visible.length !== 1 || visible[0] !== primaryProject) return [];
   return [projectPath];
 }
 
 // Figure out which project directories to index.
-export function getProjectDirs(cortexPath: string, profile?: string): string[] {
-  const manifest = readRootManifest(cortexPath);
+export function getProjectDirs(phrenPath: string, profile?: string): string[] {
+  const manifest = readRootManifest(phrenPath);
   if (manifest?.installMode === "project-local") {
-    return getLocalProjectDirs(cortexPath, manifest);
+    return getLocalProjectDirs(phrenPath, manifest);
   }
 
   if (profile) {
     if (!isValidProjectName(profile)) {
-      console.error(`${CortexError.VALIDATION_ERROR}: Invalid CORTEX_PROFILE value: ${profile}`);
+      console.error(`${PhrenError.VALIDATION_ERROR}: Invalid PHREN_PROFILE value: ${profile}`);
       return [];
     }
-    const profilePath = path.join(cortexPath, "profiles", `${profile}.yaml`);
+    const profilePath = path.join(phrenPath, "profiles", `${profile}.yaml`);
     if (!fs.existsSync(profilePath)) {
-      console.error(`${CortexError.FILE_NOT_FOUND}: Profile file not found: ${profilePath}`);
+      console.error(`${PhrenError.FILE_NOT_FOUND}: Profile file not found: ${profilePath}`);
       return [];
     }
     try {
       const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
       const projects = isRecord(data) ? data.projects : undefined;
       if (!Array.isArray(projects)) {
-        console.error(`${CortexError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);
+        console.error(`${PhrenError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);
         return [];
       }
       const listed = projects
         .map((p: unknown) => {
           const name = String(p);
           if (!isValidProjectName(name)) {
-            console.error(`${CortexError.VALIDATION_ERROR}: Skipping invalid project name in profile: ${name}`);
+            console.error(`${PhrenError.VALIDATION_ERROR}: Skipping invalid project name in profile: ${name}`);
             return null;
           }
-          return safeProjectPath(cortexPath, name);
+          return safeProjectPath(phrenPath, name);
         })
         .filter((p): p is string => p !== null && fs.existsSync(p));
 
       const sharedDirs = ["shared", "org"]
-        .map((name) => safeProjectPath(cortexPath, name))
+        .map((name) => safeProjectPath(phrenPath, name))
         .filter((p): p is string => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
 
       return [...new Set([...listed, ...sharedDirs])];
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] getProjectDirs yamlParse: ${errorMessage(err)}\n`);
-      console.error(`${CortexError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs yamlParse: ${errorMessage(err)}\n`);
+      console.error(`${PhrenError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
       return [];
     }
   }
 
   try {
-    return fs.readdirSync(cortexPath, { withFileTypes: true })
+    return fs.readdirSync(phrenPath, { withFileTypes: true })
       .filter(isProjectDirEntry)
-      .map((entry) => path.join(cortexPath, entry.name));
+      .map((entry) => path.join(phrenPath, entry.name));
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] getProjectDirs: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs: ${errorMessage(err)}\n`);
     return [];
   }
 }
@@ -435,7 +431,7 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] collectNativeMemoryFiles: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] collectNativeMemoryFiles: ${errorMessage(err)}\n`);
   }
   return results;
 }
@@ -465,15 +461,15 @@ function pushDirTokens(parts: string[], dirPath: string): void {
   }
 }
 
-export function computeCortexLiveStateToken(cortexPath: string): string {
+export function computePhrenLiveStateToken(phrenPath: string): string {
   const parts: string[] = [];
-  const projectDirs = getProjectDirs(cortexPath).sort();
-  const manifest = readRootManifest(cortexPath);
+  const projectDirs = getProjectDirs(phrenPath).sort();
+  const manifest = readRootManifest(phrenPath);
 
   for (const projectDir of projectDirs) {
     const project = path.basename(projectDir);
     parts.push(`project:${project}`);
-    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "tasks.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md", "topic-config.json", "cortex.project.yaml"]) {
+    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "tasks.md", "MEMORY_QUEUE.md", "CANONICAL_MEMORIES.md", "topic-config.json", "phren.project.yaml"]) {
       pushFileToken(parts, path.join(projectDir, file));
     }
     pushDirTokens(parts, path.join(projectDir, "reference"));
@@ -482,15 +478,15 @@ export function computeCortexLiveStateToken(cortexPath: string): string {
   }
 
   if (manifest?.installMode === "shared") {
-    pushDirTokens(parts, path.join(cortexPath, "profiles"));
+    pushDirTokens(parts, path.join(phrenPath, "profiles"));
   }
-  pushDirTokens(parts, path.join(cortexPath, "global", "skills"));
-  pushFileToken(parts, path.join(cortexPath, ".governance", "access-control.json"));
-  pushFileToken(parts, rootManifestPath(cortexPath));
-  pushFileToken(parts, runtimeHealthFile(cortexPath));
-  pushFileToken(parts, runtimeFile(cortexPath, "audit.log"));
-  pushFileToken(parts, memoryUsageLogFile(cortexPath));
-  pushFileToken(parts, installPreferencesFile(cortexPath));
+  pushDirTokens(parts, path.join(phrenPath, "global", "skills"));
+  pushFileToken(parts, path.join(phrenPath, ".governance", "access-control.json"));
+  pushFileToken(parts, rootManifestPath(phrenPath));
+  pushFileToken(parts, runtimeHealthFile(phrenPath));
+  pushFileToken(parts, runtimeFile(phrenPath, "audit.log"));
+  pushFileToken(parts, memoryUsageLogFile(phrenPath));
+  pushFileToken(parts, installPreferencesFile(phrenPath));
 
   if (manifest?.installMode === "shared") {
     pushDirTokens(parts, homePath(".github", "hooks"));
@@ -500,21 +496,21 @@ export function computeCortexLiveStateToken(cortexPath: string): string {
   return parts.sort().join("|");
 }
 
-// Lazy singleton for getCortexPath — shared across all CLI modules.
-let lazyCortexPath: string | undefined;
-export function getCortexPath(): string {
-  if (!lazyCortexPath) {
-    const existing = findCortexPath();
-    if (!existing) throw new Error(`${CortexError.NOT_FOUND}: cortex root not found. Run 'npx cortex init'.`);
-    lazyCortexPath = existing;
+// Lazy singleton for getPhrenPath — shared across all CLI modules.
+let lazyPhrenPath: string | undefined;
+export function getPhrenPath(): string {
+  if (!lazyPhrenPath) {
+    const existing = findPhrenPath();
+    if (!existing) throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'npx phren init'.`);
+    lazyPhrenPath = existing;
   }
-  return lazyCortexPath;
+  return lazyPhrenPath;
 }
 
-export function qualityMarkers(cortexPathLocal: string): { done: string; lock: string } {
+export function qualityMarkers(phrenPathLocal: string): { done: string; lock: string } {
   const today = new Date().toISOString().slice(0, 10);
   return {
-    done: runtimeFile(cortexPathLocal, `quality-${today}`),
-    lock: runtimeFile(cortexPathLocal, `quality-${today}.lock`),
+    done: runtimeFile(phrenPathLocal, `quality-${today}`),
+    lock: runtimeFile(phrenPathLocal, `quality-${today}.lock`),
   };
 }

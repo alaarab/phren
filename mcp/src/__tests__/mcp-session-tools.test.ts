@@ -49,7 +49,7 @@ describe("mcp-session tool contract", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -156,7 +156,7 @@ describe("mcp-session tool contract", () => {
 
   it("removes checkpoint files when complete_task finishes the associated task", async () => {
     registerTasks(server as any, {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},

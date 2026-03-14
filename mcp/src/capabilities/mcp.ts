@@ -29,7 +29,7 @@ export const mcpManifest: CapabilityManifest = {
 
     // Search
     "search.fts": { implemented: true, handler: "index.ts:search_knowledge" },
-    "search.entity": { implemented: true, handler: "index.ts:search_entities" },
+    "search.fragment": { implemented: true, handler: "index.ts:search_fragments" },
     "search.related_docs": { implemented: true, handler: "index.ts:get_related_docs" },
     "search.history": { implemented: false, reason: "Search history is CLI-only (search-history.jsonl)" },
 
@@ -43,12 +43,11 @@ export const mcpManifest: CapabilityManifest = {
     "config.task_mode": { implemented: false, reason: "No MCP tool for workflow policy" },
     "config.retention": { implemented: false, reason: "Config tools are CLI-only" },
     "config.workflow": { implemented: false, reason: "Config tools are CLI-only" },
-    "config.access": { implemented: false, reason: "Config tools are CLI-only" },
     "config.index": { implemented: false, reason: "Config tools are CLI-only" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "index.ts:health_check" },
-    "health.doctor_fix": { implemented: false, reason: "Doctor --fix is CLI-only (requires interactive confirmation)" },
+    "health.doctor_fix": { implemented: true, handler: "index.ts:doctor_fix" },
     "health.sync": { implemented: true, handler: "index.ts:push_changes" },
     "session.start": { implemented: true, handler: "index.ts:session_start" },
     "session.end": { implemented: true, handler: "index.ts:session_end" },

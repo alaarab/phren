@@ -85,17 +85,17 @@ function commandExists(cmd: string): boolean {
   }
 }
 
-function buildMcpServerConfig(cortexPath: string) {
+function buildMcpServerConfig(phrenPath: string) {
   const entryScript = resolveEntryScript();
   if (entryScript && fs.existsSync(entryScript)) {
     return {
       command: "node",
-      args: [entryScript, cortexPath],
+      args: [entryScript, phrenPath],
     };
   }
   return {
     command: "npx",
-    args: ["-y", `cortex@${VERSION}`, cortexPath],
+    args: ["-y", `phren@${VERSION}`, phrenPath],
   };
 }
 
@@ -103,23 +103,23 @@ function upsertMcpServer(
   data: JsonObject,
   mcpEnabled: boolean,
   preferredRoot: McpRootKey,
-  cortexPath: string
+  phrenPath: string
 ): McpConfigStatus {
   const knownRoots = ["mcpServers", "servers"] as const;
-  const hadMcp = knownRoots.some((key) => Boolean(getObjectProp(data, key)?.cortex));
+  const hadMcp = knownRoots.some((key) => Boolean(getObjectProp(data, key)?.phren));
   if (mcpEnabled) {
     let preferredRootValue = getObjectProp(data, preferredRoot);
     if (!preferredRootValue) {
       preferredRootValue = {};
       data[preferredRoot] = preferredRootValue;
     }
-    preferredRootValue.cortex = buildMcpServerConfig(cortexPath);
+    preferredRootValue.phren = buildMcpServerConfig(phrenPath);
     return hadMcp ? "already_configured" : "installed";
   }
 
   for (const key of knownRoots) {
     const root = getObjectProp(data, key);
-    if (root?.cortex) delete root.cortex;
+    if (root?.phren) delete root.phren;
   }
   return hadMcp ? "disabled" : "already_disabled";
 }
@@ -128,24 +128,24 @@ function configureMcpAtPath(
   filePath: string,
   mcpEnabled: boolean,
   preferredRoot: McpRootKey,
-  cortexPath: string
+  phrenPath: string
 ): McpConfigStatus {
   if (!mcpEnabled && !fs.existsSync(filePath)) return "already_disabled";
   let status: McpConfigStatus = "already_disabled";
   patchJsonFile(filePath, (data) => {
-    status = upsertMcpServer(data, mcpEnabled, preferredRoot, cortexPath);
+    status = upsertMcpServer(data, mcpEnabled, preferredRoot, phrenPath);
   });
   return status;
 }
 
 /**
- * Read/write a TOML config file to upsert or remove [mcp_servers.cortex].
- * Lightweight: preserves all other content, only touches the cortex section.
+ * Read/write a TOML config file to upsert or remove [mcp_servers.phren].
+ * Lightweight: preserves all other content, only touches the phren section.
  */
 function patchTomlMcpServer(
   filePath: string,
   mcpEnabled: boolean,
-  cortexPath: string
+  phrenPath: string
 ): McpConfigStatus {
   let content = "";
   const existed = fs.existsSync(filePath);
@@ -155,12 +155,12 @@ function patchTomlMcpServer(
     return "already_disabled";
   }
 
-  const cfg = buildMcpServerConfig(cortexPath);
+  const cfg = buildMcpServerConfig(phrenPath);
   const escToml = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const argsToml = "[" + cfg.args.map((a: string) => `"${escToml(a)}"`).join(", ") + "]";
-  const newSection = `[mcp_servers.cortex]\ncommand = "${escToml(cfg.command)}"\nargs = ${argsToml}\nstartup_timeout_sec = 30`;
+  const newSection = `[mcp_servers.phren]\ncommand = "${escToml(cfg.command)}"\nargs = ${argsToml}\nstartup_timeout_sec = 30`;
 
-  const sectionRe = /^\[mcp_servers\.cortex\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
+  const sectionRe = /^\[mcp_servers\.phren\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
   const hadSection = sectionRe.test(content);
 
   if (mcpEnabled) {
@@ -188,7 +188,7 @@ function patchTomlMcpServer(
 export function removeTomlMcpServer(filePath: string): boolean {
   if (!fs.existsSync(filePath)) return false;
   let content = fs.readFileSync(filePath, "utf8");
-  const sectionRe = /^\[mcp_servers\.cortex\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
+  const sectionRe = /^\[mcp_servers\.phren\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
   if (!sectionRe.test(content)) return false;
   content = content.replace(sectionRe, "").replace(/\n{3,}/g, "\n\n");
   atomicWriteText(filePath, content);
@@ -201,8 +201,8 @@ export function removeMcpServerAtPath(filePath: string): boolean {
   patchJsonFile(filePath, (data) => {
     for (const key of ["mcpServers", "servers"] as const) {
       const root = data[key];
-      if (isRecord(root) && root.cortex) {
-        delete root.cortex;
+      if (isRecord(root) && root.phren) {
+        delete root.phren;
         removed = true;
       }
     }
@@ -210,68 +210,67 @@ export function removeMcpServerAtPath(filePath: string): boolean {
   return removed;
 }
 
-export function isCortexCommand(command: string): boolean {
-  // Detect CORTEX_PATH= env var prefix (present in all lifecycle hook commands)
-  if (/\bCORTEX_PATH=/.test(command)) return true;
-  // Detect npxcortex package references
-  if (command.includes("cortex")) return true;
-  // Detect bare "cortex" executable segment
+export function isPhrenCommand(command: string): boolean {
+  // Detect PHREN_PATH= or legacy PHREN_PATH= env var prefix (present in all lifecycle hook commands)
+  if (/\b(?:PHREN_PATH|PHREN_PATH)=/.test(command)) return true;
+  // Detect npx phren/phren package references
+  if (command.includes("phren") || command.includes("phren")) return true;
+  // Detect bare "phren" or "phren" executable segment
   const segments = command.split(/[/\\\s]+/);
-  if (segments.some(seg => seg === "cortex" || seg.startsWith("cortex@") || seg.startsWith("cortex"))) return true;
-  // Also match commands that include cortex hook subcommands (used when installed via absolute path)
+  if (segments.some(seg => seg === "phren" || seg.startsWith("phren@") || seg === "phren" || seg.startsWith("phren@"))) return true;
+  // Also match commands that include hook subcommands (used when installed via absolute path)
   const HOOK_MARKERS = ["hook-prompt", "hook-stop", "hook-session-start", "hook-tool"];
   if (HOOK_MARKERS.some(m => command.includes(m))) return true;
   return false;
 }
-
-export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {
+export function configureClaude(phrenPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {
   const settingsPath = hookConfigPath("claude");
   const claudeJsonPath = homePath(".claude.json");
   const entryScript = resolveEntryScript();
-  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const hooksEnabled = opts.hooksEnabled ?? getHooksEnabledPreference(cortexPath);
-  const lifecycle = buildLifecycleCommands(cortexPath);
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(phrenPath);
+  const hooksEnabled = opts.hooksEnabled ?? getHooksEnabledPreference(phrenPath);
+  const lifecycle = buildLifecycleCommands(phrenPath);
   let status: McpConfigStatus = "already_disabled";
 
   if (fs.existsSync(claudeJsonPath)) {
     patchJsonFile(claudeJsonPath, (data) => {
-      status = upsertMcpServer(data, mcpEnabled, "mcpServers", cortexPath);
+      status = upsertMcpServer(data, mcpEnabled, "mcpServers", phrenPath);
     });
   }
 
   patchJsonFile(settingsPath, (data) => {
-    const settingsStatus = upsertMcpServer(data, mcpEnabled, "mcpServers", cortexPath);
+    const settingsStatus = upsertMcpServer(data, mcpEnabled, "mcpServers", phrenPath);
     if (status === "already_disabled") status = settingsStatus;
 
     const hooksMap = isRecord(data.hooks) ? data.hooks as HookMap : (data.hooks = {} as HookMap);
 
-    const upsertCortexHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", hookBody: { type: string; command: string; timeout?: number }) => {
+    const upsertPhrenHook = (eventName: "UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", hookBody: { type: string; command: string; timeout?: number }) => {
       if (!Array.isArray(hooksMap[eventName])) hooksMap[eventName] = [];
       const eventHooks = hooksMap[eventName] as HookEntry[];
       const marker = eventName === "UserPromptSubmit" ? "hook-prompt"
         : eventName === "Stop" ? "hook-stop"
         : eventName === "PostToolUse" ? "hook-tool"
         : "hook-session-start";
-      // Find the HookEntry containing a cortex hook command
+      // Find the HookEntry containing a phren hook command
       const existingEntryIdx = eventHooks.findIndex(
         (h: HookEntry) => h?.hooks?.some(
           (hook) =>
             typeof hook?.command === "string" &&
             (
               hook.command.includes(marker) ||
-              isCortexCommand(hook.command)
+              isPhrenCommand(hook.command)
             )
         )
       );
       if (existingEntryIdx >= 0) {
-        // Only rewrite the matching inner hook item; preserve sibling non-cortex hooks
+        // Only rewrite the matching inner hook item; preserve sibling non-phren hooks
         const entry = eventHooks[existingEntryIdx];
         const innerIdx = (entry.hooks ?? []).findIndex(
           (hook) =>
             typeof hook?.command === "string" &&
             (
               hook.command.includes(marker) ||
-              isCortexCommand(hook.command)
+              isPhrenCommand(hook.command)
             )
         );
         if (innerIdx >= 0 && entry.hooks) {
@@ -286,27 +285,27 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
       }
     };
 
-    const toolHookEnabled = hooksEnabled && isFeatureEnabled("CORTEX_FEATURE_TOOL_HOOK", false);
+    const toolHookEnabled = hooksEnabled && (isFeatureEnabled("PHREN_FEATURE_TOOL_HOOK", false) || isFeatureEnabled("PHREN_FEATURE_TOOL_HOOK", false));
 
     if (hooksEnabled) {
-      upsertCortexHook("UserPromptSubmit", {
+      upsertPhrenHook("UserPromptSubmit", {
         type: "command",
         command: lifecycle.userPromptSubmit || `node "${entryScript}" hook-prompt`,
         timeout: 3,
       });
 
-      upsertCortexHook("Stop", {
+      upsertPhrenHook("Stop", {
         type: "command",
         command: lifecycle.stop,
       });
 
-      upsertCortexHook("SessionStart", {
+      upsertPhrenHook("SessionStart", {
         type: "command",
         command: lifecycle.sessionStart,
       });
 
       if (toolHookEnabled) {
-        upsertCortexHook("PostToolUse", {
+        upsertPhrenHook("PostToolUse", {
           type: "command",
           command: lifecycle.hookTool,
         });
@@ -317,7 +316,7 @@ export function configureClaude(cortexPath: string, opts: { mcpEnabled?: boolean
         if (!Array.isArray(hooks)) continue;
         hooksMap[hookEvent] = hooks.filter(
           (h: HookEntry) => !h.hooks?.some(
-            (hook) => typeof hook.command === "string" && isCortexCommand(hook.command)
+            (hook) => typeof hook.command === "string" && isPhrenCommand(hook.command)
           )
         );
       }
@@ -338,55 +337,55 @@ function probeVSCodePath(): { targetDir: string | null; installed: boolean } {
 }
 
 export function configureVSCode(
-  cortexPath: string,
+  phrenPath: string,
   opts: { mcpEnabled?: boolean; scope?: "user" | "workspace" } = {}
 ): McpConfigStatus | "no_vscode" {
-  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(phrenPath);
   if (opts.scope === "workspace") {
-    const manifest = readRootManifest(cortexPath);
+    const manifest = readRootManifest(phrenPath);
     if (manifest?.installMode !== "project-local" || !manifest.workspaceRoot) return "no_vscode";
     const mcpFile = path.join(manifest.workspaceRoot, ".vscode", "mcp.json");
-    return configureMcpAtPath(mcpFile, mcpEnabled, "servers", "${workspaceFolder}/.cortex");
+    return configureMcpAtPath(mcpFile, mcpEnabled, "servers", "${workspaceFolder}/.phren");
   }
   const probe = probeVSCodePath();
   if (!probe.installed || !probe.targetDir) return "no_vscode";
   const mcpFile = path.join(probe.targetDir, "mcp.json");
-  return configureMcpAtPath(mcpFile, mcpEnabled, "servers", cortexPath);
+  return configureMcpAtPath(mcpFile, mcpEnabled, "servers", phrenPath);
 }
 
-export function configureCursorMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
-  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+export function configureCursorMcp(phrenPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(phrenPath);
   const resolved = resolveCursorMcpConfig(commandExists);
   if (!resolved.installed) return "no_cursor";
-  return configureMcpAtPath(resolved.target, mcpEnabled, "mcpServers", cortexPath);
+  return configureMcpAtPath(resolved.target, mcpEnabled, "mcpServers", phrenPath);
 }
 
-export function configureCopilotMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
-  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
+export function configureCopilotMcp(phrenPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(phrenPath);
   const resolved = resolveCopilotMcpConfig(commandExists);
   if (!resolved.installed) return "no_copilot";
   let status: McpConfigStatus = "already_disabled";
   if (resolved.hasCliDir) {
-    status = configureMcpAtPath(resolved.cliConfig, mcpEnabled, "mcpServers", cortexPath);
+    status = configureMcpAtPath(resolved.cliConfig, mcpEnabled, "mcpServers", phrenPath);
   }
   if (resolved.existing && resolved.existing !== resolved.cliConfig) {
-    status = configureMcpAtPath(resolved.existing, mcpEnabled, "mcpServers", cortexPath);
+    status = configureMcpAtPath(resolved.existing, mcpEnabled, "mcpServers", phrenPath);
   }
   if (!resolved.hasCliDir && !resolved.existing) {
-    status = configureMcpAtPath(resolved.cliConfig, mcpEnabled, "mcpServers", cortexPath);
+    status = configureMcpAtPath(resolved.cliConfig, mcpEnabled, "mcpServers", phrenPath);
   }
   return status;
 }
 
-export function configureCodexMcp(cortexPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
-  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(cortexPath);
-  const resolved = resolveCodexMcpConfig(cortexPath, commandExists);
+export function configureCodexMcp(phrenPath: string, opts: { mcpEnabled?: boolean } = {}): ToolStatus {
+  const mcpEnabled = opts.mcpEnabled ?? getMcpEnabledPreference(phrenPath);
+  const resolved = resolveCodexMcpConfig(phrenPath, commandExists);
   if (!resolved.installed) return "no_codex";
 
   if (resolved.preferToml) {
-    return patchTomlMcpServer(resolved.tomlPath, mcpEnabled, cortexPath);
+    return patchTomlMcpServer(resolved.tomlPath, mcpEnabled, phrenPath);
   }
-  return configureMcpAtPath(resolved.existingJson!, mcpEnabled, "mcpServers", cortexPath);
+  return configureMcpAtPath(resolved.existingJson!, mcpEnabled, "mcpServers", phrenPath);
 }
 
 export function logMcpTargetStatus(tool: string, status: string, phase: "Configured" | "Updated" = "Configured") {

@@ -114,8 +114,8 @@ export function validateSkillsDir(skillsDir: string): SkillValidationResult[] {
   return results;
 }
 
-export function readSkillManifestHooks(cortexPath: string): ManifestHooks | null {
-  const manifestPath = path.join(cortexPath, "cortex.SKILL.md");
+export function readSkillManifestHooks(phrenPath: string): ManifestHooks | null {
+  const manifestPath = path.join(phrenPath, "phren.SKILL.md");
   if (!fs.existsSync(manifestPath)) return null;
 
   const content = fs.readFileSync(manifestPath, "utf8");
@@ -155,7 +155,7 @@ function cleanupManagedSkillLinks(destDir: string, expectedNames: Set<string>, m
       if (!resolvedTarget.startsWith(managedPrefix)) continue;
       fs.unlinkSync(destPath);
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cleanupManagedSkillLinks: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanupManagedSkillLinks: ${errorMessage(err)}\n`);
     }
   }
 }
@@ -165,7 +165,7 @@ export function linkSkillsDir(
   destDir: string,
   managedRoot: string,
   symlinkFile: (src: string, dest: string, managedRoot: string) => boolean,
-  opts?: { cortexPath?: string; scope?: string },
+  opts?: { phrenPath?: string; scope?: string },
 ) {
   if (!fs.existsSync(srcDir)) return;
   fs.mkdirSync(destDir, { recursive: true });
@@ -175,7 +175,7 @@ export function linkSkillsDir(
     const srcPath = path.join(srcDir, entry);
     const stat = fs.statSync(srcPath);
     const skillName = stat.isDirectory() ? entry : entry.replace(/\.md$/, "");
-    if (opts?.cortexPath && opts.scope && !isSkillEnabled(opts.cortexPath, opts.scope, skillName)) {
+    if (opts?.phrenPath && opts.scope && !isSkillEnabled(opts.phrenPath, opts.scope, skillName)) {
       continue;
     }
 
@@ -196,7 +196,7 @@ export function linkSkillsDir(
   cleanupManagedSkillLinks(destDir, expectedNames, managedRoot);
 }
 
-export function writeSkillMd(cortexPath: string) {
+export function writeSkillMd(phrenPath: string) {
   const lifecycle = buildSharedLifecycleCommands();
   const sessionStartCmd = lifecycle.sessionStart.replace(/"/g, '\\"');
   const promptCmd = lifecycle.userPromptSubmit.replace(/"/g, '\\"');
@@ -206,7 +206,7 @@ export function writeSkillMd(cortexPath: string) {
   const toolCatalog = renderToolCatalogMarkdown();
 
   const content = `---
-name: cortex
+name: phren
 description: Long-term memory for your AI agents with automatic context injection and finding capture
 version: "${version}"
 license: MIT
@@ -226,7 +226,7 @@ hooks:
           command: "${stopCmd}"
 ---
 
-# cortex
+# phren
 
 Long-term memory for your AI agents. Injects relevant project context at the start of
 each prompt and saves findings at session end via git. Works with Claude Code, Copilot CLI,
@@ -234,9 +234,9 @@ Cursor, Codex, and more.
 
 ## Lifecycle hooks
 
-- **SessionStart**: pulls latest cortex data and self-heals hook/symlink drift
-- **UserPromptSubmit**: searches cortex, injects matching context with trust filtering and token budgeting
-- **Stop**: commits and pushes any cortex changes to remote
+- **SessionStart**: pulls latest phren data and self-heals hook/symlink drift
+- **UserPromptSubmit**: searches phren, injects matching context with trust filtering and token budgeting
+- **Stop**: commits and pushes any phren changes to remote
 
 ## MCP tools (${toolCount})
 
@@ -244,6 +244,6 @@ ${toolCatalog}
 
 `;
 
-  const dest = path.join(cortexPath, "cortex.SKILL.md");
+  const dest = path.join(phrenPath, "phren.SKILL.md");
   fs.writeFileSync(dest, content);
 }

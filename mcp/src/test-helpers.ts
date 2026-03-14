@@ -2,10 +2,10 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { execFileSync, spawnSync, spawn } from "child_process";
-import { CortexResult, writeRootManifest } from "./shared.js";
+import { PhrenResult, writeRootManifest } from "./shared.js";
 
-export function initTestCortexRoot(
-  cortexDir: string,
+export function initTestPhrenRoot(
+  phrenDir: string,
   options: {
     installMode?: "shared" | "project-local";
     syncMode?: "managed-git" | "workspace-git";
@@ -13,7 +13,7 @@ export function initTestCortexRoot(
     primaryProject?: string;
   } = {},
 ): void {
-  writeRootManifest(cortexDir, {
+  writeRootManifest(phrenDir, {
     version: 1,
     installMode: options.installMode ?? "shared",
     syncMode: options.syncMode ?? "managed-git",
@@ -42,28 +42,28 @@ export function makeTempDir(prefix: string): { path: string; cleanup: () => void
 
 export interface IsolatedCliEnv {
   rootDir: string;
-  cortexDir: string;
+  phrenDir: string;
   homeDir: string;
   cleanup: () => void;
   env: (extra?: Record<string, string>) => Record<string, string>;
 }
 
 /**
- * Create an isolated HOME + CORTEX_PATH pair for CLI subprocess tests.
+ * Create an isolated HOME + PHREN_PATH pair for CLI subprocess tests.
  */
 export function setupIsolatedCliEnv(prefix: string): IsolatedCliEnv {
   const tmp = makeTempDir(prefix);
-  const cortexDir = path.join(tmp.path, ".cortex");
+  const phrenDir = path.join(tmp.path, ".phren");
   const homeDir = path.join(tmp.path, "home");
   fs.mkdirSync(homeDir, { recursive: true });
 
   return {
     rootDir: tmp.path,
-    cortexDir,
+    phrenDir,
     homeDir,
     cleanup: tmp.cleanup,
     env: (extra: Record<string, string> = {}) => ({
-      CORTEX_PATH: cortexDir,
+      PHREN_PATH: phrenDir,
       HOME: homeDir,
       USERPROFILE: homeDir,
       ...extra,
@@ -72,25 +72,12 @@ export function setupIsolatedCliEnv(prefix: string): IsolatedCliEnv {
 }
 
 /**
- * Write governance access-control.json granting admin to the given actor,
- * and set CORTEX_ACTOR in process.env. Returns the actor name.
+ * Legacy helper — RBAC was removed. Now just ensures phren root is initialized.
  */
-export function grantAdmin(cortexDir: string, actor = "vitest-admin"): string {
-  if (!fs.existsSync(path.join(cortexDir, "cortex.root.yaml"))) {
-    initTestCortexRoot(cortexDir);
+export function grantAdmin(phrenDir: string, actor = "vitest-admin"): string {
+  if (!fs.existsSync(path.join(phrenDir, "phren.root.yaml"))) {
+    initTestPhrenRoot(phrenDir);
   }
-  const govDir = path.join(cortexDir, ".governance");
-  fs.mkdirSync(govDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(govDir, "access-control.json"),
-    JSON.stringify({
-      admins: [actor],
-      maintainers: [],
-      contributors: [],
-      viewers: [],
-    }, null, 2) + "\n"
-  );
-  process.env.CORTEX_ACTOR = actor;
   return actor;
 }
 
@@ -103,9 +90,9 @@ export function writeFile(filePath: string, content: string): void {
 }
 
 /**
- * Extract the user-facing message from a CortexResult<string>.
+ * Extract the user-facing message from a PhrenResult<string>.
  */
-export function resultMsg(r: CortexResult<unknown>): string {
+export function resultMsg(r: PhrenResult<unknown>): string {
   if (!r.ok) return r.error;
   return typeof r.data === "string" ? r.data : JSON.stringify(r.data);
 }

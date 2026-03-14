@@ -144,7 +144,7 @@ describe("isDuplicateFinding", () => {
   });
 
   it("skips superseded entries", () => {
-    const withSuperseded = '- Old finding <!-- cortex:status "superseded" -->\n- Unique finding about caching';
+    const withSuperseded = '- Old finding <!-- phren:status "superseded" -->\n- Unique finding about caching';
     expect(isDuplicateFinding(withSuperseded, "Old finding about something")).toBe(false);
   });
 
@@ -199,8 +199,8 @@ describe("detectConflicts", () => {
   });
 
   it("detects conflicts with env var entities", () => {
-    const existing = ["- Always set CORTEX_DEBUG in development"];
-    const conflicts = detectConflicts("Never set CORTEX_DEBUG in development", existing);
+    const existing = ["- Always set PHREN_DEBUG in development"];
+    const conflicts = detectConflicts("Never set PHREN_DEBUG in development", existing);
     expect(conflicts.length).toBeGreaterThan(0);
   });
 
@@ -290,8 +290,8 @@ describe("scanForSecrets", () => {
 
 describe("resolveCoref", () => {
   it("replaces 'the project' with project name", () => {
-    const result = resolveCoref("the project needs refactoring", { project: "cortex" });
-    expect(result).toBe("cortex needs refactoring");
+    const result = resolveCoref("the project needs refactoring", { project: "phren" });
+    expect(result).toBe("phren needs refactoring");
   });
 
   it("replaces 'this file' with basename", () => {
@@ -309,7 +309,7 @@ describe("resolveCoref", () => {
   });
 
   it("prepends context when text has vague pronouns and no concrete nouns", () => {
-    const result = resolveCoref("it handles them correctly", { project: "cortex" });
-    expect(result).toContain("cortex");
+    const result = resolveCoref("it handles them correctly", { project: "phren" });
+    expect(result).toContain("phren");
   });
 });

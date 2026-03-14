@@ -1,5 +1,5 @@
 /**
- * Tests for the handleHookStop auto-capture path (CORTEX_FEATURE_AUTO_CAPTURE=1).
+ * Tests for the handleHookStop auto-capture path (PHREN_FEATURE_AUTO_CAPTURE=1).
  * Tests extractConversationInsights directly (which is the core extraction logic)
  * plus the addFindingToFile integration to verify insights can be persisted.
  */

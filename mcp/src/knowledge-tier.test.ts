@@ -16,13 +16,13 @@ import * as fs from "fs";
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
 
-function makeCortex(): string {
-  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-reference-"));
+function makePhren(): string {
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-reference-"));
   return tmpDir;
 }
 
-function makeProject(cortexDir: string, name: string, files: Record<string, string>): void {
-  const dir = path.join(cortexDir, name);
+function makeProject(phrenDir: string, name: string, files: Record<string, string>): void {
+  const dir = path.join(phrenDir, name);
   fs.mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     const fullPath = path.join(dir, file);
@@ -32,15 +32,15 @@ function makeProject(cortexDir: string, name: string, files: Record<string, stri
 }
 
 beforeEach(() => {
-  process.env.CORTEX_PATH = undefined;
-  delete process.env.CORTEX_FINDINGS_CAP;
+  process.env.PHREN_PATH = undefined;
+  delete process.env.PHREN_FINDINGS_CAP;
 });
 
 afterEach(() => {
   tmpCleanup?.();
   tmpCleanup = undefined;
-  delete process.env.CORTEX_ACTOR;
-  delete process.env.CORTEX_FINDINGS_CAP;
+  delete process.env.PHREN_ACTOR;
+  delete process.env.PHREN_FINDINGS_CAP;
 });
 
 describe("countActiveFindings", () => {
@@ -85,8 +85,8 @@ describe("countActiveFindings", () => {
 
 describe("autoArchiveToReference", () => {
   it("archives oldest entries to reference/ files grouped by topic", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const findings = `# myapp FINDINGS
 
 ## 2025-01-20
@@ -100,15 +100,15 @@ describe("autoArchiveToReference", () => {
 - Workaround for the timeout bug in auth module
 - Git branch naming convention uses feature/ prefix
 `;
-    makeProject(cortex, "myapp", { "FINDINGS.md": findings });
+    makeProject(phren, "myapp", { "FINDINGS.md": findings });
 
-    const result = autoArchiveToReference(cortex, "myapp", 2);
+    const result = autoArchiveToReference(phren, "myapp", 2);
     expect(result.ok).toBe(true);
     const archived = result.ok ? result.data : 0;
     expect(archived).toBe(3);
 
     // Check that reference/ dir was created
-    const referenceDir = path.join(cortex, "myapp", "reference", "topics");
+    const referenceDir = path.join(phren, "myapp", "reference", "topics");
     expect(fs.existsSync(referenceDir)).toBe(true);
 
     // Check reference files exist
@@ -116,7 +116,7 @@ describe("autoArchiveToReference", () => {
     expect(referenceFiles.length).toBeGreaterThan(0);
 
     // Check FINDINGS.md was trimmed
-    const updatedFindings = fs.readFileSync(path.join(cortex, "myapp", "FINDINGS.md"), "utf8");
+    const updatedFindings = fs.readFileSync(path.join(phren, "myapp", "FINDINGS.md"), "utf8");
     const remainingCount = countActiveFindings(updatedFindings);
     expect(remainingCount).toBe(2);
 
@@ -125,8 +125,8 @@ describe("autoArchiveToReference", () => {
   });
 
   it("does nothing when entries <= keepCount", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const findings = `# myapp FINDINGS
 
 ## 2025-01-20
@@ -134,16 +134,16 @@ describe("autoArchiveToReference", () => {
 - First insight
 - Second insight
 `;
-    makeProject(cortex, "myapp", { "FINDINGS.md": findings });
+    makeProject(phren, "myapp", { "FINDINGS.md": findings });
 
-    const result = autoArchiveToReference(cortex, "myapp", 5);
+    const result = autoArchiveToReference(phren, "myapp", 5);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toBe(0);
   });
 
   it("appends to existing reference files", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const findings = `# myapp FINDINGS
 
 ## 2025-01-20
@@ -155,22 +155,22 @@ describe("autoArchiveToReference", () => {
 - Old architecture decision about microservices
 - Another old architecture choice for the database layer
 `;
-    makeProject(cortex, "myapp", {
+    makeProject(phren, "myapp", {
       "FINDINGS.md": findings,
-      "reference/topics/architecture.md": "# myapp - Architecture\n\n<!-- cortex:auto-topic slug=architecture -->\n\n## Archived 2024-12-01\n\n- Previous architecture note\n",
+      "reference/topics/architecture.md": "# myapp - Architecture\n\n<!-- phren:auto-topic slug=architecture -->\n\n## Archived 2024-12-01\n\n- Previous architecture note\n",
     });
 
-    autoArchiveToReference(cortex, "myapp", 1);
+    autoArchiveToReference(phren, "myapp", 1);
 
-    const archFile = path.join(cortex, "myapp", "reference", "topics", "architecture.md");
+    const archFile = path.join(phren, "myapp", "reference", "topics", "architecture.md");
     const content = fs.readFileSync(archFile, "utf8");
     expect(content).toContain("Previous architecture note");
     expect(content).toContain("microservices");
   });
 
   it("removes empty date sections after archival", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const findings = `# myapp FINDINGS
 
 ## 2025-01-20
@@ -181,11 +181,11 @@ describe("autoArchiveToReference", () => {
 
 - Archive this old one
 `;
-    makeProject(cortex, "myapp", { "FINDINGS.md": findings });
+    makeProject(phren, "myapp", { "FINDINGS.md": findings });
 
-    autoArchiveToReference(cortex, "myapp", 1);
+    autoArchiveToReference(phren, "myapp", 1);
 
-    const updated = fs.readFileSync(path.join(cortex, "myapp", "FINDINGS.md"), "utf8");
+    const updated = fs.readFileSync(path.join(phren, "myapp", "FINDINGS.md"), "utf8");
     expect(updated).not.toContain("## 2025-01-05");
     expect(updated).toContain("## 2025-01-20");
   });
@@ -193,14 +193,14 @@ describe("autoArchiveToReference", () => {
 
 describe("reference/ indexing", () => {
   it("indexes reference/ files with type 'reference'", async () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "myapp", {
+    const phren = makePhren();
+    makeProject(phren, "myapp", {
       "FINDINGS.md": "# FINDINGS\n\n## 2025-01-20\n\n- A finding\n",
       "reference/architecture.md": "# Architecture\n\nThe system uses a microservices pattern.\n",
       "reference/findings.md": "# Findings\n\nTimeout on cold start is 30s.\n",
     });
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
 
     const referenceRows = queryRows(
       db,
@@ -227,49 +227,49 @@ describe("reference/ indexing", () => {
 
 describe("size cap in addFindingToFile", () => {
   it("auto-archives when cap is exceeded", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
 
     // Build a FINDINGS.md with entries right at the cap
     const bullets = Array.from({ length: 5 }, (_, i) =>
       `- Finding number ${i + 1} about architecture decisions`
     ).join("\n");
     const findings = `# myapp FINDINGS\n\n## 2025-01-10\n\n${bullets}\n`;
-    makeProject(cortex, "myapp", { "FINDINGS.md": findings });
+    makeProject(phren, "myapp", { "FINDINGS.md": findings });
 
     // Set a low cap for testing
-    process.env.CORTEX_FINDINGS_CAP = "4";
+    process.env.PHREN_FINDINGS_CAP = "4";
 
-    addFindingToFile(cortex, "myapp", "Brand new insight about the build system");
+    addFindingToFile(phren, "myapp", "Brand new insight about the build system");
 
-    const updated = fs.readFileSync(path.join(cortex, "myapp", "FINDINGS.md"), "utf8");
+    const updated = fs.readFileSync(path.join(phren, "myapp", "FINDINGS.md"), "utf8");
     const remaining = countActiveFindings(updated);
     // Should have at most cap entries (4), since we added one and had 5 (total 6, archives 2)
     expect(remaining).toBeLessThanOrEqual(4);
 
     // Knowledge dir should exist with archived entries
-    const referenceDir = path.join(cortex, "myapp", "reference");
+    const referenceDir = path.join(phren, "myapp", "reference");
     expect(fs.existsSync(referenceDir)).toBe(true);
   });
 
   it("does not archive when under cap", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const findings = `# myapp FINDINGS\n\n## 2025-01-10\n\n- Existing insight\n`;
-    makeProject(cortex, "myapp", { "FINDINGS.md": findings });
+    makeProject(phren, "myapp", { "FINDINGS.md": findings });
 
-    process.env.CORTEX_FINDINGS_CAP = "20";
-    addFindingToFile(cortex, "myapp", "Another insight");
+    process.env.PHREN_FINDINGS_CAP = "20";
+    addFindingToFile(phren, "myapp", "Another insight");
 
-    const referenceDir = path.join(cortex, "myapp", "reference");
+    const referenceDir = path.join(phren, "myapp", "reference");
     expect(fs.existsSync(referenceDir)).toBe(false);
   });
 });
 
 describe("topic classification", () => {
   it("classifies architecture-related entries", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const findings = `# myapp FINDINGS
 
 ## 2025-01-20
@@ -282,11 +282,11 @@ describe("topic classification", () => {
 - Workaround for the race condition in auth
 - Deploy pipeline needs manual approval step
 `;
-    makeProject(cortex, "myapp", { "FINDINGS.md": findings });
+    makeProject(phren, "myapp", { "FINDINGS.md": findings });
 
-    autoArchiveToReference(cortex, "myapp", 1);
+    autoArchiveToReference(phren, "myapp", 1);
 
-    const referenceDir = path.join(cortex, "myapp", "reference", "topics");
+    const referenceDir = path.join(phren, "myapp", "reference", "topics");
     const files = fs.readdirSync(referenceDir).sort();
 
     // Should have created topic-specific files
@@ -304,8 +304,8 @@ describe("topic classification", () => {
   });
 
   it("uses custom project topics for archive routing", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const findings = `# game FINDINGS
 
 ## 2025-01-20
@@ -317,18 +317,18 @@ describe("topic classification", () => {
 - Shader compilation hitch on first frame
 - Gameplay state desync when pausing during combat
 `;
-    makeProject(cortex, "game", { "FINDINGS.md": findings });
-    const saved = writeProjectTopics(cortex, "game", [
+    makeProject(phren, "game", { "FINDINGS.md": findings });
+    const saved = writeProjectTopics(phren, "game", [
       { slug: "rendering", label: "Rendering", description: "Frame rendering and shaders", keywords: ["shader", "frame", "render", "gpu"] },
       { slug: "gameplay", label: "Gameplay", description: "Core gameplay state and combat systems", keywords: ["gameplay", "combat", "pause", "state"] },
       { slug: "general", label: "General", description: "Fallback", keywords: [] },
     ]);
     expect(saved.ok).toBe(true);
 
-    autoArchiveToReference(cortex, "game", 1);
+    autoArchiveToReference(phren, "game", 1);
 
-    const renderingDoc = path.join(cortex, "game", "reference", "topics", "rendering.md");
-    const gameplayDoc = path.join(cortex, "game", "reference", "topics", "gameplay.md");
+    const renderingDoc = path.join(phren, "game", "reference", "topics", "rendering.md");
+    const gameplayDoc = path.join(phren, "game", "reference", "topics", "gameplay.md");
     expect(fs.existsSync(renderingDoc)).toBe(true);
     expect(fs.existsSync(gameplayDoc)).toBe(true);
     expect(fs.readFileSync(renderingDoc, "utf8")).toContain("Shader compilation hitch");
@@ -336,9 +336,9 @@ describe("topic classification", () => {
   });
 
   it("reclassifies legacy auto-managed topic docs into reference/topics and skips hand-written docs", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "game", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "game", {
       "FINDINGS.md": "# game FINDINGS\n",
       "reference/frontend.md": [
         "# game - frontend",
@@ -354,18 +354,18 @@ describe("topic classification", () => {
         "This is hand-written prose and should not be rewritten.",
       ].join("\n"),
     });
-    const saved = writeProjectTopics(cortex, "game", [
+    const saved = writeProjectTopics(phren, "game", [
       { slug: "rendering", label: "Rendering", description: "Graphics and shaders", keywords: ["shader", "frame", "render"] },
       { slug: "general", label: "General", description: "Fallback", keywords: [] },
     ]);
     expect(saved.ok).toBe(true);
 
-    const result = reclassifyLegacyTopicDocs(cortex, "game");
+    const result = reclassifyLegacyTopicDocs(phren, "game");
     expect(result.movedFiles).toBe(1);
     expect(result.movedEntries).toBe(1);
     expect(result.skipped.some((item) => item.file === "reference/rendering-notes.md")).toBe(true);
-    expect(fs.existsSync(path.join(cortex, "game", "reference", "frontend.md"))).toBe(false);
-    expect(fs.readFileSync(path.join(cortex, "game", "reference", "topics", "rendering.md"), "utf8")).toContain("Shader compilation hitch");
-    expect(fs.existsSync(path.join(cortex, "game", "reference", "rendering-notes.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phren, "game", "reference", "frontend.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(phren, "game", "reference", "topics", "rendering.md"), "utf8")).toContain("Shader compilation hitch");
+    expect(fs.existsSync(path.join(phren, "game", "reference", "rendering-notes.md"))).toBe(true);
   });
 });

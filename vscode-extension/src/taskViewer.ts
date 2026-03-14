@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 import { showPreview } from "./previewPanel";
 
 interface TaskData {
@@ -10,7 +10,7 @@ interface TaskData {
   checked: boolean;
 }
 
-export function showTaskDetail(client: CortexClient, task: TaskData, onRefresh: () => void): void {
+export function showTaskDetail(client: PhrenClient, task: TaskData, onRefresh: () => void): void {
   showPreview({
     key: `task:${task.projectName}:${task.id}`,
     title: `Task: ${task.id}`,
@@ -55,7 +55,7 @@ export function showTaskDetail(client: CortexClient, task: TaskData, onRefresh: 
 }
 
 function renderTaskHtml(task: TaskData): string {
-  const sectionColor: Record<string, string> = { Active: "#388a34", Queue: "#c89b2a", Done: "#666" };
+  const sectionColor: Record<string, string> = { Active: "#388a34", Queue: "#7B68AE", Done: "#666" };
   const color = sectionColor[task.section] ?? "#888";
 
   return `<!DOCTYPE html>

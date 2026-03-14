@@ -6,18 +6,18 @@ import * as path from "path";
 import { runtimeFile, getProjectDirs } from "./shared.js";
 import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName } from "./utils.js";
-import { approveQueueItem, rejectQueueItem, editQueueItem, readReviewQueue, readReviewQueueAcrossProjects } from "./data-access.js";
+import { readReviewQueue, readReviewQueueAcrossProjects } from "./data-access.js";
 import { addProjectFromPath } from "./core-project.js";
 import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "./project-config.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { getMachineName } from "./machine-identity.js";
 
-import type { CortexResult } from "./shared.js";
+import type { PhrenResult } from "./shared.js";
 import type { McpToolResult } from "./mcp-types.js";
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
 
-/** Translate a CortexResult<string> into a standard McpToolResult shape. */
-function cortexResultToMcp(result: CortexResult<string>): McpToolResult {
+/** Translate a PhrenResult<string> into a standard McpToolResult shape. */
+function phrenResultToMcp(result: PhrenResult<string>): McpToolResult {
   if (result.ok) {
     return { ok: true, message: result.data };
   }
@@ -25,29 +25,29 @@ function cortexResultToMcp(result: CortexResult<string>): McpToolResult {
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, profile, withWriteQueue, updateFileInIndex } = ctx;
+  const { phrenPath, profile, withWriteQueue, updateFileInIndex } = ctx;
 
   // ── get_consolidation_status ───────────────────────────────────────────────
 
   server.registerTool(
     "add_project",
     {
-      title: "◆ cortex · add project",
+      title: "◆ phren · add project",
       description:
-        "Bootstrap a project into cortex from a repo or working directory. " +
-        "Copies or creates CLAUDE.md/summary/tasks/findings under ~/.cortex/<project> and adds the project to the active profile.",
+        "Bootstrap a project into phren from a repo or working directory. " +
+        "Copies or creates CLAUDE.md/summary/tasks/findings under ~/.phren/<project> and adds the project to the active profile.",
       inputSchema: z.object({
         path: z.string().describe("Project path to import. Pass the current repo path explicitly."),
         profile: z.string().optional().describe("Profile to update. Defaults to the active profile."),
         ownership: z.enum(PROJECT_OWNERSHIP_MODES).optional()
-          .describe("How Cortex should treat repo-facing instruction files: cortex-managed, detached, or repo-managed."),
+          .describe("How Phren should treat repo-facing instruction files: phren-managed, detached, or repo-managed."),
       }),
     },
     async ({ path: targetPath, profile: requestedProfile, ownership }) => {
       return withWriteQueue(async () => {
         try {
           const added = addProjectFromPath(
-            cortexPath,
+            phrenPath,
             targetPath,
             requestedProfile || profile || undefined,
             parseProjectOwnershipMode(ownership) ?? undefined
@@ -77,7 +77,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "get_consolidation_status",
     {
-      title: "◆ cortex · consolidation status",
+      title: "◆ phren · consolidation status",
       description:
         "Check whether a project's FINDINGS.md needs consolidation. " +
         "Returns entry count since last consolidation, threshold, and recommendation.",
@@ -89,10 +89,10 @@ export function register(server: McpServer, ctx: McpContext): void {
       const projectDirs = project
         ? (() => {
             if (!isValidProjectName(project)) return [];
-            const dir = path.join(cortexPath, project);
+            const dir = path.join(phrenPath, project);
             return fs.existsSync(dir) ? [dir] : [];
           })()
-        : getProjectDirs(cortexPath, profile);
+        : getProjectDirs(phrenPath, profile);
 
       if (project && projectDirs.length === 0) {
         return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
@@ -135,15 +135,15 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "health_check",
     {
-      title: "◆ cortex · health",
+      title: "◆ phren · health",
       description:
-        "Return cortex health status: version, FTS index status, hook registration, and profile/machine info.",
+        "Return phren health status: version, FTS index status, hook registration, and profile/machine info.",
       inputSchema: z.object({}),
     },
     async () => {
       const activeProfile = (() => {
         try {
-          return resolveRuntimeProfile(cortexPath);
+          return resolveRuntimeProfile(phrenPath);
         } catch {
           return profile || "";
         }
@@ -156,32 +156,32 @@ export function register(server: McpServer, ctx: McpContext): void {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
         version = pkg.version || "unknown";
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck version: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck version: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
-      // FTS index (lives in /tmpcortex-fts-*/, not .runtime/)
+      // FTS index (lives in /tmpphren-fts-*/, not .runtime/)
       let indexStatus: { exists: boolean; sizeBytes?: number } = { exists: false };
       try {
-        indexStatus = findFtsCacheForPath(cortexPath, activeProfile);
+        indexStatus = findFtsCacheForPath(phrenPath, activeProfile);
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck ftsCacheCheck: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck ftsCacheCheck: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       // Hook registration
       let hooksEnabled = false;
       try {
         const { getHooksEnabledPreference } = await import("./init-preferences.js");
-        hooksEnabled = getHooksEnabledPreference(cortexPath);
+        hooksEnabled = getHooksEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck hooksEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck hooksEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       let mcpEnabled = false;
       try {
         const { getMcpEnabledPreference } = await import("./init-preferences.js");
-        mcpEnabled = getMcpEnabledPreference(cortexPath);
+        mcpEnabled = getMcpEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck mcpEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck mcpEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       // Profile/machine info
@@ -189,33 +189,33 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           return getMachineName();
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck machineName: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck machineName: ${err instanceof Error ? err.message : String(err)}\n`);
         }
         return undefined;
       })();
 
-      const projectCount = getProjectDirs(cortexPath, activeProfile).length;
+      const projectCount = getProjectDirs(phrenPath, activeProfile).length;
 
       // Proactivity and taskMode
       let proactivity: string = "high";
       let taskMode: string = "auto";
       try {
         const { getWorkflowPolicy } = await import("./governance-policy.js");
-        const workflowPolicy = getWorkflowPolicy(cortexPath);
+        const workflowPolicy = getWorkflowPolicy(phrenPath);
         taskMode = workflowPolicy.taskMode;
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck taskMode: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck taskMode: ${err instanceof Error ? err.message : String(err)}\n`);
       }
       try {
         const { readInstallPreferences } = await import("./init-preferences.js");
-        const prefs = readInstallPreferences(cortexPath);
+        const prefs = readInstallPreferences(phrenPath);
         proactivity = prefs.proactivity || "high";
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] healthCheck proactivity: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck proactivity: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       const lines = [
-        `Cortex v${version}`,
+        `Phren v${version}`,
         `Profile: ${activeProfile || "(default)"}`,
         machineName ? `Machine: ${machineName}` : null,
         `Projects: ${projectCount}`,
@@ -224,7 +224,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         `Hooks: ${hooksEnabled ? "enabled" : "disabled"}`,
         `Proactivity: ${proactivity}`,
         `Task mode: ${taskMode}`,
-        `Path: ${cortexPath}`,
+        `Path: ${phrenPath}`,
       ].filter(Boolean);
 
       return mcpResponse({
@@ -240,7 +240,40 @@ export function register(server: McpServer, ctx: McpContext): void {
           hooksEnabled,
           proactivity,
           taskMode,
-          cortexPath,
+          phrenPath,
+        },
+      });
+    }
+  );
+
+  // ── doctor_fix ─────────────────────────────────────────────────────────────
+
+  server.registerTool(
+    "doctor_fix",
+    {
+      title: "◆ phren · doctor fix",
+      description:
+        "Run phren doctor with --fix: re-links hooks, symlinks, context, and memory pointers. " +
+        "Returns the list of checks and repair actions taken.",
+      inputSchema: z.object({
+        check_data: z.boolean().optional()
+          .describe("Also validate data files (tasks, findings, governance). Default false."),
+      }),
+    },
+    async ({ check_data }) => {
+      const { runDoctor } = await import("./link-doctor.js");
+      const result = await runDoctor(phrenPath, true, check_data ?? false);
+      const lines = result.checks.map((c) => `${c.ok ? "ok" : "FAIL"} ${c.name}: ${c.detail}`);
+      return mcpResponse({
+        ok: result.ok,
+        message: result.ok
+          ? `Doctor fix complete: all ${result.checks.length} checks passed`
+          : `Doctor fix complete: ${result.checks.filter((c) => !c.ok).length} issue(s) remain`,
+        data: {
+          machine: result.machine,
+          profile: result.profile,
+          checks: result.checks,
+          summary: lines.join("\n"),
         },
       });
     }
@@ -251,9 +284,9 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "list_hook_errors",
     {
-      title: "◆ cortex · hook errors",
+      title: "◆ phren · hook errors",
       description:
-        "List recent error entries from cortex hook-errors.log and debug.log. " +
+        "List recent error entries from phren hook-errors.log and debug.log. " +
         "Useful for diagnosing hook or index failures.",
       inputSchema: z.object({
         limit: z.number().int().min(1).max(200).optional()
@@ -283,22 +316,22 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!filterPatterns) return lines; // hook-errors.log: every line is an error
           return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readErrorLines: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readErrorLines: ${err instanceof Error ? err.message : String(err)}\n`);
           return [];
         }
       }
 
       // hook-errors.log contains only hook failure lines (no filtering needed)
-      const hookErrors = readErrorLines(runtimeFile(cortexPath, "hook-errors.log"), false);
+      const hookErrors = readErrorLines(runtimeFile(phrenPath, "hook-errors.log"), false);
       // debug.log may contain non-error lines, so filter
-      const debugErrors = readErrorLines(runtimeFile(cortexPath, "debug.log"), true);
+      const debugErrors = readErrorLines(runtimeFile(phrenPath, "debug.log"), true);
 
       const allErrors = [...hookErrors, ...debugErrors];
 
       if (allErrors.length === 0) {
         return mcpResponse({
           ok: true,
-          message: "No error entries found. Hook errors go to hook-errors.log; general errors require CORTEX_DEBUG=1.",
+          message: "No error entries found. Hook errors go to hook-errors.log; general errors require PHREN_DEBUG=1.",
           data: { errors: [], total: 0 },
         });
       }
@@ -317,7 +350,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "get_review_queue",
     {
-      title: "◆ cortex · get review queue",
+      title: "◆ phren · get review queue",
       description:
         "List all items in a project's memory review queue (MEMORY_QUEUE.md), or across all projects when omitted. " +
         "Returns items with their id, section (Review/Stale/Conflicts), date, text, confidence, and risky flag.",
@@ -330,7 +363,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
       }
       if (project) {
-        const result = readReviewQueue(cortexPath, project);
+        const result = readReviewQueue(phrenPath, project);
         if (!result.ok) {
           return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
         }
@@ -342,7 +375,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         });
       }
 
-      const result = readReviewQueueAcrossProjects(cortexPath, profile);
+      const result = readReviewQueueAcrossProjects(phrenPath, profile);
       if (!result.ok) {
         return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
       }
@@ -354,78 +387,4 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  // ── approve_queue_item ────────────────────────────────────────────────────
-
-  server.registerTool(
-    "approve_queue_item",
-    {
-      title: "◆ cortex · approve queue item",
-      description:
-        "Approve a queued memory item: moves it from the review queue into FINDINGS.md. " +
-        "Requires queue + write permission. High-risk items additionally require maintainer role.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        item: z.string().describe("Partial text of the queue item to approve."),
-      }),
-    },
-    async ({ project, item }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      const result = approveQueueItem(cortexPath, project, item);
-      if (result.ok) {
-        // Approval writes to both FINDINGS.md and MEMORY_QUEUE.md — update both in index
-        updateFileInIndex(path.join(cortexPath, project, "FINDINGS.md"));
-        updateFileInIndex(path.join(cortexPath, project, "MEMORY_QUEUE.md"));
-      }
-      return mcpResponse(cortexResultToMcp(result));
-    }
-  );
-
-  // ── reject_queue_item ─────────────────────────────────────────────────────
-
-  server.registerTool(
-    "reject_queue_item",
-    {
-      title: "◆ cortex · reject queue item",
-      description:
-        "Reject a queued memory item: removes it from the review queue without promoting to FINDINGS.md. " +
-        "Requires queue permission.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        item: z.string().describe("Partial text of the queue item to reject."),
-      }),
-    },
-    async ({ project, item }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      const result = rejectQueueItem(cortexPath, project, item);
-      if (result.ok) {
-        updateFileInIndex(path.join(cortexPath, project, "MEMORY_QUEUE.md"));
-      }
-      return mcpResponse(cortexResultToMcp(result));
-    }
-  );
-
-  // ── edit_queue_item ───────────────────────────────────────────────────────
-
-  server.registerTool(
-    "edit_queue_item",
-    {
-      title: "◆ cortex · edit queue item",
-      description:
-        "Edit the text of a queued memory item before approving or rejecting it. " +
-        "Requires queue permission.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        item: z.string().describe("Partial text of the queue item to edit."),
-        new_text: z.string().describe("Replacement text for the queue item."),
-      }),
-    },
-    async ({ project, item, new_text }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      const result = editQueueItem(cortexPath, project, item, new_text);
-      if (result.ok) {
-        updateFileInIndex(path.join(cortexPath, project, "MEMORY_QUEUE.md"));
-      }
-      return mcpResponse(cortexResultToMcp(result));
-    }
-  );
 }

@@ -10,13 +10,10 @@ import {
   removeFinding,
   readFindings,
   readReviewQueue,
-  approveQueueItem,
-  rejectQueueItem,
-  editQueueItem,
   setMachineProfile,
   listMachines,
 } from "../data-access.js";
-import { CortexError } from "../shared.js";
+import { PhrenError } from "../shared.js";
 import { grantAdmin, makeTempDir, resultMsg, spawnTsxWorker, REPO_ROOT } from "../test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -47,16 +44,16 @@ const SAMPLE_TASK = `# conctest tasks
 `;
 
 beforeEach(() => {
-  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-conc-"));
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-conc-"));
   projectDir = path.join(tmpDir, PROJECT);
   fs.mkdirSync(projectDir, { recursive: true });
   grantAdmin(tmpDir);
 });
 
 afterEach(() => {
-  delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
-  delete process.env.CORTEX_FILE_LOCK_POLL_MS;
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+  delete process.env.PHREN_FILE_LOCK_POLL_MS;
+  delete process.env.PHREN_ACTOR;
   tmpCleanup();
 });
 
@@ -119,8 +116,8 @@ describe("concurrent write safety - in-process", () => {
     const lockPath = path.join(projectDir, "tasks.md.lock");
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
-    process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "100";
-    process.env.CORTEX_FILE_LOCK_POLL_MS = "20";
+    process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = "100";
+    process.env.PHREN_FILE_LOCK_POLL_MS = "20";
 
     const before = fs.readFileSync(path.join(projectDir, "tasks.md"), "utf8");
     const msg = addTask(tmpDir, PROJECT, "Should not be added");
@@ -130,7 +127,7 @@ describe("concurrent write safety - in-process", () => {
 
     expect(msg.ok).toBe(false);
     if (!msg.ok) {
-      expect(msg.code).toBe(CortexError.LOCK_TIMEOUT);
+      expect(msg.code).toBe(PhrenError.LOCK_TIMEOUT);
       expect(msg.error).toContain("lock");
     }
     expect(after).toBe(before);
@@ -195,64 +192,6 @@ describe("concurrent write safety - in-process", () => {
   });
 });
 
-describe("concurrent write safety - queue operations", () => {
-  beforeEach(() => {
-    fs.writeFileSync(
-      path.join(projectDir, "MEMORY_QUEUE.md"),
-      [
-        "# conctest Memory Queue",
-        "",
-        "## Review",
-        "",
-        "- [2026-03-05] Review item one [confidence 0.90]",
-        "- [2026-03-06] Review item two [confidence 0.85]",
-        "",
-        "## Stale",
-        "",
-        "- [2026-03-04] Stale item [confidence 0.55]",
-        "",
-        "## Conflicts",
-        "",
-        "",
-      ].join("\n")
-    );
-    fs.writeFileSync(
-      path.join(projectDir, "FINDINGS.md"),
-      "# conctest FINDINGS\n\n## 2026-03-01\n\n- Existing finding\n"
-    );
-  });
-
-  it("approve then reject on different items leaves correct queue state", () => {
-    const approveMsg = approveQueueItem(tmpDir, PROJECT, "Review item one");
-    expect(approveMsg.ok).toBe(true);
-
-    const rejectMsg = rejectQueueItem(tmpDir, PROJECT, "Stale item");
-    expect(rejectMsg.ok).toBe(true);
-
-    const queue = readReviewQueue(tmpDir, PROJECT);
-    expect(queue.ok).toBe(true);
-    if (!queue.ok) return;
-    expect(queue.data).toHaveLength(1);
-    expect(queue.data[0].text).toContain("Review item two");
-  });
-
-  it("edit then approve produces correct findings entry", () => {
-    const editMsg = editQueueItem(tmpDir, PROJECT, "Review item one", "Edited review item");
-    expect(editMsg.ok).toBe(true);
-
-    const queue = readReviewQueue(tmpDir, PROJECT);
-    if (!queue.ok) return;
-    const editedItem = queue.data.find((i) => i.text.includes("Edited review item"));
-    expect(editedItem).toBeDefined();
-
-    const approveMsg = approveQueueItem(tmpDir, PROJECT, "Edited review item");
-    expect(approveMsg.ok).toBe(true);
-
-    const findings = readFindings(tmpDir, PROJECT);
-    if (!findings.ok) return;
-    expect(findings.data.some((f) => f.text.includes("Edited review item"))).toBe(true);
-  });
-});
 
 describe.skipIf(process.platform === "win32")("concurrent write safety - cross-process", () => {
   it("three concurrent task adds from separate processes all succeed", async () => {
@@ -261,7 +200,7 @@ describe.skipIf(process.platform === "win32")("concurrent write safety - cross-p
 
     const mkCode = (item: string) =>
       `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
-      `process.env.CORTEX_ACTOR='vitest-admin';` +
+      `process.env.PHREN_ACTOR='vitest-admin';` +
       `const out=addTask(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
@@ -290,13 +229,13 @@ describe.skipIf(process.platform === "win32")("concurrent write safety - cross-p
 
     const taskCode =
       `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
-      `process.env.CORTEX_ACTOR='vitest-admin';` +
+      `process.env.PHREN_ACTOR='vitest-admin';` +
       `const out=addTask(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},"Cross-process task item");` +
       `console.log(out.ok ? out.data : out.error);`;
 
     const findingCode =
       `import { addFinding } from ${JSON.stringify(dataAccessPath)};` +
-      `process.env.CORTEX_ACTOR='vitest-admin';` +
+      `process.env.PHREN_ACTOR='vitest-admin';` +
       `const out=addFinding(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},"Cross-process finding with unique content");` +
       `console.log(out.ok ? out.data : out.error);`;
 
@@ -350,13 +289,13 @@ describe("concurrent write safety - machines.yaml", () => {
     const lockPath = path.join(tmpDir, "machines.yaml.lock");
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
-    process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "100";
-    process.env.CORTEX_FILE_LOCK_POLL_MS = "20";
+    process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = "100";
+    process.env.PHREN_FILE_LOCK_POLL_MS = "20";
 
     const msg = setMachineProfile(tmpDir, "blocked-machine", "personal");
     fs.unlinkSync(lockPath);
 
     expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.LOCK_TIMEOUT);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.LOCK_TIMEOUT);
   });
 });

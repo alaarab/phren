@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 
 interface SearchResult {
   project: string;
@@ -27,9 +27,9 @@ interface HistoryQuickPickItem extends vscode.QuickPickItem {
 
 type AnyQuickPickItem = SearchQuickPickItem | HistoryQuickPickItem;
 
-export async function showSearchQuickPick(client: CortexClient): Promise<void> {
+export async function showSearchQuickPick(client: PhrenClient): Promise<void> {
   const quickPick = vscode.window.createQuickPick<AnyQuickPickItem>();
-  quickPick.placeholder = "Search cortex knowledge...";
+  quickPick.placeholder = "Search phren knowledge...";
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
 
@@ -141,7 +141,7 @@ export async function showSearchQuickPick(client: CortexClient): Promise<void> {
       ? `${resultItem.result.project}/${resultItem.result.filename}`
       : resultItem.label;
     const panel = vscode.window.createWebviewPanel(
-      "cortex.searchResult",
+      "phren.searchResult",
       panelTitle,
       vscode.ViewColumn.One,
       {},
@@ -161,7 +161,7 @@ export async function showSearchQuickPick(client: CortexClient): Promise<void> {
   showHistory();
 }
 
-async function resolveFullContent(client: CortexClient, result: SearchResult): Promise<string> {
+async function resolveFullContent(client: PhrenClient, result: SearchResult): Promise<string> {
   const providedContent = asNonEmptyString(result.content);
   if (providedContent) {
     return providedContent;

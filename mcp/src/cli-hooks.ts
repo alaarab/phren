@@ -9,7 +9,7 @@ import {
   debugLog,
   sessionMarker,
   sessionsDir,
-  getCortexPath,
+  getPhrenPath,
 } from "./shared.js";
 import {
   getRetentionPolicy,
@@ -123,14 +123,14 @@ function termAppearsInText(term: string, text: string): boolean {
 }
 
 function autoLearnQuerySynonyms(
-  cortexPath: string,
+  phrenPath: string,
   project: string | null,
   keywordEntries: string[],
   rows: Array<{ content: string }>,
 ): void {
   if (!project) return;
 
-  const synonymMap = loadSynonymMap(project, cortexPath);
+  const synonymMap = loadSynonymMap(project, phrenPath);
   const knownTerms = new Set<string>([
     ...Object.keys(synonymMap),
     ...Object.values(synonymMap).flat(),
@@ -164,7 +164,7 @@ function autoLearnQuerySynonyms(
 
     if (related.length === 0) continue;
     try {
-      learnSynonym(cortexPath, project, unknown, related);
+      learnSynonym(phrenPath, project, unknown, related);
       learned.push({ term: unknown, related });
     } catch (err: unknown) {
       debugLog(`hook-prompt synonym-learn failed for "${unknown}": ${errorMessage(err)}`);
@@ -209,12 +209,12 @@ export function parseHookInput(raw: string): HookPromptInput | null {
 // ── handleHookPrompt: orchestrator using extracted stages ────────────────────
 
 export async function handleHookPrompt() {
-  const profile = resolveRuntimeProfile(getCortexPath());
+  const profile = resolveRuntimeProfile(getPhrenPath());
   const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
 
   let raw = "";
   try { raw = await readStdin(); } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookPrompt stdinRead: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookPrompt stdinRead: ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(0);
   }
 
@@ -223,20 +223,20 @@ export async function handleHookPrompt() {
 
   const { prompt, cwd, sessionId } = input;
 
-  if (!getHooksEnabledPreference(getCortexPath())) {
-    appendAuditLog(getCortexPath(), "hook_prompt", "status=disabled");
+  if (!getHooksEnabledPreference(getPhrenPath())) {
+    appendAuditLog(getPhrenPath(), "hook_prompt", "status=disabled");
     process.exit(0);
   }
 
-  // Check per-tool hook preference (CORTEX_HOOK_TOOL is set by session wrappers;
+  // Check per-tool hook preference (PHREN_HOOK_TOOL is set by session wrappers;
   // Claude hooks always run as "claude" from settings.json)
-  const hookTool = process.env.CORTEX_HOOK_TOOL || "claude";
-  if (!isToolHookEnabled(getCortexPath(), hookTool)) {
-    appendAuditLog(getCortexPath(), "hook_prompt", `status=tool_disabled tool=${hookTool}`);
+  const hookTool = process.env.PHREN_HOOK_TOOL || "claude";
+  if (!isToolHookEnabled(getPhrenPath(), hookTool)) {
+    appendAuditLog(getPhrenPath(), "hook_prompt", `status=tool_disabled tool=${hookTool}`);
     process.exit(0);
   }
 
-  updateRuntimeHealth(getCortexPath(), { lastPromptAt: new Date().toISOString() });
+  updateRuntimeHealth(getPhrenPath(), { lastPromptAt: new Date().toISOString() });
 
   const keywordEntries = extractKeywordEntries(prompt);
   const keywords = keywordEntries.join(" ");
@@ -244,46 +244,46 @@ export async function handleHookPrompt() {
   debugLog(`hook-prompt keywords: "${keywords}"`);
 
   const tIndex0 = Date.now();
-  const db = await buildIndex(getCortexPath(), profile);
+  const db = await buildIndex(getPhrenPath(), profile);
   stage.indexMs = Date.now() - tIndex0;
 
   const gitCtx = getGitContext(cwd);
   const intent = detectTaskIntent(prompt);
-  const detectedProject = cwd ? detectProject(getCortexPath(), cwd, profile) : null;
+  const detectedProject = cwd ? detectProject(getPhrenPath(), cwd, profile) : null;
   if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
 
-  if (!isProjectHookEnabled(getCortexPath(), detectedProject, "UserPromptSubmit")) {
-    appendAuditLog(getCortexPath(), "hook_prompt", `status=project_disabled project=${detectedProject}`);
+  if (!isProjectHookEnabled(getPhrenPath(), detectedProject, "UserPromptSubmit")) {
+    appendAuditLog(getPhrenPath(), "hook_prompt", `status=project_disabled project=${detectedProject}`);
     process.exit(0);
   }
 
-  const safeQuery = buildRobustFtsQuery(keywords, detectedProject, getCortexPath());
+  const safeQuery = buildRobustFtsQuery(keywords, detectedProject, getPhrenPath());
   if (!safeQuery) process.exit(0);
 
   try {
     const tSearch0 = Date.now();
-    let rows = await searchDocumentsAsync(db, safeQuery, prompt, keywords, detectedProject, false, getCortexPath());
+    let rows = await searchDocumentsAsync(db, safeQuery, prompt, keywords, detectedProject, false, getPhrenPath());
     stage.searchMs = Date.now() - tSearch0;
     if (!rows || !rows.length) process.exit(0);
-    autoLearnQuerySynonyms(getCortexPath(), detectedProject, keywordEntries, rows);
+    autoLearnQuerySynonyms(getPhrenPath(), detectedProject, keywordEntries, rows);
 
     const tTrust0 = Date.now();
-    const policy = getRetentionPolicy(getCortexPath());
+    const policy = getRetentionPolicy(getPhrenPath());
     const memoryTtlDays = Number.parseInt(
-      process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10
+      process.env.PHREN_MEMORY_TTL_DAYS || String(policy.ttlDays), 10
     );
     const trustResult = applyTrustFilter(
       rows,
       Number.isNaN(memoryTtlDays) ? policy.ttlDays : memoryTtlDays,
       policy.minInjectConfidence, policy.decay,
-      getCortexPath()
+      getPhrenPath()
     );
     rows = trustResult.rows;
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 
-    if (isFeatureEnabled("CORTEX_FEATURE_AUTO_EXTRACT", true) && getProactivityLevelForFindings(getCortexPath()) !== "low" && sessionId && detectedProject && cwd) {
-      const marker = sessionMarker(getCortexPath(), `extracted-${sessionId}-${detectedProject}`);
+    if (isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && getProactivityLevelForFindings(getPhrenPath()) !== "low" && sessionId && detectedProject && cwd) {
+      const marker = sessionMarker(getPhrenPath(), `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
           await handleExtractMemories(detectedProject, cwd, true, sessionId, "hook");
@@ -295,13 +295,13 @@ export async function handleHookPrompt() {
     }
 
     const tRank0 = Date.now();
-    rows = rankResults(rows, intent, gitCtx, detectedProject, getCortexPath(), db, cwd, keywords);
+    rows = rankResults(rows, intent, gitCtx, detectedProject, getPhrenPath(), db, cwd, keywords);
     stage.rankMs = Date.now() - tRank0;
     if (!rows.length) process.exit(0);
 
-    const safeTokenBudget = clampInt(process.env.CORTEX_CONTEXT_TOKEN_BUDGET, 550, 180, 10000);
-    const safeLineBudget = clampInt(process.env.CORTEX_CONTEXT_SNIPPET_LINES, 6, 2, 100);
-    const safeCharBudget = clampInt(process.env.CORTEX_CONTEXT_SNIPPET_CHARS, 520, 120, 10000);
+    const safeTokenBudget = clampInt(process.env.PHREN_CONTEXT_TOKEN_BUDGET, 550, 180, 10000);
+    const safeLineBudget = clampInt(process.env.PHREN_CONTEXT_SNIPPET_LINES, 6, 2, 100);
+    const safeCharBudget = clampInt(process.env.PHREN_CONTEXT_SNIPPET_CHARS, 520, 120, 10000);
 
     const tSelect0 = Date.now();
     const { selected, usedTokens } = selectSnippets(rows, keywords, safeTokenBudget, safeLineBudget, safeCharBudget);
@@ -309,7 +309,7 @@ export async function handleHookPrompt() {
     if (!selected.length) process.exit(0);
 
     // Injection budget: cap total injected tokens across all content
-    const maxInjectTokens = clampInt(process.env.CORTEX_MAX_INJECT_TOKENS, 2000, 200, 20000);
+    const maxInjectTokens = clampInt(process.env.PHREN_MAX_INJECT_TOKENS, 2000, 200, 20000);
     let budgetSelected = selected;
     let budgetUsedTokens = usedTokens;
     if (budgetUsedTokens > maxInjectTokens) {
@@ -335,10 +335,10 @@ export async function handleHookPrompt() {
       debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
     }
 
-    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getCortexPath(), sessionId);
-    const taskLevel = getProactivityLevelForTask(getCortexPath());
+    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getPhrenPath(), sessionId);
+    const taskLevel = getProactivityLevelForTask(getPhrenPath());
     const taskLifecycle = handleTaskPromptLifecycle({
-      cortexPath: getCortexPath(),
+      phrenPath: getPhrenPath(),
       prompt,
       project: detectedProject,
       sessionId,
@@ -352,12 +352,12 @@ export async function handleHookPrompt() {
 
     // Inject finding sensitivity agent instruction
     try {
-      const workflowPolicy = getWorkflowPolicy(getCortexPath());
+      const workflowPolicy = getWorkflowPolicy(getPhrenPath());
       const sensitivity = workflowPolicy.findingSensitivity ?? "balanced";
       const sensitivityConfig = FINDING_SENSITIVITY_CONFIG[sensitivity];
       if (sensitivityConfig) {
         parts.push("");
-        parts.push(`[cortex finding-sensitivity=${sensitivity}] ${sensitivityConfig.agentInstruction}`);
+        parts.push(`[phren finding-sensitivity=${sensitivity}] ${sensitivityConfig.agentInstruction}`);
       }
     } catch {
       // ignore — non-fatal
@@ -372,7 +372,7 @@ export async function handleHookPrompt() {
     }
 
     if (sessionId) {
-      trackSessionMetrics(getCortexPath(), sessionId, budgetSelected);
+      trackSessionMetrics(getPhrenPath(), sessionId, budgetSelected);
     }
 
     // Reads stay side-effect free: trust filter output informs ranking/snippets now,
@@ -381,14 +381,14 @@ export async function handleHookPrompt() {
       debugLog(`hook-prompt deferred trust governance items=${trustResult.queueItems.length} audit=${trustResult.auditEntries.length}`);
     }
 
-    const noticeFile = sessionId ? sessionMarker(getCortexPath(), `noticed-${sessionId}`) : null;
+    const noticeFile = sessionId ? sessionMarker(getPhrenPath(), `noticed-${sessionId}`) : null;
     const alreadyNoticed = noticeFile ? fs.existsSync(noticeFile) : false;
 
     if (!alreadyNoticed) {
       // Clean up stale session markers (>24h old) from .sessions/ dir
       try {
         const cutoff = Date.now() - 86400000;
-        const sessDir = sessionsDir(getCortexPath());
+        const sessDir = sessionsDir(getPhrenPath());
         if (fs.existsSync(sessDir)) {
           for (const f of fs.readdirSync(sessDir)) {
             if (!f.startsWith("noticed-") && !f.startsWith("extracted-")) continue;
@@ -396,50 +396,50 @@ export async function handleHookPrompt() {
             if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
           }
         }
-        // Also clean stale markers from the cortex root
-        for (const f of fs.readdirSync(getCortexPath())) {
+        // Also clean stale markers from the phren root
+        for (const f of fs.readdirSync(getPhrenPath())) {
           if (!f.startsWith(".noticed-") && !f.startsWith(".extracted-")) continue;
-          const fp = `${getCortexPath()}/${f}`;
+          const fp = `${getPhrenPath()}/${f}`;
           try { fs.unlinkSync(fp); } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookPrompt staleNoticeUnlink: ${errorMessage(err)}\n`);
+            if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookPrompt staleNoticeUnlink: ${errorMessage(err)}\n`);
           }
         }
       } catch (err: unknown) {
         debugLog(`stale notice cleanup failed: ${errorMessage(err)}`);
       }
 
-      const needed = checkConsolidationNeeded(getCortexPath(), profile);
+      const needed = checkConsolidationNeeded(getPhrenPath(), profile);
       if (needed.length > 0) {
         const notices = needed.map((n) => {
           const since = n.lastConsolidated ? ` since ${n.lastConsolidated}` : "";
           return `  ${n.project}: ${n.entriesSince} new findings${since}`;
         });
-        parts.push(`\u25c8 cortex \u00b7 consolidation ready`);
-        parts.push(`<cortex-notice>`);
+        parts.push(`\u25c8 phren \u00b7 consolidation ready`);
+        parts.push(`<phren-notice>`);
         parts.push(`Findings ready for consolidation:`);
         parts.push(notices.join("\n"));
-        parts.push(`Run cortex-consolidate when ready.`);
-        parts.push(`<cortex-notice>`);
+        parts.push(`Run phren-consolidate when ready.`);
+        parts.push(`<phren-notice>`);
       }
 
       if (noticeFile) {
         try { fs.writeFileSync(noticeFile, ""); } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookPrompt noticeFileWrite: ${errorMessage(err)}\n`);
+          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookPrompt noticeFileWrite: ${errorMessage(err)}\n`);
         }
       }
     }
 
     const totalMs = stage.indexMs + stage.searchMs + stage.trustMs + stage.rankMs + stage.selectMs;
-    const slowThreshold = Number.parseInt(process.env.CORTEX_SLOW_FS_WARN_MS || "3000", 10) || 3000;
+    const slowThreshold = Number.parseInt(process.env.PHREN_SLOW_FS_WARN_MS || "3000", 10) || 3000;
     if (totalMs > slowThreshold) {
       debugLog(`slow-fs: hook-prompt took ${totalMs}ms (index=${stage.indexMs} search=${stage.searchMs} trust=${stage.trustMs} rank=${stage.rankMs} select=${stage.selectMs})`);
-      process.stderr.write(`cortex: hook-prompt took ${totalMs}ms, check if ~/.cortex is on a slow or network filesystem\n`);
+      process.stderr.write(`phren: hook-prompt took ${totalMs}ms, check if ~/.phren is on a slow or network filesystem\n`);
     }
 
     console.log(parts.join("\n"));
   } catch (err: unknown) {
     const msg = errorMessage(err);
-    process.stdout.write(`\n<cortex-error>cortex hook failed: ${msg}. Check ~/.cortex/.runtime/debug.log for details.<cortex-error>\n`);
+    process.stdout.write(`\n<phren-error>phren hook failed: ${msg}. Check ~/.phren/.runtime/debug.log for details.<phren-error>\n`);
     debugLog(`hook-prompt error: ${msg}`);
     process.exit(0);
   }

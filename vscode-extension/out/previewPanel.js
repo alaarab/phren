@@ -55,7 +55,7 @@ function showPreview(opts) {
         return;
     }
     currentKey = opts.key;
-    panel = vscode.window.createWebviewPanel("cortex.preview", opts.title, { viewColumn: vscode.ViewColumn.One, preserveFocus: true }, { enableScripts: true });
+    panel = vscode.window.createWebviewPanel("phren.preview", opts.title, { viewColumn: vscode.ViewColumn.One, preserveFocus: true }, { enableScripts: true });
     panel.onDidDispose(() => {
         panel = undefined;
         currentKey = undefined;

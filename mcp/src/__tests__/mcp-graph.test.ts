@@ -4,12 +4,12 @@ import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 import { buildIndex, queryRows } from "../shared-index.js";
 
-function runtimeFile(cortexPath: string, name: string) {
-  return path.join(cortexPath, ".runtime", name);
+function runtimeFile(phrenPath: string, name: string) {
+  return path.join(phrenPath, ".runtime", name);
 }
 
-function seedFindings(cortexPath: string, project: string, content: string) {
-  writeFile(path.join(cortexPath, project, "FINDINGS.md"), content);
+function seedFindings(phrenPath: string, project: string, content: string) {
+  writeFile(path.join(phrenPath, project, "FINDINGS.md"), content);
 }
 
 describe("manual-links.json persistence", () => {
@@ -62,9 +62,9 @@ describe("read_graph pagination", () => {
   beforeEach(() => { tmp = makeTempDir("mcp-graph-page-"); });
   afterEach(() => tmp.cleanup());
 
-  function seedMultipleEntities(cortexPath: string) {
+  function seedMultipleEntities(phrenPath: string) {
     // Create findings that mention multiple entities so the entity graph has entries
-    seedFindings(cortexPath, "proj", [
+    seedFindings(phrenPath, "proj", [
       "# proj Findings",
       "",
       "## 2025-01-01",
@@ -75,7 +75,7 @@ describe("read_graph pagination", () => {
       "- Nginx reverse proxy config is tricky",
       "",
     ].join("\n"));
-    const manualLinksPath = path.join(cortexPath, ".runtime", "manual-links.json");
+    const manualLinksPath = path.join(phrenPath, ".runtime", "manual-links.json");
     fs.mkdirSync(path.dirname(manualLinksPath), { recursive: true });
     fs.writeFileSync(manualLinksPath, JSON.stringify([
       { entity: "redis", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },

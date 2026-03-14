@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 import { showPreview } from "./previewPanel";
 
 interface FindingData {
@@ -9,7 +9,7 @@ interface FindingData {
   text: string;
 }
 
-export function showFindingDetail(client: CortexClient, finding: FindingData, onRefresh: () => void): void {
+export function showFindingDetail(client: PhrenClient, finding: FindingData, onRefresh: () => void): void {
   showPreview({
     key: `finding:${finding.projectName}:${finding.id}`,
     title: `Finding: ${finding.id}`,

@@ -28,7 +28,7 @@ const DEFAULT_QUERIES = [
   "manual consolidation instead of forced cap",
   "sync state across status shell and review ui",
   "background hook push in detached worker",
-  "skill deletion bug in cortex project",
+  "skill deletion bug in phren project",
 ];
 
 const DEFAULT_TOKEN_BUDGET = 550;
@@ -36,13 +36,13 @@ const DEFAULT_LINE_BUDGET = 6;
 const DEFAULT_CHAR_BUDGET = 520;
 const VECTOR_MICROBENCH_ITERATIONS = 200;
 
-function parseArgs(argv: string[]): { cortexPath: string; project?: string; outputPath?: string; queries: string[] } {
+function parseArgs(argv: string[]): { phrenPath: string; project?: string; outputPath?: string; queries: string[] } {
   const args = argv.slice(2);
   const getArg = (name: string): string | undefined => {
     const index = args.indexOf(name);
     return index >= 0 ? args[index + 1] : undefined;
   };
-  const cortexPath = getArg("--cortex-path") || path.join(os.homedir(), ".cortex");
+  const phrenPath = getArg("--phren-path") || path.join(os.homedir(), ".phren");
   const project = getArg("--project");
   const outputPath = getArg("--output");
   const queryFile = getArg("--queries");
@@ -51,7 +51,7 @@ function parseArgs(argv: string[]): { cortexPath: string; project?: string; outp
     const raw = fs.readFileSync(queryFile, "utf8");
     queries = raw.split("\n").map((line) => line.trim()).filter(Boolean);
   }
-  return { cortexPath, project, outputPath, queries };
+  return { phrenPath, project, outputPath, queries };
 }
 
 function summarize(values: number[]): { avg: number; p50: number; p95: number; min: number; max: number } {
@@ -75,7 +75,7 @@ function describeTopDoc(rows: DocRow[] | null): string | null {
 
 async function runMode(
   mode: "lexical" | "hybrid_gated",
-  cortexPath: string,
+  phrenPath: string,
   db: Awaited<ReturnType<typeof buildIndex>>,
   query: string,
   project?: string,
@@ -95,7 +95,7 @@ async function runMode(
   const rows = safeQuery
     ? mode === "lexical"
       ? searchDocuments(db, safeQuery, query, keywords, project ?? null, !project)
-      : await searchDocumentsAsync(db, safeQuery, query, keywords, project ?? null, !project, cortexPath)
+      : await searchDocumentsAsync(db, safeQuery, query, keywords, project ?? null, !project, phrenPath)
     : null;
   const searchMs = performance.now() - searchStart;
 
@@ -104,7 +104,7 @@ async function runMode(
     "general",
     null,
     project ?? null,
-    cortexPath,
+    phrenPath,
     db,
     undefined,
     query,
@@ -154,7 +154,7 @@ function summarizeModeRuns(
 }
 
 async function runVectorMicrobench(
-  cortexPath: string,
+  phrenPath: string,
   queries: string[],
   project?: string,
 ): Promise<{
@@ -170,19 +170,19 @@ async function runVectorMicrobench(
     indexedMs: number;
   }>;
 }> {
-  const cache = getEmbeddingCache(cortexPath);
+  const cache = getEmbeddingCache(phrenPath);
   await cache.load();
   const model = getEmbeddingModel();
   const allEntries = cache.getAllEntries().filter((entry) => entry.model === model);
   const eligibleEntries = allEntries.filter((entry) => {
     if (!project) return true;
-    const rel = entry.path.startsWith(cortexPath) ? entry.path.slice(cortexPath.length + 1) : entry.path;
+    const rel = entry.path.startsWith(phrenPath) ? entry.path.slice(phrenPath.length + 1) : entry.path;
     const entryProject = rel.split("/")[0] ?? "";
     return entryProject === project || entryProject === "global";
   });
   const eligibleByPath = new Map(eligibleEntries.map((entry) => [entry.path, entry]));
   const eligiblePaths = new Set(eligibleEntries.map((entry) => entry.path));
-  const vectorIndex = getPersistentVectorIndex(cortexPath);
+  const vectorIndex = getPersistentVectorIndex(phrenPath);
   vectorIndex.ensure(cache.getAllEntries());
 
   const results: Array<{ query: string; candidates: number; fullScanMs: number; indexedMs: number }> = [];
@@ -241,25 +241,25 @@ async function runVectorMicrobench(
 }
 
 async function main() {
-  const { cortexPath, project, outputPath, queries } = parseArgs(process.argv);
-  if (!fs.existsSync(cortexPath)) {
-    console.error(`cortex directory not found: ${cortexPath}`);
+  const { phrenPath, project, outputPath, queries } = parseArgs(process.argv);
+  if (!fs.existsSync(phrenPath)) {
+    console.error(`phren directory not found: ${phrenPath}`);
     process.exit(1);
   }
 
-  const db = await buildIndex(cortexPath, process.env.CORTEX_PROFILE || undefined);
+  const db = await buildIndex(phrenPath, process.env.PHREN_PROFILE || undefined);
   try {
     const countRows = db.exec("SELECT COUNT(*) FROM docs");
     const corpusDocs = Number(countRows?.[0]?.values?.[0]?.[0] ?? 0);
     const runs = [];
     for (const query of queries) {
-      runs.push(await runMode("lexical", cortexPath, db, query, project));
-      runs.push(await runMode("hybrid_gated", cortexPath, db, query, project));
+      runs.push(await runMode("lexical", phrenPath, db, query, project));
+      runs.push(await runMode("hybrid_gated", phrenPath, db, query, project));
     }
 
     const lexicalRuns = runs.filter((run) => run.mode === "lexical");
     const hybridRuns = runs.filter((run) => run.mode === "hybrid_gated");
-    const vectorIndex = await runVectorMicrobench(cortexPath, queries, project);
+    const vectorIndex = await runVectorMicrobench(phrenPath, queries, project);
     const semanticOnlyHits = queries.filter((query) => {
       const lexical = lexicalRuns.find((run) => run.query === query);
       const hybrid = hybridRuns.find((run) => run.query === query);
@@ -278,7 +278,7 @@ async function main() {
         platform: process.platform,
         arch: process.arch,
         nodeVersion: process.version,
-        cortexPath,
+        phrenPath,
         project: project ?? null,
         corpusDocs,
         queryCount: queries.length,
@@ -313,7 +313,7 @@ async function main() {
 
     const finalOutputPath = outputPath
       ? path.resolve(outputPath)
-      : path.join(os.tmpdir(), "cortex-retrieval-bench.json");
+      : path.join(os.tmpdir(), "phren-retrieval-bench.json");
     fs.writeFileSync(finalOutputPath, JSON.stringify(output, null, 2));
 
     console.log(`queries: ${queries.length}`);

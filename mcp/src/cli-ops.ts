@@ -4,7 +4,7 @@ import { execFileSync } from "child_process";
 import {
   EXEC_TIMEOUT_MS,
   findProjectNameCaseInsensitive,
-  getCortexPath,
+  getPhrenPath,
   normalizeProjectNameForCreate,
 } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
@@ -15,7 +15,7 @@ import { resolveSubprocessArgs } from "./cli-hooks.js";
 import { listAllSessions, getSessionArtifacts } from "./mcp-session.js";
 
 export function handleTaskView(profile: string) {
-  const docs = readTasksAcrossProjects(getCortexPath(), profile);
+  const docs = readTasksAcrossProjects(getPhrenPath(), profile);
   if (!docs.length) {
     console.log("No tasks found.");
     return;
@@ -62,18 +62,18 @@ export function handleTaskView(profile: string) {
 }
 
 export function handleSessionsView(args: string[]) {
-  const cortexPath = getCortexPath();
+  const phrenPath = getPhrenPath();
   const sessionId = args[0];
 
   if (sessionId) {
     // Drill into a specific session
-    const sessions = listAllSessions(cortexPath, 200);
+    const sessions = listAllSessions(phrenPath, 200);
     const session = sessions.find(s => s.sessionId === sessionId || s.sessionId.startsWith(sessionId));
     if (!session) {
       console.error(`Session "${sessionId}" not found.`);
       process.exit(1);
     }
-    const artifacts = getSessionArtifacts(cortexPath, session.sessionId);
+    const artifacts = getSessionArtifacts(phrenPath, session.sessionId);
     console.log(`Session: ${session.sessionId.slice(0, 8)}`);
     console.log(`Project: ${session.project ?? "—"}`);
     console.log(`Started: ${session.startedAt.slice(0, 16).replace("T", " ")}`);
@@ -92,7 +92,7 @@ export function handleSessionsView(args: string[]) {
   }
 
   // List all sessions
-  const sessions = listAllSessions(cortexPath, 50);
+  const sessions = listAllSessions(phrenPath, 50);
   if (sessions.length === 0) {
     console.log("No sessions found.");
     return;
@@ -109,7 +109,7 @@ export function handleSessionsView(args: string[]) {
     const summary = s.summary ? `  ${s.summary.slice(0, 50)}` : "";
     console.log(`  ${id}${status}  ${date}  ${dur}${findings}  ${proj}${summary}`);
   }
-  console.log(`\n${sessions.length} session(s). Use \`cortex sessions <id>\` to drill into one.`);
+  console.log(`\n${sessions.length} session(s). Use \`phren sessions <id>\` to drill into one.`);
 }
 
 export async function handleQuickstart() {
@@ -132,13 +132,13 @@ export async function handleQuickstart() {
     return;
   }
 
-  console.log(`\nInitializing cortex for "${normalizedProjectName}"...\n`);
+  console.log(`\nInitializing phren for "${normalizedProjectName}"...\n`);
 
   await runInit({ yes: true });
-  const cortexPath = getCortexPath();
-  await runLink(cortexPath, {});
+  const phrenPath = getPhrenPath();
+  await runLink(phrenPath, {});
 
-  const existingProject = findProjectNameCaseInsensitive(cortexPath, normalizedProjectName);
+  const existingProject = findProjectNameCaseInsensitive(phrenPath, normalizedProjectName);
   if (existingProject && existingProject !== normalizedProjectName) {
     console.error(
       `Error: project "${existingProject}" already exists with different casing. Refusing to create "${normalizedProjectName}" because it would split the same project on case-sensitive filesystems.`
@@ -146,14 +146,14 @@ export async function handleQuickstart() {
     return;
   }
 
-  const projectDir = path.join(cortexPath, normalizedProjectName);
+  const projectDir = path.join(phrenPath, normalizedProjectName);
   if (!fs.existsSync(projectDir)) {
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), `# ${normalizedProjectName} Findings\n`);
     fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), `# ${normalizedProjectName} Tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
   }
 
-  console.log(`\n\u2713 cortex ready. Project: ${normalizedProjectName}. Try: cortex search 'your query'`);
+  console.log(`\n\u2713 phren ready. Project: ${normalizedProjectName}. Try: phren search 'your query'`);
 }
 
 export async function handleDebugInjection(args: string[], profile: string) {
@@ -180,13 +180,13 @@ export async function handleDebugInjection(args: string[], profile: string) {
 
   const prompt = promptParts.join(" ").trim();
   if (!prompt) {
-    console.error('Usage: cortex debug-injection --prompt "your prompt here" [--cwd <path>] [--session <id>]');
+    console.error('Usage: phren debug-injection --prompt "your prompt here" [--cwd <path>] [--session <id>]');
     process.exit(1);
   }
 
   const subprocessArgs = resolveSubprocessArgs("hook-prompt");
   if (!subprocessArgs) {
-    console.error("Could not resolve cortex entrypoint for debug-injection.");
+    console.error("Could not resolve phren entrypoint for debug-injection.");
     process.exit(1);
   }
 
@@ -204,8 +204,8 @@ export async function handleDebugInjection(args: string[], profile: string) {
       input: payload,
       env: {
         ...process.env,
-        CORTEX_PATH: getCortexPath(),
-        CORTEX_PROFILE: profile,
+        PHREN_PATH: getPhrenPath(),
+        PHREN_PROFILE: profile,
       },
       timeout: EXEC_TIMEOUT_MS,
     }).trim();
@@ -243,12 +243,12 @@ export async function handleInspectIndex(args: string[], profile: string) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("Usage: cortex inspect-index [--project <name>] [--type <doc-type>] [--limit <n>]");
+      console.log("Usage: phren inspect-index [--project <name>] [--type <doc-type>] [--limit <n>]");
       return;
     }
   }
 
-  const db = await buildIndex(getCortexPath(), profile);
+  const db = await buildIndex(getPhrenPath(), profile);
   const where: string[] = [];
   const params: Array<string | number> = [];
   if (project) {

@@ -28,8 +28,8 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }
 
-function makeProject(cortexPath: string, name: string, files: Record<string, string>) {
-  const dir = path.join(cortexPath, name);
+function makeProject(phrenPath: string, name: string, files: Record<string, string>) {
+  const dir = path.join(phrenPath, name);
   fs.mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     writeFile(path.join(dir, file), content);
@@ -52,7 +52,7 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {
@@ -68,7 +68,7 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -178,7 +178,7 @@ describe("MCP integration: tasks immediately searchable after add", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {
@@ -195,7 +195,7 @@ describe("MCP integration: tasks immediately searchable after add", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });

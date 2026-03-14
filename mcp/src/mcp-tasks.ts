@@ -44,8 +44,8 @@ const DEFAULT_TASK_LIMIT = 20;
 /** Done items are historical — cap tightly by default to avoid large responses. */
 const DEFAULT_DONE_LIMIT = 5;
 
-function refreshTaskIndex(updateFileInIndex: (filePath: string) => void, cortexPath: string, project: string): void {
-  updateFileInIndex(path.join(cortexPath, project, TASKS_FILENAME));
+function refreshTaskIndex(updateFileInIndex: (filePath: string) => void, phrenPath: string, project: string): void {
+  updateFileInIndex(path.join(phrenPath, project, TASKS_FILENAME));
 }
 
 function buildTaskView(doc: TaskDoc, status?: TaskStatus, limit?: number, doneLimit?: number, offset?: number): { doc: TaskDoc; includedSections: TaskSection[]; totalItems: number; totalUnpaged: number; truncated: boolean } {
@@ -121,12 +121,12 @@ function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[]): string
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, profile, withWriteQueue, updateFileInIndex } = ctx;
+  const { phrenPath, profile, withWriteQueue, updateFileInIndex } = ctx;
 
   server.registerTool(
     "get_tasks",
     {
-      title: "◆ cortex · tasks",
+      title: "◆ phren · tasks",
       description: "Get tasks. Defaults to Active and Queue sections only. Pass status='all' to include Done items.",
       inputSchema: z.object({
         project: z.string().optional().describe("Project name. Omit to get all projects."),
@@ -144,7 +144,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        const result = readTasks(cortexPath, project);
+        const result = readTasks(phrenPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
@@ -176,7 +176,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       // Full task list for one project
       if (project) {
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        const result = readTasks(cortexPath, project);
+        const result = readTasks(phrenPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const view = buildTaskView(doc, status, limit, done_limit, offset);
@@ -205,7 +205,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       // All projects
-      const docs = readTasksAcrossProjects(cortexPath, profile);
+      const docs = readTasksAcrossProjects(phrenPath, profile);
       if (!docs.length) return mcpResponse({ ok: true, message: "No tasks found.", data: { projects: [] } });
       const views = docs.map((doc) => ({ project: doc.project, doc, view: buildTaskView(doc, status, limit, done_limit, offset), issues: doc.issues }));
       const anyTruncated = views.some(({ view }) => view.truncated);
@@ -231,10 +231,10 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "add_task",
     {
-      title: "◆ cortex · add task",
+      title: "◆ phren · add task",
       description: "Append a task to a project's tasks.md file. Adds to the Queue section.",
       inputSchema: z.object({
-        project: z.string().describe("Project name (must match a directory in your cortex)."),
+        project: z.string().describe("Project name (must match a directory in your phren)."),
         item: z.string().describe("The task to add."),
         scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
@@ -244,9 +244,9 @@ export function register(server: McpServer, ctx: McpContext): void {
       const normalizedScope = normalizeMemoryScope(scope ?? "shared");
       if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
       return withWriteQueue(async () => {
-        const result = addTaskStore(cortexPath, project, item, { scope: normalizedScope });
+        const result = addTaskStore(phrenPath, project, item, { scope: normalizedScope });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: true, message: `Task added: ${result.data.line}`, data: { project, item, scope: normalizedScope } });
       });
     }
@@ -255,7 +255,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "add_tasks",
     {
-      title: "◆ cortex · add tasks (bulk)",
+      title: "◆ phren · add tasks (bulk)",
       description: "Append multiple tasks to a project's tasks.md file in one call. Adds to the Queue section.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -265,10 +265,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, items }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = addTasksBatch(cortexPath, project, items);
+        const result = addTasksBatch(phrenPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { added, errors } = result.data;
-        if (added.length > 0) refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        if (added.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} tasks to ${project}`, data: { project, added, errors } });
       });
     }
@@ -277,7 +277,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "complete_task",
     {
-      title: "◆ cortex · done",
+      title: "◆ phren · done",
       description: "Move a task to the Done section by matching text.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -288,11 +288,11 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item, sessionId }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const before = resolveTaskItem(cortexPath, project, item);
-        const result = completeTaskStore(cortexPath, project, item);
+        const before = resolveTaskItem(phrenPath, project, item);
+        const result = completeTaskStore(phrenPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         if (before.ok) {
-          clearTaskCheckpoint(cortexPath, {
+          clearTaskCheckpoint(phrenPath, {
             project,
             taskId: before.data.stableId ?? before.data.id,
             stableId: before.data.stableId,
@@ -300,8 +300,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             taskLine: before.data.line,
           });
         }
-        incrementSessionTasksCompleted(cortexPath, 1, sessionId, project);
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        incrementSessionTasksCompleted(phrenPath, 1, sessionId, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -310,7 +310,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "complete_tasks",
     {
-      title: "◆ cortex · done (bulk)",
+      title: "◆ phren · done (bulk)",
       description: "Move multiple tasks to Done in one call. Pass an array of partial item texts.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -323,18 +323,18 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const resolvedItems = items
           .map((match) => {
-            const resolved = resolveTaskItem(cortexPath, project, match);
+            const resolved = resolveTaskItem(phrenPath, project, match);
             return resolved.ok ? resolved.data : null;
           })
           .filter((task): task is TaskItem => task !== null);
-        const result = completeTasksBatch(cortexPath, project, items);
+        const result = completeTasksBatch(phrenPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const { completed, errors } = result.data;
         if (completed.length > 0) {
           const completedSet = new Set(completed);
           for (const task of resolvedItems) {
             if (!completedSet.has(task.line)) continue;
-            clearTaskCheckpoint(cortexPath, {
+            clearTaskCheckpoint(phrenPath, {
               project,
               taskId: task.stableId ?? task.id,
               stableId: task.stableId,
@@ -342,9 +342,9 @@ export function register(server: McpServer, ctx: McpContext): void {
               taskLine: task.line,
             });
           }
-          incrementSessionTasksCompleted(cortexPath, completed.length, sessionId, project);
+          incrementSessionTasksCompleted(phrenPath, completed.length, sessionId, project);
         }
-        if (completed.length > 0) refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        if (completed.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
       });
     }
@@ -353,7 +353,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "remove_task",
     {
-      title: "◆ cortex · remove task",
+      title: "◆ phren · remove task",
       description: "Remove a task from a project's tasks.md file by matching text or ID.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -363,9 +363,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = removeTaskStore(cortexPath, project, item);
+        const result = removeTaskStore(phrenPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -374,7 +374,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "update_task",
     {
-      title: "◆ cortex · update task",
+      title: "◆ phren · update task",
       description: "Update a task's priority, context, or section by matching text.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -393,9 +393,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item, updates }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = updateTaskStore(cortexPath, project, item, updates);
+        const result = updateTaskStore(phrenPath, project, item, updates);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
       });
     }
@@ -404,7 +404,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "link_task_issue",
     {
-      title: "◆ cortex · link task issue",
+      title: "◆ phren · link task issue",
       description: "Link or unlink a task to an existing GitHub issue.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -434,13 +434,13 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
         }
 
-        const result = linkTaskIssue(cortexPath, project, item, {
+        const result = linkTaskIssue(phrenPath, project, item, {
           github_issue: issue_number,
           github_url: issue_url,
           unlink: unlink ?? false,
         });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({
           ok: true,
           message: unlink
@@ -461,12 +461,12 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "promote_task_to_issue",
     {
-      title: "◆ cortex · promote task",
+      title: "◆ phren · promote task",
       description: "Create a GitHub issue from a task and link it back into the task list.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         item: z.string().describe("Task text, ID, or stable bid to promote."),
-        repo: z.string().optional().describe("Target GitHub repo in owner/name form. If omitted, cortex tries to infer it from CLAUDE.md or summary.md."),
+        repo: z.string().optional().describe("Target GitHub repo in owner/name form. If omitted, phren tries to infer it from CLAUDE.md or summary.md."),
         title: z.string().optional().describe("Optional GitHub issue title. Defaults to the task text."),
         body: z.string().optional().describe("Optional GitHub issue body. Defaults to a body built from the task plus context."),
         mark_done: z.boolean().optional().describe("If true, mark the task Done after creating and linking the issue."),
@@ -475,10 +475,10 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item, repo, title, body, mark_done }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const match = resolveTaskItem(cortexPath, project, item);
+        const match = resolveTaskItem(phrenPath, project, item);
         if (!match.ok) return mcpResponse({ ok: false, error: match.error, errorCode: match.code });
 
-        const targetRepo = repo || resolveProjectGithubRepo(cortexPath, project);
+        const targetRepo = repo || resolveProjectGithubRepo(phrenPath, project);
         if (!targetRepo) {
           return mcpResponse({ ok: false, error: "Could not infer a GitHub repo for this project. Provide repo in owner/name form or add a GitHub URL to CLAUDE.md/summary.md." });
         }
@@ -490,7 +490,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         });
         if (!created.ok) return mcpResponse({ ok: false, error: created.error, errorCode: created.code });
 
-        const linked = linkTaskIssue(cortexPath, project, match.data.stableId ? `bid:${match.data.stableId}` : match.data.id, {
+        const linked = linkTaskIssue(phrenPath, project, match.data.stableId ? `bid:${match.data.stableId}` : match.data.id, {
           github_issue: created.data.issueNumber,
           github_url: created.data.url,
         });
@@ -498,9 +498,9 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         if (mark_done) {
           const completionMatch = linked.data.stableId ? `bid:${linked.data.stableId}` : linked.data.id;
-          const completed = completeTaskStore(cortexPath, project, completionMatch);
+          const completed = completeTaskStore(phrenPath, project, completionMatch);
           if (!completed.ok) return mcpResponse({ ok: false, error: completed.error, errorCode: completed.code });
-          clearTaskCheckpoint(cortexPath, {
+          clearTaskCheckpoint(phrenPath, {
             project,
             taskId: match.data.stableId ?? match.data.id,
             stableId: match.data.stableId,
@@ -509,7 +509,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           });
         }
 
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({
           ok: true,
           message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} task.`,
@@ -529,7 +529,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "pin_task",
     {
-      title: "◆ cortex · pin task",
+      title: "◆ phren · pin task",
       description: "Pin a task so it floats to the top of its section.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -539,9 +539,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = pinTask(cortexPath, project, item);
+        const result = pinTask(phrenPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -550,7 +550,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "work_next_task",
     {
-      title: "◆ cortex · work next",
+      title: "◆ phren · work next",
       description: "Move the highest-priority Queue item to Active so it becomes the next task to work on.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -559,9 +559,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = workNextTask(cortexPath, project);
+        const result = workNextTask(phrenPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project } });
       });
     }
@@ -570,7 +570,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "promote_task",
     {
-      title: "◆ cortex · promote task",
+      title: "◆ phren · promote task",
       description:
         "Promote a speculative task to committed by clearing the speculative flag. " +
         "Use this when the user says 'yes do it', 'let's work on that', or otherwise confirms " +
@@ -584,9 +584,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, item, move_to_active }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = promoteTask(cortexPath, project, item, move_to_active ?? false);
+        const result = promoteTask(phrenPath, project, item, move_to_active ?? false);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({
           ok: true,
           message: `Promoted task "${result.data.line}" in ${project}${move_to_active ? " (moved to Active)" : ""}.`,
@@ -599,7 +599,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "tidy_done_tasks",
     {
-      title: "◆ cortex · tidy done",
+      title: "◆ phren · tidy done",
       description: "Archive old Done items beyond the keep limit to keep the task list tidy.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
@@ -610,9 +610,9 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, keep, dry_run }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = tidyDoneTasks(cortexPath, project, keep ?? 30, dry_run ?? false);
+        const result = tidyDoneTasks(phrenPath, project, keep ?? 30, dry_run ?? false);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        if (!dry_run) refreshTaskIndex(updateFileInIndex, cortexPath, project);
+        if (!dry_run) refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, keep: keep ?? 30, dryRun: dry_run ?? false } });
       });
     }

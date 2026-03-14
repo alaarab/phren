@@ -1,10 +1,10 @@
 {
-  "name": "@alaarab/cortex",
-  "version": "1.33.4",
+  "name": "@phren/cli",
+  "version": "0.0.1",
   "description": "Long-term memory for AI agents. Stored as markdown in a git repo you own.",
   "type": "module",
   "bin": {
-    "cortex": "mcp/dist/index.js"
+    "phren": "mcp/dist/index.js"
   },
   "files": [
     "mcp/dist",
@@ -17,6 +17,7 @@
     "glob": "^13.0.6",
     "inquirer": "^12.10.0",
     "js-yaml": "^4.1.1",
+    "sharp": "^0.34.5",
     "sql.js-fts5": "^1.4.0",
     "zod": "^4.3.6"
   },
@@ -60,7 +61,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alaarab/cortex.git"
+    "url": "git+https://github.com/alaarab/phren.git"
   },
-  "homepage": "https://github.com/alaarab/cortex#readme"
+  "homepage": "https://github.com/alaarab/phren#readme"
 }

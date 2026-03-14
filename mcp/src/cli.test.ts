@@ -7,26 +7,26 @@ import * as os from "os";
 
 const runCli = runCliSpawn;
 
-function setupCortexDir(): { cortexDir: string; cleanup: () => void } {
-  const tmp = makeTempDir("cortex-cli-test-");
-  const cortexDir = path.join(tmp.path, ".cortex");
-  fs.mkdirSync(cortexDir, { recursive: true });
-  grantAdmin(cortexDir, "cli-test");
+function setupPhrenDir(): { phrenDir: string; cleanup: () => void } {
+  const tmp = makeTempDir("phren-cli-test-");
+  const phrenDir = path.join(tmp.path, ".phren");
+  fs.mkdirSync(phrenDir, { recursive: true });
+  grantAdmin(phrenDir, "cli-test");
 
   return {
-    cortexDir,
+    phrenDir,
     cleanup: tmp.cleanup,
   };
 }
 
 describe("CLI integration: search", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
     // Create a project with searchable content
-    const projDir = path.join(cortexDir, "test-proj");
+    const projDir = path.join(phrenDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(
       path.join(projDir, "FINDINGS.md"),
@@ -51,7 +51,7 @@ describe("CLI integration: search", () => {
   it("returns matching results for a known query", () => {
     const { stdout, exitCode } = runCli(
       ["search", "restart", "server"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("restart");
@@ -60,7 +60,7 @@ describe("CLI integration: search", () => {
   it("exits with error when no query is provided", () => {
     const { stderr, exitCode } = runCli(
       ["search"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("query");
@@ -69,7 +69,7 @@ describe("CLI integration: search", () => {
   it("filters by project with --project flag", () => {
     const { stdout, exitCode } = runCli(
       ["search", "--project", "test-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("test-proj");
@@ -78,7 +78,7 @@ describe("CLI integration: search", () => {
   it("search pipeline sanitizes query operators and still matches expected docs", () => {
     const { stdout, exitCode } = runCli(
       ["search", 'content:restart AND server OR "^cache"', "--project", "test-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("[test-proj/SEARCH_STRONG.md]");
@@ -87,7 +87,7 @@ describe("CLI integration: search", () => {
   it("search pipeline ranks stronger match ahead of weaker match", () => {
     const { stdout, exitCode } = runCli(
       ["search", "restart server", "--project", "test-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const strongIdx = stdout.indexOf("[test-proj/SEARCH_STRONG.md]");
@@ -99,11 +99,11 @@ describe("CLI integration: search", () => {
 });
 
 describe("CLI integration: doctor", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
   afterEach(() => cleanup());
@@ -111,10 +111,10 @@ describe("CLI integration: doctor", () => {
   it("outputs health check results", () => {
     const { stdout, stderr, exitCode } = runCli(
       ["doctor"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     const output = stdout + stderr;
-    expect(output).toContain("cortex doctor:");
+    expect(output).toContain("phren doctor:");
     // Should contain check lines with ok or fail
     expect(output).toMatch(/- (ok|fail) /);
   });
@@ -122,22 +122,22 @@ describe("CLI integration: doctor", () => {
   it("--fix flag runs without crashing", () => {
     const { stdout, stderr } = runCli(
       ["doctor", "--fix"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     const output = stdout + stderr;
-    expect(output).toContain("cortex doctor:");
+    expect(output).toContain("phren doctor:");
   });
 });
 
 describe("CLI integration: status", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    fs.mkdirSync(path.join(cortexDir, ".runtime"), { recursive: true });
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    fs.mkdirSync(path.join(phrenDir, ".runtime"), { recursive: true });
     fs.writeFileSync(
-      path.join(cortexDir, ".runtime", "runtime-health.json"),
+      path.join(phrenDir, ".runtime", "runtime-health.json"),
       JSON.stringify({
         schemaVersion: 1,
         lastAutoSave: { at: "2026-03-08T00:00:00.000Z", status: "saved-local" },
@@ -157,26 +157,26 @@ describe("CLI integration: status", () => {
   it("prints sync state from runtime health", () => {
     const { stdout, exitCode } = runCli(
       ["status"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test", CORTEX_OLLAMA_URL: "off" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test", PHREN_OLLAMA_URL: "off" }
     );
     const plain = stdout.replace(/\x1b\[[0-9;]*m/g, "");
     expect(exitCode).toBe(0);
-    expect(plain).toContain("cortex status");
-    expect(plain).toContain("Sync:");
-    expect(plain).toContain("Semantic:");
+    expect(plain).toContain("phren");
+    expect(plain).toContain("sync");
+    expect(plain).toContain("semantic");
     expect(plain).toContain("last pull ok");
-    expect(plain).toContain("unsynced commits: 2");
+    expect(plain).toContain("unsynced commits 2");
   });
 });
 
 describe("CLI integration: hooks", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
   let homeDir: string;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    homeDir = path.dirname(cortexDir);
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    homeDir = path.dirname(phrenDir);
   });
 
   afterEach(() => cleanup());
@@ -191,23 +191,23 @@ describe("CLI integration: hooks", () => {
 
     const { stdout, exitCode } = runCli(
       ["hooks", "show", "claude"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain("\"Stop\"");
-    expect(stdout).not.toContain("cortex.SKILL.md");
+    expect(stdout).not.toContain("phren.SKILL.md");
   });
 
-  it("shows Codex hook config from the active cortex path", () => {
+  it("shows Codex hook config from the active phren path", () => {
     fs.writeFileSync(
-      path.join(cortexDir, "codex.json"),
+      path.join(phrenDir, "codex.json"),
       JSON.stringify({ hooks: { UserPromptSubmit: [{ type: "command", command: "echo prompt" }] } }, null, 2)
     );
 
     const { stdout, exitCode } = runCli(
       ["hooks", "show", "codex"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
 
     expect(exitCode).toBe(0);
@@ -216,16 +216,16 @@ describe("CLI integration: hooks", () => {
   });
 
   it("lists project-level hook overrides when --project is provided", () => {
-    const projectDir = path.join(cortexDir, "demo");
+    const projectDir = path.join(phrenDir, "demo");
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(
-      path.join(projectDir, "cortex.project.yaml"),
+      path.join(projectDir, "phren.project.yaml"),
       ["hooks:", "  enabled: false", "  UserPromptSubmit: true", ""].join("\n"),
     );
 
     const { stdout, exitCode } = runCli(
       ["hooks", "list", "--project", "demo"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
 
     expect(exitCode).toBe(0);
@@ -237,39 +237,39 @@ describe("CLI integration: hooks", () => {
 });
 
 describe("CLI integration: projects add", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
   afterEach(() => cleanup());
 
   it("fails with a deprecation error instead of mutating state", () => {
     const { stderr, exitCode } = runCli(
-      ["projects", "add", "Cortex"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      ["projects", "add", "Phren"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(1);
     expect(stderr).toContain("removed from the supported workflow");
-    expect(stderr).toContain("npx cortex add");
-    expect(fs.existsSync(path.join(cortexDir, "cortex"))).toBe(false);
+    expect(stderr).toContain("npx phren add");
+    expect(fs.existsSync(path.join(phrenDir, "phren"))).toBe(false);
   });
 });
 
 describe("CLI integration: add project", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
   let projectDir: string;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    projectDir = path.join(path.dirname(cortexDir), "repo");
-    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
-    fs.mkdirSync(path.join(cortexDir, "profiles"), { recursive: true });
-    fs.writeFileSync(path.join(cortexDir, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - global\n");
-    fs.writeFileSync(path.join(cortexDir, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    projectDir = path.join(path.dirname(phrenDir), "repo");
+    fs.mkdirSync(path.join(phrenDir, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(phrenDir, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(phrenDir, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - global\n");
+    fs.writeFileSync(path.join(phrenDir, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
     fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
   });
 
@@ -278,47 +278,47 @@ describe("CLI integration: add project", () => {
   it("adds a project to the active profile", () => {
     const { stdout, exitCode } = runCli(
       ["add", projectDir],
-      { CORTEX_PATH: cortexDir, CORTEX_PROFILE: "work", CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_PROFILE: "work", PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain('Added project "repo"');
-    expect(fs.readFileSync(path.join(cortexDir, "profiles", "work.yaml"), "utf8")).toContain("- repo");
-    expect(fs.readFileSync(path.join(cortexDir, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
+    expect(fs.readFileSync(path.join(phrenDir, "profiles", "work.yaml"), "utf8")).toContain("- repo");
+    expect(fs.readFileSync(path.join(phrenDir, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
   });
 
-  it("uses the machine-mapped profile when CORTEX_PROFILE is unset", () => {
-    const homeDir = path.join(path.dirname(cortexDir), "home");
-    const machineFile = path.join(homeDir, ".cortex", ".machine-id");
+  it("uses the machine-mapped profile when PHREN_PROFILE is unset", () => {
+    const homeDir = path.join(path.dirname(phrenDir), "home");
+    const machineFile = path.join(homeDir, ".phren", ".machine-id");
     fs.mkdirSync(path.dirname(machineFile), { recursive: true });
     fs.writeFileSync(machineFile, "work-box\n");
-    fs.writeFileSync(path.join(cortexDir, "machines.yaml"), "work-box: work\n");
+    fs.writeFileSync(path.join(phrenDir, "machines.yaml"), "work-box: work\n");
     const { exitCode } = runCli(
       ["add", projectDir],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(fs.readFileSync(path.join(cortexDir, "profiles", "work.yaml"), "utf8")).toContain("- repo");
-    expect(fs.readFileSync(path.join(cortexDir, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
+    expect(fs.readFileSync(path.join(phrenDir, "profiles", "work.yaml"), "utf8")).toContain("- repo");
+    expect(fs.readFileSync(path.join(phrenDir, "profiles", "personal.yaml"), "utf8")).not.toContain("- repo");
   });
 
-  it("fails clearly when cortex is not initialized yet", () => {
-    fs.rmSync(path.join(cortexDir, ".governance"), { recursive: true, force: true });
+  it("fails clearly when phren is not initialized yet", () => {
+    fs.rmSync(path.join(phrenDir, ".governance"), { recursive: true, force: true });
     const { stdout, exitCode } = runCli(
       ["add", projectDir],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(1);
-    expect(stdout).toContain("cortex is not set up yet");
+    expect(stdout).toContain("phren is not set up yet");
   });
 });
 
 describe("CLI integration: projects configure", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    fs.mkdirSync(path.join(cortexDir, "demo"), { recursive: true });
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    fs.mkdirSync(path.join(phrenDir, "demo"), { recursive: true });
   });
 
   afterEach(() => cleanup());
@@ -326,23 +326,23 @@ describe("CLI integration: projects configure", () => {
   it("can persist a project-level hook toggle", () => {
     const { stdout, exitCode } = runCli(
       ["projects", "configure", "demo", "--hooks=off"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain("hooks=off");
-    const config = fs.readFileSync(path.join(cortexDir, "demo", "cortex.project.yaml"), "utf8");
+    const config = fs.readFileSync(path.join(phrenDir, "demo", "phren.project.yaml"), "utf8");
     expect(config).toContain("enabled: false");
   });
 });
 
 describe("CLI integration: add-finding", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projDir = path.join(cortexDir, "test-proj");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    const projDir = path.join(phrenDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
   });
 
@@ -351,12 +351,12 @@ describe("CLI integration: add-finding", () => {
   it("writes a finding to FINDINGS.md", () => {
     const { stdout, exitCode } = runCli(
       ["add-finding", "test-proj", "cache invalidation matters"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("added insight");
 
-    const findingsPath = path.join(cortexDir, "test-proj", "FINDINGS.md");
+    const findingsPath = path.join(phrenDir, "test-proj", "FINDINGS.md");
     expect(fs.existsSync(findingsPath)).toBe(true);
     const content = fs.readFileSync(findingsPath, "utf8");
     expect(content).toContain("cache invalidation matters");
@@ -365,7 +365,7 @@ describe("CLI integration: add-finding", () => {
   it("exits with error when project or finding is missing", () => {
     const { stderr, exitCode } = runCli(
       ["add-finding"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage");
@@ -373,12 +373,12 @@ describe("CLI integration: add-finding", () => {
 });
 
 describe("CLI integration: pin", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projDir = path.join(cortexDir, "test-proj");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    const projDir = path.join(phrenDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
   });
 
@@ -387,11 +387,11 @@ describe("CLI integration: pin", () => {
   it("writes a pinned memory to CANONICAL_MEMORIES.md", () => {
     const { stdout, exitCode } = runCli(
       ["pin", "test-proj", "always use UTC timestamps"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
 
-    const canonicalPath = path.join(cortexDir, "test-proj", "CANONICAL_MEMORIES.md");
+    const canonicalPath = path.join(phrenDir, "test-proj", "CANONICAL_MEMORIES.md");
     expect(fs.existsSync(canonicalPath)).toBe(true);
     const content = fs.readFileSync(canonicalPath, "utf8");
     expect(content).toContain("always use UTC timestamps");
@@ -401,7 +401,7 @@ describe("CLI integration: pin", () => {
   it("exits with error when project or memory is missing", () => {
     const { stderr, exitCode } = runCli(
       ["pin"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage");
@@ -409,12 +409,12 @@ describe("CLI integration: pin", () => {
 });
 
 describe("CLI integration: prune and consolidate atomic writes", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projectDir = path.join(cortexDir, "test-proj");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    const projectDir = path.join(phrenDir, "test-proj");
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(
       path.join(projectDir, "FINDINGS.md"),
@@ -425,10 +425,10 @@ describe("CLI integration: prune and consolidate atomic writes", () => {
   afterEach(() => cleanup());
 
   it("prune --dry-run does not create backups", () => {
-    const backupPath = path.join(cortexDir, "test-proj", "FINDINGS.md.bak");
+    const backupPath = path.join(phrenDir, "test-proj", "FINDINGS.md.bak");
     const { stdout, exitCode } = runCli(
       ["maintain", "prune", "test-proj", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("[dry-run]");
@@ -436,10 +436,10 @@ describe("CLI integration: prune and consolidate atomic writes", () => {
   });
 
   it("prune writes atomically (no .bak file created)", () => {
-    const backupPath = path.join(cortexDir, "test-proj", "FINDINGS.md.bak");
+    const backupPath = path.join(phrenDir, "test-proj", "FINDINGS.md.bak");
     const { stdout, exitCode } = runCli(
       ["maintain", "prune", "test-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Pruned");
@@ -448,10 +448,10 @@ describe("CLI integration: prune and consolidate atomic writes", () => {
   });
 
   it("consolidate creates .bak and reports updated backup paths", () => {
-    const backupPath = path.join(cortexDir, "test-proj", "FINDINGS.md.bak");
+    const backupPath = path.join(phrenDir, "test-proj", "FINDINGS.md.bak");
     const { stdout, exitCode } = runCli(
       ["maintain", "consolidate", "test-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Consolidated findings for test-proj.");
@@ -465,12 +465,12 @@ describe("CLI integration: prune and consolidate atomic writes", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: search edge cases", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projDir = path.join(cortexDir, "alpha");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    const projDir = path.join(phrenDir, "alpha");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# alpha FINDINGS\n\n## 2025-06-01\n\n- caching layer timeout fix\n- database connection pool sizing\n");
     fs.writeFileSync(path.join(projDir, "summary.md"), "# alpha\n\n**What:** A caching project\n");
@@ -484,7 +484,7 @@ describe("CLI integration: search edge cases", () => {
   it("--type findings filters to findings docs only", () => {
     const { stdout, exitCode } = runCli(
       ["search", "caching", "--project", "alpha", "--type", "findings"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("FINDINGS");
@@ -493,7 +493,7 @@ describe("CLI integration: search edge cases", () => {
   it("--type skills is aliased to skill", () => {
     const { stdout, exitCode } = runCli(
       ["search", "deploy", "--type", "skills"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     // Should not error about invalid type
     expect(exitCode).toBe(0);
@@ -502,7 +502,7 @@ describe("CLI integration: search edge cases", () => {
   it("invalid --type exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["search", "caching", "--type", "nonsense"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain('Invalid --type value: "nonsense"');
@@ -511,7 +511,7 @@ describe("CLI integration: search edge cases", () => {
   it("--all sets limit to 100 and returns results", () => {
     const { stdout, exitCode } = runCli(
       ["search", "caching", "--project", "alpha", "--all"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("caching");
@@ -520,7 +520,7 @@ describe("CLI integration: search edge cases", () => {
   it("--limit flag restricts result count", () => {
     const { stdout, exitCode } = runCli(
       ["search", "caching", "--project", "alpha", "--limit", "1"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
   });
@@ -528,7 +528,7 @@ describe("CLI integration: search edge cases", () => {
   it("invalid --limit value exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["search", "caching", "--limit", "abc"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Invalid --limit value");
@@ -537,7 +537,7 @@ describe("CLI integration: search edge cases", () => {
   it("--limit 0 exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["search", "caching", "--limit", "0"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Invalid --limit value");
@@ -546,7 +546,7 @@ describe("CLI integration: search edge cases", () => {
   it("--limit 201 exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["search", "caching", "--limit", "201"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Invalid --limit value");
@@ -555,7 +555,7 @@ describe("CLI integration: search edge cases", () => {
   it("unknown search flag exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["search", "caching", "--verbose"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Unknown search flag");
@@ -564,7 +564,7 @@ describe("CLI integration: search edge cases", () => {
   it("--help flag prints usage without error", () => {
     const { stderr, exitCode } = runCli(
       ["search", "--help"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     // --help causes early return (null), which exits 0
     expect(exitCode).toBe(0);
@@ -573,7 +573,7 @@ describe("CLI integration: search edge cases", () => {
   it("search with inline --project=alpha format works", () => {
     const { stdout, exitCode } = runCli(
       ["search", "caching", "--project=alpha"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("alpha");
@@ -582,7 +582,7 @@ describe("CLI integration: search edge cases", () => {
   it("search with --project alone (browse mode) returns results", () => {
     const { stdout, exitCode } = runCli(
       ["search", "--project", "alpha"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("alpha");
@@ -591,7 +591,7 @@ describe("CLI integration: search edge cases", () => {
   it("invalid project name exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["search", "test", "--project", "../escape"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Invalid project name");
@@ -600,7 +600,7 @@ describe("CLI integration: search edge cases", () => {
   it("search with --type canonical filters correctly", () => {
     const { stdout, exitCode } = runCli(
       ["search", "UTC", "--project", "alpha", "--type", "canonical"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
   });
@@ -608,7 +608,7 @@ describe("CLI integration: search edge cases", () => {
   it("search for nonexistent term returns zero results gracefully", () => {
     const { stdout, exitCode } = runCli(
       ["search", "xyznonexistent123"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("No results found");
@@ -620,11 +620,11 @@ describe("CLI integration: search edge cases", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: config subcommands", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
   afterEach(() => cleanup());
@@ -632,17 +632,17 @@ describe("CLI integration: config subcommands", () => {
   it("config with no subcommand prints help", () => {
     const { stdout, exitCode } = runCli(
       ["config"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("cortex config");
+    expect(stdout).toContain("phren config");
     expect(stdout).toContain("Subcommands:");
   });
 
   it("config with unknown subcommand exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["config", "bogus"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain('Unknown config subcommand: "bogus"');
@@ -651,7 +651,7 @@ describe("CLI integration: config subcommands", () => {
   it("config policy get returns JSON", () => {
     const { stdout, exitCode } = runCli(
       ["config", "policy", "get"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
@@ -663,7 +663,7 @@ describe("CLI integration: config subcommands", () => {
   it("config policy with no args defaults to get", () => {
     const { stdout, exitCode } = runCli(
       ["config", "policy"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
@@ -673,7 +673,7 @@ describe("CLI integration: config subcommands", () => {
   it("config policy set updates values", () => {
     const { stdout, exitCode } = runCli(
       ["config", "policy", "set", "--ttlDays=200", "--decay.d30=0.95"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
@@ -684,7 +684,7 @@ describe("CLI integration: config subcommands", () => {
   it("config policy set with invalid action prints usage", () => {
     const { stderr, exitCode } = runCli(
       ["config", "policy", "delete"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage:");
@@ -693,69 +693,37 @@ describe("CLI integration: config subcommands", () => {
   it("config workflow get returns JSON", () => {
     const { stdout, exitCode } = runCli(
       ["config", "workflow", "get"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
-    expect(parsed).toHaveProperty("requireMaintainerApproval");
+    expect(parsed).toHaveProperty("lowConfidenceThreshold");
   });
 
   it("config workflow set updates values", () => {
     const { stdout, exitCode } = runCli(
-      ["config", "workflow", "set", "--requireMaintainerApproval=true", "--lowConfidenceThreshold=0.5"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      ["config", "workflow", "set", "--lowConfidenceThreshold=0.5"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
-    expect(parsed.requireMaintainerApproval).toBe(true);
     expect(parsed.lowConfidenceThreshold).toBe(0.5);
   });
 
   it("config workflow set with riskySections", () => {
     const { stdout, exitCode } = runCli(
       ["config", "workflow", "set", "--riskySections=Stale,Conflicts,Review"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
     expect(parsed.riskySections).toEqual(["Stale", "Conflicts", "Review"]);
   });
 
-  it("config access get returns JSON", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "access", "get"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed).toHaveProperty("admins");
-    expect(parsed.admins).toContain("cli-test");
-  });
-
-  it("config access set updates roles", () => {
-    const { stdout, exitCode } = runCli(
-      ["config", "access", "set", "--admins=cli-test,admin2", "--viewers=guest1"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.admins).toContain("admin2");
-    expect(parsed.viewers).toContain("guest1");
-  });
-
-  it("config access set with invalid action prints usage", () => {
-    const { stderr, exitCode } = runCli(
-      ["config", "access", "reset"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
-    );
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain("Usage:");
-  });
-
   it("config index get returns JSON", () => {
     const { stdout, exitCode } = runCli(
       ["config", "index", "get"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
@@ -766,7 +734,7 @@ describe("CLI integration: config subcommands", () => {
   it("config index set updates globs", () => {
     const { stdout, exitCode } = runCli(
       ["config", "index", "set", "--include=**/*.md,**/*.txt", "--exclude=**/node_modules/**"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
@@ -777,7 +745,7 @@ describe("CLI integration: config subcommands", () => {
   it("config index set includeHidden flag", () => {
     const { stdout, exitCode } = runCli(
       ["config", "index", "set", "--includeHidden=true"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout);
@@ -787,7 +755,7 @@ describe("CLI integration: config subcommands", () => {
   it("config index with invalid action prints usage", () => {
     const { stderr, exitCode } = runCli(
       ["config", "index", "remove"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage:");
@@ -799,11 +767,11 @@ describe("CLI integration: config subcommands", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: maintain subcommands", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
   afterEach(() => cleanup());
@@ -811,50 +779,50 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain with no subcommand prints help", () => {
     const { stdout, exitCode } = runCli(
       ["maintain"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("cortex maintain");
+    expect(stdout).toContain("phren maintain");
     expect(stdout).toContain("Subcommands:");
   });
 
   it("maintain with unknown subcommand exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["maintain", "bogus"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain('Unknown maintain subcommand: "bogus"');
   });
 
   it("maintain govern with no project governs all projects", () => {
-    const projDir = path.join(cortexDir, "gov-proj");
+    const projDir = path.join(phrenDir, "gov-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-proj FINDINGS\n\n## 2025-01-01\n\n- a useful insight\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "govern"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Governed memories:");
   });
 
   it("maintain govern with specific project", () => {
-    const projDir = path.join(cortexDir, "gov-proj");
+    const projDir = path.join(phrenDir, "gov-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-proj FINDINGS\n\n## 2025-01-01\n\n- a useful insight\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "govern", "gov-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Governed memories:");
   });
 
   it("maintain govern --dry-run does not write queue files", () => {
-    const projDir = path.join(cortexDir, "gov-dry");
+    const projDir = path.join(phrenDir, "gov-dry");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-dry FINDINGS\n\n## 2020-01-01\n\n- wip\n- temp note\n");
 
@@ -863,7 +831,7 @@ describe("CLI integration: maintain subcommands", () => {
 
     const { stdout, exitCode } = runCli(
       ["maintain", "govern", "gov-dry", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("[dry-run]");
@@ -873,27 +841,27 @@ describe("CLI integration: maintain subcommands", () => {
   });
 
   it("maintain govern --dry-run with no project previews all", () => {
-    const projDir = path.join(cortexDir, "gov-dry2");
+    const projDir = path.join(phrenDir, "gov-dry2");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# gov-dry2 FINDINGS\n\n## 2025-01-01\n\n- useful thing\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "govern", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("[dry-run]");
   });
 
   it("maintain consolidate --dry-run does not modify files", () => {
-    const projDir = path.join(cortexDir, "cons-proj");
+    const projDir = path.join(phrenDir, "cons-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# cons-proj FINDINGS\n\n## 2025-01-01\n\n- insight one\n- insight two\n");
     const before = fs.readFileSync(path.join(projDir, "FINDINGS.md"), "utf8");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "consolidate", "cons-proj", "--dry-run"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     const after = fs.readFileSync(path.join(projDir, "FINDINGS.md"), "utf8");
@@ -903,20 +871,20 @@ describe("CLI integration: maintain subcommands", () => {
   it("maintain prune with unknown flag exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["maintain", "prune", "--unknown"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Unknown prune-memories flag");
   });
 
   it("maintain consolidate with no project consolidates all", () => {
-    const projDir = path.join(cortexDir, "multi-proj");
+    const projDir = path.join(phrenDir, "multi-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# multi-proj FINDINGS\n\n## 2025-01-01\n\n- fact\n");
 
     const { stdout, exitCode } = runCli(
       ["maintain", "consolidate"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Consolidated");
@@ -929,11 +897,11 @@ describe("CLI integration: maintain subcommands", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: quality-feedback", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
   afterEach(() => cleanup());
@@ -941,7 +909,7 @@ describe("CLI integration: quality-feedback", () => {
   it("records helpful feedback", () => {
     const { stdout, exitCode } = runCli(
       ["quality-feedback", "--key=test-proj/FINDINGS.md:insight1", "--type=helpful"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Recorded feedback: helpful");
@@ -950,7 +918,7 @@ describe("CLI integration: quality-feedback", () => {
   it("records reprompt feedback", () => {
     const { stdout, exitCode } = runCli(
       ["quality-feedback", "--key=test-proj/FINDINGS.md:insight2", "--type=reprompt"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Recorded feedback: reprompt");
@@ -959,7 +927,7 @@ describe("CLI integration: quality-feedback", () => {
   it("records regression feedback", () => {
     const { stdout, exitCode } = runCli(
       ["quality-feedback", "--key=test-proj/FINDINGS.md:insight3", "--type=regression"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Recorded feedback: regression");
@@ -968,7 +936,7 @@ describe("CLI integration: quality-feedback", () => {
   it("exits with error on missing key", () => {
     const { stderr, exitCode } = runCli(
       ["quality-feedback", "--type=helpful"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage:");
@@ -977,7 +945,7 @@ describe("CLI integration: quality-feedback", () => {
   it("exits with error on missing type", () => {
     const { stderr, exitCode } = runCli(
       ["quality-feedback", "--key=test-proj/FINDINGS.md:insight"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage:");
@@ -986,7 +954,7 @@ describe("CLI integration: quality-feedback", () => {
   it("exits with error on invalid type", () => {
     const { stderr, exitCode } = runCli(
       ["quality-feedback", "--key=test-proj/FINDINGS.md:insight", "--type=invalid"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("Usage:");
@@ -998,11 +966,11 @@ describe("CLI integration: quality-feedback", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: skill-list", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
   afterEach(() => cleanup());
@@ -1010,21 +978,21 @@ describe("CLI integration: skill-list", () => {
   it("prints no skills found when none exist", () => {
     const { stdout, exitCode } = runCli(
       ["skill-list"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("No skills found");
   });
 
   it("lists global flat skill files", () => {
-    const skillsDir = path.join(cortexDir, "global", "skills");
+    const skillsDir = path.join(phrenDir, "global", "skills");
     fs.mkdirSync(skillsDir, { recursive: true });
     fs.writeFileSync(path.join(skillsDir, "deploy.md"), "# Deploy\nDeploy to production");
     fs.writeFileSync(path.join(skillsDir, "test-runner.md"), "# Test Runner\nRun tests");
 
     const { stdout, exitCode } = runCli(
       ["skill-list"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("deploy");
@@ -1034,13 +1002,13 @@ describe("CLI integration: skill-list", () => {
   });
 
   it("lists subfolder SKILL.md format skills", () => {
-    const skillDir = path.join(cortexDir, "global", "skills", "my-skill");
+    const skillDir = path.join(phrenDir, "global", "skills", "my-skill");
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# My Skill\nDo stuff");
 
     const { stdout, exitCode } = runCli(
       ["skill-list"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("my-skill");
@@ -1049,13 +1017,13 @@ describe("CLI integration: skill-list", () => {
   });
 
   it("removes folder-format project skills without leaving broken folders behind", () => {
-    const skillDir = path.join(cortexDir, "demo", "skills", "ss");
+    const skillDir = path.join(phrenDir, "demo", "skills", "ss");
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# ss\ncontent");
 
     const { stdout, exitCode } = runCli(
       ["skills", "remove", "demo", "ss"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("Removed skill ss from demo");
@@ -1068,11 +1036,11 @@ describe("CLI integration: skill-list", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: tasks", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
   afterEach(() => cleanup());
@@ -1080,14 +1048,14 @@ describe("CLI integration: tasks", () => {
   it("prints no tasks found when none exist", () => {
     const { stdout, exitCode } = runCli(
       ["tasks"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(/(No tasks found|All tasks are empty)/);
   });
 
   it("lists active and queued items", () => {
-    const projDir = path.join(cortexDir, "task-proj");
+    const projDir = path.join(phrenDir, "task-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(
       path.join(projDir, "tasks.md"),
@@ -1096,7 +1064,7 @@ describe("CLI integration: tasks", () => {
 
     const { stdout, exitCode } = runCli(
       ["tasks"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("task-proj");
@@ -1107,7 +1075,7 @@ describe("CLI integration: tasks", () => {
 
   it("handles multiple projects", () => {
     for (const name of ["proj-a", "proj-b"]) {
-      const projDir = path.join(cortexDir, name);
+      const projDir = path.join(phrenDir, name);
       fs.mkdirSync(projDir, { recursive: true });
       fs.writeFileSync(
         path.join(projDir, "tasks.md"),
@@ -1117,7 +1085,7 @@ describe("CLI integration: tasks", () => {
 
     const { stdout, exitCode } = runCli(
       ["tasks"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("proj-a");
@@ -1131,11 +1099,11 @@ describe("CLI integration: tasks", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: unknown command", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
+    ({ phrenDir, cleanup } = setupPhrenDir());
   });
 
   afterEach(() => cleanup());
@@ -1144,7 +1112,7 @@ describe("CLI integration: unknown command", () => {
     // Unknown commands fall through CLI_COMMANDS check and hit the MCP server path
     const { exitCode } = runCli(
       ["nonexistent-command"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
   });
@@ -1155,12 +1123,12 @@ describe("CLI integration: unknown command", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: add-finding edge cases", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projDir = path.join(cortexDir, "learn-proj");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    const projDir = path.join(phrenDir, "learn-proj");
     fs.mkdirSync(projDir, { recursive: true });
   });
 
@@ -1169,21 +1137,21 @@ describe("CLI integration: add-finding edge cases", () => {
   it("adds finding with spaces in the text", () => {
     const { stdout, exitCode } = runCli(
       ["add-finding", "learn-proj", "auth middleware runs before rate limiting, order matters"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("added insight");
-    const content = fs.readFileSync(path.join(cortexDir, "learn-proj", "FINDINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(phrenDir, "learn-proj", "FINDINGS.md"), "utf8");
     expect(content).toContain("auth middleware runs before rate limiting");
   });
 
   it("creates FINDINGS.md when it does not exist", () => {
-    const findingsPath = path.join(cortexDir, "learn-proj", "FINDINGS.md");
+    const findingsPath = path.join(phrenDir, "learn-proj", "FINDINGS.md");
     expect(fs.existsSync(findingsPath)).toBe(false);
 
     runCli(
       ["add-finding", "learn-proj", "new insight"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
 
     expect(fs.existsSync(findingsPath)).toBe(true);
@@ -1192,12 +1160,12 @@ describe("CLI integration: add-finding edge cases", () => {
   });
 
   it("appends to existing FINDINGS.md", () => {
-    const findingsPath = path.join(cortexDir, "learn-proj", "FINDINGS.md");
+    const findingsPath = path.join(phrenDir, "learn-proj", "FINDINGS.md");
     fs.writeFileSync(findingsPath, "# learn-proj FINDINGS\n\n## 2025-01-01\n\n- existing insight\n");
 
     runCli(
       ["add-finding", "learn-proj", "second insight"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
 
     const content = fs.readFileSync(findingsPath, "utf8");
@@ -1208,7 +1176,7 @@ describe("CLI integration: add-finding edge cases", () => {
   it("exits cleanly with error message when finding contains a secret", () => {
     const { stderr, stdout, exitCode } = runCli(
       ["add-finding", "test-proj", "sk-ant-api03-fakesecretkey1234567890ABCDEFGHIJKLMN"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     const output = stderr + stdout;
@@ -1222,12 +1190,12 @@ describe("CLI integration: add-finding edge cases", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: pin edge cases", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projDir = path.join(cortexDir, "pin-proj");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    const projDir = path.join(phrenDir, "pin-proj");
     fs.mkdirSync(projDir, { recursive: true });
   });
 
@@ -1236,11 +1204,11 @@ describe("CLI integration: pin edge cases", () => {
   it("creates CANONICAL_MEMORIES.md with pinned content", () => {
     const { exitCode } = runCli(
       ["pin", "pin-proj", "never commit secrets to version control"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
 
-    const canonical = path.join(cortexDir, "pin-proj", "CANONICAL_MEMORIES.md");
+    const canonical = path.join(phrenDir, "pin-proj", "CANONICAL_MEMORIES.md");
     expect(fs.existsSync(canonical)).toBe(true);
     const content = fs.readFileSync(canonical, "utf8");
     expect(content).toContain("never commit secrets to version control");
@@ -1249,14 +1217,14 @@ describe("CLI integration: pin edge cases", () => {
   it("pinning same memory twice is idempotent", () => {
     runCli(
       ["pin", "pin-proj", "always validate input at boundaries"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     runCli(
       ["pin", "pin-proj", "always validate input at boundaries"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
 
-    const canonical = path.join(cortexDir, "pin-proj", "CANONICAL_MEMORIES.md");
+    const canonical = path.join(phrenDir, "pin-proj", "CANONICAL_MEMORIES.md");
     const content = fs.readFileSync(canonical, "utf8");
     // Should appear exactly once in the file
     const matches = content.match(/always validate input at boundaries/g);
@@ -1269,14 +1237,14 @@ describe("CLI integration: pin edge cases", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: doctor edge cases", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
   let projectsDir: string;
   const origProjectsDir = process.env.PROJECTS_DIR;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    projectsDir = path.join(path.dirname(cortexDir), "projects");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    projectsDir = path.join(path.dirname(phrenDir), "projects");
     fs.mkdirSync(projectsDir, { recursive: true });
     process.env.PROJECTS_DIR = projectsDir;
   });
@@ -1289,17 +1257,17 @@ describe("CLI integration: doctor edge cases", () => {
   it("--check-data validates governance files", () => {
     const { stdout, stderr } = runCli(
       ["doctor", "--check-data"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     const output = stdout + stderr;
-    expect(output).toContain("cortex doctor:");
+    expect(output).toContain("phren doctor:");
     expect(output).toContain("data:governance:");
   });
 
   it("reports fts-index check", () => {
     const { stdout, stderr } = runCli(
       ["doctor"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     const output = stdout + stderr;
     expect(output).toContain("fts-index");
@@ -1308,19 +1276,19 @@ describe("CLI integration: doctor edge cases", () => {
   it("reports machine-registered check", () => {
     const { stdout, stderr } = runCli(
       ["doctor"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     const output = stdout + stderr;
     expect(output).toContain("machine-registered");
   });
 
   it("--check-data reports suspect task hygiene items", () => {
-    const profilesDir = path.join(cortexDir, "profiles");
+    const profilesDir = path.join(phrenDir, "profiles");
     fs.mkdirSync(profilesDir, { recursive: true });
     fs.writeFileSync(path.join(profilesDir, "test.yaml"), "name: test\ndescription: Test\nprojects:\n  - doc-proj\n");
-    fs.writeFileSync(path.join(cortexDir, "machines.yaml"), `${getMachineName()}: test\n`);
+    fs.writeFileSync(path.join(phrenDir, "machines.yaml"), `${getMachineName()}: test\n`);
 
-    const projDir = path.join(cortexDir, "doc-proj");
+    const projDir = path.join(phrenDir, "doc-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(
       path.join(projDir, "tasks.md"),
@@ -1333,7 +1301,7 @@ describe("CLI integration: doctor edge cases", () => {
 
     const { stdout, stderr } = runCli(
       ["doctor", "--check-data"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     const output = stdout + stderr;
     expect(output).toContain("data:task-hygiene:doc-proj");
@@ -1346,12 +1314,12 @@ describe("CLI integration: doctor edge cases", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: inspect-index and debug-injection", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projDir = path.join(cortexDir, "idx-proj");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    const projDir = path.join(phrenDir, "idx-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# idx-proj FINDINGS\n\n## 2025-01-01\n\n- indexed content here\n");
   });
@@ -1361,7 +1329,7 @@ describe("CLI integration: inspect-index and debug-injection", () => {
   it("inspect-index returns index contents", () => {
     const { stdout, exitCode } = runCli(
       ["inspect-index"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     // Should list docs in the index
@@ -1371,7 +1339,7 @@ describe("CLI integration: inspect-index and debug-injection", () => {
   it("inspect-index with --project filters", () => {
     const { stdout, exitCode } = runCli(
       ["inspect-index", "--project", "idx-proj"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("idx-proj");
@@ -1380,7 +1348,7 @@ describe("CLI integration: inspect-index and debug-injection", () => {
   it("debug-injection runs without crashing", () => {
     const { exitCode } = runCli(
       ["debug-injection", "test query"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
   });
@@ -1397,7 +1365,7 @@ describe("CLI integration: init", () => {
   let cleanup: () => void;
 
   beforeEach(() => {
-    cliEnv = setupIsolatedCliEnv("cortex-init-cli-test-");
+    cliEnv = setupIsolatedCliEnv("phren-init-cli-test-");
     cleanup = cliEnv.cleanup;
   });
 
@@ -1410,27 +1378,27 @@ describe("CLI integration: init", () => {
     );
     expect(exitCode).toBe(0);
     expect(stdout.toLowerCase()).toContain("dry run");
-    expect(fs.existsSync(cliEnv.cortexDir)).toBe(false);
+    expect(fs.existsSync(cliEnv.phrenDir)).toBe(false);
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
-  it("init -y creates cortex directory and governance files", () => {
+  it("init -y creates phren directory and governance files", () => {
     const { stdout, exitCode } = runCli(
       ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     expect(exitCode).toBe(0);
-    expect(fs.existsSync(cliEnv.cortexDir)).toBe(true);
-    const govDir = path.join(cliEnv.cortexDir, ".governance");
+    expect(fs.existsSync(cliEnv.phrenDir)).toBe(true);
+    const govDir = path.join(cliEnv.phrenDir, ".governance");
     expect(fs.existsSync(govDir)).toBe(true);
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init with --machine sets machine name", () => {
     const { exitCode } = runCli(
       ["init", "-y", "--machine", "test-box", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     expect(exitCode).toBe(0);
-    const machinesPath = path.join(cliEnv.cortexDir, "machines.yaml");
+    const machinesPath = path.join(cliEnv.phrenDir, "machines.yaml");
     if (fs.existsSync(machinesPath)) {
       const content = fs.readFileSync(machinesPath, "utf8");
       expect(content).toContain("test-box");
@@ -1440,21 +1408,21 @@ describe("CLI integration: init", () => {
   it("init with --machine persists the local machine alias", () => {
     const { exitCode } = runCli(
       ["init", "-y", "--machine", "test-box", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     expect(exitCode).toBe(0);
-    const machineFile = path.join(cliEnv.homeDir, ".cortex", ".machine-id");
+    const machineFile = path.join(cliEnv.homeDir, ".phren", ".machine-id");
     expect(fs.readFileSync(machineFile, "utf8").trim()).toBe("test-box");
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init is idempotent (re-running does not fail)", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     const { exitCode } = runCli(
       ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     expect(exitCode).toBe(0);
   }, CLI_INTEGRATION_TIMEOUT_MS);
@@ -1471,7 +1439,7 @@ describe("CLI integration: init", () => {
   it("init --dry-run on existing install describes update plan", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     const { stdout, exitCode } = runCli(
       ["init", "--dry-run", "-y"],
@@ -1492,7 +1460,7 @@ describe("CLI integration: verify", () => {
   let cleanup: () => void;
 
   beforeEach(() => {
-    cliEnv = setupIsolatedCliEnv("cortex-verify-cli-test-");
+    cliEnv = setupIsolatedCliEnv("phren-verify-cli-test-");
     cleanup = cliEnv.cleanup;
   });
 
@@ -1501,31 +1469,31 @@ describe("CLI integration: verify", () => {
   it("verify on fresh init reports checks", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     const { stdout, stderr } = runCli(
       ["verify"],
       cliEnv.env()
     );
     const output = stdout + stderr;
-    expect(output).toContain("cortex verify:");
+    expect(output).toContain("phren verify:");
     expect(output).toMatch(/(pass|FAIL)/);
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify on empty directory reports issues", () => {
-    fs.mkdirSync(cliEnv.cortexDir, { recursive: true });
+    fs.mkdirSync(cliEnv.phrenDir, { recursive: true });
     const { stdout, stderr } = runCli(
       ["verify"],
       cliEnv.env()
     );
     const output = stdout + stderr;
-    expect(output).toContain("cortex verify:");
+    expect(output).toContain("phren verify:");
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify checks fts-index and hook-entrypoint", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     const { stdout, stderr } = runCli(
       ["verify"],
@@ -1537,7 +1505,7 @@ describe("CLI integration: verify", () => {
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify shows fix suggestions for failures", () => {
-    fs.mkdirSync(cliEnv.cortexDir, { recursive: true });
+    fs.mkdirSync(cliEnv.phrenDir, { recursive: true });
     const { stdout, stderr } = runCli(
       ["verify"],
       cliEnv.env()
@@ -1556,31 +1524,31 @@ describe("CLI integration: help and health", () => {
   it("--help prints usage information", () => {
     const { stdout, exitCode } = runCli(["--help"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("cortex");
+    expect(stdout).toContain("phren");
     expect(stdout).toContain("search");
     expect(stdout).toContain("doctor");
     expect(stdout).not.toContain("projects add");
-    expect(stdout).not.toContain("cortex link");
+    expect(stdout).not.toContain("phren link");
     expect(stdout).not.toContain("--from-existing");
   });
 
   it("-h prints usage information", () => {
     const { stdout, exitCode } = runCli(["-h"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("cortex");
+    expect(stdout).toContain("phren");
   });
 
   it("help prints usage information", () => {
     const { stdout, exitCode } = runCli(["help"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("cortex");
+    expect(stdout).toContain("phren");
   });
 
   it("projects help only shows the supported add flow", () => {
     const { stdout, exitCode } = runCli(["projects", "--help"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("cortex projects list");
-    expect(stdout).toContain("cortex projects remove <name>");
+    expect(stdout).toContain("phren projects list");
+    expect(stdout).toContain("phren projects remove <name>");
     expect(stdout).not.toContain("projects add");
   });
 
@@ -1601,7 +1569,7 @@ describe("CLI integration: temp HOME subprocess stability", () => {
   let cleanup: () => void;
 
   beforeEach(() => {
-    cliEnv = setupIsolatedCliEnv("cortex-temp-home-cli-test-");
+    cliEnv = setupIsolatedCliEnv("phren-temp-home-cli-test-");
     cleanup = cliEnv.cleanup;
   });
 
@@ -1613,7 +1581,7 @@ describe("CLI integration: temp HOME subprocess stability", () => {
       cliEnv.env()
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("cortex");
+    expect(stdout).toContain("phren");
     expect(stdout).toContain("search");
     expect(stdout).toContain("doctor");
   }, CLI_INTEGRATION_TIMEOUT_MS);
@@ -1621,7 +1589,7 @@ describe("CLI integration: temp HOME subprocess stability", () => {
   it("verify reports hook and index checks after init with a temp HOME", () => {
     runCli(
       ["init", "-y", "--mcp", "off"],
-      cliEnv.env({ CORTEX_ACTOR: "cli-test" })
+      cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     const { stdout, stderr, exitCode } = runCli(
       ["verify"],
@@ -1629,7 +1597,7 @@ describe("CLI integration: temp HOME subprocess stability", () => {
     );
     const output = stdout + stderr;
     expect(exitCode).toBe(1);
-    expect(output).toContain("cortex verify:");
+    expect(output).toContain("phren verify:");
     expect(output).toContain("local-only / hooks-only mode");
     expect(output).toContain("installed-version");
     expect(output).toContain("fts-index");
@@ -1643,17 +1611,17 @@ describe("CLI integration: temp HOME subprocess stability", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: detect-skills", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let homeDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    const tmp = makeTempDir("cortex-detect-skills-test-");
-    cortexDir = path.join(tmp.path, ".cortex");
+    const tmp = makeTempDir("phren-detect-skills-test-");
+    phrenDir = path.join(tmp.path, ".phren");
     homeDir = path.join(tmp.path, "home");
-    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(phrenDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
-    grantAdmin(cortexDir, "cli-test");
+    grantAdmin(phrenDir, "cli-test");
     cleanup = tmp.cleanup;
   });
 
@@ -1662,7 +1630,7 @@ describe("CLI integration: detect-skills", () => {
   it("reports no skills directory when ~/.claude/skills/ missing", () => {
     const { stdout, exitCode } = runCli(
       ["detect-skills"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("No native skills directory");
@@ -1673,13 +1641,13 @@ describe("CLI integration: detect-skills", () => {
     fs.mkdirSync(nativeSkills, { recursive: true });
     fs.writeFileSync(path.join(nativeSkills, "my-skill.md"), "# My Skill\nDoes things.");
 
-    const globalSkills = path.join(cortexDir, "global", "skills");
+    const globalSkills = path.join(phrenDir, "global", "skills");
     fs.mkdirSync(globalSkills, { recursive: true });
     fs.writeFileSync(path.join(globalSkills, "my-skill.md"), "# My Skill\nDoes things.");
 
     const { stdout, exitCode } = runCli(
       ["detect-skills"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("already tracked");
@@ -1692,7 +1660,7 @@ describe("CLI integration: detect-skills", () => {
 
     const { stdout, exitCode } = runCli(
       ["detect-skills"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("untracked");
@@ -1811,17 +1779,17 @@ describe("selectSnippets", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("CLI integration: uninstall", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let homeDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    const tmp = makeTempDir("cortex-uninstall-test-");
-    cortexDir = path.join(tmp.path, ".cortex");
+    const tmp = makeTempDir("phren-uninstall-test-");
+    phrenDir = path.join(tmp.path, ".phren");
     homeDir = path.join(tmp.path, "home");
-    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(phrenDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
-    grantAdmin(cortexDir, "cli-test");
+    grantAdmin(phrenDir, "cli-test");
     cleanup = tmp.cleanup;
   });
 
@@ -1830,112 +1798,112 @@ describe("CLI integration: uninstall", () => {
   it("removes MCP server and hooks from Claude settings", () => {
     runCli(
       ["init", "-y", "--mcp", "on"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
 
     const settingsPath = path.join(homeDir, ".claude", "settings.json");
     expect(fs.existsSync(settingsPath)).toBe(true);
 
     const before = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(before.mcpServers?.cortex).toBeDefined();
+    expect(before.mcpServers?.phren).toBeDefined();
 
     const { stdout, exitCode } = runCli(
       ["uninstall"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Uninstalling cortex");
+    expect(stdout).toContain("Uninstalling phren");
 
     const after = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(after.mcpServers?.cortex).toBeUndefined();
+    expect(after.mcpServers?.phren).toBeUndefined();
 
     for (const event of ["UserPromptSubmit", "Stop", "SessionStart"]) {
       const hooks = after.hooks?.[event] || [];
-      const hasCortex = hooks.some(
-        (h: any) => JSON.stringify(h).includes("cortex")
+      const hasPhren = hooks.some(
+        (h: any) => JSON.stringify(h).includes("phren")
       );
-      expect(hasCortex).toBe(false);
+      expect(hasPhren).toBe(false);
     }
   });
 
-  it("removes the shared cortex root and machine alias", () => {
-    const projDir = path.join(cortexDir, "test-proj");
+  it("removes the shared phren root and machine alias", () => {
+    const projDir = path.join(phrenDir, "test-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n- test insight");
-    const machineFile = path.join(homeDir, ".cortex", ".machine-id");
+    const machineFile = path.join(homeDir, ".phren", ".machine-id");
 
     runCli(
       ["init", "-y", "--machine", "uninstall-box"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir, PHREN_ACTOR: "cli-test" }
     );
     fs.mkdirSync(path.dirname(machineFile), { recursive: true });
     fs.writeFileSync(machineFile, "uninstall-box\n");
 
     const { exitCode, stdout } = runCli(
       ["uninstall"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("installed data removed");
-    expect(fs.existsSync(cortexDir)).toBe(false);
+    expect(fs.existsSync(phrenDir)).toBe(false);
     expect(fs.existsSync(machineFile)).toBe(false);
   });
 
   it("handles missing settings file gracefully", () => {
     const { stdout, exitCode } = runCli(
       ["uninstall"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("settings not found");
   });
 
-  it("removes cortex from VS Code MCP config", () => {
+  it("removes phren from VS Code MCP config", () => {
     const vscodeDir = path.join(homeDir, ".config", "Code", "User");
     fs.mkdirSync(vscodeDir, { recursive: true });
     fs.writeFileSync(
       path.join(vscodeDir, "mcp.json"),
-      JSON.stringify({ mcpServers: { cortex: { command: "npx", args: ["-y", "cortex"] } } }, null, 2)
+      JSON.stringify({ mcpServers: { phren: { command: "npx", args: ["-y", "phren"] } } }, null, 2)
     );
 
     const { stdout, exitCode } = runCli(
       ["uninstall"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Removed cortex from VS Code");
+    expect(stdout).toContain("Removed phren from VS Code");
 
     const after = JSON.parse(fs.readFileSync(path.join(vscodeDir, "mcp.json"), "utf8"));
-    expect(after.mcpServers?.cortex).toBeUndefined();
+    expect(after.mcpServers?.phren).toBeUndefined();
   });
 
-  it("removes cortex from Cursor MCP config", () => {
+  it("removes phren from Cursor MCP config", () => {
     const cursorDir = path.join(homeDir, ".cursor");
     fs.mkdirSync(cursorDir, { recursive: true });
     fs.writeFileSync(
       path.join(cursorDir, "mcp.json"),
-      JSON.stringify({ mcpServers: { cortex: { command: "npx", args: ["-y", "cortex"] } } }, null, 2)
+      JSON.stringify({ mcpServers: { phren: { command: "npx", args: ["-y", "phren"] } } }, null, 2)
     );
 
     const { stdout, exitCode } = runCli(
       ["uninstall"],
-      { CORTEX_PATH: cortexDir, HOME: homeDir, USERPROFILE: homeDir }
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Removed cortex from Cursor");
+    expect(stdout).toContain("Removed phren from Cursor");
 
     const after = JSON.parse(fs.readFileSync(path.join(cursorDir, "mcp.json"), "utf8"));
-    expect(after.mcpServers?.cortex).toBeUndefined();
+    expect(after.mcpServers?.phren).toBeUndefined();
   });
 });
 
 describe("CLI integration: search history", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let cleanup: () => void;
 
   beforeEach(() => {
-    ({ cortexDir, cleanup } = setupCortexDir());
-    const projDir = path.join(cortexDir, "hist-proj");
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    const projDir = path.join(phrenDir, "hist-proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(
       path.join(projDir, "FINDINGS.md"),
@@ -1948,7 +1916,7 @@ describe("CLI integration: search history", () => {
   it("--history shows empty history when no searches have been made", () => {
     const { stdout, exitCode } = runCli(
       ["search", "--history"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("No search history");
@@ -1958,12 +1926,12 @@ describe("CLI integration: search history", () => {
     // Run a search first
     runCli(
       ["search", "cache"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     // Check history
     const { stdout, exitCode } = runCli(
       ["search", "--history"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("cache");
@@ -1974,12 +1942,12 @@ describe("CLI integration: search history", () => {
     // Run a search
     runCli(
       ["search", "restart"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     // Re-run from history
     const { stdout, exitCode } = runCli(
       ["search", "--from-history", "1"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).toBe(0);
     expect(stdout).toContain("restart");
@@ -1988,7 +1956,7 @@ describe("CLI integration: search history", () => {
   it("--from-history with out-of-range index exits with error", () => {
     const { stderr, exitCode } = runCli(
       ["search", "--from-history", "99"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain("No search at position 99");
@@ -1997,9 +1965,9 @@ describe("CLI integration: search history", () => {
   it("history stores project and type metadata", () => {
     runCli(
       ["search", "cache", "--project", "hist-proj", "--type", "findings"],
-      { CORTEX_PATH: cortexDir, CORTEX_ACTOR: "cli-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
-    const historyPath = path.join(cortexDir, ".runtime", "search-history.jsonl");
+    const historyPath = path.join(phrenDir, ".runtime", "search-history.jsonl");
     expect(fs.existsSync(historyPath)).toBe(true);
     const lines = fs.readFileSync(historyPath, "utf8").trim().split("\n");
     const entry = JSON.parse(lines[lines.length - 1]);

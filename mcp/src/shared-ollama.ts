@@ -22,23 +22,23 @@ export function prepareEmbeddingInput(text: string): string {
 
 /**
  * Cloud embedding API support (Item 6).
- * Set CORTEX_EMBEDDING_API_URL to an OpenAI-compatible /embeddings endpoint.
- * Set CORTEX_EMBEDDING_API_KEY for the Authorization: Bearer header.
+ * Set PHREN_EMBEDDING_API_URL to an OpenAI-compatible /embeddings endpoint.
+ * Set PHREN_EMBEDDING_API_KEY for the Authorization: Bearer header.
  * When set, cloud embedding takes priority over Ollama.
  *
  * Example (OpenAI):
- *   CORTEX_EMBEDDING_API_URL=https://api.openai.com/v1
- *   CORTEX_EMBEDDING_API_KEY=sk-...
- *   CORTEX_EMBEDDING_MODEL=text-embedding-3-small
+ *   PHREN_EMBEDDING_API_URL=https://api.openai.com/v1
+ *   PHREN_EMBEDDING_API_KEY=sk-...
+ *   PHREN_EMBEDDING_MODEL=text-embedding-3-small
  */
 export function getCloudEmbeddingUrl(): string | null {
-  const val = process.env["CORTEX_EMBEDDING_API_URL"];
+  const val = process.env["PHREN_EMBEDDING_API_URL"];
   if (!val || ["off", "0", "false", "no"].includes(val.trim().toLowerCase())) return null;
   return val.trim().replace(/\/$/, ""); // strip trailing slash
 }
 
 function getCloudEmbeddingKey(): string | null {
-  return process.env["CORTEX_EMBEDDING_API_KEY"] ?? null;
+  return process.env["PHREN_EMBEDDING_API_KEY"] ?? null;
 }
 
 /** Embed text via OpenAI-compatible /embeddings endpoint. */
@@ -68,17 +68,17 @@ async function embedTextCloud(input: string, baseUrl: string, model: string, api
 }
 
 export function getOllamaUrl(): string | null {
-  const val = process.env["CORTEX_OLLAMA_URL"];
+  const val = process.env["PHREN_OLLAMA_URL"];
   if (val !== undefined && ["off", "0", "false", "no"].includes(val.trim().toLowerCase())) return null;
   return val ?? DEFAULT_OLLAMA_URL;
 }
 
 export function getEmbeddingModel(): string {
-  return process.env["CORTEX_EMBEDDING_MODEL"] ?? DEFAULT_EMBEDDING_MODEL;
+  return process.env["PHREN_EMBEDDING_MODEL"] ?? DEFAULT_EMBEDDING_MODEL;
 }
 
 export function getExtractModel(): string {
-  return process.env["CORTEX_EXTRACT_MODEL"] ?? DEFAULT_EXTRACT_MODEL;
+  return process.env["PHREN_EXTRACT_MODEL"] ?? DEFAULT_EXTRACT_MODEL;
 }
 
 export async function checkOllamaAvailable(url?: string): Promise<boolean> {
@@ -121,7 +121,7 @@ export async function embedText(text: string, model?: string, url?: string): Pro
   const input = prepareEmbeddingInput(text);
   if (!input) return null;
 
-  // Cloud embedding takes priority when CORTEX_EMBEDDING_API_URL is set
+  // Cloud embedding takes priority when PHREN_EMBEDDING_API_URL is set
   const cloudUrl = url ? null : getCloudEmbeddingUrl();
   if (cloudUrl) {
     return embedTextCloud(input, cloudUrl, modelName, getCloudEmbeddingKey());

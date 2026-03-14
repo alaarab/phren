@@ -28,8 +28,8 @@ export const webUiManifest: CapabilityManifest = {
     "hook.errors": { implemented: false, reason: "Hook errors not exposed in web UI" },
 
     // Search
-    "search.fts": { implemented: false, reason: "No full-text search in web UI" },
-    "search.entity": { implemented: false, reason: "No entity search in web UI" },
+    "search.fts": { implemented: true, handler: "memory-ui-server.ts:/api/search" },
+    "search.fragment": { implemented: false, reason: "No fragment search in web UI" },
     "search.related_docs": { implemented: false, reason: "No related docs in web UI" },
     "search.history": { implemented: false, reason: "No search history in web UI" },
 
@@ -43,13 +43,12 @@ export const webUiManifest: CapabilityManifest = {
     "config.task_mode": { implemented: true, handler: "memory-ui-server.ts:/api/settings (workflow policy)" },
     "config.retention": { implemented: false, reason: "Config is CLI-only" },
     "config.workflow": { implemented: true, handler: "memory-ui-server.ts:/api/settings (workflow policy)" },
-    "config.access": { implemented: false, reason: "Config is CLI-only" },
     "config.index": { implemented: false, reason: "Config is CLI-only" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "memory-ui-server.ts:/api/runtime-health" },
     "health.doctor_fix": { implemented: false, reason: "Doctor --fix is CLI-only" },
-    "health.sync": { implemented: false, reason: "No sync action in web UI" },
+    "health.sync": { implemented: true, handler: "memory-ui-server.ts:/api/sync" },
     "session.start": { implemented: false, reason: "Session lifecycle is not web UI driven" },
     "session.end": { implemented: false, reason: "Session lifecycle is not web UI driven" },
 

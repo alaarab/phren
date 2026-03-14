@@ -636,7 +636,7 @@ test.describe.serial("graph visualization e2e", () => {
     await openGraphTab(page);
 
     // Filter to show only entities
-    const entityBtn = page.locator("#graph-filter span").filter({ hasText: "Entities" });
+    const entityBtn = page.locator("#graph-filter span").filter({ hasText: "Fragments" });
     // First click "all off" by clicking each active type to disable, or use the type filter
     // The filter is a toggle — clicking "Entities" should toggle it.
     // By default all types are active. Let's filter to only entities by:
@@ -680,7 +680,7 @@ test.describe.serial("graph visualization e2e", () => {
     await page.locator("#graph-filter span").filter({ hasText: "Projects" }).click();
     await page.locator("#graph-filter span").filter({ hasText: "Findings" }).click();
     await page.locator("#graph-filter span").filter({ hasText: "Tasks" }).click();
-    await page.locator("#graph-filter span").filter({ hasText: "Entities" }).click();
+    await page.locator("#graph-filter span").filter({ hasText: "Fragments" }).click();
     await page.waitForTimeout(500);
 
     const limitRow = page.locator("#graph-limit-row");
@@ -699,7 +699,7 @@ test.describe.serial("graph visualization e2e", () => {
     await page.locator("#graph-filter span").filter({ hasText: "Projects" }).click();
     await page.locator("#graph-filter span").filter({ hasText: "Findings" }).click();
     await page.locator("#graph-filter span").filter({ hasText: "Tasks" }).click();
-    await page.locator("#graph-filter span").filter({ hasText: "Entities" }).click();
+    await page.locator("#graph-filter span").filter({ hasText: "Fragments" }).click();
   });
 
   test("task nodes visible via type filter and interactive", async ({ page }) => {
@@ -708,7 +708,7 @@ test.describe.serial("graph visualization e2e", () => {
     // Filter to only task nodes
     await page.locator("#graph-filter span").filter({ hasText: "Projects" }).click();
     await page.locator("#graph-filter span").filter({ hasText: "Findings" }).click();
-    await page.locator("#graph-filter span").filter({ hasText: "Entities" }).click();
+    await page.locator("#graph-filter span").filter({ hasText: "Fragments" }).click();
     await page.locator("#graph-filter span").filter({ hasText: "Refs" }).click();
     await page.waitForTimeout(500);
 
@@ -726,7 +726,7 @@ test.describe.serial("graph visualization e2e", () => {
     // Reset filters
     await page.locator("#graph-filter span").filter({ hasText: "Projects" }).click();
     await page.locator("#graph-filter span").filter({ hasText: "Findings" }).click();
-    await page.locator("#graph-filter span").filter({ hasText: "Entities" }).click();
+    await page.locator("#graph-filter span").filter({ hasText: "Fragments" }).click();
     await page.locator("#graph-filter span").filter({ hasText: "Refs" }).click();
   });
 

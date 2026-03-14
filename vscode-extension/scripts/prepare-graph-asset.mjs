@@ -7,7 +7,7 @@ const sourcePath = path.resolve(extensionRoot, "..", "mcp", "dist", "memory-ui-g
 const targetPath = path.resolve(extensionRoot, "out", "memory-ui-graph.js");
 
 if (!fs.existsSync(sourcePath)) {
-  throw new Error(`Missing graph engine at ${sourcePath}. Run the root Cortex build before packaging the VS Code extension.`);
+  throw new Error(`Missing graph engine at ${sourcePath}. Run the root Phren build before packaging the VS Code extension.`);
 }
 
 fs.mkdirSync(path.dirname(targetPath), { recursive: true });

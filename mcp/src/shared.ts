@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
-import { CortexError, cortexErr, cortexOk, isRecord, type CortexResult } from "./cortex-core.js";
-import { collectNativeMemoryFiles, debugLog, normalizeProjectNameForCreate, runtimeFile } from "./cortex-paths.js";
+import { PhrenError, phrenErr, phrenOk, isRecord, type PhrenResult } from "./phren-core.js";
+import { collectNativeMemoryFiles, debugLog, normalizeProjectNameForCreate, runtimeFile } from "./phren-paths.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
 
 export type { HookToolName } from "./provider-adapters.js";
@@ -11,13 +11,13 @@ export { HOOK_TOOL_NAMES, hookConfigPath } from "./provider-adapters.js";
 export {
   EXEC_TIMEOUT_MS,
   EXEC_TIMEOUT_QUICK_MS,
-  CortexError,
-  type CortexErrorCode,
-  type CortexResult,
-  cortexOk,
-  cortexErr,
+  PhrenError,
+  type PhrenErrorCode,
+  type PhrenResult,
+  phrenOk,
+  phrenErr,
   forwardErr,
-  parseCortexErrorCode,
+  parsePhrenErrorCode,
   isRecord,
   withDefaults,
   FINDING_TYPES,
@@ -28,23 +28,23 @@ export {
   DOC_TYPES,
   type DocType,
   capCache,
-} from "./cortex-core.js";
+} from "./phren-core.js";
 
 export {
   ROOT_MANIFEST_FILENAME,
   type InstallMode,
   type SyncMode,
-  type CortexRootManifest,
+  type PhrenRootManifest,
   type InstallContext,
   homeDir,
   homePath,
   expandHomePath,
-  defaultCortexPath,
+  defaultPhrenPath,
   rootManifestPath,
   readRootManifest,
   writeRootManifest,
   resolveInstallContext,
-  findNearestCortexPath,
+  findNearestPhrenPath,
   isProjectLocalMode,
   runtimeDir,
   tryUnlink,
@@ -52,7 +52,6 @@ export {
   runtimeFile,
   installPreferencesFile,
   runtimeHealthFile,
-  canonicalLocksFile,
   shellStateFile,
   sessionMetricsFile,
   memoryScoresFile,
@@ -61,18 +60,18 @@ export {
   debugLog,
   appendIndexEvent,
   resolveFindingsPath,
-  findCortexPath,
-  ensureCortexPath,
-  findCortexPathWithArg,
+  findPhrenPath,
+  ensurePhrenPath,
+  findPhrenPathWithArg,
   normalizeProjectNameForCreate,
   findProjectNameCaseInsensitive,
   getProjectDirs,
   collectNativeMemoryFiles,
-  computeCortexLiveStateToken,
-  getCortexPath,
+  computePhrenLiveStateToken,
+  getPhrenPath,
   qualityMarkers,
   atomicWriteText,
-} from "./cortex-paths.js";
+} from "./phren-paths.js";
 
 export {
   PROACTIVITY_LEVELS,
@@ -105,8 +104,8 @@ export function isMemoryScopeVisible(itemScope: string | undefined, activeScope?
   return itemScope === "shared" || itemScope === activeScope;
 }
 
-export function impactLogFile(cortexPath: string): string {
-  return runtimeFile(cortexPath, "impact.jsonl");
+export function impactLogFile(phrenPath: string): string {
+  return runtimeFile(phrenPath, "impact.jsonl");
 }
 
 function isProjectDirEntry(entry: fs.Dirent): boolean {
@@ -120,8 +119,8 @@ function isCanonicalProjectDirName(name: string): boolean {
   return name === name.toLowerCase() && isValidProjectName(name);
 }
 
-export function appendAuditLog(cortexPath: string, event: string, details: string): void {
-  const logPath = runtimeFile(cortexPath, "audit.log");
+export function appendAuditLog(phrenPath: string, event: string, details: string): void {
+  const logPath = runtimeFile(phrenPath, "audit.log");
   const line = `[${new Date().toISOString()}] ${event} ${details}\n`;
   const lockPath = logPath + ".lock";
   const maxWait = 5000;
@@ -141,7 +140,7 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
         hasLock = true;
         break;
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog lockWrite: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog lockWrite: ${errorMessage(err)}\n`);
         try {
           const stat = fs.statSync(lockPath);
           if (Date.now() - stat.mtimeMs > staleMs) {
@@ -156,7 +155,7 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
             continue;
           }
         } catch (statErr: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog staleStat: ${errorMessage(statErr)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog staleStat: ${errorMessage(statErr)}\n`);
         }
         Atomics.wait(waiter, 0, 0, pollMs);
         waited += pollMs;
@@ -180,7 +179,7 @@ export function appendAuditLog(cortexPath: string, event: string, details: strin
       try {
         fs.unlinkSync(lockPath);
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendAuditLog unlock: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog unlock: ${errorMessage(err)}\n`);
       }
     }
   }

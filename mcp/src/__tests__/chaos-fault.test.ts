@@ -7,14 +7,12 @@ import {
   addFinding,
   removeFinding,
   readReviewQueue,
-  approveQueueItem,
-  editQueueItem,
   listMachines,
   listProfiles,
   loadShellState,
   saveShellState,
 } from "../data-access.js";
-import { CortexError } from "../shared.js";
+import { PhrenError } from "../shared.js";
 import { grantAdmin, makeTempDir, writeFile as write, resultMsg } from "../test-helpers.js";
 import { readCustomHooks, runCustomHooks } from "../hooks.js";
 import * as path from "path";
@@ -27,16 +25,16 @@ let projectDir: string;
 let tmpCleanup: () => void;
 
 beforeEach(() => {
-  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-chaos-"));
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-chaos-"));
   projectDir = path.join(tmpDir, PROJECT);
   fs.mkdirSync(projectDir, { recursive: true });
   grantAdmin(tmpDir);
 });
 
 afterEach(() => {
-  delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
-  delete process.env.CORTEX_FILE_LOCK_POLL_MS;
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+  delete process.env.PHREN_FILE_LOCK_POLL_MS;
+  delete process.env.PHREN_ACTOR;
   tmpCleanup();
 });
 
@@ -150,7 +148,7 @@ describe("boundary and edge case inputs", () => {
       const result = readTasks(tmpDir, name);
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect([CortexError.INVALID_PROJECT_NAME, CortexError.PROJECT_NOT_FOUND]).toContain(result.code);
+        expect([PhrenError.INVALID_PROJECT_NAME, PhrenError.PROJECT_NOT_FOUND]).toContain(result.code);
       }
     }
   });
@@ -177,37 +175,16 @@ describe("boundary and edge case inputs", () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), task);
     const msg = completeTask(tmpDir, PROJECT, "This item does not exist at all");
     expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.NOT_FOUND);
   });
 
   it("handles removing from empty FINDINGS.md", () => {
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# chaos FINDINGS\n");
     const msg = removeFinding(tmpDir, PROJECT, "nonexistent");
     expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.NOT_FOUND);
   });
 
-  it("handles editing queue item to very long text", () => {
-    write(
-      path.join(projectDir, "MEMORY_QUEUE.md"),
-      [
-        "# chaos Memory Queue",
-        "",
-        "## Review",
-        "",
-        "- [2026-03-05] Short item [confidence 0.90]",
-        "",
-        "## Stale",
-        "",
-        "## Conflicts",
-        "",
-      ].join("\n")
-    );
-    const longText = "B".repeat(5000);
-    const msg = editQueueItem(tmpDir, PROJECT, "Short item", longText);
-    expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.VALIDATION_ERROR);
-  });
 });
 
 describe("filesystem fault injection", () => {
@@ -269,14 +246,14 @@ describe("filesystem fault injection", () => {
     fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "[1, 2, 3]\n");
     const result = listMachines(tmpDir);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe(CortexError.MALFORMED_YAML);
+    if (!result.ok) expect(result.code).toBe(PhrenError.MALFORMED_YAML);
   });
 
   it("handles machines.yaml with empty content", () => {
     fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "");
     const result = listMachines(tmpDir);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe(CortexError.MALFORMED_YAML);
+    if (!result.ok) expect(result.code).toBe(PhrenError.MALFORMED_YAML);
   });
 });
 
@@ -363,65 +340,29 @@ describe("rapid state transitions", () => {
     expect(result.data.some((f) => f.text.includes("Replacement finding"))).toBe(true);
   });
 
-  it("approve queue item then re-read queue shows consistent state", () => {
-    write(
-      path.join(projectDir, "MEMORY_QUEUE.md"),
-      [
-        "# chaos Memory Queue",
-        "",
-        "## Review",
-        "",
-        "- [2026-03-05] Item to approve [confidence 0.90]",
-        "- [2026-03-06] Item to keep [confidence 0.80]",
-        "",
-        "## Stale",
-        "",
-        "## Conflicts",
-        "",
-      ].join("\n")
-    );
-    write(
-      path.join(projectDir, "FINDINGS.md"),
-      "# chaos FINDINGS\n"
-    );
-
-    const msg = approveQueueItem(tmpDir, PROJECT, "Item to approve");
-    expect(msg.ok).toBe(true);
-
-    const queue = readReviewQueue(tmpDir, PROJECT);
-    expect(queue.ok).toBe(true);
-    if (!queue.ok) return;
-    expect(queue.data).toHaveLength(1);
-    expect(queue.data[0].text).toContain("Item to keep");
-
-    const findings = readFindings(tmpDir, PROJECT);
-    expect(findings.ok).toBe(true);
-    if (!findings.ok) return;
-    expect(findings.data.some((f) => f.text.includes("Item to approve"))).toBe(true);
-  });
 });
 
 describe("concurrent environment variable isolation", () => {
-  const origLockWait = process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
-  const origLockPoll = process.env.CORTEX_FILE_LOCK_POLL_MS;
-  const origLockStale = process.env.CORTEX_FILE_LOCK_STALE_MS;
+  const origLockWait = process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+  const origLockPoll = process.env.PHREN_FILE_LOCK_POLL_MS;
+  const origLockStale = process.env.PHREN_FILE_LOCK_STALE_MS;
 
   afterEach(() => {
-    if (origLockWait === undefined) delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
-    else process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = origLockWait;
-    if (origLockPoll === undefined) delete process.env.CORTEX_FILE_LOCK_POLL_MS;
-    else process.env.CORTEX_FILE_LOCK_POLL_MS = origLockPoll;
-    if (origLockStale === undefined) delete process.env.CORTEX_FILE_LOCK_STALE_MS;
-    else process.env.CORTEX_FILE_LOCK_STALE_MS = origLockStale;
+    if (origLockWait === undefined) delete process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+    else process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = origLockWait;
+    if (origLockPoll === undefined) delete process.env.PHREN_FILE_LOCK_POLL_MS;
+    else process.env.PHREN_FILE_LOCK_POLL_MS = origLockPoll;
+    if (origLockStale === undefined) delete process.env.PHREN_FILE_LOCK_STALE_MS;
+    else process.env.PHREN_FILE_LOCK_STALE_MS = origLockStale;
   });
 
-  it("respects CORTEX_FILE_LOCK_MAX_WAIT_MS override", () => {
+  it("respects PHREN_FILE_LOCK_MAX_WAIT_MS override", () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), "# chaos task\n\n## Queue\n\n## Done\n");
     const lockPath = path.join(projectDir, "tasks.md.lock");
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
-    process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "50";
-    process.env.CORTEX_FILE_LOCK_POLL_MS = "10";
+    process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = "50";
+    process.env.PHREN_FILE_LOCK_POLL_MS = "10";
     const start = Date.now();
     const msg = addTask(tmpDir, PROJECT, "Should timeout quickly");
     const elapsed = Date.now() - start;
@@ -433,7 +374,7 @@ describe("concurrent environment variable isolation", () => {
     expect(elapsed).toBeLessThan(2000);
   });
 
-  it("respects CORTEX_FILE_LOCK_STALE_MS override", () => {
+  it("respects PHREN_FILE_LOCK_STALE_MS override", () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), "# chaos task\n\n## Queue\n\n## Done\n");
     const lockPath = path.join(projectDir, "tasks.md.lock");
     fs.writeFileSync(lockPath, `99999\n${Date.now() - 2000}`);
@@ -441,7 +382,7 @@ describe("concurrent environment variable isolation", () => {
     fs.utimesSync(lockPath, past, past);
 
     // Set stale threshold to 1 second so the 2-second-old lock is stale
-    process.env.CORTEX_FILE_LOCK_STALE_MS = "1000";
+    process.env.PHREN_FILE_LOCK_STALE_MS = "1000";
 
     const msg = addTask(tmpDir, PROJECT, "After custom stale threshold");
     expect(msg.ok).toBe(true);

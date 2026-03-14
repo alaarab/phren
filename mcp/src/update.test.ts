@@ -22,14 +22,14 @@ vi.mock("child_process", () => ({
   execFileSync: mockExecFileSync,
 }));
 
-import { runCortexUpdate } from "./update.js";
+import { runPhrenUpdate } from "./update.js";
 import { PACKAGE_NAME, PACKAGE_SPEC } from "./package-metadata.js";
 
 function npmExec(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
-describe("runCortexUpdate", () => {
+describe("runPhrenUpdate", () => {
   beforeEach(() => {
     mockExistsSync.mockReset();
     mockExecFileSync.mockReset();
@@ -55,12 +55,12 @@ describe("runCortexUpdate", () => {
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
-    const result = await runCortexUpdate();
+    const result = await runPhrenUpdate();
 
     expect(result.ok).toBe(true);
-    expect(result.message).toContain("Updated local cortex repo at");
+    expect(result.message).toContain("Updated local phren repo at");
     expect(result.message).toContain("(Already up to date.)");
-    expect(result.message).toContain("Run `cortex update --refresh-starter`");
+    expect(result.message).toContain("Run `phren update --refresh-starter`");
     expect(result.message).toContain("Rebuilt and verified CLI health.");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       "git",
@@ -97,7 +97,7 @@ describe("runCortexUpdate", () => {
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
-    const result = await runCortexUpdate();
+    const result = await runPhrenUpdate();
 
     expect(result.ok).toBe(false);
     expect(result.message).toBe("Local repo update failed: pull failed");
@@ -123,7 +123,7 @@ describe("runCortexUpdate", () => {
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
-    const result = await runCortexUpdate();
+    const result = await runPhrenUpdate();
 
     expect(result.ok).toBe(false);
     expect(result.message).toBe("Local repo updated but rebuild/health check failed: build failed");
@@ -137,11 +137,11 @@ describe("runCortexUpdate", () => {
     });
     mockExecFileSync.mockReturnValue("");
 
-    const result = await runCortexUpdate();
+    const result = await runPhrenUpdate();
 
     expect(result.ok).toBe(true);
-    expect(result.message).toContain("Updated cortex via npm global install (@latest) and verified the package is installed.");
-    expect(result.message).toContain("Run `cortex update --refresh-starter`");
+    expect(result.message).toContain("Updated phren via npm global install (@latest) and verified the package is installed.");
+    expect(result.message).toContain("Run `phren update --refresh-starter`");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       npmExec(),
       ["install", "-g", `${PACKAGE_NAME}@latest`],
@@ -164,7 +164,7 @@ describe("runCortexUpdate", () => {
       throw new Error("network down");
     });
 
-    const result = await runCortexUpdate();
+    const result = await runPhrenUpdate();
 
     expect(result.ok).toBe(false);
     expect(result.message).toBe(
@@ -191,7 +191,7 @@ describe("runCortexUpdate", () => {
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
-    const result = await runCortexUpdate({ refreshStarter: true });
+    const result = await runPhrenUpdate({ refreshStarter: true });
 
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Refreshed starter assets.");

@@ -11,7 +11,7 @@
  *   - <div id="graph-detail-panel"> with graph-detail-meta and graph-detail-body
  *
  * Self-contained: defines its own esc() helper and accepts data via
- * window.cortexGraph.mount(data) — no external dependencies.
+ * window.phrenGraph.mount(data) — no external dependencies.
  */
 export function renderGraphScript() {
     return `
@@ -493,6 +493,11 @@ export function renderGraphScript() {
       var fx = force * dx / dist, fy = force * dy / dist;
       if (s !== dragging) { s.vx += fx; s.vy += fy; }
       if (t !== dragging) { t.vx -= fx; t.vy -= fy; }
+    }
+
+    /* while a node is held, keep pulling its local cluster every frame */
+    if (dragging && dragPullDepths) {
+      applyDragClusterPull();
     }
 
     /* uniform center gravity for organic spread */
@@ -1097,7 +1102,6 @@ export function renderGraphScript() {
         dragging.y = (my - panY) / scale - dragOffY;
         dragging.vx = 0;
         dragging.vy = 0;
-        applyDragClusterPull();
         alpha = Math.max(alpha, 0.14);
         render();
       } else if (panning) {
@@ -1339,20 +1343,20 @@ export function renderGraphScript() {
     filterEl.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;width:100%">' +
         '<input type="text" data-search-filter placeholder="Search nodes..." value="' + esc(searchQuery || '') + '" style="flex:1 1 auto;min-width:180px;padding:7px 12px;border-radius:8px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" />' +
-        '<details data-filter-menu style="position:relative;flex:0 0 auto">' +
-          '<summary style="list-style:none;cursor:pointer;padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;font-weight:600;color:var(--ink);user-select:none">Filters</summary>' +
-          '<div style="position:absolute;right:0;top:calc(100% + 8px);z-index:20;min-width:290px;max-height:330px;overflow:auto;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-raised,var(--surface));box-shadow:var(--shadow-lg)">' +
-            '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Type</div>' +
+        '<div data-filter-menu style="position:relative;flex:0 0 auto">' +
+          '<button data-filter-toggle style="cursor:pointer;padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;font-weight:600;color:var(--ink);user-select:none">Filters</button>' +
+          '<div data-filter-panel style="display:none;position:absolute;right:0;top:calc(100% + 8px);z-index:20;min-width:290px;max-height:380px;overflow:auto;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-raised,var(--surface));box-shadow:var(--shadow-lg)">' +
+            '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Project</div>' +
+            '<select data-project-filter style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink);font-size:12px;margin-bottom:10px">' + projectOpts + '</select>' +
+            '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Type</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:10px">' + typeSection + '</div>' +
             (topicSection ? '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Topics</div><div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:10px">' + topicSection + '</div>' : '') +
             '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Health</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-bottom:10px">' + healthSection + '</div>' +
-            '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Project</div>' +
-            '<select data-project-filter style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink);font-size:12px;margin-bottom:10px">' + projectOpts + '</select>' +
             '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Node Limit</div>' +
             '<input type="number" data-limit-input min="10" max="10000" value="' + nodeLimit + '" style="width:110px;padding:6px 8px;border-radius:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" />' +
           '</div>' +
-        '</details>' +
+        '</div>' +
         '<span style="flex:0 0 auto;font-size:11px;color:var(--muted);white-space:nowrap">' + visibleNodes.length + ' / ' + allNodes.length + '</span>' +
       '</div>';
 
@@ -1394,6 +1398,27 @@ export function renderGraphScript() {
     var limitInput = filterEl.querySelector('[data-limit-input]');
     if (limitInput) {
       limitInput.addEventListener('change', function() { window.applyGraphLimit(parseInt(limitInput.value, 10)); });
+    }
+
+    /* filter panel toggle: stays open until click-outside or Escape */
+    var filterToggle = filterEl.querySelector('[data-filter-toggle]');
+    var filterPanel = filterEl.querySelector('[data-filter-panel]');
+    if (filterToggle && filterPanel) {
+      filterToggle.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var isOpen = filterPanel.style.display !== 'none';
+        filterPanel.style.display = isOpen ? 'none' : 'block';
+      });
+      /* keep panel open on internal clicks */
+      filterPanel.addEventListener('click', function(e) { e.stopPropagation(); });
+      /* close on outside click */
+      document.addEventListener('click', function() { filterPanel.style.display = 'none'; });
+      /* close on Escape */
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && filterPanel.style.display !== 'none') {
+          filterPanel.style.display = 'none';
+        }
+      });
     }
   }
 
@@ -1613,12 +1638,12 @@ export function renderGraphScript() {
   };
 
   /* ── mount (called by host loadGraph with pre-fetched data) ─────────── */
-  window.cortexGraph = {
+  window.phrenGraph = {
     mount: function(data) {
       canvas = document.getElementById('graph-canvas');
       tooltip = document.getElementById('graph-tooltip');
       if (!canvas) {
-        console.error('[cortexGraph] #graph-canvas not found');
+        console.error('[phrenGraph] #graph-canvas not found');
         return;
       }
       ctx = canvas.getContext('2d');

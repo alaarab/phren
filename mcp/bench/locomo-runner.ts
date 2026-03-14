@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * LoCoMo/LongMemEval Benchmark Runner for Cortex
+ * LoCoMo/LongMemEval Benchmark Runner for Phren
  *
  * Usage:
  *   npx tsx mcp/bench/locomo-runner.ts [--sessions N] [--input path.json] [--output path.json]
@@ -117,7 +117,7 @@ const TOY_DATASET: BenchmarkSession[] = [
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeTempCortex(prefix: string): { cortexPath: string; cleanup: () => void } {
+function makeTempPhren(prefix: string): { phrenPath: string; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   // Grant admin access for governance checks
   const govDir = path.join(dir, ".governance");
@@ -131,9 +131,9 @@ function makeTempCortex(prefix: string): { cortexPath: string; cleanup: () => vo
       viewers: [],
     }, null, 2) + "\n"
   );
-  process.env.CORTEX_ACTOR = "bench-runner";
+  process.env.PHREN_ACTOR = "bench-runner";
   return {
-    cortexPath: dir,
+    phrenPath: dir,
     cleanup: () => {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -183,21 +183,21 @@ function checkKeywordInResults(results: Array<{ content: string }>, keyword: str
 // ── Core Benchmark ───────────────────────────────────────────────────────────
 
 async function runSession(session: BenchmarkSession): Promise<SessionResult> {
-  const { cortexPath, cleanup } = makeTempCortex(`cortex-bench-${session.id}-`);
+  const { phrenPath, cleanup } = makeTempPhren(`phren-bench-${session.id}-`);
   const project = "bench";
 
   try {
     // Create project directory
-    const projectDir = path.join(cortexPath, project);
+    const projectDir = path.join(phrenPath, project);
     fs.mkdirSync(projectDir, { recursive: true });
 
     // Ingest findings
     for (const finding of session.findings) {
-      addFindingToFile(cortexPath, project, finding);
+      addFindingToFile(phrenPath, project, finding);
     }
 
     // Build FTS index
-    const db = await buildIndex(cortexPath);
+    const db = await buildIndex(phrenPath);
 
     // Run queries
     const questionResults: QuestionResult[] = [];
@@ -292,8 +292,8 @@ async function runBenchmark(sessions: BenchmarkSession[]): Promise<BenchmarkResu
       nodeVersion: process.version,
       dataset: "toy",
       inputPath: null,
-      embeddingsEnabled: Boolean(process.env.CORTEX_EMBEDDING_API_URL || process.env.OLLAMA_HOST || process.env.OLLAMA_BASE_URL),
-      cacheState: "cold temp cortex per session; fresh in-memory FTS index each run",
+      embeddingsEnabled: Boolean(process.env.PHREN_EMBEDDING_API_URL || process.env.OLLAMA_HOST || process.env.OLLAMA_BASE_URL),
+      cacheState: "cold temp phren per session; fresh in-memory FTS index each run",
       indexMode: "FTS5 only",
       sessionsRequested: sessions.length,
       sessionsExecuted: sessionResults.length,

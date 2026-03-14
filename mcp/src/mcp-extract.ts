@@ -42,22 +42,22 @@ function parseFindings(raw: string): string[] {
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { cortexPath, withWriteQueue, updateFileInIndex } = ctx;
+  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
 
   server.registerTool(
     "auto_extract_findings",
     {
-      title: "◆ cortex · auto-extract findings",
+      title: "◆ phren · auto-extract findings",
       description:
         "Use a local Ollama LLM to automatically extract non-obvious findings from text. " +
         "Pass conversation snippets, code review notes, error logs, or any engineering text. " +
         "The model identifies patterns, pitfalls, decisions, and bugs worth remembering. " +
-        "Requires Ollama running locally. Set CORTEX_EXTRACT_MODEL env var to choose model (default: llama3.2). " +
-        "Set CORTEX_OLLAMA_URL=off to disable.",
+        "Requires Ollama running locally. Set PHREN_EXTRACT_MODEL env var to choose model (default: llama3.2). " +
+        "Set PHREN_OLLAMA_URL=off to disable.",
       inputSchema: z.object({
         project: z.string().describe("Project name to save extracted findings to."),
         text: z.string().describe("Text to extract findings from (conversation, code review, error log, etc.). Max 10000 chars."),
-        model: z.string().optional().describe("Ollama model to use (overrides CORTEX_EXTRACT_MODEL env var)."),
+        model: z.string().optional().describe("Ollama model to use (overrides PHREN_EXTRACT_MODEL env var)."),
         dryRun: z.boolean().optional().describe("If true, return what would be extracted without saving."),
       }),
     },
@@ -69,10 +69,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         text = text.slice(0, 10000);
       }
 
-      const findingsLevel = getProactivityLevelForFindings(ctx.cortexPath);
+      const findingsLevel = getProactivityLevelForFindings(ctx.phrenPath);
       if (!dryRun && !shouldAutoCaptureFindingsForLevel(findingsLevel, text)) {
         const error = findingsLevel === "low"
-          ? 'Findings auto-extraction is disabled when CORTEX_PROACTIVITY_FINDINGS is "low". Use add_finding for manual saves.'
+          ? 'Findings auto-extraction is disabled when PHREN_PROACTIVITY_FINDINGS is "low". Use add_finding for manual saves.'
           : 'Findings auto-extraction at "medium" requires an explicit signal like "add finding" or "worth remembering".';
         return mcpResponse({ ok: false, error });
       }
@@ -81,7 +81,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (!ollamaUrl) {
         return mcpResponse({
           ok: false,
-          error: "Ollama is disabled (CORTEX_OLLAMA_URL=off). Set CORTEX_OLLAMA_URL=http://localhost:11434 to enable auto-extraction.",
+          error: "Ollama is disabled (PHREN_OLLAMA_URL=off). Set PHREN_OLLAMA_URL=http://localhost:11434 to enable auto-extraction.",
         });
       }
 
@@ -128,7 +128,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         // Use addFindingsToFile so extracted findings go through the full pipeline:
         // secret scan, dedup check, validation, and index update.
-        const result = addFindingsToFile(cortexPath, project, findings, { source: "extract" });
+        const result = addFindingsToFile(phrenPath, project, findings, { source: "extract" });
         if (!result.ok) {
           return mcpResponse({ ok: false, error: result.error });
         }
@@ -136,7 +136,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const allSkipped = [...skipped, ...rejected.map(r => r.text)];
 
         // Update index for the findings file
-        const resolvedDir = safeProjectPath(cortexPath, project);
+        const resolvedDir = safeProjectPath(phrenPath, project);
         if (resolvedDir) {
           updateFileInIndex(path.join(resolvedDir, "FINDINGS.md"));
         }

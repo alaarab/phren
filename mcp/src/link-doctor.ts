@@ -10,7 +10,6 @@ import {
   homePath,
   hookConfigPath,
   runtimeHealthFile,
-  canonicalLocksFile,
 } from "./shared.js";
 import { validateGovernanceJson } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
@@ -96,17 +95,17 @@ function nearestWritableTarget(filePath: string): boolean {
   }
 }
 
-function gitRemoteStatus(cortexPath: string): { ok: boolean; detail: string } {
+function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
   try {
-    execFileSync("git", ["-C", cortexPath, "rev-parse", "--is-inside-work-tree"], {
+    execFileSync("git", ["-C", phrenPath, "rev-parse", "--is-inside-work-tree"], {
       stdio: ["ignore", "ignore", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     });
   } catch {
-    return { ok: false, detail: "cortex path is not a git repository" };
+    return { ok: false, detail: "phren path is not a git repository" };
   }
   try {
-    const remote = execFileSync("git", ["-C", cortexPath, "remote", "get-url", "origin"], {
+    const remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
@@ -166,12 +165,12 @@ function pushSkillMirrorChecks(
   }
 }
 
-export async function runDoctor(cortexPath: string, fix: boolean = false, checkData: boolean = false): Promise<DoctorResult> {
+export async function runDoctor(phrenPath: string, fix: boolean = false, checkData: boolean = false): Promise<DoctorResult> {
   // Import runLink lazily to avoid circular dependency at module load time
   const { runLink } = await import("./link.js");
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
   const machine = getMachineName();
-  const profile = lookupProfile(cortexPath, machine);
+  const profile = lookupProfile(phrenPath, machine);
   const gitVersion = commandVersion("git");
   const nodeVersion = commandVersion("node");
   checks.push({
@@ -184,7 +183,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     ok: versionAtLeast(nodeVersion, 20),
     detail: nodeVersion || "node not found in PATH",
   });
-  const gitRemote = gitRemoteStatus(cortexPath);
+  const gitRemote = gitRemoteStatus(phrenPath);
   checks.push({
     name: "git-remote",
     ok: gitRemote.ok,
@@ -199,7 +198,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       : `no profile mapping for machine=${machine} in machines.yaml`,
   });
 
-  const profileFile = profile ? findProfileFile(cortexPath, profile) : null;
+  const profileFile = profile ? findProfileFile(phrenPath, profile) : null;
   checks.push({
     name: "profile-exists",
     ok: Boolean(profileFile),
@@ -214,19 +213,19 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   });
 
   // Filesystem speed check
-  const fsBenchFile = path.join(cortexPath, ".fs-bench-tmp");
+  const fsBenchFile = path.join(phrenPath, ".fs-bench-tmp");
   let fsMs = 0;
   try {
     const t0 = Date.now();
-    fs.writeFileSync(fsBenchFile, "cortex-fs-check");
+    fs.writeFileSync(fsBenchFile, "phren-fs-check");
     fs.readFileSync(fsBenchFile, "utf8");
     fs.unlinkSync(fsBenchFile);
     fsMs = Date.now() - t0;
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor fsBenchmark: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmark: ${errorMessage(err)}\n`);
     fsMs = -1;
     try { fs.unlinkSync(fsBenchFile); } catch (e2: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
   }
   const fsSlow = fsMs > 500 || fsMs < 0;
@@ -234,15 +233,15 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     name: "filesystem-speed",
     ok: !fsSlow,
     detail: fsMs < 0
-      ? "could not benchmark filesystem, check ~/.cortex permissions"
-      : `write+read+delete in ${fsMs}ms${fsSlow ? " (slow, check if ~/.cortex is on a network mount)" : ""}`,
+      ? "could not benchmark filesystem, check ~/.phren permissions"
+      : `write+read+delete in ${fsMs}ms${fsSlow ? " (slow, check if ~/.phren is on a network mount)" : ""}`,
   });
 
-  const contextFile = homePath(".cortex-context.md");
+  const contextFile = homePath(".phren-context.md");
   checks.push({
     name: "context-file",
     ok: fs.existsSync(contextFile),
-    detail: fs.existsSync(contextFile) ? contextFile : "missing ~/.cortex-context.md",
+    detail: fs.existsSync(contextFile) ? contextFile : "missing ~/.phren-context.md",
   });
 
   const memoryFile = path.join(
@@ -259,7 +258,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     detail: fs.existsSync(memoryFile) ? memoryFile : "missing generated MEMORY.md",
   });
 
-  const globalClaudeSrc = path.join(cortexPath, "global", "CLAUDE.md");
+  const globalClaudeSrc = path.join(phrenPath, "global", "CLAUDE.md");
   const globalClaudeDest = homePath(".claude", "CLAUDE.md");
   let globalLinkOk = false;
   try {
@@ -276,16 +275,16 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   pushSkillMirrorChecks(
     checks,
     "global",
-    buildSkillManifest(cortexPath, profile || "", "global", homePath(".claude", "skills")),
+    buildSkillManifest(phrenPath, profile || "", "global", homePath(".claude", "skills")),
     homePath(".claude", "skills"),
   );
 
   for (const project of projects) {
     if (project === "global") continue;
-    const config = readProjectConfig(cortexPath, project);
-    const ownership = getProjectOwnershipMode(cortexPath, project, config);
+    const config = readProjectConfig(phrenPath, project);
+    const ownership = getProjectOwnershipMode(phrenPath, project, config);
     const target = findProjectDir(project);
-    if (ownership !== "cortex-managed") {
+    if (ownership !== "phren-managed") {
       checks.push({
         name: `ownership:${project}`,
         ok: true,
@@ -298,7 +297,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       continue;
     }
     for (const f of ["CLAUDE.md", "REFERENCE.md", "FINDINGS.md"]) {
-      const src = path.join(cortexPath, project, f);
+      const src = path.join(phrenPath, project, f);
       if (!fs.existsSync(src)) continue;
       const dest = path.join(target, f);
       let ok = false;
@@ -317,7 +316,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     pushSkillMirrorChecks(
       checks,
       project,
-      buildSkillManifest(cortexPath, profile || "", project, path.join(target, ".claude", "skills")),
+      buildSkillManifest(phrenPath, profile || "", project, path.join(target, ".claude", "skills")),
       path.join(target, ".claude", "skills"),
     );
   }
@@ -349,7 +348,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   checks.push({
     name: "claude-hooks",
     ok: hookOk,
-    detail: hookOk ? "prompt hook configured" : "missing prompt hook in ~/.claude/settings.json",
+    detail: hookOk ? "prompt hook configured" : "missing prompt hook in settings.json",
   });
   checks.push({
     name: "lifecycle-hooks",
@@ -359,11 +358,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       : "missing lifecycle hooks (expected hook-session-start and hook-stop)",
   });
 
-  const runtimeHealthPath = runtimeHealthFile(cortexPath);
+  const runtimeHealthPath = runtimeHealthFile(phrenPath);
   let runtime: Record<string, unknown> | null = null;
   if (fs.existsSync(runtimeHealthPath)) {
     try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] doctor runtimeHealth: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor runtimeHealth: ${errorMessage(err)}\n`);
       runtime = null;
     }
   }
@@ -390,7 +389,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   });
 
   try {
-    const db = await buildIndex(cortexPath, profile || undefined);
+    const db = await buildIndex(phrenPath, profile || undefined);
     const healthRow = queryRows(db, "SELECT count(*) FROM docs", []);
     const count = Number((healthRow?.[0]?.[0] as number | string | undefined) ?? 0);
     checks.push({
@@ -408,11 +407,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
 
   const detected = detectInstalledTools();
   if (detected.has("copilot")) {
-    const copilotHooks = hookConfigPath("copilot", cortexPath);
+    const copilotHooks = hookConfigPath("copilot", phrenPath);
     checks.push({
       name: "copilot-hooks",
       ok: fs.existsSync(copilotHooks),
-      detail: fs.existsSync(copilotHooks) ? "copilot hooks config present" : "missing ~/.github/hookscortex.json",
+      detail: fs.existsSync(copilotHooks) ? "copilot hooks config present" : "missing copilot hooks config",
     });
     checks.push({
       name: "copilot-config-writable",
@@ -421,7 +420,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     });
   }
   if (detected.has("cursor")) {
-    const cursorHooks = hookConfigPath("cursor", cortexPath);
+    const cursorHooks = hookConfigPath("cursor", phrenPath);
     checks.push({
       name: "cursor-hooks",
       ok: fs.existsSync(cursorHooks),
@@ -434,11 +433,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     });
   }
   if (detected.has("codex")) {
-    const codexHooks = hookConfigPath("codex", cortexPath);
+    const codexHooks = hookConfigPath("codex", phrenPath);
     checks.push({
       name: "codex-hooks",
       ok: fs.existsSync(codexHooks),
-      detail: fs.existsSync(codexHooks) ? "codex hooks config present" : "missing codex.json in cortex root",
+      detail: fs.existsSync(codexHooks) ? "codex hooks config present" : "missing codex hooks config in phren root",
     });
     checks.push({
       name: "codex-config-writable",
@@ -459,17 +458,17 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   }
 
   if (fix) {
-    const repaired = repairPreexistingInstall(cortexPath);
+    const repaired = repairPreexistingInstall(phrenPath);
     const details: string[] = [];
     if (repaired.removedLegacyProjects > 0) details.push(`removed ${repaired.removedLegacyProjects} legacy sample profile entries`);
-    if (repaired.createdContextFile) details.push("recreated ~/.cortex-context.md");
+    if (repaired.createdContextFile) details.push("recreated ~/.phren-context.md");
     if (repaired.createdRootMemory) details.push("recreated generated MEMORY.md");
     if (details.length === 0) details.push("baseline repair complete");
     checks.push({ name: "baseline-repair", ok: true, detail: details.join("; ") });
   }
 
   if (fix && profile && profileFile) {
-    await runLink(cortexPath, { machine, profile });
+    await runLink(phrenPath, { machine, profile });
     checks.push({ name: "self-heal", ok: true, detail: "relinked hooks, symlinks, context, memory pointers" });
   } else if (fix) {
     checks.push({ name: "self-heal", ok: false, detail: "relink blocked: machine/profile not fully configured" });
@@ -481,7 +480,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     for (const tool of detectedTools) {
       let configPath = "";
       if (tool === "copilot" || tool === "cursor" || tool === "codex") {
-        configPath = hookConfigPath(tool, cortexPath);
+        configPath = hookConfigPath(tool, phrenPath);
       }
       if (configPath && fs.existsSync(configPath)) hookChecks.push(tool);
       else if (configPath) missing.push(tool);
@@ -498,15 +497,14 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
   }
 
   if (checkData) {
-    const governanceChecks: Array<{ file: string; schema: "access-control" | "retention-policy" | "workflow-policy" | "index-policy" }> = [
-      { file: "access-control.json", schema: "access-control" },
+    const governanceChecks: Array<{ file: string; schema: "retention-policy" | "workflow-policy" | "index-policy" }> = [
       { file: "retention-policy.json", schema: "retention-policy" },
       { file: "workflow-policy.json", schema: "workflow-policy" },
       { file: "index-policy.json", schema: "index-policy" },
     ];
 
     for (const item of governanceChecks) {
-      const filePath = path.join(cortexPath, ".governance", item.file);
+      const filePath = path.join(phrenPath, ".governance", item.file);
       const exists = fs.existsSync(filePath);
       const valid = exists ? validateGovernanceJson(filePath, item.schema) : false;
       checks.push({
@@ -517,8 +515,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     }
 
     const runtimeChecks = [
-      { filePath: runtimeHealthFile(cortexPath), name: "data:runtime:runtime-health.json" },
-      { filePath: canonicalLocksFile(cortexPath), name: "data:runtime:canonical-locks.json" },
+      { filePath: runtimeHealthFile(phrenPath), name: "data:runtime:runtime-health.json" },
     ];
     for (const item of runtimeChecks) {
       const exists = fs.existsSync(item.filePath);
@@ -529,11 +526,11 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       });
     }
 
-    for (const projectDir of getProjectDirs(cortexPath, profile)) {
+    for (const projectDir of getProjectDirs(phrenPath, profile)) {
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      const taskPath = resolveTaskFilePath(cortexPath, projectName);
+      const taskPath = resolveTaskFilePath(phrenPath, projectName);
       if (taskPath && fs.existsSync(taskPath)) {
         const content = fs.readFileSync(taskPath, "utf8");
         const issues = validateTaskFormat(content);
@@ -544,7 +541,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
         });
 
         const repoPath = findProjectDir(projectName);
-        const hygiene = inspectTaskHygiene(cortexPath, projectName, repoPath);
+        const hygiene = inspectTaskHygiene(phrenPath, projectName, repoPath);
         checks.push({
           name: `data:task-hygiene:${projectName}`,
           ok: hygiene.ok,
@@ -565,7 +562,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     }
 
     // Detect conflict markers in project markdown files
-    for (const projectDir of getProjectDirs(cortexPath, profile)) {
+    for (const projectDir of getProjectDirs(phrenPath, profile)) {
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
@@ -584,9 +581,9 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
       }
     }
 
-    // Validate skill frontmatter in global/skills under cortex data dir
-    const globalSkillsDir = path.join(cortexPath, "global", "skills");
-    const skillResults = validateSkillsDir(fs.existsSync(globalSkillsDir) ? globalSkillsDir : path.join(cortexPath, "global"));
+    // Validate skill frontmatter in global/skills under phren data dir
+    const globalSkillsDir = path.join(phrenPath, "global", "skills");
+    const skillResults = validateSkillsDir(fs.existsSync(globalSkillsDir) ? globalSkillsDir : path.join(phrenPath, "global"));
     const invalidSkills = skillResults.filter(r => !r.valid);
     checks.push({
       name: "data:skills-frontmatter",
@@ -596,19 +593,19 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
         : `${skillResults.length} skill(s) validated`,
     });
 
-    // Validate cortex.SKILL.md manifest
-    const manifestPath = path.join(cortexPath, "cortex.SKILL.md");
+    // Validate phren.SKILL.md manifest
+    const manifestPath = path.join(phrenPath, "phren.SKILL.md");
     if (fs.existsSync(manifestPath)) {
       const manifestResult = validateSkillFrontmatter(fs.readFileSync(manifestPath, "utf8"), manifestPath);
       checks.push({
         name: "data:skill-manifest",
         ok: manifestResult.valid,
-        detail: manifestResult.valid ? "cortex.SKILL.md frontmatter valid" : manifestResult.errors.join("; "),
+        detail: manifestResult.valid ? "phren.SKILL.md frontmatter valid" : manifestResult.errors.join("; "),
       });
     }
 
     // Verify file checksums
-    const checksumResults = verifyFileChecksums(cortexPath);
+    const checksumResults = verifyFileChecksums(phrenPath);
     const mismatches = checksumResults.filter((r) => r.status === "mismatch");
     const missingFiles = checksumResults.filter((r) => r.status === "missing");
     if (checksumResults.length > 0) {
@@ -622,7 +619,7 @@ export async function runDoctor(cortexPath: string, fix: boolean = false, checkD
     }
 
     if (fix) {
-      updateFileChecksums(cortexPath, profile);
+      updateFileChecksums(phrenPath, profile);
     }
   }
 

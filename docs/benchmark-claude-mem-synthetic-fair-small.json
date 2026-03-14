@@ -5,9 +5,9 @@
     "platform": "linux",
     "arch": "x64",
     "bunVersion": "1.3.10",
-    "claudeMemRoot": "/home/alaarab/cortex/.benchmarks/tools/claude-mem-src",
-    "uvxPath": "/home/alaarab/cortex/.benchmarks/tools/uv/uv-0.10.9.data/scripts/uvx",
-    "dataDir": "/home/alaarab/cortex/.benchmarks/runs/claude-bench-small/home/.claude-mem",
+    "claudeMemRoot": "/home/alaarab/phren/.benchmarks/tools/claude-mem-src",
+    "uvxPath": "/home/alaarab/phren/.benchmarks/tools/uv/uv-0.10.9.data/scripts/uvx",
+    "dataDir": "/home/alaarab/phren/.benchmarks/runs/claude-bench-small/home/.claude-mem",
     "sizes": [
       1000,
       10000
@@ -17,7 +17,7 @@
     "streamChunkSize": 1000,
     "progressEvery": 1000,
     "keepTemp": true,
-    "runRoot": "/home/alaarab/cortex/.benchmarks/runs/claude-bench-small"
+    "runRoot": "/home/alaarab/phren/.benchmarks/runs/claude-bench-small"
   },
   "runs": [
     {

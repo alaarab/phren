@@ -6,17 +6,17 @@ describe("callLlm provider routing", () => {
 
   beforeEach(() => {
     // Clear all LLM-related env vars
-    delete process.env.CORTEX_LLM_ENDPOINT;
-    delete process.env.CORTEX_LLM_KEY;
+    delete process.env.PHREN_LLM_ENDPOINT;
+    delete process.env.PHREN_LLM_KEY;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
-    delete process.env.CORTEX_LLM_MODEL;
+    delete process.env.PHREN_LLM_MODEL;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     // Restore environment
-    for (const key of ["CORTEX_LLM_ENDPOINT", "CORTEX_LLM_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CORTEX_LLM_MODEL"]) {
+    for (const key of ["PHREN_LLM_ENDPOINT", "PHREN_LLM_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "PHREN_LLM_MODEL"]) {
       if (originalEnv[key] !== undefined) {
         process.env[key] = originalEnv[key];
       } else {
@@ -25,9 +25,9 @@ describe("callLlm provider routing", () => {
     }
   });
 
-  it("calls custom endpoint when CORTEX_LLM_ENDPOINT is set", async () => {
-    process.env.CORTEX_LLM_ENDPOINT = "https://custom-llm.example.com/v1";
-    process.env.CORTEX_LLM_KEY = "test-key";
+  it("calls custom endpoint when PHREN_LLM_ENDPOINT is set", async () => {
+    process.env.PHREN_LLM_ENDPOINT = "https://custom-llm.example.com/v1";
+    process.env.PHREN_LLM_KEY = "test-key";
 
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,

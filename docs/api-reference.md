@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Cortex exposes 60 MCP tools across 11 modules through the Model Context Protocol. These are available to any MCP-compatible client when the cortex server is running.
+Phren exposes 60 MCP tools across 11 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -12,7 +12,7 @@ Module layout: search, tasks, findings, memory quality, data management, entity 
 
 ### `get_memory_detail`
 
-Fetch the full content of a specific memory entry by its ID. This is Layer 3 of the progressive disclosure system: when `CORTEX_FEATURE_PROGRESSIVE_DISCLOSURE=1`, the hook-prompt injects a compact memory index instead of full snippets for 3+ results. Use this tool to expand any entry from that index.
+Fetch the full content of a specific memory entry by its ID. This is Layer 3 of the progressive disclosure system: when `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1`, the hook-prompt injects a compact memory index instead of full snippets for 3+ results. Use this tool to expand any entry from that index.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -46,7 +46,7 @@ Get a project's summary card and list of indexed documents.
 
 ### `list_projects`
 
-List all projects in the active cortex profile with a brief summary of each. Shows which documentation files exist per project.
+List all projects in the active phren profile with a brief summary of each. Shows which documentation files exist per project.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -90,7 +90,7 @@ Append a task to a project's task. Adds to the Queue section.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `project` | string | yes | Project name (must match a directory in your cortex). |
+| `project` | string | yes | Project name (must match a directory in your phren). |
 | `item` | string | yes | The task to add. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
@@ -113,7 +113,7 @@ Move a task item to the Done section by matching text.
 | `item` | string | yes | Exact or partial text of the item to complete. |
 | `sessionId` | string | no | Optional session ID from `session_start` for per-session completion metrics. |
 
-When a task is completed, cortex clears any checkpoint file associated with that task.
+When a task is completed, phren clears any checkpoint file associated with that task.
 
 ### `complete_tasks`
 
@@ -125,7 +125,7 @@ Move multiple task items to Done in one call.
 | `items` | string[] | yes | List of partial item texts to complete. |
 | `sessionId` | string | no | Optional session ID from `session_start` for per-session completion metrics. |
 
-When tasks are completed, cortex clears matching checkpoint files for those task IDs.
+When tasks are completed, phren clears matching checkpoint files for those task IDs.
 
 ### `remove_task`
 
@@ -178,7 +178,7 @@ Create a GitHub issue from a task item and link it back into the task.
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `item` | string | yes | Task item text, ID, or stable `bid:` hash. |
-| `repo` | string | no | Target GitHub repo in `owner/name` form. If omitted, cortex tries to infer it from the project's `CLAUDE.md` or `summary.md`. |
+| `repo` | string | no | Target GitHub repo in `owner/name` form. If omitted, phren tries to infer it from the project's `CLAUDE.md` or `summary.md`. |
 | `title` | string | no | Optional GitHub issue title. Defaults to the task item text. |
 | `body` | string | no | Optional GitHub issue body. Defaults to a body built from the task item plus any `Context:` line. |
 | `mark_done` | boolean | no | If true, mark the task item Done after creating and linking the issue. |
@@ -308,11 +308,11 @@ Remove multiple findings from a project's FINDINGS.md in one call.
 
 ### `push_changes`
 
-Commit and push any changes in the cortex repo.
+Commit and push any changes in the phren repo.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `message` | string | no | Commit message. Defaults to "update cortex". |
+| `message` | string | no | Commit message. Defaults to "update phren". |
 
 Finding lifecycle and impact scoring notes:
 - Lifecycle state is stored inline on finding bullets (for example: active, superseded, contradicted, retracted).
@@ -347,14 +347,14 @@ Record feedback on whether an injected memory was helpful or noisy.
 
 ### `add_project`
 
-Bootstraps a repo or working directory into cortex and adds it to the active profile. Pass the path explicitly; when no `profile` is provided, cortex uses `CORTEX_PROFILE` or the current machine mapping from `machines.yaml`.
-Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.cortex/<project>`.
+Bootstraps a repo or working directory into phren and adds it to the active profile. Pass the path explicitly; when no `profile` is provided, phren uses `PHREN_PROFILE` or the current machine mapping from `machines.yaml`.
+Creates or copies `CLAUDE.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.phren/<project>`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | yes | Project path to import. Pass the current repo path explicitly. |
 | `profile` | string | no | Profile to update. Defaults to the active profile. |
-| `ownership` | enum | no | Repo-file ownership mode: `cortex-managed`, `detached`, or `repo-managed`. |
+| `ownership` | enum | no | Repo-file ownership mode: `phren-managed`, `detached`, or `repo-managed`. |
 
 ### `export_project`
 
@@ -558,7 +558,7 @@ Integration model:
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `project` | string | no | Include project-level lifecycle hook overrides from `<cortexPath>/<project>/cortex.project.yaml`. |
+| `project` | string | no | Include project-level lifecycle hook overrides from `<phrenPath>/<project>/phren.project.yaml`. |
 
 ### `toggle_hooks`
 
@@ -573,14 +573,14 @@ Enable or disable hooks globally, for a specific tool, or for a tracked project.
 
 ### `add_custom_hook`
 
-Add a custom integration hook that runs on cortex events.
+Add a custom integration hook that runs on phren events.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `event` | string | yes | Hook event (e.g. "pre-finding", "post-finding", "pre-save", "post-save"). |
 | `command` | string | no | Shell command to execute (use this or `webhook`, but not both). |
 | `webhook` | string | no | HTTP POST URL for async webhook delivery (use this or `command`, but not both). |
-| `secret` | string | no | Optional HMAC signing secret for webhook hooks (`X-Cortex-Signature`). |
+| `secret` | string | no | Optional HMAC signing secret for webhook hooks (`X-Phren-Signature`). |
 | `timeout` | number | no | Timeout in milliseconds. |
 
 ### `remove_custom_hook`
@@ -675,7 +675,7 @@ Extract candidate findings from session/transcript context for bulk capture work
 
 ### Governance identity and RBAC
 
-- Actor identity is resolved from `CORTEX_ACTOR` (in trusted/test contexts) or OS user identity.
+- Actor identity is resolved from `PHREN_ACTOR` (in trusted/test contexts) or OS user identity.
 - Access policy comes from `.governance/access-control.json` with local augmentation from `.runtime/access-control.local.json`.
 - RBAC is enforced before write/policy/delete operations.
 
@@ -688,10 +688,10 @@ Extract candidate findings from session/transcript context for bulk capture work
 
 ### Telemetry model
 
-- Telemetry is opt-in (`cortex config telemetry on`).
+- Telemetry is opt-in (`phren config telemetry on`).
 - Data is stored locally in `.runtime/telemetry.json`.
 - No external reporting is sent by default.
 
 ---
 
-Governance, policy, and maintenance tools are CLI-only. See `cortex config` and `cortex maintain`.
+Governance, policy, and maintenance tools are CLI-only. See `phren config` and `phren maintain`.

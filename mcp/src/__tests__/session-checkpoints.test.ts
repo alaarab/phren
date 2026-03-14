@@ -49,7 +49,7 @@ describe("session-checkpoints", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},

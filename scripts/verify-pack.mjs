@@ -12,7 +12,7 @@ function fail(message) {
   process.exit(1);
 }
 
-const captureDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-pack-check-"));
+const captureDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-pack-check-"));
 const capturePath = path.join(captureDir, "pack.json");
 const captureFd = fs.openSync(capturePath, "w");
 

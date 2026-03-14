@@ -18,7 +18,7 @@ import {
   addFindingToFile,
   extractConflictVersions,
 } from "./shared-content.js";
-import { grantAdmin, initTestCortexRoot, makeTempDir, runCliExec } from "./test-helpers.js";
+import { grantAdmin, initTestPhrenRoot, makeTempDir, runCliExec } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -204,7 +204,7 @@ describe("extractKeywords", () => {
 });
 
 describe("safeProjectPath", () => {
-  const base = "/tmp/test-cortex";
+  const base = "/tmp/test-phren";
 
   it("returns resolved path for a valid subdirectory", () => {
     const result = safeProjectPath(base, "my-project");
@@ -232,21 +232,21 @@ describe("safeProjectPath", () => {
   });
 
   it("rejects prefix attacks (base name as substring)", () => {
-    // e.g. base is /tmp/test-cortex, attacker tries /tmp/test-cortex-evil
-    const result = safeProjectPath(base, "..", "test-cortex-evil");
+    // e.g. base is /tmp/test-phren, attacker tries /tmp/test-phren-evil
+    const result = safeProjectPath(base, "..", "test-phren-evil");
     expect(result).toBeNull();
   });
 });
 
 describe("isValidProjectName", () => {
   it("accepts canonical lowercase project names", () => {
-    expect(isValidProjectName("cortex")).toBe(true);
+    expect(isValidProjectName("phren")).toBe(true);
     expect(isValidProjectName("project-center")).toBe(true);
     expect(isValidProjectName("m4l_builder")).toBe(true);
   });
 
   it("rejects uppercase project names", () => {
-    expect(isValidProjectName("Cortex")).toBe(false);
+    expect(isValidProjectName("Phren")).toBe(false);
     expect(isValidProjectName("SamplePortal")).toBe(false);
   });
 
@@ -258,17 +258,17 @@ describe("isValidProjectName", () => {
 
 describe("memory workflow policy", () => {
   let tmpRoot: string;
-  let cortexDir: string;
+  let phrenDir: string;
   let actor: string;
 
   let tmpCleanup: () => void;
 
   beforeEach(() => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-workflow-test-"));
-    cortexDir = path.join(tmpRoot, "cortex");
-    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
-    actor = grantAdmin(cortexDir, "workflow-admin");
-    process.env.CORTEX_ACTOR = actor;
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-workflow-test-"));
+    phrenDir = path.join(tmpRoot, "phren");
+    fs.mkdirSync(path.join(phrenDir, ".governance"), { recursive: true });
+    actor = grantAdmin(phrenDir, "workflow-admin");
+    process.env.PHREN_ACTOR = actor;
   });
 
   afterEach(() => {
@@ -276,21 +276,18 @@ describe("memory workflow policy", () => {
   });
 
   it("returns defaults when no workflow policy file exists", () => {
-    const policy = getWorkflowPolicy(cortexDir);
-    expect(policy.requireMaintainerApproval).toBe(false);
+    const policy = getWorkflowPolicy(phrenDir);
     expect(policy.lowConfidenceThreshold).toBe(0.7);
     expect(policy.riskySections).toContain("Stale");
   });
 
   it("updates workflow policy with admin permission", () => {
-    const updated = updateWorkflowPolicy(cortexDir, {
-      requireMaintainerApproval: false,
+    const updated = updateWorkflowPolicy(phrenDir, {
       lowConfidenceThreshold: 0.55,
       riskySections: ["Review", "Conflicts"],
     });
     expect(updated.ok).toBe(true);
-    const policy = getWorkflowPolicy(cortexDir);
-    expect(policy.requireMaintainerApproval).toBe(false);
+    const policy = getWorkflowPolicy(phrenDir);
     expect(policy.lowConfidenceThreshold).toBe(0.55);
     expect(policy.riskySections).toEqual(["Review", "Conflicts"]);
   });
@@ -298,15 +295,15 @@ describe("memory workflow policy", () => {
 
 describe("index policy", () => {
   let tmpRoot: string;
-  let cortexDir: string;
+  let phrenDir: string;
 
   let tmpCleanup: () => void;
 
   beforeEach(() => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-index-policy-test-"));
-    cortexDir = path.join(tmpRoot, "cortex");
-    fs.mkdirSync(path.join(cortexDir, ".governance"), { recursive: true });
-    grantAdmin(cortexDir, "index-admin");
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-index-policy-test-"));
+    phrenDir = path.join(tmpRoot, "phren");
+    fs.mkdirSync(path.join(phrenDir, ".governance"), { recursive: true });
+    grantAdmin(phrenDir, "index-admin");
   });
 
   afterEach(() => {
@@ -314,7 +311,7 @@ describe("index policy", () => {
   });
 
   it("returns defaults when file is missing", () => {
-    const policy = getIndexPolicy(cortexDir);
+    const policy = getIndexPolicy(phrenDir);
     expect(policy.includeGlobs).toContain("**/*.md");
     expect(policy.includeGlobs).toContain("**/skills/**/*.md");
     expect(policy.includeGlobs).toContain(".claude/skills/**/*.md");
@@ -323,13 +320,13 @@ describe("index policy", () => {
   });
 
   it("updates include/exclude globs with admin permission", () => {
-    const updated = updateIndexPolicy(cortexDir, {
+    const updated = updateIndexPolicy(phrenDir, {
       includeGlobs: ["**/*.md", "**/skills/**/*.md", ".claude/skills/**/*.md", "notes/**/*.md"],
       excludeGlobs: ["**/.git/**", "**/tmp/**"],
       includeHidden: true,
     });
     expect(updated.ok).toBe(true);
-    const policy = getIndexPolicy(cortexDir);
+    const policy = getIndexPolicy(phrenDir);
     expect(policy.includeGlobs).toContain("notes/**/*.md");
     expect(policy.excludeGlobs).toContain("**/tmp/**");
     expect(policy.includeHidden).toBe(true);
@@ -521,12 +518,12 @@ describe("mergeTask", () => {
 
 describe("filterTrustedFindings", () => {
   it("keeps recent uncited bullets and valid cited bullets", () => {
-    const tmp = makeTempDir("cortex-cite-valid-");
+    const tmp = makeTempDir("phren-cite-valid-");
     const file = path.join(tmp.path, "source.ts");
     fs.writeFileSync(file, "line1\nline2\nline3\n");
 
     const today = new Date().toISOString().slice(0, 10);
-    const cited = `<!-- cortex:cite ${JSON.stringify({ created_at: new Date().toISOString(), file, line: 2 })} -->`;
+    const cited = `<!-- phren:cite ${JSON.stringify({ created_at: new Date().toISOString(), file, line: 2 })} -->`;
     const content = [
       "# Project FINDINGS",
       "",
@@ -556,7 +553,7 @@ describe("filterTrustedFindings", () => {
       `## ${new Date().toISOString().slice(0, 10)}`,
       "",
       "- Bad citation",
-      `  <!-- cortex:cite ${JSON.stringify({ created_at: new Date().toISOString(), file: "/missing/file.ts", line: 1 })} -->`,
+      `  <!-- phren:cite ${JSON.stringify({ created_at: new Date().toISOString(), file: "/missing/file.ts", line: 1 })} -->`,
       "",
     ].join("\n");
 
@@ -567,14 +564,14 @@ describe("filterTrustedFindings", () => {
 });
 
 describe("addFindingToFile", () => {
-  const originalActor = process.env.CORTEX_ACTOR;
+  const originalActor = process.env.PHREN_ACTOR;
 
   afterEach(() => {
-    process.env.CORTEX_ACTOR = originalActor;
+    process.env.PHREN_ACTOR = originalActor;
   });
 
   it("writes citation metadata alongside a new finding", () => {
-    const tmp = makeTempDir("cortex-add-finding-");
+    const tmp = makeTempDir("phren-add-finding-");
     const project = "proj";
     const projectDir = path.join(tmp.path, project);
     fs.mkdirSync(projectDir, { recursive: true });
@@ -589,7 +586,7 @@ describe("addFindingToFile", () => {
     if (result.ok) expect(result.data).toContain("added insight");
 
     const findings = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
-    expect(findings).toContain("<!-- cortex:cite");
+    expect(findings).toContain("<!-- phren:cite");
     expect(findings).toContain("\"file\":\"/tmp/source.ts\"");
     expect(findings).toContain("\"line\":12");
 
@@ -598,19 +595,19 @@ describe("addFindingToFile", () => {
 });
 
 describe("memory maintenance", () => {
-  const originalActor = process.env.CORTEX_ACTOR;
+  const originalActor = process.env.PHREN_ACTOR;
 
   afterEach(() => {
-    process.env.CORTEX_ACTOR = originalActor;
+    process.env.PHREN_ACTOR = originalActor;
   });
 
   it("prunes stale bullets and removes attached/dangling citation comments", () => {
-    const tmp = makeTempDir("cortex-prune-");
-    const cortexDir = tmp.path;
+    const tmp = makeTempDir("phren-prune-");
+    const phrenDir = tmp.path;
     const project = "proj";
-    const projectDir = path.join(cortexDir, project);
+    const projectDir = path.join(phrenDir, project);
     fs.mkdirSync(projectDir, { recursive: true });
-    grantAdmin(cortexDir);
+    grantAdmin(phrenDir);
 
     const today = new Date().toISOString().slice(0, 10);
     const content = [
@@ -619,36 +616,36 @@ describe("memory maintenance", () => {
       "## 2000-01-01",
       "",
       "- Old bullet",
-      "  <!-- cortex:cite {\"created_at\":\"2000-01-01T00:00:00.000Z\"} -->",
+      "  <!-- phren:cite {\"created_at\":\"2000-01-01T00:00:00.000Z\"} -->",
       "",
       `## ${today}`,
       "",
       "- Fresh bullet",
-      "  <!-- cortex:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
-      "  <!-- cortex:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
+      "  <!-- phren:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
+      "  <!-- phren:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
       "",
     ].join("\n");
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), content);
 
-    const result = pruneDeadMemories(cortexDir, project);
+    const result = pruneDeadMemories(phrenDir, project);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Pruned");
     const next = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
     expect(next).not.toContain("- Old bullet");
     expect(next).toContain("- Fresh bullet");
     // One citation remains (attached to fresh bullet); dangling citation is removed.
-    expect((next.match(/<!-- cortex:cite/g) || []).length).toBe(1);
+    expect((next.match(/<!-- phren:cite/g) || []).length).toBe(1);
 
     tmp.cleanup();
   });
 
   it("consolidates duplicate bullets and preserves citation metadata", () => {
-    const tmp = makeTempDir("cortex-consolidate-");
-    const cortexDir = tmp.path;
+    const tmp = makeTempDir("phren-consolidate-");
+    const phrenDir = tmp.path;
     const project = "proj";
-    const projectDir = path.join(cortexDir, project);
+    const projectDir = path.join(phrenDir, project);
     fs.mkdirSync(projectDir, { recursive: true });
-    grantAdmin(cortexDir);
+    grantAdmin(phrenDir);
 
     const today = new Date().toISOString().slice(0, 10);
     const content = [
@@ -658,17 +655,17 @@ describe("memory maintenance", () => {
       "",
       "- Same bullet",
       "- Same bullet",
-      "  <!-- cortex:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
+      "  <!-- phren:cite {\"created_at\":\"2026-01-01T00:00:00.000Z\"} -->",
       "",
     ].join("\n");
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), content);
 
-    const result = consolidateProjectFindings(cortexDir, project);
+    const result = consolidateProjectFindings(phrenDir, project);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Consolidated");
     const next = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
     expect((next.match(/- Same bullet/g) || []).length).toBe(1);
-    expect((next.match(/<!-- cortex:cite/g) || []).length).toBe(1);
+    expect((next.match(/<!-- phren:cite/g) || []).length).toBe(1);
 
     tmp.cleanup();
   });
@@ -677,48 +674,48 @@ describe("memory maintenance", () => {
 describe("debugLog", () => {
   let tmpDir: string;
   let tmpCleanup: () => void;
-  const origEnv = process.env.CORTEX_DEBUG;
+  const origEnv = process.env.PHREN_DEBUG;
   const origHome = process.env.HOME;
-  const origCortexPath = process.env.CORTEX_PATH;
+  const origPhrenPath = process.env.PHREN_PATH;
 
   beforeEach(() => {
-    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-debug-test-"));
+    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-debug-test-"));
     process.env.HOME = tmpDir;
-    const cortexDir = path.join(tmpDir, ".cortex");
-    fs.mkdirSync(cortexDir, { recursive: true });
-    initTestCortexRoot(cortexDir);
-    process.env.CORTEX_PATH = cortexDir;
+    const phrenDir = path.join(tmpDir, ".phren");
+    fs.mkdirSync(phrenDir, { recursive: true });
+    initTestPhrenRoot(phrenDir);
+    process.env.PHREN_PATH = phrenDir;
   });
 
   afterEach(() => {
-    process.env.CORTEX_DEBUG = origEnv;
+    process.env.PHREN_DEBUG = origEnv;
     process.env.HOME = origHome;
-    if (origCortexPath === undefined) delete process.env.CORTEX_PATH;
-    else process.env.CORTEX_PATH = origCortexPath;
+    if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+    else process.env.PHREN_PATH = origPhrenPath;
     tmpCleanup();
   });
 
-  it("does not write when CORTEX_DEBUG is unset", () => {
-    delete process.env.CORTEX_DEBUG;
+  it("does not write when PHREN_DEBUG is unset", () => {
+    delete process.env.PHREN_DEBUG;
     debugLog("should not appear");
-    const logFile = path.join(tmpDir, ".cortex", ".runtime", "debug.log");
+    const logFile = path.join(tmpDir, ".phren", ".runtime", "debug.log");
     expect(fs.existsSync(logFile)).toBe(false);
   });
 
-  it("writes to debug.log when CORTEX_DEBUG is set", () => {
-    process.env.CORTEX_DEBUG = "1";
+  it("writes to debug.log when PHREN_DEBUG is set", () => {
+    process.env.PHREN_DEBUG = "1";
     debugLog("hello from test");
-    const logFile = path.join(tmpDir, ".cortex", ".runtime", "debug.log");
+    const logFile = path.join(tmpDir, ".phren", ".runtime", "debug.log");
     expect(fs.existsSync(logFile)).toBe(true);
     const contents = fs.readFileSync(logFile, "utf8");
     expect(contents).toContain("hello from test");
   });
 
   it("appends successive messages", () => {
-    process.env.CORTEX_DEBUG = "1";
+    process.env.PHREN_DEBUG = "1";
     debugLog("first");
     debugLog("second");
-    const logFile = path.join(tmpDir, ".cortex", ".runtime", "debug.log");
+    const logFile = path.join(tmpDir, ".phren", ".runtime", "debug.log");
     const contents = fs.readFileSync(logFile, "utf8");
     expect(contents).toContain("first");
     expect(contents).toContain("second");

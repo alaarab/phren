@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to cortex are documented here.
+All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [1.33.0] - 2026-03-12
@@ -10,7 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Finding provenance tracking**: each finding now stores a `source` field so ingestion paths are auditable across `human`, `agent`, `hook`, and `extract` origins.
 - **Finding impact scoring**: impact now tracks passive surfacing frequency and applies a decay-resistance boost to keep repeatedly-useful findings from fading too quickly.
 - **Cross-session task checkpoints**: task state now auto-snapshots and feeds resumption context when a new session starts.
-- **Adaptive init**: `cortex init` now infers project domain, topics, and reference structure from repo content before falling back to manual selection.
+- **Adaptive init**: `phren init` now infers project domain, topics, and reference structure from repo content before falling back to manual selection.
 - **Adaptive topics**: topic suggestions can now be inferred from project content and pinned when they should remain canonical.
 - **Adaptive synonym expansion**: project-specific synonym mappings are now learned from local usage patterns and fed back into retrieval.
 - **Storage location choice in init**: onboarding now supports global, per-project, or custom storage root selection.
@@ -37,41 +37,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **CSP hardening**: Migrated 50+ inline event handlers to `addEventListener` with data attributes; added per-request nonce-based `Content-Security-Policy` header (no more `unsafe-inline`).
-- **FTS index debounce**: Skip expensive index rebuilds if rebuilt within last 5s (configurable via `CORTEX_INDEX_DEBOUNCE_MS`).
-- **Circular dependency**: Broke `utils.ts` ↔ `shared.ts` import cycle by importing directly from `cortex-paths.ts`.
+- **FTS index debounce**: Skip expensive index rebuilds if rebuilt within last 5s (configurable via `PHREN_INDEX_DEBOUNCE_MS`).
+- **Circular dependency**: Broke `utils.ts` ↔ `shared.ts` import cycle by importing directly from `phren-paths.ts`.
 - **Path traversal defense**: `safeProjectPath` now walks up to deepest existing ancestor for symlink resolution, catches escapes even for non-existent leaf paths. Null byte and separator checks added.
 - **Entity detection expansion**: 5 new patterns (versions, env vars, file paths, error codes, ISO dates) in `EXTRA_ENTITY_PATTERNS`.
 - **Error code regex tightened**: Now requires numeric suffix (TS2345, E0001) to avoid false positives on common words.
 
 ### Added
-- **93 new tests**: `cortex-core.test.ts` (41 tests) and `content-dedup.test.ts` (52 tests) covering entity extraction, dedup logic, secret scanning, coref resolution.
+- **93 new tests**: `phren-core.test.ts` (41 tests) and `content-dedup.test.ts` (52 tests) covering entity extraction, dedup logic, secret scanning, coref resolution.
 
 ## [1.32.1] - 2026-03-11
 
 ### Added
-- **Session history**: `session_history` MCP tool lists past sessions and drills into a specific session to see all findings and tasks created during it. `cortex sessions [id]` CLI command and a Sessions tab in the web UI provide the same browsing capability.
+- **Session history**: `session_history` MCP tool lists past sessions and drills into a specific session to see all findings and tasks created during it. `phren sessions [id]` CLI command and a Sessions tab in the web UI provide the same browsing capability.
 - **`GET /api/sessions`** web UI endpoint for session listing and detail with project filtering.
 
 ## [1.32.0] - 2026-03-11
 
 ### Added
-- **Finding sensitivity levels**: four-level knob (`minimal`, `conservative`, `balanced`, `aggressive`) controls how aggressively Cortex captures findings and auto-captures session insights. Configurable via `cortex config finding-sensitivity`, VS Code settings (`cortex.findingSensitivity`), and written to `.governance/policy.json` for the MCP server to read.
+- **Finding sensitivity levels**: four-level knob (`minimal`, `conservative`, `balanced`, `aggressive`) controls how aggressively Phren captures findings and auto-captures session insights. Configurable via `phren config finding-sensitivity`, VS Code settings (`phren.findingSensitivity`), and written to `.governance/policy.json` for the MCP server to read.
 - **Dedup via response**: `add_finding` now returns Jaccard similarity candidates alongside the saved finding instead of making a separate LLM call. Zero extra API cost for live duplicate detection — the active agent evaluates candidates directly.
 - **Domain-neutral entity detection**: entity extraction now learns entity patterns adaptively from each project's own findings instead of matching against a hardcoded web-dev vocabulary. Reduces false positives on non-web projects.
 - **Stack-ranked task priorities with gravity**: tasks now carry a numeric rank instead of `high`/`medium`/`low`. Inactive tasks sink over time via a gravity function so the top of the list stays actionable without manual triage.
 - **Progressive task model**: tasks are created as execution happens rather than planned upfront. Findings auto-link to the currently active task so context is preserved without extra MCP calls.
-- **`cortex task reorder`** CLI command for manually adjusting task rank.
-- **`cortex config proactivity`** CLI command to get/set the proactivity level from the terminal.
+- **`phren task reorder`** CLI command for manually adjusting task rank.
+- **`phren config proactivity`** CLI command to get/set the proactivity level from the terminal.
 - **Intent-aware auto task mode**: task-mode `auto` now reads code-change context (modified files, branch name) to infer intent and suppress task creation when the user is in a maintenance or review flow. Suppression patterns are configurable.
-- **Finding supersession annotations**: `add_finding` appends `<!-- cortex:superseded_by "..." DATE -->` to the old finding and `<!-- cortex:supersedes "..." -->` to the new one when a near-duplicate is replaced. Contradicting findings get `<!-- cortex:contradicts "..." -->`. `get_findings` filters superseded entries by default; pass `include_superseded: true` to include them. VS Code tree view shows distinct icons for superseded (`lightbulb-autofix`), conflicting (`warning`), and potential-duplicate (`issue-opened`) findings.
-- **VS Code `cortex.findingSensitivity` setting**: dropdown with per-level descriptions; writes `findingSensitivity` to `.governance/policy.json` on change and shows an info notification.
+- **Finding supersession annotations**: `add_finding` appends `<!-- phren:superseded_by "..." DATE -->` to the old finding and `<!-- phren:supersedes "..." -->` to the new one when a near-duplicate is replaced. Contradicting findings get `<!-- phren:contradicts "..." -->`. `get_findings` filters superseded entries by default; pass `include_superseded: true` to include them. VS Code tree view shows distinct icons for superseded (`lightbulb-autofix`), conflicting (`warning`), and potential-duplicate (`issue-opened`) findings.
+- **VS Code `phren.findingSensitivity` setting**: dropdown with per-level descriptions; writes `findingSensitivity` to `.governance/policy.json` on change and shows an info notification.
 - **VS Code `potentialDuplicates` tree indicator**: findings returned with potential-duplicate candidates from `add_finding` show an `issue-opened` icon and `"(possible duplicate)"` description in the explorer tree, with the first candidate in the tooltip.
 - **Capability registry**: internal registry documents which features are implemented across all four surfaces (CLI, MCP, VS Code, web UI) with handler cross-references.
 - **Task negation pattern detection**: phrases like "don't add a task" or "no task needed" suppress automatic task creation in `auto` mode.
 
 ### Changed
-- **Semantic dedup and conflict settings are batch-only**: `cortex.semanticDedup` and `cortex.semanticConflict` now explicitly apply only to offline maintenance commands (`cortex maintain consolidate`, `cortex maintain extract`). Live dedup during `add_finding` uses the active agent — no extra API call. VS Code notifications and setting descriptions updated to reflect this.
-- **`cortex.llmModel` description clarified**: model selector now says "Model for offline cortex operations. Live dedup uses the active agent instead."
+- **Semantic dedup and conflict settings are batch-only**: `phren.semanticDedup` and `phren.semanticConflict` now explicitly apply only to offline maintenance commands (`phren maintain consolidate`, `phren maintain extract`). Live dedup during `add_finding` uses the active agent — no extra API call. VS Code notifications and setting descriptions updated to reflect this.
+- **`phren.llmModel` description clarified**: model selector now says "Model for offline phren operations. Live dedup uses the active agent instead."
 - VS Code cost-warning notifications for expensive models now say "for offline batch operations" instead of "for yes/no dedup."
 
 ### Fixed
@@ -87,11 +87,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.31.1] - 2026-03-12
 
 ### Added
-- **CLI task commands**: `cortex task add`, `cortex task complete`, `cortex task update` for managing tasks from the terminal.
-- **CLI finding commands**: `cortex finding add`, `cortex finding remove`, `cortex finding list` for managing findings from the terminal.
-- **CLI config command**: `cortex config task-mode` to set the task workflow mode.
-- **`cortex web-ui`**: renamed CLI command for the web UI (was `review-ui`).
-- **`cortex task list`** and **`cortex finding list`** subcommands.
+- **CLI task commands**: `phren task add`, `phren task complete`, `phren task update` for managing tasks from the terminal.
+- **CLI finding commands**: `phren finding add`, `phren finding remove`, `phren finding list` for managing findings from the terminal.
+- **CLI config command**: `phren config task-mode` to set the task workflow mode.
+- **`phren web-ui`**: renamed CLI command for the web UI (was `review-ui`).
+- **`phren task list`** and **`phren finding list`** subcommands.
 - **VS Code extension commands**: Add Task, Complete Task, Remove Finding, Pin Memory, and Search History added to the command palette.
 - **Web UI Tasks tab**: full task browser with project and section filters.
 - **Web UI Settings dashboard**: proactivity level, task mode, and hooks status visible and configurable from the web UI.
@@ -107,19 +107,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - `tasks.md` is now the canonical task file across the runtime, starter projects, review UI, and docs. The legacy `tasks.md` starter files were removed and task-file guidance now points at `tasks.md`.
-- Install and onboarding guidance now treats `cortex` as the real user-facing command after `npm install -g @alaarab/cortex`, instead of steering people toward `npx cortex`.
+- Install and onboarding guidance now treats `phren` as the real user-facing command after `npm install -g @alaarab/phren`, instead of steering people toward `npx phren`.
 - Projects can now define their own archive topics via `topic-config.json`, with managed topic docs under `reference/topics/` instead of relying only on generic starter buckets.
 - The review UI now surfaces suggested project topics inferred from project language, with flows to adopt, edit, and reclassify managed topic archives.
 
 ### Fixed
-- Public docs, post-init verification messages, and the bundled review UI template no longer leak `tasks.md` file references or `npx cortex` examples in the normal install path.
-- Packaging metadata and release docs now reflect the scoped npm package (`@alaarab/cortex`) while preserving `cortex` as the executable users run.
+- Public docs, post-init verification messages, and the bundled review UI template no longer leak `tasks.md` file references or `npx phren` examples in the normal install path.
+- Packaging metadata and release docs now reflect the scoped npm package (`@alaarab/phren`) while preserving `phren` as the executable users run.
 
 ## [1.28.0] - 2026-03-10
 
 ### Changed
 - Semantic-search messaging now treats disabled mode as a healthy optional state in CLI status/doctor output instead of something users should feel pressured to enable.
-- `cortex init` now frames Ollama-backed semantic retrieval as a best fit for paraphrase-heavy or weak-lexical queries, with opt-in prompts that default to off.
+- `phren init` now frames Ollama-backed semantic retrieval as a best fit for paraphrase-heavy or weak-lexical queries, with opt-in prompts that default to off.
 - README and environment docs now recommend leaving semantic retrieval disabled when searches are mostly identifiers, filenames, commands, project names, or exact phrases.
 
 ### Fixed
@@ -143,7 +143,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - Large-corpus cosine fallback no longer fills its candidate set with `ORDER BY RANDOM()`. It now uses deterministic rowid windows after FTS prefiltering, which keeps the fallback reproducible and avoids reintroducing table-wide random-sort cost.
 - `session_context` and `session_end` now fail fast when callers omit explicit session identity instead of silently resolving the wrong active session in multi-client MCP processes.
-- `@import` resolution now compares imported files against the realpathed `global/` root, which fixes false `symlink traversal` blocks on macOS temp paths and other symlinked cortex roots.
+- `@import` resolution now compares imported files against the realpathed `global/` root, which fixes false `symlink traversal` blocks on macOS temp paths and other symlinked phren roots.
 - Project-name migration now handles case-only native-memory renames on case-insensitive filesystems by using a temporary hop instead of mistaking the target path for a conflicting duplicate.
 
 ### Docs
@@ -154,14 +154,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **RRF hybrid search**: three-tier search (FTS5 + token-overlap + vector embeddings) merged with Reciprocal Rank Fusion. All three tiers run in parallel, results merged by rank.
 - **Recency boost**: recent findings rank higher in retrieval (7 days or less: +0.3, 30 days or less: +0.15).
-- **Cloud embedding support**: `CORTEX_EMBEDDING_API_URL` + `CORTEX_EMBEDDING_API_KEY` for OpenAI-compatible embedding endpoints. Works in both hook retrieval and MCP search.
-- **`cortex projects` CLI**: `cortex projects list`, `cortex projects add <name>`, `cortex projects remove <name>` for managing projects from the terminal.
-- **Auto-capture at session end**: `CORTEX_FEATURE_AUTO_CAPTURE=1` extracts insights from the conversation transcript at Stop hook. Offered in `cortex init` walkthrough.
-- **Semantic dedup/conflict in init walkthrough**: `cortex init` now prompts to enable `CORTEX_FEATURE_SEMANTIC_DEDUP` and `CORTEX_FEATURE_SEMANTIC_CONFLICT` when an LLM is configured.
+- **Cloud embedding support**: `PHREN_EMBEDDING_API_URL` + `PHREN_EMBEDDING_API_KEY` for OpenAI-compatible embedding endpoints. Works in both hook retrieval and MCP search.
+- **`phren projects` CLI**: `phren projects list`, `phren projects add <name>`, `phren projects remove <name>` for managing projects from the terminal.
+- **Auto-capture at session end**: `PHREN_FEATURE_AUTO_CAPTURE=1` extracts insights from the conversation transcript at Stop hook. Offered in `phren init` walkthrough.
+- **Semantic dedup/conflict in init walkthrough**: `phren init` now prompts to enable `PHREN_FEATURE_SEMANTIC_DEDUP` and `PHREN_FEATURE_SEMANTIC_CONFLICT` when an LLM is configured.
 - **`conflicts_with` in `add_finding` response**: MCP response now includes `conflictsWith` field when a conflict is detected.
 - **Entity hints in `add_finding` response**: `detectedEntities: string[]` returned when entities are auto-extracted from finding text.
 - **Automatic entity extraction**: entities auto-extracted from finding text on write (backtick-quoted, double-quoted, `<!-- entity: X -->` annotations).
-- **Cross-project contradiction detection**: `CORTEX_FEATURE_SEMANTIC_CONFLICT` now scans global + top-2 other projects' FINDINGS.md, not just the current project.
+- **Cross-project contradiction detection**: `PHREN_FEATURE_SEMANTIC_CONFLICT` now scans global + top-2 other projects' FINDINGS.md, not just the current project.
 
 ### Fixed
 - **Archive data safety**: `autoArchiveToReference()` no longer drops findings when a reference write fails. Only successfully-archived topics are removed from FINDINGS.md.
@@ -172,8 +172,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Task priority sort**: `work_next_task` now correctly returns highest-priority item (High > Medium > Low > none). `pin_task` now reorders the item to the top of its section.
 - **MCP search project synonyms**: `search_knowledge` now passes `project` to `buildRobustFtsQuery()` so project-specific synonyms apply.
 - **Per-tool hook disable**: `toggle_hooks(tool=...)` now respected at runtime; disabled tools no longer fire hooks.
-- **ESM version fix**: `cortex status` now correctly reports version in ESM builds.
-- **Uninstall completeness**: `cortex uninstall` now removes Copilot/Cursor/Codex configs and wrapper binaries.
+- **ESM version fix**: `phren status` now correctly reports version in ESM builds.
+- **Uninstall completeness**: `phren uninstall` now removes Copilot/Cursor/Codex configs and wrapper binaries.
 - **Embedding cache in hook subprocess**: vector tier now loads the embedding cache on first call in hook subprocesses.
 - **callLlm OpenAI routing**: properly routes to OpenAI's API when `OPENAI_API_KEY` is set (was incorrectly sending to Anthropic).
 - **Conflict annotation targeting**: uses content + date tag matching instead of unreliable 60-char prefix to find the correct bullet.
@@ -222,7 +222,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.15.2] - 2026-03-08
 
 ### Added
-- **Per-project MCP servers**: declare extra MCP servers in `cortex.project.yaml` under `mcpServers`. `cortex link` merges them into agent config using namespaced keys (`cortex__<project>__<name>`)
+- **Per-project MCP servers**: declare extra MCP servers in `phren.project.yaml` under `mcpServers`. `phren link` merges them into agent config using namespaced keys (`phren__<project>__<name>`)
 - **Skills shell view** (`s`): browse and remove per-project skills from the interactive shell
 - **Hooks shell view** (`k`): enable/disable hooks per tool from the interactive shell
 
@@ -232,14 +232,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.15.0] - 2026-03-07
 
 ### Added
-- **Synonym search**: user-extensible YAML synonym maps at `~/.cortex/global/synonyms.yaml` and per-project. Type "throttling", find "rate limit" and "429"
+- **Synonym search**: user-extensible YAML synonym maps at `~/.phren/global/synonyms.yaml` and per-project. Type "throttling", find "rate limit" and "429"
 - **Cross-project age decay**: findings from non-active projects scored lower in retrieval to surface current-project context first
-- **Per-project skill injection controls**: `cortex.project.yaml` lets projects opt out of global skill injection (`skills: false`)
-- **Skills CLI**: `cortex skills list/add/remove` — manage project-scoped skills from the terminal
-- **Hooks CLI**: `cortex hooks list/enable/disable` — toggle hook execution per tool (claude/copilot/cursor/codex) from the terminal
+- **Per-project skill injection controls**: `phren.project.yaml` lets projects opt out of global skill injection (`skills: false`)
+- **Skills CLI**: `phren skills list/add/remove` — manage project-scoped skills from the terminal
+- **Hooks CLI**: `phren hooks list/enable/disable` — toggle hook execution per tool (claude/copilot/cursor/codex) from the terminal
 - **Skills shell view** (`s`): browse and remove per-project skills from the interactive shell
 - **Hooks shell view** (`k`): enable/disable hooks per tool from the interactive shell
-- **Per-project MCP servers**: declare extra MCP servers in `cortex.project.yaml` under `mcpServers`. `cortex link` merges them into agent config using namespaced keys (`cortex__<project>__<name>`)
+- **Per-project MCP servers**: declare extra MCP servers in `phren.project.yaml` under `mcpServers`. `phren link` merges them into agent config using namespaced keys (`phren__<project>__<name>`)
 - All npm dependencies updated to latest
 
 ### Fixed
@@ -248,7 +248,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Semantic fallback threshold tightened (0.15 → 0.25) to reduce noise in cross-project injection
 
 ### Renamed
-- `search_cortex` MCP tool → `search_knowledge`
+- `search_phren` MCP tool → `search_knowledge`
 - All `LEARNINGS.md` files migrated to `FINDINGS.md`
 
 ## [1.14.0] - 2026-03-07
@@ -260,8 +260,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - Double glob traversal on cold start: `globAllFiles()` helper replaces two independent `globSync()` calls with one pass
 - Quality scoring key mismatch: search and hook-injection paths now both key off full document content, so feedback accumulates correctly
-- `withFileLock` consolidated into shared-governance version with adapter in data-access.ts preserving `CortexResult` return contract
-- Module-level `ensureCortexPath()` side effects: all 6 CLI modules now use lazy `getCortexPath()` getter
+- `withFileLock` consolidated into shared-governance version with adapter in data-access.ts preserving `PhrenResult` return contract
+- Module-level `ensurePhrenPath()` side effects: all 6 CLI modules now use lazy `getPhrenPath()` getter
 - MCP server imports moved to top of `index.ts` (standard ESM convention)
 - Stale backward-compat alias docs removed from `link-skills.ts`
 
@@ -302,7 +302,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Race condition in upsertCanonical (content read outside lock)
 - Conflict annotation write uses .tmp-then-rename pattern
 - writeQueue counter decrement happens before promise resolves
-- computeCortexHash now includes global/*.md and policy files
+- computePhrenHash now includes global/*.md and policy files
 - Synchronous stdin read in hook-prompt no longer blocks event loop
 - "Memory" label inconsistencies (now "Memory Queue" everywhere)
 - Node engine bumped to >=20.0.0 to match CI matrix
@@ -316,15 +316,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `add_learning` renamed to `add_finding` (old names still work as aliases)
 - shared.ts split into shared.ts, shared-content.ts, shared-governance.ts, shared-index.ts
 - shell.ts split into shell-input.ts, shell-view.ts, and core orchestrator
-- CortexResult<T> standardized across all modules
+- PhrenResult<T> standardized across all modules
 
 ## [1.11.1] - 2026-03-06
 
 ### Added
 - Bulk MCP operations: `complete_tasks`, `add_learnings`, `remove_learnings` accept arrays and process all items in one call. FTS index rebuilds once at the end instead of per-item.
 - Tiered knowledge system: auto-archival moves old LEARNINGS.md entries into `knowledge/{topic}.md` when cap exceeded (default 20 entries).
-- Injection budget: `CORTEX_MAX_INJECT_TOKENS` env var (default 2000) with priority ordering (learnings > search results > knowledge).
-- Task priority filtering: only HIGH/MEDIUM items injected by default, configurable via `CORTEX_TASK_PRIORITY`.
+- Injection budget: `PHREN_MAX_INJECT_TOKENS` env var (default 2000) with priority ordering (learnings > search results > knowledge).
+- Task priority filtering: only HIGH/MEDIUM items injected by default, configurable via `PHREN_TASK_PRIORITY`.
 - Duplicate learning detection: >60% word overlap check before appending to LEARNINGS.md.
 
 ### Fixed
@@ -342,18 +342,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - Project templates for `init`: four built-in templates (python-project, monorepo, library, frontend), each with CLAUDE.md, LEARNINGS.md, summary.md, and tasks.md. Use `--template <name>` during init.
-- `--from-existing <path>` flag on init: bootstrap a cortex project from an existing directory that already has a CLAUDE.md.
-- `@import` syntax in indexed documents: `@import shared/file.md` resolves relative to the cortex global directory, with cycle detection and depth cap.
+- `--from-existing <path>` flag on init: bootstrap a phren project from an existing directory that already has a CLAUDE.md.
+- `@import` syntax in indexed documents: `@import shared/file.md` resolves relative to the phren global directory, with cycle detection and depth cap.
 - `knowledge/` directory support: files in a project's `knowledge/` subdirectory are classified as `knowledge` type in the FTS index.
 - Task done-section stripping: completed task items (under `## Done`) are excluded from the FTS index to reduce noise.
-- Search history: `cortex search --history` shows recent searches, `--from-history <n>` re-runs a previous query. History stored in `.runtime/search-history.jsonl`.
-- Opt-in telemetry: local-only usage stats (tool call counts, CLI command counts, sessions, errors) stored in `.runtime/telemetry.json`. Disabled by default, enable with `cortex config telemetry on`.
+- Search history: `phren search --history` shows recent searches, `--from-history <n>` re-runs a previous query. History stored in `.runtime/search-history.jsonl`.
+- Opt-in telemetry: local-only usage stats (tool call counts, CLI command counts, sessions, errors) stored in `.runtime/telemetry.json`. Disabled by default, enable with `phren config telemetry on`.
 - Data portability MCP tools: `export_project` (export as JSON), `import_project` (import from JSON), `manage_project` (archive/unarchive).
-- `cortex verify` command: post-init verification that checks MCP config, hooks, global files, governance config, FTS index, and hook entrypoint.
-- `cortex uninstall` command: removes MCP server entries and hooks from all detected agent configs.
-- `cortex status` command: shows active project, profile, MCP/hooks state, project stats, and telemetry summary.
+- `phren verify` command: post-init verification that checks MCP config, hooks, global files, governance config, FTS index, and hook entrypoint.
+- `phren uninstall` command: removes MCP server entries and hooks from all detected agent configs.
+- `phren status` command: shows active project, profile, MCP/hooks state, project stats, and telemetry summary.
 - CI hardening: GitHub Actions workflow for build, test, and package smoke checks with strict TypeScript unused-symbol gates.
-- Schema versioning for governance config files with migration support (`cortex maintain migrate governance`).
+- Schema versioning for governance config files with migration support (`phren maintain migrate governance`).
 - Structured error codes in shell and API for more predictable automation handling.
 - Dry-run coverage for destructive lifecycle and governance operations.
 - OSS contributor docs: `CONTRIBUTING.md`, `SECURITY.md`, and API references.
@@ -361,7 +361,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - MCP tool count: 14 to 16 (added `export_project`, `import_project`, `manage_project`; moved governance tools to CLI-only).
-- `search_cortex` renamed to `search_knowledge` (old name still works as alias).
+- `search_phren` renamed to `search_knowledge` (old name still works as alias).
 - Starter template rewritten with guided tour, day-to-day workflow, and P0/P1/P2 task examples.
 - Init success output now mentions agent restart and points to README for a guided tour.
 - Shared module split: `shared.ts` split into `shared.ts`, `shared-content.ts`, `shared-governance.ts`, and `shared-index.ts` for maintainability.
@@ -380,9 +380,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Added `memory-ui` integration tests for approve/reject/edit flows and error handling.
   - Added explicit hooks-mode test coverage in `init.test.ts` and release-gate checks.
 - CLI rollout controls via environment flags:
-  - `CORTEX_FEATURE_AUTO_EXTRACT` (toggle automatic extraction in hook-prompt).
-  - `CORTEX_FEATURE_DAILY_MAINTENANCE` (toggle detached daily maintenance jobs).
-  - GitHub mining safety knobs: `CORTEX_GH_TIMEOUT_MS`, `CORTEX_GH_RETRIES`, `CORTEX_GH_PR_LIMIT`, `CORTEX_GH_RUN_LIMIT`, `CORTEX_GH_ISSUE_LIMIT`.
+  - `PHREN_FEATURE_AUTO_EXTRACT` (toggle automatic extraction in hook-prompt).
+  - `PHREN_FEATURE_DAILY_MAINTENANCE` (toggle detached daily maintenance jobs).
+  - GitHub mining safety knobs: `PHREN_GH_TIMEOUT_MS`, `PHREN_GH_RETRIES`, `PHREN_GH_PR_LIMIT`, `PHREN_GH_RUN_LIMIT`, `PHREN_GH_ISSUE_LIMIT`.
 
 ### Changed
 - Command execution hardening:
@@ -408,7 +408,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - Publish/install CLI executable reliability:
   - Build now explicitly applies executable mode to `mcp/dist/index.js`.
-  - Fresh global installs now consistently expose a runnable `cortex` binary in new shells.
+  - Fresh global installs now consistently expose a runnable `phren` binary in new shells.
 
 ## [1.9.0] - 2026-03-06
 
@@ -419,11 +419,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Added upgrade-path coverage that converts legacy Claude lifecycle hooks to `hook-session-start` / `hook-stop`.
 - New migration tooling for legacy findings:
   - `migrateLegacyFindings` core migration flow in shared layer.
-  - New CLI: `cortex migrate-findings <project> [--pin] [--dry-run]`.
+  - New CLI: `phren migrate-findings <project> [--pin] [--dry-run]`.
   - New MCP tool: `migrate_legacy_findings`.
 - New indexer completeness controls:
   - Explicit include/exclude and hidden-doc indexing policy via `.governance/index-policy.json`.
-  - New CLI: `cortex index-policy get|set ...`.
+  - New CLI: `phren index-policy get|set ...`.
   - New MCP tool: `index_policy`.
 - Runtime lifecycle health tracking in `.governance/runtime-health.json`:
   - Session start, prompt, stop, auto-save, and maintenance status timestamps.
@@ -435,7 +435,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
     - `hook-prompt`
     - `hook-stop`
   - Session wrappers now orchestrate the same lifecycle commands for consistent behavior.
-- `cortex doctor` now validates runtime execution health:
+- `phren doctor` now validates runtime execution health:
   - lifecycle hook presence
   - wrapper activation in PATH
   - last prompt hook run
@@ -467,7 +467,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - Governance and quality controls:
   - Canonical/pinned memory support via `CANONICAL_MEMORIES.md` and `pin_memory` (MCP) / `pin-memory` (CLI).
-  - Governance queue + audit trail via `MEMORY_QUEUE.md` and `.cortex-audit.log`.
+  - Governance queue + audit trail via `MEMORY_QUEUE.md` and `.phren-audit.log`.
   - Governance/policy/admin APIs:
     - MCP: `govern_memories`, `memory_policy`, `memory_access`, `prune_memories`, `consolidate_memories`, `memory_feedback`
     - CLI: `govern-memories`, `memory-policy`, `memory-access`, `prune-memories`, `consolidate-memories`, `quality-feedback`
@@ -484,7 +484,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Expanded MCP auto-configuration beyond Claude/VS Code:
   - New best-effort MCP config writers for Cursor, GitHub Copilot CLI, and Codex.
   - `init`, `link`, and `mcp-mode` now apply MCP mode across all detected tool targets.
-  - `uninstall` now removes cortex MCP entries from all known tool config paths.
+  - `uninstall` now removes phren MCP entries from all known tool config paths.
 - Memory workflow policy and approval gates:
   - New workflow policy file: `.governance/memory-workflow-policy.json`.
   - New CLI command: `memory-workflow [get|set ...]`.
@@ -496,7 +496,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Added token usage trace in hook output.
 
 ### Fixed
-- `remove_learning` now removes an immediately attached `cortex:cite` comment, preventing orphan citation metadata lines in `LEARNINGS.md`.
+- `remove_learning` now removes an immediately attached `phren:cite` comment, preventing orphan citation metadata lines in `LEARNINGS.md`.
 - GitHub data mining now executes `gh` using argument-safe process execution (no shell-string concatenation in `runGhJson`).
 - `hook-prompt` daily quality maintenance moved to detached background execution (`background-maintenance`) so prompt hooks stay low-latency.
 - MCP runtime in packaged/npx installs now resolves `sql.js-fts5` WASM reliably (fixes server boot failures from invalid local WASM URL resolution).
@@ -537,29 +537,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.7.4] - 2026-03-04
 
 ### Changed
-- MCP tool titles now use `◆ cortex ·` prefix for consistent branding in Claude Code's UI (e.g., "◆ cortex · search", "◆ cortex · save learning", "◆ cortex · push")
-- Hook output now includes a status line before injected context: `◆ cortex · {project} · {n} results`
-- Consolidation notice prefixed with `◈ cortex · consolidation ready` for visibility
-- hook-context output labeled with `◆ cortex · {project} · context`
+- MCP tool titles now use `◆ phren ·` prefix for consistent branding in Claude Code's UI (e.g., "◆ phren · search", "◆ phren · save learning", "◆ phren · push")
+- Hook output now includes a status line before injected context: `◆ phren · {project} · {n} results`
+- Consolidation notice prefixed with `◈ phren · consolidation ready` for visibility
+- hook-context output labeled with `◆ phren · {project} · context`
 
 ## [1.7.3] - 2026-03-04
 
 ### Added
-- Consolidation detection: `hook-prompt` now scans LEARNINGS.md files for entries since the last `<!-- consolidated: -->` marker and injects a `<cortex-notice>` when a project has 25+ new entries or 60+ days without consolidation (once per session, not every prompt)
+- Consolidation detection: `hook-prompt` now scans LEARNINGS.md files for entries since the last `<!-- consolidated: -->` marker and injects a `<phren-notice>` when a project has 25+ new entries or 60+ days without consolidation (once per session, not every prompt)
 - `<details>` stripping in FTS5 indexer: archived entries in consolidation blocks are excluded from search so old superseded learnings don't pollute results
-- Updated `/cortex-consolidate` skill: marker-aware consolidation, archive to `<details>` block, global promotion rules, chain of `prev:` dates for history
+- Updated `/phren-consolidate` skill: marker-aware consolidation, archive to `<details>` block, global promotion rules, chain of `prev:` dates for history
 
 ## [1.7.2] - 2026-03-04
 
 ### Added
 - `list_machines()` MCP tool: reads machines.yaml and returns registered machines with their profiles
 - `list_profiles()` MCP tool: reads profiles directory and returns each profile's project list
-- SessionStart hook: auto-pulls cortex on session start (uses `--rebase` to handle diverged histories cleanly)
+- SessionStart hook: auto-pulls phren on session start (uses `--rebase` to handle diverged histories cleanly)
 
 ## [1.7.1] - 2026-03-04
 
 ### Removed
-- `/cortex-update` and `/cortex-learn` skills: redundant now that hooks auto-commit and CLAUDE.md instructions tell Claude to call `add_learning()` during sessions
+- `/phren-update` and `/phren-learn` skills: redundant now that hooks auto-commit and CLAUDE.md instructions tell Claude to call `add_learning()` during sessions
 
 ### Changed
 - Skills count: 5 to 4 (sync, init, discover, consolidate)
@@ -568,25 +568,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.7.0] - 2026-03-04
 
 ### Added
-- **Auto-inject context**: UserPromptSubmit hook automatically injects relevant cortex context into every prompt. Claude gets project context without needing to call MCP tools first.
+- **Auto-inject context**: UserPromptSubmit hook automatically injects relevant phren context into every prompt. Claude gets project context without needing to call MCP tools first.
 - **Post-compaction context**: hook-context CLI subcommand re-injects project summary, learnings, and task after context compaction so Claude stays oriented.
 - **Synonym search**: FTS5 queries now expand synonyms automatically. Searching "throttling" also finds "rate limit", "429", and related terms. Works in both MCP tools and CLI.
-- **CLI subcommands**: `cortex search`, `cortex hook-prompt`, `cortex hook-context`, `cortex add-learning` for use by hooks and scripts.
-- `npx cortex init` now registers UserPromptSubmit and Stop hooks in `~/.claude/settings.json` alongside the MCP server.
+- **CLI subcommands**: `phren search`, `phren hook-prompt`, `phren hook-context`, `phren add-learning` for use by hooks and scripts.
+- `npx phren init` now registers UserPromptSubmit and Stop hooks in `~/.claude/settings.json` alongside the MCP server.
 - New shared module (`shared.ts`) extracts reusable infrastructure (buildIndex, queryRows, extractSnippet, addLearningToFile) for both MCP and CLI use.
 
 ### Changed
 - MCP server version bumped to 1.7.0
-- `search_cortex` MCP tool now expands synonyms before searching
+- `search_phren` MCP tool now expands synonyms before searching
 - Refactored index.ts: shared logic moved to shared.ts, CLI commands to cli.ts
-- `findCortexPath` split into two variants: one for CLI (env/default) and one for MCP (accepts arg)
+- `findPhrenPath` split into two variants: one for CLI (env/default) and one for MCP (accepts arg)
 
 ## [1.6.4] - 2026-03-04
 
 ### Added
 - `add_learning(project, insight)` MCP tool: record a learning to LEARNINGS.md the moment you discover it, grouped by date
 - `remove_learning(project, text)` MCP tool: remove a learning that turned out to be wrong or outdated
-- `save_learnings(message?)` MCP tool: commit and push all cortex changes (git add, commit, push)
+- `save_learnings(message?)` MCP tool: commit and push all phren changes (git add, commit, push)
 - Global CLAUDE.md now instructs Claude to use learning tools proactively during the session, not just at the end
 
 ### Changed
@@ -596,10 +596,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.6.3] - 2026-03-04
 
 ### Fixed
-- README: removed duplicate JSON config blocks, fixed skill count (5 not 6), updated `/cortex:learn` references to `/cortex-update`
-- README: added `update_task` tool and `search_cortex` type filter to MCP docs
-- README: replaced outdated `cd mcp && npm run build` instructions with `npx cortex init`
-- Site: fixed `MEMORY.md` reference to `CLAUDE.md` in bento card, `/cortex-learn` to `/cortex-update`
+- README: removed duplicate JSON config blocks, fixed skill count (5 not 6), updated `/phren:learn` references to `/phren-update`
+- README: added `update_task` tool and `search_phren` type filter to MCP docs
+- README: replaced outdated `cd mcp && npm run build` instructions with `npx phren init`
+- Site: fixed `MEMORY.md` reference to `CLAUDE.md` in bento card, `/phren-learn` to `/phren-update`
 - Site: updated "Clones the starter" to "Creates" (bundled since v1.6.0)
 - llms-install.md: fixed tool parameter signatures to match actual MCP server, added `-y` to npx commands
 
@@ -621,13 +621,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.6.0] - 2026-03-04
 
 ### Changed
-- Starter is now bundled in the npm package (no more git clone from cortex-starter repo)
+- Starter is now bundled in the npm package (no more git clone from phren-starter repo)
 - Init copies from bundled starter directory, works offline and without git
 - Synced all starter templates to match 1.5.0 conventions (bold labels, project skills, key patterns, full global CLAUDE.md)
-- Init output says "Created cortex v1.6.0" instead of "Cloned cortex-starter"
+- Init output says "Created phren v1.6.0" instead of "Cloned phren-starter"
 
 ### Removed
-- Git clone dependency during init (cortex-starter repo is now a mirror, not the source of truth)
+- Git clone dependency during init (phren-starter repo is now a mirror, not the source of truth)
 
 ## [1.5.0] - 2026-03-04
 
@@ -640,7 +640,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - Automated tests: 28 vitest cases for FTS5 injection, path traversal, project name validation
-- Conflict resolution guide in cortex-sync skill
+- Conflict resolution guide in phren-sync skill
 - yq support for YAML parsing in link.sh (falls back to grep/sed)
 - Clear manual instructions when jq is missing (instead of fragile sed patching)
 
@@ -653,7 +653,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.3.0] - 2026-03-04
 
 ### Changed
-- Merged `/cortex-learn` into `/cortex-update`: one skill for saving session learnings, works standalone or with full cortex setup
+- Merged `/phren-learn` into `/phren-update`: one skill for saving session learnings, works standalone or with full phren setup
 - Simplified from 6 skills to 5: update, sync, init, discover, consolidate
 - MCP tool descriptions now tell Claude when to call them proactively
 - global CLAUDE.md instructs Claude to use MCP tools and task without being asked
@@ -662,13 +662,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Framework boilerplate no longer lists personal workflow skills
 
 ### Fixed
-- cortex-sync path references used `~/cortex` instead of `~/.cortex`
-- VS Code manual config missing `~/.cortex` path argument
+- phren-sync path references used `~/phren` instead of `~/.phren`
+- VS Code manual config missing `~/.phren` path argument
 
 ## [1.2.0] - 2026-03-04
 
 ### Added
-- `npx cortex init`: one-command setup that clones cortex-starter to `~/.cortex`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
+- `npx phren init`: one-command setup that clones phren-starter to `~/.phren`, sets hostname in `machines.yaml`, and configures Claude Code + VS Code MCP automatically
 - link.sh symlinks `CLAUDE-*.md` split files alongside `CLAUDE.md` for `@import` support
 
 ## [1.1.4] - 2026-03-04
@@ -682,16 +682,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - GitHub Pages landing site (`docs/`)
-- Auto-creates `~/.cortex` with starter README on first run (no error on fresh install)
-- CLI path argument: `claude mcp add cortex -- npx cortex ~/custom/path`
+- Auto-creates `~/.phren` with starter README on first run (no error on fresh install)
+- CLI path argument: `claude mcp add phren -- npx phren ~/custom/path`
 - Plugin marketplace support: `.claude-plugin/marketplace.json`
-- Skills installable via `/plugin marketplace add alaarab/cortex` + `/plugin install cortex@cortex`
+- Skills installable via `/plugin marketplace add alaarab/phren` + `/plugin install phren@phren`
 - LICENSE file
 
 ### Changed
-- Default cortex directory is now `~/.cortex` (consistent with `~/.claude`)
-- Skill names use plugin namespace format: `/cortex:sync`, `/cortex:learn`, etc.
-- Removed `my-cortex` from default path fallbacks
+- Default phren directory is now `~/.phren` (consistent with `~/.claude`)
+- Skill names use plugin namespace format: `/phren:sync`, `/phren:learn`, etc.
+- Removed `my-phren` from default path fallbacks
 
 ### Fixed
 - npm bin path stripped of leading `./` to resolve publish warning
@@ -701,47 +701,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 Initial release.
 
 - MCP server with SQLite FTS5 full-text search
-- Tools: `search_cortex`, `get_project_summary`, `list_projects`
+- Tools: `search_phren`, `get_project_summary`, `list_projects`
 - Profile-aware project indexing via `profiles/*.yaml`
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
-- `cortex` on npm
+- `phren` on npm
 
-[Unreleased]: https://github.com/alaarab/cortex/compare/v1.33.0...HEAD
-[1.33.0]: https://github.com/alaarab/cortex/compare/v1.32.2...v1.33.0
-[1.32.2]: https://github.com/alaarab/cortex/compare/v1.32.1...v1.32.2
-[1.32.1]: https://github.com/alaarab/cortex/compare/v1.32.0...v1.32.1
-[1.32.0]: https://github.com/alaarab/cortex/compare/v1.31.1...v1.32.0
-[1.31.1]: https://github.com/alaarab/cortex/compare/v1.29.1...v1.31.1
-[1.29.1]: https://github.com/alaarab/cortex/compare/v1.28.0...v1.29.1
-[1.25.0]: https://github.com/alaarab/cortex/compare/v1.20.0...v1.25.0
-[1.16.0]: https://github.com/alaarab/cortex/compare/v1.15.6...v1.16.0
-[1.15.6]: https://github.com/alaarab/cortex/compare/v1.15.5...v1.15.6
-[1.15.5]: https://github.com/alaarab/cortex/compare/v1.13.6...v1.15.5
-[1.13.6]: https://github.com/alaarab/cortex/compare/v1.11.1...v1.13.6
-[1.11.1]: https://github.com/alaarab/cortex/compare/v1.11.0...v1.11.1
-[1.11.0]: https://github.com/alaarab/cortex/compare/v1.10.2...v1.11.0
-[1.10.2]: https://github.com/alaarab/cortex/compare/v1.10.0...v1.10.2
-[1.10.0]: https://github.com/alaarab/cortex/compare/v1.9.0...v1.10.0
-[1.9.0]: https://github.com/alaarab/cortex/compare/v1.8.6...v1.9.0
-[1.8.6]: https://github.com/alaarab/cortex/compare/v1.8.4...v1.8.6
-[1.8.4]: https://github.com/alaarab/cortex/compare/v1.8.3...v1.8.4
-[1.8.3]: https://github.com/alaarab/cortex/compare/v1.8.2...v1.8.3
-[1.8.2]: https://github.com/alaarab/cortex/compare/v1.8.1...v1.8.2
-[1.8.1]: https://github.com/alaarab/cortex/compare/v1.8.0...v1.8.1
-[1.8.0]: https://github.com/alaarab/cortex/compare/v1.7.4...v1.8.0
-[1.7.4]: https://github.com/alaarab/cortex/compare/v1.7.3...v1.7.4
-[1.7.3]: https://github.com/alaarab/cortex/compare/v1.7.2...v1.7.3
-[1.7.2]: https://github.com/alaarab/cortex/compare/v1.7.1...v1.7.2
-[1.7.1]: https://github.com/alaarab/cortex/compare/v1.7.0...v1.7.1
-[1.7.0]: https://github.com/alaarab/cortex/compare/v1.6.4...v1.7.0
-[1.6.4]: https://github.com/alaarab/cortex/compare/v1.6.3...v1.6.4
-[1.6.3]: https://github.com/alaarab/cortex/compare/v1.6.2...v1.6.3
-[1.6.2]: https://github.com/alaarab/cortex/compare/v1.6.1...v1.6.2
-[1.6.1]: https://github.com/alaarab/cortex/compare/v1.6.0...v1.6.1
-[1.6.0]: https://github.com/alaarab/cortex/compare/v1.5.0...v1.6.0
-[1.5.0]: https://github.com/alaarab/cortex/compare/v1.3.0...v1.5.0
-[1.3.0]: https://github.com/alaarab/cortex/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/alaarab/cortex/compare/v1.1.4...v1.2.0
-[1.1.4]: https://github.com/alaarab/cortex/compare/v1.1.0...v1.1.4
-[1.1.0]: https://github.com/alaarab/cortex/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/alaarab/cortex/releases/tag/v1.0.0
+[Unreleased]: https://github.com/alaarab/phren/compare/v1.33.0...HEAD
+[1.33.0]: https://github.com/alaarab/phren/compare/v1.32.2...v1.33.0
+[1.32.2]: https://github.com/alaarab/phren/compare/v1.32.1...v1.32.2
+[1.32.1]: https://github.com/alaarab/phren/compare/v1.32.0...v1.32.1
+[1.32.0]: https://github.com/alaarab/phren/compare/v1.31.1...v1.32.0
+[1.31.1]: https://github.com/alaarab/phren/compare/v1.29.1...v1.31.1
+[1.29.1]: https://github.com/alaarab/phren/compare/v1.28.0...v1.29.1
+[1.25.0]: https://github.com/alaarab/phren/compare/v1.20.0...v1.25.0
+[1.16.0]: https://github.com/alaarab/phren/compare/v1.15.6...v1.16.0
+[1.15.6]: https://github.com/alaarab/phren/compare/v1.15.5...v1.15.6
+[1.15.5]: https://github.com/alaarab/phren/compare/v1.13.6...v1.15.5
+[1.13.6]: https://github.com/alaarab/phren/compare/v1.11.1...v1.13.6
+[1.11.1]: https://github.com/alaarab/phren/compare/v1.11.0...v1.11.1
+[1.11.0]: https://github.com/alaarab/phren/compare/v1.10.2...v1.11.0
+[1.10.2]: https://github.com/alaarab/phren/compare/v1.10.0...v1.10.2
+[1.10.0]: https://github.com/alaarab/phren/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/alaarab/phren/compare/v1.8.6...v1.9.0
+[1.8.6]: https://github.com/alaarab/phren/compare/v1.8.4...v1.8.6
+[1.8.4]: https://github.com/alaarab/phren/compare/v1.8.3...v1.8.4
+[1.8.3]: https://github.com/alaarab/phren/compare/v1.8.2...v1.8.3
+[1.8.2]: https://github.com/alaarab/phren/compare/v1.8.1...v1.8.2
+[1.8.1]: https://github.com/alaarab/phren/compare/v1.8.0...v1.8.1
+[1.8.0]: https://github.com/alaarab/phren/compare/v1.7.4...v1.8.0
+[1.7.4]: https://github.com/alaarab/phren/compare/v1.7.3...v1.7.4
+[1.7.3]: https://github.com/alaarab/phren/compare/v1.7.2...v1.7.3
+[1.7.2]: https://github.com/alaarab/phren/compare/v1.7.1...v1.7.2
+[1.7.1]: https://github.com/alaarab/phren/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/alaarab/phren/compare/v1.6.4...v1.7.0
+[1.6.4]: https://github.com/alaarab/phren/compare/v1.6.3...v1.6.4
+[1.6.3]: https://github.com/alaarab/phren/compare/v1.6.2...v1.6.3
+[1.6.2]: https://github.com/alaarab/phren/compare/v1.6.1...v1.6.2
+[1.6.1]: https://github.com/alaarab/phren/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/alaarab/phren/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/alaarab/phren/compare/v1.3.0...v1.5.0
+[1.3.0]: https://github.com/alaarab/phren/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/alaarab/phren/compare/v1.1.4...v1.2.0
+[1.1.4]: https://github.com/alaarab/phren/compare/v1.1.0...v1.1.4
+[1.1.0]: https://github.com/alaarab/phren/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/alaarab/phren/releases/tag/v1.0.0

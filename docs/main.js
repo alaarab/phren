@@ -323,7 +323,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     if (row.kind === 'health-ok') {
       el.classList.add('demo-health-ok');
       el.appendChild(mkEl('span', 'demo-health-check', '✓  '));
-      el.appendChild(mkEl('span', '', 'cortex healthy'));
+      el.appendChild(mkEl('span', '', 'phren healthy'));
       return el;
     }
 
@@ -342,7 +342,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     const screen = mkEl('div', 'demo-shell-screen');
 
     const hdr = mkEl('div', 'demo-shell-headerline');
-    hdr.appendChild(mkEl('span', 'demo-shell-brand', '◆ cortex'));
+    hdr.appendChild(mkEl('span', 'demo-shell-brand', '◆ phren'));
     if (scene.project) {
       hdr.appendChild(mkEl('span', 'demo-shell-sep', ' · '));
       hdr.appendChild(mkEl('span', 'demo-shell-project', scene.project));

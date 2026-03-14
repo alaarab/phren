@@ -45,9 +45,9 @@ exports.readDeviceContext = readDeviceContext;
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const HOME_CORTEX_DIR = path.join(os.homedir(), ".cortex");
-const MACHINE_ID_PATH = path.join(HOME_CORTEX_DIR, ".machine-id");
-const CONTEXT_PATH = path.join(os.homedir(), ".cortex-context.md");
+const HOME_PHREN_DIR = path.join(os.homedir(), ".phren");
+const MACHINE_ID_PATH = path.join(HOME_PHREN_DIR, ".machine-id");
+const CONTEXT_PATH = path.join(os.homedir(), ".phren-context.md");
 function machineIdPath() {
     return MACHINE_ID_PATH;
 }

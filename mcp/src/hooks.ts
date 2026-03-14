@@ -3,13 +3,13 @@ import * as path from "path";
 import { createHmac, randomUUID } from "crypto";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
-import { EXEC_TIMEOUT_QUICK_MS, CortexError, debugLog, runtimeFile, homePath, installPreferencesFile, type CortexErrorCode } from "./shared.js";
+import { EXEC_TIMEOUT_QUICK_MS, PhrenError, debugLog, runtimeFile, homePath, installPreferencesFile, type PhrenErrorCode } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
 
 export interface HookError {
-  code: CortexErrorCode;
+  code: PhrenErrorCode;
   message: string;
 }
 
@@ -72,7 +72,7 @@ function resolveCliEntryScript(): string | null {
   return fs.existsSync(local) ? local : null;
 }
 
-function cortexPackageSpec(): string {
+function phrenPackageSpec(): string {
   return PACKAGE_SPEC;
 }
 
@@ -84,7 +84,7 @@ export interface LifecycleCommands {
 }
 
 function buildPackageLifecycleCommands(): LifecycleCommands {
-  const packageSpec = cortexPackageSpec();
+  const packageSpec = phrenPackageSpec();
   return {
     sessionStart: `npx -y ${packageSpec} hook-session-start`,
     userPromptSubmit: `npx -y ${packageSpec} hook-prompt`,
@@ -93,43 +93,43 @@ function buildPackageLifecycleCommands(): LifecycleCommands {
   };
 }
 
-export function buildLifecycleCommands(cortexPath: string): LifecycleCommands {
+export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
   const entry = resolveCliEntryScript();
   const isWindows = process.platform === "win32";
-  const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
   if (entry) {
     const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     if (isWindows) {
       return {
-        sessionStart: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-session-start`,
-        userPromptSubmit: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-prompt`,
-        stop: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-stop`,
-        hookTool: `set "CORTEX_PATH=${escapedCortex}" && node "${escapedEntry}" hook-tool`,
+        sessionStart: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-session-start`,
+        userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-prompt`,
+        stop: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-stop`,
+        hookTool: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-tool`,
       };
     }
     return {
-      sessionStart: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-session-start`,
-      userPromptSubmit: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-prompt`,
-      stop: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-stop`,
-      hookTool: `CORTEX_PATH="${escapedCortex}" node "${escapedEntry}" hook-tool`,
+      sessionStart: `PHREN_PATH="${escapedPhren}" node "${escapedEntry}" hook-session-start`,
+      userPromptSubmit: `PHREN_PATH="${escapedPhren}" node "${escapedEntry}" hook-prompt`,
+      stop: `PHREN_PATH="${escapedPhren}" node "${escapedEntry}" hook-stop`,
+      hookTool: `PHREN_PATH="${escapedPhren}" node "${escapedEntry}" hook-tool`,
     };
   }
 
-  const packageSpec = cortexPackageSpec();
+  const packageSpec = phrenPackageSpec();
   if (isWindows) {
     return {
-      sessionStart: `set "CORTEX_PATH=${escapedCortex}" && npx -y ${packageSpec} hook-session-start`,
-      userPromptSubmit: `set "CORTEX_PATH=${escapedCortex}" && npx -y ${packageSpec} hook-prompt`,
-      stop: `set "CORTEX_PATH=${escapedCortex}" && npx -y ${packageSpec} hook-stop`,
-      hookTool: `set "CORTEX_PATH=${escapedCortex}" && npx -y ${packageSpec} hook-tool`,
+      sessionStart: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-session-start`,
+      userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-prompt`,
+      stop: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-stop`,
+      hookTool: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-tool`,
     };
   }
   return {
-    sessionStart: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-session-start`,
-    userPromptSubmit: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-prompt`,
-    stop: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-stop`,
-    hookTool: `CORTEX_PATH="${escapedCortex}" npx -y ${packageSpec} hook-tool`,
+    sessionStart: `PHREN_PATH="${escapedPhren}" npx -y ${packageSpec} hook-session-start`,
+    userPromptSubmit: `PHREN_PATH="${escapedPhren}" npx -y ${packageSpec} hook-prompt`,
+    stop: `PHREN_PATH="${escapedPhren}" npx -y ${packageSpec} hook-stop`,
+    hookTool: `PHREN_PATH="${escapedPhren}" npx -y ${packageSpec} hook-tool`,
   };
 }
 
@@ -139,9 +139,9 @@ export function buildSharedLifecycleCommands(): LifecycleCommands {
 
 function withHookToolEnv(command: string, tool: "claude" | "copilot" | "cursor" | "codex"): string {
   if (process.platform === "win32") {
-    return `set "CORTEX_HOOK_TOOL=${tool}" && ${command}`;
+    return `set "PHREN_HOOK_TOOL=${tool}" && ${command}`;
   }
-  return `CORTEX_HOOK_TOOL="${tool}" ${command}`;
+  return `PHREN_HOOK_TOOL="${tool}" ${command}`;
 }
 
 function withHookToolLifecycleCommands(
@@ -156,7 +156,7 @@ function withHookToolLifecycleCommands(
   };
 }
 
-function installSessionWrapper(tool: string, cortexPath: string): boolean {
+function installSessionWrapper(tool: string, phrenPath: string): boolean {
   const realBinary = resolveToolBinary(tool);
   if (!realBinary) return false;
 
@@ -166,25 +166,25 @@ function installSessionWrapper(tool: string, cortexPath: string): boolean {
   const wrapperPath = path.join(localBinDir, tool);
 
   const escapedBinary = realBinary.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const escapedCortex = cortexPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const escapedEntry = entry ? entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"') : "";
-  const packageSpec = cortexPackageSpec();
+  const packageSpec = phrenPackageSpec();
   const sessionStartCmd = entry
-    ? `env CORTEX_PATH="$CORTEX_PATH" node "$ENTRY_SCRIPT" hook-session-start`
-    : `env CORTEX_PATH="$CORTEX_PATH" npx -y ${packageSpec} hook-session-start`;
+    ? `env PHREN_PATH="$PHREN_PATH" node "$ENTRY_SCRIPT" hook-session-start`
+    : `env PHREN_PATH="$PHREN_PATH" npx -y ${packageSpec} hook-session-start`;
   const stopCmd = entry
-    ? `env CORTEX_PATH="$CORTEX_PATH" node "$ENTRY_SCRIPT" hook-stop`
-    : `env CORTEX_PATH="$CORTEX_PATH" npx -y ${packageSpec} hook-stop`;
+    ? `env PHREN_PATH="$PHREN_PATH" node "$ENTRY_SCRIPT" hook-stop`
+    : `env PHREN_PATH="$PHREN_PATH" npx -y ${packageSpec} hook-stop`;
   const content = `#!/bin/sh
 set -u
 
 REAL_BIN="${escapedBinary}"
-CORTEX_PATH="\${CORTEX_PATH:-${escapedCortex}}"
+PHREN_PATH="\${PHREN_PATH:-${escapedPhren}}"
 ENTRY_SCRIPT="${escapedEntry}"
-export CORTEX_HOOK_TOOL="${tool}"
+export PHREN_HOOK_TOOL="${tool}"
 
 if [ ! -x "$REAL_BIN" ]; then
-  echo "cortex wrapper error: real ${tool} binary not executable: $REAL_BIN" >&2
+  echo "phren wrapper error: real ${tool} binary not executable: $REAL_BIN" >&2
   exit 127
 fi
 
@@ -204,7 +204,7 @@ run_with_timeout() {
   fi
 }
 
-HOOK_TIMEOUT="\${CORTEX_HOOK_TIMEOUT_S:-${Math.ceil(HOOK_TIMEOUT_MS / 1000)}}s"
+HOOK_TIMEOUT="\${PHREN_HOOK_TIMEOUT_S:-${Math.ceil(HOOK_TIMEOUT_MS / 1000)}}s"
 
 run_with_timeout "$HOOK_TIMEOUT" ${sessionStartCmd} >/dev/null 2>&1
 
@@ -285,9 +285,9 @@ export interface HookToolPreferences {
   codex?: boolean;
 }
 
-function readHookPreferences(cortexPath: string): { enabled: boolean; toolPrefs: HookToolPreferences } {
+function readHookPreferences(phrenPath: string): { enabled: boolean; toolPrefs: HookToolPreferences } {
   try {
-    const prefsPath = installPreferencesFile(cortexPath);
+    const prefsPath = installPreferencesFile(phrenPath);
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
     const enabled = prefs.hooksEnabled !== false;
     const toolPrefs: HookToolPreferences = prefs.hookTools && typeof prefs.hookTools === "object"
@@ -300,8 +300,8 @@ function readHookPreferences(cortexPath: string): { enabled: boolean; toolPrefs:
   }
 }
 
-export function isToolHookEnabled(cortexPath: string, tool: string): boolean {
-  const { enabled, toolPrefs } = readHookPreferences(cortexPath);
+export function isToolHookEnabled(phrenPath: string, tool: string): boolean {
+  const { enabled, toolPrefs } = readHookPreferences(phrenPath);
   if (!enabled) return false;
   const key = tool as keyof HookToolPreferences;
   if (key in toolPrefs) return toolPrefs[key] !== false;
@@ -351,12 +351,12 @@ export function getHookTarget(h: CustomHookEntry): string {
 }
 
 const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
-const HOOK_TIMEOUT_MS = parseInt(process.env.CORTEX_HOOK_TIMEOUT_MS || '14000', 10);
+const HOOK_TIMEOUT_MS = parseInt(process.env.PHREN_HOOK_TIMEOUT_MS || '14000', 10);
 const HOOK_ERROR_LOG_MAX_LINES = 1000;
 
-export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
+export function readCustomHooks(phrenPath: string): CustomHookEntry[] {
   try {
-    const prefsPath = installPreferencesFile(cortexPath);
+    const prefsPath = installPreferencesFile(phrenPath);
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
     if (!Array.isArray(prefs.customHooks)) return [];
     return prefs.customHooks.filter(
@@ -375,8 +375,8 @@ export function readCustomHooks(cortexPath: string): CustomHookEntry[] {
   }
 }
 
-function appendHookErrorLog(cortexPath: string, event: string, message: string): void {
-  const logPath = runtimeFile(cortexPath, "hook-errors.log");
+function appendHookErrorLog(phrenPath: string, event: string, message: string): void {
+  const logPath = runtimeFile(phrenPath, "hook-errors.log");
   const line = `[${new Date().toISOString()}] [${event}] ${message}\n`;
   fs.appendFileSync(logPath, line);
   try {
@@ -387,16 +387,16 @@ function appendHookErrorLog(cortexPath: string, event: string, message: string):
       atomicWriteText(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] appendHookErrorLog rotate: ${errorMessage(err)}\n`);
+    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] appendHookErrorLog rotate: ${errorMessage(err)}\n`);
   }
 }
 
 export function runCustomHooks(
-  cortexPath: string,
+  phrenPath: string,
   event: CustomHookEvent,
   env: Record<string, string> = {}
 ): { ran: number; errors: HookError[] } {
-  const hooks = readCustomHooks(cortexPath);
+  const hooks = readCustomHooks(phrenPath);
   const matching = hooks.filter((h) => h.event === event);
   const errors: HookError[] = [];
 
@@ -409,7 +409,7 @@ export function runCustomHooks(
       const payload = JSON.stringify({ event, env, timestamp: new Date().toISOString() });
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (hook.secret) {
-        headers["X-Cortex-Signature"] = `sha256=${createHmac("sha256", hook.secret).update(payload).digest("hex")}`;
+        headers["X-Phren-Signature"] = `sha256=${createHmac("sha256", hook.secret).update(payload).digest("hex")}`;
       }
       fetch(hook.webhook, {
         method: "POST",
@@ -422,9 +422,9 @@ export function runCustomHooks(
           const message = `${event}: ${hook.webhook}: ${errorMessage(err)}`;
           debugLog(`runCustomHooks webhook: ${message}`);
           try {
-            appendHookErrorLog(cortexPath, event, message);
+            appendHookErrorLog(phrenPath, event, message);
           } catch (logErr: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] runCustomHooks webhookErrorLog: ${errorMessage(logErr)}\n`);
+            if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] runCustomHooks webhookErrorLog: ${errorMessage(logErr)}\n`);
           }
         });
       continue;
@@ -432,20 +432,20 @@ export function runCustomHooks(
     const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];
     try {
       execFileSync(shellCmd, shellArgs, {
-        cwd: cortexPath,
+        cwd: phrenPath,
         encoding: "utf8",
         timeout: hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT,
-        env: { ...process.env, CORTEX_PATH: cortexPath, CORTEX_HOOK_EVENT: event, ...env },
+        env: { ...process.env, PHREN_PATH: phrenPath, PHREN_HOOK_EVENT: event, ...env },
         stdio: ["ignore", "ignore", "pipe"],
       });
     } catch (err: unknown) {
       const message = `${event}: ${hook.command}: ${errorMessage(err)}`;
       debugLog(`runCustomHooks: ${message}`);
-      errors.push({ code: CortexError.VALIDATION_ERROR, message });
+      errors.push({ code: PhrenError.VALIDATION_ERROR, message });
       try {
-        appendHookErrorLog(cortexPath, event, errorMessage(err));
+        appendHookErrorLog(phrenPath, event, errorMessage(err));
       } catch (logErr: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] runCustomHooks hookErrorLog: ${errorMessage(logErr)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] runCustomHooks hookErrorLog: ${errorMessage(logErr)}\n`);
       }
     }
   }
@@ -458,7 +458,7 @@ export interface HookConfigOptions {
   allTools?: boolean;
 }
 
-export function configureAllHooks(cortexPath: string, options: HookConfigOptions = {}): string[] {
+export function configureAllHooks(phrenPath: string, options: HookConfigOptions = {}): string[] {
   const configured: string[] = [];
   const detected: Set<string> = options.tools
     ? options.tools
@@ -466,12 +466,12 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
       ? new Set(["copilot", "cursor", "codex"])
       : detectInstalledTools();
 
-  const lifecycle = buildLifecycleCommands(cortexPath);
+  const lifecycle = buildLifecycleCommands(phrenPath);
 
-  // ── GitHub Copilot CLI (user-level: ~/.github/hookscortex.json) ──────────
+  // ── GitHub Copilot CLI (user-level: ~/.github/hooks/phren.json) ──────────
   if (detected.has("copilot")) {
     const copilotLifecycle = withHookToolLifecycleCommands(lifecycle, "copilot");
-    const copilotFile = hookConfigPath("copilot", cortexPath);
+    const copilotFile = hookConfigPath("copilot", phrenPath);
     const copilotHooksDir = path.dirname(copilotFile);
     try {
       fs.mkdirSync(copilotHooksDir, { recursive: true });
@@ -489,18 +489,18 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
     } catch (err: unknown) {
       debugLog(`configureAllHooks: copilot failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(cortexPath, "copilot")) installSessionWrapper("copilot", cortexPath);
+    if (isToolHookEnabled(phrenPath, "copilot")) installSessionWrapper("copilot", phrenPath);
   }
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
   if (detected.has("cursor")) {
     const cursorLifecycle = withHookToolLifecycleCommands(lifecycle, "cursor");
-    const cursorFile = hookConfigPath("cursor", cortexPath);
+    const cursorFile = hookConfigPath("cursor", phrenPath);
     try {
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] configureAllHooks cursorRead: ${errorMessage(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] configureAllHooks cursorRead: ${errorMessage(err)}\n`);
       }
       const config: CursorHookConfig = {
         ...existing,
@@ -516,17 +516,17 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
     } catch (err: unknown) {
       debugLog(`configureAllHooks: cursor failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(cortexPath, "cursor")) installSessionWrapper("cursor", cortexPath);
+    if (isToolHookEnabled(phrenPath, "cursor")) installSessionWrapper("cursor", phrenPath);
   }
 
-  // ── Codex (codex.json in cortex path) ────────────────────────────────────
+  // ── Codex (codex.json in phren path) ─────────────────────────────────────
   if (detected.has("codex")) {
-    const codexFile = hookConfigPath("codex", cortexPath);
+    const codexFile = hookConfigPath("codex", phrenPath);
     try {
       const codexLifecycle = withHookToolLifecycleCommands(buildSharedLifecycleCommands(), "codex");
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] configureAllHooks codexRead: ${errorMessage(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] configureAllHooks codexRead: ${errorMessage(err)}\n`);
       }
       const config: CodexHookConfig = {
         ...existing,
@@ -542,7 +542,7 @@ export function configureAllHooks(cortexPath: string, options: HookConfigOptions
     } catch (err: unknown) {
       debugLog(`configureAllHooks: codex failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(cortexPath, "codex")) installSessionWrapper("codex", cortexPath);
+    if (isToolHookEnabled(phrenPath, "codex")) installSessionWrapper("codex", phrenPath);
   }
 
   return configured;

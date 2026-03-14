@@ -71,8 +71,8 @@ function loadGraphScript() {
 }
 /* ── Main entry ──────────────────────────────────────────── */
 async function showGraphWebview(client, context) {
-    const panel = vscode.window.createWebviewPanel("cortex.entityGraph", "Cortex Entity Graph", vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
-    panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "cortex.svg"));
+    const panel = vscode.window.createWebviewPanel("phren.entityGraph", "Phren Entity Graph", vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
+    panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "phren.svg"));
     panel.webview.html = renderLoadingHtml(panel.webview);
     let graphData;
     try {
@@ -336,7 +336,7 @@ async function fetchProjects(client) {
         if (name === "global" || name === "scripts" || name === "templates" || name === "profiles")
             continue;
         // Filter known stale/non-profile projects (should be fixed at MCP level long-term)
-        if (name === "dendron" || name === "cortex-framework" || name === "max4liveplugins" || name === "pcn-reports")
+        if (name === "dendron" || name === "phren-framework" || name === "max4liveplugins" || name === "pcn-reports")
             continue;
         parsed.push({ name, brief: asString(record?.brief) });
     }
@@ -443,7 +443,7 @@ async function fetchEntities(client) {
 }
 function loadMemoryScores() {
     try {
-        const scoresPath = path.join(os.homedir(), ".cortex", ".runtime", "memory-scores.json");
+        const scoresPath = path.join(os.homedir(), ".phren", ".runtime", "memory-scores.json");
         const raw = fs.readFileSync(scoresPath, "utf8");
         const parsed = JSON.parse(raw);
         return { schemaVersion: parsed.schemaVersion ?? 1, entries: parsed.entries ?? {} };
@@ -526,12 +526,12 @@ function renderLoadingHtml(webview) {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cortex Entity Graph</title>
+  <title>Phren Entity Graph</title>
   <style>
     body { margin:0; display:grid; place-items:center; min-height:100vh; color:var(--vscode-foreground); font-family:sans-serif; }
   </style>
 </head>
-<body><div>Loading Cortex Entity Graph...</div></body>
+<body><div>Loading Phren Entity Graph...</div></body>
 </html>`;
 }
 function renderErrorHtml(webview, errorMessage) {
@@ -542,7 +542,7 @@ function renderErrorHtml(webview, errorMessage) {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cortex Entity Graph</title>
+  <title>Phren Entity Graph</title>
   <style>
     body { margin:0; display:grid; place-items:center; min-height:100vh; padding:24px; color:var(--vscode-errorForeground); font-family:sans-serif; }
     .panel { max-width:720px; border:1px solid; border-radius:10px; padding:16px; }
@@ -562,7 +562,7 @@ function renderGraphHtml(webview, payload) {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cortex Entity Graph</title>
+  <title>Phren Entity Graph</title>
   <style>
     :root {
       color-scheme:light dark;
@@ -713,8 +713,8 @@ ${graphScript}
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
 
   // Mount the web-ui graph
-  if (window.cortexGraph && window.cortexGraph.mount) {
-    window.cortexGraph.mount({
+  if (window.phrenGraph && window.phrenGraph.mount) {
+    window.phrenGraph.mount({
       nodes: graphNodes,
       links: graphLinks,
       scores: scores,
@@ -723,7 +723,7 @@ ${graphScript}
   } else {
     var fallback = document.getElementById('graph-canvas');
     if (fallback && fallback.parentElement) {
-      fallback.parentElement.innerHTML = '<p style="padding:24px;color:var(--vscode-errorForeground,#f44)">Graph engine not available. Ensure the cortex MCP server is built (npm run build in cortex root).</p>';
+      fallback.parentElement.innerHTML = '<p style="padding:24px;color:var(--vscode-errorForeground,#f44)">Graph engine not available. Ensure the phren MCP server is built (npm run build in phren root).</p>';
     }
   }
 
@@ -772,9 +772,9 @@ ${graphScript}
   });
 
   // Hook into the graph engine's node-select event (fired when the user clicks a bubble)
-  // cortexGraph exposes window.cortexGraph.onNodeSelect(callback)
-  if (window.cortexGraph && window.cortexGraph.onNodeSelect) {
-    window.cortexGraph.onNodeSelect(function(node, canvasX, canvasY) {
+  // phrenGraph exposes window.phrenGraph.onNodeSelect(callback)
+  if (window.phrenGraph && window.phrenGraph.onNodeSelect) {
+    window.phrenGraph.onNodeSelect(function(node, canvasX, canvasY) {
       if (!node || node.group === 'project' || node.group === 'entity' || node.group === 'reference') {
         hideOverlay();
         return;
@@ -799,9 +799,9 @@ ${graphScript}
     if (canvas) {
       canvas.addEventListener('click', function(evt) {
         // If the graph engine doesn't have onNodeSelect, fall back to a manual hit test
-        // against a simple node-position map if window.cortexGraph.getNodeAt is available
-        if (window.cortexGraph && window.cortexGraph.getNodeAt) {
-          var node = window.cortexGraph.getNodeAt(evt.offsetX, evt.offsetY);
+        // against a simple node-position map if window.phrenGraph.getNodeAt is available
+        if (window.phrenGraph && window.phrenGraph.getNodeAt) {
+          var node = window.phrenGraph.getNodeAt(evt.offsetX, evt.offsetY);
           if (node && node.id.startsWith('finding:')) {
             vscode.postMessage({ command: 'nodeClick', nodeId: node.id, kind: 'finding' });
           }

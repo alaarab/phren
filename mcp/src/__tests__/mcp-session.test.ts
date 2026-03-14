@@ -4,14 +4,14 @@ import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 import { incrementSessionFindings, incrementSessionTasksCompleted } from "../mcp-session.js";
 
-function sessionFile(cortexPath: string, sessionId: string) {
-  return path.join(cortexPath, ".runtime", "sessions", `session-${sessionId}.json`);
+function sessionFile(phrenPath: string, sessionId: string) {
+  return path.join(phrenPath, ".runtime", "sessions", `session-${sessionId}.json`);
 }
 
-function writeSession(cortexPath: string, state: { sessionId: string; [key: string]: unknown }) {
-  const dir = path.join(cortexPath, ".runtime", "sessions");
+function writeSession(phrenPath: string, state: { sessionId: string; [key: string]: unknown }) {
+  const dir = path.join(phrenPath, ".runtime", "sessions");
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(sessionFile(cortexPath, state.sessionId), JSON.stringify(state));
+  fs.writeFileSync(sessionFile(phrenPath, state.sessionId), JSON.stringify(state));
 }
 
 describe("incrementSessionFindings", () => {

@@ -74,21 +74,21 @@ describe.sequential("workflow integration", () => {
   let tmp: { path: string; cleanup: () => void };
   let priorHome: string | undefined;
   let priorUserProfile: string | undefined;
-  let priorCortexPath: string | undefined;
+  let priorPhrenPath: string | undefined;
   let priorProfile: string | undefined;
   let priorCwd: string;
 
   beforeEach(() => {
-    tmp = makeTempDir("cortex-workflow-");
+    tmp = makeTempDir("phren-workflow-");
     priorHome = process.env.HOME;
     priorUserProfile = process.env.USERPROFILE;
-    priorCortexPath = process.env.CORTEX_PATH;
-    priorProfile = process.env.CORTEX_PROFILE;
+    priorPhrenPath = process.env.PHREN_PATH;
+    priorProfile = process.env.PHREN_PROFILE;
     priorCwd = process.cwd();
     process.env.HOME = tmp.path;
     process.env.USERPROFILE = tmp.path;
-    process.env.CORTEX_PATH = path.join(tmp.path, ".cortex");
-    process.env.CORTEX_PROFILE = "work";
+    process.env.PHREN_PATH = path.join(tmp.path, ".phren");
+    process.env.PHREN_PROFILE = "work";
   });
 
   afterEach(() => {
@@ -97,16 +97,16 @@ describe.sequential("workflow integration", () => {
     else process.env.HOME = priorHome;
     if (priorUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = priorUserProfile;
-    if (priorCortexPath === undefined) delete process.env.CORTEX_PATH;
-    else process.env.CORTEX_PATH = priorCortexPath;
-    if (priorProfile === undefined) delete process.env.CORTEX_PROFILE;
-    else process.env.CORTEX_PROFILE = priorProfile;
-    delete process.env.CORTEX_ACTOR;
+    if (priorPhrenPath === undefined) delete process.env.PHREN_PATH;
+    else process.env.PHREN_PATH = priorPhrenPath;
+    if (priorProfile === undefined) delete process.env.PHREN_PROFILE;
+    else process.env.PHREN_PROFILE = priorProfile;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 
   it("covers init, add, session-start notice, MCP round-trips, and web-ui workflows", async () => {
-    const cortexPath = process.env.CORTEX_PATH as string;
+    const phrenPath = process.env.PHREN_PATH as string;
     const repoA = path.join(tmp.path, "repo-a");
     const repoB = path.join(tmp.path, "repo-b");
     const repoC = path.join(tmp.path, "repo-c");
@@ -120,26 +120,26 @@ describe.sequential("workflow integration", () => {
     process.chdir(repoA);
     await suppressOutput(() => runInit({ yes: true, profile: "work" }));
 
-    const verify = runPostInitVerify(cortexPath);
+    const verify = runPostInitVerify(phrenPath);
     expect(verify.checks.find((check) => check.name === "config")?.ok).toBe(true);
     expect(verify.checks.find((check) => check.name === "global-claude")?.ok).toBe(true);
     expect(verify.checks.find((check) => check.name === "installed-version")?.ok).toBe(true);
     expect(verify.checks.find((check) => check.name === "hook-entrypoint")?.ok).toBe(true);
     expect(verify.checks.find((check) => check.name === "fts-index")?.ok).toBe(true);
-    expect(getUntrackedProjectNotice(cortexPath, repoA)).toBeNull();
+    expect(getUntrackedProjectNotice(phrenPath, repoA)).toBeNull();
 
     await suppressOutput(() => runTopLevelCommand(["add", repoB]));
-    expect(fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8")).toContain("- repo-b");
-    expect(getUntrackedProjectNotice(cortexPath, repoB)).toBeNull();
-    expect(getUntrackedProjectNotice(cortexPath, repoD)).toContain("Ask the user whether they want to add it to cortex now.");
-    expect(getUntrackedProjectNotice(cortexPath, repoD)).toContain("ownership=\"cortex-managed\"|\"detached\"|\"repo-managed\"");
+    expect(fs.readFileSync(path.join(phrenPath, "profiles", "work.yaml"), "utf8")).toContain("- repo-b");
+    expect(getUntrackedProjectNotice(phrenPath, repoB)).toBeNull();
+    expect(getUntrackedProjectNotice(phrenPath, repoD)).toContain("Ask the user whether they want to add it to phren now.");
+    expect(getUntrackedProjectNotice(phrenPath, repoD)).toContain("ownership=\"phren-managed\"|\"detached\"|\"repo-managed\"");
 
-    process.env.CORTEX_ACTOR = "workflow-admin";
-    grantAdmin(cortexPath);
+    process.env.PHREN_ACTOR = "workflow-admin";
+    grantAdmin(phrenPath);
     const server = makeMockServer();
-    db = await buildIndex(cortexPath, "work");
+    db = await buildIndex(phrenPath, "work");
     const ctx: McpContext = {
-      cortexPath,
+      phrenPath,
       profile: "work",
       db: () => {
         if (!db) throw new Error("index unavailable");
@@ -147,11 +147,11 @@ describe.sequential("workflow integration", () => {
       },
       rebuildIndex: async () => {
         db?.close();
-        db = await buildIndex(cortexPath, "work");
+        db = await buildIndex(phrenPath, "work");
       },
       updateFileInIndex: (filePath: string) => {
         if (!db) throw new Error("index unavailable");
-        updateFileInIndex(db, filePath, cortexPath);
+        updateFileInIndex(db, filePath, phrenPath);
       },
       withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
     };
@@ -162,7 +162,7 @@ describe.sequential("workflow integration", () => {
     const addProjectRes = parseResult(await server.call("add_project", { path: repoC }));
     expect(addProjectRes.ok).toBe(true);
     expect(addProjectRes.data.project).toBe("repo-c");
-    expect(fs.readFileSync(path.join(cortexPath, "profiles", "work.yaml"), "utf8")).toContain("- repo-c");
+    expect(fs.readFileSync(path.join(phrenPath, "profiles", "work.yaml"), "utf8")).toContain("- repo-c");
 
     const addFindingRes = parseResult(await server.call("add_finding", {
       project: "repo-c",
@@ -179,7 +179,7 @@ describe.sequential("workflow integration", () => {
     expect(JSON.stringify(searchRes.data.results)).toContain("Workflow coverage proves repo-c");
 
     fs.writeFileSync(
-      path.join(cortexPath, "repo-c", "MEMORY_QUEUE.md"),
+      path.join(phrenPath, "repo-c", "MEMORY_QUEUE.md"),
       [
         "# repo-c Memory Queue",
         "",
@@ -192,7 +192,7 @@ describe.sequential("workflow integration", () => {
 
     const authToken = "workflow-auth-token";
     const csrfTokens = new Map<string, number>();
-    const webUi = createWebUiServer(cortexPath, { authToken, csrfTokens }, "work");
+    const webUi = createWebUiServer(phrenPath, { authToken, csrfTokens }, "work");
     await new Promise<void>((resolve) => webUi.listen(0, "127.0.0.1", () => resolve()));
     try {
       const address = webUi.address();
@@ -207,6 +207,7 @@ describe.sequential("workflow integration", () => {
       const csrfRes = await httpGet(address.port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
       expect(csrfRes.status).toBe(200);
       const csrf = JSON.parse(csrfRes.body).token as string;
+      // Queue approval was removed — verify the endpoint returns an error
       const approveRes = await postForm(address.port, "/api/approve", {
         _auth: authToken,
         _csrf: csrf,
@@ -214,11 +215,8 @@ describe.sequential("workflow integration", () => {
         line: "- [2026-03-09] Approve this integrated workflow memory [confidence 0.90]",
       });
       expect(approveRes.status).toBe(200);
-      expect(JSON.parse(approveRes.body).ok).toBe(true);
-
-      const queueRes = await httpGet(address.port, "/api/review-queue?_auth=" + encodeURIComponent(authToken));
-      expect(queueRes.status).toBe(200);
-      expect(queueRes.body).not.toContain("Approve this integrated workflow memory");
+      expect(JSON.parse(approveRes.body).ok).toBe(false);
+      expect(JSON.parse(approveRes.body).error).toContain("removed");
     } finally {
       await new Promise<void>((resolve) => webUi.close(() => resolve()));
       db?.close();

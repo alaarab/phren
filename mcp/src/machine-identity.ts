@@ -4,8 +4,8 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { homePath } from "./shared.js";
 
-function cortexMachineFilePath(): string {
-  return homePath(".cortex", ".machine-id");
+function phrenMachineFilePath(): string {
+  return homePath(".phren", ".machine-id");
 }
 
 function atomicWriteText(filePath: string, content: string): void {
@@ -16,7 +16,7 @@ function atomicWriteText(filePath: string, content: string): void {
 }
 
 export function machineFilePath(): string {
-  return cortexMachineFilePath();
+  return phrenMachineFilePath();
 }
 
 export function defaultMachineName(): string {

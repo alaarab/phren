@@ -26,8 +26,8 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }
 
-function makeProject(cortexPath: string, name: string, files: Record<string, string>) {
-  const dir = path.join(cortexPath, name);
+function makeProject(phrenPath: string, name: string, files: Record<string, string>) {
+  const dir = path.join(phrenPath, name);
   fs.mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     writeFile(path.join(dir, file), content);
@@ -54,7 +54,7 @@ describe("mcp-search: project filter", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -64,7 +64,7 @@ describe("mcp-search: project filter", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -86,7 +86,7 @@ describe("mcp-search: project filter", () => {
     db.close();
     db = await buildIndex(tmp.path);
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -141,7 +141,7 @@ describe("mcp-search: type filter", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -151,7 +151,7 @@ describe("mcp-search: type filter", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -204,7 +204,7 @@ describe("mcp-search: tag filter", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -214,7 +214,7 @@ describe("mcp-search: tag filter", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -250,7 +250,7 @@ describe("mcp-search: no cross-project leakage", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -260,7 +260,7 @@ describe("mcp-search: no cross-project leakage", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -315,7 +315,7 @@ describe("mcp-search: feedback re-ranking", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -325,7 +325,7 @@ describe("mcp-search: feedback re-ranking", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -365,7 +365,7 @@ describe("mcp-search: list_projects", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -375,7 +375,7 @@ describe("mcp-search: list_projects", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -416,7 +416,7 @@ describe("mcp-search: get_project_summary", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -426,7 +426,7 @@ describe("mcp-search: get_project_summary", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -463,7 +463,7 @@ describe("mcp-search: get_findings", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -473,7 +473,7 @@ describe("mcp-search: get_findings", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -500,7 +500,7 @@ describe("mcp-search: get_findings", () => {
 
   it("surfaces provenance metadata in get_findings output", async () => {
     makeProject(tmp.path, "withmeta", {
-      "FINDINGS.md": "# withmeta FINDINGS\n\n## 2026-03-09\n\n- Provenance stays attached <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->\n  <!-- cortex:cite {\"created_at\":\"2026-03-09T10:00:00Z\",\"task_item\":\"deadbeef\"} -->\n",
+      "FINDINGS.md": "# withmeta FINDINGS\n\n## 2026-03-09\n\n- Provenance stays attached <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->\n  <!-- phren:cite {\"created_at\":\"2026-03-09T10:00:00Z\",\"task_item\":\"deadbeef\"} -->\n",
     });
 
     const res = parseResult(await server.call("get_findings", { project: "withmeta" }));
@@ -514,7 +514,7 @@ describe("mcp-search: get_findings", () => {
 
   it("hides historical findings by default and includes them when include_history=true", async () => {
     makeProject(tmp.path, "historyproj", {
-      "FINDINGS.md": "# historyproj FINDINGS\n\n## 2026-03-09\n\n- Active finding stays visible <!-- created: 2026-03-09 --> <!-- cortex:status \"active\" -->\n- Old finding is historical <!-- created: 2026-03-09 --> <!-- cortex:status \"superseded\" -->\n\n<details>\n<summary>Archived</summary>\n\n## 2026-02-20\n\n- Archived historical finding <!-- created: 2026-02-20 --> <!-- cortex:status \"retracted\" -->\n</details>\n",
+      "FINDINGS.md": "# historyproj FINDINGS\n\n## 2026-03-09\n\n- Active finding stays visible <!-- created: 2026-03-09 --> <!-- phren:status \"active\" -->\n- Old finding is historical <!-- created: 2026-03-09 --> <!-- phren:status \"superseded\" -->\n\n<details>\n<summary>Archived</summary>\n\n## 2026-02-20\n\n- Archived historical finding <!-- created: 2026-02-20 --> <!-- phren:status \"retracted\" -->\n</details>\n",
     });
 
     const hidden = parseResult(await server.call("get_findings", { project: "historyproj" }));
@@ -533,7 +533,7 @@ describe("mcp-search: get_findings", () => {
 
   it("supports status filter and includes normalized lifecycle fields", async () => {
     makeProject(tmp.path, "lifecycleproj", {
-      "FINDINGS.md": "# lifecycleproj FINDINGS\n\n## 2026-03-09\n\n- Citation failed on this finding <!-- created: 2026-03-09 --> <!-- cortex:status \"invalid_citation\" --> <!-- cortex:status_updated \"2026-03-10\" --> <!-- cortex:status_reason \"citation_missing\" --> <!-- cortex:status_ref \"docs/ref.md:12\" -->\n- Baseline healthy finding <!-- created: 2026-03-09 --> <!-- cortex:status \"active\" -->\n",
+      "FINDINGS.md": "# lifecycleproj FINDINGS\n\n## 2026-03-09\n\n- Citation failed on this finding <!-- created: 2026-03-09 --> <!-- phren:status \"invalid_citation\" --> <!-- phren:status_updated \"2026-03-10\" --> <!-- phren:status_reason \"citation_missing\" --> <!-- phren:status_ref \"docs/ref.md:12\" -->\n- Baseline healthy finding <!-- created: 2026-03-09 --> <!-- phren:status \"active\" -->\n",
     });
 
     const filtered = parseResult(await server.call("get_findings", { project: "lifecycleproj", status: "invalid_citation" }));
@@ -557,20 +557,20 @@ describe("mcp-search: lifecycle search ordering and filters", () => {
     grantAdmin(tmp.path);
 
     makeProject(tmp.path, "active-proj", {
-      "FINDINGS.md": "# active-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears here <!-- created: 2026-03-01 --> <!-- cortex:status \"active\" -->\n",
+      "FINDINGS.md": "# active-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears here <!-- created: 2026-03-01 --> <!-- phren:status \"active\" -->\n",
     });
     makeProject(tmp.path, "degraded-proj", {
-      "FINDINGS.md": "# degraded-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears but is stale <!-- created: 2026-03-01 --> <!-- cortex:status \"stale\" -->\n",
+      "FINDINGS.md": "# degraded-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears but is stale <!-- created: 2026-03-01 --> <!-- phren:status \"stale\" -->\n",
     });
     makeProject(tmp.path, "history-proj", {
-      "FINDINGS.md": "# history-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears but is retracted <!-- created: 2026-03-01 --> <!-- cortex:status \"retracted\" -->\n",
+      "FINDINGS.md": "# history-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears but is retracted <!-- created: 2026-03-01 --> <!-- phren:status \"retracted\" -->\n",
     });
 
     db = await buildIndex(tmp.path);
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -580,7 +580,7 @@ describe("mcp-search: lifecycle search ordering and filters", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -637,7 +637,7 @@ describe("mcp-search: get_memory_detail URL decode", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => db,
       rebuildIndex: async () => {},
@@ -648,7 +648,7 @@ describe("mcp-search: get_memory_detail URL decode", () => {
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
   });
@@ -670,6 +670,6 @@ describe("mcp-search: get_memory_detail URL decode", () => {
   it("returns error for invalid format even after decode", async () => {
     const res = parseResult(await server.call("get_memory_detail", { id: "invalid-id" }));
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("Invalid memory id format");
+    expect(res.error).toContain("Invalid memory ID format");
   });
 });

@@ -34,17 +34,17 @@ interface EmbeddingEntryLike {
   vec: number[];
 }
 
-function embeddingsFilePath(cortexPath: string): string {
-  return runtimeFile(cortexPath, "embeddings.json");
+function embeddingsFilePath(phrenPath: string): string {
+  return runtimeFile(phrenPath, "embeddings.json");
 }
 
-function vectorIndexPath(cortexPath: string): string {
-  return runtimeFile(cortexPath, "embedding-index.json");
+function vectorIndexPath(phrenPath: string): string {
+  return runtimeFile(phrenPath, "embedding-index.json");
 }
 
-function readSourceMarker(cortexPath: string): SourceMarker | null {
+function readSourceMarker(phrenPath: string): SourceMarker | null {
   try {
-    const stat = fs.statSync(embeddingsFilePath(cortexPath));
+    const stat = fs.statSync(embeddingsFilePath(phrenPath));
     return { mtimeMs: stat.mtimeMs, size: stat.size };
   } catch {
     return null;
@@ -124,19 +124,19 @@ function buildVectorIndexData(entries: EmbeddingEntryLike[]): Record<string, Mod
 }
 
 class PersistentVectorIndex {
-  private cortexPath: string;
+  private phrenPath: string;
   private loaded = false;
   private source: SourceMarker | null = null;
   private models: Record<string, ModelVectorIndex> = {};
 
-  constructor(cortexPath: string) {
-    this.cortexPath = cortexPath;
+  constructor(phrenPath: string) {
+    this.phrenPath = phrenPath;
   }
 
   private loadFromDisk(): void {
     if (this.loaded) return;
     this.loaded = true;
-    const filePath = vectorIndexPath(this.cortexPath);
+    const filePath = vectorIndexPath(this.phrenPath);
     try {
       const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as VectorIndexFile;
       if (parsed?.version !== VECTOR_INDEX_VERSION || !parsed.models || typeof parsed.models !== "object") return;
@@ -149,7 +149,7 @@ class PersistentVectorIndex {
   }
 
   private saveToDisk(): void {
-    const filePath = vectorIndexPath(this.cortexPath);
+    const filePath = vectorIndexPath(this.phrenPath);
     try {
       withFileLock(filePath, () => {
         const tmp = `${filePath}.tmp-${crypto.randomUUID()}`;
@@ -168,7 +168,7 @@ class PersistentVectorIndex {
 
   ensure(entries: EmbeddingEntryLike[]): void {
     this.loadFromDisk();
-    const currentSource = readSourceMarker(this.cortexPath);
+    const currentSource = readSourceMarker(this.phrenPath);
     if (markersMatch(this.source, currentSource) && Object.keys(this.models).length > 0) return;
     this.models = buildVectorIndexData(entries);
     this.source = currentSource;
@@ -217,10 +217,10 @@ class PersistentVectorIndex {
 
 const vectorIndexInstances = new Map<string, PersistentVectorIndex>();
 
-export function getPersistentVectorIndex(cortexPath: string): PersistentVectorIndex {
-  const existing = vectorIndexInstances.get(cortexPath);
+export function getPersistentVectorIndex(phrenPath: string): PersistentVectorIndex {
+  const existing = vectorIndexInstances.get(phrenPath);
   if (existing) return existing;
-  const created = new PersistentVectorIndex(cortexPath);
-  vectorIndexInstances.set(cortexPath, created);
+  const created = new PersistentVectorIndex(phrenPath);
+  vectorIndexInstances.set(phrenPath, created);
   return created;
 }

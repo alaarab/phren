@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { initTestCortexRoot, makeTempDir } from "../test-helpers.js";
+import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 
 const RECOVERY_TEST_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
 
@@ -27,16 +27,16 @@ function configureRepo(repo: string) {
 
 describe("handleBackgroundSync recovery", () => {
   let tmp: { path: string; cleanup: () => void };
-  const origCortexPath = process.env.CORTEX_PATH;
+  const origPhrenPath = process.env.PHREN_PATH;
 
   beforeEach(() => {
-    tmp = makeTempDir("cortex-bg-sync-recovery-");
+    tmp = makeTempDir("phren-bg-sync-recovery-");
     vi.resetModules();
   });
 
   afterEach(() => {
-    if (origCortexPath === undefined) delete process.env.CORTEX_PATH;
-    else process.env.CORTEX_PATH = origCortexPath;
+    if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+    else process.env.PHREN_PATH = origPhrenPath;
     tmp.cleanup();
   });
 
@@ -50,7 +50,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["clone", remote, repoB], { stdio: "ignore" });
     configureRepo(repoA);
     configureRepo(repoB);
-    initTestCortexRoot(repoA);
+    initTestPhrenRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
     fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# task\n\n## Active\n\n- Base task\n");
@@ -70,7 +70,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["add", "."], { cwd: repoB, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "local"], { cwd: repoB, stdio: "ignore" });
 
-    process.env.CORTEX_PATH = repoB;
+    process.env.PHREN_PATH = repoB;
     const { handleBackgroundSync } = await import("../cli-hooks-session.js");
     await handleBackgroundSync();
 
@@ -91,7 +91,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["clone", remote, repo], { stdio: "ignore" });
     configureRepo(repo);
     fs.mkdirSync(path.join(repo, ".governance"), { recursive: true });
-    initTestCortexRoot(repo);
+    initTestPhrenRoot(repo);
 
     fs.mkdirSync(path.join(repo, "demo"), { recursive: true });
     fs.writeFileSync(path.join(repo, "demo", "summary.md"), "# summary\n\nbase\n");
@@ -105,7 +105,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["add", "."], { cwd: repo, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "local"], { cwd: repo, stdio: "ignore" });
 
-    process.env.CORTEX_PATH = repo;
+    process.env.PHREN_PATH = repo;
     const { handleBackgroundSync } = await import("../cli-hooks-session.js");
     await handleBackgroundSync();
 
@@ -125,7 +125,7 @@ describe("handleBackgroundSync recovery", () => {
     configureRepo(repoB);
     fs.mkdirSync(path.join(repoA, ".governance"), { recursive: true });
     fs.mkdirSync(path.join(repoB, ".governance"), { recursive: true });
-    initTestCortexRoot(repoA);
+    initTestPhrenRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
     fs.writeFileSync(path.join(repoA, "demo", "summary.md"), "# summary\n\nshared line\n");
@@ -144,7 +144,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["add", "."], { cwd: repoB, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "local"], { cwd: repoB, stdio: "ignore" });
 
-    process.env.CORTEX_PATH = repoB;
+    process.env.PHREN_PATH = repoB;
     const { handleBackgroundSync } = await import("../cli-hooks-session.js");
     await handleBackgroundSync();
 
@@ -167,7 +167,7 @@ describe("handleBackgroundSync recovery", () => {
     configureRepo(repoB);
     fs.mkdirSync(path.join(repoA, ".governance"), { recursive: true });
     fs.mkdirSync(path.join(repoB, ".governance"), { recursive: true });
-    initTestCortexRoot(repoA);
+    initTestPhrenRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
     fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# demo task\n\n## Active\n\n- [ ] Base task\n\n## Queue\n\n## Done\n");
@@ -186,7 +186,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["add", "."], { cwd: repoB, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "local task"], { cwd: repoB, stdio: "ignore" });
 
-    process.env.CORTEX_PATH = repoB;
+    process.env.PHREN_PATH = repoB;
     const { handleBackgroundSync } = await import("../cli-hooks-session.js");
     await handleBackgroundSync();
 

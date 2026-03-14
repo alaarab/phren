@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { EXEC_TIMEOUT_MS, cortexErr, cortexOk, type CortexResult, CortexError } from "./shared.js";
+import { EXEC_TIMEOUT_MS, phrenErr, phrenOk, type PhrenResult, PhrenError } from "./shared.js";
 import { errorMessage, resolveExecCommand } from "./utils.js";
 import type { TaskItem } from "./data-tasks.js";
 
@@ -30,9 +30,9 @@ export function extractGithubRepoFromText(content: string): string | undefined {
   return match?.[1];
 }
 
-export function resolveProjectGithubRepo(cortexPath: string, project: string): string | undefined {
+export function resolveProjectGithubRepo(phrenPath: string, project: string): string | undefined {
   for (const file of ["CLAUDE.md", "summary.md"]) {
-    const fullPath = path.join(cortexPath, project, file);
+    const fullPath = path.join(phrenPath, project, file);
     if (!fs.existsSync(fullPath)) continue;
     const repo = extractGithubRepoFromText(fs.readFileSync(fullPath, "utf8"));
     if (repo) return repo;
@@ -42,7 +42,7 @@ export function resolveProjectGithubRepo(cortexPath: string, project: string): s
 
 export function buildTaskIssueBody(project: string, item: TaskItem): string {
   const lines = [
-    `Imported from cortex task for project \`${project}\`.`,
+    `Imported from phren task for project \`${project}\`.`,
     "",
     `Task item: ${item.line}`,
   ];
@@ -59,7 +59,7 @@ export function createGithubIssueForTask(args: {
   repo: string;
   title: string;
   body: string;
-}): CortexResult<{ repo: string; issueNumber?: number; url: string }> {
+}): PhrenResult<{ repo: string; issueNumber?: number; url: string }> {
   try {
     const ghExec = resolveExecCommand("gh");
     const stdout = execFileSync(ghExec.command, [
@@ -79,15 +79,15 @@ export function createGithubIssueForTask(args: {
     }).trim();
 
     const parsed = parseGithubIssueUrl(stdout);
-    return cortexOk({
+    return phrenOk({
       repo: args.repo,
       issueNumber: parsed?.issueNumber,
       url: parsed?.url || stdout,
     });
   } catch (err: unknown) {
-    return cortexErr(
+    return phrenErr(
       `Could not create GitHub issue. Ensure GitHub CLI is installed and authenticated: ${errorMessage(err)}`,
-      CortexError.NETWORK_ERROR,
+      PhrenError.NETWORK_ERROR,
     );
   }
 }

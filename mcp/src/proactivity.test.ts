@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { initTestCortexRoot, makeTempDir } from "./test-helpers.js";
+import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 import {
   getProactivityLevel,
   getProactivityLevelForTask,
@@ -16,10 +16,10 @@ describe("proactivity config", () => {
   const originalEnv = {
     HOME: process.env.HOME,
     USERPROFILE: process.env.USERPROFILE,
-    CORTEX_PATH: process.env.CORTEX_PATH,
-    CORTEX_PROACTIVITY: process.env.CORTEX_PROACTIVITY,
-    CORTEX_PROACTIVITY_FINDINGS: process.env.CORTEX_PROACTIVITY_FINDINGS,
-    CORTEX_PROACTIVITY_TASKS: process.env.CORTEX_PROACTIVITY_TASKS,
+    PHREN_PATH: process.env.PHREN_PATH,
+    PHREN_PROACTIVITY: process.env.PHREN_PROACTIVITY,
+    PHREN_PROACTIVITY_FINDINGS: process.env.PHREN_PROACTIVITY_FINDINGS,
+    PHREN_PROACTIVITY_TASKS: process.env.PHREN_PROACTIVITY_TASKS,
   };
 
   let tmpCleanup: (() => void) | undefined;
@@ -32,33 +32,33 @@ describe("proactivity config", () => {
   }
 
   function writeGovernanceInstallPreferences(content: Record<string, unknown>): void {
-    const filePath = path.join(homeDir, ".cortex", ".governance", "install-preferences.json");
+    const filePath = path.join(homeDir, ".phren", ".governance", "install-preferences.json");
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(content, null, 2) + "\n");
   }
 
   beforeEach(() => {
-    const tmp = makeTempDir("cortex-proactivity-test-");
+    const tmp = makeTempDir("phren-proactivity-test-");
     tmpCleanup = tmp.cleanup;
     homeDir = path.join(tmp.path, "home");
     fs.mkdirSync(homeDir, { recursive: true });
-    initTestCortexRoot(path.join(homeDir, ".cortex"));
+    initTestPhrenRoot(path.join(homeDir, ".phren"));
 
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
-    process.env.CORTEX_PATH = path.join(homeDir, ".cortex");
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_FINDINGS;
-    delete process.env.CORTEX_PROACTIVITY_TASKS;
+    process.env.PHREN_PATH = path.join(homeDir, ".phren");
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_FINDINGS;
+    delete process.env.PHREN_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
     restoreEnv("HOME");
     restoreEnv("USERPROFILE");
-    restoreEnv("CORTEX_PATH");
-    restoreEnv("CORTEX_PROACTIVITY");
-    restoreEnv("CORTEX_PROACTIVITY_FINDINGS");
-    restoreEnv("CORTEX_PROACTIVITY_TASKS");
+    restoreEnv("PHREN_PATH");
+    restoreEnv("PHREN_PROACTIVITY");
+    restoreEnv("PHREN_PROACTIVITY_FINDINGS");
+    restoreEnv("PHREN_PROACTIVITY_TASKS");
     tmpCleanup?.();
   });
 
@@ -68,8 +68,8 @@ describe("proactivity config", () => {
     expect(getProactivityLevelForTask()).toBe("high");
   });
 
-  it("uses CORTEX_PROACTIVITY as the shared override", () => {
-    process.env.CORTEX_PROACTIVITY = "medium";
+  it("uses PHREN_PROACTIVITY as the shared override", () => {
+    process.env.PHREN_PROACTIVITY = "medium";
 
     expect(getProactivityLevel()).toBe("medium");
     expect(getProactivityLevelForFindings()).toBe("medium");
@@ -77,9 +77,9 @@ describe("proactivity config", () => {
   });
 
   it("lets findings and task env vars override the shared level", () => {
-    process.env.CORTEX_PROACTIVITY = "low";
-    process.env.CORTEX_PROACTIVITY_FINDINGS = "high";
-    process.env.CORTEX_PROACTIVITY_TASKS = "medium";
+    process.env.PHREN_PROACTIVITY = "low";
+    process.env.PHREN_PROACTIVITY_FINDINGS = "high";
+    process.env.PHREN_PROACTIVITY_TASKS = "medium";
 
     expect(getProactivityLevel()).toBe("low");
     expect(getProactivityLevelForFindings()).toBe("high");
@@ -108,8 +108,8 @@ describe("proactivity config", () => {
 
   it("keeps env vars higher priority than governance defaults", () => {
     writeGovernanceInstallPreferences({ proactivity: "low" });
-    process.env.CORTEX_PROACTIVITY = "medium";
-    process.env.CORTEX_PROACTIVITY_FINDINGS = "high";
+    process.env.PHREN_PROACTIVITY = "medium";
+    process.env.PHREN_PROACTIVITY_FINDINGS = "high";
 
     expect(getProactivityLevel()).toBe("medium");
     expect(getProactivityLevelForFindings()).toBe("high");

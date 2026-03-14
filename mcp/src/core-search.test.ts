@@ -6,7 +6,7 @@ import { queryRows, type DbRow, type SqlJsDatabase } from "./shared-index.js";
 import type { DocRow } from "./shared-index.js";
 import { buildRobustFtsQuery, extractKeywords } from "./utils.js";
 import { keywordFallbackSearch } from "./core-search.js";
-import { initTestCortexRoot, makeTempDir } from "./test-helpers.js";
+import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 
 // Minimal mock DB that returns empty results for all queries.
 // rankResults calls queryDocRows (for canonical rows) and getEntityBoostDocs
@@ -33,18 +33,18 @@ function makeDoc(overrides: Partial<DocRow> & { path: string }): DocRow {
 describe("rankResults", () => {
   let tmpDir: string;
   let tmpCleanup: () => void;
-  const origGitCtxEnv = process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
+  const origGitCtxEnv = process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
 
   beforeEach(() => {
     ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("core-search-test-"));
     // Disable git-context filter for predictable scoring
-    delete process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
+    delete process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
   });
 
   afterEach(() => {
     tmpCleanup();
-    if (origGitCtxEnv === undefined) delete process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER;
-    else process.env.CORTEX_FEATURE_GIT_CONTEXT_FILTER = origGitCtxEnv;
+    if (origGitCtxEnv === undefined) delete process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
+    else process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = origGitCtxEnv;
   });
 
   it("empty input returns empty array without throwing", () => {
@@ -277,7 +277,7 @@ describe("synonym expansion in buildRobustFtsQuery", () => {
   it("loads music domain synonym pack from learned-synonyms.json", () => {
     const tmp = makeTempDir("synonyms-music-");
     try {
-      initTestCortexRoot(tmp.path);
+      initTestPhrenRoot(tmp.path);
       const project = "beatlab";
       const projectDir = path.join(tmp.path, project);
       fs.mkdirSync(projectDir, { recursive: true });
@@ -296,7 +296,7 @@ describe("synonym expansion in buildRobustFtsQuery", () => {
   it("maps game domain to gamedev synonym pack via learned-synonyms.json", () => {
     const tmp = makeTempDir("synonyms-game-");
     try {
-      initTestCortexRoot(tmp.path);
+      initTestPhrenRoot(tmp.path);
       const project = "arcade";
       const projectDir = path.join(tmp.path, project);
       fs.mkdirSync(projectDir, { recursive: true });

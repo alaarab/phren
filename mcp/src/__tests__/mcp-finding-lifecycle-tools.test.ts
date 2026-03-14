@@ -25,14 +25,14 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }
 
-function seedProject(cortexPath: string, project = "demo") {
-  const dir = path.join(cortexPath, project);
+function seedProject(phrenPath: string, project = "demo") {
+  const dir = path.join(phrenPath, project);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), "# demo\n");
 }
 
-function writeFindings(cortexPath: string, lines: string[]) {
-  const file = path.join(cortexPath, "demo", "FINDINGS.md");
+function writeFindings(phrenPath: string, lines: string[]) {
+  const file = path.join(phrenPath, "demo", "FINDINGS.md");
   fs.writeFileSync(file, ["# demo Findings", "", "## 2026-03-12", "", ...lines, ""].join("\n"));
 }
 
@@ -47,7 +47,7 @@ describe("mcp-finding lifecycle tools", () => {
     seedProject(tmp.path, "demo");
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => { throw new Error("unused"); },
       rebuildIndex: async () => {},
@@ -78,8 +78,8 @@ describe("mcp-finding lifecycle tools", () => {
     expect(res.data.status).toBe("superseded");
 
     const content = fs.readFileSync(path.join(tmp.path, "demo", "FINDINGS.md"), "utf8");
-    expect(content).toContain('<!-- cortex:status "superseded" -->');
-    expect(content).toContain('<!-- cortex:superseded_by "New retry strategy"');
+    expect(content).toContain('<!-- phren:status "superseded" -->');
+    expect(content).toContain('<!-- phren:superseded_by "New retry strategy"');
   });
 
   it("retract_finding marks finding as retracted with reason", async () => {
@@ -98,8 +98,8 @@ describe("mcp-finding lifecycle tools", () => {
     expect(res.data.reason).toBe("security policy updated");
 
     const content = fs.readFileSync(path.join(tmp.path, "demo", "FINDINGS.md"), "utf8");
-    expect(content).toContain('<!-- cortex:status "retracted" -->');
-    expect(content).toContain('<!-- cortex:status_reason "security policy updated" -->');
+    expect(content).toContain('<!-- phren:status "retracted" -->');
+    expect(content).toContain('<!-- phren:status_reason "security policy updated" -->');
   });
 
   it("resolve_contradiction applies requested resolution", async () => {
@@ -120,12 +120,12 @@ describe("mcp-finding lifecycle tools", () => {
     expect(res.data.finding_b.status).toBe("superseded");
 
     const content = fs.readFileSync(path.join(tmp.path, "demo", "FINDINGS.md"), "utf8");
-    expect(content).toContain('<!-- cortex:status_reason "contradiction_resolved_keep_a" -->');
+    expect(content).toContain('<!-- phren:status_reason "contradiction_resolved_keep_a" -->');
   });
 
   it("get_contradictions returns contradicted findings", async () => {
     writeFindings(tmp.path, [
-      '- Contradicted item <!-- fid:abcd1234 --> <!-- cortex:status "contradicted" --> <!-- cortex:status_reason "conflicts_with" --> <!-- cortex:status_ref "Other item" -->',
+      '- Contradicted item <!-- fid:abcd1234 --> <!-- phren:status "contradicted" --> <!-- phren:status_reason "conflicts_with" --> <!-- phren:status_ref "Other item" -->',
       "- Active item <!-- fid:ffff0000 -->",
     ]);
 

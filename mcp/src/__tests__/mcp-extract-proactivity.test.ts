@@ -59,7 +59,7 @@ describe("mcp-extract proactivity gating", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "test",
       db: () => { throw new Error("db not expected"); },
       rebuildIndex: async () => {},
@@ -68,20 +68,20 @@ describe("mcp-extract proactivity gating", () => {
     };
 
     register(server as any, ctx);
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_FINDINGS;
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_FINDINGS;
     vi.mocked(addFindingsToFile).mockClear();
     vi.mocked(generateText).mockClear();
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_FINDINGS;
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_FINDINGS;
     tmp.cleanup();
   });
 
   it("persists auto-extracted findings at high", async () => {
-    process.env.CORTEX_PROACTIVITY_FINDINGS = "high";
+    process.env.PHREN_PROACTIVITY_FINDINGS = "high";
 
     const res = parseResult(await server.call("auto_extract_findings", {
       project: "demo",
@@ -94,7 +94,7 @@ describe("mcp-extract proactivity gating", () => {
   });
 
   it('requires an explicit signal at medium before persisting findings', async () => {
-    process.env.CORTEX_PROACTIVITY_FINDINGS = "medium";
+    process.env.PHREN_PROACTIVITY_FINDINGS = "medium";
 
     const blocked = parseResult(await server.call("auto_extract_findings", {
       project: "demo",
@@ -115,7 +115,7 @@ describe("mcp-extract proactivity gating", () => {
   });
 
   it("blocks auto-extracted finding persistence at low", async () => {
-    process.env.CORTEX_PROACTIVITY_FINDINGS = "low";
+    process.env.PHREN_PROACTIVITY_FINDINGS = "low";
 
     const res = parseResult(await server.call("auto_extract_findings", {
       project: "demo",

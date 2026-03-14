@@ -13,7 +13,7 @@
     ],
     "queriesPerSize": 8,
     "keepTemp": true,
-    "rootDir": "/home/alaarab/cortex/.benchmarks/runs/cortex-bench-fair",
+    "rootDir": "/home/alaarab/phren/.benchmarks/runs/phren-bench-fair",
     "tokenBudget": 550,
     "lineBudget": 6,
     "charBudget": 520,
@@ -23,7 +23,7 @@
   "runs": [
     {
       "size": 1000,
-      "cortexPath": "/home/alaarab/cortex/.benchmarks/runs/cortex-bench-fair/cortex-sim-1000",
+      "phrenPath": "/home/alaarab/phren/.benchmarks/runs/phren-bench-fair/phren-sim-1000",
       "corpusDocs": 1021,
       "generatedFiles": 1000,
       "queries": [
@@ -274,7 +274,7 @@
     },
     {
       "size": 10000,
-      "cortexPath": "/home/alaarab/cortex/.benchmarks/runs/cortex-bench-fair/cortex-sim-10000",
+      "phrenPath": "/home/alaarab/phren/.benchmarks/runs/phren-bench-fair/phren-sim-10000",
       "corpusDocs": 10021,
       "generatedFiles": 10000,
       "queries": [
@@ -525,7 +525,7 @@
     },
     {
       "size": 100000,
-      "cortexPath": "/home/alaarab/cortex/.benchmarks/runs/cortex-bench-fair/cortex-sim-100000",
+      "phrenPath": "/home/alaarab/phren/.benchmarks/runs/phren-bench-fair/phren-sim-100000",
       "corpusDocs": 100021,
       "generatedFiles": 100000,
       "queries": [

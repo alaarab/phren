@@ -19,13 +19,13 @@ const FAKE_POSTGRES   = "postgres://" + "testuser:testpass@localhost:5432/testdb
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
 
-function makeCortex(): string {
-  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-secrets-test-"));
+function makePhren(): string {
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-secrets-test-"));
   return tmpDir;
 }
 
-function makeProject(cortexDir: string, name: string, files: Record<string, string>): void {
-  const dir = path.join(cortexDir, name);
+function makeProject(phrenDir: string, name: string, files: Record<string, string>): void {
+  const dir = path.join(phrenDir, name);
   fs.mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, file), content);
@@ -33,7 +33,7 @@ function makeProject(cortexDir: string, name: string, files: Record<string, stri
 }
 
 afterEach(() => {
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_ACTOR;
   if (tmpCleanup) {
     tmpCleanup();
     tmpCleanup = undefined;
@@ -74,33 +74,33 @@ describe("scanForSecrets", () => {
 
 describe("addFindingToFile rejects secrets", () => {
   it("returns VALIDATION_ERROR when finding contains an AWS key", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "myproj", { "summary.md": "# myproj\n" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "myproj", { "summary.md": "# myproj\n" });
 
-    const result = addFindingToFile(cortex, "myproj", `Use ${FAKE_AWS_KEY} for the API`);
+    const result = addFindingToFile(phren, "myproj", `Use ${FAKE_AWS_KEY} for the API`);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toContain("Rejected: finding appears to contain a secret (AWS access key)");
     expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
   });
 
   it("returns VALIDATION_ERROR when finding contains a JWT", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "myproj", { "summary.md": "# myproj\n" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "myproj", { "summary.md": "# myproj\n" });
 
-    const result = addFindingToFile(cortex, "myproj", `Set token to ${FAKE_JWT}`);
+    const result = addFindingToFile(phren, "myproj", `Set token to ${FAKE_JWT}`);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toContain("Rejected: finding appears to contain a secret (JWT token)");
     expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
   });
 
   it("allows clean findings through", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "myproj", { "summary.md": "# myproj\n" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "myproj", { "summary.md": "# myproj\n" });
 
-    const result = addFindingToFile(cortex, "myproj", "Always use parameterized queries");
+    const result = addFindingToFile(phren, "myproj", "Always use parameterized queries");
     expect(result.ok).toBe(true);
   });
 });

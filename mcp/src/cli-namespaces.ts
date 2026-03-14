@@ -3,7 +3,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import {
   expandHomePath,
-  getCortexPath,
+  getPhrenPath,
   getProjectDirs,
   homePath,
   hookConfigPath,
@@ -14,7 +14,7 @@ import { readInstallPreferences, writeInstallPreferences, type InstallPreference
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
-import { TASK_FILE_ALIASES, addTask, completeTask, updateTask, reorderTask } from "./data-tasks.js";
+import { TASK_FILE_ALIASES, addTask, completeTask, updateTask, reorderTask, pinTask } from "./data-tasks.js";
 import {
   PROJECT_HOOK_EVENTS,
   PROJECT_OWNERSHIP_MODES,
@@ -25,32 +25,39 @@ import {
   writeProjectHookConfig,
 } from "./project-config.js";
 import { addFinding, removeFinding } from "./core-finding.js";
+import { supersedeFinding, retractFinding } from "./finding-lifecycle.js";
+import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, type CustomHookEntry } from "./hooks.js";
+import { runtimeFile } from "./shared.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
 
 function printSkillsUsage() {
   console.log("Usage:");
-  console.log("  cortex skills list [--project <name>]");
-  console.log("  cortex skills show <name> [--project <name>]");
-  console.log("  cortex skills edit <name> [--project <name>]");
-  console.log("  cortex skills add <project> <path>");
-  console.log("  cortex skills resolve <project|global> [--json]");
-  console.log("  cortex skills doctor <project|global>");
-  console.log("  cortex skills sync <project|global>");
-  console.log("  cortex skills enable <project|global> <name>");
-  console.log("  cortex skills disable <project|global> <name>");
-  console.log("  cortex skills remove <project> <name>");
+  console.log("  phren skills list [--project <name>]");
+  console.log("  phren skills show <name> [--project <name>]");
+  console.log("  phren skills edit <name> [--project <name>]");
+  console.log("  phren skills add <project> <path>");
+  console.log("  phren skills resolve <project|global> [--json]");
+  console.log("  phren skills doctor <project|global>");
+  console.log("  phren skills sync <project|global>");
+  console.log("  phren skills enable <project|global> <name>");
+  console.log("  phren skills disable <project|global> <name>");
+  console.log("  phren skills remove <project> <name>");
 }
 
 function printHooksUsage() {
   console.log("Usage:");
-  console.log("  cortex hooks list [--project <name>]");
-  console.log("  cortex hooks show <tool>");
-  console.log("  cortex hooks edit <tool>");
-  console.log("  cortex hooks enable <tool>");
-  console.log("  cortex hooks disable <tool>");
+  console.log("  phren hooks list [--project <name>]");
+  console.log("  phren hooks show <tool>");
+  console.log("  phren hooks edit <tool>");
+  console.log("  phren hooks enable <tool>");
+  console.log("  phren hooks disable <tool>");
+  console.log("  phren hooks add-custom <event> <command>");
+  console.log("  phren hooks remove-custom <event> [<command>]");
+  console.log("  phren hooks errors [--limit <n>]");
   console.log("  tools: claude|copilot|cursor|codex");
+  console.log("  events: " + HOOK_EVENT_VALUES.join(", "));
 }
 
 function normalizeHookTool(raw: string | undefined): HookToolName | null {
@@ -75,7 +82,7 @@ function parseMcpToggle(raw: string | undefined): boolean | undefined {
 }
 
 function findSkillPath(name: string, profile: string, project?: string): string | null {
-  const found = findSkill(getCortexPath(), profile, project, name);
+  const found = findSkill(getPhrenPath(), profile, project, name);
   if (!found || "error" in found) return null;
   return found.path;
 }
@@ -85,7 +92,7 @@ function openInEditor(filePath: string): void {
   try {
     execFileSync(editor, [filePath], { stdio: "inherit" });
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] openInEditor: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] openInEditor: ${errorMessage(err)}\n`);
     console.error(`Editor "${editor}" failed. Set $EDITOR to your preferred editor.`);
     process.exit(1);
   }
@@ -146,7 +153,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
 
     const baseName = path.basename(source);
     const fileName = baseName.toLowerCase().endsWith(".md") ? baseName : `${baseName}.md`;
-    const destDir = path.join(getCortexPath(), project, "skills");
+    const destDir = path.join(getPhrenPath(), project, "skills");
     const dest = path.join(destDir, fileName);
     fs.mkdirSync(destDir, { recursive: true });
 
@@ -159,7 +166,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       fs.symlinkSync(source, dest);
       console.log(`Linked skill ${fileName} into ${project}.`);
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] skill add symlinkFailed: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] skill add symlinkFailed: ${errorMessage(err)}\n`);
       fs.copyFileSync(source, dest);
       console.log(`Copied skill ${fileName} into ${project}.`);
     }
@@ -178,7 +185,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
     }
 
     if (subcommand === "sync") {
-      const syncedManifest = syncSkillLinksForScope(getCortexPath(), scope);
+      const syncedManifest = syncSkillLinksForScope(getPhrenPath(), scope);
       if (!syncedManifest) {
         console.error(`Project directory not found for "${scope}".`);
         process.exit(1);
@@ -191,7 +198,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
     }
 
     const destDir = resolveSkillMirrorDir(scope);
-    const manifest = buildSkillManifest(getCortexPath(), profile, scope, destDir || undefined);
+    const manifest = buildSkillManifest(getPhrenPath(), profile, scope, destDir || undefined);
     if (subcommand === "resolve") {
       if (args.includes("--json")) {
         console.log(JSON.stringify(manifest, null, 2));
@@ -216,12 +223,12 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       console.error(`Invalid project name: "${scope}"`);
       process.exit(1);
     }
-    const resolved = findSkill(getCortexPath(), profile, scope, name);
+    const resolved = findSkill(getPhrenPath(), profile, scope, name);
     if (!resolved || "error" in resolved) {
       console.error(`Skill not found: "${name}" in "${scope}"`);
       process.exit(1);
     }
-    setSkillEnabledAndSync(getCortexPath(), scope, resolved.name, subcommand === "enable");
+    setSkillEnabledAndSync(getPhrenPath(), scope, resolved.name, subcommand === "enable");
     console.log(`${subcommand === "enable" ? "Enabled" : "Disabled"} skill ${resolved.name} in ${scope}.`);
     return;
   }
@@ -238,7 +245,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       process.exit(1);
     }
 
-    const resolved = findLocalSkill(getCortexPath(), project, name)?.path || null;
+    const resolved = findLocalSkill(getPhrenPath(), project, name)?.path || null;
     if (!resolved) {
       console.error(`Skill not found: "${name}" in project "${project}"`);
       process.exit(1);
@@ -266,12 +273,12 @@ export function handleHooksNamespace(args: string[]) {
   }
 
   if (subcommand === "list") {
-    const cortexPath = getCortexPath();
-    const prefs = readInstallPreferences(cortexPath);
+    const phrenPath = getPhrenPath();
+    const prefs = readInstallPreferences(phrenPath);
     const hooksEnabled = prefs.hooksEnabled !== false;
     const toolPrefs = prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {};
     const project = getOptionValue(args.slice(1), "--project");
-    if (project && (!isValidProjectName(project) || !fs.existsSync(path.join(cortexPath, project)))) {
+    if (project && (!isValidProjectName(project) || !fs.existsSync(path.join(phrenPath, project)))) {
       console.error(`Project "${project}" not found.`);
       process.exit(1);
     }
@@ -287,15 +294,24 @@ export function handleHooksNamespace(args: string[]) {
       console.log(`${row.tool.padEnd(8)}  ${row.hookType.padEnd(9)}  ${row.status}`);
     }
     if (project) {
-      const projectConfig = readProjectConfig(cortexPath, project);
+      const projectConfig = readProjectConfig(phrenPath, project);
       const base = projectConfig.hooks?.enabled;
       console.log("");
       console.log(`Project ${project}`);
       console.log(`  base: ${typeof base === "boolean" ? (base ? "enabled" : "disabled") : "inherit"}`);
       for (const event of PROJECT_HOOK_EVENTS) {
         const configured = projectConfig.hooks?.[event];
-        const effective = isProjectHookEnabled(cortexPath, project, event, projectConfig);
+        const effective = isProjectHookEnabled(phrenPath, project, event, projectConfig);
         console.log(`  ${event}: ${effective ? "enabled" : "disabled"}${typeof configured === "boolean" ? ` (explicit ${configured ? "on" : "off"})` : " (inherit)"}`);
+      }
+    }
+    const customHooks = readCustomHooks(phrenPath);
+    if (customHooks.length > 0) {
+      console.log("");
+      console.log(`${customHooks.length} custom hook(s):`);
+      for (const h of customHooks) {
+        const hookKind = "webhook" in h ? "[webhook] " : "";
+        console.log(`  ${h.event}: ${hookKind}${getHookTarget(h)}${h.timeout ? ` (${h.timeout}ms)` : ""}`);
       }
     }
     return;
@@ -307,7 +323,7 @@ export function handleHooksNamespace(args: string[]) {
       printHooksUsage();
       process.exit(1);
     }
-    const configPath = hookConfigPath(tool, getCortexPath());
+    const configPath = hookConfigPath(tool, getPhrenPath());
     if (!configPath || !fs.existsSync(configPath)) {
       console.error(`Hook config not found for "${tool}": ${configPath ?? "(unknown path)"}`);
       process.exit(1);
@@ -327,14 +343,83 @@ export function handleHooksNamespace(args: string[]) {
       process.exit(1);
     }
 
-    const prefs = readInstallPreferences(getCortexPath());
-    writeInstallPreferences(getCortexPath(), {
+    const prefs = readInstallPreferences(getPhrenPath());
+    writeInstallPreferences(getPhrenPath(), {
       hookTools: {
         ...(prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {}),
         [tool]: subcommand === "enable",
       },
     } satisfies Partial<InstallPreferences>);
     console.log(`${subcommand === "enable" ? "Enabled" : "Disabled"} hooks for ${tool}.`);
+    return;
+  }
+
+  if (subcommand === "add-custom") {
+    const event = args[1];
+    const command = args.slice(2).join(" ");
+    if (!event || !command) {
+      console.error('Usage: phren hooks add-custom <event> "<command>"');
+      console.error("Events: " + HOOK_EVENT_VALUES.join(", "));
+      process.exit(1);
+    }
+    if (!HOOK_EVENT_VALUES.includes(event as typeof HOOK_EVENT_VALUES[number])) {
+      console.error(`Invalid event "${event}". Valid events: ${HOOK_EVENT_VALUES.join(", ")}`);
+      process.exit(1);
+    }
+    const phrenPath = getPhrenPath();
+    const prefs = readInstallPreferences(phrenPath);
+    const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
+    const newHook: CustomHookEntry = { event: event as typeof HOOK_EVENT_VALUES[number], command };
+    writeInstallPreferences(phrenPath, { ...prefs, customHooks: [...existing, newHook] });
+    console.log(`Added custom hook for "${event}": ${command}`);
+    return;
+  }
+
+  if (subcommand === "remove-custom") {
+    const event = args[1];
+    if (!event) {
+      console.error('Usage: phren hooks remove-custom <event> [<command>]');
+      process.exit(1);
+    }
+    if (!HOOK_EVENT_VALUES.includes(event as typeof HOOK_EVENT_VALUES[number])) {
+      console.error(`Invalid event "${event}". Valid events: ${HOOK_EVENT_VALUES.join(", ")}`);
+      process.exit(1);
+    }
+    const command = args.slice(2).join(" ") || undefined;
+    const phrenPath = getPhrenPath();
+    const prefs = readInstallPreferences(phrenPath);
+    const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
+    const remaining = existing.filter(h => h.event !== event || (command && !getHookTarget(h).includes(command)));
+    const removed = existing.length - remaining.length;
+    if (removed === 0) {
+      console.error(`No custom hooks matched event="${event}"${command ? ` command containing "${command}"` : ""}.`);
+      process.exit(1);
+    }
+    writeInstallPreferences(phrenPath, { ...prefs, customHooks: remaining });
+    console.log(`Removed ${removed} custom hook(s) for "${event}".`);
+    return;
+  }
+
+  if (subcommand === "errors") {
+    const phrenPath = getPhrenPath();
+    const logPath = runtimeFile(phrenPath, "hook-errors.log");
+    if (!fs.existsSync(logPath)) {
+      console.log("No hook errors recorded.");
+      return;
+    }
+    const content = fs.readFileSync(logPath, "utf8").trim();
+    if (!content) {
+      console.log("No hook errors recorded.");
+      return;
+    }
+    const lines = content.split("\n");
+    const limitArg = getOptionValue(args.slice(1), "--limit");
+    const limit = limitArg ? Math.max(1, parseInt(limitArg, 10) || 20) : 20;
+    const display = lines.slice(-limit);
+    console.log(`Hook errors (last ${display.length} of ${lines.length}):\n`);
+    for (const line of display) {
+      console.log(line);
+    }
     return;
   }
 
@@ -345,12 +430,12 @@ export function handleHooksNamespace(args: string[]) {
 
 export function handleSkillList(profile: string, project?: string) {
   if (project) {
-    const manifest = buildSkillManifest(getCortexPath(), profile, project, resolveSkillMirrorDir(project) || undefined);
+    const manifest = buildSkillManifest(getPhrenPath(), profile, project, resolveSkillMirrorDir(project) || undefined);
     printResolvedManifest(project, manifest, resolveSkillMirrorDir(project));
     return;
   }
 
-  const sources = getAllSkills(getCortexPath(), profile);
+  const sources = getAllSkills(getPhrenPath(), profile);
 
   if (!sources.length) {
     console.log("No skills found.");
@@ -386,8 +471,8 @@ export function handleDetectSkills(args: string[], profile: string) {
   }
 
   const trackedSkills = new Set<string>();
-  const cortexPath = getCortexPath();
-  const globalSkillsDir = path.join(cortexPath, "global", "skills");
+  const phrenPath = getPhrenPath();
+  const globalSkillsDir = path.join(phrenPath, "global", "skills");
   if (fs.existsSync(globalSkillsDir)) {
     for (const entry of fs.readdirSync(globalSkillsDir)) {
       trackedSkills.add(entry.replace(/\.md$/, ""));
@@ -396,7 +481,7 @@ export function handleDetectSkills(args: string[], profile: string) {
       }
     }
   }
-  for (const dir of getProjectDirs(cortexPath, profile)) {
+  for (const dir of getProjectDirs(phrenPath, profile)) {
     for (const projectSkillsDir of [path.join(dir, "skills"), path.join(dir, ".claude", "skills")]) {
       if (!fs.existsSync(projectSkillsDir)) continue;
       for (const entry of fs.readdirSync(projectSkillsDir)) {
@@ -412,7 +497,7 @@ export function handleDetectSkills(args: string[], profile: string) {
     try {
       if (fs.lstatSync(entryPath).isSymbolicLink()) continue;
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] skillList lstat: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] skillList lstat: ${errorMessage(err)}\n`);
     }
     const name = entry.replace(/\.md$/, "");
     if (trackedSkills.has(name)) continue;
@@ -427,7 +512,7 @@ export function handleDetectSkills(args: string[], profile: string) {
   }
 
   if (!untracked.length) {
-    console.log("All skills in ~/.claude/skills/ are already tracked by cortex.");
+    console.log("All skills in ~/.claude/skills/ are already tracked by phren.");
     return;
   }
 
@@ -437,7 +522,7 @@ export function handleDetectSkills(args: string[], profile: string) {
   }
 
   if (!importFlag) {
-    console.log("\nRun with --import to copy these into cortex global skills.");
+    console.log("\nRun with --import to copy these into phren global skills.");
     return;
   }
 
@@ -460,7 +545,7 @@ export function handleDetectSkills(args: string[], profile: string) {
     console.log(`  imported ${skill.name} -> ${destDisplay}`);
     imported++;
   }
-  console.log(`\nImported ${imported} skill(s). They are now tracked in cortex global skills.`);
+  console.log(`\nImported ${imported} skill(s). They are now tracked in phren global skills.`);
 }
 
 function resolveSkillMirrorDir(scope: string): string | null {
@@ -530,30 +615,30 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
   if (!subcommand || subcommand === "list" || subcommand === "--help" || subcommand === "-h") {
     if (subcommand === "--help" || subcommand === "-h") {
       console.log("Usage:");
-      console.log("  cortex projects list               List all projects");
-      console.log("  cortex projects configure <name>   Update per-project enrollment settings");
+      console.log("  phren projects list               List all projects");
+      console.log("  phren projects configure <name>   Update per-project enrollment settings");
       console.log("    flags: --ownership=<mode> --hooks=on|off");
-      console.log("  cortex projects remove <name>      Remove a project (asks for confirmation)");
+      console.log("  phren projects remove <name>      Remove a project (asks for confirmation)");
       return;
     }
     return handleProjectsList(profile);
   }
 
   if (subcommand === "add") {
-    console.error("`cortex projects add` has been removed from the supported workflow.");
-    console.error("Use `cd ~/your-project && npx cortex add` so enrollment stays path-based.");
+    console.error("`phren projects add` has been removed from the supported workflow.");
+    console.error("Use `cd ~/your-project && npx phren add` so enrollment stays path-based.");
     process.exit(1);
   }
 
   if (subcommand === "remove") {
-    const manifest = readRootManifest(getCortexPath());
+    const manifest = readRootManifest(getPhrenPath());
     if (manifest?.installMode === "project-local") {
-      console.error("projects remove is unsupported in project-local mode. Use `cortex uninstall`.");
+      console.error("projects remove is unsupported in project-local mode. Use `phren uninstall`.");
       process.exit(1);
     }
     const name = args[1];
     if (!name) {
-      console.error("Usage: cortex projects remove <name>");
+      console.error("Usage: phren projects remove <name>");
       process.exit(1);
     }
     return handleProjectsRemove(name, profile);
@@ -562,14 +647,14 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
   if (subcommand === "configure") {
     const name = args[1];
     if (!name) {
-      console.error(`Usage: cortex projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
+      console.error(`Usage: phren projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
       process.exit(1);
     }
     if (!isValidProjectName(name)) {
       console.error(`Invalid project name: "${name}".`);
       process.exit(1);
     }
-    if (!fs.existsSync(path.join(getCortexPath(), name))) {
+    if (!fs.existsSync(path.join(getPhrenPath(), name))) {
       console.error(`Project "${name}" not found.`);
       process.exit(1);
     }
@@ -578,11 +663,11 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
     const ownership = ownershipArg ? parseProjectOwnershipMode(ownershipArg) : undefined;
     const hooksEnabled = parseMcpToggle(hooksArg);
     if (!ownershipArg && hooksArg === undefined) {
-      console.error(`Usage: cortex projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
+      console.error(`Usage: phren projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
       process.exit(1);
     }
     if (ownershipArg && !ownership) {
-      console.error(`Usage: cortex projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
+      console.error(`Usage: phren projects configure <name> [--ownership=${PROJECT_OWNERSHIP_MODES.join("|")}] [--hooks=on|off]`);
       process.exit(1);
     }
     if (hooksArg !== undefined && hooksEnabled === undefined) {
@@ -592,11 +677,11 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
 
     const updates: string[] = [];
     if (ownership) {
-      writeProjectConfig(getCortexPath(), name, { ownership });
+      writeProjectConfig(getPhrenPath(), name, { ownership });
       updates.push(`ownership=${ownership}`);
     }
     if (hooksEnabled !== undefined) {
-      writeProjectHookConfig(getCortexPath(), name, { enabled: hooksEnabled });
+      writeProjectHookConfig(getPhrenPath(), name, { enabled: hooksEnabled });
       updates.push(`hooks=${hooksEnabled ? "on" : "off"}`);
     }
     console.log(`Updated ${name}: ${updates.join(", ")}`);
@@ -604,31 +689,31 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
   }
 
   console.error(`Unknown subcommand: ${subcommand}`);
-  console.error("Usage: cortex projects [list|configure|remove]");
+  console.error("Usage: phren projects [list|configure|remove]");
   process.exit(1);
 }
 
 function handleProjectsList(profile: string) {
-  const cortexPath = getCortexPath();
-  const projectDirs = getProjectDirs(cortexPath, profile);
+  const phrenPath = getPhrenPath();
+  const projectDirs = getProjectDirs(phrenPath, profile);
   const projects = projectDirs
     .map((dir) => path.basename(dir))
     .filter((name) => name !== "global")
     .sort();
 
   if (!projects.length) {
-    console.log("No projects found. Run: cd ~/your-project && npx cortex add");
+    console.log("No projects found. Run: cd ~/your-project && npx phren add");
     return;
   }
 
-  console.log(`\nProjects in ${cortexPath}:\n`);
+  console.log(`\nProjects in ${phrenPath}:\n`);
   for (const name of projects) {
-    const projectDir = path.join(cortexPath, name);
+    const projectDir = path.join(phrenPath, name);
     let dirFiles: Set<string>;
     try {
       dirFiles = new Set(fs.readdirSync(projectDir));
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] projects list readdir: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] projects list readdir: ${errorMessage(err)}\n`);
       dirFiles = new Set();
     }
     const tags: string[] = [];
@@ -638,7 +723,7 @@ function handleProjectsList(profile: string) {
     console.log(`  ${name}${tagStr}`);
   }
   console.log(`\n${projects.length} project(s) total.`);
-  console.log("Add another project: cd ~/your-project && npx cortex add");
+  console.log("Add another project: cd ~/your-project && npx phren add");
 }
 
 async function handleProjectsRemove(name: string, profile: string) {
@@ -651,8 +736,8 @@ async function handleProjectsRemove(name: string, profile: string) {
     process.exit(1);
   }
 
-  const cortexPath = getCortexPath();
-  const projectDir = path.join(cortexPath, name);
+  const phrenPath = getPhrenPath();
+  const projectDir = path.join(phrenPath, name);
 
   if (!fs.existsSync(projectDir)) {
     console.error(`Project "${name}" not found at ${projectDir}`);
@@ -669,7 +754,7 @@ async function handleProjectsRemove(name: string, profile: string) {
   try {
     countFiles(projectDir);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] projects remove countFiles: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] projects remove countFiles: ${errorMessage(err)}\n`);
   }
 
   const readline = await import("readline");
@@ -695,10 +780,11 @@ async function handleProjectsRemove(name: string, profile: string) {
 
 function printTaskUsage() {
   console.log("Usage:");
-  console.log('  cortex task add <project> "<text>"');
-  console.log('  cortex task complete <project> "<text>"');
-  console.log('  cortex task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."]');
-  console.log('  cortex task reorder <project> "<text>" --rank=<n>');
+  console.log('  phren task add <project> "<text>"');
+  console.log('  phren task complete <project> "<text>"');
+  console.log('  phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."]');
+  console.log('  phren task pin <project> "<text>"');
+  console.log('  phren task reorder <project> "<text>" --rank=<n>');
 }
 
 export async function handleTaskNamespace(args: string[]) {
@@ -709,7 +795,7 @@ export async function handleTaskNamespace(args: string[]) {
   }
 
   if (subcommand === "list") {
-    // Delegate to the cross-project task view (same as `cortex tasks`)
+    // Delegate to the cross-project task view (same as `phren tasks`)
     const { handleTaskView } = await import("./cli-ops.js");
     return handleTaskView(args[1] || "default");
   }
@@ -718,10 +804,10 @@ export async function handleTaskNamespace(args: string[]) {
     const project = args[1];
     const text = args.slice(2).join(" ");
     if (!project || !text) {
-      console.error('Usage: cortex task add <project> "<text>"');
+      console.error('Usage: phren task add <project> "<text>"');
       process.exit(1);
     }
-    const result = addTask(getCortexPath(), project, text);
+    const result = addTask(getPhrenPath(), project, text);
     if (!result.ok) {
       console.error(result.error);
       process.exit(1);
@@ -734,10 +820,10 @@ export async function handleTaskNamespace(args: string[]) {
     const project = args[1];
     const match = args.slice(2).join(" ");
     if (!project || !match) {
-      console.error('Usage: cortex task complete <project> "<text>"');
+      console.error('Usage: phren task complete <project> "<text>"');
       process.exit(1);
     }
-    const result = completeTask(getCortexPath(), project, match);
+    const result = completeTask(getPhrenPath(), project, match);
     if (!result.ok) {
       console.error(result.error);
       process.exit(1);
@@ -771,7 +857,23 @@ export async function handleTaskNamespace(args: string[]) {
       printTaskUsage();
       process.exit(1);
     }
-    const result = updateTask(getCortexPath(), project, match, updates);
+    const result = updateTask(getPhrenPath(), project, match, updates);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    console.log(result.data);
+    return;
+  }
+
+  if (subcommand === "pin") {
+    const project = args[1];
+    const match = args.slice(2).join(" ");
+    if (!project || !match) {
+      console.error('Usage: phren task pin <project> "<text>"');
+      process.exit(1);
+    }
+    const result = pinTask(getPhrenPath(), project, match);
     if (!result.ok) {
       console.error(result.error);
       process.exit(1);
@@ -798,10 +900,10 @@ export async function handleTaskNamespace(args: string[]) {
     const match = positional.join(" ");
     const rank = rankArg ? Number.parseInt(rankArg, 10) : Number.NaN;
     if (!match || !rankArg || !Number.isFinite(rank) || rank < 1) {
-      console.error('Usage: cortex task reorder <project> "<text>" --rank=<n>');
+      console.error('Usage: phren task reorder <project> "<text>" --rank=<n>');
       process.exit(1);
     }
-    const result = reorderTask(getCortexPath(), project, match, rank);
+    const result = reorderTask(getPhrenPath(), project, match, rank);
     if (!result.ok) {
       console.error(result.error);
       process.exit(1);
@@ -819,8 +921,10 @@ export async function handleTaskNamespace(args: string[]) {
 
 function printFindingUsage() {
   console.log("Usage:");
-  console.log('  cortex finding add <project> "<text>"');
-  console.log('  cortex finding remove <project> "<text>"');
+  console.log('  phren finding add <project> "<text>"');
+  console.log('  phren finding remove <project> "<text>"');
+  console.log('  phren finding supersede <project> "<text>" --by "<newer guidance>"');
+  console.log('  phren finding retract <project> "<text>" --reason "<reason>"');
 }
 
 export async function handleFindingNamespace(args: string[]) {
@@ -833,11 +937,11 @@ export async function handleFindingNamespace(args: string[]) {
   if (subcommand === "list") {
     const project = args[1];
     if (!project) {
-      console.error("Usage: cortex finding list <project>");
+      console.error("Usage: phren finding list <project>");
       process.exit(1);
     }
     const { readFindings } = await import("./data-access.js");
-    const result = readFindings(getCortexPath(), project);
+    const result = readFindings(getPhrenPath(), project);
     if (!result.ok) {
       console.error(result.error);
       process.exit(1);
@@ -857,10 +961,10 @@ export async function handleFindingNamespace(args: string[]) {
     const project = args[1];
     const text = args.slice(2).join(" ");
     if (!project || !text) {
-      console.error('Usage: cortex finding add <project> "<text>"');
+      console.error('Usage: phren finding add <project> "<text>"');
       process.exit(1);
     }
-    const result = addFinding(getCortexPath(), project, text);
+    const result = addFinding(getPhrenPath(), project, text);
     if (!result.ok) {
       console.error(result.message);
       process.exit(1);
@@ -873,15 +977,83 @@ export async function handleFindingNamespace(args: string[]) {
     const project = args[1];
     const text = args.slice(2).join(" ");
     if (!project || !text) {
-      console.error('Usage: cortex finding remove <project> "<text>"');
+      console.error('Usage: phren finding remove <project> "<text>"');
       process.exit(1);
     }
-    const result = removeFinding(getCortexPath(), project, text);
+    const result = removeFinding(getPhrenPath(), project, text);
     if (!result.ok) {
       console.error(result.message);
       process.exit(1);
     }
     console.log(result.message);
+    return;
+  }
+
+  if (subcommand === "supersede") {
+    const project = args[1];
+    if (!project) {
+      console.error('Usage: phren finding supersede <project> "<text>" --by "<newer guidance>"');
+      process.exit(1);
+    }
+    const rest = args.slice(2);
+    const byIdx = rest.indexOf("--by");
+    const byEqIdx = rest.findIndex(a => a.startsWith("--by="));
+    let text: string;
+    let byValue: string;
+    if (byEqIdx !== -1) {
+      byValue = rest[byEqIdx].slice("--by=".length);
+      text = rest.filter((_, i) => i !== byEqIdx && !rest[i].startsWith("--")).join(" ");
+    } else if (byIdx !== -1) {
+      text = rest.slice(0, byIdx).join(" ");
+      byValue = rest.slice(byIdx + 1).join(" ");
+    } else {
+      text = "";
+      byValue = "";
+    }
+    if (!text || !byValue) {
+      console.error('Usage: phren finding supersede <project> "<text>" --by "<newer guidance>"');
+      process.exit(1);
+    }
+    const result = supersedeFinding(getPhrenPath(), project, text, byValue);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    console.log(`Finding superseded: "${result.data.finding}" -> "${result.data.superseded_by}"`);
+    return;
+  }
+
+  if (subcommand === "retract") {
+    const project = args[1];
+    if (!project) {
+      console.error('Usage: phren finding retract <project> "<text>" --reason "<reason>"');
+      process.exit(1);
+    }
+    const rest = args.slice(2);
+    const reasonIdx = rest.indexOf("--reason");
+    const reasonEqIdx = rest.findIndex(a => a.startsWith("--reason="));
+    let text: string;
+    let reasonValue: string;
+    if (reasonEqIdx !== -1) {
+      reasonValue = rest[reasonEqIdx].slice("--reason=".length);
+      text = rest.filter((_, i) => i !== reasonEqIdx && !rest[i].startsWith("--")).join(" ");
+    } else if (reasonIdx !== -1) {
+      text = rest.slice(0, reasonIdx).join(" ");
+      reasonValue = rest.slice(reasonIdx + 1).join(" ");
+    } else {
+      text = "";
+      reasonValue = "";
+    }
+    if (!text || !reasonValue) {
+      console.error('Usage: phren finding retract <project> "<text>" --reason "<reason>"');
+      process.exit(1);
+    }
+    const result = retractFinding(getPhrenPath(), project, text, reasonValue);
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+    console.log(`Finding retracted: "${result.data.finding}" (reason: ${result.data.reason})`);
     return;
   }
 

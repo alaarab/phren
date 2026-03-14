@@ -9,8 +9,8 @@ const PROJECT = "myapp";
 
 let tmp: { path: string; cleanup: () => void };
 
-function seedProject(cortexPath: string, project = PROJECT) {
-  const dir = path.join(cortexPath, project);
+function seedProject(phrenPath: string, project = PROJECT) {
+  const dir = path.join(phrenPath, project);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n`);
 }
@@ -30,23 +30,23 @@ afterEach(() => {
 });
 
 describe("finding supersession annotations", () => {
-  it("adds cortex:superseded_by annotation to the old finding", () => {
+  it("adds phren:superseded_by annotation to the old finding", () => {
     addFindingToFile(tmp.path, PROJECT, "Use SQLite WAL mode for concurrent readers");
     addFindingToFile(tmp.path, PROJECT, "Use SQLite WAL mode plus connection pooling for concurrent readers", {
       supersedes: "Use SQLite WAL mode for concurrent readers",
     });
     const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toMatch(/cortex:superseded_by/);
+    expect(content).toMatch(/phren:superseded_by/);
     expect(content).toMatch(/Use SQLite WAL mode for concurrent readers/);
   });
 
-  it("adds cortex:supersedes annotation to the new finding", () => {
+  it("adds phren:supersedes annotation to the new finding", () => {
     addFindingToFile(tmp.path, PROJECT, "Cache responses at the CDN layer");
     addFindingToFile(tmp.path, PROJECT, "Cache responses at the CDN layer with stale-while-revalidate", {
       supersedes: "Cache responses at the CDN layer",
     });
     const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toMatch(/cortex:supersedes/);
+    expect(content).toMatch(/phren:supersedes/);
   });
 
   it("superseded findings are hidden by default in readFindings (supersededBy is set)", () => {

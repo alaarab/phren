@@ -53,19 +53,19 @@ describe("removeSkillPath", () => {
     process.env.USERPROFILE = tmp.path;
 
     try {
-      const cortexPath = path.join(tmp.path, "cortex");
-      const skillPath = path.join(cortexPath, "global", "skills", "helper.md");
+      const phrenPath = path.join(tmp.path, "phren");
+      const skillPath = path.join(phrenPath, "global", "skills", "helper.md");
       writeFile(skillPath, "---\nname: helper\ndescription: test\n---\nbody\n");
 
-      syncSkillLinksForScope(cortexPath, "global");
+      syncSkillLinksForScope(phrenPath, "global");
       const linked = path.join(tmp.path, ".claude", "skills", "helper.md");
       expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
 
-      setSkillEnabledAndSync(cortexPath, "global", "helper", false);
+      setSkillEnabledAndSync(phrenPath, "global", "helper", false);
       expect(fs.existsSync(skillPath)).toBe(true);
       expect(fs.existsSync(linked)).toBe(false);
 
-      setSkillEnabledAndSync(cortexPath, "global", "helper", true);
+      setSkillEnabledAndSync(phrenPath, "global", "helper", true);
       expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
     } finally {
       if (priorHome === undefined) delete process.env.HOME;
@@ -87,13 +87,13 @@ describe("removeSkillPath", () => {
     process.env.PROJECTS_DIR = path.join(tmp.path, "projects");
 
     try {
-      const cortexPath = path.join(tmp.path, "cortex");
+      const phrenPath = path.join(tmp.path, "phren");
       const projectDir = path.join(tmp.path, "projects", "demo");
       fs.mkdirSync(projectDir, { recursive: true });
-      writeFile(path.join(cortexPath, "global", "skills", "humanize.md"), "---\nname: humanize\ndescription: global\n---\nbody\n");
-      writeFile(path.join(cortexPath, "demo", "skills", "verify.md"), "---\nname: verify\ndescription: local\n---\nbody\n");
+      writeFile(path.join(phrenPath, "global", "skills", "humanize.md"), "---\nname: humanize\ndescription: global\n---\nbody\n");
+      writeFile(path.join(phrenPath, "demo", "skills", "verify.md"), "---\nname: verify\ndescription: local\n---\nbody\n");
 
-      const manifest = syncSkillLinksForScope(cortexPath, "demo");
+      const manifest = syncSkillLinksForScope(phrenPath, "demo");
       const linkedGlobal = path.join(projectDir, ".claude", "skills", "humanize.md");
       const linkedLocal = path.join(projectDir, ".claude", "skills", "verify.md");
       const manifestPath = path.join(projectDir, ".claude", "skill-manifest.json");

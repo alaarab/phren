@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import { isValidProjectName } from "./utils.js";
-import { queryDocBySourceKey, queryRows, queryEntityLinks, queryCrossProjectEntities, ensureGlobalEntitiesTable, logEntityMiss } from "./shared-index.js";
+import { queryDocBySourceKey, queryRows, queryFragmentLinks, queryCrossProjectFragments, ensureGlobalEntitiesTable, logFragmentMiss } from "./shared-index.js";
 import { runtimeFile } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
 
@@ -12,16 +12,16 @@ import { withFileLock } from "./shared-governance.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
 
-  // ── search_entities ───────────────────────────────────────────────────────
+  // ── search_fragments ──────────────────────────────────────────────────
   server.registerTool(
-    "search_entities",
+    "search_fragments",
     {
-      title: "◆ cortex · search entities",
+      title: "phren : search fragments",
       description:
-        "Search named entities in the knowledge graph (libraries, tools, concepts mentioned in findings). " +
-        "Returns matching entity names and how many findings reference each.",
+        "Search named fragments in the knowledge graph (libraries, tools, concepts mentioned in findings). " +
+        "Returns matching fragment names and how many findings reference each.",
       inputSchema: z.object({
-        query: z.string().describe("Entity name to search for (partial match)."),
+        query: z.string().describe("Fragment name to search for (partial match)."),
         project: z.string().optional().describe("Filter to a specific project."),
         limit: z.number().int().min(1).max(50).optional().describe("Max results (default 10)."),
       }),
@@ -60,30 +60,30 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const rows = queryRows(db, sql, params);
       if (!rows || rows.length === 0) {
-        logEntityMiss(ctx.cortexPath, query, "search_entities", project);
-        return mcpResponse({ ok: true, data: [], message: `No entities matching "${query}".` });
+        logFragmentMiss(ctx.phrenPath, query, "search_fragments", project);
+        return mcpResponse({ ok: true, data: [], message: `No fragments matching "${query}".` });
       }
 
-      const entities = rows.map(r => ({
+      const fragments = rows.map(r => ({
         name: String(r[0]),
         type: String(r[1]),
         refCount: Number(r[2]),
       }));
 
-      return mcpResponse({ ok: true, data: entities });
+      return mcpResponse({ ok: true, data: fragments });
     },
   );
 
-  // ── get_related_docs ──────────────────────────────────────────────────────
+  // ── get_related_docs ──────────────────────────────────────────────────
   server.registerTool(
     "get_related_docs",
     {
-      title: "◆ cortex · related docs",
+      title: "phren : related docs",
       description:
-        "Find all findings and docs that mention a specific entity (library, tool, concept). " +
+        "Find all findings and docs that mention a specific fragment (library, tool, concept). " +
         "Use this to see how a technology is used across projects.",
       inputSchema: z.object({
-        entity: z.string().describe("Entity name to look up."),
+        entity: z.string().describe("Fragment name to look up."),
         project: z.string().optional().describe("Filter to a specific project."),
         limit: z.number().int().min(1).max(50).optional().describe("Max docs to return (default 10)."),
       }),
@@ -92,7 +92,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const db = ctx.db();
       const max = limit ?? 10;
 
-      const links = queryEntityLinks(db, entity.toLowerCase());
+      const links = queryFragmentLinks(db, entity.toLowerCase());
       let relatedDocs = links.related.filter(r => r.includes("/"));
 
       if (project) {
@@ -102,13 +102,13 @@ export function register(server: McpServer, ctx: McpContext): void {
       relatedDocs = relatedDocs.slice(0, max);
 
       if (relatedDocs.length === 0) {
-        logEntityMiss(ctx.cortexPath, entity, "get_related_docs", project);
-        return mcpResponse({ ok: true, data: [], message: `No docs found referencing "${entity}".` });
+        logFragmentMiss(ctx.phrenPath, entity, "get_related_docs", project);
+        return mcpResponse({ ok: true, data: [], message: `No docs found referencing fragment "${entity}".` });
       }
 
       const results: { sourceDoc: string; snippet: string }[] = [];
       for (const doc of relatedDocs) {
-        const docRow = queryDocBySourceKey(db, ctx.cortexPath, doc);
+        const docRow = queryDocBySourceKey(db, ctx.phrenPath, doc);
         const snippet = docRow?.content ? docRow.content.slice(0, 200) : "";
         results.push({ sourceDoc: doc, snippet });
       }
@@ -117,18 +117,18 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
   );
 
-  // ── read_graph ────────────────────────────────────────────────────────────
+  // ── read_graph ────────────────────────────────────────────────────────
   server.registerTool(
     "read_graph",
     {
-      title: "◆ cortex · knowledge graph",
+      title: "phren : knowledge graph",
       description:
-        "Read the entity relationship graph. Returns top entities by reference count " +
+        "Read the fragment relationship graph. Returns top fragments by reference count " +
         "and their connected documents.",
       inputSchema: z.object({
         project: z.string().optional().describe("Filter to a specific project."),
-        limit: z.number().int().min(1).max(2000).optional().describe("Max entities to return (default 500, max 2000)."),
-        offset: z.number().int().min(0).optional().describe("Number of entities to skip for pagination (default 0)."),
+        limit: z.number().int().min(1).max(2000).optional().describe("Max fragments to return (default 500, max 2000)."),
+        offset: z.number().int().min(0).optional().describe("Number of fragments to skip for pagination (default 0)."),
       }),
     },
     async ({ project, limit, offset }) => {
@@ -166,7 +166,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       let sql: string;
       let params: (string | number)[];
 
-      // Step 1: Get entity list with counts (no GROUP_CONCAT to avoid comma-in-value bugs)
+      // Step 1: Get fragment list with counts (no GROUP_CONCAT to avoid comma-in-value bugs)
       if (project) {
         sql = `
           SELECT e.id, e.name, e.type, COUNT(el.source_id) as ref_count
@@ -193,47 +193,47 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const rows = queryRows(db, sql, params);
       if (!rows || rows.length === 0) {
-        return mcpResponse({ ok: true, data: { entities: [], total, hasMore: false }, message: "No entities in the graph." });
+        return mcpResponse({ ok: true, data: { fragments: [], total, hasMore: false }, message: "No fragments in the graph." });
       }
 
-      // Step 2: For each entity, fetch its docs as separate rows
-      const entities = rows.map(r => {
-        const entityId = Number(r[0]);
+      // Step 2: For each fragment, fetch its docs as separate rows
+      const fragments = rows.map(r => {
+        const fragmentId = Number(r[0]);
         const docSql = project
           ? "SELECT DISTINCT el.source_doc FROM entity_links el WHERE el.target_id = ? AND el.source_doc LIKE ?"
           : "SELECT DISTINCT el.source_doc FROM entity_links el WHERE el.target_id = ?";
-        const docParams: (string | number)[] = project ? [entityId, `${project}/%`] : [entityId];
+        const docParams: (string | number)[] = project ? [fragmentId, `${project}/%`] : [fragmentId];
         const docRows = queryRows(db, docSql, docParams);
         const docs = (docRows || []).map(dr => String(dr[0]));
-        const entityName = String(r[1]);
+        const fragmentName = String(r[1]);
         return {
-          id: `entity:${entityName}`,
-          name: entityName,
+          id: `fragment:${fragmentName}`,
+          name: fragmentName,
           type: String(r[2]),
           refCount: Number(r[3]),
           docs,
         };
       });
 
-      const hasMore = skip + entities.length < total;
-      return mcpResponse({ ok: true, data: { entities, total, hasMore, offset: skip, limit: max } });
+      const hasMore = skip + fragments.length < total;
+      return mcpResponse({ ok: true, data: { fragments, total, hasMore, offset: skip, limit: max } });
     },
   );
 
-  // ── link_findings ─────────────────────────────────────────────────────────
+  // ── link_findings ─────────────────────────────────────────────────────
   server.registerTool(
     "link_findings",
     {
-      title: "◆ cortex · link findings",
+      title: "phren : link findings",
       description:
-        "Manually link a finding to an entity (technology/concept) that wasn't auto-detected. " +
+        "Manually link a finding to a fragment (technology/concept) that wasn't auto-detected. " +
         "Use this to explicitly connect a finding to a library or tool.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         finding_text: z.string().describe("Partial text of the finding to link (used to locate the source doc)."),
-        entity: z.string().describe("Entity name to link to (e.g. 'Redis', 'Docker')."),
+        entity: z.string().describe("Fragment name to link to (e.g. 'Redis', 'Docker')."),
         relation: z.string().optional().describe("Relationship type (default: 'mentions')."),
-        entity_type: z.string().optional().describe("Entity type (e.g. 'library', 'service', 'concept', 'architecture'). Defaults to 'entity'."),
+        entity_type: z.string().optional().describe("Fragment type (e.g. 'library', 'service', 'concept', 'architecture'). Defaults to 'fragment'."),
       }),
     },
     async ({ project, finding_text, entity, relation, entity_type }) => {
@@ -244,20 +244,20 @@ export function register(server: McpServer, ctx: McpContext): void {
       return ctx.withWriteQueue(async () => {
         const db = ctx.db();
         const relType = relation ?? "mentions";
-        const entityName = entity.toLowerCase();
-        const resolvedEntityType = entity_type ?? "entity";
+        const fragmentName = entity.toLowerCase();
+        const resolvedFragmentType = entity_type ?? "fragment";
 
-        // 1. Find or create entity
+        // 1. Find or create fragment
         try {
-          db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [entityName, resolvedEntityType, new Date().toISOString().slice(0, 10)]);
+          db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [fragmentName, resolvedFragmentType, new Date().toISOString().slice(0, 10)]);
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings entityInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+          if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link_findings fragmentInsert: ${err instanceof Error ? err.message : String(err)}\n`);
         }
-        const entityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [entityName, resolvedEntityType]);
-        if (!entityResult?.length || !entityResult[0]?.values?.length) {
-          return mcpResponse({ ok: false, error: "Failed to create entity." });
+        const fragmentResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [fragmentName, resolvedFragmentType]);
+        if (!fragmentResult?.length || !fragmentResult[0]?.values?.length) {
+          return mcpResponse({ ok: false, error: "Failed to create fragment." });
         }
-        const targetId = Number(entityResult[0].values[0][0]);
+        const targetId = Number(fragmentResult[0].values[0][0]);
 
         // 2. Find source doc in the canonical findings document
         const docCheck = queryRows(db, "SELECT content FROM docs WHERE project = ? AND filename = 'FINDINGS.md' LIMIT 1", [project]);
@@ -270,51 +270,51 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({ ok: false, error: `Finding text not found in ${sourceDoc}.` });
         }
 
-        // 3. Find or create document entity
+        // 3. Find or create document fragment
         try {
           db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings docEntityInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+          if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link_findings docFragmentInsert: ${err instanceof Error ? err.message : String(err)}\n`);
         }
-        const docEntityResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
-        if (!docEntityResult?.length || !docEntityResult[0]?.values?.length) {
-          return mcpResponse({ ok: false, error: "Failed to create document entity." });
+        const docFragmentResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
+        if (!docFragmentResult?.length || !docFragmentResult[0]?.values?.length) {
+          return mcpResponse({ ok: false, error: "Failed to create document fragment." });
         }
-        const sourceId = Number(docEntityResult[0].values[0][0]);
+        const sourceId = Number(docFragmentResult[0].values[0][0]);
 
-        // 4. Insert entity_link
+        // 4. Insert fragment link
         try {
           db.run(
             "INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)",
             [sourceId, targetId, relType, sourceDoc],
           );
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings linkInsert: ${err instanceof Error ? err.message : String(err)}\n`);
-          return mcpResponse({ ok: false, error: "Failed to insert entity link." });
+          if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link_findings linkInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+          return mcpResponse({ ok: false, error: "Failed to insert fragment link." });
         }
 
-        // 4a. Also populate global_entities so manual links appear in cross_project_entities
+        // 4a. Also populate global_entities so manual links appear in cross_project_fragments
         try {
           ensureGlobalEntitiesTable(db);
           db.run(
             "INSERT OR IGNORE INTO global_entities (entity, project, doc_key) VALUES (?, ?, ?)",
-            [entityName, project, sourceDoc],
+            [fragmentName, project, sourceDoc],
           );
         } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings globalEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+          if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link_findings globalFragments: ${err instanceof Error ? err.message : String(err)}\n`);
         }
 
         // 4b. Persist manual link so it survives index rebuilds (mandatory — failure aborts the operation)
-        const manualLinksPath = runtimeFile(ctx.cortexPath, "manual-links.json");
+        const manualLinksPath = runtimeFile(ctx.phrenPath, "manual-links.json");
         try {
           withFileLock(manualLinksPath, () => {
             let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
             if (fs.existsSync(manualLinksPath)) {
               try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch (err: unknown) {
-                if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link_findings manualLinksRead: ${err instanceof Error ? err.message : String(err)}\n`);
+                if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link_findings manualLinksRead: ${err instanceof Error ? err.message : String(err)}\n`);
               }
             }
-            const newEntry = { entity: entityName, entityType: resolvedEntityType, sourceDoc, relType };
+            const newEntry = { entity: fragmentName, entityType: resolvedFragmentType, sourceDoc, relType };
             const alreadyStored = existing.some(
               (e) => e.entity === newEntry.entity && e.entityType === newEntry.entityType && e.sourceDoc === newEntry.sourceDoc && e.relType === newEntry.relType
             );
@@ -326,7 +326,6 @@ export function register(server: McpServer, ctx: McpContext): void {
             }
           });
         } catch (persistErr) {
-          // Persistence failed — return error without rebuilding (in-memory link would be discarded by rebuild)
           return mcpResponse({
             ok: false,
             error: `Failed to persist manual link: ${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
@@ -345,16 +344,16 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
   );
 
-  // ── cross_project_entities (Q20) ───────────────────────────────────────────
+  // ── cross_project_fragments ───────────────────────────────────────────
   server.registerTool(
-    "cross_project_entities",
+    "cross_project_fragments",
     {
-      title: "◆ cortex · cross-project entities",
+      title: "phren : cross-project fragments",
       description:
-        "Find entities (libraries, tools, concepts) shared across multiple projects. " +
+        "Find fragments (libraries, tools, concepts) shared across multiple projects. " +
         "Use this to discover how a technology or concept is used in other projects.",
       inputSchema: z.object({
-        entity: z.string().describe("Entity name to search for (partial match)."),
+        entity: z.string().describe("Fragment name to search for (partial match)."),
         exclude_project: z.string().optional().describe("Exclude a specific project from results."),
         limit: z.number().int().min(1).max(50).optional().describe("Max results (default 20)."),
       }),
@@ -362,19 +361,19 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ entity, exclude_project, limit }) => {
       const db = ctx.db();
       const max = limit ?? 20;
-      const results = queryCrossProjectEntities(db, entity, exclude_project);
+      const results = queryCrossProjectFragments(db, entity, exclude_project);
       const capped = results.slice(0, max);
 
       if (capped.length === 0) {
-        logEntityMiss(ctx.cortexPath, entity, "cross_project_entities", exclude_project);
+        logFragmentMiss(ctx.phrenPath, entity, "cross_project_fragments", exclude_project);
         return mcpResponse({ ok: true, data: [], message: `No cross-project references found for "${entity}".` });
       }
 
       // Group by project for cleaner output
-      const byProject = new Map<string, Array<{ entity: string; docKey: string }>>();
+      const byProject = new Map<string, Array<{ fragment: string; docKey: string }>>();
       for (const r of capped) {
         const arr = byProject.get(r.project) ?? [];
-        arr.push({ entity: r.entity, docKey: r.docKey });
+        arr.push({ fragment: r.fragment, docKey: r.docKey });
         byProject.set(r.project, arr);
       }
 
@@ -382,7 +381,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       for (const [proj, refs] of byProject) {
         lines.push(`### ${proj}`);
         for (const ref of refs) {
-          lines.push(`- ${ref.entity} (${ref.docKey})`);
+          lines.push(`- ${ref.fragment} (${ref.docKey})`);
         }
       }
 
@@ -393,4 +392,5 @@ export function register(server: McpServer, ctx: McpContext): void {
       });
     },
   );
+
 }

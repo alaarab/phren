@@ -1,4 +1,4 @@
-# Cortex hooks
+# Phren hooks
 
 Shell scripts that plug into Claude Code's hook system. These run automatically at specific lifecycle points in a Claude session.
 
@@ -6,9 +6,9 @@ Shell scripts that plug into Claude Code's hook system. These run automatically 
 
 ### post-session.sh
 
-Fires when Claude finishes responding (`Stop` event). Auto-commits and pushes any cortex changes from the session.
+Fires when Claude finishes responding (`Stop` event). Auto-commits and pushes any phren changes from the session.
 
-Set `CORTEX_AUTO_LEARN=1` to make it output a stronger prompt that triggers an automatic learning extraction instead of a passive reminder.
+Set `PHREN_AUTO_LEARN=1` to make it output a stronger prompt that triggers an automatic learning extraction instead of a passive reminder.
 
 ## Installation
 
@@ -24,7 +24,7 @@ Add the hook config to `~/.claude/settings.json` (applies to all projects) or `.
         "hooks": [
           {
             "type": "command",
-            "command": "~/.cortex/hooks/post-session.sh"
+            "command": "~/.phren/hooks/post-session.sh"
           }
         ]
       }
@@ -33,7 +33,7 @@ Add the hook config to `~/.claude/settings.json` (applies to all projects) or `.
 }
 ```
 
-If your cortex repo lives somewhere other than `~/.cortex`, update the path or set `CORTEX_DIR`:
+If your phren repo lives somewhere other than `~/.phren`, update the path or set `PHREN_DIR`:
 
 ```json
 {
@@ -43,7 +43,7 @@ If your cortex repo lives somewhere other than `~/.cortex`, update the path or s
         "hooks": [
           {
             "type": "command",
-            "command": "CORTEX_DIR=/path/to/cortex /path/to/cortex/hooks/post-session.sh"
+            "command": "PHREN_DIR=/path/to/phren /path/to/phren/hooks/post-session.sh"
           }
         ]
       }
@@ -62,7 +62,7 @@ If you already have hooks in your settings, merge the entries. Each event key (`
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "~/.cortex/hooks/post-session.sh" }
+          { "type": "command", "command": "~/.phren/hooks/post-session.sh" }
         ]
       }
     ],
@@ -115,7 +115,7 @@ Missing keys default to the value of `hooksEnabled`. When `hooksEnabled` is `fal
 
 ## Per-project hook overrides
 
-Tracked projects can override lifecycle hooks in `<cortexPath>/<project>cortex.project.yaml`:
+Tracked projects can override lifecycle hooks in `<phrenPath>/<project>phren.project.yaml`:
 
 ```yaml
 hooks:

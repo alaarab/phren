@@ -4,21 +4,23 @@ import { timingSafeEqual } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as querystring from "querystring";
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import {
-  CortexError,
-  computeCortexLiveStateToken,
+  PhrenError,
+  computePhrenLiveStateToken,
   getProjectDirs,
-  type CortexResult,
+  type PhrenResult,
 } from "./shared.js";
 import {
-  approveQueueItem,
-  editQueueItem,
   editFinding,
   readReviewQueue,
-  rejectQueueItem,
   removeFinding,
+  readFindings,
+  addFinding as addFindingStore,
   readTasksAcrossProjects,
+  addTask as addTaskStore,
+  completeTask as completeTaskStore,
+  removeTask as removeTaskStore,
   TASKS_FILENAME,
 } from "./data-access.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
@@ -158,7 +160,7 @@ async function bindWebUiPort(
     const candidate = candidates[i];
     try {
       if (candidate !== requestedPort) {
-        process.stderr.write(`[cortex] web-ui port ${candidate - 1} is busy, retrying on ${candidate}\n`);
+        process.stderr.write(`[phren] web-ui port ${candidate - 1} is busy, retrying on ${candidate}\n`);
       }
       return await listenOnLoopback(server, candidate);
     } catch (err: unknown) {
@@ -296,11 +298,11 @@ function requireCsrf(
   return false;
 }
 
-function readProjectQueue(cortexPath: string, profile?: string) {
-  const projects = getProjectDirs(cortexPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
+function readProjectQueue(phrenPath: string, profile?: string) {
+  const projects = getProjectDirs(phrenPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
   const items: Array<{ project: string; section: string; line: string; text: string; date: string; machine?: string; model?: string }> = [];
   for (const project of projects) {
-    const queueResult = readReviewQueue(cortexPath, project);
+    const queueResult = readReviewQueue(phrenPath, project);
     const queueItems = queueResult.ok ? queueResult.data : [];
     for (const item of queueItems) {
       items.push({
@@ -317,14 +319,14 @@ function readProjectQueue(cortexPath: string, profile?: string) {
   return items;
 }
 
-function runQueueAction(cortexPath: string, pathname: string, project: string, line: string, newText: string): CortexResult<string> {
-  if (pathname === "/api/approve" || pathname === "/approve") return approveQueueItem(cortexPath, project, line);
-  if (pathname === "/api/reject" || pathname === "/reject") return rejectQueueItem(cortexPath, project, line);
-  if (pathname === "/api/edit" || pathname === "/edit") return editQueueItem(cortexPath, project, line, newText);
+function runQueueAction(_phrenPath: string, pathname: string, _project: string, _line: string, _newText: string): PhrenResult<string> {
+  if (pathname === "/api/approve" || pathname === "/approve") return { ok: false, error: "Queue approval has been removed. Use the review queue as a read-only reference." };
+  if (pathname === "/api/reject" || pathname === "/reject") return { ok: false, error: "Queue rejection has been removed. Use the review queue as a read-only reference." };
+  if (pathname === "/api/edit" || pathname === "/edit") return { ok: false, error: "Queue editing has been removed. Use the review queue as a read-only reference." };
   return { ok: false, error: "unknown action" };
 }
 
-function handleLegacyQueueActionResult(res: http.ServerResponse, result: CortexResult<string>): void {
+function handleLegacyQueueActionResult(res: http.ServerResponse, result: PhrenResult<string>): void {
   if (result.ok) {
     res.writeHead(302, { location: "/" });
     res.end();
@@ -332,17 +334,17 @@ function handleLegacyQueueActionResult(res: http.ServerResponse, result: CortexR
   }
 
   const code = result.code;
-  if (code === CortexError.PERMISSION_DENIED || result.error.includes("requires maintainer/admin role")) {
+  if (code === PhrenError.PERMISSION_DENIED || result.error.includes("requires maintainer/admin role")) {
     res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
     res.end(result.error);
     return;
   }
-  if (code === CortexError.NOT_FOUND) {
+  if (code === PhrenError.NOT_FOUND) {
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
     res.end(result.error);
     return;
   }
-  if (code === CortexError.INVALID_PROJECT_NAME || code === CortexError.EMPTY_INPUT) {
+  if (code === PhrenError.INVALID_PROJECT_NAME || code === PhrenError.EMPTY_INPUT) {
     res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
     res.end(result.error);
     return;
@@ -384,15 +386,15 @@ function parseTopicPayload(raw: string): { slug: string; label: string; descript
 }
 
 export function createWebUiHttpServer(
-  cortexPath: string,
-  renderPage: (cortexPath: string, authToken?: string, nonce?: string) => string,
+  phrenPath: string,
+  renderPage: (phrenPath: string, authToken?: string, nonce?: string) => string,
   profile?: string,
   opts?: WebUiOptions,
 ): http.Server {
   try {
-    repairPreexistingInstall(cortexPath);
+    repairPreexistingInstall(phrenPath);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] web-ui repair: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] web-ui repair: ${errorMessage(err)}\n`);
   }
   const authToken = opts?.authToken;
   const csrfTokens = opts?.csrfTokens;
@@ -407,7 +409,7 @@ export function createWebUiHttpServer(
       if (csrfTokens) csrfTokens.set(crypto.randomUUID(), Date.now());
       const nonce = crypto.randomBytes(16).toString("base64");
       setCommonHeaders(res, nonce);
-      const html = renderPage(cortexPath, authToken, nonce);
+      const html = renderPage(phrenPath, authToken, nonce);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(html);
       return;
@@ -421,26 +423,67 @@ export function createWebUiHttpServer(
 
     if (req.method === "GET" && pathname === "/api/projects") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(collectProjectsForUI(cortexPath, profile)));
+      res.end(JSON.stringify(collectProjectsForUI(phrenPath, profile)));
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/change-token") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ token: computeCortexLiveStateToken(cortexPath) }));
+      res.end(JSON.stringify({ token: computePhrenLiveStateToken(phrenPath) }));
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/runtime-health") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(readSyncSnapshot(cortexPath)));
+      res.end(JSON.stringify(readSyncSnapshot(phrenPath)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/sync") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const message = String(parsed.message || "update phren");
+        try {
+          const EXEC_TIMEOUT = 15_000;
+          const runGit = (args: string[]) =>
+            execFileSync("git", args, { cwd: phrenPath, encoding: "utf8", timeout: EXEC_TIMEOUT }).trim();
+
+          const status = runGit(["status", "--porcelain"]);
+          if (!status) {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: true, message: "Nothing to sync — working tree clean." }));
+            return;
+          }
+
+          runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
+          runGit(["commit", "-m", message]);
+
+          let pushed = false;
+          try {
+            const remotes = runGit(["remote"]);
+            if (remotes) {
+              runGit(["push"]);
+              pushed = true;
+            }
+          } catch { /* no remote or push failed */ }
+
+          const changedFiles = status.split("\n").filter(Boolean).length;
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true, message: `Synced ${changedFiles} file(s).${pushed ? " Pushed to remote." : " No remote, saved locally."}` }));
+        } catch (err: unknown) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        }
+      });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/review-queue") {
       if (!requireGetAuth(req, res, url, authToken, true)) return;
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(readProjectQueue(cortexPath, profile)));
+      res.end(JSON.stringify(readProjectQueue(phrenPath, profile)));
       return;
     }
 
@@ -448,8 +491,8 @@ export function createWebUiHttpServer(
       if (!requireGetAuth(req, res, url, authToken, true)) return;
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({
-        accepted: recentAccepted(cortexPath),
-        usage: recentUsage(cortexPath),
+        accepted: recentAccepted(phrenPath),
+        usage: recentUsage(phrenPath),
       }));
       return;
     }
@@ -469,7 +512,7 @@ export function createWebUiHttpServer(
         res.end(JSON.stringify({ ok: false, error: `File not allowed: ${file}` }));
         return;
       }
-      const filePath = path.join(cortexPath, project, file);
+      const filePath = path.join(phrenPath, project, file);
       if (!fs.existsSync(filePath)) {
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: `File not found: ${file}` }));
@@ -489,7 +532,7 @@ export function createWebUiHttpServer(
         return;
       }
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(cortexPath, project) }));
+      res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(phrenPath, project) }));
       return;
     }
 
@@ -502,7 +545,7 @@ export function createWebUiHttpServer(
         return;
       }
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: true, ...listProjectReferenceDocs(cortexPath, project) }));
+      res.end(JSON.stringify({ ok: true, ...listProjectReferenceDocs(phrenPath, project) }));
       return;
     }
 
@@ -510,7 +553,7 @@ export function createWebUiHttpServer(
       const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
       const project = String(qs.project || "");
       const file = String(qs.file || "");
-      const contentResult = readReferenceContent(cortexPath, project, file);
+      const contentResult = readReferenceContent(phrenPath, project, file);
       res.writeHead(contentResult.ok ? 200 : 400, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(contentResult.ok ? { ok: true, content: contentResult.content } : { ok: false, error: contentResult.error }));
       return;
@@ -518,14 +561,14 @@ export function createWebUiHttpServer(
 
     if (req.method === "GET" && pathname === "/api/skills") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(collectSkillsForUI(cortexPath, profile)));
+      res.end(JSON.stringify(collectSkillsForUI(phrenPath, profile)));
       return;
     }
 
     if (req.method === "GET" && pathname.startsWith("/api/skill-content")) {
       const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
       const filePath = String(qs.path || "");
-      if (!filePath || !isAllowedFilePath(filePath, cortexPath)) {
+      if (!filePath || !isAllowedFilePath(filePath, phrenPath)) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "Invalid path" }));
         return;
@@ -542,7 +585,7 @@ export function createWebUiHttpServer(
 
     if (req.method === "GET" && pathname === "/api/hooks") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(getHooksData(cortexPath)));
+      res.end(JSON.stringify(getHooksData(phrenPath)));
       return;
     }
 
@@ -553,7 +596,7 @@ export function createWebUiHttpServer(
         if (!requireCsrf(res, parsed, csrfTokens, true)) return;
         const filePath = String(parsed.path || "");
         const content = String(parsed.content || "");
-        if (!filePath || !isAllowedFilePath(filePath, cortexPath)) {
+        if (!filePath || !isAllowedFilePath(filePath, phrenPath)) {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify({ ok: false, error: "Invalid path" }));
           return;
@@ -586,13 +629,13 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "Invalid skill toggle request" }));
           return;
         }
-        const skill = findSkill(cortexPath, profile || "", project, name);
+        const skill = findSkill(phrenPath, profile || "", project, name);
         if (!skill || "error" in skill) {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify({ ok: false, error: skill && "error" in skill ? skill.error : "Skill not found" }));
           return;
         }
-        setSkillEnabledAndSync(cortexPath, project, skill.name, enabled);
+        setSkillEnabledAndSync(phrenPath, project, skill.name, enabled);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: true, enabled }));
       });
@@ -611,10 +654,10 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "Invalid tool" }));
           return;
         }
-        const prefs = readInstallPreferences(cortexPath);
+        const prefs = readInstallPreferences(phrenPath);
         const toolPrefs = (prefs.hookTools && typeof prefs.hookTools === "object") ? prefs.hookTools : {};
         const current = toolPrefs[tool] !== false && prefs.hooksEnabled !== false;
-        writeInstallPreferences(cortexPath, {
+        writeInstallPreferences(phrenPath, {
           hookTools: { ...toolPrefs, [tool]: !current },
         } satisfies Partial<InstallPreferences>);
         res.writeHead(200, { "content-type": "application/json" });
@@ -641,14 +684,14 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "Invalid topics payload" }));
           return;
         }
-        const saved = writeProjectTopics(cortexPath, project, topics);
+        const saved = writeProjectTopics(phrenPath, project, topics);
         if (!saved.ok) {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify(saved));
           return;
         }
         for (const topic of saved.topics) {
-          const ensured = ensureTopicReferenceDoc(cortexPath, project, topic);
+          const ensured = ensureTopicReferenceDoc(phrenPath, project, topic);
           if (!ensured.ok) {
             res.writeHead(200, { "content-type": "application/json" });
             res.end(JSON.stringify({ ok: false, error: ensured.error }));
@@ -656,7 +699,7 @@ export function createWebUiHttpServer(
           }
         }
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(cortexPath, project) }));
+        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(phrenPath, project) }));
       });
       return;
     }
@@ -672,7 +715,7 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
           return;
         }
-        const result = reclassifyLegacyTopicDocs(cortexPath, project);
+        const result = reclassifyLegacyTopicDocs(phrenPath, project);
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, ...result }));
       });
@@ -697,14 +740,14 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "Invalid topic payload" }));
           return;
         }
-        const pinned = pinProjectTopicSuggestion(cortexPath, project, topic);
+        const pinned = pinProjectTopicSuggestion(phrenPath, project, topic);
         if (!pinned.ok) {
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify(pinned));
           return;
         }
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(cortexPath, project) }));
+        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(phrenPath, project) }));
       });
       return;
     }
@@ -721,15 +764,43 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
           return;
         }
-        const unpinned = unpinProjectTopicSuggestion(cortexPath, project, slug);
+        const unpinned = unpinProjectTopicSuggestion(phrenPath, project, slug);
         if (!unpinned.ok) {
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify(unpinned));
           return;
         }
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(cortexPath, project) }));
+        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(phrenPath, project) }));
       });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/search") {
+      if (!requireGetAuth(req, res, url, authToken, true)) return;
+      const searchParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
+      const query = searchParams.get("q") || searchParams.get("query") || "";
+      const searchProject = searchParams.get("project") || undefined;
+      const searchType = searchParams.get("type") || undefined;
+      const searchLimit = parseInt(searchParams.get("limit") || "10", 10) || 10;
+      if (!query.trim()) {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "Missing query parameter (q or query)." }));
+        return;
+      }
+      try {
+        const { runSearch } = await import("./cli-search.js");
+        const result = await runSearch(
+          { query, limit: Math.min(searchLimit, 50), project: searchProject, type: searchType },
+          phrenPath,
+          profile || "",
+        );
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, query, results: result.lines }));
+      } catch (err: unknown) {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
+      }
       return;
     }
 
@@ -737,14 +808,14 @@ export function createWebUiHttpServer(
       const graphParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
       const focusProject = graphParams.get("project") || undefined;
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(await buildGraph(cortexPath, profile, focusProject)));
+      res.end(JSON.stringify(await buildGraph(phrenPath, profile, focusProject)));
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/scores") {
       let scores: Record<string, unknown> = {};
       try {
-        const raw = fs.readFileSync(path.join(cortexPath, ".runtime", "memory-scores.json"), "utf-8");
+        const raw = fs.readFileSync(path.join(phrenPath, ".runtime", "memory-scores.json"), "utf-8");
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === "object") {
           scores = parsed as Record<string, unknown>;
@@ -760,10 +831,10 @@ export function createWebUiHttpServer(
     if (req.method === "GET" && pathname === "/api/tasks") {
       if (!requireGetAuth(req, res, url, authToken, true)) return;
       try {
-        const docs = readTasksAcrossProjects(cortexPath, profile);
-        const tasks: Array<{ project: string; section: string; line: string; priority?: string; pinned?: boolean; githubIssue?: number; githubUrl?: string }> = [];
+        const docs = readTasksAcrossProjects(phrenPath, profile);
+        const tasks: Array<{ project: string; section: string; line: string; priority?: string; pinned?: boolean; githubIssue?: number; githubUrl?: string; context?: string; checked?: boolean }> = [];
         for (const doc of docs) {
-          for (const section of ["Active", "Queue"] as const) {
+          for (const section of ["Active", "Queue", "Done"] as const) {
             for (const item of doc.items[section]) {
               tasks.push({
                 project: doc.project,
@@ -773,6 +844,8 @@ export function createWebUiHttpServer(
                 pinned: item.pinned,
                 githubIssue: item.githubIssue,
                 githubUrl: item.githubUrl,
+                context: item.context,
+                checked: item.checked,
               });
             }
           }
@@ -786,6 +859,63 @@ export function createWebUiHttpServer(
       return;
     }
 
+    if (req.method === "POST" && pathname === "/api/tasks/complete") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const item = String(parsed.item || "");
+        if (!project || !item || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/item" }));
+          return;
+        }
+        const result = completeTaskStore(phrenPath, project, item);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/tasks/add") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const item = String(parsed.item || "");
+        if (!project || !item || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/item" }));
+          return;
+        }
+        const result = addTaskStore(phrenPath, project, item);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? `Task added: ${result.data.line}` : undefined, error: result.ok ? undefined : result.error }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/tasks/remove") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const item = String(parsed.item || "");
+        if (!project || !item || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/item" }));
+          return;
+        }
+        const result = removeTaskStore(phrenPath, project, item);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
+      });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/sessions") {
       if (!requireGetAuth(req, res, url, authToken, true)) return;
       try {
@@ -794,18 +924,18 @@ export function createWebUiHttpServer(
         const project = typeof qs.project === "string" ? qs.project : undefined;
         const limit = parseInt(typeof qs.limit === "string" ? qs.limit : "50", 10) || 50;
         if (sessionId) {
-          const sessions = listAllSessions(cortexPath, 200);
+          const sessions = listAllSessions(phrenPath, 200);
           const session = sessions.find(s => s.sessionId === sessionId || s.sessionId.startsWith(sessionId));
           if (!session) {
             res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: false, error: "Session not found" }));
             return;
           }
-          const artifacts = getSessionArtifacts(cortexPath, session.sessionId, project);
+          const artifacts = getSessionArtifacts(phrenPath, session.sessionId, project);
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: true, session, ...artifacts }));
         } else {
-          const sessions = listAllSessions(cortexPath, limit);
+          const sessions = listAllSessions(phrenPath, limit);
           const filtered = project ? sessions.filter(s => s.project === project) : sessions;
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: true, sessions: filtered }));
@@ -820,9 +950,9 @@ export function createWebUiHttpServer(
     if (req.method === "GET" && pathname === "/api/settings") {
       if (!requireGetAuth(req, res, url, authToken, true)) return;
       try {
-        const prefs = readInstallPreferences(cortexPath);
-        const workflowPolicy = getWorkflowPolicy(cortexPath);
-        const hooksData = getHooksData(cortexPath);
+        const prefs = readInstallPreferences(phrenPath);
+        const workflowPolicy = getWorkflowPolicy(phrenPath);
+        const hooksData = getHooksData(phrenPath);
         const proactivityFindings = prefs.proactivityFindings || prefs.proactivity || "high";
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({
@@ -857,7 +987,7 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: `Invalid finding sensitivity: "${value}". Must be one of: ${valid.join(", ")}` }));
           return;
         }
-        const result = updateWorkflowPolicy(cortexPath, { findingSensitivity: value as "minimal" | "conservative" | "balanced" | "aggressive" });
+        const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: value as "minimal" | "conservative" | "balanced" | "aggressive" });
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(result.ok ? { ok: true, findingSensitivity: result.data.findingSensitivity } : { ok: false, error: result.error }));
       });
@@ -876,7 +1006,7 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: `Invalid task mode: "${value}". Must be one of: ${valid.join(", ")}` }));
           return;
         }
-        const result = updateWorkflowPolicy(cortexPath, { taskMode: value as "off" | "manual" | "auto" });
+        const result = updateWorkflowPolicy(phrenPath, { taskMode: value as "off" | "manual" | "auto" });
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(result.ok ? { ok: true, taskMode: result.data.taskMode } : { ok: false, error: result.error }));
       });
@@ -895,8 +1025,8 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: `Invalid proactivity: "${value}". Must be one of: ${valid.join(", ")}` }));
           return;
         }
-        writeInstallPreferences(cortexPath, { proactivity: value as "high" | "medium" | "low" });
-        writeGovernanceInstallPreferences(cortexPath, { proactivity: value as "high" | "medium" | "low" });
+        writeInstallPreferences(phrenPath, { proactivity: value as "high" | "medium" | "low" });
+        writeGovernanceInstallPreferences(phrenPath, { proactivity: value as "high" | "medium" | "low" });
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, proactivity: value }));
       });
@@ -910,8 +1040,8 @@ export function createWebUiHttpServer(
         if (!requireCsrf(res, parsed, csrfTokens, true)) return;
         const enabled = String(parsed.enabled || "").toLowerCase() === "true";
         const next = enabled ? "high" : "low";
-        writeInstallPreferences(cortexPath, { proactivityFindings: next });
-        writeGovernanceInstallPreferences(cortexPath, { proactivityFindings: next });
+        writeInstallPreferences(phrenPath, { proactivityFindings: next });
+        writeGovernanceInstallPreferences(phrenPath, { proactivityFindings: next });
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, autoCaptureEnabled: enabled, proactivityFindings: next }));
       });
@@ -924,7 +1054,7 @@ export function createWebUiHttpServer(
         if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
         if (!requireCsrf(res, parsed, csrfTokens, true)) return;
         const enabled = String(parsed.enabled || "").toLowerCase() === "true";
-        writeInstallPreferences(cortexPath, { mcpEnabled: enabled });
+        writeInstallPreferences(phrenPath, { mcpEnabled: enabled });
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, mcpEnabled: enabled }));
       });
@@ -959,7 +1089,7 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/line" }));
           return;
         }
-        const result = runQueueAction(cortexPath, pathname, project, line, newText);
+        const result = runQueueAction(phrenPath, pathname, project, line, newText);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
       });
@@ -984,7 +1114,50 @@ export function createWebUiHttpServer(
           res.end("Invalid project name");
           return;
         }
-        handleLegacyQueueActionResult(res, runQueueAction(cortexPath, pathname, project, line, newText));
+        handleLegacyQueueActionResult(res, runQueueAction(phrenPath, pathname, project, line, newText));
+      });
+      return;
+    }
+
+    // GET /api/findings/:project — list findings for a project
+    if (req.method === "GET" && pathname.startsWith("/api/findings/")) {
+      const project = decodeURIComponent(pathname.slice("/api/findings/".length));
+      if (!project || !isValidProjectName(project)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
+        return;
+      }
+      const result = readFindings(phrenPath, project);
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      if (!result.ok) {
+        res.end(JSON.stringify({ ok: false, error: result.error }));
+      } else {
+        res.end(JSON.stringify({ ok: true, data: { project, findings: result.data } }));
+      }
+      return;
+    }
+
+    // POST /api/findings/:project — add a finding
+    if (req.method === "POST" && pathname.startsWith("/api/findings/")) {
+      const project = decodeURIComponent(pathname.slice("/api/findings/".length));
+      if (!project || !isValidProjectName(project)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
+        return;
+      }
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const text = String(parsed.text || "");
+        if (!text) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "text is required" }));
+          return;
+        }
+        const result = addFindingStore(phrenPath, project, text);
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
       });
       return;
     }
@@ -1008,7 +1181,7 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "old_text and new_text are required" }));
           return;
         }
-        const result = editFinding(cortexPath, project, oldText, newText);
+        const result = editFinding(phrenPath, project, oldText, newText);
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
       });
@@ -1033,7 +1206,7 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: false, error: "text is required" }));
           return;
         }
-        const result = removeFinding(cortexPath, project, text);
+        const result = removeFinding(phrenPath, project, text);
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
       });
@@ -1046,25 +1219,25 @@ export function createWebUiHttpServer(
 }
 
 export async function startWebUiServer(
-  cortexPath: string,
+  phrenPath: string,
   port: number,
-  renderPage: (cortexPath: string, authToken?: string, nonce?: string) => string,
+  renderPage: (phrenPath: string, authToken?: string, nonce?: string) => string,
   profile?: string,
   opts: WebUiStartOptions = {},
 ): Promise<void> {
   const authToken = crypto.randomUUID();
   const csrfTokens = new Map<string, number>();
-  const server = createWebUiHttpServer(cortexPath, renderPage, profile, { authToken, csrfTokens });
+  const server = createWebUiHttpServer(phrenPath, renderPage, profile, { authToken, csrfTokens });
   const boundPort = await bindWebUiPort(server, port, Boolean(opts.allowPortFallback && port !== 0));
 
   const publicUrl = `http://127.0.0.1:${boundPort}`;
   const reviewUrl = `${publicUrl}/?_auth=${encodeURIComponent(authToken)}`;
   const ready = await waitForWebUiReady(reviewUrl);
 
-  process.stdout.write(`cortex web-ui running at ${publicUrl}\n`);
+  process.stdout.write(`phren web-ui running at ${publicUrl}\n`);
   process.stderr.write(`open: ${reviewUrl}\n`);
   if (!ready) {
-    process.stderr.write("[cortex] web-ui health check did not confirm readiness before launch\n");
+    process.stderr.write("[phren] web-ui health check did not confirm readiness before launch\n");
   }
 
   const shouldAutoOpen = opts.autoOpen ?? Boolean(process.stdout.isTTY);
@@ -1073,11 +1246,11 @@ export async function startWebUiServer(
       if (opts.browserLauncher) await opts.browserLauncher(reviewUrl);
       else await launchWebUiBrowser(reviewUrl);
     } catch (err: unknown) {
-      process.stderr.write(`[cortex] web-ui browser launch failed: ${errorMessage(err)}\n`);
+      process.stderr.write(`[phren] web-ui browser launch failed: ${errorMessage(err)}\n`);
       process.stdout.write(`secure session URL: ${reviewUrl}\n`);
     }
   } else if (shouldAutoOpen && !ready) {
-    process.stderr.write("[cortex] skipped auto-open because readiness check failed; use the secure URL below\n");
+    process.stderr.write("[phren] skipped auto-open because readiness check failed; use the secure URL below\n");
     process.stdout.write(`secure session URL: ${reviewUrl}\n`);
   } else {
     process.stdout.write(`secure session URL: ${reviewUrl}\n`);

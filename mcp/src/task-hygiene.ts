@@ -154,7 +154,7 @@ function collectCorpus(root: string): string[] {
       try {
         texts.push(fs.readFileSync(fullPath, "utf8").slice(0, MAX_TEXT_BYTES).toLowerCase());
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] task hygiene read ${fullPath}: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] task hygiene read ${fullPath}: ${errorMessage(err)}\n`);
       }
       if (filesSeen >= MAX_FILES_PER_ROOT) break;
     }
@@ -220,14 +220,14 @@ function formatDetail(issues: TaskHygieneIssue[], roots: string[]): string {
   return `${issues.length} suspect task(s): ${preview}`;
 }
 
-export function inspectTaskHygiene(cortexPath: string, project: string, repoPath?: string | null): TaskHygieneResult {
-  const parsed = readTasks(cortexPath, project);
+export function inspectTaskHygiene(phrenPath: string, project: string, repoPath?: string | null): TaskHygieneResult {
+  const parsed = readTasks(phrenPath, project);
   if (!parsed.ok) {
     return { ok: true, detail: "skipped: tasks unavailable", issues: [] };
   }
 
   const roots = uniqueValues([
-    path.join(cortexPath, project),
+    path.join(phrenPath, project),
     repoPath || "",
   ].filter((candidate) => candidate && fs.existsSync(candidate)));
 

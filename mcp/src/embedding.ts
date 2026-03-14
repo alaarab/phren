@@ -27,8 +27,8 @@ interface SqlJsStatic {
 let sqlJsLoader: () => Promise<SqlJsStatic> = bootstrapSqlJs as () => Promise<SqlJsStatic>;
 
 const EMBED_CACHE_DB = "embed-cache.db";
-function getCacheDbPath(cortexPath: string): string {
-  const dir = runtimeDir(cortexPath);
+function getCacheDbPath(phrenPath: string): string {
+  const dir = runtimeDir(phrenPath);
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, EMBED_CACHE_DB);
 }
@@ -81,8 +81,8 @@ export function resetSqlJsStateForTests(): void {
   sqlResolved = null;
 }
 
-async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
-  const dbPath = getCacheDbPath(cortexPath);
+async function openCacheDb(phrenPath: string): Promise<SqlJsDatabase> {
+  const dbPath = getCacheDbPath(phrenPath);
   const SQL = await getSql();
 
   let db: SqlJsDatabase | undefined;
@@ -103,7 +103,7 @@ async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
     return db;
   } catch (err) {
     try { db?.close(); } catch (e2: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
     throw err;
   }
@@ -117,8 +117,8 @@ async function openCacheDb(cortexPath: string): Promise<SqlJsDatabase> {
  * open the same on-disk snapshot, insert different entries, and overwrite each
  * other's work.
  */
-function persistDb(cortexPath: string, db: SqlJsDatabase): void {
-  const dbPath = getCacheDbPath(cortexPath);
+function persistDb(phrenPath: string, db: SqlJsDatabase): void {
+  const dbPath = getCacheDbPath(phrenPath);
   try {
     withFileLock(dbPath, () => {
       // Read the freshest on-disk snapshot (may have entries from another process)
@@ -152,9 +152,9 @@ function persistDb(cortexPath: string, db: SqlJsDatabase): void {
           }
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding persistDb onDiskLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskLoad: ${err instanceof Error ? err.message : String(err)}\n`);
         try { onDisk?.close(); } catch (e2: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
         }
         onDisk = null;
       }
@@ -166,7 +166,7 @@ function persistDb(cortexPath: string, db: SqlJsDatabase): void {
         fs.renameSync(tmp, dbPath);
       } finally {
         if (onDisk) try { onDisk.close(); } catch (e2: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
         }
       }
     });
@@ -286,7 +286,7 @@ export const embeddingOps = {
  * Get embedding with caching. Uses the configured provider.
  */
 export async function getCachedEmbedding(
-  cortexPath: string,
+  phrenPath: string,
   text: string,
   apiKey: string,
   model: string
@@ -294,7 +294,7 @@ export async function getCachedEmbedding(
   let db: SqlJsDatabase | undefined;
   try {
     const hash = sha256(`${model}:${text}`);
-    db = await embeddingOps.openCacheDb(cortexPath);
+    db = await embeddingOps.openCacheDb(phrenPath);
     const cached = embeddingOps.lookupCache(db, model, hash);
     if (cached) return cached;
 
@@ -302,14 +302,14 @@ export async function getCachedEmbedding(
     embeddingOps.insertCache(db, model, hash, embedding);
     // Q14: persistDb now holds a file lock and merges with the on-disk snapshot
     // before writing, so concurrent callers don't overwrite each other's entries.
-    embeddingOps.persistDb(cortexPath, db);
+    embeddingOps.persistDb(phrenPath, db);
     return embedding;
   } catch (err) {
     debugLog(`embedding: getCachedEmbedding failed: ${errorMessage(err)}`);
     return [];
   } finally {
     try { db?.close(); } catch (e2: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
   }
 }
@@ -318,7 +318,7 @@ export async function getCachedEmbedding(
  * Get embeddings for multiple texts with caching. Batches uncached texts into single API calls.
  */
 export async function getCachedEmbeddings(
-  cortexPath: string,
+  phrenPath: string,
   texts: string[],
   apiKey: string,
   model: string
@@ -327,7 +327,7 @@ export async function getCachedEmbeddings(
 
   let db: SqlJsDatabase | undefined;
   try {
-    db = await embeddingOps.openCacheDb(cortexPath);
+    db = await embeddingOps.openCacheDb(phrenPath);
     const results: (number[] | null)[] = texts.map(text => {
       const hash = sha256(`${model}:${text}`);
       return embeddingOps.lookupCache(db!, model, hash);
@@ -354,7 +354,7 @@ export async function getCachedEmbeddings(
           embeddingOps.insertCache(db, model, hash, batchEmbeddings[j]);
         }
       }
-      embeddingOps.persistDb(cortexPath, db);
+      embeddingOps.persistDb(phrenPath, db);
     }
 
     return results.map(result => result ?? []);
@@ -363,7 +363,7 @@ export async function getCachedEmbeddings(
     return texts.map(() => []);
   } finally {
     try { db?.close(); } catch (e2: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] embedding getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
   }
 }

@@ -1,8 +1,8 @@
-# cortex MCP server
+# phren MCP server
 
-MCP server that indexes your personal cortex and exposes it to AI agents via full-text search.
+MCP server that indexes your personal phren and exposes it to AI agents via full-text search.
 
-On startup it walks your cortex directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index.
+On startup it walks your phren directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index.
 
 Public surface: 60 MCP tools across 11 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, extraction).
 
@@ -16,23 +16,23 @@ Notable shipped capabilities:
 ## Install
 
 ```bash
-npm install -g @alaarab/cortex
-cortex init
+npm install -g @alaarab/phren
+phren init
 ```
 
 Or add manually to Claude Code:
 
 ```bash
-claude mcp add cortex -- cortex ~/.cortex
+claude mcp add phren -- phren ~/.phren
 ```
 
 ## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CORTEX_PATH` | `~/.cortex` | Path to your cortex instance |
-| `CORTEX_PROFILE` | *(none)* | Active profile name. When unset, cortex uses `machines.yaml` when available and otherwise falls back to an unscoped view |
-| `CORTEX_ACTOR` | OS user / env | Actor identity used in governance/audit RBAC checks |
+| `PHREN_PATH` | `~/.phren` | Path to your phren instance |
+| `PHREN_PROFILE` | *(none)* | Active profile name. When unset, phren uses `machines.yaml` when available and otherwise falls back to an unscoped view |
+| `PHREN_ACTOR` | OS user / env | Actor identity used in governance/audit RBAC checks |
 
 ## Tools
 
@@ -47,7 +47,7 @@ See [docs/api-reference.md](../docs/api-reference.md) for the full API reference
 
 - RBAC uses `.governance/access-control.json` and `.runtime/access-control.local.json`
 - Web UI binds loopback-only, uses per-run auth token, enforces CSRF for mutations, and sets CSP headers
-- Telemetry is opt-in only (`cortex config telemetry on`) and stored locally in `.runtime/telemetry.json`
+- Telemetry is opt-in only (`phren config telemetry on`) and stored locally in `.runtime/telemetry.json`
 
 ### search_knowledge
 
@@ -76,8 +76,8 @@ No parameters.
 
 ## How it works
 
-1. Reads `CORTEX_PATH` (or defaults to `~/.cortex`)
-2. Resolves the active profile from `CORTEX_PROFILE`, or from `machines.yaml` when the env var is unset
+1. Reads `PHREN_PATH` (or defaults to `~/.phren`)
+2. Resolves the active profile from `PHREN_PROFILE`, or from `machines.yaml` when the env var is unset
 3. If no active profile can be resolved yet, falls back to an unscoped view of top-level project directories
 4. Walks each project directory, reads `.md` files, classifies them by filename
 5. Builds an in-memory SQLite FTS5 index with Porter stemming
@@ -88,7 +88,7 @@ File types are derived from filenames: `CLAUDE.md` -> "claude", `summary.md` -> 
 ## Development
 
 ```bash
-cd ~/cortex
+cd ~/phren
 npm install
 npm run build    # Compile TypeScript
 npm run dev      # Run with tsx (hot reload)

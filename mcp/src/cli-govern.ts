@@ -2,7 +2,7 @@ import {
   appendAuditLog,
   qualityMarkers,
   getProjectDirs,
-  getCortexPath,
+  getPhrenPath,
 } from "./shared.js";
 import {
   appendReviewQueue,
@@ -10,7 +10,6 @@ import {
   consolidateProjectFindings,
   updateRuntimeHealth,
   pruneDeadMemories,
-  enforceCanonicalLocks,
 } from "./shared-governance.js";
 import {
   filterTrustedFindingsDetailed,
@@ -25,10 +24,10 @@ import { resolveRuntimeProfile } from "./runtime-profile.js";
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
 function targetProjects(projectArg?: string): string[] {
-  const profile = resolveRuntimeProfile(getCortexPath());
+  const profile = resolveRuntimeProfile(getPhrenPath());
   return projectArg
     ? [projectArg]
-    : getProjectDirs(getCortexPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
+    : getProjectDirs(getPhrenPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
 }
 
 function parseProjectDryRunArgs(
@@ -60,7 +59,7 @@ function parseProjectDryRunArgs(
 function captureFindingBackups(projects: string[]): Map<string, number> {
   const snapshots = new Map<string, number>();
   for (const project of projects) {
-    const backup = path.join(getCortexPath(), project, "FINDINGS.md.bak");
+    const backup = path.join(getPhrenPath(), project, "FINDINGS.md.bak");
     if (!fs.existsSync(backup)) continue;
     snapshots.set(backup, fs.statSync(backup).mtimeMs);
   }
@@ -70,13 +69,13 @@ function captureFindingBackups(projects: string[]): Map<string, number> {
 function summarizeBackupChanges(before: Map<string, number>, projects: string[]): string[] {
   const changed: string[] = [];
   for (const project of projects) {
-    const backup = path.join(getCortexPath(), project, "FINDINGS.md.bak");
+    const backup = path.join(getPhrenPath(), project, "FINDINGS.md.bak");
     if (!fs.existsSync(backup)) continue;
     const current = fs.statSync(backup).mtimeMs;
     const previous = before.get(backup);
     if (previous === undefined || current !== previous) {
       // Normalize to forward slashes for consistent output across platforms
-      changed.push(path.relative(getCortexPath(), backup).replace(/\\/g, "/"));
+      changed.push(path.relative(getPhrenPath(), backup).replace(/\\/g, "/"));
     }
   }
   return changed.sort();
@@ -93,19 +92,19 @@ interface GovernanceSummary {
 }
 
 export async function handleGovernMemories(projectArg?: string, silent: boolean = false, dryRun: boolean = false): Promise<GovernanceSummary> {
-  const profile = resolveRuntimeProfile(getCortexPath());
-  const policy = getRetentionPolicy(getCortexPath());
-  const ttlDays = Number.parseInt(process.env.CORTEX_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
+  const profile = resolveRuntimeProfile(getPhrenPath());
+  const policy = getRetentionPolicy(getPhrenPath());
+  const ttlDays = Number.parseInt((process.env.PHREN_MEMORY_TTL_DAYS) || String(policy.ttlDays), 10);
   const projects = projectArg
     ? [projectArg]
-    : getProjectDirs(getCortexPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
+    : getProjectDirs(getPhrenPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
 
   let staleCount = 0;
   let conflictCount = 0;
   let reviewCount = 0;
 
   for (const project of projects) {
-    const learningsPath = path.join(getCortexPath(), project, "FINDINGS.md");
+    const learningsPath = path.join(getPhrenPath(), project, "FINDINGS.md");
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
     const trust = filterTrustedFindingsDetailed(content, {
@@ -125,27 +124,25 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
     reviewCount += lowValue.length;
 
     if (!dryRun) {
-      appendReviewQueue(getCortexPath(), project, "Stale", stale);
-      appendReviewQueue(getCortexPath(), project, "Conflicts", conflicts);
-      appendReviewQueue(getCortexPath(), project, "Review", lowValue);
+      appendReviewQueue(getPhrenPath(), project, "Stale", stale);
+      appendReviewQueue(getPhrenPath(), project, "Conflicts", conflicts);
+      appendReviewQueue(getPhrenPath(), project, "Review", lowValue);
     }
   }
 
   if (!dryRun) {
     appendAuditLog(
-      getCortexPath(),
+      getPhrenPath(),
       "govern_memories",
       `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
     );
     for (const project of projects) {
-      consolidateProjectFindings(getCortexPath(), project);
+      consolidateProjectFindings(getPhrenPath(), project);
     }
   }
-  const lockSummary = dryRun ? "" : enforceCanonicalLocks(getCortexPath(), projectArg);
   if (!silent) {
     const prefix = dryRun ? "[dry-run] Would govern" : "Governed";
     console.log(`${prefix} memories: stale=${staleCount}, conflicts=${conflictCount}, review=${reviewCount}`);
-    if (lockSummary) console.log(lockSummary);
   }
   return {
     projects: projects.length,
@@ -156,11 +153,11 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
 }
 
 export async function handlePruneMemories(args: string[] = []) {
-  const usage = "cortex prune-memories [project] [--dry-run]";
+  const usage = "phren prune-memories [project] [--dry-run]";
   const { projectArg, dryRun } = parseProjectDryRunArgs(args, "prune-memories", usage);
   const projects = targetProjects(projectArg);
   const beforeBackups = dryRun ? new Map<string, number>() : captureFindingBackups(projects);
-  const result = pruneDeadMemories(getCortexPath(), projectArg, dryRun);
+  const result = pruneDeadMemories(getPhrenPath(), projectArg, dryRun);
   if (!result.ok) {
     console.log(result.error);
     return;
@@ -168,13 +165,13 @@ export async function handlePruneMemories(args: string[] = []) {
   console.log(result.data);
 
   // TTL enforcement: move entries older than ttlDays that haven't been retrieved recently
-  const policy = getRetentionPolicy(getCortexPath());
+  const policy = getRetentionPolicy(getPhrenPath());
   const ttlDays = policy.ttlDays;
   const retrievalGraceDays = Math.floor(ttlDays / 2);
   const now = Date.now();
 
   // Load retrieval log once for all projects
-  const retrievalLogPath = path.join(getCortexPath(), ".runtime", "retrieval-log.jsonl");
+  const retrievalLogPath = path.join(getPhrenPath(), ".runtime", "retrieval-log.jsonl");
   let retrievalEntries: Array<{ file: string; section: string; retrievedAt: string }> = [];
   if (fs.existsSync(retrievalLogPath)) {
     try {
@@ -184,7 +181,7 @@ export async function handlePruneMemories(args: string[] = []) {
         .map(line => { try { return JSON.parse(line); } catch { return null; } }) // null filtered below
         .filter((e): e is { file: string; section: string; retrievedAt: string } => e !== null);
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli-govern retrievalLog readParse: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli-govern retrievalLog readParse: ${errorMessage(err)}\n`);
     }
   }
 
@@ -201,7 +198,7 @@ export async function handlePruneMemories(args: string[] = []) {
 
   let ttlExpired = 0;
   for (const project of projects) {
-    const learningsPath = path.join(getCortexPath(), project, "FINDINGS.md");
+    const learningsPath = path.join(getPhrenPath(), project, "FINDINGS.md");
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
     const lines = content.split("\n");
@@ -234,7 +231,7 @@ export async function handlePruneMemories(args: string[] = []) {
     }
 
     if (expiredEntries.length > 0 && !dryRun) {
-      appendReviewQueue(getCortexPath(), project, "Stale", expiredEntries);
+      appendReviewQueue(getPhrenPath(), project, "Stale", expiredEntries);
     }
     if (expiredEntries.length > 0 && dryRun) {
       for (const entry of expiredEntries) {
@@ -255,11 +252,11 @@ export async function handlePruneMemories(args: string[] = []) {
 }
 
 export async function handleConsolidateMemories(args: string[] = []) {
-  const usage = "cortex consolidate-memories [project] [--dry-run]";
+  const usage = "phren consolidate-memories [project] [--dry-run]";
   const { projectArg, dryRun } = parseProjectDryRunArgs(args, "consolidate-memories", usage);
   const projects = targetProjects(projectArg);
   const beforeBackups = dryRun ? new Map<string, number>() : captureFindingBackups(projects);
-  const results = projects.map((p) => consolidateProjectFindings(getCortexPath(), p, dryRun));
+  const results = projects.map((p) => consolidateProjectFindings(getPhrenPath(), p, dryRun));
   console.log(results.map((r) => r.ok ? r.data : r.error).join("\n"));
   if (dryRun) return;
   const backups = summarizeBackupChanges(beforeBackups, projects);
@@ -287,19 +284,19 @@ export async function handleMaintain(args: string[]) {
     case "restore":
       return handleRestoreBackup(rest);
     default:
-      console.log(`cortex maintain - memory maintenance and governance
+      console.log(`phren maintain - memory maintenance and governance
 
 Subcommands:
-  cortex maintain govern [project] [--dry-run]
+  phren maintain govern [project] [--dry-run]
                                          Queue stale/conflicting/low-value memories for review.
                                          Run when search results feel noisy or after a long break.
-  cortex maintain prune [project] [--dry-run]
+  phren maintain prune [project] [--dry-run]
                                          Delete expired entries by retention policy
-  cortex maintain consolidate [project] [--dry-run]
+  phren maintain consolidate [project] [--dry-run]
                                          Deduplicate FINDINGS.md bullets. Run after a burst of work
                                          when findings feel repetitive, or monthly to keep things clean.
-  cortex maintain extract [project]      Mine git/GitHub signals into memory candidates
-  cortex maintain restore [project]      List and restore from .bak files`);
+  phren maintain extract [project]      Mine git/GitHub signals into memory candidates
+  phren maintain restore [project]      List and restore from .bak files`);
       if (sub) {
         console.error(`\nUnknown maintain subcommand: "${sub}"`);
         process.exit(1);
@@ -313,7 +310,7 @@ function findBackups(projects: string[]): Array<{ project: string; file: string;
   const results: Array<{ project: string; file: string; fullPath: string; age: string }> = [];
   const now = Date.now();
   for (const project of projects) {
-    const dir = path.join(getCortexPath(), project);
+    const dir = path.join(getPhrenPath(), project);
     if (!fs.existsSync(dir)) continue;
     for (const f of fs.readdirSync(dir)) {
       if (!f.endsWith(".bak")) continue;
@@ -343,12 +340,12 @@ async function handleRestoreBackup(args: string[]) {
     for (const b of backups) {
       console.log(`  ${b.project}/${b.file}  (${b.age})`);
     }
-    console.log("\nTo restore, run: cortex maintain restore <project> --apply");
+    console.log("\nTo restore, run: phren maintain restore <project> --apply");
     return;
   }
 
   if (!projectArg) {
-    console.error("Specify a project to restore: cortex maintain restore <project> --apply");
+    console.error("Specify a project to restore: phren maintain restore <project> --apply");
     process.exit(1);
   }
 
@@ -363,32 +360,32 @@ async function handleRestoreBackup(args: string[]) {
     fs.copyFileSync(b.fullPath, target);
     console.log(`Restored ${b.project}/${b.file.replace(/\.bak$/, "")} from backup`);
   }
-  appendAuditLog(getCortexPath(), "restore_backup", `project=${projectArg} files=${projectBackups.length}`);
+  appendAuditLog(getPhrenPath(), "restore_backup", `project=${projectArg} files=${projectBackups.length}`);
 }
 
 // ── Background maintenance ───────────────────────────────────────────────────
 
 export async function handleBackgroundMaintenance(projectArg?: string) {
-  const markers = qualityMarkers(getCortexPath());
+  const markers = qualityMarkers(getPhrenPath());
   const startedAt = new Date().toISOString();
   try {
-    const compacted = compactFindingJournals(getCortexPath(), projectArg);
+    const compacted = compactFindingJournals(getPhrenPath(), projectArg);
     const governance = await handleGovernMemories(projectArg, true);
-    const pruneResult = pruneDeadMemories(getCortexPath(), projectArg);
+    const pruneResult = pruneDeadMemories(getPhrenPath(), projectArg);
     const pruneMsg = pruneResult.ok ? pruneResult.data : pruneResult.error;
     if (!pruneResult.ok) {
-      updateRuntimeHealth(getCortexPath(), {
+      updateRuntimeHealth(getPhrenPath(), {
         lastGovernance: {
           at: startedAt,
           status: "error",
           detail: `prune failed: ${pruneMsg}`,
         },
       });
-      appendAuditLog(getCortexPath(), "background_maintenance_failed", `error=prune_failed: ${pruneMsg}`);
+      appendAuditLog(getPhrenPath(), "background_maintenance_failed", `error=prune_failed: ${pruneMsg}`);
       return;
     }
     fs.writeFileSync(markers.done, new Date().toISOString() + "\n");
-    updateRuntimeHealth(getCortexPath(), {
+    updateRuntimeHealth(getPhrenPath(), {
       lastGovernance: {
         at: startedAt,
         status: "ok",
@@ -396,23 +393,23 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
       },
     });
     appendAuditLog(
-      getCortexPath(),
+      getPhrenPath(),
       "background_maintenance",
       `status=ok journal_added=${compacted.added} journal_skipped=${compacted.skipped} journal_failed=${compacted.failed} projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}`
     );
   } catch (err: unknown) {
     const errMsg = errorMessage(err);
-    updateRuntimeHealth(getCortexPath(), {
+    updateRuntimeHealth(getPhrenPath(), {
       lastGovernance: {
         at: startedAt,
         status: "error",
         detail: errMsg,
       },
     });
-    appendAuditLog(getCortexPath(), "background_maintenance_failed", `error=${errMsg}`);
+    appendAuditLog(getPhrenPath(), "background_maintenance_failed", `error=${errMsg}`);
   } finally {
     try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] cli-govern backgroundMaintenance unlockFinal: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli-govern backgroundMaintenance unlockFinal: ${errorMessage(err)}\n`);
     }
   }
 }

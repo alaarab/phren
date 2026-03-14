@@ -1,21 +1,21 @@
 <div align="center">
 <br>
 
-<img src="icon.svg" width="120" alt="cortex" />
+<img src="icon.svg" width="120" alt="phren" />
 
 <br>
 
-# cortex
+# phren
 
-**Long-term memory for your AI agents.**
+**Meet phren. He remembers so your agent doesn't have to.**
 
-[![npm](https://img.shields.io/npm/v/%40alaarab%2Fcortex?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/cortex)
-[![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fcortex-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/)
-[![Whitepaper PDF](https://img.shields.io/badge/whitepaper-PDF-2563EB?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/cortex/whitepaper.pdf)
+[![npm](https://img.shields.io/npm/v/%40alaarab%2Fphren?style=flat&labelColor=0D0D0D&color=7C3AED)](https://www.npmjs.com/package/@alaarab/phren)
+[![Docs](https://img.shields.io/badge/docs-alaarab.github.io%2Fphren-A78BFA?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/phren/)
+[![Whitepaper PDF](https://img.shields.io/badge/whitepaper-PDF-2563EB?style=flat&labelColor=0D0D0D)](https://alaarab.github.io/phren/whitepaper.pdf)
 
 <br>
 
-Project memory should not disappear between sessions or get stranded on one machine. Cortex keeps that memory in a git-backed store you control, so useful context can accumulate across projects and machines without turning every prompt into a dump of old notes. Because retrieval stays local in the default path, that same design also keeps lookups fast and predictable for day-to-day code work. Agents search it automatically, retrieve only what fits the budget, and keep building on the same project state as you work.
+Phren is your project's memory keeper. He collects fragments — insights, decisions, patterns — and surfaces them when they matter. Tell him what you learned, and he'll hold it in a git-backed store you control. Next session, next machine, next agent: phren remembers what happened and feeds back only what fits, so your agents keep building on what they already know instead of starting fresh every time.
 
 <br>
 </div>
@@ -25,42 +25,42 @@ Project memory should not disappear between sessions or get stranded on one mach
 ## Getting started
 
 ```bash
-npm install -g @alaarab/cortex
-cortex init
+npm install -g @alaarab/phren
+phren init
 # Preview changes without writing files
-cortex init --dry-run
+phren init --dry-run
 ```
 
 | Scenario | What to do |
 |---|---|
-| First time | `npm install -g @alaarab/cortex && cortex init` |
-| Add a project | Open a session there and let the agent ask, or run `cortex add` |
-| New machine | `cortex init` and paste your cortex repo URL |
-| Repo-local install | `cortex init --mode project-local` inside the repo |
+| First time | `npm install -g @alaarab/phren && phren init` |
+| Add a project | Open a session there and let the agent ask, or run `phren add` |
+| New machine | `phren init` and paste your phren repo URL |
+| Repo-local install | `phren init --mode project-local` inside the repo |
 
-`cortex init` now supports two install modes:
+`phren init` supports two install modes:
 
-- `shared` (default): personal cross-machine memory rooted at `~/.cortex`
-- `project-local`: one repo-owned install rooted at `<repo>/.cortex`
+- `shared` (default): personal cross-machine memory rooted at `~/.phren`
+- `project-local`: one repo-owned install rooted at `<repo>/.phren`
 
 What init does depends on the mode:
 
-- `shared`: creates `~/.cortex`, registers supported MCP targets, sets up Claude hooks, registers the current machine/profile, and offers to add the current repo
-- `project-local`: creates `<repo>/.cortex`, writes a root manifest, configures VS Code workspace MCP in `.vscode/mcp.json`, and keeps all state inside the repo
+- `shared`: creates `~/.phren`, registers supported MCP targets, sets up Claude hooks, registers the current machine/profile, and offers to add the current repo
+- `project-local`: creates `<repo>/.phren`, writes a root manifest, configures VS Code workspace MCP in `.vscode/mcp.json`, and keeps all state inside the repo
 
 Common init behavior:
 
-- Writes a required `cortex.root.yaml` manifest
+- Writes a required `phren.root.yaml` manifest
 - Offers to add the current repo when you run it inside a git project or a folder with `CLAUDE.md`
-- Asks who should own repo-facing instruction files: `cortex-managed`, `detached`, or `repo-managed`
+- Asks who should own repo-facing instruction files: `phren-managed`, `detached`, or `repo-managed`
 - Asks how task handling should work: `off`, `manual`, `suggest`, or `auto`
-- Supports `cortex init --dry-run` for a no-write preview
+- Supports `phren init --dry-run` for a no-write preview
 
 After init, you'll see something like:
 
 ```
-  cortex initialized
-  Path:    ~/.cortex
+  phren initialized
+  Path:    ~/.phren
   Machine: work-laptop
   Profile: personal (6 projects)
   MCP:     registered for Claude Code
@@ -71,7 +71,7 @@ After init, you'll see something like:
 
 ## Works with every major agent
 
-Init detects your tools and registers them. A finding saved by Claude Code shows up in Codex next session, and the other way around.
+Init detects your tools and registers them. Tell phren something in Claude Code, and he surfaces it in Codex next session — and the other way around.
 
 | Agent | Shared mode | Project-local mode |
 |-------|-------------|--------------------|
@@ -87,13 +87,13 @@ Automatic prompt injection and lifecycle hooks are still Claude-only. Other edit
 
 ## Positioning
 
-Cortex sits in the same broad agent-memory space as claude-mem, Supermemory, Mem0, GitHub Copilot Memory, and research systems such as MemoryBank and MemGPT. It does not claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas.
+Phren sits in the same broad agent-memory space as claude-mem, Supermemory, Mem0, GitHub Copilot Memory, and research systems such as MemoryBank and MemGPT. He does not claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas.
 
-The distinction is architectural: Cortex applies those patterns to a repo-backed project memory system built from markdown + git, with explicit governance, review workflows, and shared use across agents, projects, and machines.
+The distinction is architectural: phren applies those patterns to a repo-backed project memory system built from markdown + git, with explicit governance, review workflows, and shared use across agents, projects, and machines.
 
 ---
 
-## Why cortex
+## Why phren
 
 ### New in v1.33.0
 
@@ -104,13 +104,13 @@ The distinction is architectural: Cortex applies those patterns to a repo-backed
 - Memory structure and integrations expanded: any file under `reference/` is indexed, scoped memory views are available for spawned agents, and settings are consolidated into a findings-first integrations surface.
 - VS Code extension onboarding and release workflow were hardened (auto-install path, uninstall command, publish prep), with first-run reliability fixes and docs synced to the 60-tool MCP server.
 
-**Compounding context, bounded retrieval.** Cortex lets project memory grow over time, but it does not inject the whole store. It searches what you actually wrote and keeps injection selective -- about 550 tokens by default -- so long-lived context does not turn into prompt bloat. Tune it with `CORTEX_CONTEXT_TOKEN_BUDGET`.
+**Compounding context, bounded retrieval.** Phren lets project memory grow over time, but he doesn't inject the whole store. He searches what you actually wrote and keeps injection selective — about 550 tokens by default — so long-lived context doesn't turn into prompt bloat. Tune it with `PHREN_CONTEXT_TOKEN_BUDGET`.
 
 **Local retrieval keeps the hot path fast.** In the default path, search runs against a local SQLite index instead of a hosted memory API. That cuts out the network hop and helps keep exact-ish code-memory queries responsive.
 
-**Stale context fades, recurring context stays.** Findings decay over time. Patterns that keep coming up stay strong. Things that have not mattered in months fall back, so retrieval reflects what is still useful instead of everything ever recorded.
+**Stale context fades, recurring context stays.** Phren lets findings decay over time. Patterns that keep coming up stay strong. Things that haven't mattered in months fall back, so what phren surfaces reflects what's still useful instead of everything ever recorded.
 
-**Cross-machine continuity through git sync.** Claude Code, Codex, Cursor, all read from the same project memory. What one tool figures out becomes available on another machine through ordinary git sync cycles, without making every retrieval depend on a remote memory service. Profiles keep work and personal separate.
+**Cross-machine continuity through git sync.** Claude Code, Codex, Cursor — they all talk to the same phren. What one tool figures out, phren carries to the next machine through ordinary git sync cycles, without depending on a remote memory service. Profiles keep work and personal separate.
 
 **Your project memory stays in a repo you control.** No account, no vendor, no hosted service in the default path. Markdown in a repo you control. Read it, edit it, grep it, delete it.
 
@@ -120,26 +120,26 @@ The distinction is architectural: Cortex applies those patterns to a repo-backed
 
 Three things happen every session without you doing anything:
 
-**Before each prompt** -- a hook pulls keywords from your message, searches the index, and injects the best matches. Trust filtering drops low-confidence or outdated entries.
+**Before each prompt** — phren pulls keywords from your message, searches his index, and injects the best matches. Trust filtering drops low-confidence or outdated entries.
 
-**After each response** -- changes get committed locally. If a remote is configured, Cortex queues a background sync worker to push safely. If nothing changed, the hook skips.
+**After each response** — phren commits changes locally. If a remote is configured, he queues a background sync worker to push safely. If nothing changed, he skips.
 
-**When context resets** -- a hook re-injects your project summary, recent findings, and active tasks so the agent picks up where it left off.
+**When context resets** — phren re-injects your project summary, recent findings, and active tasks so the agent picks up where it left off.
 
 Two more things run in the background:
 
-**Consolidation.** When findings pile up past the threshold, cortex flags it once per session. Background maintenance governs and prunes on its own schedule, and `/cortex-consolidate` remains the direct operator command for cleanup and pattern promotion.
+**Consolidation.** When findings pile up past the threshold, phren flags it once per session. He governs and prunes on his own schedule in the background, and `/phren-consolidate` remains the direct operator command for cleanup and pattern promotion.
 
-**Review queue.** Findings that fail trust filtering land in `MEMORY_QUEUE.md` for review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
+**Review queue.** Findings that phren isn't confident about land in `MEMORY_QUEUE.md` for your review. Triage from the shell (press `m`) or with `:mq approve`, `:mq reject`, `:mq edit`.
 
 ---
 
 ## Reference
 
 <details>
-<summary><strong>What lives in your cortex</strong></summary>
+<summary><strong>What phren remembers</strong></summary>
 
-`cortex init` creates your project store with starter templates. Each project gets its own directory. Add files as the project grows.
+`phren init` creates your project store with starter templates. Each project gets its own directory. Tell phren more as the project grows.
 
 | File | What it's for |
 |------|--------------|
@@ -150,27 +150,27 @@ Two more things run in the background:
 | `CANONICAL_MEMORIES.md` | Pinned memories that never expire and always inject |
 | `tasks.md` | Task list that persists across sessions |
 | `MEMORY_QUEUE.md` | Items waiting for your review |
-| `skills/` | Project-local Cortex skill source files; the resolved agent-facing mirror is generated into `.claude/skills/` as local state and should not be committed from app repos |
+| `skills/` | Project-local phren skill source files; the resolved agent-facing mirror is generated into `.claude/skills/` as local state and should not be committed from app repos |
 
 </details>
 
 <details>
 <summary><strong>Memory across your machines</strong></summary>
 
-Shared mode uses one cortex repo that carries your project memory. Push it to a private remote, clone it anywhere you work.
+Shared mode uses one phren repo that carries your project memory. Push it to a private remote, clone it anywhere you work.
 
 ```bash
-cd ~/.cortex
-git init && git add . && git commit -m "Initial cortex"
-git remote add origin git@github.com:YOU/my-cortex.git
+cd ~/.phren
+git init && git add . && git commit -m "Initial phren"
+git remote add origin git@github.com:YOU/my-phren.git
 git push -u origin main
 ```
 
-On a new machine: run `cortex init` and paste your repo URL when the walkthrough asks if you have an existing cortex repo.
+On a new machine: run `phren init` and paste your repo URL when the walkthrough asks if you have an existing phren repo.
 
 `SessionStart` pulls on open. The Stop hook commits locally after each response and queues a best-effort push when a remote exists. This is eventual consistency -- git gives you portability and auditability, not real-time sync.
 
-Shared state lives in your cortex repo. Generated local state does not. The `.claude/` mirrors created inside app repos, tool-specific instruction files such as `.github/copilot-instructions.md`, and the local machine alias file (`~/.cortex/.machine-id`) are machine-local artifacts and should not be treated as canonical project memory.
+Shared state lives in your phren repo. Generated local state does not. The `.claude/` mirrors created inside app repos, tool-specific instruction files such as `.github/copilot-instructions.md`, and the local machine alias file (`~/.phren/.machine-id`) are machine-local artifacts and should not be treated as canonical project memory.
 
 `machines.yaml` maps each hostname to a profile:
 
@@ -191,18 +191,18 @@ projects:
   - side-project
 ```
 
-Profiles decide which projects are active on each machine. `cortex init` is the normal refresh path: it registers the current machine/profile mapping, rewires supported agents, and offers to add the current repo when needed.
+Profiles decide which projects are active on each machine. `phren init` is the normal refresh path: it registers the current machine/profile mapping, rewires supported agents, and offers to add the current repo when needed.
 
 If you want stable names across laptops, desktops, and CI, set the machine name explicitly at onboarding instead of relying on the raw OS hostname:
 
 ```bash
-cortex init --machine work-laptop --profile work
+phren init --machine work-laptop --profile work
 ```
 
 For CI or unattended setup:
 
 ```bash
-cortex init --machine ci-runner --profile work
+phren init --machine ci-runner --profile work
 ```
 
 </details>
@@ -214,18 +214,18 @@ Project-local mode is the repo-owned install:
 
 ```bash
 cd /path/to/repo
-cortex init --mode project-local
+phren init --mode project-local
 ```
 
 That creates:
 
-- `<repo>/.cortex/cortex.root.yaml`
-- `<repo>/.cortex/<project>/...`
+- `<repo>/.phren/phren.root.yaml`
+- `<repo>/.phren/<project>/...`
 - `<repo>/.vscode/mcp.json` entry for the workspace server
 
 Design constraints:
 
-- one Cortex root per repo
+- one phren root per repo
 - one primary project per project-local root
 - no home-directory writes by default
 - no global hooks
@@ -238,7 +238,7 @@ This mode is for repo-owned memory, not cross-machine personal memory. If you wa
 <details>
 <summary><strong>Shared project memory</strong></summary>
 
-When more than one tool or session touches the same project, they all read and write the same store. A Codex session hits a pitfall and saves a finding. Ten minutes later, a Claude Code session on a different machine gets that finding in its context after the next successful sync cycle. No coordination service or custom broker layer, just a shared git repo.
+When more than one tool or session touches the same project, they all talk to the same phren. A Codex session hits a pitfall and tells him. Ten minutes later, a Claude Code session on a different machine gets that fragment in its context — phren carried it over on the next sync cycle. No coordination service or custom broker layer, just phren and a shared git repo.
 
 - **Parallel agents** share findings on push/pull cycles
 - **Sequential sessions** build on each other. Session 47 knows everything sessions 1 through 46 learned.
@@ -254,7 +254,7 @@ Because it's all markdown in git, you have a full record of what your agents lea
 
 **Core mode (default).** Markdown is the source of truth. Git handles sync and audit history. Retrieval runs through a local SQLite FTS5 index. This is the simplest and most portable setup: no required hosted service, predictable token budgets, and a repo you can inspect with normal tools.
 
-**Optional semantic mode.** Cortex can also use Ollama or an embeddings API for gated semantic recovery when lexical retrieval is sparse or weak. This is mainly for paraphrase-heavy or fuzzy queries. If you mostly search by filenames, symbols, commands, project names, or exact phrases, the lexical path is usually the important one and semantic mode may stay mostly dormant. Semantic mode exists for harder recovery cases, not as a blanket speed claim.
+**Optional semantic mode.** Phren can also use Ollama or an embeddings API for gated semantic recovery when lexical retrieval comes up short. This is mainly for paraphrase-heavy or fuzzy queries. If you mostly search by filenames, symbols, commands, project names, or exact phrases, the lexical path is usually the important one and semantic mode may stay mostly dormant. Semantic mode helps phren find things when the words don't match exactly, not as a blanket speed claim.
 
 </details>
 
@@ -266,40 +266,40 @@ Because it's all markdown in git, you have a full record of what your agents lea
 Shared mode is the default:
 
 ```bash
-cortex init
+phren init
 ```
 
 Project-local mode is explicit:
 
 ```bash
-cortex init --mode project-local
+phren init --mode project-local
 ```
 
 In project-local mode:
 
-- `cortex mcp-mode on|off` manages `.vscode/mcp.json`
-- `cortex hooks-mode` is unsupported
-- `cortex config machines` and `cortex config profiles` are shared-mode only
-- `cortex uninstall` removes `<repo>/.cortex` and the workspace MCP entry
+- `phren mcp-mode on|off` manages `.vscode/mcp.json`
+- `phren hooks-mode` is unsupported
+- `phren config machines` and `phren config profiles` are shared-mode only
+- `phren uninstall` removes `<repo>/.phren` and the workspace MCP entry
 
 Hooks-only mode (no MCP tools):
 
 ```bash
-cortex init --mcp off
+phren init --mcp off
 ```
 
 Toggle anytime:
 
 ```bash
-cortex mcp-mode on       # shared: user MCP, project-local: VS Code workspace MCP
-cortex mcp-mode off      # disable MCP for the current install mode
-cortex hooks-mode off    # shared mode only
-cortex hooks-mode on     # shared mode only
+phren mcp-mode on       # shared: user MCP, project-local: VS Code workspace MCP
+phren mcp-mode off      # disable MCP for the current install mode
+phren hooks-mode off    # shared mode only
+phren hooks-mode on     # shared mode only
 ```
 
 ### Templates
 
-`cortex init --template <name>` scaffolds with a project-specific starter:
+`phren init --template <name>` scaffolds with a project-specific starter:
 
 | Template | Best for |
 |----------|----------|
@@ -308,7 +308,7 @@ cortex hooks-mode on     # shared mode only
 | `library` | Reusable libraries |
 | `frontend` | React/Vue/web apps |
 
-To add an existing repo, run `cortex add` from that directory, or just open a session there and cortex will suggest it. Cortex auto-detects git repos and folders that already contain `CLAUDE.md`.
+To add an existing repo, run `phren add` from that directory, or just open a session there and phren will suggest it. Phren auto-detects git repos and folders that already contain `CLAUDE.md`.
 
 ### Adding projects
 
@@ -316,21 +316,21 @@ From a project directory:
 
 ```bash
 cd ~/code/my-project
-cortex add --ownership repo-managed
+phren add --ownership repo-managed
 ```
 
-Or just open a session in the project directory. Cortex tells the agent to ask whether you want to add it, and if yes whether Cortex should manage repo-facing `CLAUDE.md` / `AGENTS.md` files or leave repo-owned files alone. If you say no, the agent should point you to `cortex add` for later.
+Or just open a session in the project directory. Phren notices the unfamiliar repo and asks whether you want him to remember it. If yes, he'll ask whether he should manage repo-facing `CLAUDE.md` / `AGENTS.md` files or leave repo-owned files alone. If you say no, he'll point you to `phren add` for later.
 
 For a brand-new scaffold inside Claude:
 
 ```bash
-/cortex-init my-project
+/phren-init my-project
 ```
 
-- `cortex add` is the supported path for existing repos.
-- Change the default add behavior later with `cortex config project-ownership <mode>`.
-- Change task automation later with `cortex config workflow set --taskMode=<off|manual|suggest|auto>`.
-- Tune capture levels later with `cortex config proactivity.findings <high|medium|low>` and `cortex config proactivity.tasks <high|medium|low>`.
+- `phren add` is the supported path for existing repos.
+- Change the default add behavior later with `phren config project-ownership <mode>`.
+- Change task automation later with `phren config workflow set --taskMode=<off|manual|suggest|auto>`.
+- Tune capture levels later with `phren config proactivity.findings <high|medium|low>` and `phren config proactivity.tasks <high|medium|low>`.
 - Platform support and release expectations are documented in [docs/platform-matrix.md](docs/platform-matrix.md).
 - Best-effort vs fail-closed behavior is documented in [docs/error-reporting.md](docs/error-reporting.md).
 - Package/update behavior is documented in [docs/versioning.md](docs/versioning.md).
@@ -345,23 +345,23 @@ Four skills for the things that can't be automatic:
 
 | Skill | What it does |
 |-------|-------------|
-| `/cortex-sync` | Pull latest from your cortex repo and re-link on this machine. |
-| `/cortex-init` | Scaffold a brand-new project entry. Use this when the project does not exist yet; use `cortex add` for an existing repo. |
-| `/cortex-discover` | Health audit. Missing files, stale content, stuck tasks. |
-| `/cortex-consolidate` | Read findings across all projects and surface patterns that repeat. |
+| `/phren-sync` | Pull latest from your phren repo and re-link on this machine. |
+| `/phren-init` | Scaffold a brand-new project entry. Use this when the project does not exist yet; use `phren add` for an existing repo. |
+| `/phren-discover` | Health audit. Missing files, stale content, stuck tasks. |
+| `/phren-consolidate` | Read findings across all projects and surface patterns that repeat. |
 
 **When to run these manually:**
 
-- **`/cortex-discover`** -- Run after your first week on a new project, or when you feel like things are slipping through the cracks. It tells you what's missing, what's stale, and what's stuck.
-- **`/cortex-consolidate`** -- Run after a burst of work across multiple projects, or monthly. It finds patterns that repeat across projects and promotes them to global knowledge so every agent benefits.
-- **`cortex maintain govern`** -- Run when search results feel noisy or after a long break from a project. It queues low-value and stale entries for review.
-- **`cortex maintain consolidate`** -- Run when findings in a single project feel repetitive. It deduplicates bullets in FINDINGS.md. Use `--dry-run` first to preview.
+- **`/phren-discover`** -- Run after your first week on a new project, or when you feel like things are slipping through the cracks. It tells you what's missing, what's stale, and what's stuck.
+- **`/phren-consolidate`** -- Run after a burst of work across multiple projects, or monthly. It finds patterns that repeat across projects and promotes them to global knowledge so every agent benefits.
+- **`phren maintain govern`** -- Run when search results feel noisy or after a long break from a project. It queues low-value and stale entries for review.
+- **`phren maintain consolidate`** -- Run when findings in a single project feel repetitive. It deduplicates bullets in FINDINGS.md. Use `--dry-run` first to preview.
 
-Put personal workflow skills in `~/.cortex/global/skills/`. `cortex init` and later refresh runs wire them into supported agents automatically.
+Put personal workflow skills in `~/.phren/global/skills/`. `phren init` and later refresh runs wire them into supported agents automatically.
 
 ### Per-project agent config
 
-Drop a `cortex.project.yaml` in `~/.cortex/<project>/` to control what gets injected for that project:
+Drop a `phren.project.yaml` in `~/.phren/<project>/` to control what gets injected for that project:
 
 ```yaml
 # Opt out of global skill injection for this project
@@ -378,7 +378,7 @@ mcpServers:
       API_KEY: "from-your-env"
 ```
 
-`cortex init` applies project MCP servers into your agent config under namespaced keys (`cortex__<project>__<name>`) and cleans them up when the config changes.
+`phren init` applies project MCP servers into your agent config under namespaced keys (`phren__<project>__<name>`) and cleans them up when the config changes.
 
 </details>
 
@@ -392,7 +392,7 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 - Finding capture (9): `add_finding`, `add_findings`, `supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`, `remove_finding`, `remove_findings`, `push_changes`
 - Memory quality (2): `pin_memory`, `memory_feedback`
 - Data management (3): `export_project`, `import_project`, `manage_project`
-- Entity graph (5): `search_entities`, `get_related_docs`, `read_graph`, `link_findings`, `cross_project_entities`
+- Fragment graph (5): `search_fragments`, `get_related_docs`, `read_graph`, `link_findings`, `cross_project_fragments`
 - Session management (4): `session_start`, `session_end`, `session_context`, `session_history`
 - Operations and review (8): `add_project`, `get_consolidation_status`, `health_check`, `list_hook_errors`, `get_review_queue`, `approve_queue_item`, `reject_queue_item`, `edit_queue_item`
 - Skills management (6): `list_skills`, `read_skill`, `write_skill`, `remove_skill`, `enable_skill`, `disable_skill`
@@ -401,14 +401,14 @@ The MCP server indexes your project store into a local SQLite FTS5 database and 
 
 For parameter schemas and examples, see [docs/api-reference.md](docs/api-reference.md).
 
-Governance, policy, and maintenance tools are CLI-only (see `cortex config` and `cortex maintain`).
+Governance, policy, and maintenance tools are CLI-only (see `phren config` and `phren maintain`).
 
 </details>
 
 <details>
 <summary><strong>Interactive shell</strong></summary>
 
-`cortex` in a terminal opens the shell. Seven views, single-key navigation:
+`phren` in a terminal opens the shell. Seven views, single-key navigation:
 
 | Key | View |
 |-----|------|
@@ -449,71 +449,71 @@ The shell works the same on every machine, for every agent.
 For scripting, hooks, and quick lookups from the terminal:
 
 ```bash
-cortex                                   # interactive shell (TTY default)
-cortex search "rate limiting"            # FTS5 search with synonym expansion
-cortex add-finding <project> "..."       # append a finding from the terminal
-cortex pin <project> "..."               # promote canonical memory
-cortex tasks [project]                 # cross-project task view
-cortex status                            # health, active project, stats
-cortex doctor [--fix]                    # health checks + optional self-heal
-cortex verify                            # check init completed correctly
-cortex web-ui [--port=3499]              # lightweight web UI in the browser
-cortex update [--refresh-starter]        # update package; optionally refresh starter globals too
-cortex uninstall                         # remove cortex config, integrations, and installed data
+phren                                   # interactive shell (TTY default)
+phren search "rate limiting"            # FTS5 search with synonym expansion
+phren add-finding <project> "..."       # tell phren something worth remembering
+phren pin <project> "..."               # promote canonical memory
+phren tasks [project]                 # cross-project task view
+phren status                            # health, active project, stats
+phren doctor [--fix]                    # health checks + optional self-heal
+phren verify                            # check init completed correctly
+phren web-ui [--port=3499]              # lightweight web UI in the browser
+phren update [--refresh-starter]        # update package; optionally refresh starter globals too
+phren uninstall                         # remove phren config, integrations, and installed data
 
-cortex add [path] [--ownership <mode>]     # add current directory (or path) as a project
-cortex projects list                        # list all projects
-cortex projects configure <name> --ownership=<mode>  # change a project's ownership mode
-cortex projects remove <name>               # remove a project (confirmation required)
+phren add [path] [--ownership <mode>]     # add current directory (or path) as a project
+phren projects list                        # list all projects
+phren projects configure <name> --ownership=<mode>  # change a project's ownership mode
+phren projects remove <name>               # remove a project (confirmation required)
 
-cortex mcp-mode [on|off|status]          # shared: user MCP, project-local: VS Code workspace MCP
-cortex hooks-mode [on|off|status]        # shared-mode only
-cortex config project-ownership [mode]   # default ownership for future project enrollments
-cortex config workflow set --taskMode=manual  # set task handling mode
-cortex config proactivity.findings [level]    # findings auto-capture aggressiveness
-cortex config proactivity.tasks [level]     # task auto-capture aggressiveness
+phren mcp-mode [on|off|status]          # shared: user MCP, project-local: VS Code workspace MCP
+phren hooks-mode [on|off|status]        # shared-mode only
+phren config project-ownership [mode]   # default ownership for future project enrollments
+phren config workflow set --taskMode=manual  # set task handling mode
+phren config proactivity.findings [level]    # findings auto-capture aggressiveness
+phren config proactivity.tasks [level]     # task auto-capture aggressiveness
 
-cortex skills list                       # list all installed skills
-cortex skills add <project> <path>       # add a skill to a project
-cortex skills enable <project|global> <name>   # enable a disabled skill without rewriting it
-cortex skills disable <project|global> <name>  # disable a skill without deleting it
-cortex skills remove <project> <name>    # remove a skill from a project
-cortex skill-list                        # alias for skills list
+phren skills list                       # list all installed skills
+phren skills add <project> <path>       # add a skill to a project
+phren skills enable <project|global> <name>   # enable a disabled skill without rewriting it
+phren skills disable <project|global> <name>  # disable a skill without deleting it
+phren skills remove <project> <name>    # remove a skill from a project
+phren skill-list                        # alias for skills list
 
-cortex hooks list                        # show hook status per tool
-cortex hooks enable <tool>              # enable hooks for tool (claude/copilot/cursor/codex)
-cortex hooks disable <tool>             # disable hooks for tool
+phren hooks list                        # show hook status per tool
+phren hooks enable <tool>              # enable hooks for tool (claude/copilot/cursor/codex)
+phren hooks disable <tool>            # disable hooks for tool
 ```
 
-Use `cortex config` for policy tuning and `cortex maintain` for governance operations. Run `--dry-run` before destructive maintenance commands.
+Use `phren config` for policy tuning and `phren maintain` for governance operations. Run `--dry-run` before destructive maintenance commands.
 
-### cortex doctor
+### phren doctor
 
-`cortex doctor` checks your setup. `--fix` repairs what it can. `--check-data` also validates config files.
+`phren doctor` checks your setup. `--fix` repairs what it can. `--check-data` also validates config files.
 
 | Check | What it verifies | What FAIL means |
 |-------|-----------------|-----------------|
-| `machine-registered` | Your hostname is in machines.yaml | Run `cortex init` or add your machine manually |
+| `machine-registered` | Your hostname is in machines.yaml | Run `phren init` or add your machine manually |
 | `profile-exists` | The profile YAML file exists in profiles/ | Create the profile file or fix the mapping in machines.yaml |
 | `profile-projects` | At least one project is listed in the profile | Add projects to your profile YAML |
-| `context-file` | ~/.cortex-context.md exists | Run `cortex doctor --fix` or rerun `cortex init` to regenerate |
-| `root-memory` | The generated MEMORY.md exists | Run `cortex doctor --fix` or rerun `cortex init` |
-| `global-link` | ~/.claude/CLAUDE.md symlinks to your cortex global | Run `cortex doctor --fix` or rerun `cortex init` |
-| `symlink:<project>/<file>` | Per-project file symlinks are correct | Run `cortex doctor --fix` or rerun `cortex init` |
-| `claude-hooks` | Prompt hook is configured in settings.json | Run `cortex init` to reconfigure hooks |
-| `lifecycle-hooks` | Session-start and stop hooks are configured | Run `cortex init` to reconfigure hooks |
+| `context-file` | ~/.phren-context.md exists | Run `phren doctor --fix` or rerun `phren init` to regenerate |
+| `root-memory` | The generated MEMORY.md exists | Run `phren doctor --fix` or rerun `phren init` |
+| `global-link` | ~/.claude/CLAUDE.md symlinks to your phren global | Run `phren doctor --fix` or rerun `phren init` |
+| `symlink:<project>/<file>` | Per-project file symlinks are correct | Run `phren doctor --fix` or rerun `phren init` |
+| `claude-hooks` | Prompt hook is configured in settings.json | Run `phren init` to reconfigure hooks |
+| `lifecycle-hooks` | Session-start and stop hooks are configured | Run `phren init` to reconfigure hooks |
 | `runtime-health-file` | The runtime health tracker file exists | Will be created on next hook run |
-| `runtime-auto-save` | Last auto-save completed successfully | Check ~/.cortex/.audit-log for details |
+| `runtime-auto-save` | Last auto-save completed successfully | Check ~/.phren/.audit-log for details |
 | `runtime-prompt` | Prompt hook has run at least once | Start a new agent session to trigger it |
-| `fts-index` | SQLite FTS5 index builds and queries correctly | Check for corrupt data files, run `cortex doctor --fix` |
-| `copilot-hooks` | Copilot CLI hook config exists (if Copilot detected) | Run `cortex init` to configure |
-| `cursor-hooks` | Cursor hook config exists (if Cursor detected) | Run `cortex init` to configure |
-| `codex-hooks` | Codex hook config exists (if Codex detected) | Run `cortex init` to configure |
-| `config` | .governance/ config directory exists | Run `cortex init` to create config files |
+| `fts-index` | SQLite FTS5 index builds and queries correctly | Check for corrupt data files, run `phren doctor --fix` |
+| `copilot-hooks` | Copilot CLI hook config exists (if Copilot detected) | Run `phren init` to configure |
+| `cursor-hooks` | Cursor hook config exists (if Cursor detected) | Run `phren init` to configure |
+| `codex-hooks` | Codex hook config exists (if Codex detected) | Run `phren init` to configure |
+| `config` | .governance/ config directory exists | Run `phren init` to create config files |
 
 ### Access control (RBAC)
 
-Four roles: `admin`, `maintainer`, `contributor`, `viewer`. Set in `.governance/access-control.json`. Identity comes from `CORTEX_ACTOR`, then `USER`/`USERNAME`, then your OS username. Unknown actors default to `viewer`.
+Four roles: `admin`, `maintainer`, `contributor`, `viewer`. Set in `.governance/access-control.json`. Identity comes from `PHREN_ACTOR`, then `USER`/`USERNAME`, then your OS username. Unknown actors default to `viewer`.
 
 See [docs/environment.md](docs/environment.md) for all feature flags and env vars.
 
@@ -522,62 +522,62 @@ See [docs/environment.md](docs/environment.md) for all feature flags and env var
 <details>
 <summary><strong>Repository structure</strong></summary>
 
-This repo has two roles: it's the source code for the `cortex` npm package, and it ships the starter files that `cortex init` copies to `~/.cortex`. The top-level directories break down like this:
+This repo has two roles: it's the source code for the `phren` npm package, and it ships the starter files that `phren init` copies to `~/.phren`. The top-level directories break down like this:
 
 | Directory | What it is | When you'd touch it |
 |-----------|-----------|---------------------|
-| `mcp/` | MCP server and CLI source code (TypeScript). The core of cortex. | Adding tools, fixing bugs, changing CLI behavior. |
-| `global/` | Default user-level config shipped with the package. Contains the template `CLAUDE.md`, shared context files, and built-in skill definitions. Copied to `~/.cortex/global/` on init. | Editing the default instructions or adding built-in skills that ship with every install. |
+| `mcp/` | MCP server and CLI source code (TypeScript). The core of phren. | Adding tools, fixing bugs, changing CLI behavior. |
+| `global/` | Default user-level config shipped with the package. Contains the template `CLAUDE.md`, shared context files, and built-in skill definitions. Copied to `~/.phren/global/` on init. | Editing the default instructions or adding built-in skills that ship with every install. |
 | `hooks/` | Shell scripts that plug into agent lifecycle events (Stop, SessionStart, UserPromptSubmit). Registered by init into agent settings. | Adding or modifying agent hooks. |
-| `skills/` | Cortex slash commands (`/cortex-init`, `/cortex-sync`, etc.). Each subdirectory has a `SKILL.md` with the full prompt. | Writing or editing built-in cortex skills. |
-| `starter/` | Complete `~/.cortex` skeleton copied on first init: example projects, profiles, machines.yaml, and typed project templates. | Changing what new users get out of the box. |
-| `templates/` | Default project scaffolding used by the `/cortex-init` skill (no `--template` flag). Contains the bare project skeleton and example summary files. | Editing the default project scaffold or adding example files. |
-| `profiles/` | Example profile YAML files (personal, work) showing how to map project sets to machines. Copied to `~/.cortex/profiles/` on init. | Adding new example profiles that ship with the package. |
+| `skills/` | Phren slash commands (`/phren-init`, `/phren-sync`, etc.). Each subdirectory has a `SKILL.md` with the full prompt. | Writing or editing built-in phren skills. |
+| `starter/` | Complete `~/.phren` skeleton copied on first init: example projects, profiles, machines.yaml, and typed project templates. | Changing what new users get out of the box. |
+| `templates/` | Default project scaffolding used by the `/phren-init` skill (no `--template` flag). Contains the bare project skeleton and example summary files. | Editing the default project scaffold or adding example files. |
+| `profiles/` | Example profile YAML files (personal, work) showing how to map project sets to machines. Copied to `~/.phren/profiles/` on init. | Adding new example profiles that ship with the package. |
 | `scripts/` | Dev scripts for maintainers: doc validation, retrieval evaluation. Not shipped to users. | Running CI checks or contributing to the test suite. |
 | `docs/` | Documentation site, whitepaper, architecture docs, and internal design specs. Served via GitHub Pages. | Reading or updating docs. |
 
-**starter/ vs templates/**: `starter/` is the full `~/.cortex` directory tree (projects, profiles, machines.yaml). `templates/` holds the bare project skeleton used by the `/cortex-init` skill. `starter/templates/` holds typed project templates (frontend, library, etc.) used by `cortex init --template`. Three layers: starter seeds the whole store, templates seeds the default project, starter/templates seeds typed projects.
+**starter/ vs templates/**: `starter/` is the full `~/.phren` directory tree (projects, profiles, machines.yaml). `templates/` holds the bare project skeleton used by the `/phren-init` skill. `starter/templates/` holds typed project templates (frontend, library, etc.) used by `phren init --template`. Three layers: starter seeds the whole store, templates seeds the default project, starter/templates seeds typed projects.
 
 </details>
 
 <details>
 <summary><strong>Troubleshooting</strong></summary>
 
-**Cortex not injecting context into prompts**
+**Phren not injecting context into prompts**
 
-Run `cortex status` and check the Hooks line. If it says "off", run `cortex hooks-mode on`. If hooks are on but nothing's appearing, run `cortex doctor` to check the prompt hook config. In project-local mode, hooks are intentionally unsupported.
+Run `phren status` and check the Hooks line. If it says "off", run `phren hooks-mode on`. If hooks are on but nothing's appearing, run `phren doctor` to check the prompt hook config. In project-local mode, hooks are intentionally unsupported.
 
 **MCP tools not connecting**
 
-Run `cortex status` and check the MCP line. If it's off, run `cortex mcp-mode on`. If cfg shows "missing", run `cortex init`. In shared mode, MCP lands in user config files. In project-local mode, VS Code MCP lands in `.vscode/mcp.json`.
+Run `phren status` and check the MCP line. If it's off, run `phren mcp-mode on`. If cfg shows "missing", run `phren init`. In shared mode, MCP lands in user config files. In project-local mode, VS Code MCP lands in `.vscode/mcp.json`.
 
-**"I saved a finding but can't find it"**
+**"I told phren something but can't find it"**
 
-Findings are scoped to a project. Try `cortex search "your term" --project <name>`. If it was flagged by trust filtering, check the review queue: `cortex` then press `m`.
+Findings are scoped to a project. Try `phren search "your term" --project <name>`. If it was flagged by trust filtering, check the review queue: `phren` then press `m`.
 
 **Doctor says FAIL on symlinks**
 
-Project directory probably moved or symlinks are stale. Run `cortex doctor --fix`.
+Project directory probably moved or symlinks are stale. Run `phren doctor --fix`.
 
 **Push failed or sync looks stuck**
 
-Run `cortex status` first. If the store says `saved-local`, your data is committed locally and waiting on sync. The shell health view and web UI also show the last push error and unsynced commit count. Fix the remote or network issue, then let the background worker retry or run a normal git push yourself.
+Run `phren status` first. If the store says `saved-local`, your data is committed locally and waiting on sync. The shell health view and web UI also show the last push error and unsynced commit count. Fix the remote or network issue, then let the background worker retry or run a normal git push yourself.
 
 **Hooks disabled or stale**
 
-Run `cortex hooks list`. If the target tool is off or misconfigured, enable it again with `cortex hooks enable <tool>` or rerun `cortex init`.
+Run `phren hooks list`. If the target tool is off or misconfigured, enable it again with `phren hooks enable <tool>` or rerun `phren init`.
 
 **Review queue keeps growing**
 
-Your trust policy is probably pushing too much low-confidence content into review. Triage with `cortex` then `m`, or tune policy with `cortex config`.
+Your trust policy is probably pushing too much low-confidence content into review. Triage with `phren` then `m`, or tune policy with `phren config`.
 
 **Governance writes are denied**
 
-Check `.governance/access-control.json` and your `CORTEX_ACTOR` identity. Cortex will reject the write rather than silently dropping it.
+Check `.governance/access-control.json` and your `PHREN_ACTOR` identity. Phren will refuse the write rather than silently forgetting it.
 
 **Merge conflicts after pulling on a new machine**
 
-Run `cortex` and type `:conflicts`. Cortex auto-merges most cases (task items, findings). If a manual merge is needed, conflict markers show in the files.
+Run `phren` and type `:conflicts`. Phren handles most merges on his own (task items, findings). If he can't resolve it, conflict markers show in the files for you.
 
 </details>
 
@@ -585,6 +585,6 @@ Run `cortex` and type `:conflicts`. Cortex auto-merges most cases (task items, f
 
 Found a security issue? See [SECURITY.md](SECURITY.md) for responsible disclosure.
 
-Cortex uses `sql.js-fts5` for local SQLite FTS5 in Node. Pinned and tested in CI.
+Phren uses `sql.js-fts5` for local SQLite FTS5 in Node. Pinned and tested in CI.
 
 MIT License. Made by [Ala Arab](https://github.com/alaarab). [Contributions welcome](CONTRIBUTING.md).

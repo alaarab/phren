@@ -81,12 +81,12 @@ describe.sequential("web-ui server", () => {
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
   let port = 0;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-web-ui-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-test-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     write(
       path.join(tmpRoot, ".governance", "access-control.json"),
       JSON.stringify({
@@ -111,85 +111,35 @@ describe.sequential("web-ui server", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
-  it("supports edit/approve/reject workflow via HTTP actions", async () => {
-    const oldReviewLine = "- [2026-03-05] Keep this memory [confidence 0.90]";
-    const staleLine = "- [2026-03-04] Remove stale memory [confidence 0.55]";
-
-    const editRes = await postForm(port, "/edit", {
-      project: "demo",
-      line: oldReviewLine,
-      new_text: "keep this memory updated",
-    });
-    expect(editRes.status).toBe(302);
-
-    const queueAfterEdit = fs.readFileSync(path.join(tmpRoot, "demo", "MEMORY_QUEUE.md"), "utf8");
-    const editedLine = queueAfterEdit.split("\n").find((line) => line.includes("keep this memory updated"));
-    expect(editedLine).toBeDefined();
+  it("queue operations return error since they were removed", async () => {
+    const reviewLine = "- [2026-03-05] Keep this memory [confidence 0.90]";
 
     const approveRes = await postForm(port, "/approve", {
       project: "demo",
-      line: editedLine || "",
+      line: reviewLine,
     });
-    expect(approveRes.status).toBe(302);
+    expect(approveRes.status).toBe(500);
+    expect(approveRes.body).toContain("removed");
 
     const rejectRes = await postForm(port, "/reject", {
       project: "demo",
-      line: staleLine,
+      line: reviewLine,
     });
-    expect(rejectRes.status).toBe(302);
+    expect(rejectRes.status).toBe(500);
+    expect(rejectRes.body).toContain("removed");
 
-    const queueFinal = fs.readFileSync(path.join(tmpRoot, "demo", "MEMORY_QUEUE.md"), "utf8");
-    expect(queueFinal).not.toContain("keep this memory updated");
-    expect(queueFinal).not.toContain("Remove stale memory");
-
-    const findings = fs.readFileSync(path.join(tmpRoot, "demo", "FINDINGS.md"), "utf8");
-    expect(findings).toContain("keep this memory updated");
-  });
-
-  it("returns 403 when contributor tries to approve risky queue item", async () => {
-    process.env.CORTEX_ACTOR = "web-ui-contributor";
-    write(
-      path.join(tmpRoot, ".governance", "access-control.json"),
-      JSON.stringify({
-        admins: [],
-        maintainers: [],
-        contributors: ["web-ui-contributor"],
-        viewers: [],
-      }, null, 2) + "\n"
-    );
-    write(
-      path.join(tmpRoot, ".governance", "workflow-policy.json"),
-      JSON.stringify({
-        requireMaintainerApproval: true,
-        lowConfidenceThreshold: 0.7,
-        riskySections: ["Stale", "Conflicts"],
-        taskMode: "manual",
-      }, null, 2) + "\n"
-    );
-    const staleLine = "- [2026-03-04] Remove stale memory [confidence 0.55]";
-
-    const res = await postForm(port, "/approve", {
+    const editRes = await postForm(port, "/edit", {
       project: "demo",
-      line: staleLine,
+      line: reviewLine,
+      new_text: "updated",
     });
-    expect(res.status).toBe(403);
-    expect(res.body).toContain("maintainer or admin");
-  });
-
-  it("returns 400 for empty edit text", async () => {
-    const line = "- [2026-03-05] Keep this memory [confidence 0.90]";
-    const res = await postForm(port, "/edit", {
-      project: "demo",
-      line,
-      new_text: "   ",
-    });
-    expect(res.status).toBe(400);
-    expect(res.body).toContain("cannot be empty");
+    expect(editRes.status).toBe(500);
+    expect(editRes.body).toContain("removed");
   });
 
   it("returns 400 for invalid project name", async () => {
@@ -301,12 +251,12 @@ describe.sequential("web-ui CSRF protection", () => {
   let server: http.Server | null = null;
   let port = 0;
   let csrfTokens: Map<string, number>;
-  const priorActor = process.env.CORTEX_ACTOR;
+  const priorActor = process.env.PHREN_ACTOR;
 
   beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-csrf-test-"));
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-csrf-test-"));
     seedProject(tmpRoot);
-    process.env.CORTEX_ACTOR = "web-ui-admin";
+    process.env.PHREN_ACTOR = "web-ui-admin";
     write(
       path.join(tmpRoot, ".governance", "access-control.json"),
       JSON.stringify({
@@ -332,8 +282,8 @@ describe.sequential("web-ui CSRF protection", () => {
       server.close(() => resolve());
     });
     server = null;
-    if (priorActor === undefined) delete process.env.CORTEX_ACTOR;
-    else process.env.CORTEX_ACTOR = priorActor;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
     tmpCleanup();
   });
 
@@ -350,7 +300,7 @@ describe.sequential("web-ui CSRF protection", () => {
     expect(csrfTokens.size).toBe(1);
   });
 
-  it("POST /approve with valid CSRF token succeeds", async () => {
+  it("POST /api/hook-toggle with valid CSRF token succeeds", async () => {
     // Get a CSRF token first
     await new Promise<void>((resolve, reject) => {
       http.get(`http://127.0.0.1:${port}/`, (res) => {
@@ -360,12 +310,12 @@ describe.sequential("web-ui CSRF protection", () => {
     });
     const token = [...csrfTokens.keys()][0];
 
-    const res = await postForm(port, "/approve", {
+    const res = await postForm(port, "/api/hook-toggle", {
       _csrf: token,
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(200);
   });
 
   it("POST /approve without CSRF token returns 403", async () => {
@@ -397,18 +347,18 @@ describe.sequential("web-ui CSRF protection", () => {
     const token = [...csrfTokens.keys()][0];
 
     // First use succeeds
-    const first = await postForm(port, "/reject", {
+    const first = await postForm(port, "/api/hook-toggle", {
       _csrf: token,
-      project: "demo",
-      line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
+      tool: "claude",
+      enabled: "true",
     });
-    expect(first.status).toBe(302);
+    expect(first.status).toBe(200);
 
     // Replay with same token fails
-    const replay = await postForm(port, "/reject", {
+    const replay = await postForm(port, "/api/hook-toggle", {
       _csrf: token,
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
     expect(replay.status).toBe(403);
   });
@@ -416,7 +366,7 @@ describe.sequential("web-ui CSRF protection", () => {
 
 describe("web-ui HTML rendering", () => {
   it("uses element-based handlers for skills and hooks instead of inline quoted values", () => {
-    const { path: tmpRoot, cleanup } = makeTempDir("cortex-web-ui-html-");
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
@@ -432,7 +382,7 @@ describe("web-ui HTML rendering", () => {
   });
 
   it("uses safe review-queue handlers and escaped plain-text rendering for queue items", () => {
-    const { path: tmpRoot, cleanup } = makeTempDir("cortex-web-ui-review-html-");
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-review-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
@@ -452,13 +402,13 @@ describe("web-ui HTML rendering", () => {
   });
 
   it("renders graph detail scaffolding and enhanced graph controls", () => {
-    const { path: tmpRoot, cleanup } = makeTempDir("cortex-web-ui-graph-html-");
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-graph-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
       expect(body).toContain('id="graph-detail-panel"');
       expect(body).toContain('id="graph-detail-body"');
-      expect(body).toContain("cortexGraph");
+      expect(body).toContain("phrenGraph");
       expect(body).toContain("window.graphClearSelection");
     } finally {
       cleanup();
@@ -483,7 +433,7 @@ describe("web-ui launch helpers", () => {
   });
 
   it("waits for the web-ui server to answer before launch", async () => {
-    const { path: tmpRoot, cleanup } = makeTempDir("cortex-web-ui-ready-");
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-ready-");
     const server = createWebUiServer(tmpRoot);
     seedProject(tmpRoot);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));

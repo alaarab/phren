@@ -24,12 +24,12 @@ function parseAndApplyDotEnv(filePath: string): void {
   }
 }
 
-function resolveDotEnvPath(cortexPath?: string): string | null {
+function resolveDotEnvPath(phrenPath?: string): string | null {
+  const envPath = process.env.PHREN_PATH;
   const candidates = [
-    cortexPath ? path.join(cortexPath, ".env") : null,
-    process.env.CORTEX_PATH ? path.join(process.env.CORTEX_PATH, ".env") : null,
-    path.join(homeDir(), ".cortex", ".env"),
-    path.join(homeDir(), "cortex", ".env"),
+    phrenPath ? path.join(phrenPath, ".env") : null,
+    envPath ? path.join(envPath, ".env") : null,
+    path.join(homeDir(), ".phren", ".env"),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   const seen = new Set<string>();
@@ -42,9 +42,9 @@ function resolveDotEnvPath(cortexPath?: string): string | null {
   return null;
 }
 
-export function bootstrapCortexDotEnv(cortexPath?: string): string | null {
-  const cacheKey = `${cortexPath ?? ""}|${process.env.CORTEX_PATH ?? ""}|${process.env.HOME ?? ""}|${process.env.USERPROFILE ?? ""}`;
-  const envPath = resolveDotEnvPath(cortexPath);
+export function bootstrapPhrenDotEnv(phrenPath?: string): string | null {
+  const cacheKey = `${phrenPath ?? ""}|${process.env.PHREN_PATH ?? ""}|${process.env.HOME ?? ""}|${process.env.USERPROFILE ?? ""}`;
+  const envPath = resolveDotEnvPath(phrenPath);
   if (!envPath) {
     _loadedEnvKey = cacheKey;
     _loadedEnvPath = null;
@@ -64,7 +64,7 @@ export function bootstrapCortexDotEnv(cortexPath?: string): string | null {
   return envPath;
 }
 
-export function resetCortexDotEnvBootstrapForTests(): void {
+export function resetPhrenDotEnvBootstrapForTests(): void {
   _loadedEnvKey = undefined;
   _loadedEnvPath = null;
   _loadedEnvMtimeMs = -1;

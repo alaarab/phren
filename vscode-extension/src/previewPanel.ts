@@ -31,7 +31,7 @@ export function showPreview(opts: PreviewOptions): void {
 
   currentKey = opts.key;
   panel = vscode.window.createWebviewPanel(
-    "cortex.preview",
+    "phren.preview",
     opts.title,
     { viewColumn: vscode.ViewColumn.One, preserveFocus: true },
     { enableScripts: true },

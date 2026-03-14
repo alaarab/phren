@@ -3,19 +3,19 @@ import { buildTaskIssueBody, extractGithubRepoFromText, parseGithubIssueUrl } fr
 
 describe("tasks-github helpers", () => {
   it("parses GitHub issue URLs into repo and issue number", () => {
-    expect(parseGithubIssueUrl("https://github.com/alaarab/cortex/issues/14")).toEqual({
-      repo: "alaarab/cortex",
+    expect(parseGithubIssueUrl("https://github.com/alaarab/phren/issues/14")).toEqual({
+      repo: "alaarab/phren",
       issueNumber: 14,
-      url: "https://github.com/alaarab/cortex/issues/14",
+      url: "https://github.com/alaarab/phren/issues/14",
     });
   });
 
   it("extracts a GitHub repo from markdown text", () => {
-    expect(extractGithubRepoFromText("Repo: https://github.com/alaarab/cortex\n")).toBe("alaarab/cortex");
+    expect(extractGithubRepoFromText("Repo: https://github.com/alaarab/phren\n")).toBe("alaarab/phren");
   });
 
   it("builds an issue body from task item context", () => {
-    const body = buildTaskIssueBody("cortex", {
+    const body = buildTaskIssueBody("phren", {
       id: "Q1",
       stableId: "deadbeef",
       section: "Queue",

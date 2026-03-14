@@ -3,7 +3,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import * as crypto from "crypto";
-import { CortexClient } from "./cortexClient";
+import { PhrenClient } from "./phrenClient";
 
 /**
  * Load the web-ui graph script from the MCP dist.
@@ -34,6 +34,34 @@ function loadGraphScript(): string {
   }
   return "";
 }
+
+/* ── Phren inline SVG for webview embedding ─────────────── */
+
+const PHREN_INLINE_SVG_SMALL = `<svg width="64" height="64" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="pb" cx="48%" cy="42%" r="50%">
+      <stop offset="0%" stop-color="#9B8DC8"/>
+      <stop offset="40%" stop-color="#7B68AE"/>
+      <stop offset="85%" stop-color="#5B4B8A"/>
+      <stop offset="100%" stop-color="#2D2255"/>
+    </radialGradient>
+  </defs>
+  <path d="M 28 60 C 26 44, 32 28, 46 22 C 52 18, 60 16, 68 18 C 78 20, 86 28, 90 38 C 96 50, 94 66, 88 76 C 82 86, 74 94, 62 96 C 48 98, 36 92, 30 80 C 24 72, 24 66, 28 60 Z" fill="url(#pb)"/>
+  <path d="M 36 38 C 46 34, 60 36, 72 32 C 78 30, 84 34, 88 38" stroke="#5B4B8A" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.5"/>
+  <path d="M 30 52 C 42 48, 56 50, 68 46 C 78 44, 84 48, 90 52" stroke="#5B4B8A" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.4"/>
+  <path d="M 42 68 L 46 63 L 50 68 L 46 73 Z" fill="#1a1a2e"/>
+  <path d="M 56 68 L 61 62 L 66 68 L 61 74 Z" fill="#1a1a2e"/>
+  <rect x="43" y="64" width="2.5" height="2.5" rx="0.5" fill="#FFF" opacity="0.8"/>
+  <rect x="57.5" y="63" width="2.5" height="2.5" rx="0.5" fill="#FFF" opacity="0.8"/>
+  <path d="M 48 78 L 51 81 L 54 78" stroke="#2D2255" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="38" y="96" width="11" height="14" rx="2" fill="#3D3270"/>
+  <rect x="57" y="96" width="11" height="14" rx="2" fill="#3D3270"/>
+  <g transform="translate(96, 14)">
+    <polygon points="0,-8 2,0 0,8 -2,0" fill="#00E5FF"/>
+    <polygon points="-8,0 0,-2 8,0 0,2" fill="#00E5FF"/>
+    <circle cx="0" cy="0" r="1.5" fill="#FFF" opacity="0.9"/>
+  </g>
+</svg>`;
 
 /* ── Interfaces ──────────────────────────────────────────── */
 
@@ -127,15 +155,15 @@ interface GraphPayload {
 
 /* ── Main entry ──────────────────────────────────────────── */
 
-export async function showGraphWebview(client: CortexClient, context: vscode.ExtensionContext): Promise<void> {
+export async function showGraphWebview(client: PhrenClient, context: vscode.ExtensionContext): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
-    "cortex.entityGraph",
-    "Cortex Entity Graph",
+    "phren.entityGraph",
+    "Phren Entity Graph",
     vscode.ViewColumn.One,
     { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] },
   );
 
-  panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "cortex.svg"));
+  panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "icon.svg"));
   panel.webview.html = renderLoadingHtml(panel.webview);
 
   let graphData: GraphPayload | undefined;
@@ -230,7 +258,7 @@ export async function showGraphWebview(client: CortexClient, context: vscode.Ext
 
 /* ── Data loading ────────────────────────────────────────── */
 
-async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
+async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const projects = await fetchProjects(client);
 
   // Parallel per-project fetches
@@ -270,7 +298,7 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
       subtype: "project",
       text: summary.summary,
       radius: Math.min(14 + Math.sqrt(findings.length + tasks.length) * 1.5, 30),
-      color: "#7c3aed",
+      color: "#7B68AE",
     });
 
     // Finding nodes
@@ -286,7 +314,7 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
         subtype: finding.topicSlug,
         text: finding.text,
         radius: 8,
-        color: "#f4a261", // placeholder; actual color determined by graph engine from topic slug
+        color: "#5B4B8A", // placeholder; actual color determined by graph engine from topic slug
         date: finding.date,
         stableId: finding.stableId,
         topicSlug: finding.topicSlug,
@@ -305,7 +333,7 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
       const taskScoreKey = buildScoreKey(projectName, "tasks.md", task.line);
       const taskScore = scoreLookup.get(taskScoreKey);
       const sectionLower = task.section.toLowerCase();
-      const taskColorMap: Record<string, string> = { active: "#10b981", queue: "#eab308", done: "#6b7280" };
+      const taskColorMap: Record<string, string> = { active: "#10b981", queue: "#00E5FF", done: "#6b7280" };
       nodes.push({
         id: taskId,
         kind: "task",
@@ -314,7 +342,7 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
         subtype: sectionLower,
         text: task.line,
         radius: 7,
-        color: taskColorMap[sectionLower] || "#eab308",
+        color: taskColorMap[sectionLower] || "#00E5FF",
         section: task.section,
         priority: task.priority,
         scoreKey: taskScoreKey,
@@ -349,7 +377,7 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
       subtype: entity.type,
       text: `${entity.name} (${entity.type}) - ${entity.refCount} refs`,
       radius: Math.min(6 + entity.refCount, 16),
-      color: "#06b6d4",
+      color: "#00E5FF",
       refCount: entity.refCount,
       entityType: entity.type,
       connectedProjects: uniqueConnected,
@@ -413,7 +441,7 @@ async function loadGraphData(client: CortexClient): Promise<GraphPayload> {
 
 /* ── Fetch helpers ───────────────────────────────────────── */
 
-async function fetchProjects(client: CortexClient): Promise<{ name: string; brief?: string }[]> {
+async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief?: string }[]> {
   const raw = await client.listProjects();
   const data = responseData(raw);
   const parsed: { name: string; brief?: string }[] = [];
@@ -425,13 +453,13 @@ async function fetchProjects(client: CortexClient): Promise<{ name: string; brie
     if (name.includes(":") || name.includes("/") || name.includes("\\")) continue;
     if (name === "global" || name === "scripts" || name === "templates" || name === "profiles") continue;
     // Filter known stale/non-profile projects (should be fixed at MCP level long-term)
-    if (name === "dendron" || name === "cortex-framework" || name === "max4liveplugins" || name === "pcn-reports") continue;
+    if (name === "dendron" || name === "phren-framework" || name === "max4liveplugins" || name === "pcn-reports") continue;
     parsed.push({ name, brief: asString(record?.brief) });
   }
   return parsed;
 }
 
-async function fetchProjectSummary(client: CortexClient, project: string): Promise<ProjectSummaryData> {
+async function fetchProjectSummary(client: PhrenClient, project: string): Promise<ProjectSummaryData> {
   const raw = await client.getProjectSummary(project);
   const data = responseData(raw);
   const files: ProjectSummaryFile[] = [];
@@ -452,7 +480,7 @@ async function fetchProjectSummary(client: CortexClient, project: string): Promi
   };
 }
 
-async function fetchFindings(client: CortexClient, project: string): Promise<FindingData[]> {
+async function fetchFindings(client: PhrenClient, project: string): Promise<FindingData[]> {
   const raw = await client.getFindings(project);
   const data = responseData(raw);
   const parsed: FindingData[] = [];
@@ -474,7 +502,7 @@ async function fetchFindings(client: CortexClient, project: string): Promise<Fin
   return parsed;
 }
 
-async function fetchTasks(client: CortexClient, project: string): Promise<TaskData[]> {
+async function fetchTasks(client: PhrenClient, project: string): Promise<TaskData[]> {
   const raw = await client.getTasks(project, { status: "all", done_limit: 10 });
   const data = responseData(raw);
   const items = asRecord(data?.items);
@@ -511,7 +539,7 @@ async function fetchTasks(client: CortexClient, project: string): Promise<TaskDa
   return parsed;
 }
 
-async function fetchEntities(client: CortexClient): Promise<EntityData[]> {
+async function fetchEntities(client: PhrenClient): Promise<EntityData[]> {
   try {
     const raw = await client.readGraph();
     const data = responseData(raw);
@@ -534,7 +562,7 @@ async function fetchEntities(client: CortexClient): Promise<EntityData[]> {
 
 function loadMemoryScores(): MemoryScores {
   try {
-    const scoresPath = path.join(os.homedir(), ".cortex", ".runtime", "memory-scores.json");
+    const scoresPath = path.join(os.homedir(), ".phren", ".runtime", "memory-scores.json");
     const raw = fs.readFileSync(scoresPath, "utf8");
     const parsed = JSON.parse(raw) as MemoryScores;
     return { schemaVersion: parsed.schemaVersion ?? 1, entries: parsed.entries ?? {} };
@@ -621,12 +649,22 @@ function renderLoadingHtml(webview: vscode.Webview): string {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cortex Entity Graph</title>
+  <title>Phren Entity Graph</title>
   <style>
     body { margin:0; display:grid; place-items:center; min-height:100vh; color:var(--vscode-foreground); font-family:sans-serif; }
+    .loading-container { text-align:center; }
+    .loading-container svg { margin-bottom:16px; }
+    .loading-text { font-size:14px; opacity:0.7; }
+    @keyframes phren-bob { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-4px); } }
+    .phren-loading { animation:phren-bob 1.2s ease-in-out infinite; }
   </style>
 </head>
-<body><div>Loading Cortex Entity Graph...</div></body>
+<body>
+  <div class="loading-container">
+    <div class="phren-loading">${PHREN_INLINE_SVG_SMALL}</div>
+    <div class="loading-text">Loading entity graph...</div>
+  </div>
+</body>
 </html>`;
 }
 
@@ -638,13 +676,13 @@ function renderErrorHtml(webview: vscode.Webview, errorMessage: string): string 
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cortex Entity Graph</title>
+  <title>Phren Entity Graph</title>
   <style>
     body { margin:0; display:grid; place-items:center; min-height:100vh; padding:24px; color:var(--vscode-errorForeground); font-family:sans-serif; }
     .panel { max-width:720px; border:1px solid; border-radius:10px; padding:16px; }
   </style>
 </head>
-<body><div class="panel">Failed to render entity graph: ${escapeHtml(errorMessage)}</div></body>
+<body><div class="panel"><div style="text-align:center;margin-bottom:12px">${PHREN_INLINE_SVG_SMALL}</div>Failed to render entity graph: ${escapeHtml(errorMessage)}</div></body>
 </html>`;
 }
 
@@ -661,7 +699,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cortex Entity Graph</title>
+  <title>Phren Entity Graph</title>
   <style>
     :root {
       color-scheme:light dark;
@@ -732,6 +770,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       </div>
     </section>
     <aside class="graph-detail-panel" id="graph-detail-panel">
+      <div style="text-align:center;margin-bottom:12px;opacity:0.6">${PHREN_INLINE_SVG_SMALL}</div>
       <h2>Details</h2>
       <div id="graph-detail-meta">Click a bubble to inspect it.</div>
       <div id="graph-detail-body"><p class="text-muted" style="margin:0">Use the graph filters, then click a project or finding bubble to pin its details here.</p></div>
@@ -812,8 +851,8 @@ ${graphScript}
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
 
   // Mount the web-ui graph
-  if (window.cortexGraph && window.cortexGraph.mount) {
-    window.cortexGraph.mount({
+  if (window.phrenGraph && window.phrenGraph.mount) {
+    window.phrenGraph.mount({
       nodes: graphNodes,
       links: graphLinks,
       scores: scores,
@@ -822,7 +861,7 @@ ${graphScript}
   } else {
     var fallback = document.getElementById('graph-canvas');
     if (fallback && fallback.parentElement) {
-      fallback.parentElement.innerHTML = '<p style="padding:24px;color:var(--vscode-errorForeground,#f44)">Graph engine not available. Ensure the cortex MCP server is built (npm run build in cortex root).</p>';
+      fallback.parentElement.innerHTML = '<p style="padding:24px;color:var(--vscode-errorForeground,#f44)">Graph engine not available. Ensure the phren MCP server is built (npm run build in project root).</p>';
     }
   }
 
@@ -871,9 +910,9 @@ ${graphScript}
   });
 
   // Hook into the graph engine's node-select event (fired when the user clicks a bubble)
-  // cortexGraph exposes window.cortexGraph.onNodeSelect(callback)
-  if (window.cortexGraph && window.cortexGraph.onNodeSelect) {
-    window.cortexGraph.onNodeSelect(function(node, canvasX, canvasY) {
+  // phrenGraph exposes window.phrenGraph.onNodeSelect(callback)
+  if (window.phrenGraph && window.phrenGraph.onNodeSelect) {
+    window.phrenGraph.onNodeSelect(function(node, canvasX, canvasY) {
       if (!node || node.group === 'project' || node.group === 'entity' || node.group === 'reference') {
         hideOverlay();
         return;
@@ -898,9 +937,9 @@ ${graphScript}
     if (canvas) {
       canvas.addEventListener('click', function(evt) {
         // If the graph engine doesn't have onNodeSelect, fall back to a manual hit test
-        // against a simple node-position map if window.cortexGraph.getNodeAt is available
-        if (window.cortexGraph && window.cortexGraph.getNodeAt) {
-          var node = window.cortexGraph.getNodeAt(evt.offsetX, evt.offsetY);
+        // against a simple node-position map if window.phrenGraph.getNodeAt is available
+        if (window.phrenGraph && window.phrenGraph.getNodeAt) {
+          var node = window.phrenGraph.getNodeAt(evt.offsetX, evt.offsetY);
           if (node && node.id.startsWith('finding:')) {
             vscode.postMessage({ command: 'nodeClick', nodeId: node.id, kind: 'finding' });
           }

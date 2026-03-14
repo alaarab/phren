@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you find a security issue in Cortex, please report it privately. Do not open a public issue.
+If you find a security issue in Phren, please report it privately. Do not open a public issue.
 
 **Email:** security@alaarab.com
 
@@ -15,7 +15,7 @@ Include:
 
 ## What Counts as a Security Issue
 
-- Path traversal (reading or writing files outside the cortex directory)
+- Path traversal (reading or writing files outside the phren directory)
 - Arbitrary code execution through MCP tool inputs
 - Information disclosure (leaking data from other projects or profiles)
 - Injection attacks through FTS5 queries or CLI arguments
@@ -23,7 +23,7 @@ Include:
 
 ## What Does Not Count
 
-- Bugs that require local filesystem access (cortex is a local-first tool)
+- Bugs that require local filesystem access (phren is a local-first tool)
 - Issues that require the user to run malicious commands themselves
 - Feature requests or general bugs (use the issue tracker for these)
 

@@ -1,7 +1,7 @@
 /**
  * Feature 4: Stack-ranked priorities
  *
- * Tests for applyGravity() (unit) and the `cortex task reorder` CLI command.
+ * Tests for applyGravity() (unit) and the `phren task reorder` CLI command.
  *
  * Features 1–3 and 5 have dedicated test files:
  *   1. Capability registry      — capabilities.test.ts
@@ -21,30 +21,30 @@ const runCli = runCliExec;
 
 // ── Shared fixture helpers ────────────────────────────────────────────────────
 
-function makeCortex() {
+function makePhren() {
   const tmp = makeTempDir("feature-drafts-");
   grantAdmin(tmp.path);
   return tmp;
 }
 
-function makeProject(cortexPath: string, project: string) {
-  const dir = path.join(cortexPath, project);
+function makeProject(phrenPath: string, project: string) {
+  const dir = path.join(phrenPath, project);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n`);
 }
 
-function writeTasks(cortexPath: string, project: string, content: string) {
-  writeFile(path.join(cortexPath, project, "tasks.md"), content);
+function writeTasks(phrenPath: string, project: string, content: string) {
+  writeFile(path.join(phrenPath, project, "tasks.md"), content);
 }
 
-function readTasks(cortexPath: string, project: string): string {
-  return fs.readFileSync(path.join(cortexPath, project, "tasks.md"), "utf-8");
+function readTasks(phrenPath: string, project: string): string {
+  return fs.readFileSync(path.join(phrenPath, project, "tasks.md"), "utf-8");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Feature 4: Stack-ranked priorities
 // applyGravity() — display-only drift; does NOT mutate the file
-// cortex task reorder <project> "<text>" --rank=<n>
+// phren task reorder <project> "<text>" --rank=<n>
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Feature 4: stack-ranked priorities", () => {
@@ -69,7 +69,7 @@ describe("Feature 4: stack-ranked priorities", () => {
   ].join("\n");
 
   beforeEach(() => {
-    tmp = makeCortex();
+    tmp = makePhren();
     makeProject(tmp.path, project);
     writeTasks(tmp.path, project, RANKED_TASKS);
   });
@@ -134,10 +134,10 @@ describe("Feature 4: stack-ranked priorities", () => {
     expect(gravitated[0].rank).toBeUndefined();
   });
 
-  it("cortex task reorder moves a task to a new rank", () => {
+  it("phren task reorder moves a task to a new rank", () => {
     const { exitCode, stdout, stderr } = runCli(
       ["task", "reorder", project, "Add rate limiting", "--rank=1"],
-      { CORTEX_PATH: tmp.path, CORTEX_ACTOR: "test" },
+      { PHREN_PATH: tmp.path, PHREN_ACTOR: "test" },
     );
     expect(exitCode).toBe(0);
     void stdout; void stderr;
@@ -151,26 +151,26 @@ describe("Feature 4: stack-ranked priorities", () => {
     expect(rateLimitLine).toContain("rank:1");
   });
 
-  it("cortex task reorder exits non-zero when project is missing", () => {
+  it("phren task reorder exits non-zero when project is missing", () => {
     const { exitCode } = runCli(
       ["task", "reorder"],
-      { CORTEX_PATH: tmp.path, CORTEX_ACTOR: "test" },
+      { PHREN_PATH: tmp.path, PHREN_ACTOR: "test" },
     );
     expect(exitCode).not.toBe(0);
   });
 
-  it("cortex task reorder exits non-zero when --rank is missing", () => {
+  it("phren task reorder exits non-zero when --rank is missing", () => {
     const { exitCode } = runCli(
       ["task", "reorder", project, "Implement caching"],
-      { CORTEX_PATH: tmp.path, CORTEX_ACTOR: "test" },
+      { PHREN_PATH: tmp.path, PHREN_ACTOR: "test" },
     );
     expect(exitCode).not.toBe(0);
   });
 
-  it("cortex task reorder exits non-zero when task text does not match any item", () => {
+  it("phren task reorder exits non-zero when task text does not match any item", () => {
     const { exitCode } = runCli(
       ["task", "reorder", project, "Nonexistent task text xyz", "--rank=1"],
-      { CORTEX_PATH: tmp.path, CORTEX_ACTOR: "test" },
+      { PHREN_PATH: tmp.path, PHREN_ACTOR: "test" },
     );
     expect(exitCode).not.toBe(0);
   });

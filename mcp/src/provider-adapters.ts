@@ -27,8 +27,8 @@ function homePathForEnv(env: NodeJS.ProcessEnv, ...parts: string[]): string {
   return joinPortable(homeDir(env), ...parts);
 }
 
-function defaultCortexPath(env: NodeJS.ProcessEnv = process.env): string {
-  return env.CORTEX_PATH || homePathForEnv(env, ".cortex");
+function defaultPhrenPath(env: NodeJS.ProcessEnv = process.env): string {
+  return env.PHREN_PATH || env.PHREN_PATH || homePathForEnv(env, ".phren");
 }
 
 function normalizeWindowsPathToWsl(input: string | undefined): string | undefined {
@@ -54,32 +54,32 @@ export function pickExistingFile(candidates: string[]): string | null {
 
 export function hookConfigPath(
   tool: HookToolName,
-  cortexPath: string | undefined = defaultCortexPath()
+  phrenPath: string | undefined = defaultPhrenPath()
 ): string {
   switch (tool) {
     case "claude":
       return homePathForEnv(process.env, ".claude", "settings.json");
     case "copilot":
-      return homePathForEnv(process.env, ".github", "hooks", "cortex.json");
+      return homePathForEnv(process.env, ".github", "hooks", "phren.json");
     case "cursor":
       return homePathForEnv(process.env, ".cursor", "hooks.json");
     case "codex":
-      return path.join(cortexPath || defaultCortexPath(), "codex.json");
+      return path.join(phrenPath || defaultPhrenPath(), "codex.json");
   }
 }
 
-export function hookConfigPaths(cortexPath: string): Record<HookToolName, string> {
+export function hookConfigPaths(phrenPath: string): Record<HookToolName, string> {
   return {
-    claude: hookConfigPath("claude", cortexPath),
-    copilot: hookConfigPath("copilot", cortexPath),
-    cursor: hookConfigPath("cursor", cortexPath),
-    codex: hookConfigPath("codex", cortexPath),
+    claude: hookConfigPath("claude", phrenPath),
+    copilot: hookConfigPath("copilot", phrenPath),
+    cursor: hookConfigPath("cursor", phrenPath),
+    codex: hookConfigPath("codex", phrenPath),
   };
 }
 
-export function hookConfigRoots(cortexPath: string): string[] {
-  const roots = new Set<string>([path.resolve(cortexPath)]);
-  for (const target of Object.values(hookConfigPaths(cortexPath))) {
+export function hookConfigRoots(phrenPath: string): string[] {
+  const roots = new Set<string>([path.resolve(phrenPath)]);
+  for (const target of Object.values(hookConfigPaths(phrenPath))) {
     roots.add(path.resolve(path.dirname(target)));
   }
   return Array.from(roots);
@@ -190,17 +190,17 @@ export function resolveCopilotMcpConfig(commandExists: CommandExistsFn, env: Nod
   return { installed, existing, cliConfig: candidates[0], hasCliDir };
 }
 
-export function codexJsonCandidates(cortexPath: string, env: NodeJS.ProcessEnv = process.env): string[] {
+export function codexJsonCandidates(phrenPath: string, env: NodeJS.ProcessEnv = process.env): string[] {
   const home = homeDir(env);
   return [
     joinPortable(home, ".codex", "config.json"),
     joinPortable(home, ".codex", "mcp.json"),
-    path.join(cortexPath, "codex.json"),
+    path.join(phrenPath, "codex.json"),
   ];
 }
 
 export function resolveCodexMcpConfig(
-  cortexPath: string,
+  phrenPath: string,
   commandExists: CommandExistsFn,
   env: NodeJS.ProcessEnv = process.env
 ): {
@@ -212,7 +212,7 @@ export function resolveCodexMcpConfig(
 } {
   const home = homeDir(env);
   const tomlPath = joinPortable(home, ".codex", "config.toml");
-  const jsonCandidates = codexJsonCandidates(cortexPath, env);
+  const jsonCandidates = codexJsonCandidates(phrenPath, env);
   const existingJson = pickExistingFile(jsonCandidates);
   const installed =
     fs.existsSync(tomlPath) ||

@@ -2,15 +2,15 @@ import { describe, it, expect } from "vitest";
 import {
   UNIVERSAL_TECH_TERMS_RE,
   EXTRA_ENTITY_PATTERNS,
-  cortexOk,
-  cortexErr,
+  phrenOk,
+  phrenErr,
   forwardErr,
-  parseCortexErrorCode,
+  parsePhrenErrorCode,
   isRecord,
   withDefaults,
   capCache,
-  CortexError,
-} from "./cortex-core.js";
+  PhrenError,
+} from "./phren-core.js";
 
 // ── UNIVERSAL_TECH_TERMS_RE ─────────────────────────────────────────────────
 
@@ -83,8 +83,8 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
   });
 
   describe("env_key pattern", () => {
-    it("matches CORTEX_ prefixed env vars", () => {
-      expect(matchPattern("env_key", "Set CORTEX_LLM_ENDPOINT to your URL")).toEqual(["CORTEX_LLM_ENDPOINT"]);
+    it("matches PHREN_ prefixed env vars", () => {
+      expect(matchPattern("env_key", "Set PHREN_LLM_ENDPOINT to your URL")).toEqual(["PHREN_LLM_ENDPOINT"]);
     });
 
     it("matches NODE_ENV style vars", () => {
@@ -97,8 +97,8 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
     });
 
     it("matches multiple env vars in one string", () => {
-      const matches = matchPattern("env_key", "CORTEX_DEBUG=1 and AWS_REGION=us-east-1");
-      expect(matches).toContain("CORTEX_DEBUG");
+      const matches = matchPattern("env_key", "PHREN_DEBUG=1 and AWS_REGION=us-east-1");
+      expect(matches).toContain("PHREN_DEBUG");
       expect(matches).toContain("AWS_REGION");
     });
   });
@@ -115,8 +115,8 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
     });
 
     it("matches tilde paths", () => {
-      const matches = matchPattern("file_path", "Stored in ~/cortex/FINDINGS.md");
-      expect(matches).toEqual(["~/cortex/FINDINGS.md"]);
+      const matches = matchPattern("file_path", "Stored in ~/phren/FINDINGS.md");
+      expect(matches).toEqual(["~/phren/FINDINGS.md"]);
     });
 
     it("returns empty for plain text", () => {
@@ -160,7 +160,7 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
   });
 
   it("handles very long strings without hanging", () => {
-    const longText = "CORTEX_DEBUG ".repeat(10000) + "v1.0.0";
+    const longText = "PHREN_DEBUG ".repeat(10000) + "v1.0.0";
     for (const { re } of EXTRA_ENTITY_PATTERNS) {
       const regex = new RegExp(re.source, re.flags);
       // Should complete without hanging
@@ -185,17 +185,17 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
   });
 });
 
-// ── CortexResult helpers ────────────────────────────────────────────────────
+// ── PhrenResult helpers ────────────────────────────────────────────────────
 
-describe("cortexOk / cortexErr / forwardErr", () => {
-  it("cortexOk wraps data", () => {
-    const r = cortexOk(42);
+describe("phrenOk / phrenErr / forwardErr", () => {
+  it("phrenOk wraps data", () => {
+    const r = phrenOk(42);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.data).toBe(42);
   });
 
-  it("cortexErr wraps error", () => {
-    const r = cortexErr("bad", CortexError.FILE_NOT_FOUND);
+  it("phrenErr wraps error", () => {
+    const r = phrenErr("bad", PhrenError.FILE_NOT_FOUND);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error).toBe("bad");
@@ -204,7 +204,7 @@ describe("cortexOk / cortexErr / forwardErr", () => {
   });
 
   it("forwardErr re-types a failed result", () => {
-    const original = cortexErr<number>("oops", CortexError.PERMISSION_DENIED);
+    const original = phrenErr<number>("oops", PhrenError.PERMISSION_DENIED);
     const forwarded = forwardErr<string>(original);
     expect(forwarded.ok).toBe(false);
     if (!forwarded.ok) {
@@ -214,25 +214,25 @@ describe("cortexOk / cortexErr / forwardErr", () => {
   });
 
   it("forwardErr on ok result returns generic error", () => {
-    const original = cortexOk("data");
+    const original = phrenOk("data");
     const forwarded = forwardErr<number>(original);
     expect(forwarded.ok).toBe(false);
   });
 });
 
-// ── parseCortexErrorCode ────────────────────────────────────────────────────
+// ── parsePhrenErrorCode ────────────────────────────────────────────────────
 
-describe("parseCortexErrorCode", () => {
+describe("parsePhrenErrorCode", () => {
   it("extracts known error code from prefix", () => {
-    expect(parseCortexErrorCode("PROJECT_NOT_FOUND: myproject")).toBe("PROJECT_NOT_FOUND");
+    expect(parsePhrenErrorCode("PROJECT_NOT_FOUND: myproject")).toBe("PROJECT_NOT_FOUND");
   });
 
   it("returns undefined for unknown prefix", () => {
-    expect(parseCortexErrorCode("RANDOM_ERROR: something")).toBeUndefined();
+    expect(parsePhrenErrorCode("RANDOM_ERROR: something")).toBeUndefined();
   });
 
   it("returns undefined for empty string", () => {
-    expect(parseCortexErrorCode("")).toBeUndefined();
+    expect(parsePhrenErrorCode("")).toBeUndefined();
   });
 });
 

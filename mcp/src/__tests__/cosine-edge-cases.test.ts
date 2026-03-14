@@ -5,8 +5,8 @@ import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
 import { buildIndex, type SqlJsDatabase } from "../shared-index.js";
 import { cosineFallback, invalidateDfCache } from "../shared-search-fallback.js";
 
-function makeProject(cortexPath: string, name: string, files: Record<string, string>) {
-  const dir = path.join(cortexPath, name);
+function makeProject(phrenPath: string, name: string, files: Record<string, string>) {
+  const dir = path.join(phrenPath, name);
   fs.mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     writeFile(path.join(dir, file), content);
@@ -26,11 +26,11 @@ describe("cosineFallback: edge cases", () => {
   afterEach(() => {
     db?.close();
     tmp.cleanup();
-    delete process.env.CORTEX_FEATURE_HYBRID_SEARCH;
+    delete process.env.PHREN_FEATURE_HYBRID_SEARCH;
   });
 
   it("returns empty array when feature flag is disabled", async () => {
-    process.env.CORTEX_FEATURE_HYBRID_SEARCH = "0";
+    process.env.PHREN_FEATURE_HYBRID_SEARCH = "0";
     makeProject(tmp.path, "proj", {
       "FINDINGS.md": "# proj\n\n- Redis caching strategy uses TTL of 300 seconds\n",
     });
@@ -39,7 +39,7 @@ describe("cosineFallback: edge cases", () => {
     expect(results).toEqual([]);
   });
 
-  it("returns empty array for zero-length corpus (empty cortex dir)", async () => {
+  it("returns empty array for zero-length corpus (empty phren dir)", async () => {
     // No projects = no docs
     db = await buildIndex(tmp.path);
     const results = cosineFallback(db, "redis caching", new Set(), 10);

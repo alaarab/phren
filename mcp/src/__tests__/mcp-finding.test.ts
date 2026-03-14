@@ -9,8 +9,8 @@ const PROJECT = "myapp";
 
 let tmp: { path: string; cleanup: () => void };
 
-function seedProject(cortexPath: string, project = PROJECT) {
-  const dir = path.join(cortexPath, project);
+function seedProject(phrenPath: string, project = PROJECT) {
+  const dir = path.join(phrenPath, project);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n`);
 }
@@ -38,7 +38,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_ACTOR;
   tmp.cleanup();
 });
 

@@ -1,18 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  findCortexPath,
+  findPhrenPath,
   appendAuditLog,
   withDefaults,
   getProjectDirs,
-  findCortexPathWithArg,
+  findPhrenPathWithArg,
   collectNativeMemoryFiles,
   findProjectNameCaseInsensitive,
-  CortexError,
-  cortexOk,
-  cortexErr,
-  ensureCortexPath,
+  PhrenError,
+  phrenOk,
+  phrenErr,
+  ensurePhrenPath,
   normalizeProjectNameForCreate,
-  parseCortexErrorCode,
+  parsePhrenErrorCode,
   expandHomePath,
   homePath,
   hookConfigPath,
@@ -22,9 +22,6 @@ import {
   recordInjection,
   recordFeedback,
   getQualityMultiplier,
-  checkPermission,
-  getAccessControl,
-  updateAccessControl,
   validateGovernanceJson,
   getRetentionPolicy,
   updateRetentionPolicy,
@@ -37,7 +34,6 @@ import {
   appendReviewQueue,
   flushEntryScores,
   entryScoreKey,
-  enforceCanonicalLocks,
   pruneDeadMemories,
 } from "./shared-governance.js";
 import {
@@ -62,23 +58,22 @@ import {
   extractConflictVersions,
 } from "./shared-content.js";
 import { isValidProjectName } from "./utils.js";
-import { grantAdmin, initTestCortexRoot, makeTempDir, suppressOutput } from "./test-helpers.js";
+import { grantAdmin, initTestPhrenRoot, makeTempDir, suppressOutput } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
-import * as os from "os";
 import * as yaml from "js-yaml";
 
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
 
-function makeCortex(): string {
-  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-test-"));
-  initTestCortexRoot(tmpDir);
+function makePhren(): string {
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-test-"));
+  initTestPhrenRoot(tmpDir);
   return tmpDir;
 }
 
-function makeProject(cortexDir: string, name: string, files: Record<string, string>): void {
-  const dir = path.join(cortexDir, name);
+function makeProject(phrenDir: string, name: string, files: Record<string, string>): void {
+  const dir = path.join(phrenDir, name);
   fs.mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, file), content);
@@ -94,12 +89,12 @@ function readVersionedEntries<T>(filePath: string): Record<string, T> {
 }
 
 beforeEach(() => {
-  delete process.env.CORTEX_PATH;
+  delete process.env.PHREN_PATH;
 });
 
 afterEach(() => {
-  delete process.env.CORTEX_PATH;
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_PATH;
+  delete process.env.PHREN_ACTOR;
   if (tmpCleanup) {
     tmpCleanup();
     tmpCleanup = undefined;
@@ -111,7 +106,7 @@ afterEach(() => {
 describe("isValidProjectName", () => {
   it("accepts simple names", () => {
     expect(isValidProjectName("my-project")).toBe(true);
-    expect(isValidProjectName("cortex")).toBe(true);
+    expect(isValidProjectName("phren")).toBe(true);
     expect(isValidProjectName("foo_bar")).toBe(true);
   });
 
@@ -133,36 +128,36 @@ describe("isValidProjectName", () => {
 
 describe("project casing helpers", () => {
   it("normalizes new project names to lowercase", () => {
-    expect(normalizeProjectNameForCreate("Cortex")).toBe("cortex");
+    expect(normalizeProjectNameForCreate("Phren")).toBe("phren");
     expect(normalizeProjectNameForCreate("My-App")).toBe("my-app");
   });
 
   it("finds existing projects case-insensitively", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "Cortex", { "FINDINGS.md": "# Cortex Findings\n" });
-    expect(findProjectNameCaseInsensitive(cortex, "cortex")).toBe("Cortex");
-    expect(findProjectNameCaseInsensitive(cortex, "CORTEX")).toBe("Cortex");
-    expect(findProjectNameCaseInsensitive(cortex, "missing")).toBeNull();
+    const phren = makePhren();
+    makeProject(phren, "Phren", { "FINDINGS.md": "# Phren Findings\n" });
+    expect(findProjectNameCaseInsensitive(phren, "phren")).toBe("Phren");
+    expect(findProjectNameCaseInsensitive(phren, "PHREN")).toBe("Phren");
+    expect(findProjectNameCaseInsensitive(phren, "missing")).toBeNull();
   });
 });
 
-// --- findCortexPath / ensureCortexPath ---
+// --- findPhrenPath / ensurePhrenPath ---
 
-describe("findCortexPath", () => {
-  it("returns CORTEX_PATH env var when set", () => {
-    const cortex = makeCortex();
-    process.env.CORTEX_PATH = cortex;
-    expect(findCortexPath()).toBe(cortex);
+describe("findPhrenPath", () => {
+  it("returns PHREN_PATH env var when set", () => {
+    const phren = makePhren();
+    process.env.PHREN_PATH = phren;
+    expect(findPhrenPath()).toBe(phren);
   });
 
-  it("returns null when no cortex directory exists and no env var", () => {
+  it("returns null when no phren directory exists and no env var", () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
-      expect(findCortexPath()).toBeNull();
+      expect(findPhrenPath()).toBeNull();
     } finally {
       process.chdir(origCwd);
       process.env.HOME = origHome;
@@ -170,17 +165,17 @@ describe("findCortexPath", () => {
     }
   });
 
-  it("finds ~/.cortex when it exists", () => {
+  it("finds ~/.phren when it exists", () => {
     const tmp = makeTempDir("fakehome-");
-    const dotCortex = path.join(tmp.path, ".cortex");
-    fs.mkdirSync(dotCortex);
-    initTestCortexRoot(dotCortex);
+    const dotPhren = path.join(tmp.path, ".phren");
+    fs.mkdirSync(dotPhren);
+    initTestPhrenRoot(dotPhren);
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
-      expect(findCortexPath()).toBe(dotCortex);
+      expect(findPhrenPath()).toBe(dotPhren);
     } finally {
       process.chdir(origCwd);
       process.env.HOME = origHome;
@@ -188,14 +183,14 @@ describe("findCortexPath", () => {
     }
   });
 
-  it("finds the nearest ancestor .cortex directory", () => {
-    const tmp = makeTempDir("ancestor-cortex-");
+  it("finds the nearest ancestor .phren directory", () => {
+    const tmp = makeTempDir("ancestor-phren-");
     const repoRoot = path.join(tmp.path, "repo");
     const nestedDir = path.join(repoRoot, "packages", "app");
-    const localCortex = path.join(repoRoot, ".cortex");
+    const localPhren = path.join(repoRoot, ".phren");
     fs.mkdirSync(nestedDir, { recursive: true });
-    fs.mkdirSync(localCortex, { recursive: true });
-    initTestCortexRoot(localCortex);
+    fs.mkdirSync(localPhren, { recursive: true });
+    initTestPhrenRoot(localPhren);
 
     const origCwd = process.cwd();
     const origHome = process.env.HOME;
@@ -203,7 +198,7 @@ describe("findCortexPath", () => {
     fs.mkdirSync(process.env.HOME, { recursive: true });
     process.chdir(nestedDir);
     try {
-      expect(findCortexPath()).toBe(localCortex);
+      expect(findPhrenPath()).toBe(localPhren);
     } finally {
       process.chdir(origCwd);
       process.env.HOME = origHome;
@@ -212,19 +207,19 @@ describe("findCortexPath", () => {
   });
 });
 
-describe("ensureCortexPath", () => {
-  it("creates ~/.cortex if nothing exists", async () => {
+describe("ensurePhrenPath", () => {
+  it("creates ~/.phren if nothing exists", async () => {
     const tmp = makeTempDir("fakehome-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
-      const result = await suppressOutput(() => Promise.resolve(ensureCortexPath()));
-      expect(result).toBe(path.join(tmp.path, ".cortex"));
+      const result = await suppressOutput(() => Promise.resolve(ensurePhrenPath()));
+      expect(result).toBe(path.join(tmp.path, ".phren"));
       expect(fs.existsSync(result)).toBe(true);
-      expect(fs.existsSync(path.join(result, "cortex.root.yaml"))).toBe(true);
-      expect(findCortexPath()).toBe(result);
+      expect(fs.existsSync(path.join(result, "phren.root.yaml"))).toBe(true);
+      expect(findPhrenPath()).toBe(result);
     } finally {
       process.chdir(origCwd);
       process.env.HOME = origHome;
@@ -243,9 +238,9 @@ describe("path resolution helpers", () => {
     try {
       expect(expandHomePath("~/demo/file.txt")).toBe(path.join(tmp.path, "demo", "file.txt"));
       expect(homePath(".claude", "settings.json")).toBe(path.join(tmp.path, ".claude", "settings.json"));
-      expect(hookConfigPath("copilot")).toBe(path.join(tmp.path, ".github", "hooks", "cortex.json"));
-      expect(hookConfigPath("claude", path.join(tmp.path, ".cortex"))).toBe(path.join(tmp.path, ".claude", "settings.json"));
-      expect(hookConfigPath("codex", path.join(tmp.path, ".cortex"))).toBe(path.join(tmp.path, ".cortex", "codex.json"));
+      expect(hookConfigPath("copilot")).toBe(path.join(tmp.path, ".github", "hooks", "phren.json"));
+      expect(hookConfigPath("claude", path.join(tmp.path, ".phren"))).toBe(path.join(tmp.path, ".claude", "settings.json"));
+      expect(hookConfigPath("codex", path.join(tmp.path, ".phren"))).toBe(path.join(tmp.path, ".phren", "codex.json"));
     } finally {
       process.env.HOME = origHome;
       process.env.USERPROFILE = origProfile;
@@ -256,13 +251,9 @@ describe("path resolution helpers", () => {
 
 describe("governance validation", () => {
   it("validates shared governance schemas", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
+    const phren = makePhren();
+    const govDir = path.join(phren, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
-
-    const accessControl = path.join(govDir, "access-control.json");
-    fs.writeFileSync(accessControl, JSON.stringify({ admins: ["root"], maintainers: [], contributors: [], viewers: [] }, null, 2));
-    expect(validateGovernanceJson(accessControl, "access-control")).toBe(true);
 
     const indexPolicy = path.join(govDir, "index-policy.json");
     fs.writeFileSync(indexPolicy, JSON.stringify({ includeGlobs: "bad-shape" }, null, 2));
@@ -274,13 +265,13 @@ describe("governance validation", () => {
 
 describe("buildIndex and queryRows", () => {
   it("indexes markdown files and supports FTS5 search", async () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "testproj", {
+    const phren = makePhren();
+    makeProject(phren, "testproj", {
       "FINDINGS.md": "# testproj FINDINGS\n\n## 2025-01-01\n\n- Always validate user input before processing\n",
       "summary.md": "# testproj\n\nA test project for vitest.\n",
     });
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT project, filename FROM docs WHERE docs MATCH ? ORDER BY rank", ["validate"]);
     expect(rows).not.toBeNull();
     expect(rows!.length).toBeGreaterThanOrEqual(1);
@@ -290,23 +281,23 @@ describe("buildIndex and queryRows", () => {
   });
 
   it("returns null for queries with no matches", async () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "testproj", {
+    const phren = makePhren();
+    makeProject(phren, "testproj", {
       "summary.md": "# testproj\n\nA simple project.\n",
     });
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["zzzznonexistent"]);
     expect(rows).toBeNull();
     db.close();
   });
 
   it("indexes multiple projects", async () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "alpha", { "summary.md": "# alpha\n\nFirst project about databases.\n" });
-    makeProject(cortex, "beta", { "summary.md": "# beta\n\nSecond project about networking.\n" });
+    const phren = makePhren();
+    makeProject(phren, "alpha", { "summary.md": "# alpha\n\nFirst project about databases.\n" });
+    makeProject(phren, "beta", { "summary.md": "# beta\n\nSecond project about networking.\n" });
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     const alphaRows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ? AND project = ?", ["databases", "alpha"]);
     const betaRows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ? AND project = ?", ["networking", "beta"]);
     expect(alphaRows).not.toBeNull();
@@ -317,12 +308,12 @@ describe("buildIndex and queryRows", () => {
   });
 
   it("returns null for invalid SQL instead of throwing", async () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "testproj", {
+    const phren = makePhren();
+    makeProject(phren, "testproj", {
       "summary.md": "# testproj\n\nA simple project.\n",
     });
 
-    const db = await buildIndex(cortex);
+    const db = await buildIndex(phren);
     expect(queryRows(db, "SELECT definitely_not_a_column FROM docs", [])).toBeNull();
     db.close();
   });
@@ -337,16 +328,16 @@ describe("buildIndex and queryRows", () => {
   });
 
   it("buildIndex returns empty index when profile YAML is malformed (fail-closed, Q18)", async () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const origHome = process.env.HOME;
     const origUserProfile = process.env.USERPROFILE;
-    const homeDir = path.join(cortex, "home");
+    const homeDir = path.join(phren, "home");
     fs.mkdirSync(homeDir, { recursive: true });
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
-    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
-    fs.writeFileSync(path.join(cortex, "profiles", "broken.yaml"), "name: broken\nprojects: [\n");
-    makeProject(cortex, "testproj", {
+    fs.mkdirSync(path.join(phren, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(phren, "profiles", "broken.yaml"), "name: broken\nprojects: [\n");
+    makeProject(phren, "testproj", {
       "summary.md": "# testproj\n\nProfile parse fallback should still index this.\n",
     });
 
@@ -354,7 +345,7 @@ describe("buildIndex and queryRows", () => {
       // Q18: when a profile is set but the file is malformed, getProjectDirs returns []
       // and buildIndex produces an empty (but valid) FTS database — it does NOT widen
       // to all projects, which would violate profile-based access control.
-      const db = await suppressOutput(() => buildIndex(cortex, "broken"));
+      const db = await suppressOutput(() => buildIndex(phren, "broken"));
       const rows = queryRows(db, "SELECT project FROM docs WHERE docs MATCH ?", ["fallback"]);
       expect(rows).toBeNull(); // empty DB — no documents indexed
       db.close();
@@ -387,28 +378,28 @@ describe("extractSnippet", () => {
 
 describe("addFindingToFile", () => {
   it("creates FINDINGS.md if it does not exist", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "newproj", { "summary.md": "# newproj\n" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "newproj", { "summary.md": "# newproj\n" });
 
-    const result = addFindingToFile(cortex, "newproj", "Always use parameterized queries");
+    const result = addFindingToFile(phren, "newproj", "Always use parameterized queries");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Created FINDINGS.md");
-    const content = fs.readFileSync(path.join(cortex, "newproj", "FINDINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(phren, "newproj", "FINDINGS.md"), "utf8");
     expect(content).toContain("- Always use parameterized queries");
-    expect(content).toContain("cortex:cite");
+    expect(content).toContain("phren:cite");
   });
 
   it("appends to existing date section", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const today = new Date().toISOString().slice(0, 10);
-    makeProject(cortex, "myproj", {
+    makeProject(phren, "myproj", {
       "FINDINGS.md": `# myproj FINDINGS\n\n## ${today}\n\n- Existing finding\n`,
     });
 
-    addFindingToFile(cortex, "myproj", "Second insight");
-    const content = fs.readFileSync(path.join(cortex, "myproj", "FINDINGS.md"), "utf8");
+    addFindingToFile(phren, "myproj", "Second insight");
+    const content = fs.readFileSync(path.join(phren, "myproj", "FINDINGS.md"), "utf8");
     expect(content).toContain("- Second insight");
     expect(content).toContain("- Existing finding");
     // Should still have only one date heading for today
@@ -417,35 +408,35 @@ describe("addFindingToFile", () => {
   });
 
   it("rejects invalid project names", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const result = addFindingToFile(cortex, "../etc", "bad");
+    const phren = makePhren();
+    grantAdmin(phren);
+    const result = addFindingToFile(phren, "../etc", "bad");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Invalid project name");
   });
 
   it("skips duplicate findings with high word overlap", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const today = new Date().toISOString().slice(0, 10);
-    makeProject(cortex, "dupeproj", {
+    makeProject(phren, "dupeproj", {
       "FINDINGS.md": `# dupeproj FINDINGS\n\n## ${today}\n\n- The auth middleware runs before rate limiting and order matters\n`,
     });
 
-    const result = addFindingToFile(cortex, "dupeproj", "The auth middleware runs before rate limiting, order matters");
+    const result = addFindingToFile(phren, "dupeproj", "The auth middleware runs before rate limiting, order matters");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Skipped duplicate");
   });
 
   it("allows non-duplicate findings through", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const today = new Date().toISOString().slice(0, 10);
-    makeProject(cortex, "dupeproj2", {
+    makeProject(phren, "dupeproj2", {
       "FINDINGS.md": `# dupeproj2 FINDINGS\n\n## ${today}\n\n- The auth middleware runs before rate limiting\n`,
     });
 
-    const result = addFindingToFile(cortex, "dupeproj2", "Database indexes need to be rebuilt after migration");
+    const result = addFindingToFile(phren, "dupeproj2", "Database indexes need to be rebuilt after migration");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Added finding");
   });
@@ -486,48 +477,48 @@ describe("isDuplicateFinding", () => {
 
 describe("checkConsolidationNeeded", () => {
   it("flags projects with 25+ entries since last consolidation", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const bullets = Array.from({ length: 26 }, (_, i) => `- Finding number ${i + 1}`).join("\n");
-    makeProject(cortex, "bigproj", {
+    makeProject(phren, "bigproj", {
       "FINDINGS.md": `# bigproj FINDINGS\n\n## 2025-01-01\n\n${bullets}\n`,
     });
 
-    const results = checkConsolidationNeeded(cortex);
+    const results = checkConsolidationNeeded(phren);
     expect(results.length).toBe(1);
     expect(results[0].project).toBe("bigproj");
     expect(results[0].entriesSince).toBe(26);
   });
 
   it("does not flag projects under threshold", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "smallproj", {
+    const phren = makePhren();
+    makeProject(phren, "smallproj", {
       "FINDINGS.md": "# smallproj FINDINGS\n\n## 2025-01-01\n\n- One finding\n- Two finding\n",
     });
 
-    const results = checkConsolidationNeeded(cortex);
+    const results = checkConsolidationNeeded(phren);
     expect(results.length).toBe(0);
   });
 
   it("counts only entries after the consolidation marker", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const oldBullets = Array.from({ length: 30 }, (_, i) => `- Old finding ${i}`).join("\n");
     const newBullets = Array.from({ length: 5 }, (_, i) => `- New finding ${i}`).join("\n");
-    makeProject(cortex, "markedproj", {
+    makeProject(phren, "markedproj", {
       "FINDINGS.md": `# markedproj FINDINGS\n\n## 2024-01-01\n\n${oldBullets}\n\n<!-- consolidated: 2025-01-01 -->\n\n## 2025-02-01\n\n${newBullets}\n`,
     });
 
-    const results = checkConsolidationNeeded(cortex);
+    const results = checkConsolidationNeeded(phren);
     expect(results.length).toBe(0);
   });
 
   it("flags time-based consolidation (60+ days, 10+ entries)", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const bullets = Array.from({ length: 12 }, (_, i) => `- Finding ${i}`).join("\n");
-    makeProject(cortex, "oldproj", {
+    makeProject(phren, "oldproj", {
       "FINDINGS.md": `# oldproj FINDINGS\n\n## 2024-06-01\n\n${bullets}\n\n<!-- consolidated: 2024-01-01 -->\n\n## 2024-06-15\n\n${bullets}\n`,
     });
 
-    const results = checkConsolidationNeeded(cortex);
+    const results = checkConsolidationNeeded(phren);
     expect(results.length).toBe(1);
     expect(results[0].project).toBe("oldproj");
   });
@@ -537,47 +528,47 @@ describe("checkConsolidationNeeded", () => {
 
 describe("detectProject", () => {
   it("matches the longest sourcePath prefix", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "myapp", {
+    const phren = makePhren();
+    makeProject(phren, "myapp", {
       "summary.md": "# myapp\n",
-      "cortex.project.yaml": yaml.dump({ sourcePath: "/home/user/myapp" }),
+      "phren.project.yaml": yaml.dump({ sourcePath: "/home/user/myapp" }),
     });
 
-    const result = detectProject(cortex, "/home/user/myapp/src");
+    const result = detectProject(phren, "/home/user/myapp/src");
     expect(result).toBe("myapp");
   });
 
   it("returns null when no project matches", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "myapp", {
+    const phren = makePhren();
+    makeProject(phren, "myapp", {
       "summary.md": "# myapp\n",
-      "cortex.project.yaml": yaml.dump({ sourcePath: "/home/user/myapp" }),
+      "phren.project.yaml": yaml.dump({ sourcePath: "/home/user/myapp" }),
     });
 
-    const result = detectProject(cortex, "/home/user/other-project/src");
+    const result = detectProject(phren, "/home/user/other-project/src");
     expect(result).toBeNull();
   });
 
   it("prefers a more specific sourcePath over a parent sourcePath", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "web", {
+    const phren = makePhren();
+    makeProject(phren, "web", {
       "summary.md": "# web\n",
-      "cortex.project.yaml": yaml.dump({ sourcePath: "/home/user/projects/web" }),
+      "phren.project.yaml": yaml.dump({ sourcePath: "/home/user/projects/web" }),
     });
-    makeProject(cortex, "web-api", {
+    makeProject(phren, "web-api", {
       "summary.md": "# web-api\n",
-      "cortex.project.yaml": yaml.dump({ sourcePath: "/home/user/projects/web/api" }),
+      "phren.project.yaml": yaml.dump({ sourcePath: "/home/user/projects/web/api" }),
     });
 
-    const match = detectProject(cortex, "/home/user/projects/web/api/src");
+    const match = detectProject(phren, "/home/user/projects/web/api/src");
     expect(match).toBe("web-api");
   });
 
   it("does not guess from path segments when sourcePath is missing", () => {
-    const cortex = makeCortex();
-    makeProject(cortex, "cortex", { "summary.md": "# cortex\n" });
+    const phren = makePhren();
+    makeProject(phren, "phren", { "summary.md": "# phren\n" });
 
-    const result = detectProject(cortex, "/home/cortex/mcp/src");
+    const result = detectProject(phren, "/home/phren/mcp/src");
     expect(result).toBeNull();
   });
 });
@@ -586,9 +577,9 @@ describe("detectProject", () => {
 
 describe("appendAuditLog", () => {
   it("appends log entries", () => {
-    const cortex = makeCortex();
-    appendAuditLog(cortex, "test_event", "details=foo");
-    const logPath = path.join(cortex, ".runtime", "audit.log");
+    const phren = makePhren();
+    appendAuditLog(phren, "test_event", "details=foo");
+    const logPath = path.join(phren, ".runtime", "audit.log");
     expect(fs.existsSync(logPath)).toBe(true);
     const content = fs.readFileSync(logPath, "utf8");
     expect(content).toContain("test_event");
@@ -596,16 +587,16 @@ describe("appendAuditLog", () => {
   });
 
   it("rotates log when over 1MB", () => {
-    const cortex = makeCortex();
-    const logPath = path.join(cortex, ".runtime", "audit.log");
-    fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
+    const phren = makePhren();
+    const logPath = path.join(phren, ".runtime", "audit.log");
+    fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
     // Seed with >1MB of data (each line ~80 chars, need ~13000 lines)
     const bigContent = Array.from({ length: 14000 }, (_, i) =>
       `[2025-01-01T00:00:00.000Z] event_${i} ${"x".repeat(60)}`
     ).join("\n") + "\n";
     fs.writeFileSync(logPath, bigContent);
 
-    appendAuditLog(cortex, "trigger_rotation", "details=bar");
+    appendAuditLog(phren, "trigger_rotation", "details=bar");
     const after = fs.readFileSync(logPath, "utf8");
     const lines = after.split("\n").filter(l => l.length > 0);
     expect(lines.length).toBeLessThanOrEqual(500);
@@ -617,9 +608,9 @@ describe("appendAuditLog", () => {
 
 describe("consolidateProjectFindings", () => {
   it("deduplicates entries with normalized whitespace", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "dedupproj", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "dedupproj", {
       "FINDINGS.md": [
         "# dedupproj FINDINGS",
         "",
@@ -632,16 +623,16 @@ describe("consolidateProjectFindings", () => {
       ].join("\n"),
     });
 
-    consolidateProjectFindings(cortex, "dedupproj");
-    const content = fs.readFileSync(path.join(cortex, "dedupproj", "FINDINGS.md"), "utf8");
+    consolidateProjectFindings(phren, "dedupproj");
+    const content = fs.readFileSync(path.join(phren, "dedupproj", "FINDINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(2);
   });
 
   it("deduplicates entries that differ only by trailing whitespace", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "trailproj", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "trailproj", {
       "FINDINGS.md": [
         "# trailproj FINDINGS",
         "",
@@ -653,255 +644,44 @@ describe("consolidateProjectFindings", () => {
       ].join("\n"),
     });
 
-    consolidateProjectFindings(cortex, "trailproj");
-    const content = fs.readFileSync(path.join(cortex, "trailproj", "FINDINGS.md"), "utf8");
+    consolidateProjectFindings(phren, "trailproj");
+    const content = fs.readFileSync(path.join(phren, "trailproj", "FINDINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(1);
     expect(bullets[0]).toBe("- Use parameterized queries");
   });
 });
 
-describe("RBAC and canonical locks", () => {
-  let cortex: string;
-  const origActor = process.env.CORTEX_ACTOR;
+describe("upsertCanonical", () => {
+  it("creates CANONICAL_MEMORIES.md with pinned content", () => {
+    const phren = makePhren();
+    makeProject(phren, "pinproj", { "summary.md": "# pinproj" });
 
-  function setupAccess(acl: { admins?: string[]; maintainers?: string[]; contributors?: string[]; viewers?: string[] }) {
-    const govDir = path.join(cortex, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "access-control.json"),
-      JSON.stringify({ admins: [], maintainers: [], contributors: [], viewers: [], ...acl }, null, 2) + "\n"
+    const result = upsertCanonical(phren, "pinproj", "Always run tests before pushing");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toContain("Pinned");
+
+    const canonical = fs.readFileSync(
+      path.join(phren, "pinproj", "CANONICAL_MEMORIES.md"),
+      "utf8"
     );
-  }
-
-  let rbacCleanup: () => void;
-
-  beforeEach(() => {
-    ({ path: cortex, cleanup: rbacCleanup } = makeTempDir("cortex-rbac-"));
+    expect(canonical).toContain("Always run tests before pushing");
+    expect(canonical).toContain("## Pinned");
   });
 
-  afterEach(() => {
-    process.env.CORTEX_ACTOR = origActor;
-    rbacCleanup();
-  });
+  it("does not duplicate an existing pinned memory", () => {
+    const phren = makePhren();
+    makeProject(phren, "dupproj", { "summary.md": "# dupproj" });
 
-  describe("checkPermission", () => {
-    it("admin can perform any action", () => {
-      setupAccess({ admins: ["alice"] });
-      for (const action of ["read", "write", "queue", "pin", "policy", "delete"] as const) {
-        expect(checkPermission(cortex, action, "alice")).toBeNull();
-      }
-    });
+    upsertCanonical(phren, "dupproj", "Unique insight");
+    upsertCanonical(phren, "dupproj", "Unique insight");
 
-    it("maintainer can do everything except policy", () => {
-      setupAccess({ maintainers: ["bob"] });
-      expect(checkPermission(cortex, "read", "bob")).toBeNull();
-      expect(checkPermission(cortex, "write", "bob")).toBeNull();
-      expect(checkPermission(cortex, "pin", "bob")).toBeNull();
-      expect(checkPermission(cortex, "delete", "bob")).toBeNull();
-      expect(checkPermission(cortex, "policy", "bob")).toContain("Permission denied");
-    });
-
-    it("contributor can read, write, and queue but not pin, delete, or policy", () => {
-      setupAccess({ contributors: ["carol"] });
-      expect(checkPermission(cortex, "read", "carol")).toBeNull();
-      expect(checkPermission(cortex, "write", "carol")).toBeNull();
-      expect(checkPermission(cortex, "queue", "carol")).toBeNull();
-      expect(checkPermission(cortex, "pin", "carol")).toContain("Permission denied");
-      expect(checkPermission(cortex, "delete", "carol")).toContain("Permission denied");
-      expect(checkPermission(cortex, "policy", "carol")).toContain("Permission denied");
-    });
-
-    it("viewer can only read", () => {
-      setupAccess({ viewers: ["dave"] });
-      expect(checkPermission(cortex, "read", "dave")).toBeNull();
-      expect(checkPermission(cortex, "write", "dave")).toContain("Permission denied");
-      expect(checkPermission(cortex, "pin", "dave")).toContain("Permission denied");
-      expect(checkPermission(cortex, "policy", "dave")).toContain("Permission denied");
-    });
-
-    it("unknown actor gets viewer role (least privilege)", () => {
-      setupAccess({ admins: ["alice"] });
-      expect(checkPermission(cortex, "read", "stranger")).toBeNull();
-      expect(checkPermission(cortex, "write", "stranger")).toContain("Permission denied");
-    });
-
-    it("uses a local maintainer override when the actor is absent from the shared ACL", () => {
-      setupAccess({ admins: ["alice"] });
-      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
-      fs.writeFileSync(
-        path.join(cortex, ".runtime", "access-control.local.json"),
-        JSON.stringify({ maintainers: ["stranger"] }, null, 2) + "\n",
-      );
-      expect(checkPermission(cortex, "write", "stranger")).toBeNull();
-      expect(checkPermission(cortex, "policy", "stranger")).toContain("Permission denied");
-    });
-
-    it("prefers the shared ACL when it explicitly lists the actor", () => {
-      setupAccess({ viewers: ["dave"] });
-      fs.mkdirSync(path.join(cortex, ".runtime"), { recursive: true });
-      fs.writeFileSync(
-        path.join(cortex, ".runtime", "access-control.local.json"),
-        JSON.stringify({ maintainers: ["dave"] }, null, 2) + "\n",
-      );
-      expect(checkPermission(cortex, "write", "dave")).toContain("Permission denied");
-    });
-
-    it("denial message includes actor name and role", () => {
-      setupAccess({ viewers: ["eve"] });
-      const denial = checkPermission(cortex, "write", "eve");
-      expect(denial).toContain("eve");
-      expect(denial).toContain("viewer");
-      expect(denial).toContain("write");
-    });
-
-    it("ignores caller-controlled env actors outside explicit test mode", () => {
-      const origEnvActor = process.env.CORTEX_ACTOR;
-      const origUser = process.env.USER;
-      const origNodeEnv = process.env.NODE_ENV;
-      const origVitestWorkerId = process.env.VITEST_WORKER_ID;
-      const currentUser = os.userInfo().username;
-      setupAccess({ admins: [currentUser], viewers: ["spoofed-admin"] });
-
-      delete process.env.VITEST_WORKER_ID;
-      delete process.env.NODE_ENV;
-      delete process.env.CORTEX_TRUST_ENV_ACTOR;
-      process.env.CORTEX_ACTOR = "spoofed-admin";
-      process.env.USER = "spoofed-admin";
-
-      try {
-        expect(checkPermission(cortex, "write")).toBeNull();
-      } finally {
-        if (origEnvActor === undefined) delete process.env.CORTEX_ACTOR;
-        else process.env.CORTEX_ACTOR = origEnvActor;
-        if (origUser === undefined) delete process.env.USER;
-        else process.env.USER = origUser;
-        if (origNodeEnv === undefined) delete process.env.NODE_ENV;
-        else process.env.NODE_ENV = origNodeEnv;
-        if (origVitestWorkerId === undefined) delete process.env.VITEST_WORKER_ID;
-        else process.env.VITEST_WORKER_ID = origVitestWorkerId;
-      }
-    });
-  });
-
-  describe("enforceCanonicalLocks", () => {
-    it("creates a lock entry on first run and restores drifted content", () => {
-      setupAccess({ admins: ["test-admin"] });
-      process.env.CORTEX_ACTOR = "test-admin";
-      makeProject(cortex, "lockproj", {
-        "CANONICAL_MEMORIES.md": "# Canonical\n\n- Important fact\n",
-      });
-
-      // First run: creates the lock
-      const first = enforceCanonicalLocks(cortex, "lockproj");
-      expect(first).toContain("checked=1");
-      expect(first).toContain("restored=0");
-
-      // Tamper with the file
-      fs.writeFileSync(
-        path.join(cortex, "lockproj", "CANONICAL_MEMORIES.md"),
-        "# Tampered\n\n- Wrong info\n"
-      );
-
-      // Second run: detects drift and restores
-      const second = enforceCanonicalLocks(cortex, "lockproj");
-      expect(second).toContain("restored=1");
-
-      const restored = fs.readFileSync(
-        path.join(cortex, "lockproj", "CANONICAL_MEMORIES.md"),
-        "utf8"
-      );
-      expect(restored).toContain("Important fact");
-      expect(restored).not.toContain("Tampered");
-    });
-
-    it("does not restore when content matches the lock", () => {
-      setupAccess({ admins: ["test-admin"] });
-      process.env.CORTEX_ACTOR = "test-admin";
-      makeProject(cortex, "stable", {
-        "CANONICAL_MEMORIES.md": "# Stable\n\n- Unchanged\n",
-      });
-
-      enforceCanonicalLocks(cortex, "stable");
-      const result = enforceCanonicalLocks(cortex, "stable");
-      expect(result).toContain("restored=0");
-    });
-  });
-
-  describe("upsertCanonical", () => {
-    it("creates CANONICAL_MEMORIES.md and locks the entry", () => {
-      setupAccess({ admins: ["test-admin"] });
-      process.env.CORTEX_ACTOR = "test-admin";
-      makeProject(cortex, "pinproj", { "summary.md": "# pinproj" });
-
-      const result = upsertCanonical(cortex, "pinproj", "Always run tests before pushing");
-      expect(result.ok).toBe(true);
-      if (result.ok) expect(result.data).toContain("Pinned");
-
-      const canonical = fs.readFileSync(
-        path.join(cortex, "pinproj", "CANONICAL_MEMORIES.md"),
-        "utf8"
-      );
-      expect(canonical).toContain("Always run tests before pushing");
-      expect(canonical).toContain("## Pinned");
-
-      // Lock file should exist
-      const lockData = readVersionedEntries<{ hash: string }>(
-        path.join(cortex, ".runtime", "canonical-locks.json")
-      );
-      expect(lockData["pinproj/CANONICAL_MEMORIES.md"]).toBeDefined();
-      expect(lockData["pinproj/CANONICAL_MEMORIES.md"].hash).toBeTruthy();
-    });
-
-    it("does not duplicate an existing pinned memory", () => {
-      setupAccess({ admins: ["test-admin"] });
-      process.env.CORTEX_ACTOR = "test-admin";
-      makeProject(cortex, "dupproj", { "summary.md": "# dupproj" });
-
-      upsertCanonical(cortex, "dupproj", "Unique insight");
-      upsertCanonical(cortex, "dupproj", "Unique insight");
-
-      const canonical = fs.readFileSync(
-        path.join(cortex, "dupproj", "CANONICAL_MEMORIES.md"),
-        "utf8"
-      );
-      const matches = canonical.match(/Unique insight/g);
-      expect(matches?.length).toBe(1);
-    });
-
-    it("denies pinning when actor lacks permission", () => {
-      setupAccess({ viewers: ["readonly"] });
-      process.env.CORTEX_ACTOR = "readonly";
-      makeProject(cortex, "nopinproj", { "summary.md": "# nopinproj" });
-
-      const result = upsertCanonical(cortex, "nopinproj", "Should be denied");
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toContain("Permission denied");
-      expect(fs.existsSync(path.join(cortex, "nopinproj", "CANONICAL_MEMORIES.md"))).toBe(false);
-    });
-  });
-
-  describe("updateAccessControl", () => {
-    it("admin can update access control", () => {
-      setupAccess({ admins: ["boss"] });
-      process.env.CORTEX_ACTOR = "boss";
-
-      const result = updateAccessControl(cortex, { contributors: ["newdev"] });
-      expect(result.ok).toBe(true);
-      if (result.ok) expect(result.data.contributors).toContain("newdev");
-
-      const acl = getAccessControl(cortex);
-      expect(acl.contributors).toContain("newdev");
-    });
-
-    it("non-admin cannot update access control", () => {
-      setupAccess({ contributors: ["dev"] });
-      process.env.CORTEX_ACTOR = "dev";
-
-      const result = updateAccessControl(cortex, { admins: ["dev"] });
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toContain("Permission denied");
-    });
+    const canonical = fs.readFileSync(
+      path.join(phren, "dupproj", "CANONICAL_MEMORIES.md"),
+      "utf8"
+    );
+    const matches = canonical.match(/Unique insight/g);
+    expect(matches?.length).toBe(1);
   });
 });
 
@@ -944,7 +724,7 @@ describe("filterTrustedFindingsDetailed", () => {
       `## ${dateStr}`,
       "",
       "- Finding with citation",
-      `  <!-- cortex:cite {"created_at":"${d.toISOString()}"} -->`,
+      `  <!-- phren:cite {"created_at":"${d.toISOString()}"} -->`,
       "",
     ].join("\n");
     const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.3 });
@@ -981,33 +761,33 @@ describe("filterTrustedFindingsDetailed", () => {
 
 describe("recordInjection", () => {
   it("creates and updates score entries", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const key = "testproj/FINDINGS.md:abc123";
 
-    recordInjection(cortex, key, "session-1");
-    flushEntryScores(cortex);
+    recordInjection(phren, key, "session-1");
+    flushEntryScores(phren);
 
-    const scoresPath = path.join(cortex, ".runtime", "memory-scores.json");
+    const scoresPath = path.join(phren, ".runtime", "memory-scores.json");
     expect(fs.existsSync(scoresPath)).toBe(true);
     const scores = readVersionedEntries<any>(scoresPath);
     expect(scores[key]).toBeDefined();
     expect(scores[key].impressions).toBe(1);
 
-    recordInjection(cortex, key, "session-2");
-    flushEntryScores(cortex);
+    recordInjection(phren, key, "session-2");
+    flushEntryScores(phren);
     const scores2 = readVersionedEntries<any>(scoresPath);
     expect(scores2[key].impressions).toBe(2);
   });
 
   it("appends to usage log", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const key = "testproj/FINDINGS.md:def456";
 
-    recordInjection(cortex, key, "sess-42");
+    recordInjection(phren, key, "sess-42");
 
-    const logPath = path.join(cortex, ".runtime", "memory-usage.log");
+    const logPath = path.join(phren, ".runtime", "memory-usage.log");
     expect(fs.existsSync(logPath)).toBe(true);
     const logContent = fs.readFileSync(logPath, "utf8");
     expect(logContent).toContain("inject");
@@ -1020,47 +800,47 @@ describe("recordInjection", () => {
 
 describe("recordFeedback", () => {
   it("records helpful feedback", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const key = "proj/file:aaa";
 
-    recordInjection(cortex, key);
-    recordFeedback(cortex, key, "helpful");
-    flushEntryScores(cortex);
+    recordInjection(phren, key);
+    recordFeedback(phren, key, "helpful");
+    flushEntryScores(phren);
 
     const scores = readVersionedEntries<any>(
-      path.join(cortex, ".runtime", "memory-scores.json")
+      path.join(phren, ".runtime", "memory-scores.json")
     );
     expect(scores[key].helpful).toBe(1);
     expect(scores[key].repromptPenalty).toBe(0);
   });
 
   it("records reprompt penalty", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const key = "proj/file:bbb";
 
-    recordInjection(cortex, key);
-    recordFeedback(cortex, key, "reprompt");
-    flushEntryScores(cortex);
+    recordInjection(phren, key);
+    recordFeedback(phren, key, "reprompt");
+    flushEntryScores(phren);
 
     const scores = readVersionedEntries<any>(
-      path.join(cortex, ".runtime", "memory-scores.json")
+      path.join(phren, ".runtime", "memory-scores.json")
     );
     expect(scores[key].repromptPenalty).toBe(1);
   });
 
   it("records regression penalty", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const key = "proj/file:ccc";
 
-    recordInjection(cortex, key);
-    recordFeedback(cortex, key, "regression");
-    flushEntryScores(cortex);
+    recordInjection(phren, key);
+    recordFeedback(phren, key, "regression");
+    flushEntryScores(phren);
 
     const scores = readVersionedEntries<any>(
-      path.join(cortex, ".runtime", "memory-scores.json")
+      path.join(phren, ".runtime", "memory-scores.json")
     );
     expect(scores[key].regressionPenalty).toBe(1);
   });
@@ -1070,51 +850,51 @@ describe("recordFeedback", () => {
 
 describe("getQualityMultiplier", () => {
   it("returns 1 for unknown keys", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    expect(getQualityMultiplier(cortex, "unknown/key:xyz")).toBe(1);
+    const phren = makePhren();
+    grantAdmin(phren);
+    expect(getQualityMultiplier(phren, "unknown/key:xyz")).toBe(1);
   });
 
   it("returns > 1 for helpful memories", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const key = "proj/file:helpful";
 
-    recordInjection(cortex, key);
-    recordFeedback(cortex, key, "helpful");
-    recordFeedback(cortex, key, "helpful");
-    recordFeedback(cortex, key, "helpful");
+    recordInjection(phren, key);
+    recordFeedback(phren, key, "helpful");
+    recordFeedback(phren, key, "helpful");
+    recordFeedback(phren, key, "helpful");
 
-    const mult = getQualityMultiplier(cortex, key);
+    const mult = getQualityMultiplier(phren, key);
     expect(mult).toBeGreaterThan(1);
   });
 
   it("returns < 1 for penalized memories", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const key = "proj/file:bad";
 
-    recordInjection(cortex, key);
-    recordFeedback(cortex, key, "regression");
-    recordFeedback(cortex, key, "reprompt");
+    recordInjection(phren, key);
+    recordFeedback(phren, key, "regression");
+    recordFeedback(phren, key, "reprompt");
 
-    const mult = getQualityMultiplier(cortex, key);
+    const mult = getQualityMultiplier(phren, key);
     expect(mult).toBeLessThan(1);
   });
 
   it("clamps between 0.2 and 1.5", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
 
     const goodKey = "proj/file:great";
-    recordInjection(cortex, goodKey);
-    for (let i = 0; i < 20; i++) recordFeedback(cortex, goodKey, "helpful");
-    expect(getQualityMultiplier(cortex, goodKey)).toBeLessThanOrEqual(1.5);
+    recordInjection(phren, goodKey);
+    for (let i = 0; i < 20; i++) recordFeedback(phren, goodKey, "helpful");
+    expect(getQualityMultiplier(phren, goodKey)).toBeLessThanOrEqual(1.5);
 
     const badKey = "proj/file:terrible";
-    recordInjection(cortex, badKey);
-    for (let i = 0; i < 20; i++) recordFeedback(cortex, badKey, "regression");
-    expect(getQualityMultiplier(cortex, badKey)).toBeGreaterThanOrEqual(0.2);
+    recordInjection(phren, badKey);
+    for (let i = 0; i < 20; i++) recordFeedback(phren, badKey, "regression");
+    expect(getQualityMultiplier(phren, badKey)).toBeGreaterThanOrEqual(0.2);
   });
 });
 
@@ -1301,7 +1081,7 @@ describe("autoMergeConflicts", () => {
   let gitCleanup: () => void;
 
   function initGitRepo(): string {
-    const tmp = makeTempDir("cortex-automerge-");
+    const tmp = makeTempDir("phren-automerge-");
     gitCleanup = tmp.cleanup;
     const { execFileSync } = require("child_process");
     execFileSync("git", ["init", tmp.path], { stdio: "ignore" });
@@ -1471,7 +1251,7 @@ describe("autoMergeConflicts", () => {
   });
 
   it("returns false for a non-git directory", () => {
-    const tmp = makeTempDir("cortex-nongit-");
+    const tmp = makeTempDir("phren-nongit-");
     try {
       expect(autoMergeConflicts(tmp.path)).toBe(false);
     } finally {
@@ -1585,71 +1365,60 @@ describe("stripTaskDoneSection", () => {
 
 describe("pruneDeadMemories", () => {
   it("prunes entries older than retention policy in dry-run mode", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const govDir = path.join(cortex, ".governance");
+    const phren = makePhren();
+    grantAdmin(phren);
+    const govDir = path.join(phren, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "retention-policy.json"),
       JSON.stringify({ ttlDays: 120, retentionDays: 30, autoAcceptThreshold: 0.75, minInjectConfidence: 0.35, decay: { d30: 1, d60: 0.85, d90: 0.65, d120: 0.45 } }, null, 2) + "\n"
     );
-    makeProject(cortex, "pruneproj", {
+    makeProject(phren, "pruneproj", {
       "FINDINGS.md": "# pruneproj FINDINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
     });
 
-    const result = pruneDeadMemories(cortex, "pruneproj", true);
+    const result = pruneDeadMemories(phren, "pruneproj", true);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data).toContain("[dry-run]");
       expect(result.data).toContain("1");
     }
     // File should be unchanged in dry-run
-    const content = fs.readFileSync(path.join(cortex, "pruneproj", "FINDINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(phren, "pruneproj", "FINDINGS.md"), "utf8");
     expect(content).toContain("Very old entry");
   });
 
   it("prunes entries and uses atomic write (no .bak file)", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const govDir = path.join(cortex, ".governance");
+    const phren = makePhren();
+    grantAdmin(phren);
+    const govDir = path.join(phren, ".governance");
+    fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "retention-policy.json"),
       JSON.stringify({ ttlDays: 120, retentionDays: 30, autoAcceptThreshold: 0.75, minInjectConfidence: 0.35, decay: { d30: 1, d60: 0.85, d90: 0.65, d120: 0.45 } }, null, 2) + "\n"
     );
-    makeProject(cortex, "pruneproj", {
+    makeProject(phren, "pruneproj", {
       "FINDINGS.md": "# pruneproj FINDINGS\n\n## 2020-01-01\n\n- Very old entry\n\n## 2099-01-01\n\n- Future entry\n",
     });
 
-    const result = pruneDeadMemories(cortex, "pruneproj");
+    const result = pruneDeadMemories(phren, "pruneproj");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toContain("Pruned 1");
-    const content = fs.readFileSync(path.join(cortex, "pruneproj", "FINDINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(phren, "pruneproj", "FINDINGS.md"), "utf8");
     expect(content).not.toContain("Very old entry");
     expect(content).toContain("Future entry");
     // atomic write (tmp + rename) — no .bak file is created
-    expect(fs.existsSync(path.join(cortex, "pruneproj", "FINDINGS.md.bak"))).toBe(false);
+    expect(fs.existsSync(path.join(phren, "pruneproj", "FINDINGS.md.bak"))).toBe(false);
   });
 
-  it("denies prune when actor lacks delete permission", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
-    fs.mkdirSync(govDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(govDir, "access-control.json"),
-      JSON.stringify({ admins: [], contributors: ["dev"], viewers: [] }, null, 2) + "\n"
-    );
-    process.env.CORTEX_ACTOR = "dev";
-    const result = pruneDeadMemories(cortex, "proj");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("Permission denied");
-  });
 });
 
 // --- getRetentionPolicy / updateRetentionPolicy ---
 
 describe("getRetentionPolicy and updateRetentionPolicy", () => {
   it("returns defaults when no policy file exists", () => {
-    const cortex = makeCortex();
-    const policy = getRetentionPolicy(cortex);
+    const phren = makePhren();
+    const policy = getRetentionPolicy(phren);
     expect(policy.ttlDays).toBe(120);
     expect(policy.retentionDays).toBe(365);
     expect(policy.decay.d30).toBe(1.0);
@@ -1657,38 +1426,38 @@ describe("getRetentionPolicy and updateRetentionPolicy", () => {
   });
 
   it("merges partial policy with defaults", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
+    const phren = makePhren();
+    const govDir = path.join(phren, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "retention-policy.json"),
       JSON.stringify({ ttlDays: 60 }, null, 2) + "\n"
     );
-    const policy = getRetentionPolicy(cortex);
+    const policy = getRetentionPolicy(phren);
     expect(policy.ttlDays).toBe(60);
     expect(policy.retentionDays).toBe(365);
   });
 
   it("admin can update policy", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const result = updateRetentionPolicy(cortex, { ttlDays: 90 });
+    const phren = makePhren();
+    grantAdmin(phren);
+    const result = updateRetentionPolicy(phren, { ttlDays: 90 });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.ttlDays).toBe(90);
   });
 
   it("non-admin cannot update policy", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
+    const phren = makePhren();
+    const govDir = path.join(phren, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "access-control.json"),
       JSON.stringify({ contributors: ["dev"] }, null, 2) + "\n"
     );
-    process.env.CORTEX_ACTOR = "dev";
-    const result = updateRetentionPolicy(cortex, { ttlDays: 1 });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("Permission denied");
+    process.env.PHREN_ACTOR = "dev";
+    const result = updateRetentionPolicy(phren, { ttlDays: 1 });
+    // RBAC was removed — any actor can update policy now
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -1696,30 +1465,29 @@ describe("getRetentionPolicy and updateRetentionPolicy", () => {
 
 describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
   it("returns defaults when no file exists", () => {
-    const cortex = makeCortex();
-    const wp = getWorkflowPolicy(cortex);
-    expect(wp.requireMaintainerApproval).toBe(false);
+    const phren = makePhren();
+    const wp = getWorkflowPolicy(phren);
     expect(wp.lowConfidenceThreshold).toBe(0.7);
     expect(wp.riskySections).toEqual(["Stale", "Conflicts"]);
     expect(wp.taskMode).toBe("auto");
   });
 
   it("filters invalid riskySections values", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
+    const phren = makePhren();
+    const govDir = path.join(phren, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "workflow-policy.json"),
       JSON.stringify({ riskySections: ["Review", "BadSection", "Stale"] }, null, 2) + "\n"
     );
-    const wp = getWorkflowPolicy(cortex);
+    const wp = getWorkflowPolicy(phren);
     expect(wp.riskySections).toEqual(["Review", "Stale"]);
   });
 
   it("admin can update workflow policy", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const result = updateWorkflowPolicy(cortex, { lowConfidenceThreshold: 0.5, taskMode: "auto" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    const result = updateWorkflowPolicy(phren, { lowConfidenceThreshold: 0.5, taskMode: "auto" });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.lowConfidenceThreshold).toBe(0.5);
@@ -1732,29 +1500,29 @@ describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
 
 describe("getIndexPolicy and updateIndexPolicy", () => {
   it("returns defaults when no file exists", () => {
-    const cortex = makeCortex();
-    const ip = getIndexPolicy(cortex);
+    const phren = makePhren();
+    const ip = getIndexPolicy(phren);
     expect(ip.includeGlobs).toContain("**/*.md");
     expect(ip.includeHidden).toBe(false);
   });
 
   it("filters empty globs and falls back to defaults", () => {
-    const cortex = makeCortex();
-    const govDir = path.join(cortex, ".governance");
+    const phren = makePhren();
+    const govDir = path.join(phren, ".governance");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "index-policy.json"),
       JSON.stringify({ includeGlobs: ["", "  "], excludeGlobs: [] }, null, 2) + "\n"
     );
-    const ip = getIndexPolicy(cortex);
+    const ip = getIndexPolicy(phren);
     expect(ip.includeGlobs.length).toBeGreaterThan(0);
     expect(ip.includeGlobs.every(g => g.trim().length > 0)).toBe(true);
   });
 
   it("admin can update index policy", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const result = updateIndexPolicy(cortex, { includeHidden: true });
+    const phren = makePhren();
+    grantAdmin(phren);
+    const result = updateIndexPolicy(phren, { includeHidden: true });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.includeHidden).toBe(true);
   });
@@ -1764,34 +1532,34 @@ describe("getIndexPolicy and updateIndexPolicy", () => {
 
 describe("getRuntimeHealth and updateRuntimeHealth", () => {
   it("returns default health when no file exists", () => {
-    const cortex = makeCortex();
-    const h = getRuntimeHealth(cortex);
+    const phren = makePhren();
+    const h = getRuntimeHealth(phren);
     expect(h.schemaVersion).toBe(1);
     expect(h.lastPromptAt).toBeUndefined();
   });
 
   it("updates and persists runtime health", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const now = new Date().toISOString();
-    updateRuntimeHealth(cortex, { lastPromptAt: now });
-    const h = getRuntimeHealth(cortex);
+    updateRuntimeHealth(phren, { lastPromptAt: now });
+    const h = getRuntimeHealth(phren);
     expect(h.lastPromptAt).toBe(now);
   });
 
   it("handles lastAutoSave updates", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const now = new Date().toISOString();
-    updateRuntimeHealth(cortex, {
+    updateRuntimeHealth(phren, {
       lastAutoSave: { at: now, status: "saved-pushed", detail: "ok" },
     });
-    const h = getRuntimeHealth(cortex);
+    const h = getRuntimeHealth(phren);
     expect(h.lastAutoSave?.status).toBe("saved-pushed");
   });
 
   it("handles sync metadata updates", () => {
-    const cortex = makeCortex();
+    const phren = makePhren();
     const now = new Date().toISOString();
-    updateRuntimeHealth(cortex, {
+    updateRuntimeHealth(phren, {
       lastSync: {
         lastPullAt: now,
         lastPullStatus: "ok",
@@ -1800,7 +1568,7 @@ describe("getRuntimeHealth and updateRuntimeHealth", () => {
         unsyncedCommits: 2,
       },
     });
-    const h = getRuntimeHealth(cortex);
+    const h = getRuntimeHealth(phren);
     expect(h.lastSync?.lastPullStatus).toBe("ok");
     expect(h.lastSync?.lastPushStatus).toBe("saved-local");
     expect(h.lastSync?.unsyncedCommits).toBe(2);
@@ -1811,57 +1579,57 @@ describe("getRuntimeHealth and updateRuntimeHealth", () => {
 
 describe("appendReviewQueue", () => {
   it("creates MEMORY_QUEUE.md if it does not exist", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "queueproj", { "summary.md": "# queueproj\n" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "queueproj", { "summary.md": "# queueproj\n" });
 
-    const result = appendReviewQueue(cortex, "queueproj", "Stale", ["Old memory"]);
+    const result = appendReviewQueue(phren, "queueproj", "Stale", ["Old memory"]);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toBe(1);
-    const content = fs.readFileSync(path.join(cortex, "queueproj", "MEMORY_QUEUE.md"), "utf8");
+    const content = fs.readFileSync(path.join(phren, "queueproj", "MEMORY_QUEUE.md"), "utf8");
     expect(content).toContain("## Stale");
     expect(content).toContain("Old memory");
   });
 
   it("does not duplicate existing entries", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "dupqueue", { "summary.md": "# dupqueue\n" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "dupqueue", { "summary.md": "# dupqueue\n" });
 
-    appendReviewQueue(cortex, "dupqueue", "Review", ["Check this"]);
-    const result = appendReviewQueue(cortex, "dupqueue", "Review", ["Check this"]);
+    appendReviewQueue(phren, "dupqueue", "Review", ["Check this"]);
+    const result = appendReviewQueue(phren, "dupqueue", "Review", ["Check this"]);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toBe(0);
   });
 
   it("returns 0 for empty entries", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "emptyq", { "summary.md": "# emptyq\n" });
-    const emptyResult = appendReviewQueue(cortex, "emptyq", "Stale", []);
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "emptyq", { "summary.md": "# emptyq\n" });
+    const emptyResult = appendReviewQueue(phren, "emptyq", "Stale", []);
     expect(emptyResult.ok).toBe(true);
     if (emptyResult.ok) expect(emptyResult.data).toBe(0);
   });
 
   it("returns 0 for invalid project", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const badResult = appendReviewQueue(cortex, "../bad", "Stale", ["entry"]);
+    const phren = makePhren();
+    grantAdmin(phren);
+    const badResult = appendReviewQueue(phren, "../bad", "Stale", ["entry"]);
     expect(badResult.ok).toBe(false);
   });
 
   it("normalizes multiline and comment-heavy queue entries into a safe single line", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "sanitizequeue", { "summary.md": "# sanitizequeue\n" });
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "sanitizequeue", { "summary.md": "# sanitizequeue\n" });
 
-    const result = appendReviewQueue(cortex, "sanitizequeue", "Review", [
+    const result = appendReviewQueue(phren, "sanitizequeue", "Review", [
       "Line one\\nLine two <!-- source: injected --> \"quoted\" \0 text",
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const content = fs.readFileSync(path.join(cortex, "sanitizequeue", "MEMORY_QUEUE.md"), "utf8");
+    const content = fs.readFileSync(path.join(phren, "sanitizequeue", "MEMORY_QUEUE.md"), "utf8");
     expect(content).toContain('Line one Line two "quoted" text');
     expect(content).not.toContain("<!-- source: injected -->");
     expect(content).not.toContain("\0");
@@ -1872,14 +1640,14 @@ describe("appendReviewQueue", () => {
 
 describe("getProjectDirs", () => {
   it("lists directories excluding hidden dirs, profiles, and templates", () => {
-    const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, "proj-a"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "proj-b"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, ".governance"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "templates"), { recursive: true });
+    const phren = makePhren();
+    fs.mkdirSync(path.join(phren, "proj-a"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "proj-b"), { recursive: true });
+    fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "profiles"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "templates"), { recursive: true });
 
-    const dirs = getProjectDirs(cortex);
+    const dirs = getProjectDirs(phren);
     const names = dirs.map(d => path.basename(d));
     expect(names).toContain("proj-a");
     expect(names).toContain("proj-b");
@@ -1889,44 +1657,44 @@ describe("getProjectDirs", () => {
   });
 
   it("excludes global directory from project listing", () => {
-    const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, "proj-a"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "global"), { recursive: true });
+    const phren = makePhren();
+    fs.mkdirSync(path.join(phren, "proj-a"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "global"), { recursive: true });
 
-    const dirs = getProjectDirs(cortex);
+    const dirs = getProjectDirs(phren);
     const names = dirs.map(d => path.basename(d));
     expect(names).toContain("proj-a");
     expect(names).not.toContain("global");
   });
 
   it("uses profile to filter projects", () => {
-    const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, "proj-a"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "proj-b"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
+    const phren = makePhren();
+    fs.mkdirSync(path.join(phren, "proj-a"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "proj-b"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "profiles"), { recursive: true });
     fs.writeFileSync(
-      path.join(cortex, "profiles", "test.yaml"),
+      path.join(phren, "profiles", "test.yaml"),
       yaml.dump({ name: "test", projects: ["proj-a"] })
     );
 
-    const dirs = getProjectDirs(cortex, "test");
+    const dirs = getProjectDirs(phren, "test");
     const names = dirs.map(d => path.basename(d));
     expect(names).toContain("proj-a");
     expect(names).not.toContain("proj-b");
   });
 
   it("includes shared/org dirs alongside profile projects", () => {
-    const cortex = makeCortex();
-    fs.mkdirSync(path.join(cortex, "proj-a"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "shared"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "org"), { recursive: true });
-    fs.mkdirSync(path.join(cortex, "profiles"), { recursive: true });
+    const phren = makePhren();
+    fs.mkdirSync(path.join(phren, "proj-a"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "shared"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "org"), { recursive: true });
+    fs.mkdirSync(path.join(phren, "profiles"), { recursive: true });
     fs.writeFileSync(
-      path.join(cortex, "profiles", "myprof.yaml"),
+      path.join(phren, "profiles", "myprof.yaml"),
       yaml.dump({ name: "myprof", projects: ["proj-a"] })
     );
 
-    const dirs = getProjectDirs(cortex, "myprof");
+    const dirs = getProjectDirs(phren, "myprof");
     const names = dirs.map(d => path.basename(d));
     expect(names).toContain("proj-a");
     expect(names).toContain("shared");
@@ -1934,8 +1702,8 @@ describe("getProjectDirs", () => {
   });
 
   it("rejects invalid profile names", async () => {
-    const cortex = makeCortex();
-    const dirs = await suppressOutput(() => Promise.resolve(getProjectDirs(cortex, "../bad")));
+    const phren = makePhren();
+    const dirs = await suppressOutput(() => Promise.resolve(getProjectDirs(phren, "../bad")));
     expect(dirs).toEqual([]);
   });
 });
@@ -1944,43 +1712,43 @@ describe("getProjectDirs", () => {
 
 describe("consolidateProjectFindings additional", () => {
   it("supports dry-run mode", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "drycons", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "drycons", {
       "FINDINGS.md": "# drycons FINDINGS\n\n## 2025-01-01\n\n- A\n- A\n- B\n",
     });
-    const result = consolidateProjectFindings(cortex, "drycons", true);
+    const result = consolidateProjectFindings(phren, "drycons", true);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data).toContain("[dry-run]");
       expect(result.data).toContain("1 duplicate");
     }
     // File unchanged
-    const content = fs.readFileSync(path.join(cortex, "drycons", "FINDINGS.md"), "utf8");
+    const content = fs.readFileSync(path.join(phren, "drycons", "FINDINGS.md"), "utf8");
     expect(content.split("\n").filter(l => l.startsWith("- ")).length).toBe(3);
   });
 
   it("rejects invalid project name", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    const result = consolidateProjectFindings(cortex, "../bad");
+    const phren = makePhren();
+    grantAdmin(phren);
+    const result = consolidateProjectFindings(phren, "../bad");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Invalid project name");
   });
 
   it("returns message when no FINDINGS.md exists", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "emptycons", { "summary.md": "# emptycons\n" });
-    const result = consolidateProjectFindings(cortex, "emptycons");
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "emptycons", { "summary.md": "# emptycons\n" });
+    const result = consolidateProjectFindings(phren, "emptycons");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("No FINDINGS.md");
   });
 
   it("deduplicates entries that differ only by trailing whitespace", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "trailws", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "trailws", {
       "FINDINGS.md": [
         "# trailws FINDINGS",
         "",
@@ -1992,32 +1760,32 @@ describe("consolidateProjectFindings additional", () => {
         "",
       ].join("\n"),
     });
-    consolidateProjectFindings(cortex, "trailws");
-    const content = fs.readFileSync(path.join(cortex, "trailws", "FINDINGS.md"), "utf8");
+    consolidateProjectFindings(phren, "trailws");
+    const content = fs.readFileSync(path.join(phren, "trailws", "FINDINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(2);
   });
 
   it("preserves citation comments during dedup", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
-    makeProject(cortex, "citecons", {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "citecons", {
       "FINDINGS.md": [
         "# citecons FINDINGS",
         "",
         "## 2025-01-01",
         "",
         "- Some insight",
-        '  <!-- cortex:cite {"created_at":"2025-01-01T00:00:00.000Z"} -->',
+        '  <!-- phren:cite {"created_at":"2025-01-01T00:00:00.000Z"} -->',
         "- Some insight",
         "",
       ].join("\n"),
     });
-    consolidateProjectFindings(cortex, "citecons");
-    const content = fs.readFileSync(path.join(cortex, "citecons", "FINDINGS.md"), "utf8");
+    consolidateProjectFindings(phren, "citecons");
+    const content = fs.readFileSync(path.join(phren, "citecons", "FINDINGS.md"), "utf8");
     const bullets = content.split("\n").filter(l => l.startsWith("- "));
     expect(bullets.length).toBe(1);
-    expect(content).toContain("cortex:cite");
+    expect(content).toContain("phren:cite");
   });
 });
 
@@ -2104,7 +1872,7 @@ describe("filterTrustedFindingsDetailed (extended)", () => {
       `## ${today}`,
       "",
       "- Entry with bad citation",
-      '  <!-- cortex:cite {"created_at":"2025-01-01T00:00:00.000Z","repo":"/nonexistent/path"} -->',
+      '  <!-- phren:cite {"created_at":"2025-01-01T00:00:00.000Z","repo":"/nonexistent/path"} -->',
     ].join("\n");
     const result = filterTrustedFindingsDetailed(content, { ttlDays: 365 });
     expect(result.issues.some(i => i.reason === "invalid_citation")).toBe(true);
@@ -2119,29 +1887,29 @@ describe("validateGovernanceJson (extended)", () => {
   });
 
   it("returns false for non-object JSON (array)", () => {
-    const cortex = makeCortex();
-    const f = path.join(cortex, "test.json");
+    const phren = makePhren();
+    const f = path.join(phren, "test.json");
     fs.writeFileSync(f, "[1,2,3]");
     expect(validateGovernanceJson(f, "access-control")).toBe(false);
   });
 
   it("validates retention-policy with bad decay", () => {
-    const cortex = makeCortex();
-    const f = path.join(cortex, "test.json");
+    const phren = makePhren();
+    const f = path.join(phren, "test.json");
     fs.writeFileSync(f, JSON.stringify({ decay: "not an object" }));
     expect(validateGovernanceJson(f, "retention-policy")).toBe(false);
   });
 
   it("validates workflow-policy", () => {
-    const cortex = makeCortex();
-    const f = path.join(cortex, "test.json");
-    fs.writeFileSync(f, JSON.stringify({ requireMaintainerApproval: "not-bool" }));
+    const phren = makePhren();
+    const f = path.join(phren, "test.json");
+    fs.writeFileSync(f, JSON.stringify({ lowConfidenceThreshold: "not-a-number" }));
     expect(validateGovernanceJson(f, "workflow-policy")).toBe(false);
   });
 
   it("validates index-policy", () => {
-    const cortex = makeCortex();
-    const f = path.join(cortex, "test.json");
+    const phren = makePhren();
+    const f = path.join(phren, "test.json");
     fs.writeFileSync(f, JSON.stringify({ includeHidden: "not-bool" }));
     expect(validateGovernanceJson(f, "index-policy")).toBe(false);
   });
@@ -2152,39 +1920,39 @@ describe("validateGovernanceJson (extended)", () => {
 
 describe("flushEntryScores", () => {
   it("writes cached scores to disk", () => {
-    const cortex = makeCortex();
-    grantAdmin(cortex);
+    const phren = makePhren();
+    grantAdmin(phren);
     const key = "proj/file:flush-test";
-    recordInjection(cortex, key);
+    recordInjection(phren, key);
     // Scores are already on disk from recordInjection, but flushEntryScores re-writes
-    flushEntryScores(cortex);
-    const scoresPath = path.join(cortex, ".runtime", "memory-scores.json");
+    flushEntryScores(phren);
+    const scoresPath = path.join(phren, ".runtime", "memory-scores.json");
     const raw = JSON.parse(fs.readFileSync(scoresPath, "utf8"));
     expect(raw.entries[key]).toBeDefined();
   });
 });
 
-// --- findCortexPathWithArg ---
+// --- findPhrenPathWithArg ---
 
-describe("findCortexPathWithArg", () => {
+describe("findPhrenPathWithArg", () => {
   it("resolves an explicit argument path", () => {
-    const cortex = makeCortex();
-    const result = findCortexPathWithArg(cortex);
-    expect(result).toBe(cortex);
+    const phren = makePhren();
+    const result = findPhrenPathWithArg(phren);
+    expect(result).toBe(phren);
   });
 
   it("throws for non-existent explicit path", () => {
-    expect(() => findCortexPathWithArg("/nonexistent/path")).toThrow();
+    expect(() => findPhrenPathWithArg("/nonexistent/path")).toThrow();
   });
 
-  it("falls back to ensureCortexPath when no arg given", async () => {
-    const tmp = makeTempDir("fakehome-no-cortex-");
+  it("falls back to ensurePhrenPath when no arg given", async () => {
+    const tmp = makeTempDir("fakehome-no-phren-");
     const origHome = process.env.HOME;
     const origCwd = process.cwd();
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
-      expect(() => findCortexPathWithArg()).toThrow("cortex root not found");
+      expect(() => findPhrenPathWithArg()).toThrow("phren root not found");
     } finally {
       process.chdir(origCwd);
       process.env.HOME = origHome;
@@ -2253,41 +2021,41 @@ describe("extractSnippet (extended)", () => {
   });
 });
 
-// --- parseCortexErrorCode ---
+// --- parsePhrenErrorCode ---
 
-describe("parseCortexErrorCode", () => {
+describe("parsePhrenErrorCode", () => {
   it("extracts known error codes from prefixed strings", () => {
-    expect(parseCortexErrorCode('PROJECT_NOT_FOUND: "myproj"')).toBe(CortexError.PROJECT_NOT_FOUND);
-    expect(parseCortexErrorCode('NOT_FOUND: No item matching "foo"')).toBe(CortexError.NOT_FOUND);
-    expect(parseCortexErrorCode("PERMISSION_DENIED: write denied")).toBe(CortexError.PERMISSION_DENIED);
-    expect(parseCortexErrorCode("LOCK_TIMEOUT: could not acquire lock")).toBe(CortexError.LOCK_TIMEOUT);
-    expect(parseCortexErrorCode("EMPTY_INPUT: field required")).toBe(CortexError.EMPTY_INPUT);
-    expect(parseCortexErrorCode("AMBIGUOUS_MATCH: 3 matches")).toBe(CortexError.AMBIGUOUS_MATCH);
-    expect(parseCortexErrorCode("MALFORMED_YAML: machines.yaml")).toBe(CortexError.MALFORMED_YAML);
+    expect(parsePhrenErrorCode('PROJECT_NOT_FOUND: "myproj"')).toBe(PhrenError.PROJECT_NOT_FOUND);
+    expect(parsePhrenErrorCode('NOT_FOUND: No item matching "foo"')).toBe(PhrenError.NOT_FOUND);
+    expect(parsePhrenErrorCode("PERMISSION_DENIED: write denied")).toBe(PhrenError.PERMISSION_DENIED);
+    expect(parsePhrenErrorCode("LOCK_TIMEOUT: could not acquire lock")).toBe(PhrenError.LOCK_TIMEOUT);
+    expect(parsePhrenErrorCode("EMPTY_INPUT: field required")).toBe(PhrenError.EMPTY_INPUT);
+    expect(parsePhrenErrorCode("AMBIGUOUS_MATCH: 3 matches")).toBe(PhrenError.AMBIGUOUS_MATCH);
+    expect(parsePhrenErrorCode("MALFORMED_YAML: machines.yaml")).toBe(PhrenError.MALFORMED_YAML);
   });
 
   it("returns undefined for non-error strings", () => {
-    expect(parseCortexErrorCode("Added to project task: task")).toBeUndefined();
-    expect(parseCortexErrorCode("Marked done in project: item")).toBeUndefined();
-    expect(parseCortexErrorCode("")).toBeUndefined();
+    expect(parsePhrenErrorCode("Added to project task: task")).toBeUndefined();
+    expect(parsePhrenErrorCode("Marked done in project: item")).toBeUndefined();
+    expect(parsePhrenErrorCode("")).toBeUndefined();
   });
 
   it("returns undefined for unknown error codes", () => {
-    expect(parseCortexErrorCode("UNKNOWN_CODE: something")).toBeUndefined();
+    expect(parsePhrenErrorCode("UNKNOWN_CODE: something")).toBeUndefined();
   });
 });
 
-// --- CortexResult helpers ---
+// --- PhrenResult helpers ---
 
-describe("CortexResult helpers", () => {
-  it("cortexOk wraps data", () => {
-    const result = cortexOk({ items: [1, 2, 3] });
+describe("PhrenResult helpers", () => {
+  it("phrenOk wraps data", () => {
+    const result = phrenOk({ items: [1, 2, 3] });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toEqual({ items: [1, 2, 3] });
   });
 
-  it("cortexErr wraps error with optional code", () => {
-    const result = cortexErr("something failed", CortexError.FILE_NOT_FOUND);
+  it("phrenErr wraps error with optional code", () => {
+    const result = phrenErr("something failed", PhrenError.FILE_NOT_FOUND);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toBe("something failed");
@@ -2295,8 +2063,8 @@ describe("CortexResult helpers", () => {
     }
   });
 
-  it("cortexErr works without code", () => {
-    const result = cortexErr("generic error");
+  it("phrenErr works without code", () => {
+    const result = phrenErr("generic error");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBeUndefined();
   });
@@ -2311,7 +2079,7 @@ describe("collectNativeMemoryFiles", () => {
   const origHome = process.env.HOME;
 
   beforeEach(() => {
-    ({ path: tmpRoot, cleanup: nativeMemCleanup } = makeTempDir("cortex-native-mem-"));
+    ({ path: tmpRoot, cleanup: nativeMemCleanup } = makeTempDir("phren-native-mem-"));
     process.env.HOME = tmpRoot;
   });
 
@@ -2325,7 +2093,7 @@ describe("collectNativeMemoryFiles", () => {
     expect(result).toEqual([]);
   });
 
-  it("skips MEMORY.md (root memory managed by cortex)", () => {
+  it("skips MEMORY.md (root memory managed by phren)", () => {
     const memDir = path.join(tmpRoot, ".claude", "projects", "test-key", "memory");
     fs.mkdirSync(memDir, { recursive: true });
     fs.writeFileSync(path.join(memDir, "MEMORY.md"), "# Root Memory");
@@ -2367,13 +2135,13 @@ describe("collectNativeMemoryFiles", () => {
 
 
 describe("resolveImports", () => {
-  let cortexDir: string;
+  let phrenDir: string;
   let importCleanup: () => void;
 
   beforeEach(() => {
-    const tmp = makeTempDir("cortex-import-test-");
-    cortexDir = tmp.path;
-    const sharedDir = path.join(cortexDir, "global", "shared");
+    const tmp = makeTempDir("phren-import-test-");
+    phrenDir = tmp.path;
+    const sharedDir = path.join(phrenDir, "global", "shared");
     fs.mkdirSync(sharedDir, { recursive: true });
     importCleanup = tmp.cleanup;
   });
@@ -2382,46 +2150,46 @@ describe("resolveImports", () => {
 
   it("returns content unchanged when no imports present", () => {
     const content = "# Hello\n\nNo imports here.";
-    expect(resolveImports(content, cortexDir)).toBe(content);
+    expect(resolveImports(content, phrenDir)).toBe(content);
   });
 
   it("resolves a single @import directive", () => {
     fs.writeFileSync(
-      path.join(cortexDir, "global", "shared", "conventions.md"),
+      path.join(phrenDir, "global", "shared", "conventions.md"),
       "Always use snake_case."
     );
     const content = "# Project\n\n@import shared/conventions.md\n\nMore text.";
-    const result = resolveImports(content, cortexDir);
+    const result = resolveImports(content, phrenDir);
     expect(result).toContain("Always use snake_case.");
     expect(result).not.toContain("@import");
   });
 
   it("resolves multiple @import directives", () => {
     fs.writeFileSync(
-      path.join(cortexDir, "global", "shared", "a.md"),
+      path.join(phrenDir, "global", "shared", "a.md"),
       "Content A"
     );
     fs.writeFileSync(
-      path.join(cortexDir, "global", "shared", "b.md"),
+      path.join(phrenDir, "global", "shared", "b.md"),
       "Content B"
     );
     const content = "@import shared/a.md\n@import shared/b.md";
-    const result = resolveImports(content, cortexDir);
+    const result = resolveImports(content, phrenDir);
     expect(result).toContain("Content A");
     expect(result).toContain("Content B");
   });
 
   it("handles nested imports recursively", () => {
     fs.writeFileSync(
-      path.join(cortexDir, "global", "shared", "outer.md"),
+      path.join(phrenDir, "global", "shared", "outer.md"),
       "Outer start\n@import shared/inner.md\nOuter end"
     );
     fs.writeFileSync(
-      path.join(cortexDir, "global", "shared", "inner.md"),
+      path.join(phrenDir, "global", "shared", "inner.md"),
       "Inner content"
     );
     const content = "@import shared/outer.md";
-    const result = resolveImports(content, cortexDir);
+    const result = resolveImports(content, phrenDir);
     expect(result).toContain("Outer start");
     expect(result).toContain("Inner content");
     expect(result).toContain("Outer end");
@@ -2429,27 +2197,27 @@ describe("resolveImports", () => {
 
   it("detects circular imports and inserts comment", () => {
     fs.writeFileSync(
-      path.join(cortexDir, "global", "shared", "loop-a.md"),
+      path.join(phrenDir, "global", "shared", "loop-a.md"),
       "@import shared/loop-b.md"
     );
     fs.writeFileSync(
-      path.join(cortexDir, "global", "shared", "loop-b.md"),
+      path.join(phrenDir, "global", "shared", "loop-b.md"),
       "@import shared/loop-a.md"
     );
     const content = "@import shared/loop-a.md";
-    const result = resolveImports(content, cortexDir);
+    const result = resolveImports(content, phrenDir);
     expect(result).toContain("@import cycle:");
   });
 
   it("handles missing import file gracefully", () => {
     const content = "@import shared/nonexistent.md";
-    const result = resolveImports(content, cortexDir);
+    const result = resolveImports(content, phrenDir);
     expect(result).toContain("@import not found: shared/nonexistent.md");
   });
 
   it("blocks path traversal attempts", () => {
     const content = "@import ../../etc/passwd";
-    const result = resolveImports(content, cortexDir);
+    const result = resolveImports(content, phrenDir);
     expect(result).toContain("@import blocked: path traversal");
   });
 
@@ -2458,11 +2226,11 @@ describe("resolveImports", () => {
     for (let i = 0; i < 6; i++) {
       const next = i < 5 ? `@import shared/d${i + 1}.md` : "deepest";
       fs.writeFileSync(
-        path.join(cortexDir, "global", "shared", `d${i}.md`),
+        path.join(phrenDir, "global", "shared", `d${i}.md`),
         `level-${i}\n${next}`
       );
     }
-    const result = resolveImports("@import shared/d0.md", cortexDir);
+    const result = resolveImports("@import shared/d0.md", phrenDir);
     expect(result).toContain("level-0");
     expect(result).toContain("level-4");
     // depth 5 should not be resolved (MAX_IMPORT_DEPTH = 5)
@@ -2472,29 +2240,29 @@ describe("resolveImports", () => {
 
 // --- New error codes (VALIDATION_ERROR, INDEX_ERROR, NETWORK_ERROR) ---
 
-describe("CortexError new codes", () => {
+describe("PhrenError new codes", () => {
   it("VALIDATION_ERROR exists and is a string", () => {
-    expect(CortexError.VALIDATION_ERROR).toBe("VALIDATION_ERROR");
-    expect(typeof CortexError.VALIDATION_ERROR).toBe("string");
+    expect(PhrenError.VALIDATION_ERROR).toBe("VALIDATION_ERROR");
+    expect(typeof PhrenError.VALIDATION_ERROR).toBe("string");
   });
 
   it("INDEX_ERROR exists and is a string", () => {
-    expect(CortexError.INDEX_ERROR).toBe("INDEX_ERROR");
-    expect(typeof CortexError.INDEX_ERROR).toBe("string");
+    expect(PhrenError.INDEX_ERROR).toBe("INDEX_ERROR");
+    expect(typeof PhrenError.INDEX_ERROR).toBe("string");
   });
 
   it("NETWORK_ERROR exists and is a string", () => {
-    expect(CortexError.NETWORK_ERROR).toBe("NETWORK_ERROR");
-    expect(typeof CortexError.NETWORK_ERROR).toBe("string");
+    expect(PhrenError.NETWORK_ERROR).toBe("NETWORK_ERROR");
+    expect(typeof PhrenError.NETWORK_ERROR).toBe("string");
   });
 
-  it("parseCortexErrorCode extracts new codes from prefixed messages", () => {
-    expect(parseCortexErrorCode("VALIDATION_ERROR: invalid input")).toBe(CortexError.VALIDATION_ERROR);
-    expect(parseCortexErrorCode("INDEX_ERROR: index rebuild failed")).toBe(CortexError.INDEX_ERROR);
-    expect(parseCortexErrorCode("NETWORK_ERROR: connection refused")).toBe(CortexError.NETWORK_ERROR);
+  it("parsePhrenErrorCode extracts new codes from prefixed messages", () => {
+    expect(parsePhrenErrorCode("VALIDATION_ERROR: invalid input")).toBe(PhrenError.VALIDATION_ERROR);
+    expect(parsePhrenErrorCode("INDEX_ERROR: index rebuild failed")).toBe(PhrenError.INDEX_ERROR);
+    expect(parsePhrenErrorCode("NETWORK_ERROR: connection refused")).toBe(PhrenError.NETWORK_ERROR);
   });
 
-  it("all 13 CortexError codes are present", () => {
+  it("all 13 PhrenError codes are present", () => {
     const expectedKeys = [
       "PROJECT_NOT_FOUND",
       "INVALID_PROJECT_NAME",
@@ -2510,7 +2278,7 @@ describe("CortexError new codes", () => {
       "INDEX_ERROR",
       "NETWORK_ERROR",
     ];
-    const actualKeys = Object.keys(CortexError);
+    const actualKeys = Object.keys(PhrenError);
     expect(actualKeys).toEqual(expect.arrayContaining(expectedKeys));
     expect(actualKeys.length).toBe(expectedKeys.length);
   });

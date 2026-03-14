@@ -1,61 +1,74 @@
 import {
+  type HookContext,
+  buildHookContext,
+  checkHookGuard,
+  handleGuardSkip,
   debugLog,
   appendAuditLog,
   runtimeFile,
-  sessionMetricsFile,
-  qualityMarkers,
   sessionMarker,
   EXEC_TIMEOUT_MS,
-  getCortexPath,
+  getPhrenPath,
   getProjectDirs,
   findProjectNameCaseInsensitive,
   homePath,
-  readRootManifest,
-} from "./shared.js";
-import {
-  appendReviewQueue,
-  recordFeedback,
-  getQualityMultiplier,
   updateRuntimeHealth,
   withFileLock,
   getWorkflowPolicy,
-} from "./shared-governance.js";
-import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
-import {
+  appendReviewQueue,
+  recordFeedback,
+  getQualityMultiplier,
   detectProject,
-} from "./shared-index.js";
+  isProjectHookEnabled,
+  readProjectConfig,
+  getProjectSourcePath,
+  detectProjectDir,
+  ensureLocalGitRepo,
+  isProjectTracked,
+  repairPreexistingInstall,
+  getProactivityLevelForTask,
+  getProactivityLevelForFindings,
+  hasExplicitFindingSignal,
+  shouldAutoCaptureFindingsForLevel,
+  FINDING_SENSITIVITY_CONFIG,
+  isFeatureEnabled,
+  errorMessage,
+  bootstrapPhrenDotEnv,
+  finalizeTaskSession,
+  appendFindingJournal,
+  runDoctor,
+  resolveRuntimeProfile,
+} from "./cli-hooks-context.js";
+import {
+  sessionMetricsFile,
+  qualityMarkers,
+} from "./shared.js";
 import {
   autoMergeConflicts,
   mergeTask,
   mergeFindings,
 } from "./shared-content.js";
-import { runGit, isFeatureEnabled, errorMessage } from "./utils.js";
+import { runGit } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
-import { runDoctor } from "./link.js";
-import { getHooksEnabledPreference } from "./init.js";
-import { detectProjectDir, ensureLocalGitRepo, isProjectTracked, repairPreexistingInstall } from "./init-setup.js";
-import { isToolHookEnabled } from "./hooks.js";
-import { appendFindingJournal } from "./finding-journal.js";
-import { getProjectSourcePath, isProjectHookEnabled, readProjectConfig } from "./project-config.js";
 import { isTaskFileName, TASKS_FILENAME } from "./data-tasks.js";
-import { bootstrapCortexDotEnv } from "./cortex-dotenv.js";
 import {
   buildIndex,
   queryRows,
 } from "./shared-index.js";
 import type { SelectedSnippet } from "./shared-retrieval.js";
 import { filterTaskByPriority } from "./shared-retrieval.js";
-import { resolveRuntimeProfile } from "./runtime-profile.js";
-import { finalizeTaskSession } from "./task-lifecycle.js";
-import { getProactivityLevelForTask, getProactivityLevelForFindings, hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 
 function getRuntimeProfile(): string {
-  return resolveRuntimeProfile(getCortexPath());
+  return resolveRuntimeProfile(getPhrenPath());
 }
+
+// Re-export HookContext types for consumers
+export type { HookContext } from "./cli-hooks-context.js";
+export { buildHookContext, checkHookGuard, handleGuardSkip } from "./cli-hooks-context.js";
 
 /** Read JSON from stdin if it's not a TTY. Returns null if stdin is a TTY or parsing fails. */
 function readStdinJson<T>(): T | null {
@@ -63,7 +76,7 @@ function readStdinJson<T>(): T | null {
   try {
     return JSON.parse(fs.readFileSync(0, "utf-8")) as T;
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] readStdinJson: ${errorMessage(err)}\n`);
+    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] readStdinJson: ${errorMessage(err)}\n`);
     return null;
   }
 }
@@ -94,48 +107,48 @@ function isSafeTranscriptPath(p: string): boolean {
   return safePrefixes.some(prefix => normalized.startsWith(prefix + path.sep) || normalized === prefix);
 }
 
-export function getUntrackedProjectNotice(cortexPath: string, cwd: string): string | null {
-  const profile = resolveRuntimeProfile(cortexPath);
-  const projectDir = detectProjectDir(cwd, cortexPath);
+export function getUntrackedProjectNotice(phrenPath: string, cwd: string): string | null {
+  const profile = resolveRuntimeProfile(phrenPath);
+  const projectDir = detectProjectDir(cwd, phrenPath);
   if (!projectDir) return null;
   const activeProfile = profile || undefined;
   // Check the exact current working directory against projects in the active profile.
   // This avoids prompting when cwd is already inside a tracked sourcePath.
-  if (detectProject(cortexPath, cwd, activeProfile)) return null;
-  if (detectProject(cortexPath, projectDir, activeProfile)) return null;
+  if (detectProject(phrenPath, cwd, activeProfile)) return null;
+  if (detectProject(phrenPath, projectDir, activeProfile)) return null;
   const projectName = path.basename(projectDir).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  if (isProjectTracked(cortexPath, projectName, activeProfile)) {
-    const trackedName = getProjectDirs(cortexPath, activeProfile)
+  if (isProjectTracked(phrenPath, projectName, activeProfile)) {
+    const trackedName = getProjectDirs(phrenPath, activeProfile)
       .map((dir) => path.basename(dir))
       .find((name) => name.toLowerCase() === projectName)
-      || findProjectNameCaseInsensitive(cortexPath, projectName)
+      || findProjectNameCaseInsensitive(phrenPath, projectName)
       || projectName;
-    const config = readProjectConfig(cortexPath, trackedName);
-    const sourcePath = getProjectSourcePath(cortexPath, trackedName, config);
+    const config = readProjectConfig(phrenPath, trackedName);
+    const sourcePath = getProjectSourcePath(phrenPath, trackedName, config);
     if (!sourcePath) return null;
     const resolvedProjectDir = path.resolve(projectDir);
     const sameSource = resolvedProjectDir === sourcePath || resolvedProjectDir.startsWith(sourcePath + path.sep);
     if (sameSource) return null;
   }
   return [
-    "<cortex-notice>",
-    "This project directory is not tracked by cortex yet.",
-    "Run `npx cortex add` to track it now.",
-    `Suggested command: \`npx cortex add \"${projectDir}\"\``,
-    "Ask the user whether they want to add it to cortex now.",
-    "If they say no, tell them they can always run `npx cortex add` later.",
-    "If they say yes, also ask whether Cortex should manage repo instruction files or leave their existing repo-owned CLAUDE/AGENTS files alone.",
-    `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="cortex-managed"|"detached"|"repo-managed", or run \`npx cortex add\` from that directory.`,
-    "After onboarding, run `npx cortex doctor` if hooks or MCP tools are not responding.",
-    "<cortex-notice>",
+    "<phren-notice>",
+    "This project directory is not tracked by phren yet.",
+    "Run `npx phren add` to track it now.",
+    `Suggested command: \`npx phren add \"${projectDir}\"\``,
+    "Ask the user whether they want to add it to phren now.",
+    "If they say no, tell them they can always run `npx phren add` later.",
+    "If they say yes, also ask whether phren should manage repo instruction files or leave their existing repo-owned CLAUDE/AGENTS files alone.",
+    `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="phren-managed"|"detached"|"repo-managed", or run \`npx phren add\` from that directory.`,
+    "After onboarding, run `npx phren doctor` if hooks or MCP tools are not responding.",
+    "<phren-notice>",
     "",
   ].join("\n");
 }
 
 const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
 
-function projectHasBootstrapSignals(cortexPath: string, project: string): boolean {
-  const projectDir = path.join(cortexPath, project);
+function projectHasBootstrapSignals(phrenPath: string, project: string): boolean {
+  const projectDir = path.join(phrenPath, project);
   const findingsPath = path.join(projectDir, "FINDINGS.md");
   if (fs.existsSync(findingsPath)) {
     const findings = fs.readFileSync(findingsPath, "utf8");
@@ -152,38 +165,38 @@ function projectHasBootstrapSignals(cortexPath: string, project: string): boolea
 }
 
 export function getSessionStartOnboardingNotice(
-  cortexPath: string,
+  phrenPath: string,
   cwd: string,
   activeProject: string | null,
 ): string | null {
-  const markerPath = sessionMarker(cortexPath, SESSION_START_ONBOARDING_MARKER);
+  const markerPath = sessionMarker(phrenPath, SESSION_START_ONBOARDING_MARKER);
   if (fs.existsSync(markerPath)) return null;
 
-  if (getUntrackedProjectNotice(cortexPath, cwd)) return null;
+  if (getUntrackedProjectNotice(phrenPath, cwd)) return null;
 
-  const profile = resolveRuntimeProfile(cortexPath);
-  const trackedProjects = getProjectDirs(cortexPath, profile).filter((dir) => path.basename(dir) !== "global");
+  const profile = resolveRuntimeProfile(phrenPath);
+  const trackedProjects = getProjectDirs(phrenPath, profile).filter((dir) => path.basename(dir) !== "global");
 
   if (trackedProjects.length === 0) {
     return [
-      "<cortex-notice>",
-      "Cortex onboarding: no tracked projects are active for this workspace yet.",
-      "Start in a project repo and run `npx cortex add` so SessionStart can inject project context.",
-      "Run `npx cortex doctor` to verify hooks and MCP wiring after setup.",
-      "<cortex-notice>",
+      "<phren-notice>",
+      "Phren onboarding: no tracked projects are active for this workspace yet.",
+      "Start in a project repo and run `npx phren add` so SessionStart can inject project context.",
+      "Run `npx phren doctor` to verify hooks and MCP wiring after setup.",
+      "<phren-notice>",
       "",
     ].join("\n");
   }
 
   if (!activeProject) return null;
-  if (projectHasBootstrapSignals(cortexPath, activeProject)) return null;
+  if (projectHasBootstrapSignals(phrenPath, activeProject)) return null;
 
   return [
-    "<cortex-notice>",
-    `Cortex onboarding: project "${activeProject}" is tracked but memory is still empty.`,
+    "<phren-notice>",
+    `Phren onboarding: project "${activeProject}" is tracked but memory is still empty.`,
     "Capture one finding with `add_finding` and one task with `add_task` to seed future SessionStart context.",
-    "Run `npx cortex doctor` if setup seems incomplete.",
-    "<cortex-notice>",
+    "Run `npx phren doctor` if setup seems incomplete.",
+    "<phren-notice>",
     "",
   ].join("\n");
 }
@@ -225,8 +238,8 @@ interface SessionMetric {
   lastSeen?: string;
 }
 
-function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMetric> {
-  const file = sessionMetricsFile(cortexPathLocal);
+function parseSessionMetrics(phrenPathLocal: string): Record<string, SessionMetric> {
+  const file = sessionMetricsFile(phrenPathLocal);
   if (!fs.existsSync(file)) return {};
   try {
     return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, SessionMetric>;
@@ -236,30 +249,30 @@ function parseSessionMetrics(cortexPathLocal: string): Record<string, SessionMet
   }
 }
 
-function writeSessionMetrics(cortexPathLocal: string, data: Record<string, SessionMetric>) {
-  const file = sessionMetricsFile(cortexPathLocal);
+function writeSessionMetrics(phrenPathLocal: string, data: Record<string, SessionMetric>) {
+  const file = sessionMetricsFile(phrenPathLocal);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
 }
 
 function updateSessionMetrics(
-  cortexPathLocal: string,
+  phrenPathLocal: string,
   updater: (data: Record<string, SessionMetric>) => void
 ): void {
-  const file = sessionMetricsFile(cortexPathLocal);
+  const file = sessionMetricsFile(phrenPathLocal);
   withFileLock(file, () => {
-    const metrics = parseSessionMetrics(cortexPathLocal);
+    const metrics = parseSessionMetrics(phrenPathLocal);
     updater(metrics);
-    writeSessionMetrics(cortexPathLocal, metrics);
+    writeSessionMetrics(phrenPathLocal, metrics);
   });
 }
 
 export function trackSessionMetrics(
-  cortexPathLocal: string,
+  phrenPathLocal: string,
   sessionId: string,
   selected: SelectedSnippet[]
 ): void {
-  updateSessionMetrics(cortexPathLocal, (metrics) => {
+  updateSessionMetrics(phrenPathLocal, (metrics) => {
     if (!metrics[sessionId]) metrics[sessionId] = { prompts: 0, keys: {}, lastChangedCount: 0, lastKeys: [] };
     metrics[sessionId].prompts += 1;
     const injectedKeys: string[] = [];
@@ -268,15 +281,15 @@ export function trackSessionMetrics(
       const key = injected.key;
       const seen = metrics[sessionId].keys[key] || 0;
       metrics[sessionId].keys[key] = seen + 1;
-      if (seen >= 1) recordFeedback(cortexPathLocal, key, "reprompt");
+      if (seen >= 1) recordFeedback(phrenPathLocal, key, "reprompt");
     }
 
-    const relevantCount = selected.filter((s) => getQualityMultiplier(cortexPathLocal, s.key) > 0.5).length;
+    const relevantCount = selected.filter((s) => getQualityMultiplier(phrenPathLocal, s.key) > 0.5).length;
     const prevRelevant = metrics[sessionId].lastChangedCount || 0;
     const prevKeys = metrics[sessionId].lastKeys || [];
     if (relevantCount > prevRelevant) {
       for (const prevKey of prevKeys) {
-        recordFeedback(cortexPathLocal, prevKey, "helpful");
+        recordFeedback(phrenPathLocal, prevKey, "helpful");
       }
     }
     metrics[sessionId].lastChangedCount = relevantCount;
@@ -305,9 +318,9 @@ export function resolveSubprocessArgs(command: string): string[] | null {
   return null;
 }
 
-function scheduleBackgroundSync(cortexPathLocal: string): boolean {
-  const lockPath = runtimeFile(cortexPathLocal, "background-sync.lock");
-  const logPath = runtimeFile(cortexPathLocal, "background-sync.log");
+function scheduleBackgroundSync(phrenPathLocal: string): boolean {
+  const lockPath = runtimeFile(phrenPathLocal, "background-sync.lock");
+  const logPath = runtimeFile(phrenPathLocal, "background-sync.log");
   const spawnArgs = resolveSubprocessArgs("background-sync");
   if (!spawnArgs) return false;
 
@@ -332,8 +345,8 @@ function scheduleBackgroundSync(cortexPathLocal: string): boolean {
       stdio: ["ignore", logFd, logFd],
       env: {
         ...process.env,
-        CORTEX_PATH: cortexPathLocal,
-        CORTEX_PROFILE: getRuntimeProfile(),
+        PHREN_PATH: phrenPathLocal,
+        PHREN_PROFILE: getRuntimeProfile(),
       },
     });
     child.unref();
@@ -346,9 +359,9 @@ function scheduleBackgroundSync(cortexPathLocal: string): boolean {
   }
 }
 
-function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string): boolean {
-  if (!isFeatureEnabled("CORTEX_FEATURE_DAILY_MAINTENANCE", true)) return false;
-  const markers = qualityMarkers(cortexPathLocal);
+function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string): boolean {
+  if (!isFeatureEnabled("PHREN_FEATURE_DAILY_MAINTENANCE", true)) return false;
+  const markers = qualityMarkers(phrenPathLocal);
   if (fs.existsSync(markers.done)) return false;
   if (fs.existsSync(markers.lock)) {
     try {
@@ -377,7 +390,7 @@ function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string
       fd = fs.openSync(markers.lock, "wx");
     } catch (err: unknown) {
       // Another process already claimed the lock
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance lockClaim: ${errorMessage(err)}\n`);
+      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance lockClaim: ${errorMessage(err)}\n`);
       return false;
     }
     try {
@@ -386,7 +399,7 @@ function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string
       fs.closeSync(fd);
     }
     if (project) spawnArgs.push(project);
-    const logDir = path.join(cortexPathLocal, ".governance");
+    const logDir = path.join(phrenPathLocal, ".governance");
     fs.mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, "background-maintenance.log");
     const logFd = fs.openSync(logPath, "a");
@@ -400,31 +413,31 @@ function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string
       stdio: ["ignore", logFd, logFd],
       env: {
         ...process.env,
-        CORTEX_PATH: cortexPathLocal,
-        CORTEX_PROFILE: getRuntimeProfile(),
+        PHREN_PATH: phrenPathLocal,
+        PHREN_PROFILE: getRuntimeProfile(),
       },
     });
     child.on("exit", (code, signal) => {
       const msg = `[${new Date().toISOString()}] exit code=${code ?? "null"} signal=${signal ?? "none"}\n`;
       try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance exitLog: ${errorMessage(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance exitLog: ${errorMessage(err)}\n`);
       }
       if (code === 0) {
         try { fs.writeFileSync(markers.done, new Date().toISOString() + "\n"); } catch (err: unknown) {
-          if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance doneMarker: ${errorMessage(err)}\n`);
+          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance doneMarker: ${errorMessage(err)}\n`);
         }
       }
       try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance unlockOnExit: ${errorMessage(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance unlockOnExit: ${errorMessage(err)}\n`);
       }
     });
     child.on("error", (spawnErr) => {
       const msg = `[${new Date().toISOString()}] spawn error: ${spawnErr.message}\n`;
       try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance errorLog: ${errorMessage(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance errorLog: ${errorMessage(err)}\n`);
       }
       try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance unlockOnError: ${errorMessage(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance unlockOnError: ${errorMessage(err)}\n`);
       }
     });
     fs.closeSync(logFd);
@@ -433,17 +446,17 @@ function scheduleBackgroundMaintenance(cortexPathLocal: string, project?: string
   } catch (err: unknown) {
     const errMsg = errorMessage(err);
     try {
-      const logDir = path.join(cortexPathLocal, ".governance");
+      const logDir = path.join(phrenPathLocal, ".governance");
       fs.mkdirSync(logDir, { recursive: true });
       fs.appendFileSync(
         path.join(logDir, "background-maintenance.log"),
         `[${new Date().toISOString()}] spawn failed: ${errMsg}\n`
       );
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance logSpawnFailure: ${errorMessage(err)}\n`);
+      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance logSpawnFailure: ${errorMessage(err)}\n`);
     }
     try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] backgroundMaintenance unlockOnFailure: ${errorMessage(err)}\n`);
+      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance unlockOnFailure: ${errorMessage(err)}\n`);
     }
     return false;
   }
@@ -600,36 +613,32 @@ async function recoverPushConflict(cwd: string): Promise<{ ok: boolean; detail: 
 
 export async function handleHookSessionStart() {
   const startedAt = new Date().toISOString();
-  const cortexPath = getCortexPath();
-  const manifest = readRootManifest(cortexPath);
-  const cwd = process.cwd();
-  const activeProject = detectProject(cortexPath, cwd, getRuntimeProfile());
-  if (!getHooksEnabledPreference(cortexPath)) {
-    updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
-    appendAuditLog(cortexPath, "hook_session_start", "status=disabled");
+  const ctx = buildHookContext();
+  const { phrenPath, cwd, activeProject, manifest } = ctx;
+
+  // Check common guards (hooks enabled, tool enabled)
+  if (!ctx.hooksEnabled) {
+    handleGuardSkip(ctx, "hook_session_start", "disabled", { lastSessionStartAt: startedAt });
     return;
   }
-
-  const hookTool = process.env.CORTEX_HOOK_TOOL || "claude";
-  if (!isToolHookEnabled(cortexPath, hookTool)) {
-    appendAuditLog(cortexPath, "hook_session_start", `status=tool_disabled tool=${hookTool}`);
+  if (!ctx.toolHookEnabled) {
+    handleGuardSkip(ctx, "hook_session_start", `tool_disabled tool=${ctx.hookTool}`);
     return;
   }
 
   try {
-    repairPreexistingInstall(cortexPath);
+    repairPreexistingInstall(phrenPath);
   } catch (err: unknown) {
     debugLog(`hook-session-start repair failed: ${errorMessage(err)}`);
   }
 
-  if (!isProjectHookEnabled(cortexPath, activeProject, "SessionStart")) {
-    updateRuntimeHealth(cortexPath, { lastSessionStartAt: startedAt });
-    appendAuditLog(cortexPath, "hook_session_start", `status=project_disabled project=${activeProject}`);
+  if (!isProjectHookEnabled(phrenPath, activeProject, "SessionStart")) {
+    handleGuardSkip(ctx, "hook_session_start", `project_disabled project=${activeProject}`, { lastSessionStartAt: startedAt });
     return;
   }
 
   if (manifest?.installMode === "project-local") {
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(phrenPath, {
       lastSessionStartAt: startedAt,
       lastSync: {
         lastPullAt: startedAt,
@@ -637,32 +646,32 @@ export async function handleHookSessionStart() {
         lastPullDetail: "project-local mode does not manage git sync",
       },
     });
-    appendAuditLog(cortexPath, "hook_session_start", "status=skipped-local");
+    appendAuditLog(phrenPath, "hook_session_start", "status=skipped-local");
     return;
   }
 
-  const gitRepo = ensureLocalGitRepo(getCortexPath());
-  const remotes = gitRepo.ok ? await runBestEffortGit(["remote"], getCortexPath()) : { ok: false, error: gitRepo.detail };
+  const gitRepo = ensureLocalGitRepo(phrenPath);
+  const remotes = gitRepo.ok ? await runBestEffortGit(["remote"], phrenPath) : { ok: false, error: gitRepo.detail };
   const hasRemote = Boolean(remotes.ok && remotes.output && remotes.output.trim());
   const pull = !gitRepo.ok
     ? { ok: false, error: gitRepo.detail }
     : hasRemote
-      ? await runBestEffortGit(["pull", "--rebase", "--quiet"], getCortexPath())
+      ? await runBestEffortGit(["pull", "--rebase", "--quiet"], phrenPath)
       : {
           ok: true,
           output: gitRepo.initialized
             ? "initialized local git repo; no remote configured"
             : "local-only repo; no remote configured",
         };
-  const doctor = await runDoctor(getCortexPath(), false);
-  const maintenanceScheduled = scheduleBackgroundMaintenance(getCortexPath());
-  const unsyncedCommits = hasRemote ? await countUnsyncedCommits(getCortexPath()) : 0;
+  const doctor = await runDoctor(phrenPath, false);
+  const maintenanceScheduled = scheduleBackgroundMaintenance(phrenPath);
+  const unsyncedCommits = hasRemote ? await countUnsyncedCommits(phrenPath) : 0;
 
-  try { const { trackSession } = await import("./telemetry.js"); trackSession(getCortexPath()); } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookSessionStart trackSession: ${errorMessage(err)}\n`);
+  try { const { trackSession } = await import("./telemetry.js"); trackSession(phrenPath); } catch (err: unknown) {
+    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookSessionStart trackSession: ${errorMessage(err)}\n`);
   }
 
-  updateRuntimeHealth(getCortexPath(), {
+  updateRuntimeHealth(phrenPath, {
     lastSessionStartAt: startedAt,
     lastSync: {
       lastPullAt: startedAt,
@@ -673,23 +682,23 @@ export async function handleHookSessionStart() {
     },
   });
   appendAuditLog(
-    getCortexPath(),
+    phrenPath,
     "hook_session_start",
     `pull=${hasRemote ? (pull.ok ? "ok" : "fail") : "skipped-local"} doctor=${doctor.ok ? "ok" : "issues"} maintenance=${maintenanceScheduled ? "scheduled" : "skipped"}`
   );
 
-  // Untracked project detection: suggest `cortex add` if CWD looks like a project but isn't tracked
+  // Untracked project detection: suggest `phren add` if CWD looks like a project but isn't tracked
   try {
-    const notice = getUntrackedProjectNotice(cortexPath, cwd);
+    const notice = getUntrackedProjectNotice(phrenPath, cwd);
     if (notice) {
       process.stdout.write(notice);
       debugLog(`untracked project detected at ${cwd}`);
     }
-    const onboarding = getSessionStartOnboardingNotice(cortexPath, cwd, activeProject);
+    const onboarding = getSessionStartOnboardingNotice(phrenPath, cwd, activeProject);
     if (onboarding) {
       process.stdout.write(onboarding);
       try {
-        fs.writeFileSync(sessionMarker(cortexPath, SESSION_START_ONBOARDING_MARKER), `${startedAt}\n`);
+        fs.writeFileSync(sessionMarker(phrenPath, SESSION_START_ONBOARDING_MARKER), `${startedAt}\n`);
       } catch (err: unknown) {
         debugLog(`session-start onboarding marker write failed: ${errorMessage(err)}`);
       }
@@ -743,40 +752,34 @@ export function extractConversationInsights(text: string): string[] {
 
 export function filterConversationInsightsForProactivity(
   insights: string[],
-  level = getProactivityLevelForFindings(getCortexPath())
+  level = getProactivityLevelForFindings(getPhrenPath())
 ): string[] {
   if (level === "high") return insights;
   return insights.filter((insight) => shouldAutoCaptureFindingsForLevel(level, insight));
 }
 
 export async function handleHookStop() {
-  const cortexPath = getCortexPath();
-  const manifest = readRootManifest(cortexPath);
+  const ctx = buildHookContext();
+  const { phrenPath, activeProject, manifest } = ctx;
   const now = new Date().toISOString();
-  bootstrapCortexDotEnv(getCortexPath());
-  const cwd = process.cwd();
-  const activeProject = detectProject(getCortexPath(), cwd, getRuntimeProfile());
-  if (!getHooksEnabledPreference(getCortexPath())) {
-    updateRuntimeHealth(getCortexPath(), {
+  bootstrapPhrenDotEnv(phrenPath);
+
+  if (!ctx.hooksEnabled) {
+    handleGuardSkip(ctx, "hook_stop", "disabled", {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "clean", detail: "hooks disabled by preference" },
     });
-    appendAuditLog(getCortexPath(), "hook_stop", "status=disabled");
     return;
   }
-
-  const hookTool = process.env.CORTEX_HOOK_TOOL || "claude";
-  if (!isToolHookEnabled(getCortexPath(), hookTool)) {
-    appendAuditLog(getCortexPath(), "hook_stop", `status=tool_disabled tool=${hookTool}`);
+  if (!ctx.toolHookEnabled) {
+    handleGuardSkip(ctx, "hook_stop", `tool_disabled tool=${ctx.hookTool}`);
     return;
   }
-
-  if (!isProjectHookEnabled(getCortexPath(), activeProject, "Stop")) {
-    updateRuntimeHealth(getCortexPath(), {
+  if (!isProjectHookEnabled(phrenPath, activeProject, "Stop")) {
+    handleGuardSkip(ctx, "hook_stop", `project_disabled project=${activeProject}`, {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "clean", detail: `hooks disabled for project ${activeProject}` },
     });
-    appendAuditLog(getCortexPath(), "hook_stop", `status=project_disabled project=${activeProject}`);
     return;
   }
 
@@ -784,17 +787,17 @@ export async function handleHookStop() {
   // Needed for auto-capture transcript_path parsing.
   const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
   const taskSessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
-  const taskLevel = getProactivityLevelForTask(cortexPath);
+  const taskLevel = getProactivityLevelForTask(phrenPath);
   if (taskSessionId && taskLevel !== "high") {
     debugLog(`hook-stop task proactivity=${taskLevel}`);
   }
 
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
-  // Gated behind CORTEX_FEATURE_AUTO_CAPTURE=1.
-  const findingsLevel = getProactivityLevelForFindings(cortexPath);
-  if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false) && findingsLevel !== "low") {
+  // Gated behind PHREN_FEATURE_AUTO_CAPTURE=1.
+  const findingsLevel = getProactivityLevelForFindings(phrenPath);
+  if (isFeatureEnabled("PHREN_FEATURE_AUTO_CAPTURE", false) && findingsLevel !== "low") {
     try {
-      let captureInput = process.env.CORTEX_CONVERSATION_CONTEXT || "";
+      let captureInput = process.env.PHREN_CONVERSATION_CONTEXT || "";
       if (!captureInput && stdinPayload?.transcript_path) {
         const transcriptPath = stdinPayload.transcript_path;
         if (!isSafeTranscriptPath(transcriptPath)) {
@@ -816,7 +819,7 @@ export async function handleHookStop() {
                 }
               }
             } catch (err: unknown) {
-              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookSessionStart transcriptParse: ${errorMessage(err)}\n`);
+              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookSessionStart transcriptParse: ${errorMessage(err)}\n`);
             }
           }
           captureInput = assistantTexts.join("\n");
@@ -828,7 +831,7 @@ export async function handleHookStop() {
           let capReached = false;
           if (taskSessionId) {
             try {
-              const capFile = sessionMarker(getCortexPath(), `tool-findings-${taskSessionId}`);
+              const capFile = sessionMarker(phrenPath, `tool-findings-${taskSessionId}`);
               let count = 0;
               if (fs.existsSync(capFile)) {
                 count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
@@ -839,13 +842,13 @@ export async function handleHookStop() {
                 capReached = true;
               }
             } catch (err: unknown) {
-              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookStop sessionCapCheck: ${errorMessage(err)}\n`);
+              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookStop sessionCapCheck: ${errorMessage(err)}\n`);
             }
           }
           if (!capReached) {
             const insights = filterConversationInsightsForProactivity(extractConversationInsights(captureInput), findingsLevel);
             for (const insight of insights) {
-              appendFindingJournal(getCortexPath(), activeProject, `[pattern] ${insight}`, {
+              appendFindingJournal(phrenPath, activeProject, `[pattern] ${insight}`, {
                 source: "hook",
                 sessionId: `hook-stop-${Date.now()}`,
               });
@@ -857,16 +860,16 @@ export async function handleHookStop() {
     } catch (err: unknown) {
       debugLog(`auto-capture failed: ${errorMessage(err)}`);
     }
-  } else if (isFeatureEnabled("CORTEX_FEATURE_AUTO_CAPTURE", false)) {
+  } else if (isFeatureEnabled("PHREN_FEATURE_AUTO_CAPTURE", false)) {
     debugLog("auto-capture: skipped because findings proactivity is low");
   }
 
   // Wrap git operations in a file lock to prevent concurrent agents from fighting
-  const gitOpLockPath = path.join(cortexPath, ".runtime", "git-op");
+  const gitOpLockPath = path.join(phrenPath, ".runtime", "git-op");
   await withFileLock(gitOpLockPath, async () => {
 
   if (manifest?.installMode === "project-local") {
-    updateRuntimeHealth(cortexPath, {
+    updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "saved-local", detail: "project-local mode writes files only" },
       lastSync: {
@@ -875,19 +878,19 @@ export async function handleHookStop() {
         lastPushDetail: "project-local mode does not manage git sync",
       },
     });
-    appendAuditLog(cortexPath, "hook_stop", "status=skipped-local");
+    appendAuditLog(phrenPath, "hook_stop", "status=skipped-local");
     return;
   }
 
-  const gitRepo = ensureLocalGitRepo(cortexPath);
+  const gitRepo = ensureLocalGitRepo(phrenPath);
   if (!gitRepo.ok) {
     finalizeTaskSession({
-      cortexPath: getCortexPath(),
+      phrenPath,
       sessionId: taskSessionId,
       status: "error",
       detail: gitRepo.detail,
     });
-    updateRuntimeHealth(getCortexPath(), {
+    updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "error", detail: gitRepo.detail },
       lastSync: {
@@ -896,19 +899,19 @@ export async function handleHookStop() {
         lastPushDetail: gitRepo.detail,
       },
     });
-    appendAuditLog(getCortexPath(), "hook_stop", `status=error detail=${JSON.stringify(gitRepo.detail)}`);
+    appendAuditLog(phrenPath, "hook_stop", `status=error detail=${JSON.stringify(gitRepo.detail)}`);
     return;
   }
 
-  const status = await runBestEffortGit(["status", "--porcelain"], getCortexPath());
+  const status = await runBestEffortGit(["status", "--porcelain"], phrenPath);
   if (!status.ok) {
     finalizeTaskSession({
-      cortexPath: getCortexPath(),
+      phrenPath,
       sessionId: taskSessionId,
       status: "error",
       detail: status.error || "git status failed",
     });
-    updateRuntimeHealth(getCortexPath(), {
+    updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "error", detail: status.error || "git status failed" },
       lastSync: {
@@ -917,12 +920,12 @@ export async function handleHookStop() {
         lastPushDetail: status.error || "git status failed",
       },
     });
-    appendAuditLog(getCortexPath(), "hook_stop", `status=error detail=${JSON.stringify(status.error || "git status failed")}`);
+    appendAuditLog(phrenPath, "hook_stop", `status=error detail=${JSON.stringify(status.error || "git status failed")}`);
     return;
   }
 
   if (!status.output) {
-    updateRuntimeHealth(getCortexPath(), {
+    updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "clean", detail: "no changes" },
       lastSync: {
@@ -932,19 +935,19 @@ export async function handleHookStop() {
         unsyncedCommits: 0,
       },
     });
-    appendAuditLog(getCortexPath(), "hook_stop", "status=clean");
+    appendAuditLog(phrenPath, "hook_stop", "status=clean");
     return;
   }
 
   // Exclude sensitive files from staging: .env files and private keys should
-  // never be committed to the cortex git repository.
+  // never be committed to the phren git repository.
   const add = await runBestEffortGit(
     ["add", "-A", "--", ":(exclude).env", ":(exclude)**/.env", ":(exclude)*.pem", ":(exclude)*.key"],
-    getCortexPath()
+    phrenPath
   );
-  let commitMsg = "auto-save cortex";
+  let commitMsg = "auto-save phren";
   if (add.ok) {
-    const diff = await runBestEffortGit(["diff", "--cached", "--stat", "--no-color"], getCortexPath());
+    const diff = await runBestEffortGit(["diff", "--cached", "--stat", "--no-color"], phrenPath);
     if (diff.ok && diff.output) {
       // Parse "project/file.md | 3 +++" lines into project names and file types
       const changes = new Map<string, Set<string>>();
@@ -965,19 +968,19 @@ export async function handleHookStop() {
       }
       if (changes.size > 0) {
         const parts = [...changes.entries()].map(([proj, types]) => `${proj}(${[...types].join(",")})`);
-        commitMsg = `cortex: ${parts.join(" ")}`;
+        commitMsg = `phren: ${parts.join(" ")}`;
       }
     }
   }
-  const commit = add.ok ? await runBestEffortGit(["commit", "-m", commitMsg], getCortexPath()) : { ok: false, error: add.error };
+  const commit = add.ok ? await runBestEffortGit(["commit", "-m", commitMsg], phrenPath) : { ok: false, error: add.error };
   if (!add.ok || !commit.ok) {
     finalizeTaskSession({
-      cortexPath: getCortexPath(),
+      phrenPath,
       sessionId: taskSessionId,
       status: "error",
       detail: add.error || commit.error || "git add/commit failed",
     });
-    updateRuntimeHealth(getCortexPath(), {
+    updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: {
         at: now,
@@ -990,20 +993,20 @@ export async function handleHookStop() {
         lastPushDetail: add.error || commit.error || "git add/commit failed",
       },
     });
-    appendAuditLog(getCortexPath(), "hook_stop", `status=error detail=${JSON.stringify(add.error || commit.error || "git add/commit failed")}`);
+    appendAuditLog(phrenPath, "hook_stop", `status=error detail=${JSON.stringify(add.error || commit.error || "git add/commit failed")}`);
     return;
   }
 
-  const remotes = await runBestEffortGit(["remote"], getCortexPath());
+  const remotes = await runBestEffortGit(["remote"], phrenPath);
   if (!remotes.ok || !remotes.output) {
     finalizeTaskSession({
-      cortexPath: getCortexPath(),
+      phrenPath,
       sessionId: taskSessionId,
       status: "saved-local",
       detail: "commit created; no remote configured",
     });
-    const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
-    updateRuntimeHealth(getCortexPath(), {
+    const unsyncedCommits = await countUnsyncedCommits(phrenPath);
+    updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "saved-local", detail: "commit created; no remote configured" },
       lastSync: {
@@ -1013,21 +1016,21 @@ export async function handleHookStop() {
         unsyncedCommits,
       },
     });
-    appendAuditLog(getCortexPath(), "hook_stop", "status=saved-local");
+    appendAuditLog(phrenPath, "hook_stop", "status=saved-local");
     return;
   }
-  const unsyncedCommits = await countUnsyncedCommits(getCortexPath());
-  const scheduled = scheduleBackgroundSync(getCortexPath());
+  const unsyncedCommits = await countUnsyncedCommits(phrenPath);
+  const scheduled = scheduleBackgroundSync(phrenPath);
   const syncDetail = scheduled
     ? "commit saved; background sync scheduled"
     : "commit saved; background sync already running";
   finalizeTaskSession({
-    cortexPath: getCortexPath(),
+    phrenPath,
     sessionId: taskSessionId,
     status: "saved-local",
     detail: syncDetail,
   });
-  updateRuntimeHealth(getCortexPath(), {
+  updateRuntimeHealth(phrenPath, {
     lastStopAt: now,
     lastAutoSave: { at: now, status: "saved-local", detail: syncDetail },
     lastSync: {
@@ -1037,7 +1040,7 @@ export async function handleHookStop() {
       unsyncedCommits,
     },
   });
-  appendAuditLog(getCortexPath(), "hook_stop", `status=saved-local detail=${JSON.stringify(syncDetail)}`);
+  appendAuditLog(phrenPath, "hook_stop", `status=saved-local detail=${JSON.stringify(syncDetail)}`);
 
   }); // end withFileLock(gitOpLockPath)
 
@@ -1046,15 +1049,15 @@ export async function handleHookStop() {
 }
 
 export async function handleBackgroundSync() {
-  const cortexPathLocal = getCortexPath();
+  const phrenPathLocal = getPhrenPath();
   const now = new Date().toISOString();
-  const lockPath = runtimeFile(cortexPathLocal, "background-sync.lock");
+  const lockPath = runtimeFile(phrenPathLocal, "background-sync.lock");
 
   try {
-    const remotes = await runBestEffortGit(["remote"], cortexPathLocal);
+    const remotes = await runBestEffortGit(["remote"], phrenPathLocal);
     if (!remotes.ok || !remotes.output) {
-      const unsyncedCommits = await countUnsyncedCommits(cortexPathLocal);
-      updateRuntimeHealth(cortexPathLocal, {
+      const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
+      updateRuntimeHealth(phrenPathLocal, {
         lastAutoSave: { at: now, status: "saved-local", detail: "background sync skipped; no remote configured" },
         lastSync: {
           lastPushAt: now,
@@ -1063,13 +1066,13 @@ export async function handleBackgroundSync() {
           unsyncedCommits,
         },
       });
-      appendAuditLog(cortexPathLocal, "background_sync", "status=saved-local detail=no_remote");
+      appendAuditLog(phrenPathLocal, "background_sync", "status=saved-local detail=no_remote");
       return;
     }
 
-    const push = await runBestEffortGit(["push"], cortexPathLocal);
+    const push = await runBestEffortGit(["push"], phrenPathLocal);
     if (push.ok) {
-      updateRuntimeHealth(cortexPathLocal, {
+      updateRuntimeHealth(phrenPathLocal, {
         lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed by background sync" },
         lastSync: {
           lastPushAt: now,
@@ -1078,13 +1081,13 @@ export async function handleBackgroundSync() {
           unsyncedCommits: 0,
         },
       });
-      appendAuditLog(cortexPathLocal, "background_sync", "status=saved-pushed");
+      appendAuditLog(phrenPathLocal, "background_sync", "status=saved-pushed");
       return;
     }
 
-    const recovered = await recoverPushConflict(cortexPathLocal);
+    const recovered = await recoverPushConflict(phrenPathLocal);
     if (recovered.ok) {
-      updateRuntimeHealth(cortexPathLocal, {
+      updateRuntimeHealth(phrenPathLocal, {
         lastAutoSave: { at: now, status: "saved-pushed", detail: recovered.detail },
         lastSync: {
           lastPullAt: now,
@@ -1097,12 +1100,12 @@ export async function handleBackgroundSync() {
           unsyncedCommits: 0,
         },
       });
-      appendAuditLog(cortexPathLocal, "background_sync", `status=saved-pushed detail=${JSON.stringify(recovered.detail)}`);
+      appendAuditLog(phrenPathLocal, "background_sync", `status=saved-pushed detail=${JSON.stringify(recovered.detail)}`);
       return;
     }
 
-    const unsyncedCommits = await countUnsyncedCommits(cortexPathLocal);
-    updateRuntimeHealth(cortexPathLocal, {
+    const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
+    updateRuntimeHealth(phrenPathLocal, {
       lastAutoSave: { at: now, status: "saved-local", detail: recovered.detail || push.error || "background sync push failed" },
       lastSync: {
         lastPullAt: now,
@@ -1114,7 +1117,7 @@ export async function handleBackgroundSync() {
         unsyncedCommits,
       },
     });
-    appendAuditLog(cortexPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(recovered.detail || push.error || "background sync push failed")}`);
+    appendAuditLog(phrenPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(recovered.detail || push.error || "background sync push failed")}`);
   } finally {
     try { fs.unlinkSync(lockPath); } catch {}
   }
@@ -1122,7 +1125,7 @@ export async function handleBackgroundSync() {
 
 function scheduleWeeklyGovernance(): void {
   try {
-    const lastGovPath = runtimeFile(getCortexPath(), "last-governance.txt");
+    const lastGovPath = runtimeFile(getPhrenPath(), "last-governance.txt");
     const lastRun = fs.existsSync(lastGovPath) ? parseInt(fs.readFileSync(lastGovPath, "utf8"), 10) : 0;
     const daysSince = (Date.now() - lastRun) / 86_400_000;
     if (daysSince >= 7) {
@@ -1140,22 +1143,23 @@ function scheduleWeeklyGovernance(): void {
 }
 
 export async function handleHookContext() {
-  if (!getHooksEnabledPreference(getCortexPath())) {
+  const ctx = buildHookContext();
+  if (!ctx.hooksEnabled) {
     process.exit(0);
   }
 
-  let cwd = process.cwd();
+  let cwd = ctx.cwd;
   const ctxStdin = readStdinJson<{ cwd?: string }>();
   if (ctxStdin?.cwd) cwd = ctxStdin.cwd;
 
-  const project = detectProject(getCortexPath(), cwd, getRuntimeProfile());
-  if (!isProjectHookEnabled(getCortexPath(), project, "UserPromptSubmit")) {
+  const project = cwd !== ctx.cwd ? detectProject(ctx.phrenPath, cwd, ctx.profile) : ctx.activeProject;
+  if (!isProjectHookEnabled(ctx.phrenPath, project, "UserPromptSubmit")) {
     process.exit(0);
   }
 
-  const db = await buildIndex(getCortexPath(), getRuntimeProfile());
-  const contextLabel = project ? `\u25c6 cortex \u00b7 ${project} \u00b7 context` : `\u25c6 cortex \u00b7 context`;
-  const parts: string[] = [contextLabel, "<cortex-context>"];
+  const db = await buildIndex(ctx.phrenPath, ctx.profile);
+  const contextLabel = project ? `\u25c6 phren \u00b7 ${project} \u00b7 context` : `\u25c6 phren \u00b7 context`;
+  const parts: string[] = [contextLabel, "<phren-context>"];
 
   if (project) {
     const summaryRow = queryRows(db, "SELECT content FROM docs WHERE project = ? AND type = 'summary'", [project]);
@@ -1199,13 +1203,13 @@ export async function handleHookContext() {
   } else {
     const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
     if (projectRows) {
-      parts.push("# Cortex projects");
+      parts.push("# Phren projects");
       parts.push(projectRows.map(r => `- ${r[0]}`).join("\n"));
       parts.push("");
     }
   }
 
-  parts.push("<cortex-context>");
+  parts.push("<phren-context>");
 
   if (parts.length > 2) {
     console.log(parts.join("\n"));
@@ -1215,14 +1219,14 @@ export async function handleHookContext() {
 // ── PostToolUse hook ─────────────────────────────────────────────────────────
 
 const INTERESTING_TOOLS = new Set(["Read", "Write", "Edit", "Bash", "Glob", "Grep"]);
-const COOLDOWN_MS = parseInt(process.env.CORTEX_AUTOCAPTURE_COOLDOWN_MS ?? "30000", 10);
+const COOLDOWN_MS = parseInt(process.env.PHREN_AUTOCAPTURE_COOLDOWN_MS ?? "30000", 10);
 
 function getSessionCap(): number {
-  if (process.env.CORTEX_AUTOCAPTURE_SESSION_CAP) {
-    return parseInt(process.env.CORTEX_AUTOCAPTURE_SESSION_CAP, 10);
+  if (process.env.PHREN_AUTOCAPTURE_SESSION_CAP) {
+    return parseInt(process.env.PHREN_AUTOCAPTURE_SESSION_CAP, 10);
   }
   try {
-    const policy = getWorkflowPolicy(getCortexPath());
+    const policy = getWorkflowPolicy(getPhrenPath());
     const sensitivity = policy.findingSensitivity ?? "balanced";
     return FINDING_SENSITIVITY_CONFIG[sensitivity]?.sessionCap ?? 10;
   } catch {
@@ -1268,7 +1272,8 @@ function flattenToolResponseText(value: unknown, maxChars = 4000): string {
 }
 
 export async function handleHookTool() {
-  if (!getHooksEnabledPreference(getCortexPath())) {
+  const ctx = buildHookContext();
+  if (!ctx.hooksEnabled) {
     process.exit(0);
   }
 
@@ -1280,7 +1285,7 @@ export async function handleHookTool() {
       try {
         raw = fs.readFileSync(0, "utf-8");
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool stdinRead: ${errorMessage(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool stdinRead: ${errorMessage(err)}\n`);
         process.exit(0);
       }
     }
@@ -1289,7 +1294,7 @@ export async function handleHookTool() {
     try {
       data = JSON.parse(raw) as Record<string, unknown>;
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool stdinParse: ${errorMessage(err)}\n`);
+      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool stdinParse: ${errorMessage(err)}\n`);
       process.exit(0);
     }
 
@@ -1328,21 +1333,21 @@ export async function handleHookTool() {
     }
 
     const cwd: string | undefined = (data.cwd ?? input.cwd ?? undefined) as string | undefined;
-    let activeProject = cwd ? detectProject(getCortexPath(), cwd, getRuntimeProfile()) : null;
-    if (!isProjectHookEnabled(getCortexPath(), activeProject, "PostToolUse")) {
-      appendAuditLog(getCortexPath(), "hook_tool", `status=project_disabled project=${activeProject}`);
+    let activeProject = cwd ? detectProject(ctx.phrenPath, cwd, ctx.profile) : null;
+    if (!isProjectHookEnabled(ctx.phrenPath, activeProject, "PostToolUse")) {
+      appendAuditLog(ctx.phrenPath, "hook_tool", `status=project_disabled project=${activeProject}`);
       process.exit(0);
     }
 
     try {
-      const logFile = runtimeFile(getCortexPath(), "tool-log.jsonl");
+      const logFile = runtimeFile(ctx.phrenPath, "tool-log.jsonl");
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool toolLog: ${errorMessage(err)}\n`);
+      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool toolLog: ${errorMessage(err)}\n`);
     }
 
-    const cooldownFile = runtimeFile(getCortexPath(), "hook-tool-cooldown");
+    const cooldownFile = runtimeFile(ctx.phrenPath, "hook-tool-cooldown");
     try {
       if (fs.existsSync(cooldownFile)) {
         const age = Date.now() - fs.statSync(cooldownFile).mtimeMs;
@@ -1352,12 +1357,12 @@ export async function handleHookTool() {
         }
       }
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool cooldownStat: ${errorMessage(err)}\n`);
+      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool cooldownStat: ${errorMessage(err)}\n`);
     }
 
     if (activeProject && sessionId) {
       try {
-        const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
+        const capFile = sessionMarker(ctx.phrenPath, `tool-findings-${sessionId}`);
         let count = 0;
         if (fs.existsSync(capFile)) {
           count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
@@ -1368,11 +1373,11 @@ export async function handleHookTool() {
           activeProject = null;
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool sessionCapCheck: ${errorMessage(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool sessionCapCheck: ${errorMessage(err)}\n`);
       }
     }
 
-    const findingsLevelForTool = getProactivityLevelForFindings(getCortexPath());
+    const findingsLevelForTool = getProactivityLevelForFindings(ctx.phrenPath);
     if (activeProject && findingsLevelForTool !== "low") {
       try {
         const candidates = filterToolFindingsForProactivity(
@@ -1380,27 +1385,25 @@ export async function handleHookTool() {
           findingsLevelForTool
         );
         for (const { text, confidence } of candidates) {
-          // Queue all candidates for review rather than auto-promoting to FINDINGS.md;
-          // requires human review and provenance confirmation before promotion.
-          appendReviewQueue(getCortexPath(), activeProject, "Review", [text]);
+          appendReviewQueue(ctx.phrenPath, activeProject, "Review", [text]);
           debugLog(`hook-tool: queued candidate for review (conf=${confidence}): ${text.slice(0, 60)}`);
         }
 
         if (candidates.length > 0) {
           try { fs.writeFileSync(cooldownFile, Date.now().toString()); } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool cooldownWrite: ${errorMessage(err)}\n`);
+            if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool cooldownWrite: ${errorMessage(err)}\n`);
           }
           if (sessionId) {
             try {
-              const capFile = sessionMarker(getCortexPath(), `tool-findings-${sessionId}`);
+              const capFile = sessionMarker(ctx.phrenPath, `tool-findings-${sessionId}`);
               let count = 0;
               try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch (err: unknown) {
-                if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool capFileRead: ${errorMessage(err)}\n`);
+                if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool capFileRead: ${errorMessage(err)}\n`);
               }
               count += candidates.length;
               fs.writeFileSync(capFile, count.toString());
             } catch (err: unknown) {
-              if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] hookTool capFileWrite: ${errorMessage(err)}\n`);
+              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool capFileWrite: ${errorMessage(err)}\n`);
             }
           }
         }
@@ -1432,7 +1435,7 @@ const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|
 
 export function filterToolFindingsForProactivity(
   candidates: Array<{ text: string; confidence: number; explicit?: boolean }>,
-  level = getProactivityLevelForFindings(getCortexPath())
+  level = getProactivityLevelForFindings(getPhrenPath())
 ): Array<{ text: string; confidence: number; explicit?: boolean }> {
   if (level === "high") return candidates;
   if (level === "low") return [];

@@ -14,24 +14,24 @@ describe("task lifecycle", () => {
     grantAdmin(tmp.path);
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "manual",
     }, null, 2) + "\n");
     writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
-    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/cortex\n");
+    writeFile(path.join(tmp.path, project, "CLAUDE.md"), "Repo: https://github.com/alaarab/phren\n");
   });
 
   afterEach(() => {
-    delete process.env.CORTEX_ACTOR;
+    delete process.env.PHREN_ACTOR;
     tmp.cleanup();
   });
 
   it("suggest mode proposes a task without mutating tasks.md", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "suggest",
@@ -39,7 +39,7 @@ describe("task lifecycle", () => {
 
     const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Implement automatic task management for hooks",
       project,
       sessionId: "session-suggest",
@@ -56,15 +56,15 @@ describe("task lifecycle", () => {
   it("auto mode creates an active task and links an explicit GitHub issue URL", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "auto",
     }, null, 2) + "\n");
 
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
-      prompt: "Implement automatic task management for hooks https://github.com/alaarab/cortex/issues/14",
+      phrenPath: tmp.path,
+      prompt: "Implement automatic task management for hooks https://github.com/alaarab/phren/issues/14",
       project,
       sessionId: "session-auto",
       intent: "build",
@@ -79,13 +79,13 @@ describe("task lifecycle", () => {
     expect(task.data.items.Active).toHaveLength(1);
     expect(task.data.items.Active[0].context).toContain("Implement automatic task management for hooks");
     expect(task.data.items.Active[0].githubIssue).toBe(14);
-    expect(task.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    expect(task.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
 
   it("auto mode suggests instead of writing when discovery intent detected", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "auto",
@@ -93,7 +93,7 @@ describe("task lifecycle", () => {
 
     const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Explore different caching strategies and evaluate the pros and cons",
       project,
       sessionId: "session-discovery",
@@ -110,14 +110,14 @@ describe("task lifecycle", () => {
   it("auto mode writes task when execution intent detected", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "auto",
     }, null, 2) + "\n");
 
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Yes do it, implement the new caching layer",
       project,
       sessionId: "session-execution",
@@ -136,14 +136,14 @@ describe("task lifecycle", () => {
   it("auto mode writes task when both execution and discovery signals present", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "auto",
     }, null, 2) + "\n");
 
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Go ahead and explore the caching alternatives then ship it",
       project,
       sessionId: "session-both",
@@ -157,14 +157,14 @@ describe("task lifecycle", () => {
   it("auto mode writes task when no discovery signal present (default behavior)", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "auto",
     }, null, 2) + "\n");
 
     const result = handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Fix the authentication middleware",
       project,
       sessionId: "session-default",
@@ -178,14 +178,14 @@ describe("task lifecycle", () => {
   it("auto mode completes the tracked task after a successful stop", () => {
     writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
-      requireMaintainerApproval: true,
+
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
       taskMode: "auto",
     }, null, 2) + "\n");
 
     handleTaskPromptLifecycle({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       prompt: "Fix narrow terminal task rendering",
       project,
       sessionId: "session-complete",
@@ -193,7 +193,7 @@ describe("task lifecycle", () => {
     });
 
     finalizeTaskSession({
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       sessionId: "session-complete",
       status: "saved-local",
       detail: "commit saved; background sync scheduled",

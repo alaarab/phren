@@ -12,9 +12,6 @@ import {
   tidyDoneTasks,
   readReviewQueue,
   readReviewQueueAcrossProjects,
-  approveQueueItem,
-  rejectQueueItem,
-  editQueueItem,
   listMachines,
   setMachineProfile,
   listProfiles,
@@ -30,7 +27,7 @@ import {
   removeFinding,
   TASKS_FILENAME,
 } from "./data-access.js";
-import { CortexError } from "./shared.js";
+import { PhrenError } from "./shared.js";
 import { grantAdmin, makeTempDir, resultMsg, spawnTsxWorker, REPO_ROOT } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -45,7 +42,7 @@ const runDataAccessWorker = spawnTsxWorker;
 let tmpCleanup: () => void;
 
 beforeEach(() => {
-  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("cortex-da-test-"));
+  ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-da-test-"));
   projectDir = path.join(tmpDir, PROJECT);
   fs.mkdirSync(projectDir, { recursive: true });
   grantAdmin(tmpDir);
@@ -53,7 +50,7 @@ beforeEach(() => {
 
 afterEach(() => {
   tmpCleanup();
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_ACTOR;
 });
 
 const SAMPLE_TASK = `# testproject tasks
@@ -78,7 +75,7 @@ const SAMPLE_FINDINGS = `# testproject FINDINGS
 ## 2026-03-01
 
 - The auth middleware runs before rate limiting, order matters
-  <!-- cortex:cite {"created_at":"2026-03-01T10:00:00Z"} -->
+  <!-- phren:cite {"created_at":"2026-03-01T10:00:00Z"} -->
 - SQLite WAL mode is required for concurrent readers
 
 ## 2026-02-15
@@ -121,13 +118,13 @@ describe("readTasks", () => {
   it("returns an error for an invalid project name", () => {
     const result = readTasks(tmpDir, "../escape");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe(CortexError.INVALID_PROJECT_NAME);
+    if (!result.ok) expect(result.code).toBe(PhrenError.INVALID_PROJECT_NAME);
   });
 
   it("returns an error for a missing project directory", () => {
     const result = readTasks(tmpDir, "nonexistent");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
+    if (!result.ok) expect(result.code).toBe(PhrenError.PROJECT_NOT_FOUND);
   });
 
   it("handles a task with no items", () => {
@@ -192,7 +189,7 @@ describe("readTasks", () => {
 
 - [ ] Implement auth middleware [high] <!-- bid:deadbeef -->
   Context: protect admin routes
-  GitHub: #14 https://github.com/alaarab/cortex/issues/14
+  GitHub: #14 https://github.com/alaarab/phren/issues/14
 
 ## Queue
 
@@ -206,7 +203,7 @@ describe("readTasks", () => {
     expect(result.data.items.Active[0].stableId).toBe("deadbeef");
     expect(result.data.items.Active[0].context).toBe("protect admin routes");
     expect(result.data.items.Active[0].githubIssue).toBe(14);
-    expect(result.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    expect(result.data.items.Active[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
 });
 
@@ -308,7 +305,7 @@ describe("task mutation helpers", () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
     let msg = updateTask(tmpDir, PROJECT, "Add rate limiting", {
       github_issue: "#14",
-      github_url: "https://github.com/alaarab/cortex/issues/14",
+      github_url: "https://github.com/alaarab/phren/issues/14",
     });
     expect(resultMsg(msg)).toContain("github -> #14");
 
@@ -316,7 +313,7 @@ describe("task mutation helpers", () => {
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(after.data.githubIssue).toBe(14);
-    expect(after.data.githubUrl).toBe("https://github.com/alaarab/cortex/issues/14");
+    expect(after.data.githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
 
     msg = updateTask(tmpDir, PROJECT, "Add rate limiting", {
       unlink_github: true,
@@ -334,7 +331,7 @@ describe("task mutation helpers", () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
     const linked = linkTaskIssue(tmpDir, PROJECT, "Add rate limiting", {
       github_issue: 22,
-      github_url: "https://github.com/alaarab/cortex/issues/22",
+      github_url: "https://github.com/alaarab/phren/issues/22",
     });
     expect(linked.ok).toBe(true);
 
@@ -346,7 +343,7 @@ describe("task mutation helpers", () => {
     if (!after.ok) return;
     expect(after.data.section).toBe("Active");
     expect(after.data.githubIssue).toBe(22);
-    expect(after.data.githubUrl).toBe("https://github.com/alaarab/cortex/issues/22");
+    expect(after.data.githubUrl).toBe("https://github.com/alaarab/phren/issues/22");
   });
 
   it("rejects invalid github_url values during task updates", () => {
@@ -471,7 +468,7 @@ describe("readFindings", () => {
 
     expect(result.data[0].date).toBe("2026-03-01");
     expect(result.data[0].text).toContain("auth middleware");
-    expect(result.data[0].citation).toContain("cortex:cite");
+    expect(result.data[0].citation).toContain("phren:cite");
     expect(result.data[0].source).toBe("unknown");
 
     expect(result.data[1].date).toBe("2026-03-01");
@@ -494,7 +491,7 @@ describe("readFindings", () => {
   it("returns an error for a missing project", () => {
     const result = readFindings(tmpDir, "nonexistent");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
+    if (!result.ok) expect(result.code).toBe(PhrenError.PROJECT_NOT_FOUND);
   });
 
   it("assigns sequential IDs", () => {
@@ -514,7 +511,7 @@ describe("readFindings", () => {
 ## 2026-03-09
 
 - Refactor slices should stay independently releasable <!-- created: 2026-03-09 --> <!-- source: source:agent machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->
-  <!-- cortex:cite {"created_at":"2026-03-09T10:00:00Z","task_item":"deadbeef"} -->
+  <!-- phren:cite {"created_at":"2026-03-09T10:00:00Z","task_item":"deadbeef"} -->
 `,
     );
     const result = readFindings(tmpDir, PROJECT);
@@ -539,14 +536,14 @@ describe("readFindings", () => {
 
 ## 2026-03-10
 
-- Current finding remains visible <!-- fid:aaaabbbb --> <!-- cortex:status "active" -->
+- Current finding remains visible <!-- fid:aaaabbbb --> <!-- phren:status "active" -->
 
 <details>
 <summary>Archived</summary>
 
 ## 2026-02-01
 
-- Archived finding from details <!-- fid:ccccdddd --> <!-- cortex:status "superseded" --> <!-- cortex:status_updated "2026-02-03" --> <!-- cortex:status_reason "superseded_by" --> <!-- cortex:status_ref "new-approach" -->
+- Archived finding from details <!-- fid:ccccdddd --> <!-- phren:status "superseded" --> <!-- phren:status_updated "2026-02-03" --> <!-- phren:status_reason "superseded_by" --> <!-- phren:status_ref "new-approach" -->
 </details>
 `,
     );
@@ -578,14 +575,14 @@ describe("readFindingHistory", () => {
 
 ## 2026-03-12
 
-- Current finding text <!-- fid:aa11bb22 --> <!-- cortex:status "active" --> <!-- cortex:status_updated "2026-03-12" -->
+- Current finding text <!-- fid:aa11bb22 --> <!-- phren:status "active" --> <!-- phren:status_updated "2026-03-12" -->
 
 <details>
 <summary>Archived</summary>
 
 ## 2026-02-10
 
-- Current finding text <!-- fid:aa11bb22 --> <!-- cortex:status "superseded" --> <!-- cortex:status_updated "2026-02-10" --> <!-- cortex:status_reason "superseded_by" --> <!-- cortex:status_ref "replacement" -->
+- Current finding text <!-- fid:aa11bb22 --> <!-- phren:status "superseded" --> <!-- phren:status_updated "2026-02-10" --> <!-- phren:status_reason "superseded_by" --> <!-- phren:status_ref "replacement" -->
 </details>
 `,
     );
@@ -648,7 +645,7 @@ describe("removeFinding", () => {
 
     const content = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
     expect(content).not.toContain("auth middleware");
-    expect(content).not.toContain("cortex:cite");
+    expect(content).not.toContain("phren:cite");
   });
 
   it("returns an error when no finding matches", () => {
@@ -660,7 +657,7 @@ describe("removeFinding", () => {
   it("returns an error when FINDINGS.md does not exist", () => {
     const msg = removeFinding(tmpDir, PROJECT, "anything");
     expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.FILE_NOT_FOUND);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.FILE_NOT_FOUND);
   });
 });
 
@@ -722,63 +719,6 @@ describe("memory queue helpers", () => {
     expect(result.data.some((item) => item.project === "bravo" && item.section === "Conflicts")).toBe(true);
   });
 
-  it("approveQueueItem adds finding and removes queue item", () => {
-    const msg = approveQueueItem(tmpDir, PROJECT, "cleanup flaky");
-    expect(resultMsg(msg)).toContain("Approved memory");
-
-    const queueAfter = readReviewQueue(tmpDir, PROJECT);
-    if (queueAfter.ok) {
-      expect(queueAfter.data.some((i) => i.text.includes("cleanup flaky"))).toBe(false);
-    }
-
-    const findings = readFindings(tmpDir, PROJECT);
-    if (findings.ok) {
-      expect(findings.data.some((i) => i.text.includes("cleanup flaky"))).toBe(true);
-    }
-  });
-
-  it("rejectQueueItem removes the matched queue item", () => {
-    const msg = rejectQueueItem(tmpDir, PROJECT, "conflicting guidance");
-    expect(resultMsg(msg)).toContain("Rejected memory");
-    const queueAfter = readReviewQueue(tmpDir, PROJECT);
-    if (!queueAfter.ok) return;
-    expect(queueAfter.data.some((i) => i.text.includes("conflicting guidance"))).toBe(false);
-  });
-
-  it("editQueueItem rewrites the item text", () => {
-    const msg = editQueueItem(tmpDir, PROJECT, "old stale memory", "updated stale memory");
-    expect(resultMsg(msg)).toContain("Edited memory");
-    const queueAfter = readReviewQueue(tmpDir, PROJECT);
-    if (!queueAfter.ok) return;
-    expect(queueAfter.data.some((i) => i.text.includes("updated stale memory"))).toBe(true);
-  });
-
-  it("approveQueueItem promotes sanitized text from messy queue lines", () => {
-    fs.writeFileSync(
-      path.join(projectDir, "MEMORY_QUEUE.md"),
-      [
-        "# testproject Review Queue",
-        "",
-        "## Review",
-        "",
-        "- [2026-03-05] [decision] Use \\\"quoted\\\" config values <!-- source: injected --> [confidence 0.80]",
-        "",
-        "## Stale",
-        "",
-        "## Conflicts",
-        "",
-      ].join("\n"),
-    );
-
-    const msg = approveQueueItem(tmpDir, PROJECT, "M1");
-    expect(resultMsg(msg)).toContain("Approved memory");
-
-    const findings = readFindings(tmpDir, PROJECT);
-    expect(findings.ok).toBe(true);
-    if (!findings.ok) return;
-    expect(findings.data.some((i) => i.text.includes('[decision] Use "quoted" config values'))).toBe(true);
-    expect(findings.data.some((i) => i.text.includes("source: injected"))).toBe(false);
-  });
 });
 
 describe("machines, profiles, and shell state", () => {
@@ -805,14 +745,14 @@ describe("machines, profiles, and shell state", () => {
     fs.unlinkSync(path.join(tmpDir, "machines.yaml"));
     const listed = listMachines(tmpDir);
     expect(listed.ok).toBe(false);
-    if (!listed.ok) expect(listed.code).toBe(CortexError.FILE_NOT_FOUND);
+    if (!listed.ok) expect(listed.code).toBe(PhrenError.FILE_NOT_FOUND);
   });
 
   it("returns MALFORMED_YAML for invalid machines.yaml", () => {
     fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "machine-a: [\n");
     const listed = listMachines(tmpDir);
     expect(listed.ok).toBe(false);
-    if (!listed.ok) expect(listed.code).toBe(CortexError.MALFORMED_YAML);
+    if (!listed.ok) expect(listed.code).toBe(PhrenError.MALFORMED_YAML);
   });
 
   it("lists profiles and mutates profile projects", () => {
@@ -831,14 +771,14 @@ describe("machines, profiles, and shell state", () => {
     fs.rmSync(path.join(tmpDir, "profiles"), { recursive: true, force: true });
     const listed = listProfiles(tmpDir);
     expect(listed.ok).toBe(false);
-    if (!listed.ok) expect(listed.code).toBe(CortexError.FILE_NOT_FOUND);
+    if (!listed.ok) expect(listed.code).toBe(PhrenError.FILE_NOT_FOUND);
   });
 
   it("returns MALFORMED_YAML for invalid profile yaml", () => {
     fs.writeFileSync(path.join(tmpDir, "profiles", "personal.yaml"), "name: personal\nprojects: [\n");
     const listed = listProfiles(tmpDir);
     expect(listed.ok).toBe(false);
-    if (!listed.ok) expect(listed.code).toBe(CortexError.MALFORMED_YAML);
+    if (!listed.ok) expect(listed.code).toBe(PhrenError.MALFORMED_YAML);
   });
 
   it("listProjectCards includes summary/docs", () => {
@@ -958,17 +898,17 @@ describe("file locking", () => {
     const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
-    process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "150";
-    process.env.CORTEX_FILE_LOCK_POLL_MS = "25";
+    process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = "150";
+    process.env.PHREN_FILE_LOCK_POLL_MS = "25";
     const before = fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
     const msg = addTask(tmpDir, PROJECT, "Blocked by lock");
     const after = fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
-    delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
-    delete process.env.CORTEX_FILE_LOCK_POLL_MS;
+    delete process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+    delete process.env.PHREN_FILE_LOCK_POLL_MS;
     fs.unlinkSync(lockPath);
 
     expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.LOCK_TIMEOUT);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.LOCK_TIMEOUT);
     expect(after).toBe(before);
     expect(after).not.toContain("Blocked by lock");
   });
@@ -978,15 +918,15 @@ describe("file locking", () => {
     const lockPath = path.join(projectDir, `${TASKS_FILENAME}.lock`);
     fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`);
 
-    process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS = "150";
-    process.env.CORTEX_FILE_LOCK_POLL_MS = "25";
+    process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = "150";
+    process.env.PHREN_FILE_LOCK_POLL_MS = "25";
     const msg = workNextTask(tmpDir, PROJECT);
-    delete process.env.CORTEX_FILE_LOCK_MAX_WAIT_MS;
-    delete process.env.CORTEX_FILE_LOCK_POLL_MS;
+    delete process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+    delete process.env.PHREN_FILE_LOCK_POLL_MS;
     fs.unlinkSync(lockPath);
 
     expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.LOCK_TIMEOUT);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.LOCK_TIMEOUT);
 
     const after = readTasks(tmpDir, PROJECT);
     if (!after.ok) return;
@@ -1001,7 +941,7 @@ describe("file locking", () => {
     const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
     const mkCode = (item: string) =>
       `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
-      `process.env.CORTEX_ACTOR='vitest-admin';` +
+      `process.env.PHREN_ACTOR='vitest-admin';` +
       `const out=addTask(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(item)});` +
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
@@ -1025,7 +965,7 @@ describe("file locking", () => {
     const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
     const mkCode = (text: string) =>
       `import { addFinding } from ${JSON.stringify(dataAccessPath)};` +
-      `process.env.CORTEX_ACTOR='vitest-admin';` +
+      `process.env.PHREN_ACTOR='vitest-admin';` +
       `const out=addFinding(${JSON.stringify(tmpDir)},${JSON.stringify(PROJECT)},${JSON.stringify(text)});` +
       `console.log(out.ok ? out.data : out.error); if(!out.ok && out.error.includes('LOCK_TIMEOUT')) process.exit(2);`;
 
@@ -1098,19 +1038,19 @@ describe("structured error codes in data-access", () => {
   it("readTasks returns INVALID_PROJECT_NAME for path traversal", () => {
     const result = readTasks(tmpDir, "../escape");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe(CortexError.INVALID_PROJECT_NAME);
+    if (!result.ok) expect(result.code).toBe(PhrenError.INVALID_PROJECT_NAME);
   });
 
   it("readTasks returns PROJECT_NOT_FOUND for missing project", () => {
     const result = readTasks(tmpDir, "nonexistent");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe(CortexError.PROJECT_NOT_FOUND);
+    if (!result.ok) expect(result.code).toBe(PhrenError.PROJECT_NOT_FOUND);
   });
 
   it("completeTask returns NOT_FOUND for unmatched item", () => {
     const msg = completeTask(tmpDir, PROJECT, "does-not-exist");
     expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.NOT_FOUND);
   });
 
   it("removeFinding returns NOT_FOUND for unmatched finding", () => {
@@ -1118,31 +1058,15 @@ describe("structured error codes in data-access", () => {
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# FINDINGS\n\n## 2025-01-01\n\n- Existing finding\n");
     const msg = removeFinding(tmpDir, PROJECT, "nonexistent-finding-xyz");
     expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.NOT_FOUND);
-  });
-
-  it("editQueueItem returns EMPTY_INPUT for blank text", () => {
-    const msg = editQueueItem(tmpDir, PROJECT, "anything", "");
-    expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.EMPTY_INPUT);
-  });
-
-  it("editQueueItem rejects oversized queue text", () => {
-    fs.writeFileSync(
-      path.join(projectDir, "MEMORY_QUEUE.md"),
-      "# testproject Review Queue\n\n## Review\n\n- [2026-03-05] anything\n\n## Stale\n\n## Conflicts\n",
-    );
-    const msg = editQueueItem(tmpDir, PROJECT, "anything", "X".repeat(5001));
-    expect(msg.ok).toBe(false);
-    if (!msg.ok) expect(msg.code).toBe(CortexError.VALIDATION_ERROR);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.NOT_FOUND);
   });
 
   it("listMachines returns FILE_NOT_FOUND when machines.yaml missing", () => {
-    const tmp = makeTempDir("cortex-err-");
+    const tmp = makeTempDir("phren-err-");
     try {
       const result = listMachines(tmp.path);
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.code).toBe(CortexError.FILE_NOT_FOUND);
+      if (!result.ok) expect(result.code).toBe(PhrenError.FILE_NOT_FOUND);
     } finally {
       tmp.cleanup();
     }

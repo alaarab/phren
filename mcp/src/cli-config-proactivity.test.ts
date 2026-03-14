@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { initTestCortexRoot, makeTempDir } from "./test-helpers.js";
+import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 
 const originalEnv = {
   HOME: process.env.HOME,
   USERPROFILE: process.env.USERPROFILE,
-  CORTEX_PATH: process.env.CORTEX_PATH,
-  CORTEX_PROACTIVITY: process.env.CORTEX_PROACTIVITY,
-  CORTEX_PROACTIVITY_FINDINGS: process.env.CORTEX_PROACTIVITY_FINDINGS,
-  CORTEX_PROACTIVITY_TASKS: process.env.CORTEX_PROACTIVITY_TASKS,
+  PHREN_PATH: process.env.PHREN_PATH,
+  PHREN_PROACTIVITY: process.env.PHREN_PROACTIVITY,
+  PHREN_PROACTIVITY_FINDINGS: process.env.PHREN_PROACTIVITY_FINDINGS,
+  PHREN_PROACTIVITY_TASKS: process.env.PHREN_PROACTIVITY_TASKS,
 };
 
 let tmpCleanup: (() => void) | undefined;
-let cortexDir: string;
+let phrenDir: string;
 let homeDir: string;
 
 function restoreEnv(name: keyof typeof originalEnv): void {
@@ -23,11 +23,11 @@ function restoreEnv(name: keyof typeof originalEnv): void {
 }
 
 function governancePrefsPath(): string {
-  return path.join(cortexDir, ".governance", "install-preferences.json");
+  return path.join(phrenDir, ".governance", "install-preferences.json");
 }
 
 function installPrefsPath(): string {
-  return path.join(cortexDir, ".runtime", "install-preferences.json");
+  return path.join(phrenDir, ".runtime", "install-preferences.json");
 }
 
 async function importCliConfig() {
@@ -49,30 +49,30 @@ function captureConsole() {
 
 describe("handleConfig proactivity", () => {
   beforeEach(() => {
-    const tmp = makeTempDir("cortex-config-proactivity-");
+    const tmp = makeTempDir("phren-config-proactivity-");
     tmpCleanup = tmp.cleanup;
-    cortexDir = path.join(tmp.path, ".cortex");
+    phrenDir = path.join(tmp.path, ".phren");
     homeDir = path.join(tmp.path, "home");
-    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(phrenDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
-    initTestCortexRoot(cortexDir);
+    initTestPhrenRoot(phrenDir);
 
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
-    process.env.CORTEX_PATH = cortexDir;
-    delete process.env.CORTEX_PROACTIVITY;
-    delete process.env.CORTEX_PROACTIVITY_FINDINGS;
-    delete process.env.CORTEX_PROACTIVITY_TASKS;
+    process.env.PHREN_PATH = phrenDir;
+    delete process.env.PHREN_PROACTIVITY;
+    delete process.env.PHREN_PROACTIVITY_FINDINGS;
+    delete process.env.PHREN_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     restoreEnv("HOME");
     restoreEnv("USERPROFILE");
-    restoreEnv("CORTEX_PATH");
-    restoreEnv("CORTEX_PROACTIVITY");
-    restoreEnv("CORTEX_PROACTIVITY_FINDINGS");
-    restoreEnv("CORTEX_PROACTIVITY_TASKS");
+    restoreEnv("PHREN_PATH");
+    restoreEnv("PHREN_PROACTIVITY");
+    restoreEnv("PHREN_PROACTIVITY_FINDINGS");
+    restoreEnv("PHREN_PROACTIVITY_TASKS");
     tmpCleanup?.();
   });
 
@@ -143,31 +143,31 @@ describe("handleConfig proactivity", () => {
     await expect(handleConfig(["proactivity.findings", "urgent"])).rejects.toThrow("process.exit");
 
     expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(output.errors).toContain("Usage: cortex config proactivity.findings [high|medium|low]");
+    expect(output.errors).toContain("Usage: phren config proactivity.findings [high|medium|low]");
     expect(fs.existsSync(governancePrefsPath())).toBe(false);
   });
 });
 
 describe("handleConfig project ownership", () => {
   beforeEach(() => {
-    const tmp = makeTempDir("cortex-config-project-ownership-");
+    const tmp = makeTempDir("phren-config-project-ownership-");
     tmpCleanup = tmp.cleanup;
-    cortexDir = path.join(tmp.path, ".cortex");
+    phrenDir = path.join(tmp.path, ".phren");
     homeDir = path.join(tmp.path, "home");
-    fs.mkdirSync(cortexDir, { recursive: true });
+    fs.mkdirSync(phrenDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
-    initTestCortexRoot(cortexDir);
+    initTestPhrenRoot(phrenDir);
 
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
-    process.env.CORTEX_PATH = cortexDir;
+    process.env.PHREN_PATH = phrenDir;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     restoreEnv("HOME");
     restoreEnv("USERPROFILE");
-    restoreEnv("CORTEX_PATH");
+    restoreEnv("PHREN_PATH");
     tmpCleanup?.();
   });
 
@@ -180,7 +180,7 @@ describe("handleConfig project ownership", () => {
 
     const initial = JSON.parse(output.logs[0]);
     const updated = JSON.parse(output.logs[1]);
-    expect(initial.effective.projectOwnershipDefault).toBe("cortex-managed");
+    expect(initial.effective.projectOwnershipDefault).toBe("phren-managed");
     expect(updated.configured.projectOwnershipDefault).toBe("detached");
     expect(updated.effective.projectOwnershipDefault).toBe("detached");
 

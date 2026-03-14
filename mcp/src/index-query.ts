@@ -36,14 +36,14 @@ function normalizeDocSegment(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
-function getProjectRoot(cortexPath: string, project: string): string {
-  return path.join(path.resolve(cortexPath), project);
+function getProjectRoot(phrenPath: string, project: string): string {
+  return path.join(path.resolve(phrenPath), project);
 }
 
-export function buildSourceDocKey(project: string, docPath: string, cortexPath: string, fallbackFilename?: string): string {
+export function buildSourceDocKey(project: string, docPath: string, phrenPath: string, fallbackFilename?: string): string {
   const normalizedProject = normalizeDocSegment(project);
   const normalizedDocPath = path.resolve(docPath);
-  const projectRoot = getProjectRoot(cortexPath, project);
+  const projectRoot = getProjectRoot(phrenPath, project);
   if (normalizedDocPath.startsWith(projectRoot + path.sep) || normalizedDocPath === projectRoot) {
     const relPath = normalizeDocSegment(path.relative(projectRoot, normalizedDocPath));
     if (relPath) return `${normalizedProject}/${relPath}`;
@@ -69,8 +69,8 @@ export function decodeFiniteNumber(value: SqlValue | undefined, context: string)
   return value;
 }
 
-export function getDocSourceKey(doc: Pick<DocRow, "project" | "filename" | "path">, cortexPath: string): string {
-  return buildSourceDocKey(doc.project, doc.path, cortexPath, doc.filename);
+export function getDocSourceKey(doc: Pick<DocRow, "project" | "filename" | "path">, phrenPath: string): string {
+  return buildSourceDocKey(doc.project, doc.path, phrenPath, doc.filename);
 }
 
 /** Normalize a memory ID to canonical format: `mem:project/path/to/file.md`. */
@@ -112,7 +112,7 @@ export function queryDocRows(db: SqlJsDatabase, sql: string, params: (string | n
   return raw.map(rowToDoc);
 }
 
-export function queryDocBySourceKey(db: SqlJsDatabase, cortexPath: string, sourceKey: string): DocRow | null {
+export function queryDocBySourceKey(db: SqlJsDatabase, phrenPath: string, sourceKey: string): DocRow | null {
   const match = sourceKey.match(/^([^/]+)\/(.+)$/);
   if (!match) return null;
   const [, project, rest] = match;
@@ -123,7 +123,7 @@ export function queryDocBySourceKey(db: SqlJsDatabase, cortexPath: string, sourc
     [project, filename]
   );
   if (!rows) return null;
-  return rows.find((row) => getDocSourceKey(row, cortexPath) === sourceKey) ?? null;
+  return rows.find((row) => getDocSourceKey(row, phrenPath) === sourceKey) ?? null;
 }
 
 export function extractSnippet(content: string, query: string, lines: number = 5): string {

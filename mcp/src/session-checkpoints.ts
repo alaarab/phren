@@ -26,8 +26,8 @@ function sanitizeFileSegment(value: string): string {
   return safe || "unknown";
 }
 
-function checkpointDir(cortexPath: string): string {
-  const probe = sessionMarker(cortexPath, "checkpoint-probe.json");
+function checkpointDir(phrenPath: string): string {
+  const probe = sessionMarker(phrenPath, "checkpoint-probe.json");
   return path.dirname(probe);
 }
 
@@ -35,8 +35,8 @@ function checkpointFileName(project: string, taskId: string): string {
   return `checkpoint-${sanitizeFileSegment(project)}-${sanitizeFileSegment(taskId)}.json`;
 }
 
-export function checkpointPath(cortexPath: string, project: string, taskId: string): string {
-  return sessionMarker(cortexPath, checkpointFileName(project, taskId));
+export function checkpointPath(phrenPath: string, project: string, taskId: string): string {
+  return sessionMarker(phrenPath, checkpointFileName(project, taskId));
 }
 
 function readCheckpointFile(filePath: string): TaskCheckpoint | null {
@@ -69,8 +69,8 @@ function readCheckpointFile(filePath: string): TaskCheckpoint | null {
   }
 }
 
-export function writeTaskCheckpoint(cortexPath: string, checkpoint: TaskCheckpoint): void {
-  const filePath = checkpointPath(cortexPath, checkpoint.project, checkpoint.taskId);
+export function writeTaskCheckpoint(phrenPath: string, checkpoint: TaskCheckpoint): void {
+  const filePath = checkpointPath(phrenPath, checkpoint.project, checkpoint.taskId);
   const normalizedCheckpoint: TaskCheckpoint = {
     ...checkpoint,
     taskText: checkpoint.taskText ?? checkpoint.taskLine,
@@ -78,8 +78,8 @@ export function writeTaskCheckpoint(cortexPath: string, checkpoint: TaskCheckpoi
   atomicWriteJson(filePath, normalizedCheckpoint);
 }
 
-export function listTaskCheckpoints(cortexPath: string, project?: string): TaskCheckpoint[] {
-  const dir = checkpointDir(cortexPath);
+export function listTaskCheckpoints(phrenPath: string, project?: string): TaskCheckpoint[] {
+  const dir = checkpointDir(phrenPath);
   let files: string[];
   try {
     files = fs.readdirSync(dir);
@@ -107,7 +107,7 @@ export function listTaskCheckpoints(cortexPath: string, project?: string): TaskC
   return rows.map((row) => row.checkpoint);
 }
 
-export function clearTaskCheckpoint(cortexPath: string, args: {
+export function clearTaskCheckpoint(phrenPath: string, args: {
   project: string;
   taskId?: string;
   stableId?: string;
@@ -121,7 +121,7 @@ export function clearTaskCheckpoint(cortexPath: string, args: {
 
   let removed = 0;
   for (const id of ids) {
-    const filePath = checkpointPath(cortexPath, args.project, id);
+    const filePath = checkpointPath(phrenPath, args.project, id);
     try {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
@@ -132,12 +132,12 @@ export function clearTaskCheckpoint(cortexPath: string, args: {
     }
   }
 
-  const allProjectCheckpoints = listTaskCheckpoints(cortexPath, args.project);
+  const allProjectCheckpoints = listTaskCheckpoints(phrenPath, args.project);
   for (const checkpoint of allProjectCheckpoints) {
     const idMatch = ids.size > 0 && ids.has(checkpoint.taskId);
     const lineMatch = args.taskLine && checkpoint.taskLine === args.taskLine;
     if (!idMatch && !lineMatch) continue;
-    const filePath = checkpointPath(cortexPath, checkpoint.project, checkpoint.taskId);
+    const filePath = checkpointPath(phrenPath, checkpoint.project, checkpoint.taskId);
     try {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);

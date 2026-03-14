@@ -1,6 +1,6 @@
 # Platform Validation Matrix
 
-This is the current support and validation matrix for Cortex runtime surfaces.
+This is the current support and validation matrix for Phren runtime surfaces.
 
 ## Supported platforms
 
@@ -14,8 +14,8 @@ This is the current support and validation matrix for Cortex runtime surfaces.
 
 | Surface | Linux | macOS | Windows |
 |---|---|---|---|
-| `cortex init` | expected | expected | expected |
-| `cortex add` | expected | expected | expected |
+| `phren init` | expected | expected | expected |
+| `phren add` | expected | expected | expected |
 | MCP registration/config writes | expected | expected | expected |
 | Hook config writing | expected | expected | expected |
 | Wrapper fallback install | expected | expected | expected with platform-specific command wrappers |

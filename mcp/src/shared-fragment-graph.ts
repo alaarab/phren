@@ -2,7 +2,7 @@ import { decodeStringRow } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
 import { runtimeFile } from "./shared.js";
-import { UNIVERSAL_TECH_TERMS_RE } from "./cortex-core.js";
+import { UNIVERSAL_TECH_TERMS_RE } from "./phren-core.js";
 
 export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -10,55 +10,59 @@ export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[
 export function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
 
 /**
- * Log entity resolution misses to .runtime/entity-misses.jsonl.
+ * Log fragment resolution misses to .runtime/fragment-misses.jsonl.
  *
  * Judgment criteria — what's worth capturing vs noise:
- * - Worth capturing: repeated lookups for the same entity name (indicates a gap
- *   in the entity graph that the user keeps hitting), entity names that look like
+ * - Worth capturing: repeated lookups for the same fragment name (indicates a gap
+ *   in the fragment graph that the user keeps hitting), fragment names that look like
  *   real library/tool names (not random query fragments).
  * - Noise: single one-off lookups for short generic terms, lookups that fail
  *   because the query was malformed. We filter these by requiring name.length > 2.
  *
- * Gated by CORTEX_DEBUG to avoid disk writes for regular users. The miss log is
- * append-only JSONL so downstream tooling can detect repeated patterns (e.g.
- * "entity X was looked up 5 times but never found" → suggest adding it).
+ * Gated by PHREN_DEBUG (or PHREN_DEBUG for compat) to avoid disk writes for
+ * regular users. The miss log is append-only JSONL so downstream tooling can
+ * detect repeated patterns (e.g. "fragment X was looked up 5 times but never
+ * found" -> suggest adding it).
  */
-export function logEntityMiss(cortexPath: string, name: string, context: string, project?: string): void {
-  if (!process.env.CORTEX_DEBUG) return;
+export function logFragmentMiss(phrenPath: string, name: string, context: string, project?: string): void {
+  if (!process.env.PHREN_DEBUG && !(process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) return;
   if (!name || name.length <= 2) return;
   try {
     const entry = JSON.stringify({
-      entity: name,
+      fragment: name,
       context,
       ts: Date.now(),
       project: project ?? null,
     });
-    const missFile = runtimeFile(cortexPath, "entity-misses.jsonl");
+    const missFile = runtimeFile(phrenPath, "fragment-misses.jsonl");
     fs.appendFileSync(missFile, entry + "\n");
   } catch {
     // Best-effort logging; don't let miss tracking break the caller.
   }
 }
 
-// Use the shared universal starter set. Framework/tool specifics are learned
-// dynamically per project via extractDynamicEntities() in content-dedup.ts.
-const PROSE_ENTITY_PATTERN = UNIVERSAL_TECH_TERMS_RE;
+/** @deprecated Use logFragmentMiss instead */
+export const logEntityMiss = logFragmentMiss;
 
-const ENTITY_PATTERNS = [
+// Use the shared universal starter set. Framework/tool specifics are learned
+// dynamically per project via extractDynamicFragments() in content-dedup.ts.
+const PROSE_FRAGMENT_PATTERN = UNIVERSAL_TECH_TERMS_RE;
+
+const FRAGMENT_PATTERNS = [
   // import/require patterns: import X from 'pkg' or require('pkg')
   /(?:import\s+.*?\s+from\s+['"])(@?[\w\-/]+)(?:['"])/g,
   /(?:require\s*\(\s*['"])(@?[\w\-/]+)(?:['"]\s*\))/g,
   // @scope/package patterns in text
   /@[\w-]+\/[\w-]+/g,
   // Known library/tool names mentioned in prose (case-insensitive word boundaries)
-  PROSE_ENTITY_PATTERN,
+  PROSE_FRAGMENT_PATTERN,
   // Backtick-quoted identifiers: `word` or `word-with-dashes`
   /`([\w][\w\-\.\/]{1,48}[\w])`/g,
   // Double-quoted short identifiers (tool/package names, not full sentences)
   /"([\w][\w\-]{1,30}[\w])"/g,
 ];
 
-function isAllowedEntityName(name: string): boolean {
+function isAllowedFragmentName(name: string): boolean {
   const trimmed = name.trim();
   if (!trimmed || trimmed.length <= 1 || trimmed.length >= 100) return false;
   // Skip version strings (e.g. "1.2.3", "v2.0.0-beta")
@@ -73,38 +77,38 @@ function isAllowedEntityName(name: string): boolean {
 
   if (!/\s/.test(trimmed)) {
     const normalized = trimmed.replace(/^[@#]/, "").toLowerCase();
-    if (COMMON_SINGLE_WORD_ENTITIES.has(normalized)) return false;
+    if (COMMON_SINGLE_WORD_FRAGMENTS.has(normalized)) return false;
   }
 
   return true;
 }
 
 /**
- * Lightweight synchronous entity extraction from text — regex only, no DB writes.
- * Used by add_finding to surface detected entities in the MCP response without
+ * Lightweight synchronous fragment extraction from text — regex only, no DB writes.
+ * Used by add_finding to surface detected fragments in the MCP response without
  * requiring a DB reference in the write path. Full DB linking happens on the next
  * index rebuild, which is triggered automatically after every add_finding call via
- * updateFileInIndex → extractAndLinkEntities.
+ * updateFileInIndex -> extractAndLinkFragments.
  */
-export function extractEntityNames(content: string): string[] {
+export function extractFragmentNames(content: string): string[] {
   const found = new Set<string>();
-  for (const pattern of ENTITY_PATTERNS) {
+  for (const pattern of FRAGMENT_PATTERNS) {
     const regex = new RegExp(pattern.source, pattern.flags);
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) {
       const name = match[1] || match[0];
-      if (!isAllowedEntityName(name)) continue;
+      if (!isAllowedFragmentName(name)) continue;
       found.add(name.toLowerCase());
     }
   }
 
-  // Extract explicit entity annotations: <!-- entity: Foo,Bar -->
-  const annotationRe = /<!--\s*entity:\s*([^-]+)-->/gi;
+  // Extract explicit fragment annotations: <!-- fragment: Foo,Bar --> (also supports legacy <!-- entity: ... -->)
+  const annotationRe = /<!--\s*(?:fragment|entity):\s*([^-]+)-->/gi;
   let m: RegExpExecArray | null;
   while ((m = annotationRe.exec(content)) !== null) {
     for (const part of m[1].split(",")) {
       const name = part.trim();
-      if (isAllowedEntityName(name)) {
+      if (isAllowedFragmentName(name)) {
         found.add(name.toLowerCase());
       }
     }
@@ -113,11 +117,14 @@ export function extractEntityNames(content: string): string[] {
   return [...found];
 }
 
-function getOrCreateEntity(db: SqlJsDatabase, name: string, type: string): number {
+/** @deprecated Use extractFragmentNames instead */
+export const extractEntityNames = extractFragmentNames;
+
+function getOrCreateFragment(db: SqlJsDatabase, name: string, type: string): number {
   try {
     db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [name, type, new Date().toISOString().slice(0, 10)]);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] entityInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragmentInsert: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   const result = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [name, type]);
   if (result?.length && result[0]?.values?.length) {
@@ -128,7 +135,7 @@ function getOrCreateEntity(db: SqlJsDatabase, name: string, type: string): numbe
 
 /**
  * Ensure the global_entities cross-project index table exists.
- * Called during buildIndex to enable cross-project entity queries.
+ * Called during buildIndex to enable cross-project fragment queries.
  */
 export function ensureGlobalEntitiesTable(db: SqlJsDatabase): void {
   try {
@@ -141,106 +148,117 @@ export function ensureGlobalEntitiesTable(db: SqlJsDatabase): void {
       )`
     );
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] ensureGlobalEntitiesTable: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] ensureGlobalEntitiesTable: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
 /**
- * Parse user-defined entity names from CLAUDE.md frontmatter.
- * Looks for: <!-- cortex:entities: Redis,MyService,InternalAPI -->
+ * Parse user-defined fragment names from CLAUDE.md frontmatter.
+ * Looks for: <!-- phren:fragments: Redis,MyService,InternalAPI -->
+ * Also supports legacy: <!-- phren:entities: ... -->
  *
  * Results are cached per project+mtime to avoid repeated sync readFileSync calls
  * during a single index build that processes many docs for the same project.
  */
-const _userEntityCache = new Map<string, { mtime: number; entities: string[] }>();
-const _buildUserEntityCache = new Map<string, string[]>();
+const _userFragmentCache = new Map<string, { mtime: number; fragments: string[] }>();
+const _buildUserFragmentCache = new Map<string, string[]>();
 let _activeBuildCacheKeyPrefix: string | null = null;
 
-function readUserDefinedEntitiesFromDisk(claudeMdPath: string): { mtime: number; entities: string[] } | null {
+function readUserDefinedFragmentsFromDisk(claudeMdPath: string): { mtime: number; fragments: string[] } | null {
   if (!fs.existsSync(claudeMdPath)) return null;
   const stat = fs.statSync(claudeMdPath);
   const content = fs.readFileSync(claudeMdPath, "utf-8");
-  const match = content.match(/<!--\s*cortex:entities:\s*(.+?)\s*-->/);
-  const entities = match
+  // Support both new phren:fragments and legacy phren:entities annotations
+  const match = content.match(/<!--\s*(?:phren:fragments|phren:entities):\s*(.+?)\s*-->/);
+  const fragments = match
     ? match[1].split(",").map(s => s.trim()).filter(s => s.length > 0)
     : [];
-  return { mtime: stat.mtimeMs, entities };
+  return { mtime: stat.mtimeMs, fragments };
 }
 
 /**
- * Prime CLAUDE.md entities per project for a single build pass.
- * During an active build, extractAndLinkEntities resolves user entities from this
+ * Prime CLAUDE.md fragments per project for a single build pass.
+ * During an active build, extractAndLinkFragments resolves user fragments from this
  * in-memory map and avoids per-file sync stat/read calls.
  */
-export function beginUserEntityBuildCache(cortexPath: string, projects: Iterable<string>): void {
-  _activeBuildCacheKeyPrefix = `${cortexPath}/`;
+export function beginUserFragmentBuildCache(phrenPath: string, projects: Iterable<string>): void {
+  _activeBuildCacheKeyPrefix = `${phrenPath}/`;
   for (const project of projects) {
-    const cacheKey = `${cortexPath}/${project}`;
-    const claudeMdPath = `${cortexPath}/${project}/CLAUDE.md`;
+    const cacheKey = `${phrenPath}/${project}`;
+    const claudeMdPath = `${phrenPath}/${project}/CLAUDE.md`;
     try {
-      const loaded = readUserDefinedEntitiesFromDisk(claudeMdPath);
+      const loaded = readUserDefinedFragmentsFromDisk(claudeMdPath);
       if (!loaded) {
-        _buildUserEntityCache.set(cacheKey, []);
+        _buildUserFragmentCache.set(cacheKey, []);
         continue;
       }
-      _userEntityCache.set(cacheKey, loaded);
-      _buildUserEntityCache.set(cacheKey, loaded.entities);
+      _userFragmentCache.set(cacheKey, loaded);
+      _buildUserFragmentCache.set(cacheKey, loaded.fragments);
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] beginUserEntityBuildCache: ${err instanceof Error ? err.message : String(err)}\n`);
-      _buildUserEntityCache.set(cacheKey, []);
+      if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] beginUserFragmentBuildCache: ${err instanceof Error ? err.message : String(err)}\n`);
+      _buildUserFragmentCache.set(cacheKey, []);
     }
   }
 }
 
-/** End a build-scoped cache created by beginUserEntityBuildCache(). */
-export function endUserEntityBuildCache(cortexPath: string): void {
-  const prefix = `${cortexPath}/`;
-  for (const key of [..._buildUserEntityCache.keys()]) {
-    if (key.startsWith(prefix)) _buildUserEntityCache.delete(key);
+/** @deprecated Use beginUserFragmentBuildCache instead */
+export const beginUserEntityBuildCache = beginUserFragmentBuildCache;
+
+/** End a build-scoped cache created by beginUserFragmentBuildCache(). */
+export function endUserFragmentBuildCache(phrenPath: string): void {
+  const prefix = `${phrenPath}/`;
+  for (const key of [..._buildUserFragmentCache.keys()]) {
+    if (key.startsWith(prefix)) _buildUserFragmentCache.delete(key);
   }
   if (_activeBuildCacheKeyPrefix === prefix) _activeBuildCacheKeyPrefix = null;
 }
 
-function parseUserDefinedEntities(cortexPath: string, project: string): string[] {
-  const claudeMdPath = `${cortexPath}/${project}/CLAUDE.md`;
-  const cacheKey = `${cortexPath}/${project}`;
+/** @deprecated Use endUserFragmentBuildCache instead */
+export const endUserEntityBuildCache = endUserFragmentBuildCache;
+
+function parseUserDefinedFragments(phrenPath: string, project: string): string[] {
+  const claudeMdPath = `${phrenPath}/${project}/CLAUDE.md`;
+  const cacheKey = `${phrenPath}/${project}`;
   try {
     // Active build path: no sync I/O in per-file extraction.
-    if (_activeBuildCacheKeyPrefix === `${cortexPath}/`) {
-      if (_buildUserEntityCache.has(cacheKey)) return _buildUserEntityCache.get(cacheKey) ?? [];
-      _buildUserEntityCache.set(cacheKey, []);
+    if (_activeBuildCacheKeyPrefix === `${phrenPath}/`) {
+      if (_buildUserFragmentCache.has(cacheKey)) return _buildUserFragmentCache.get(cacheKey) ?? [];
+      _buildUserFragmentCache.set(cacheKey, []);
       return [];
     }
 
-    const cached = _userEntityCache.get(cacheKey);
+    const cached = _userFragmentCache.get(cacheKey);
     if (cached) {
       try {
         if (fs.existsSync(claudeMdPath) && fs.statSync(claudeMdPath).mtimeMs === cached.mtime) {
-          return cached.entities;
+          return cached.fragments;
         }
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] parseUserDefinedEntities statCheck: ${err instanceof Error ? err.message : String(err)}\n`);
+        if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] parseUserDefinedFragments statCheck: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
 
-    const loaded = readUserDefinedEntitiesFromDisk(claudeMdPath);
+    const loaded = readUserDefinedFragmentsFromDisk(claudeMdPath);
     if (!loaded) return [];
-    _userEntityCache.set(cacheKey, loaded);
-    return loaded.entities;
+    _userFragmentCache.set(cacheKey, loaded);
+    return loaded.fragments;
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] parseUserDefinedEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] parseUserDefinedFragments: ${err instanceof Error ? err.message : String(err)}\n`);
     return [];
   }
 }
 
-/** Clear the user entity cache (call between index builds). */
-export function clearUserEntityCache(): void {
-  _userEntityCache.clear();
-  _buildUserEntityCache.clear();
+/** Clear the user fragment cache (call between index builds). */
+export function clearUserFragmentCache(): void {
+  _userFragmentCache.clear();
+  _buildUserFragmentCache.clear();
   _activeBuildCacheKeyPrefix = null;
 }
 
-// Words that commonly start sentences or appear in titles — not entity names
+/** @deprecated Use clearUserFragmentCache instead */
+export const clearUserEntityCache = clearUserFragmentCache;
+
+// Words that commonly start sentences or appear in titles — not fragment names
 const SENTENCE_START_WORDS = new Set([
   "the", "this", "that", "these", "those", "when", "where", "which", "while",
   "what", "with", "will", "would", "should", "could", "have", "has", "had",
@@ -254,7 +272,7 @@ const SENTENCE_START_WORDS = new Set([
   "instead", "rather", "already", "always", "never", "sometimes", "often",
 ]);
 
-const COMMON_SINGLE_WORD_ENTITIES = new Set([
+const COMMON_SINGLE_WORD_FRAGMENTS = new Set([
   ...SENTENCE_START_WORDS,
   "agent", "analysis", "app", "approach", "artifact", "branch", "build", "cache",
   "change", "changes", "check", "cli", "code", "command", "config", "context",
@@ -267,7 +285,7 @@ const COMMON_SINGLE_WORD_ENTITIES = new Set([
   "update", "user", "value", "version", "workflow", "write",
 ]);
 
-// Patterns that look like version strings, file paths, or dates — not entities
+// Patterns that look like version strings, file paths, or dates — not fragments
 const FALSE_POSITIVE_PATTERNS = [
   /^v?\d+\.\d+/,              // version strings: 1.2.3, v2.0
   /^[A-Z]:\\/,                // Windows paths: C:\
@@ -278,7 +296,7 @@ const FALSE_POSITIVE_PATTERNS = [
 ];
 
 /**
- * Extract capitalized noun phrases (2+ words starting with uppercase) as candidate entities.
+ * Extract capitalized noun phrases (2+ words starting with uppercase) as candidate fragments.
  * e.g. "Auth Service", "Data Pipeline", "Internal API"
  *
  * Filters out common false positives: sentence-start capitalization, version strings,
@@ -304,40 +322,40 @@ function extractCapitalizedPhrases(content: string): string[] {
   return [...found];
 }
 
-export function extractAndLinkEntities(db: SqlJsDatabase, content: string, sourceDoc: string, cortexPath?: string): void {
-  const entityNames = extractEntityNames(content);
+export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sourceDoc: string, phrenPath?: string): void {
+  const fragmentNames = extractFragmentNames(content);
 
-  // Q28: Extract capitalized noun phrases as candidate entities
+  // Extract capitalized noun phrases as candidate fragments
   const capitalizedPhrases = extractCapitalizedPhrases(content);
   for (const phrase of capitalizedPhrases) {
-    entityNames.push(phrase);
+    fragmentNames.push(phrase);
   }
 
-  // Q28: Add user-defined entities from CLAUDE.md frontmatter
-  if (cortexPath) {
+  // Add user-defined fragments from CLAUDE.md frontmatter
+  if (phrenPath) {
     const projectMatch = sourceDoc.match(/^([^/]+)\//);
     if (projectMatch) {
       const project = projectMatch[1];
-      const userEntities = parseUserDefinedEntities(cortexPath, project);
-      for (const ue of userEntities) {
-        const lower = ue.toLowerCase();
-        // Check if user-defined entity appears in content (use escaped regex for safe matching)
+      const userFragments = parseUserDefinedFragments(phrenPath, project);
+      for (const uf of userFragments) {
+        const lower = uf.toLowerCase();
+        // Check if user-defined fragment appears in content (use escaped regex for safe matching)
         const safePattern = new RegExp(`\\b${escapeRegex(lower)}\\b`, "i");
         if (safePattern.test(content)) {
-          entityNames.push(lower);
+          fragmentNames.push(lower);
         }
       }
     }
   }
 
   // Deduplicate
-  const uniqueNames = [...new Set(entityNames)];
+  const uniqueNames = [...new Set(fragmentNames)];
   if (uniqueNames.length === 0) return;
 
-  const docEntityId = getOrCreateEntity(db, sourceDoc, "document");
-  if (docEntityId === -1) return;
+  const docFragmentId = getOrCreateFragment(db, sourceDoc, "document");
+  if (docFragmentId === -1) return;
 
-  // Q20: Ensure global_entities table exists
+  // Ensure global_entities table exists
   ensureGlobalEntitiesTable(db);
 
   // Extract project from sourceDoc for global_entities
@@ -345,19 +363,19 @@ export function extractAndLinkEntities(db: SqlJsDatabase, content: string, sourc
   const project = projectMatch ? projectMatch[1] : null;
 
   for (const name of uniqueNames) {
-    const entityType = name.includes(" ") ? "concept" : "library";
-    const entityId = getOrCreateEntity(db, name, entityType);
-    if (entityId === -1) continue;
+    const fragmentType = name.includes(" ") ? "concept" : "library";
+    const fragmentId = getOrCreateFragment(db, name, fragmentType);
+    if (fragmentId === -1) continue;
     try {
       db.run(
         "INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)",
-        [docEntityId, entityId, "mentions", sourceDoc]
+        [docFragmentId, fragmentId, "mentions", sourceDoc]
       );
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] entityLinksInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+      if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragmentLinksInsert: ${err instanceof Error ? err.message : String(err)}\n`);
     }
 
-    // Q20: Write to global_entities for cross-project queries
+    // Write to global_entities for cross-project queries
     if (project) {
       try {
         db.run(
@@ -365,53 +383,59 @@ export function extractAndLinkEntities(db: SqlJsDatabase, content: string, sourc
           [name, project, sourceDoc]
         );
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] globalEntitiesInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+        if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] globalFragmentsInsert: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   }
 }
 
+/** @deprecated Use extractAndLinkFragments instead */
+export const extractAndLinkEntities = extractAndLinkFragments;
+
 /**
- * Query related entities for a given name.
+ * Query related fragments for a given name.
  */
-export function queryEntityLinks(db: SqlJsDatabase, name: string): { related: string[] } {
+export function queryFragmentLinks(db: SqlJsDatabase, name: string): { related: string[] } {
   const related: string[] = [];
   try {
-    // Find the entity
-    const entityResult = db.exec("SELECT id FROM entities WHERE name = ?", [name.toLowerCase()]);
-    if (!entityResult?.length || !entityResult[0]?.values?.length) return { related };
-    const entityId = Number(entityResult[0].values[0][0]);
+    // Find the fragment
+    const fragmentResult = db.exec("SELECT id FROM entities WHERE name = ?", [name.toLowerCase()]);
+    if (!fragmentResult?.length || !fragmentResult[0]?.values?.length) return { related };
+    const fragmentId = Number(fragmentResult[0].values[0][0]);
 
-    // Find related entities through links (both directions)
+    // Find related fragments through links (both directions)
     const links = db.exec(
       `SELECT DISTINCT e.name FROM entity_links el JOIN entities e ON (el.target_id = e.id OR el.source_id = e.id)
        WHERE (el.source_id = ? OR el.target_id = ?) AND e.id != ?`,
-      [entityId, entityId, entityId]
+      [fragmentId, fragmentId, fragmentId]
     );
     if (links?.length && links[0]?.values?.length) {
       for (const row of links[0].values) {
-        related.push(decodeStringRow(row, 1, "queryEntityLinks")[0]);
+        related.push(decodeStringRow(row, 1, "queryFragmentLinks")[0]);
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] queryEntityLinks: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] queryFragmentLinks: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   return { related };
 }
 
+/** @deprecated Use queryFragmentLinks instead */
+export const queryEntityLinks = queryFragmentLinks;
+
 /**
- * Q20: Query cross-project entity relationships.
- * Returns projects and docs that share entities with the given query.
+ * Query cross-project fragment relationships.
+ * Returns projects and docs that share fragments with the given query.
  */
-export function queryCrossProjectEntities(
+export function queryCrossProjectFragments(
   db: SqlJsDatabase,
-  entityName: string,
+  fragmentName: string,
   excludeProject?: string
-): Array<{ entity: string; project: string; docKey: string }> {
-  const results: Array<{ entity: string; project: string; docKey: string }> = [];
+): Array<{ fragment: string; project: string; docKey: string }> {
+  const results: Array<{ fragment: string; project: string; docKey: string }> = [];
   try {
     ensureGlobalEntitiesTable(db);
-    const pattern = `%${escapeLike(entityName.toLowerCase())}%`;
+    const pattern = `%${escapeLike(fragmentName.toLowerCase())}%`;
     let sql = "SELECT entity, project, doc_key FROM global_entities WHERE entity LIKE ? ESCAPE '\\'";
     const params: (string | number)[] = [pattern];
     if (excludeProject) {
@@ -422,21 +446,21 @@ export function queryCrossProjectEntities(
     const rows = db.exec(sql, params);
     if (rows?.length && rows[0]?.values?.length) {
       for (const row of rows[0].values) {
-        const [entity, project, docKey] = decodeStringRow(row, 3, "queryCrossProjectEntities");
+        const [fragment, project, docKey] = decodeStringRow(row, 3, "queryCrossProjectFragments");
         results.push({
-          entity,
+          fragment,
           project,
           docKey,
         });
       }
     }
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] queryCrossProjectEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] queryCrossProjectFragments: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   return results;
 }
 
-export function getEntityBoostDocs(db: SqlJsDatabase, query: string): Set<string> {
+export function getFragmentBoostDocs(db: SqlJsDatabase, query: string): Set<string> {
   const normalizedQuery = query.toLowerCase();
   try {
     const rows = db.exec(
@@ -454,7 +478,10 @@ export function getEntityBoostDocs(db: SqlJsDatabase, query: string): Set<string
     }
     return boostDocs;
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] getEntityBoostDocs: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG || (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getFragmentBoostDocs: ${err instanceof Error ? err.message : String(err)}\n`);
     return new Set();
   }
 }
+
+/** @deprecated Use getFragmentBoostDocs instead */
+export const getEntityBoostDocs = getFragmentBoostDocs;

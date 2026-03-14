@@ -1,1 +1,1 @@
-export * from "./cortex-paths.js";
+export * from "./phren-paths.js";

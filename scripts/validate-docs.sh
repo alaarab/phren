@@ -35,12 +35,12 @@ fi
 
 # 4. Public onboarding docs should not advertise removed enrollment flows
 PUBLIC_DOCS=("README.md" "docs/faq.md" "docs/llms-install.md" "docs/index.html")
-REMOVED_PATTERNS=("cortex link" "projects add" "--from-existing")
+REMOVED_PATTERNS=("phren link" "projects add" "--from-existing")
 for doc in "${PUBLIC_DOCS[@]}"; do
   for pattern in "${REMOVED_PATTERNS[@]}"; do
-    if grep -n -- "$pattern" "$doc" >/tmp/cortex-doc-grep.txt; then
+    if grep -n -- "$pattern" "$doc" >/tmp/phren-doc-grep.txt; then
       echo "FAIL: $doc still mentions removed onboarding flow: $pattern"
-      cat /tmp/cortex-doc-grep.txt
+      cat /tmp/phren-doc-grep.txt
       ERRORS=$((ERRORS + 1))
     fi
   done
@@ -58,9 +58,9 @@ for required in "docs/platform-matrix.md" "docs/error-reporting.md"; do
 done
 
 # 6. Public docs should not point at renamed support docs
-if grep -R -nE 'platform-support\.md|error-policy\.md' README.md docs >/tmp/cortex-doc-renames.txt; then
+if grep -R -nE 'platform-support\.md|error-policy\.md' README.md docs >/tmp/phren-doc-renames.txt; then
   echo "FAIL: Found stale references to renamed docs:"
-  cat /tmp/cortex-doc-renames.txt
+  cat /tmp/phren-doc-renames.txt
   ERRORS=$((ERRORS + 1))
 fi
 

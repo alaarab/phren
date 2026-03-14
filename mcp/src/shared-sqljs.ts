@@ -14,7 +14,7 @@ function findWasmBinary(): Buffer | undefined {
     const resolved = require.resolve("sql.js-fts5/dist/sql-wasm.wasm") as string;
     if (fs.existsSync(resolved)) return fs.readFileSync(resolved);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] findWasmBinary requireResolve: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findWasmBinary requireResolve: ${err instanceof Error ? err.message : String(err)}\n`);
     // fall through to path probing
   }
 

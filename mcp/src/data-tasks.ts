@@ -2,11 +2,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { randomBytes, randomUUID } from "crypto";
 import {
-  cortexErr,
-  CortexError,
-  type CortexErrorCode,
-  cortexOk,
-  type CortexResult,
+  phrenErr,
+  PhrenError,
+  type PhrenErrorCode,
+  phrenOk,
+  type PhrenResult,
   forwardErr,
   getProjectDirs,
 } from "./shared.js";
@@ -14,13 +14,13 @@ import { withFileLock as withFileLockRaw } from "./shared-governance.js";
 import { validateTaskFormat } from "./shared-content.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 
-function withSafeLock<T>(filePath: string, fn: () => CortexResult<T>): CortexResult<T> {
+function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {
   try {
     return withFileLockRaw(filePath, fn);
   } catch (err: unknown) {
     const msg = errorMessage(err);
     if (msg.includes("could not acquire lock")) {
-      return cortexErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, CortexError.LOCK_TIMEOUT);
+      return phrenErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, PhrenError.LOCK_TIMEOUT);
     }
     throw err;
   }
@@ -158,14 +158,14 @@ function parseContinuation(lines: string[], idx: number): {
   return { context, githubIssue, githubUrl, linesToSkip };
 }
 
-function ensureProject(cortexPath: string, project: string): CortexResult<string> {
-  if (!isValidProjectName(project)) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
-  const dir = safeProjectPath(cortexPath, project);
-  if (!dir) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
+function ensureProject(phrenPath: string, project: string): PhrenResult<string> {
+  if (!isValidProjectName(project)) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
+  const dir = safeProjectPath(phrenPath, project);
+  if (!dir) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
   if (!fs.existsSync(dir)) {
-    return cortexErr(`No project "${project}" found. Add it with 'cd ~/your-project && cortex add'.`, CortexError.PROJECT_NOT_FOUND);
+    return phrenErr(`No project "${project}" found. Add it with 'cd ~/your-project && phren add'.`, PhrenError.PROJECT_NOT_FOUND);
   }
-  return cortexOk(dir);
+  return phrenOk(dir);
 }
 
 /** Pattern that matches the task metadata comment embedded in task item lines.
@@ -231,8 +231,8 @@ export function applyGravity(items: TaskItem[]): TaskItem[] {
   });
 }
 
-export function canonicalTaskFilePath(cortexPath: string, project: string): string | null {
-  const resolved = safeProjectPath(cortexPath, project);
+export function canonicalTaskFilePath(phrenPath: string, project: string): string | null {
+  const resolved = safeProjectPath(phrenPath, project);
   if (!resolved) return null;
   return path.join(resolved, TASKS_FILENAME);
 }
@@ -241,8 +241,8 @@ export function isTaskFileName(filename: string): boolean {
   return filename.toLowerCase() === TASKS_FILENAME;
 }
 
-export function resolveTaskFilePath(cortexPath: string, project: string): string | null {
-  return canonicalTaskFilePath(cortexPath, project);
+export function resolveTaskFilePath(phrenPath: string, project: string): string | null {
+  return canonicalTaskFilePath(phrenPath, project);
 }
 
 function normalizeTaskItemLine(item: TaskItem): string {
@@ -352,9 +352,9 @@ function renderTask(doc: TaskDoc): string {
 function findItemByMatch(
   doc: TaskDoc,
   match: string
-): { match?: { section: TaskSection; index: number }; error?: string; errorCode?: CortexErrorCode } {
+): { match?: { section: TaskSection; index: number }; error?: string; errorCode?: PhrenErrorCode } {
   const needle = match.trim().toLowerCase();
-  if (!needle) return { error: `${CortexError.EMPTY_INPUT}: Please provide the item text or ID to match against.`, errorCode: CortexError.EMPTY_INPUT };
+  if (!needle) return { error: `${PhrenError.EMPTY_INPUT}: Please provide the item text or ID to match against.`, errorCode: PhrenError.EMPTY_INPUT };
 
   // 1a) Stable ID match (bid:XXXX or just the 8-char hex).
   const bidNeedle = needle.replace(/^bid:/, "");
@@ -380,7 +380,7 @@ function findItemByMatch(
   }
   if (exact.length === 1) return { match: exact[0] };
   if (exact.length > 1) {
-    return { error: `${CortexError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${exact.length} exact matches). Use item ID.`, errorCode: CortexError.AMBIGUOUS_MATCH };
+    return { error: `${PhrenError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${exact.length} exact matches). Use item ID.`, errorCode: PhrenError.AMBIGUOUS_MATCH };
   }
 
   // 3) Substring fallback, but only when unique.
@@ -392,15 +392,15 @@ function findItemByMatch(
   }
   if (partial.length === 1) return { match: partial[0] };
   if (partial.length > 1) {
-    return { error: `${CortexError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${partial.length} partial matches). Use item ID.`, errorCode: CortexError.AMBIGUOUS_MATCH };
+    return { error: `${PhrenError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${partial.length} partial matches). Use item ID.`, errorCode: PhrenError.AMBIGUOUS_MATCH };
   }
-  return { error: `${CortexError.NOT_FOUND}: Item not found — no task matching "${match}".`, errorCode: CortexError.NOT_FOUND };
+  return { error: `${PhrenError.NOT_FOUND}: Item not found — no task matching "${match}".`, errorCode: PhrenError.NOT_FOUND };
 }
 
-function taskItemNotFound(project: string, match: string): CortexResult<never> {
-  return cortexErr(
+function taskItemNotFound(project: string, match: string): PhrenResult<never> {
+  return phrenErr(
     `Item not found: no task matching "${match}" in project "${project}". Check the item text or use its ID (shown in the tasks view).`,
-    CortexError.NOT_FOUND
+    PhrenError.NOT_FOUND
   );
 }
 
@@ -410,19 +410,19 @@ function writeTaskDoc(doc: TaskDoc): void {
   fs.renameSync(tmpPath, doc.path);
 }
 
-function taskArchivePath(cortexPath: string, project: string): string {
-  return path.join(cortexPath, ".governance", "task-archive", `${project}.md`);
+function taskArchivePath(phrenPath: string, project: string): string {
+  return path.join(phrenPath, ".governance", "task-archive", `${project}.md`);
 }
 
-export function readTasks(cortexPath: string, project: string): CortexResult<TaskDoc> {
-  const ensured = ensureProject(cortexPath, project);
+export function readTasks(phrenPath: string, project: string): PhrenResult<TaskDoc> {
+  const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const taskPath = canonicalTaskFilePath(cortexPath, project);
-  if (!taskPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
+  const taskPath = canonicalTaskFilePath(phrenPath, project);
+  if (!taskPath) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
 
   if (!fs.existsSync(taskPath)) {
-    return cortexOk({
+    return phrenOk({
       project,
       title: `# ${project} tasks`,
       path: taskPath,
@@ -432,29 +432,29 @@ export function readTasks(cortexPath: string, project: string): CortexResult<Tas
   }
 
   const content = fs.readFileSync(taskPath, "utf8");
-  return cortexOk(parseTaskContent(project, taskPath, content));
+  return phrenOk(parseTaskContent(project, taskPath, content));
 }
 
-export function readTasksAcrossProjects(cortexPath: string, profile?: string): TaskDoc[] {
-  const projects = getProjectDirs(cortexPath, profile).map((dir) => path.basename(dir)).sort();
+export function readTasksAcrossProjects(phrenPath: string, profile?: string): TaskDoc[] {
+  const projects = getProjectDirs(phrenPath, profile).map((dir) => path.basename(dir)).sort();
   const result: TaskDoc[] = [];
   for (const project of projects) {
-    const file = canonicalTaskFilePath(cortexPath, project);
+    const file = canonicalTaskFilePath(phrenPath, project);
     if (!file || !fs.existsSync(file)) continue;
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) continue;
     result.push(parsed.data);
   }
   return result;
 }
 
-export function resolveTaskItem(cortexPath: string, project: string, match: string): CortexResult<TaskItem> {
-  const parsed = readTasks(cortexPath, project);
+export function resolveTaskItem(phrenPath: string, project: string, match: string): PhrenResult<TaskItem> {
+  const parsed = readTasks(phrenPath, project);
   if (!parsed.ok) return forwardErr(parsed);
   const found = findItemByMatch(parsed.data, match);
-  if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+  if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
   if (!found.match) return taskItemNotFound(project, match);
-  return cortexOk(parsed.data.items[found.match.section][found.match.index]);
+  return phrenOk(parsed.data.items[found.match.section][found.match.index]);
 }
 
 export interface AddTaskOptions {
@@ -465,16 +465,16 @@ export interface AddTaskOptions {
   parentFinding?: string;
 }
 
-export function addTask(cortexPath: string, project: string, item: string, opts?: AddTaskOptions): CortexResult<TaskItem> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, CortexError.INVALID_PROJECT_NAME);
+export function addTask(phrenPath: string, project: string, item: string, opts?: AddTaskOptions): PhrenResult<TaskItem> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
   // Validate project exists before acquiring the lock — withFileLock creates the parent
   // directory via mkdirSync, which would silently create an unintended project directory.
-  const preCheck = ensureProject(cortexPath, project);
+  const preCheck = ensureProject(phrenPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const line = item.replace(/^-\s*/, "").trim();
@@ -493,18 +493,18 @@ export function addTask(cortexPath: string, project: string, item: string, opts?
     };
     parsed.data.items.Queue.push(newItem);
     writeTaskDoc(parsed.data);
-    return cortexOk(newItem);
+    return phrenOk(newItem);
   });
 }
 
-export function addTasks(cortexPath: string, project: string, items: string[]): CortexResult<{ added: string[]; errors: string[] }> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
-  const preCheck = ensureProject(cortexPath, project);
+export function addTasks(phrenPath: string, project: string, items: string[]): PhrenResult<{ added: string[]; errors: string[] }> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const added: string[] = [];
@@ -525,16 +525,16 @@ export function addTasks(cortexPath: string, project: string, items: string[]): 
       added.push(line);
     }
     writeTaskDoc(parsed.data);
-    return cortexOk({ added, errors });
+    return phrenOk({ added, errors });
   });
 }
 
-export function completeTasks(cortexPath: string, project: string, matches: string[]): CortexResult<{ completed: string[]; errors: string[] }> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function completeTasks(phrenPath: string, project: string, matches: string[]): PhrenResult<{ completed: string[]; errors: string[] }> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const completed: string[] = [];
@@ -552,20 +552,20 @@ export function completeTasks(cortexPath: string, project: string, matches: stri
       completed.push(item.line);
     }
     writeTaskDoc(parsed.data);
-    return cortexOk({ completed, errors });
+    return phrenOk({ completed, errors });
   });
 }
 
-export function completeTask(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function completeTask(phrenPath: string, project: string, match: string): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
@@ -573,43 +573,43 @@ export function completeTask(cortexPath: string, project: string, match: string)
     item.checked = true;
     parsed.data.items.Done.unshift(item);
     writeTaskDoc(parsed.data);
-    return cortexOk(`Marked done in ${project}: ${item.line}`);
+    return phrenOk(`Marked done in ${project}: ${item.line}`);
   });
 }
 
-export function removeTask(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function removeTask(phrenPath: string, project: string, match: string): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
     writeTaskDoc(parsed.data);
-    return cortexOk(`Removed task from ${project}: ${item.line}`);
+    return phrenOk(`Removed task from ${project}: ${item.line}`);
   });
 }
 
 export function updateTask(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   match: string,
   updates: { priority?: string; context?: string; replace_context?: boolean; section?: string; github_issue?: number | string; github_url?: string; unlink_github?: boolean }
-): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
@@ -637,7 +637,7 @@ export function updateTask(
       changes.push("github link removed");
     } else if (updates.github_issue !== undefined || updates.github_url !== undefined) {
       if (updates.github_url && !isValidGitHubIssueUrl(updates.github_url)) {
-        return cortexErr("github_url must be a valid GitHub issue URL.", CortexError.VALIDATION_ERROR);
+        return phrenErr("github_url must be a valid GitHub issue URL.", PhrenError.VALIDATION_ERROR);
       }
       const githubIssueRaw = typeof updates.github_issue === "string"
         ? updates.github_issue.trim()
@@ -649,7 +649,7 @@ export function updateTask(
         updates.github_url?.trim() || "",
       ].filter(Boolean).join(" "));
       if (!parsedIssue.githubIssue && !parsedIssue.githubUrl) {
-        return cortexErr("GitHub link update requires a valid issue number and/or GitHub issue URL.", CortexError.VALIDATION_ERROR);
+        return phrenErr("GitHub link update requires a valid issue number and/or GitHub issue URL.", PhrenError.VALIDATION_ERROR);
       }
       item.githubIssue = parsedIssue.githubIssue;
       item.githubUrl = parsedIssue.githubUrl;
@@ -669,65 +669,65 @@ export function updateTask(
     }
 
     writeTaskDoc(parsed.data);
-    return cortexOk(`Updated item in ${project}: ${changes.join(", ") || "no changes"}`);
+    return phrenOk(`Updated item in ${project}: ${changes.join(", ") || "no changes"}`);
   });
 }
 
-export function pinTask(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function pinTask(phrenPath: string, project: string, match: string): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const section = found.match.section;
     const item = parsed.data.items[section][found.match.index];
-    if (item.pinned) return cortexOk(`Already pinned in ${project}: ${item.line}`);
+    if (item.pinned) return phrenOk(`Already pinned in ${project}: ${item.line}`);
     item.pinned = true;
     item.line = stripPinnedTag(item.line);
     parsed.data.items[section].splice(found.match.index, 1);
     parsed.data.items[section].unshift(item);
     writeTaskDoc(parsed.data);
-    return cortexOk(`Pinned in ${project}: ${item.line}`);
+    return phrenOk(`Pinned in ${project}: ${item.line}`);
   });
 }
 
-export function unpinTask(cortexPath: string, project: string, match: string): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function unpinTask(phrenPath: string, project: string, match: string): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
-    if (!item.pinned) return cortexOk(`Not pinned in ${project}: ${item.line}`);
+    if (!item.pinned) return phrenOk(`Not pinned in ${project}: ${item.line}`);
     item.pinned = undefined;
     item.line = stripPinnedTag(item.line);
     writeTaskDoc(parsed.data);
-    return cortexOk(`Unpinned in ${project}: ${item.line}`);
+    return phrenOk(`Unpinned in ${project}: ${item.line}`);
   });
 }
 
-export function reorderTask(cortexPath: string, project: string, match: string, targetRank: number): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function reorderTask(phrenPath: string, project: string, match: string, targetRank: number): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const section = found.match.section;
@@ -750,20 +750,20 @@ export function reorderTask(cortexPath: string, project: string, match: string, 
     items.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
 
     writeTaskDoc(parsed.data);
-    return cortexOk(`Reordered in ${project}: "${item.line}" moved to rank ${clampedTarget}`);
+    return phrenOk(`Reordered in ${project}: "${item.line}" moved to rank ${clampedTarget}`);
   });
 }
 
-export function appendChildFinding(cortexPath: string, project: string, match: string, findingId: string): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function appendChildFinding(phrenPath: string, project: string, match: string, findingId: string): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
@@ -771,20 +771,20 @@ export function appendChildFinding(cortexPath: string, project: string, match: s
     item.lastActivity = new Date().toISOString();
 
     writeTaskDoc(parsed.data);
-    return cortexOk(`Linked finding ${findingId} to task in ${project}: ${item.line}`);
+    return phrenOk(`Linked finding ${findingId} to task in ${project}: ${item.line}`);
   });
 }
 
-export function promoteTask(cortexPath: string, project: string, match: string, moveToActive: boolean): CortexResult<TaskItem> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function promoteTask(phrenPath: string, project: string, match: string, moveToActive: boolean): PhrenResult<TaskItem> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
@@ -798,19 +798,19 @@ export function promoteTask(cortexPath: string, project: string, match: string, 
     }
 
     writeTaskDoc(parsed.data);
-    return cortexOk(item);
+    return phrenOk(item);
   });
 }
 
-export function workNextTask(cortexPath: string, project: string): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function workNextTask(phrenPath: string, project: string): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
     if (!parsed.data.items.Queue.length) {
-      return cortexErr(`No queued tasks in "${project}". Add items with :add or the add_task tool.`, CortexError.NOT_FOUND);
+      return phrenErr(`No queued tasks in "${project}". Add items with :add or the add_task tool.`, PhrenError.NOT_FOUND);
     }
 
     const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
@@ -825,31 +825,31 @@ export function workNextTask(cortexPath: string, project: string): CortexResult<
     item.checked = false;
     parsed.data.items.Active.push(item);
     writeTaskDoc(parsed.data);
-    return cortexOk(`Moved next queue item to Active in ${project}: ${item.line}`);
+    return phrenOk(`Moved next queue item to Active in ${project}: ${item.line}`);
   });
 }
 
-export function tidyDoneTasks(cortexPath: string, project: string, keep: number = 30, dryRun?: boolean): CortexResult<string> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+export function tidyDoneTasks(phrenPath: string, project: string, keep: number = 30, dryRun?: boolean): PhrenResult<string> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const safeKeep = Number.isFinite(keep) ? Math.max(0, Math.floor(keep)) : 30;
     if (parsed.data.items.Done.length <= safeKeep) {
-      return cortexOk(`No tidy needed for ${project}. Done=${parsed.data.items.Done.length}, keep=${safeKeep}.`);
+      return phrenOk(`No tidy needed for ${project}. Done=${parsed.data.items.Done.length}, keep=${safeKeep}.`);
     }
 
     const archived = parsed.data.items.Done.slice(safeKeep);
     if (dryRun) {
-      return cortexOk(`[dry-run] Would archive ${archived.length} done item(s) for ${project}, keeping ${safeKeep}.`);
+      return phrenOk(`[dry-run] Would archive ${archived.length} done item(s) for ${project}, keeping ${safeKeep}.`);
     }
 
     parsed.data.items.Done = parsed.data.items.Done.slice(0, safeKeep);
 
-    const archiveFile = taskArchivePath(cortexPath, project);
+    const archiveFile = taskArchivePath(phrenPath, project);
     fs.mkdirSync(path.dirname(archiveFile), { recursive: true });
     const stamp = new Date().toISOString();
     const lines = archived.map((item) => `- [x] ${item.line}${item.context ? `\n  Context: ${item.context}` : ""}`);
@@ -858,7 +858,7 @@ export function tidyDoneTasks(cortexPath: string, project: string, keep: number 
     fs.writeFileSync(archiveFile, prior + block);
 
     writeTaskDoc(parsed.data);
-    return cortexOk(`Tidied ${project}: archived ${archived.length} done item(s), kept ${safeKeep}.`);
+    return phrenOk(`Tidied ${project}: archived ${archived.length} done item(s), kept ${safeKeep}.`);
   });
 }
 
@@ -867,20 +867,20 @@ export function taskMarkdown(doc: TaskDoc): string {
 }
 
 export function linkTaskIssue(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   match: string,
   link: { github_issue?: number | string; github_url?: string; unlink?: boolean }
-): CortexResult<TaskItem> {
-  const bPath = canonicalTaskFilePath(cortexPath, project);
-  if (!bPath) return cortexErr(`Project name "${project}" is not valid.`, CortexError.INVALID_PROJECT_NAME);
+): PhrenResult<TaskItem> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
 
   return withSafeLock(bPath, () => {
-    const parsed = readTasks(cortexPath, project);
+    const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const found = findItemByMatch(parsed.data, match);
-    if (found.error) return cortexErr(found.error, found.errorCode ?? CortexError.AMBIGUOUS_MATCH);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
@@ -889,7 +889,7 @@ export function linkTaskIssue(
       item.githubUrl = undefined;
     } else {
       if (link.github_url && !isValidGitHubIssueUrl(link.github_url)) {
-        return cortexErr("github_url must be a valid GitHub issue URL.", CortexError.VALIDATION_ERROR);
+        return phrenErr("github_url must be a valid GitHub issue URL.", PhrenError.VALIDATION_ERROR);
       }
       const githubIssueRaw = typeof link.github_issue === "string"
         ? link.github_issue.trim()
@@ -901,13 +901,13 @@ export function linkTaskIssue(
         link.github_url?.trim() || "",
       ].filter(Boolean).join(" "));
       if (!parsedLink.githubIssue && !parsedLink.githubUrl) {
-        return cortexErr("GitHub link update requires a valid issue number and/or GitHub issue URL.", CortexError.VALIDATION_ERROR);
+        return phrenErr("GitHub link update requires a valid issue number and/or GitHub issue URL.", PhrenError.VALIDATION_ERROR);
       }
       item.githubIssue = parsedLink.githubIssue;
       item.githubUrl = parsedLink.githubUrl;
     }
 
     writeTaskDoc(parsed.data);
-    return cortexOk(item);
+    return phrenOk(item);
   });
 }

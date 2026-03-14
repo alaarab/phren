@@ -10,7 +10,7 @@ Add an `@import` line in any indexed markdown file to pull in shared content:
 @import shared/my-library-conventions.md
 ```
 
-The import path is relative to `~/.cortex/global/`. Imports are resolved recursively (up to 5 levels deep) during FTS indexing. Circular imports are detected and skipped.
+The import path is relative to `~/.phren/global/`. Imports are resolved recursively (up to 5 levels deep) during FTS indexing. Circular imports are detected and skipped.
 
 ## What goes here
 
@@ -21,5 +21,5 @@ The import path is relative to `~/.cortex/global/`. Imports are resolved recursi
 ## What doesn't go here
 
 - Project-specific config (that stays in `<project>/CLAUDE.md`)
-- Findings (those go in FINDINGS.md files and get consolidated by `cortex-consolidate`)
+- Findings (those go in FINDINGS.md files and get consolidated by `phren-consolidate`)
 - Skills (those go in `global/skills/`)

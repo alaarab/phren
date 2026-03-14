@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, appendAuditLog, cortexOk, cortexErr, CortexError, type CortexResult } from "./shared.js";
+import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult } from "./shared.js";
 import { normalizeMemoryScope } from "./shared.js";
-import { checkPermission, loadCanonicalLocks, saveCanonicalLocksUnlocked, hashContent, withFileLock } from "./shared-governance.js";
+import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import { getMachineName } from "./machine-identity.js";
 import {
@@ -31,6 +31,9 @@ import {
   stripLifecycleComments,
   type FindingLifecycleMetadata,
 } from "./finding-lifecycle.js";
+import {
+  METADATA_REGEX,
+} from "./content-metadata.js";
 
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;
@@ -43,7 +46,7 @@ interface PreparedFinding {
   tagWarning?: string;
 }
 
-const LIFECYCLE_ANNOTATION_RE = /<!--\s*cortex:status(?:_updated|_reason|_ref)?\b[^>]*-->/i;
+const LIFECYCLE_ANNOTATION_RE = METADATA_REGEX.lifecycleAnnotation;
 
 interface AddFindingOptions {
   extraAnnotations?: string[];
@@ -99,10 +102,10 @@ function resolveInferredCitationRepo(citationInput?: Partial<FindingCitation>): 
 
 function detectFindingModel(): string | undefined {
   const candidates = [
-    process.env.CORTEX_MODEL,
+    (process.env.PHREN_MODEL),
     process.env.OPENAI_MODEL,
     process.env.CLAUDE_MODEL,
-    process.env.CORTEX_LLM_MODEL,
+    (process.env.PHREN_LLM_MODEL),
     process.env.MODEL,
   ];
   return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
@@ -110,25 +113,25 @@ function detectFindingModel(): string | undefined {
 
 function detectFindingTool(): string | undefined {
   const candidates = [
-    process.env.CORTEX_TOOL,
-    process.env.CORTEX_HOOK_TOOL,
+    (process.env.PHREN_TOOL),
+    (process.env.PHREN_HOOK_TOOL),
   ];
   return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
 }
 
 function detectFindingProvenanceSource(explicitSource?: FindingProvenanceSource): FindingProvenanceSource {
   if (explicitSource) return explicitSource;
-  const envSource = process.env.CORTEX_FINDING_SOURCE?.trim().toLowerCase();
+  const envSource = (process.env.PHREN_FINDING_SOURCE)?.trim().toLowerCase();
   if (isFindingProvenanceSource(envSource)) return envSource;
-  if (process.env.CORTEX_CONSOLIDATION === "1") return "consolidation";
-  if (process.env.CORTEX_AUTO_EXTRACT === "1") return "extract";
-  if (process.env.CORTEX_HOOK_TOOL || process.env.CORTEX_HOOK_PHASE) return "hook";
-  if (process.env.CORTEX_ACTOR?.trim()) return "agent";
+  if ((process.env.PHREN_CONSOLIDATION) === "1") return "consolidation";
+  if ((process.env.PHREN_AUTO_EXTRACT) === "1") return "extract";
+  if ((process.env.PHREN_HOOK_TOOL)) return "hook";
+  if ((process.env.PHREN_ACTOR || process.env.PHREN_ACTOR)?.trim()) return "agent";
   return "human";
 }
 
 function buildFindingSource(sessionId?: string, explicitSource?: FindingProvenanceSource, scope?: string): FindingProvenance {
-  const actor = process.env.CORTEX_ACTOR?.trim() || undefined;
+  const actor = (process.env.PHREN_ACTOR || process.env.PHREN_ACTOR)?.trim() || undefined;
   const source: FindingProvenance = {
     source: detectFindingProvenanceSource(explicitSource),
     machine: getMachineName(),
@@ -142,27 +145,27 @@ function buildFindingSource(sessionId?: string, explicitSource?: FindingProvenan
 }
 
 function resolveFindingCitationInput(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   citationInput?: Partial<FindingCitation>,
-): CortexResult<Partial<FindingCitation> | undefined> {
+): PhrenResult<Partial<FindingCitation> | undefined> {
   const resolved = citationInput ? { ...citationInput } : {};
   if (citationInput?.task_item) {
-    const taskResolution = resolveFindingTaskReference(cortexPath, project, citationInput.task_item);
+    const taskResolution = resolveFindingTaskReference(phrenPath, project, citationInput.task_item);
     if (taskResolution.error) {
-      return cortexErr(taskResolution.error, CortexError.VALIDATION_ERROR);
+      return phrenErr(taskResolution.error, PhrenError.VALIDATION_ERROR);
     }
     if (taskResolution.stableId) {
       resolved.task_item = taskResolution.stableId;
     }
   } else {
-    const taskItem = resolveAutoFindingTaskItem(cortexPath, project);
+    const taskItem = resolveAutoFindingTaskItem(phrenPath, project);
     if (taskItem) {
       resolved.task_item = taskItem;
     }
   }
 
-  return cortexOk(Object.keys(resolved).length > 0 ? resolved : undefined);
+  return phrenOk(Object.keys(resolved).length > 0 ? resolved : undefined);
 }
 
 function prepareFinding(
@@ -175,7 +178,7 @@ function prepareFinding(
   nowIso?: string,
   inferredRepo?: string,
   headCommit?: string,
-  cortexPath?: string,
+  phrenPath?: string,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
   const secretType = scanForSecrets(learning);
   if (secretType) {
@@ -201,7 +204,7 @@ function prepareFinding(
   }
 
   const existingBullets = fullHistory.split("\n").filter((l) => l.startsWith("- "));
-  const dynamicEntities = cortexPath ? extractDynamicEntities(cortexPath, project) : undefined;
+  const dynamicEntities = phrenPath ? extractDynamicEntities(phrenPath, project) : undefined;
   const conflicts = detectConflicts(normalizedLearning, existingBullets, dynamicEntities);
   if (conflicts.length > 0) {
     const snippet = conflicts[0].replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
@@ -211,7 +214,7 @@ function prepareFinding(
       status_reason: "conflicts_with",
       status_ref: snippet,
     };
-    bullet += ` <!-- conflicts_with: "${snippet}" --> <!-- cortex:contradicts "${snippet}" -->`;
+    bullet += ` <!-- conflicts_with: "${snippet}" --> <!-- phren:contradicts "${snippet}" -->`;
     debugLog(`add_finding: conflict detected for "${project}": ${snippet}`);
   }
   if (extraAnnotations && extraAnnotations.length > 0) {
@@ -229,7 +232,7 @@ function prepareFinding(
       };
     }
     const existing = new Set(
-      [...bullet.matchAll(/<!--\s*conflicts_with:\s*"([^"]+)"(?:\s*\(from project: [^)]+\))?\s*-->/g)].map((m) => m[0])
+      [...bullet.matchAll(METADATA_REGEX.conflictsWithAll)].map((m) => m[0])
     );
     for (const annotation of extraAnnotations) {
       if (!annotation.startsWith("<!--")) continue;
@@ -275,20 +278,16 @@ function insertFindingIntoContent(content: string, today: string, bullet: string
   return content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n${citationComment}\n`;
 }
 
-export function upsertCanonical(cortexPath: string, project: string, memory: string): CortexResult<string> {
-  const denial = checkPermission(cortexPath, "pin");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir || !fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+export function upsertCanonical(phrenPath: string, project: string, memory: string): PhrenResult<string> {
+  if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
+  const resolvedDir = safeProjectPath(phrenPath, project);
+  if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const canonicalPath = path.join(resolvedDir, "CANONICAL_MEMORIES.md");
   const today = new Date().toISOString().slice(0, 10);
   const bullet = memory.startsWith("- ") ? memory : `- ${memory}`;
   withFileLock(canonicalPath, () => {
-    let canonicalContent: string;
     if (!fs.existsSync(canonicalPath)) {
-      canonicalContent = `# ${project} Canonical Memories\n\n## Pinned\n\n${bullet} _(pinned ${today})_\n`;
-      fs.writeFileSync(canonicalPath, canonicalContent);
+      fs.writeFileSync(canonicalPath, `# ${project} Canonical Memories\n\n## Pinned\n\n${bullet} _(pinned ${today})_\n`);
     } else {
       const existing = fs.readFileSync(canonicalPath, "utf8");
       const line = `${bullet} _(pinned ${today})_`;
@@ -296,59 +295,39 @@ export function upsertCanonical(cortexPath: string, project: string, memory: str
         const updated = existing.includes("## Pinned")
           ? existing.replace("## Pinned", `## Pinned\n\n${line}`)
           : `${existing.trimEnd()}\n\n## Pinned\n\n${line}\n`;
-        canonicalContent = updated.endsWith("\n") ? updated : updated + "\n";
+        const content = updated.endsWith("\n") ? updated : updated + "\n";
         const tmpPath = canonicalPath + `.tmp-${crypto.randomUUID()}`;
-        fs.writeFileSync(tmpPath, canonicalContent);
+        fs.writeFileSync(tmpPath, content);
         fs.renameSync(tmpPath, canonicalPath);
-      } else {
-        canonicalContent = existing;
       }
     }
-
-    // Wrap canonical-locks.json read-modify-write in its own file lock to prevent
-    // concurrent upserts for different projects from overwriting each other's entries.
-    // We call loadCanonicalLocks (unlocked read) + saveCanonicalLocksUnlocked inside
-    // withFileLock to avoid deadlocking with saveCanonicalLocks' internal lock.
-    const canonicalLocksPath = path.join(cortexPath, ".runtime", "canonical-locks.json");
-    withFileLock(canonicalLocksPath, () => {
-      const locks = loadCanonicalLocks(cortexPath);
-      const lockKey = `${project}/CANONICAL_MEMORIES.md`;
-      locks[lockKey] = {
-        hash: hashContent(canonicalContent),
-        snapshot: canonicalContent,
-        updatedAt: new Date().toISOString(),
-      };
-      saveCanonicalLocksUnlocked(cortexPath, locks);
-    });
   });
 
-  appendAuditLog(cortexPath, "pin_memory", `project=${project} memory=${JSON.stringify(memory)}`);
-  return cortexOk(`Pinned canonical memory in ${project}.`);
+  appendAuditLog(phrenPath, "pin_memory", `project=${project} memory=${JSON.stringify(memory)}`);
+  return phrenOk(`Pinned canonical memory in ${project}.`);
 }
 
 export function addFindingToFile(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   learning: string,
   citationInput?: Partial<FindingCitation>,
   opts?: AddFindingOptions
-): CortexResult<string> {
-  const denial = checkPermission(cortexPath, "write");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
+): PhrenResult<string> {
   const findingError = validateFinding(learning);
-  if (findingError) return cortexErr(findingError, CortexError.EMPTY_INPUT);
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
+  if (findingError) return phrenErr(findingError, PhrenError.EMPTY_INPUT);
+  if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
+  const resolvedDir = safeProjectPath(phrenPath, project);
+  if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, "FINDINGS.md");
 
   // Secret/PII scan — reject before anything else (before existence check, before lock)
   const nowIso = new Date().toISOString();
   const today = nowIso.slice(0, 10);
-  const resolvedCitationInputResult = resolveFindingCitationInput(cortexPath, project, citationInput);
+  const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project, citationInput);
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;
-  const effectiveSessionId = resolveFindingSessionId(cortexPath, project, opts?.sessionId);
+  const effectiveSessionId = resolveFindingSessionId(phrenPath, project, opts?.sessionId);
   const source = buildFindingSource(effectiveSessionId, opts?.source, opts?.scope);
   const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
@@ -363,23 +342,23 @@ export function addFindingToFile(
   // Reject secrets before anything else — even if project doesn't exist yet
   const earlySecretType = scanForSecrets(learning);
   if (earlySecretType) {
-    return cortexErr(`Rejected: finding appears to contain a secret (${earlySecretType}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
+    return phrenErr(`Rejected: finding appears to contain a secret (${earlySecretType}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
   }
   // Check project dir existence before withFileLock (which would create the dir via mkdirSync)
-  if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" does not exist.`, CortexError.INVALID_PROJECT_NAME);
+  if (!fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" does not exist.`, PhrenError.INVALID_PROJECT_NAME);
 
-  const result: CortexResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
-    const preparedForNewFile = prepareFinding(learning, project, "", opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, cortexPath);
+  const result: PhrenResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
+    const preparedForNewFile = prepareFinding(learning, project, "", opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath);
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
-        return cortexErr(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
+        return phrenErr(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
       }
       if (preparedForNewFile.status === "duplicate") {
-        return cortexOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
+        return phrenOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
       }
       const newContent = `# ${project} Findings\n\n## ${today}\n\n${preparedForNewFile.finding.bullet}\n${preparedForNewFile.finding.citationComment}\n`;
       fs.writeFileSync(learningsPath, newContent);
-      return cortexOk({
+      return phrenOk({
         content: newContent,
         citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
         tagWarning: preparedForNewFile.finding.tagWarning,
@@ -398,13 +377,13 @@ export function addFindingToFile(
           .filter(line => !line.startsWith("- ") || !line.toLowerCase().includes(supersedesText.slice(0, 40).toLowerCase()))
           .join("\n")
       : content;
-    const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, cortexPath);
+    const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath);
     if (prepared.status === "rejected") {
-      return cortexErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, CortexError.VALIDATION_ERROR);
+      return phrenErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
     }
     if (prepared.status === "duplicate") {
       debugLog(`add_finding: skipped duplicate for "${project}": ${learning.slice(0, 80)}`);
-      return cortexOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
+      return phrenOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
     }
 
     const issues = validateFindingsFormat(content);
@@ -421,25 +400,25 @@ export function addFindingToFile(
         const lineText = lines[i].replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").replace(/^\[[^\]]+\]\s+/, "").slice(0, 60).toLowerCase().replace(/\s+/g, " ").trim();
         if (lineText === needle) {
           // Remove any legacy and normalized lifecycle supersession metadata before re-appending.
-          lines[i] = lines[i].replace(/\s*<!--\s*superseded_by:.*?-->/g, "");
-          lines[i] = lines[i].replace(/\s*<!--\s*cortex:superseded_by\s+"[^"]+"(?:\s+[0-9-]+)?\s*-->/g, "");
+          lines[i] = lines[i].replace(METADATA_REGEX.stripSupersededByLegacy, "");
+          lines[i] = lines[i].replace(METADATA_REGEX.stripSupersededBy, "");
           lines[i] = stripLifecycleComments(lines[i]);
           const newFirst60 = normalizedForSupersedes.replace(/^-\s+/, "").slice(0, 60);
           lines[i] =
-            `${lines[i]} <!-- cortex:superseded_by "${newFirst60}" ${today} --> ` +
+            `${lines[i]} <!-- phren:superseded_by "${newFirst60}" ${today} --> ` +
             `${buildLifecycleComments({ status: "superseded", status_updated: today, status_reason: "superseded_by", status_ref: newFirst60 }, today)}`;
           updated = lines.join("\n");
           break;
         }
       }
-      // Also annotate the new finding bullet with cortex:supersedes
+      // Also annotate the new finding bullet with phren:supersedes
       const newLines = updated.split("\n");
       for (let i = 0; i < newLines.length; i++) {
         if (!newLines[i].startsWith("- ")) continue;
         if (newLines[i].includes(prepared.finding.bullet.slice(0, 40))) {
-          if (!newLines[i].includes("cortex:supersedes")) {
+          if (!newLines[i].includes("phren:supersedes") && !newLines[i].includes("phren:supersedes")) {
             const supersedesFirst60 = supersedesText.slice(0, 60);
-            newLines[i] = `${newLines[i]} <!-- cortex:supersedes "${supersedesFirst60}" -->`;
+            newLines[i] = `${newLines[i]} <!-- phren:supersedes "${supersedesFirst60}" -->`;
           }
           updated = newLines.join("\n");
           break;
@@ -450,7 +429,7 @@ export function addFindingToFile(
     const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpPath, updated);
     fs.renameSync(tmpPath, learningsPath);
-    return cortexOk({
+    return phrenOk({
       content: updated,
       citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
       tagWarning: prepared.finding.tagWarning,
@@ -460,18 +439,18 @@ export function addFindingToFile(
   });
 
   if (!result.ok) return result;
-  if (typeof result.data === "string") return cortexOk(result.data);
+  if (typeof result.data === "string") return phrenOk(result.data);
 
   appendAuditLog(
-    cortexPath,
+    phrenPath,
     "add_finding",
     `project=${project}${result.data.created ? " created=true" : ""} citation_commit=${result.data.citation.commit ?? "none"} citation_file=${result.data.citation.file ?? "none"}`
   );
 
-  const cap = Number.parseInt(process.env.CORTEX_FINDINGS_CAP || "", 10) || DEFAULT_FINDINGS_CAP;
+  const cap = Number.parseInt((process.env.PHREN_FINDINGS_CAP) || "", 10) || DEFAULT_FINDINGS_CAP;
   const activeCount = countActiveFindings(result.data.content);
   if (activeCount > cap) {
-    const archiveResult = autoArchiveToReference(cortexPath, project, cap);
+    const archiveResult = autoArchiveToReference(phrenPath, project, cap);
     if (archiveResult.ok && archiveResult.data > 0) {
       debugLog(`Size cap: archived ${archiveResult.data} oldest entries for "${project}" (cap=${cap})`);
     }
@@ -479,32 +458,30 @@ export function addFindingToFile(
 
   if (result.data.created) {
     const createdMsg = `Created FINDINGS.md for "${project}" and added insight.`;
-    return cortexOk(result.data.tagWarning ? `${createdMsg} Warning: ${result.data.tagWarning}` : createdMsg);
+    return phrenOk(result.data.tagWarning ? `${createdMsg} Warning: ${result.data.tagWarning}` : createdMsg);
   }
 
   const addedMsg = `Added finding to ${project}: ${result.data.bullet} (with citation metadata)`;
-  return cortexOk(result.data.tagWarning ? `${addedMsg} Warning: ${result.data.tagWarning}` : addedMsg);
+  return phrenOk(result.data.tagWarning ? `${addedMsg} Warning: ${result.data.tagWarning}` : addedMsg);
 }
 
 export function addFindingsToFile(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   learnings: string[],
   opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; source?: FindingProvenanceSource; scope?: string }
-): CortexResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
-  const denial = checkPermission(cortexPath, "write");
-  if (denial) return cortexErr(denial, CortexError.PERMISSION_DENIED);
-  if (!isValidProjectName(project)) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(cortexPath, project);
-  if (!resolvedDir) return cortexErr(`Invalid project name: "${project}".`, CortexError.INVALID_PROJECT_NAME);
+): PhrenResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
+  if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
+  const resolvedDir = safeProjectPath(phrenPath, project);
+  if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, "FINDINGS.md");
 
   const today = new Date().toISOString().slice(0, 10);
   const nowIso = new Date().toISOString();
-  const resolvedCitationInputResult = resolveFindingCitationInput(cortexPath, project);
+  const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project);
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;
-  const effectiveSessionId = resolveFindingSessionId(cortexPath, project, opts?.sessionId);
+  const effectiveSessionId = resolveFindingSessionId(phrenPath, project, opts?.sessionId);
   const source = buildFindingSource(effectiveSessionId, opts?.source, opts?.scope);
   const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
@@ -514,9 +491,9 @@ export function addFindingsToFile(
   const rejected: { text: string; reason: string }[] = [];
 
   // Check project dir existence before withFileLock (which would create the dir via mkdirSync)
-  if (!fs.existsSync(resolvedDir)) return cortexErr(`Project "${project}" not found in cortex.`, CortexError.PROJECT_NOT_FOUND);
+  if (!fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
 
-  const contentResult: CortexResult<AddFindingsWriteResult> = withFileLock(learningsPath, () => {
+  const contentResult: PhrenResult<AddFindingsWriteResult> = withFileLock(learningsPath, () => {
     if (!fs.existsSync(learningsPath)) {
       let content = `# ${project} Findings\n\n## ${today}\n`;
       for (const [index, learning] of learnings.entries()) {
@@ -526,7 +503,7 @@ export function addFindingsToFile(
           rejected.push({ text: learning, reason: lengthError });
           continue;
         }
-        const prepared = prepareFinding(learning, project, content, extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, cortexPath);
+        const prepared = prepareFinding(learning, project, content, extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath);
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
           continue;
@@ -542,7 +519,7 @@ export function addFindingsToFile(
       if (added.length > 0) {
         fs.writeFileSync(learningsPath, content.endsWith("\n") ? content : `${content}\n`);
       }
-      return cortexOk({ content, wrote: added.length > 0 });
+      return phrenOk({ content, wrote: added.length > 0 });
     }
 
     let content = fs.readFileSync(learningsPath, "utf8");
@@ -566,7 +543,7 @@ export function addFindingsToFile(
         nowIso,
         inferredRepo,
         headCommit,
-        cortexPath,
+        phrenPath,
       );
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });
@@ -587,22 +564,22 @@ export function addFindingsToFile(
       fs.renameSync(tmpPath, learningsPath);
     }
 
-    return cortexOk({ content, wrote: added.length > 0 });
+    return phrenOk({ content, wrote: added.length > 0 });
   });
 
   if (!contentResult.ok) return contentResult;
 
   if (contentResult.data.wrote) {
-    appendAuditLog(cortexPath, "add_finding", `project=${project} count=${added.length} batch=true`);
+    appendAuditLog(phrenPath, "add_finding", `project=${project} count=${added.length} batch=true`);
 
-    const cap = Number.parseInt(process.env.CORTEX_FINDINGS_CAP || "", 10) || DEFAULT_FINDINGS_CAP;
+    const cap = Number.parseInt((process.env.PHREN_FINDINGS_CAP) || "", 10) || DEFAULT_FINDINGS_CAP;
     if (countActiveFindings(contentResult.data.content) > cap) {
-      const archiveResult = autoArchiveToReference(cortexPath, project, cap);
+      const archiveResult = autoArchiveToReference(phrenPath, project, cap);
       if (archiveResult.ok && archiveResult.data > 0) {
         debugLog(`Size cap: archived ${archiveResult.data} oldest entries for "${project}" (cap=${cap})`);
       }
     }
   }
 
-  return cortexOk({ added, skipped, rejected });
+  return phrenOk({ added, skipped, rejected });
 }

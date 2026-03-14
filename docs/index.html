@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cortex: Long-term memory for AI agents</title>
-  <meta name="description" content="AI agents forget everything between sessions. Cortex captures what they learn in a private git repo you own. Works across Claude Code, Copilot, Cursor, and Codex." />
-  <meta property="og:title" content="Cortex: Long-term memory for AI agents" />
-  <meta property="og:description" content="Git-backed memory shared across tools, machines, and sessions. Hooks inject context, save findings, and keep the store in sync." />
+  <title>Phren: He remembers so your agent doesn't have to</title>
+  <meta name="description" content="AI agents forget everything between sessions. Phren remembers what they learn and surfaces it when it matters. Git-backed, private, works across Claude Code, Copilot, Cursor, and Codex." />
+  <meta property="og:title" content="Meet phren. Your project's memory keeper." />
+  <meta property="og:description" content="Tell phren what you learned. He holds it in git, carries it across machines, and surfaces the right fragments when your agents need them." />
   <meta property="og:type" content="website" />
   <link rel="stylesheet" href="style.css">
 </head>
@@ -49,7 +49,7 @@
         <circle cx="64" cy="64" r="6.5" fill="url(#n-centerGlow)"/>
         <circle cx="64" cy="64" r="3" fill="#FDE89A" opacity="0.5"/>
       </svg>
-      <span class="nav-wordmark">cortex</span>
+      <span class="nav-wordmark">phren</span>
     </a>
     <div class="nav-links">
       <a href="#how" class="nav-link">How it works</a>
@@ -59,7 +59,7 @@
       <a href="#web-ui" class="nav-link">Graph</a>
       <a href="#skills" class="nav-link">Skills</a>
       <a href="whitepaper.pdf" class="nav-link" target="_blank" rel="noopener">Whitepaper</a>
-      <a href="https://github.com/alaarab/cortex" class="nav-cta" target="_blank" rel="noopener">
+      <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
       </a>
@@ -256,14 +256,14 @@
         </svg>
       </div>
 
-      <h1 class="hero-title">Long term memory for AI agents.</h1>
+      <h1 class="hero-title">Meet phren. He remembers so your agent doesn't have to.</h1>
 
       <p class="hero-sub">
         <span class="hero-sub-line">Private. Local. Git-backed.</span>
       </p>
 
       <div class="hero-cta-buttons">
-        <a href="https://github.com/alaarab/cortex" class="btn-primary" target="_blank" rel="noopener">
+        <a href="https://github.com/alaarab/phren" class="btn-primary" target="_blank" rel="noopener">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           GitHub
         </a>
@@ -279,16 +279,16 @@
             <div class="install-step-body">
               <div class="code-block code-block-install">
                 <div class="install-command-row">
-                  <div><span class="code-prompt">$</span> npm install -g @alaarab/cortex && cortex init</div>
-                  <button class="copy-btn" data-cmd="npm install -g @alaarab/cortex && cortex init">copy</button>
+                  <div><span class="code-prompt">$</span> npm install -g @alaarab/phren && phren init</div>
+                  <button class="copy-btn" data-cmd="npm install -g @alaarab/phren && phren init">copy</button>
                 </div>
                 <div class="install-command-note">
-                  Installs Cortex globally, then creates <code style="color:var(--indigo)">~/.cortex</code>, registers the machine, configures MCP, wires up hooks, and bootstraps the repo you are standing in.
+                  Installs phren globally, then creates <code style="color:var(--indigo)">~/.phren</code>, registers the machine, configures MCP, wires up hooks, and bootstraps the repo you are standing in.
                 </div>
                 <div class="install-path-grid">
                   <div class="install-path-card install-path-card-primary">
                     <div class="install-path-kicker">Fresh setup</div>
-                    <div class="install-path-title">Run it once. Cortex does the rest.</div>
+                    <div class="install-path-title">Run it once. Phren does the rest.</div>
                     <p class="install-path-copy">Starter templates, git-backed memory, MCP wiring, and hooks land in one pass.</p>
                   </div>
                   <div class="install-path-card">
@@ -342,7 +342,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
           <div class="step-title">Shell and UI when you need them</div>
-          <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>cortex</code> opens the interactive shell. <code>cortex web-ui</code> opens the browser with your memory graph and review queue.</p>
+          <p class="step-desc">MCP handles the daily flow. When you want to browse or clean up: <code>phren</code> opens the interactive shell. <code>phren web-ui</code> opens the browser with your memory graph and review queue.</p>
         </div>
       </div>
     </div>
@@ -364,8 +364,8 @@
             <span class="trace-hook-when">once, on open</span>
           </div>
           <div class="trace-steps">
-            <div class="trace-step"><span class="trace-fn">git pull --rebase</span> <span class="trace-comment">sync ~/.cortex from remote</span></div>
-            <div class="trace-step"><span class="trace-fn">detectProject(cwd)</span> <span class="trace-comment">match working directory to a cortex project</span></div>
+            <div class="trace-step"><span class="trace-fn">git pull --rebase</span> <span class="trace-comment">sync ~/.phren from remote</span></div>
+            <div class="trace-step"><span class="trace-fn">detectProject(cwd)</span> <span class="trace-comment">match working directory to a phren project</span></div>
             <div class="trace-step"><span class="trace-fn">inject(CLAUDE.md, summary.md)</span> <span class="trace-comment">project instructions enter the context window</span></div>
             <div class="trace-out">&#8627; your agent knows the project before you type anything</div>
           </div>
@@ -382,7 +382,7 @@
             <div class="trace-step"><span class="trace-fn">fts5.search(keywords)</span> <span class="trace-comment">synonym expansion, 20-term cap, sub-ms lookup</span></div>
             <div class="trace-step"><span class="trace-fn">trustFilter(results)</span> <span class="trace-comment">confidence decay, citation check, policy threshold</span></div>
             <div class="trace-step"><span class="trace-fn">inject(top3, budget=550)</span> <span class="trace-comment">best matches enter context. nothing if nothing matches.</span></div>
-            <div class="trace-out">&#8627; <span class="trace-out-example">&#9670; cortex <span class="dot-sep">·</span> 3 results</span> in your status line, that's this hook reporting what it found</div>
+            <div class="trace-out">&#8627; <span class="trace-out-example">&#9670; phren <span class="dot-sep">·</span> 3 results</span> in your status line, that's this hook reporting what it found</div>
           </div>
         </div>
 
@@ -393,7 +393,7 @@
             <span class="trace-hook-when">after every response, including subagents</span>
           </div>
           <div class="trace-steps">
-            <div class="trace-step"><span class="trace-fn">git add -A ~/.cortex</span> <span class="trace-comment">stage whatever changed</span></div>
+            <div class="trace-step"><span class="trace-fn">git add -A ~/.phren</span> <span class="trace-comment">stage whatever changed</span></div>
             <div class="trace-step"><span class="trace-fn">git commit</span> <span class="trace-comment">no-op if nothing changed</span></div>
             <div class="trace-step"><span class="trace-fn">background sync worker</span> <span class="trace-comment">push later, rebase on conflict, auto-retry</span></div>
             <div class="trace-out">&#8627; next session, any machine: SessionStart pulls it back down</div>
@@ -407,8 +407,8 @@
   <section class="bento-section" id="why">
     <div class="container">
       <div class="bento-header reveal">
-        <div class="section-label">Why cortex</div>
-        <h2 class="section-title">Smarter context.<br>Shared memory.</h2>
+        <div class="section-label">Why phren</div>
+        <h2 class="section-title">Phren connects the fragments.<br>Your agents stay sharp.</h2>
       </div>
       <div class="bento-grid">
         <!-- Card 1: Targeted retrieval -->
@@ -417,7 +417,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
           <div class="bento-card-title">Lean context. Lower cost.</div>
-          <p class="bento-card-desc">CLAUDE.md loads the whole file every time. Cortex searches what you actually wrote and injects only what matches: about 550 tokens by default instead of everything. Less token spend means more agents in parallel and cleaner context. Adjust the target with <code>CORTEX_CONTEXT_TOKEN_BUDGET</code>.</p>
+          <p class="bento-card-desc">CLAUDE.md loads the whole file every time. Phren searches what you actually wrote and injects only what matches: about 550 tokens by default instead of everything. Less token spend means more agents in parallel and cleaner context. Adjust the target with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>.</p>
           <div class="token-bars">
             <div class="token-bar-row">
               <div class="token-bar-label">CLAUDE.md</div>
@@ -425,7 +425,7 @@
               <div class="token-bar-val" style="color:var(--copper-mid)">bloated</div>
             </div>
             <div class="token-bar-row">
-              <div class="token-bar-label">Cortex</div>
+              <div class="token-bar-label">Phren</div>
               <div class="token-bar-track"><div class="token-bar-fill token-bar-fill-after"></div></div>
               <div class="token-bar-val" style="color:var(--indigo)">550 default</div>
             </div>
@@ -450,8 +450,8 @@
         <div class="bento-card bento-card-fun reveal reveal-delay-2">
           <div class="fun-card-copy">
             <div class="fun-card-kicker">Better together</div>
-            <h3 class="fun-card-title">Agents prefer Cortex.</h3>
-            <p class="fun-card-desc">Agents such as Claude settle in fast when Cortex is already there. The trail is warm, the context is already humming, and the repo feels like walking back into a room with the lights still on.</p>
+            <h3 class="fun-card-title">Phren is already waiting.</h3>
+            <p class="fun-card-desc">When agents arrive, phren is already there. He's mapped the fragments, warmed the trail, and the repo feels like walking back into a room with the lights still on.</p>
           </div>
           <div class="fun-card-art" aria-hidden="true">
             <svg viewBox="0 0 520 320" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -465,7 +465,7 @@
                   <stop offset="0%" stop-color="#FF8A90" stop-opacity="0.55"/>
                   <stop offset="100%" stop-color="#FF8A90" stop-opacity="0"/>
                 </radialGradient>
-                <radialGradient id="fun-cortexGlow" cx="50%" cy="50%" r="50%">
+                <radialGradient id="fun-phrenGlow" cx="50%" cy="50%" r="50%">
                   <stop offset="0%" stop-color="#F5C840"/>
                   <stop offset="45%" stop-color="#D4892E"/>
                   <stop offset="100%" stop-color="#8B4A12"/>
@@ -552,7 +552,7 @@
                 <circle cx="40" cy="81" r="2.3" fill="#1E4A6E" opacity="0.8"/>
                 <circle cx="56" cy="85" r="2.5" fill="#1E4A6E" opacity="0.9"/>
                 <circle cx="58" cy="58" r="14" fill="#C4762A" opacity="0.08" filter="url(#fun-softGlow)"/>
-                <circle cx="58" cy="58" r="6.5" fill="url(#fun-cortexGlow)"/>
+                <circle cx="58" cy="58" r="6.5" fill="url(#fun-phrenGlow)"/>
                 <circle cx="58" cy="58" r="3" fill="#FDE89A" opacity="0.55"/>
               </g>
 
@@ -582,7 +582,7 @@
           <div class="terminal-dot terminal-dot-red"></div>
           <div class="terminal-dot terminal-dot-yellow"></div>
           <div class="terminal-dot terminal-dot-green"></div>
-          <span class="terminal-title">cortex shell</span>
+          <span class="terminal-title">phren shell</span>
         </div>
         <div class="demo-terminal-body" id="demo-terminal-body"></div>
       </div>
@@ -595,7 +595,7 @@
       <div class="web-ui-header reveal" style="text-align:left;max-width:100%;margin-bottom:32px">
         <div class="section-label">Memory management</div>
         <h2 class="section-title">Web UI and memory graph.</h2>
-        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Browse what your agents know. <code style="font-size:14px;color:var(--copper-mid)">cortex web-ui</code> opens a browser with your full memory graph, finding details, quality scores, and review queue.</p>
+        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Browse what your agents know. <code style="font-size:14px;color:var(--copper-mid)">phren web-ui</code> opens a browser with your full memory graph, finding details, quality scores, and review queue.</p>
       </div>
       <div class="rui-mock reveal">
         <div class="rui-mock-chrome">
@@ -604,7 +604,7 @@
             <span class="rui-dot rui-dot-y"></span>
             <span class="rui-dot rui-dot-g"></span>
           </div>
-          <div class="rui-mock-urlbar">localhost:3499 &nbsp;&middot;&nbsp; cortex web-ui</div>
+          <div class="rui-mock-urlbar">localhost:3499 &nbsp;&middot;&nbsp; phren web-ui</div>
         </div>
         <div class="rui-mock-body">
           <div class="rui-mock-sidebar">
@@ -804,33 +804,33 @@
       <div class="skills-header reveal">
         <div class="section-label">Workflow</div>
         <h2 class="section-title">MCP tools handle the work.<br>Skills are optional shortcuts.</h2>
-        <p class="section-sub" style="margin-top:12px">Cortex exposes MCP tools organized by workflow: search and retrieve context, capture findings and tasks, review memory quality, and sync across machines. Skills are shortcuts for common multi-step jobs. Not required for daily use. Add your own in <code style="font-size:14px;color:var(--copper-mid)">~/.cortex/global/skills/</code>.</p>
+        <p class="section-sub" style="margin-top:12px">Phren exposes MCP tools organized by workflow: search and retrieve context, capture findings and tasks, review memory quality, and sync across machines. Skills are shortcuts for common multi-step jobs. Not required for daily use. Add your own in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>.</p>
       </div>
 
       <div class="skills-grid">
         <div class="skill-card reveal">
-          <div class="skill-name">/cortex-sync</div>
-          <div class="skill-desc">Pull cortex to a new machine or push config changes back.</div>
+          <div class="skill-name">/phren-sync</div>
+          <div class="skill-desc">Pull phren to a new machine or push config changes back.</div>
         </div>
         <div class="skill-card reveal reveal-delay-2">
-          <div class="skill-name">/cortex-init</div>
-          <div class="skill-desc">Scaffold a brand-new project entry. Use <code style="font-size:11px;color:var(--text-muted)">cortex add</code> for an existing repo.</div>
+          <div class="skill-name">/phren-init</div>
+          <div class="skill-desc">Scaffold a brand-new project entry. Use <code style="font-size:11px;color:var(--text-muted)">phren add</code> for an existing repo.</div>
         </div>
         <div class="skill-card reveal">
-          <div class="skill-name">/cortex-discover</div>
+          <div class="skill-name">/phren-discover</div>
           <div class="skill-desc">Audit a project for missing files, stale content, stuck task items.</div>
         </div>
         <div class="skill-card reveal reveal-delay-1">
-          <div class="skill-name">/cortex-consolidate</div>
+          <div class="skill-name">/phren-consolidate</div>
           <div class="skill-desc">Find patterns across all project findings. Surfaces what shows up in more than one place.</div>
         </div>
         <div class="skill-card reveal">
-          <div class="skill-name">/cortex-profiles</div>
+          <div class="skill-name">/phren-profiles</div>
           <div class="skill-desc">Manage machine-to-profile mappings. Add machines, switch profiles, and keep multi-machine config in sync.</div>
         </div>
         <div class="skill-card reveal" style="border-style: dashed; opacity: 0.6; grid-column: span 2;">
           <div class="skill-name" style="color:var(--text-dim)">bring your own</div>
-          <div class="skill-desc">Drop your own skills into <code style="font-size:11px;color:var(--text-muted)">~/.cortex/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">cortex init</code> wires them up on the next refresh. Starter templates include examples without prescribing your workflow.</div>
+          <div class="skill-desc">Drop your own skills into <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code> and <code style="font-size:11px;color:var(--text-muted)">phren init</code> wires them up on the next refresh. Starter templates include examples without prescribing your workflow.</div>
         </div>
       </div>
     </div>
@@ -843,8 +843,8 @@
         <div class="cta-brand">
           <div class="cta-brand-copy">
             <div class="section-label">Memory layer</div>
-            <h2 class="cta-title">Start building your Cortex.</h2>
-            <p class="cta-tagline">Your own private repo, shared between your agents.</p>
+            <h2 class="cta-title">Tell phren what matters.</h2>
+            <p class="cta-tagline">He'll remember it for you. Private repo, shared across all your agents.</p>
           </div>
           <svg class="cta-icon" width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -914,13 +914,13 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Get started
           </a>
-          <a href="https://github.com/alaarab/cortex" class="btn-ghost" target="_blank" rel="noopener">
+          <a href="https://github.com/alaarab/phren" class="btn-ghost" target="_blank" rel="noopener">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
             View on GitHub
           </a>
-          <a href="https://www.npmjs.com/package/@alaarab/cortex" class="npm-badge" target="_blank" rel="noopener">
+          <a href="https://www.npmjs.com/package/@alaarab/phren" class="npm-badge" target="_blank" rel="noopener">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M0 0v24h24V0H0zm13 20.727H7.273V3.273H13v13.636h3.636V3.273H20.727v17.454H13z"/></svg>
-            cortex
+            phren
           </a>
         </div>
       </div>
@@ -929,12 +929,12 @@
 
   <footer class="footer-bar">
     <div class="footer-left">
-      <span class="footer-wordmark">cortex</span>
+      <span class="footer-wordmark">phren</span>
       <span class="dot-sep">•</span>
-      <span>Long-term memory for AI agents</span>
+      <span>He remembers so your agent doesn't have to</span>
     </div>
     <div class="footer-right">
-      <a href="https://github.com/alaarab/cortex" target="_blank" rel="noopener">github.com/alaarab/cortex</a>
+      <a href="https://github.com/alaarab/phren" target="_blank" rel="noopener">github.com/alaarab/phren</a>
       <span class="dot-sep">•</span>
       <a href="#how">How it works</a>
       <span class="dot-sep">•</span>
@@ -950,7 +950,7 @@
       <span class="dot-sep">•</span>
       <a href="whitepaper.pdf" target="_blank" rel="noopener">Whitepaper</a>
       <span class="dot-sep">•</span>
-      <a href="https://github.com/alaarab/cortex/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+      <a href="https://github.com/alaarab/phren/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
     </div>
   </footer>
 

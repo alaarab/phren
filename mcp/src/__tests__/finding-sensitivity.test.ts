@@ -8,9 +8,9 @@
  *   1. Default is "balanced" from getWorkflowPolicy
  *   2. Each level maps to correct sessionCap and proactivityFindings values
  *   3. Agent instruction injected in hook context with correct prefix
- *   4. getSessionCap() respects policy; CORTEX_AUTOCAPTURE_SESSION_CAP env var overrides it
+ *   4. getSessionCap() respects policy; PHREN_AUTOCAPTURE_SESSION_CAP env var overrides it
  *   5. Init walkthrough writes chosen level to workflow-policy.json
- *   6. CLI: cortex config finding-sensitivity get / set
+ *   6. CLI: phren config finding-sensitivity get / set
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,30 +24,29 @@ const runCli = runCliExec;
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
-function makeCortex() {
+function makePhren() {
   const tmp = makeTempDir("finding-sensitivity-");
   grantAdmin(tmp.path);
   return tmp;
 }
 
-function makeProject(cortexPath: string, project: string) {
-  const dir = path.join(cortexPath, project);
+function makeProject(phrenPath: string, project: string) {
+  const dir = path.join(phrenPath, project);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n`);
 }
 
 function writeWorkflowPolicy(
-  cortexPath: string,
+  phrenPath: string,
   overrides: Record<string, unknown> = {},
 ) {
-  const govDir = path.join(cortexPath, ".governance");
+  const govDir = path.join(phrenPath, ".governance");
   fs.mkdirSync(govDir, { recursive: true });
   writeFile(
     path.join(govDir, "workflow-policy.json"),
     JSON.stringify(
       {
         schemaVersion: 1,
-        requireMaintainerApproval: false,
         lowConfidenceThreshold: 0.7,
         riskySections: ["Stale", "Conflicts"],
         taskMode: "auto",
@@ -67,7 +66,7 @@ function writeWorkflowPolicy(
 describe("finding sensitivity — defaults", () => {
   let tmp: { path: string; cleanup: () => void };
 
-  beforeEach(() => { tmp = makeCortex(); });
+  beforeEach(() => { tmp = makePhren(); });
   afterEach(() => tmp.cleanup());
 
   it("getWorkflowPolicy returns findingSensitivity='balanced' when no policy file exists", () => {
@@ -151,25 +150,25 @@ describe("finding sensitivity — FINDING_SENSITIVITY_CONFIG mapping", () => {
 // so we verify the injection format at the unit level by checking:
 //   - FINDING_SENSITIVITY_CONFIG contains the correct instruction text
 //   - getWorkflowPolicy returns the right level so the hook code would pick it up
-//   - the injected string follows the documented format: "[cortex finding-sensitivity=<level>] <instruction>"
+//   - the injected string follows the documented format: "[phren finding-sensitivity=<level>] <instruction>"
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("finding sensitivity — agent instruction format", () => {
   let tmp: { path: string; cleanup: () => void };
 
-  beforeEach(() => { tmp = makeCortex(); });
+  beforeEach(() => { tmp = makePhren(); });
   afterEach(() => tmp.cleanup());
 
   for (const level of ["minimal", "conservative", "balanced", "aggressive"] as const) {
-    it(`injection string for ${level} follows [cortex finding-sensitivity=<level>] <instruction> format`, () => {
+    it(`injection string for ${level} follows [phren finding-sensitivity=<level>] <instruction> format`, () => {
       writeWorkflowPolicy(tmp.path, { findingSensitivity: level });
       const policy = getWorkflowPolicy(tmp.path);
       expect(policy.findingSensitivity).toBe(level);
 
       const cfg = FINDING_SENSITIVITY_CONFIG[level];
-      const injectedLine = `[cortex finding-sensitivity=${level}] ${cfg.agentInstruction}`;
+      const injectedLine = `[phren finding-sensitivity=${level}] ${cfg.agentInstruction}`;
       // Format validation: must start with the bracket prefix
-      expect(injectedLine).toMatch(/^\[cortex finding-sensitivity=\w+\] .+/);
+      expect(injectedLine).toMatch(/^\[phren finding-sensitivity=\w+\] .+/);
       // Must contain the level name
       expect(injectedLine).toContain(level);
       // Must contain the actual instruction text
@@ -202,15 +201,15 @@ describe("finding sensitivity — agent instruction format", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. getSessionCap: policy vs CORTEX_AUTOCAPTURE_SESSION_CAP override
+// 4. getSessionCap: policy vs PHREN_AUTOCAPTURE_SESSION_CAP override
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("finding sensitivity — session cap resolution", () => {
   let tmp: { path: string; cleanup: () => void };
 
-  beforeEach(() => { tmp = makeCortex(); });
+  beforeEach(() => { tmp = makePhren(); });
   afterEach(() => {
-    delete process.env.CORTEX_AUTOCAPTURE_SESSION_CAP;
+    delete process.env.PHREN_AUTOCAPTURE_SESSION_CAP;
     tmp.cleanup();
   });
 
@@ -236,15 +235,15 @@ describe("finding sensitivity — session cap resolution", () => {
     expect(FINDING_SENSITIVITY_CONFIG[policy.findingSensitivity].sessionCap).toBe(20);
   });
 
-  it("CORTEX_AUTOCAPTURE_SESSION_CAP env var overrides the policy cap in CLI context", () => {
+  it("PHREN_AUTOCAPTURE_SESSION_CAP env var overrides the policy cap in CLI context", () => {
     // Write aggressive policy (cap=20) then override via env var to 5
     writeWorkflowPolicy(tmp.path, { findingSensitivity: "aggressive" });
     const { stdout, exitCode } = runCli(
       ["config", "finding-sensitivity", "get"],
       {
-        CORTEX_PATH: tmp.path,
-        CORTEX_ACTOR: "test",
-        CORTEX_AUTOCAPTURE_SESSION_CAP: "5",
+        PHREN_PATH: tmp.path,
+        PHREN_ACTOR: "test",
+        PHREN_AUTOCAPTURE_SESSION_CAP: "5",
       },
     );
     expect(exitCode).toBe(0);
@@ -257,14 +256,14 @@ describe("finding sensitivity — session cap resolution", () => {
     expect(parsed.sessionCap).toBe(20);
   });
 
-  it("CORTEX_AUTOCAPTURE_SESSION_CAP env var value is used by getSessionCap when set", () => {
+  it("PHREN_AUTOCAPTURE_SESSION_CAP env var value is used by getSessionCap when set", () => {
     // Direct unit test: set env var and verify getSessionCap would use it.
     // Since getSessionCap is not exported, we test the contract via the constant.
     // The env var takes precedence over any policy level.
-    process.env.CORTEX_AUTOCAPTURE_SESSION_CAP = "7";
+    process.env.PHREN_AUTOCAPTURE_SESSION_CAP = "7";
     // We can't call getSessionCap() directly (not exported), but we verify that
     // FINDING_SENSITIVITY_CONFIG.aggressive.sessionCap would be overridden by parsing
-    const envCap = parseInt(process.env.CORTEX_AUTOCAPTURE_SESSION_CAP, 10);
+    const envCap = parseInt(process.env.PHREN_AUTOCAPTURE_SESSION_CAP, 10);
     expect(envCap).toBe(7);
     // And that any policy cap would differ
     expect(FINDING_SENSITIVITY_CONFIG.aggressive.sessionCap).not.toBe(7);
@@ -278,7 +277,7 @@ describe("finding sensitivity — session cap resolution", () => {
 describe("finding sensitivity — init writes policy", () => {
   let tmp: { path: string; cleanup: () => void };
 
-  beforeEach(() => { tmp = makeCortex(); });
+  beforeEach(() => { tmp = makePhren(); });
   afterEach(() => tmp.cleanup());
 
   it("updateWorkflowPolicy persists findingSensitivity=conservative", () => {
@@ -310,14 +309,14 @@ describe("finding sensitivity — init writes policy", () => {
     expect(policy.findingSensitivity).toBe("minimal");
   });
 
-  it("cortex init --finding-sensitivity conservative writes conservative to policy", () => {
+  it("phren init --finding-sensitivity conservative writes conservative to policy", () => {
     // Use a fake HOME so configureClaude writes hooks to a sandboxed settings.json
-    // instead of the real ~/.claude/settings.json (which would leak the temp CORTEX_PATH).
+    // instead of the real ~/.claude/settings.json (which would leak the temp PHREN_PATH).
     const fakeHome = path.join(tmp.path, "home");
     fs.mkdirSync(fakeHome, { recursive: true });
     const { exitCode } = runCli(
       ["init", "--yes", "--finding-sensitivity", "conservative", "--mcp", "off", "--hooks-only"],
-      { CORTEX_PATH: tmp.path, CORTEX_ACTOR: "test", HOME: fakeHome, USERPROFILE: fakeHome },
+      { PHREN_PATH: tmp.path, PHREN_ACTOR: "test", HOME: fakeHome, USERPROFILE: fakeHome },
     );
     // init may exit 0 or non-zero depending on environment; just check the file if written
     if (exitCode === 0) {
@@ -331,14 +330,14 @@ describe("finding sensitivity — init writes policy", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. CLI: cortex config finding-sensitivity get / set
+// 6. CLI: phren config finding-sensitivity get / set
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("finding sensitivity — CLI config subcommand", () => {
   let tmp: { path: string; cleanup: () => void };
 
   beforeEach(() => {
-    tmp = makeCortex();
+    tmp = makePhren();
     writeWorkflowPolicy(tmp.path);
   });
   afterEach(() => tmp.cleanup());
@@ -346,7 +345,7 @@ describe("finding sensitivity — CLI config subcommand", () => {
   it("config finding-sensitivity get returns JSON with level and sessionCap", () => {
     const { stdout, exitCode } = runCli(
       ["config", "finding-sensitivity", "get"],
-      { CORTEX_PATH: tmp.path },
+      { PHREN_PATH: tmp.path },
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout) as { level: string; sessionCap: number; proactivityFindings: string; agentInstruction: string };
@@ -359,13 +358,13 @@ describe("finding sensitivity — CLI config subcommand", () => {
   it("config finding-sensitivity set minimal persists and get reflects it", () => {
     const set = runCli(
       ["config", "finding-sensitivity", "set", "minimal"],
-      { CORTEX_PATH: tmp.path },
+      { PHREN_PATH: tmp.path },
     );
     expect(set.exitCode).toBe(0);
 
     const get = runCli(
       ["config", "finding-sensitivity", "get"],
-      { CORTEX_PATH: tmp.path },
+      { PHREN_PATH: tmp.path },
     );
     expect(get.exitCode).toBe(0);
     const parsed = JSON.parse(get.stdout) as { level: string; sessionCap: number };
@@ -376,11 +375,11 @@ describe("finding sensitivity — CLI config subcommand", () => {
   it("config finding-sensitivity set aggressive persists and get reflects it", () => {
     runCli(
       ["config", "finding-sensitivity", "set", "aggressive"],
-      { CORTEX_PATH: tmp.path },
+      { PHREN_PATH: tmp.path },
     );
     const get = runCli(
       ["config", "finding-sensitivity", "get"],
-      { CORTEX_PATH: tmp.path },
+      { PHREN_PATH: tmp.path },
     );
     const parsed = JSON.parse(get.stdout) as { level: string; sessionCap: number };
     expect(parsed.level).toBe("aggressive");
@@ -390,7 +389,7 @@ describe("finding sensitivity — CLI config subcommand", () => {
   it("config finding-sensitivity with bare value (no set subcommand) also works", () => {
     const { exitCode, stdout } = runCli(
       ["config", "finding-sensitivity", "conservative"],
-      { CORTEX_PATH: tmp.path },
+      { PHREN_PATH: tmp.path },
     );
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(stdout) as { level: string };
@@ -400,18 +399,18 @@ describe("finding sensitivity — CLI config subcommand", () => {
   it("config finding-sensitivity set with invalid level exits non-zero", () => {
     const { exitCode } = runCli(
       ["config", "finding-sensitivity", "set", "turbo"],
-      { CORTEX_PATH: tmp.path },
+      { PHREN_PATH: tmp.path },
     );
     expect(exitCode).not.toBe(0);
   });
 
   it("config finding-sensitivity get returns JSON even when no policy file exists", () => {
-    const fresh = makeCortex();
+    const fresh = makePhren();
     grantAdmin(fresh.path);
     try {
       const { stdout, exitCode } = runCli(
         ["config", "finding-sensitivity", "get"],
-        { CORTEX_PATH: fresh.path },
+        { PHREN_PATH: fresh.path },
       );
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(stdout) as { level: string };
@@ -426,7 +425,7 @@ describe("finding sensitivity — CLI config subcommand", () => {
 
     runCli(
       ["config", "finding-sensitivity", "set", "aggressive"],
-      { CORTEX_PATH: tmp.path },
+      { PHREN_PATH: tmp.path },
     );
 
     const policy = getWorkflowPolicy(tmp.path);

@@ -22,7 +22,7 @@ interface StartedWebUi {
 export interface WebUiHarness {
   rootDir: string;
   homeDir: string;
-  cortexDir: string;
+  phrenDir: string;
   repoADir: string;
   repoBDir: string;
   publicUrl: string;
@@ -47,20 +47,20 @@ function writeFile(filePath: string, content: string): void {
   fs.writeFileSync(filePath, content);
 }
 
-function makeIsolatedEnv(rootDir: string): { homeDir: string; cortexDir: string; env: NodeJS.ProcessEnv } {
+function makeIsolatedEnv(rootDir: string): { homeDir: string; phrenDir: string; env: NodeJS.ProcessEnv } {
   const homeDir = path.join(rootDir, "home");
-  const cortexDir = path.join(homeDir, ".cortex");
+  const phrenDir = path.join(homeDir, ".phren");
   fs.mkdirSync(homeDir, { recursive: true });
   return {
     homeDir,
-    cortexDir,
+    phrenDir,
     env: {
       ...process.env,
       HOME: homeDir,
       USERPROFILE: homeDir,
-      CORTEX_PATH: cortexDir,
-      CORTEX_PROFILE: "work",
-      CORTEX_ACTOR: FALLBACK_ACTOR,
+      PHREN_PATH: phrenDir,
+      PHREN_PROFILE: "work",
+      PHREN_ACTOR: FALLBACK_ACTOR,
     },
   };
 }
@@ -75,7 +75,7 @@ function runCli(args: string[], cwd: string, env: NodeJS.ProcessEnv): void {
   });
 }
 
-function seedHookFixtures(cortexDir: string, homeDir: string): void {
+function seedHookFixtures(phrenDir: string, homeDir: string): void {
   writeFile(
     path.join(homeDir, ".claude", "settings.json"),
     JSON.stringify({
@@ -85,7 +85,7 @@ function seedHookFixtures(cortexDir: string, homeDir: string): void {
     }, null, 2) + "\n",
   );
   writeFile(
-    path.join(cortexDir, "codex.json"),
+    path.join(phrenDir, "codex.json"),
     JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ type: "command", command: "echo codex-prompt" }],
@@ -94,9 +94,9 @@ function seedHookFixtures(cortexDir: string, homeDir: string): void {
   );
 }
 
-function seedSkillFixture(cortexDir: string): void {
+function seedSkillFixture(phrenDir: string): void {
   writeFile(
-    path.join(cortexDir, "global", "skills", "browser-checks.md"),
+    path.join(phrenDir, "global", "skills", "browser-checks.md"),
     [
       "---",
       "description: Browser web-ui smoke skill",
@@ -111,9 +111,9 @@ function seedSkillFixture(cortexDir: string): void {
   );
 }
 
-function seedProjectFixtures(cortexDir: string): void {
+function seedProjectFixtures(phrenDir: string): void {
   writeFile(
-    path.join(cortexDir, ".governance", "access-control.json"),
+    path.join(phrenDir, ".governance", "access-control.json"),
     JSON.stringify({
       admins: [FALLBACK_ACTOR, os.userInfo().username],
       maintainers: [],
@@ -123,11 +123,11 @@ function seedProjectFixtures(cortexDir: string): void {
   );
 
   writeFile(
-    path.join(cortexDir, "repo-a", "summary.md"),
+    path.join(phrenDir, "repo-a", "summary.md"),
     "# repo-a\n\nRepo A summary for browser smoke coverage.\n",
   );
   writeFile(
-    path.join(cortexDir, "repo-a", "FINDINGS.md"),
+    path.join(phrenDir, "repo-a", "FINDINGS.md"),
     [
       "# repo-a FINDINGS",
       "",
@@ -139,7 +139,7 @@ function seedProjectFixtures(cortexDir: string): void {
     ].join("\n"),
   );
   writeFile(
-    path.join(cortexDir, "repo-a", "tasks.md"),
+    path.join(phrenDir, "repo-a", "tasks.md"),
     [
       "# repo-a task",
       "",
@@ -150,19 +150,19 @@ function seedProjectFixtures(cortexDir: string): void {
     ].join("\n"),
   );
   writeFile(
-    path.join(cortexDir, "repo-a", "CLAUDE.md"),
+    path.join(phrenDir, "repo-a", "CLAUDE.md"),
     "# repo-a\n\nRepo A instructions for browser smoke coverage.\n",
   );
   writeFile(
-    path.join(cortexDir, "repo-a", "reference", "browser.md"),
+    path.join(phrenDir, "repo-a", "reference", "browser.md"),
     "# Browser Reference\n\nBrowser reference doc.\n",
   );
   writeFile(
-    path.join(cortexDir, "repo-a", "reference", "topics", "general.md"),
+    path.join(phrenDir, "repo-a", "reference", "topics", "general.md"),
     "# General\n\nGeneral topic reference.\n",
   );
   writeFile(
-    path.join(cortexDir, "repo-a", "MEMORY_QUEUE.md"),
+    path.join(phrenDir, "repo-a", "MEMORY_QUEUE.md"),
     [
       "# repo-a Memory Queue",
       "",
@@ -174,11 +174,11 @@ function seedProjectFixtures(cortexDir: string): void {
   );
 
   writeFile(
-    path.join(cortexDir, "repo-b", "summary.md"),
+    path.join(phrenDir, "repo-b", "summary.md"),
     "# repo-b\n\nRepo B summary for project browsing coverage.\n",
   );
   writeFile(
-    path.join(cortexDir, "repo-b", "FINDINGS.md"),
+    path.join(phrenDir, "repo-b", "FINDINGS.md"),
     [
       "# repo-b FINDINGS",
       "",
@@ -207,7 +207,7 @@ function startWebUi(cwd: string, env: NodeJS.ProcessEnv): Promise<StartedWebUi> 
     }, START_TIMEOUT_MS);
 
     const maybeResolve = () => {
-      const publicMatch = stdout.match(/^cortex web-ui running at (.+)$/m);
+      const publicMatch = stdout.match(/^phren web-ui running at (.+)$/m);
       const secureMatch = stdout.match(/^secure session URL: (.+)$/m);
       if (!publicMatch || !secureMatch) return;
       cleanupListeners();
@@ -262,19 +262,19 @@ async function stopProcess(child: ChildProcessWithoutNullStreams): Promise<void>
 export async function createWebUiHarness(): Promise<WebUiHarness> {
   ensureCliBuilt();
 
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-playwright-"));
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-playwright-"));
   const repoADir = path.join(rootDir, "repo-a");
   const repoBDir = path.join(rootDir, "repo-b");
   fs.mkdirSync(path.join(repoADir, ".git"), { recursive: true });
   fs.mkdirSync(path.join(repoBDir, ".git"), { recursive: true });
 
-  const { homeDir, cortexDir, env } = makeIsolatedEnv(rootDir);
+  const { homeDir, phrenDir, env } = makeIsolatedEnv(rootDir);
   runCli(["init", "-y", "--profile", "work"], repoADir, env);
   runCli(["add", repoBDir], repoADir, env);
 
-  seedHookFixtures(cortexDir, homeDir);
-  seedSkillFixture(cortexDir);
-  seedProjectFixtures(cortexDir);
+  seedHookFixtures(phrenDir, homeDir);
+  seedSkillFixture(phrenDir);
+  seedProjectFixtures(phrenDir);
 
   const started = await startWebUi(repoADir, env);
   const secure = new URL(started.secureUrl);
@@ -287,7 +287,7 @@ export async function createWebUiHarness(): Promise<WebUiHarness> {
   return {
     rootDir,
     homeDir,
-    cortexDir,
+    phrenDir,
     repoADir,
     repoBDir,
     publicUrl: started.publicUrl,

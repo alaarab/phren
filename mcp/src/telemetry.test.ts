@@ -18,7 +18,7 @@ import {
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-telemetry-test-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-telemetry-test-"));
   _resetBuffer();
 });
 

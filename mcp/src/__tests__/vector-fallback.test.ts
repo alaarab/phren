@@ -117,7 +117,7 @@ describe("vectorFallback content hydration", () => {
   });
 
   it("classifies Windows-style task paths correctly during hydration", async () => {
-    expect(deriveVectorDocIdentity("C:\\cortex", "C:\\cortex\\proj\\tasks.md")).toEqual({
+    expect(deriveVectorDocIdentity("C:\\phren", "C:\\phren\\proj\\tasks.md")).toEqual({
       project: "proj",
       filename: "tasks.md",
       relFile: "tasks.md",

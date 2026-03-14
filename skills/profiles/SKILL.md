@@ -1,12 +1,12 @@
 ---
 name: profiles
-description: Manage machine-to-profile and profile-to-project mappings in cortex.
+description: Manage machine-to-profile and profile-to-project mappings in phren.
 dependencies:
   - git
 ---
-# cortex-profiles - Manage your profiles
+# phren-profiles - Manage your profiles
 
-> **Multi-machine only.** This skill is for users who sync cortex across multiple machines and need to control which projects appear where. If you only use one machine, you can skip this -- `cortex-sync` handles everything you need.
+> **Multi-machine only.** This skill is for users who sync phren across multiple machines and need to control which projects appear where. If you only use one machine, you can skip this -- `phren-sync` handles everything you need.
 
 > Add projects to profiles, move projects between profiles, create new profiles, and check what's in each one.
 
@@ -14,17 +14,17 @@ Manage which projects appear on which machines by editing your profile definitio
 
 ## Prerequisites
 
-You need a cortex repo. The profiles live in `~/.cortex/profiles/` and machine mappings live in `~/.cortex/machines.yaml`.
+You need a phren repo. The profiles live in `~/.phren/profiles/` and machine mappings live in `~/.phren/machines.yaml`.
 
 ```
-~/.cortex/
+~/.phren/
   profiles/
     work.yaml
     personal.yaml
   machines.yaml
 ```
 
-If you don't have a cortex repo yet, start with `cortex-init`.
+If you don't have a phren repo yet, start with `phren-init`.
 
 ## What's a profile?
 
@@ -47,7 +47,7 @@ When you sync on a machine mapped to this profile, only those projects appear. P
 
 User says: "add my-project to my work profile"
 
-1. Find the profile file: `~/.cortex/profiles/work.yaml`
+1. Find the profile file: `~/.phren/profiles/work.yaml`
 2. Read it and find the `projects:` list
 3. Add the project name if it's not already there
 4. Commit the change
@@ -56,7 +56,7 @@ User says: "add my-project to my work profile"
 
 User says: "create a new profile called staging"
 
-1. Create a new file: `~/.cortex/profiles/staging.yaml`
+1. Create a new file: `~/.phren/profiles/staging.yaml`
 2. Fill it with the required structure:
 
 ```yaml
@@ -73,49 +73,49 @@ projects:
 
 User says: "what's in my personal profile?"
 
-1. Find `~/.cortex/profiles/personal.yaml`
+1. Find `~/.phren/profiles/personal.yaml`
 2. Read it and display the projects list
 
 ### "Move a project between profiles"
 
 User says: "move my-project from personal to work"
 
-1. Find `~/.cortex/profiles/personal.yaml` and remove the project
-2. Find `~/.cortex/profiles/work.yaml` and add the project
+1. Find `~/.phren/profiles/personal.yaml` and remove the project
+2. Find `~/.phren/profiles/work.yaml` and add the project
 3. Commit both changes
 
 ### "Set this machine's profile"
 
 User says: "this machine is my work laptop"
 
-1. Get the current machine name: `cat ~/.cortex/.machine-id` or `hostname`
-2. Ask which profile to use (show available profiles from `~/.cortex/profiles/`)
-3. Add/update the line in `~/.cortex/machines.yaml`: `work-laptop: work`
+1. Get the current machine name: `cat ~/.phren/.machine-id` or `hostname`
+2. Ask which profile to use (show available profiles from `~/.phren/profiles/`)
+3. Add/update the line in `~/.phren/machines.yaml`: `work-laptop: work`
 4. Commit the change
-5. Run `cortex-sync` to activate
+5. Run `phren-sync` to activate
 
 ### "List my profiles"
 
 If the user asks what profiles exist:
 
-1. List all files in `~/.cortex/profiles/`
+1. List all files in `~/.phren/profiles/`
 2. For each one, read the name and description fields
 3. Show which machine is mapped to each profile (from `machines.yaml`)
 
 ## After making changes
 
-Always commit to the cortex git repo:
+Always commit to the phren git repo:
 
 ```bash
-cd ~/.cortex
+cd ~/.phren
 git add profiles/ machines.yaml
 git commit -m "update profiles"
 git push  # only if remote exists
 ```
 
-Then suggest running `cortex-sync` to activate changes on this machine.
+Then suggest running `phren-sync` to activate changes on this machine.
 
 ## Related skills
 
-- `cortex-sync`: sync your profiles to this machine and activate them
-- `cortex-init`: create a new project or bootstrap cortex from scratch
+- `phren-sync`: sync your profiles to this machine and activate them
+- `phren-init`: create a new project or bootstrap phren from scratch

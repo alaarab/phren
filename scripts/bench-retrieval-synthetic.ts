@@ -139,9 +139,9 @@ function shardFor(index: number): string {
   return `shard-${String(Math.floor(index / 1000)).padStart(3, "0")}`;
 }
 
-function memoryPath(cortexPath: string, index: number): string {
+function memoryPath(phrenPath: string, index: number): string {
   const shard = shardFor(index);
-  return path.join(cortexPath, PROJECT_NAME, "reference", shard, `memory-${pad(index)}.md`);
+  return path.join(phrenPath, PROJECT_NAME, "reference", shard, `memory-${pad(index)}.md`);
 }
 
 function memoryFilename(index: number): string {
@@ -172,21 +172,21 @@ function buildMemoryContent(index: number): string {
   ].join("\n");
 }
 
-function createSyntheticCortex(rootDir: string, size: number): { cortexPath: string; queries: QuerySpec[] } {
-  const cortexPath = path.join(rootDir, `cortex-sim-${size}`);
-  fs.mkdirSync(path.join(cortexPath, PROJECT_NAME, "reference"), { recursive: true });
-  fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "CLAUDE.md"), `# ${PROJECT_NAME}\n\nSynthetic benchmark project.\n`);
-  fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "summary.md"), `Synthetic corpus with ${size} generated memory files.\n`);
-  fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "FINDINGS.md"), "# Findings\n\n");
-  fs.writeFileSync(path.join(cortexPath, PROJECT_NAME, "tasks.md"), "# Task\n\n## Active\n\n");
+function createSyntheticPhren(rootDir: string, size: number): { phrenPath: string; queries: QuerySpec[] } {
+  const phrenPath = path.join(rootDir, `phren-sim-${size}`);
+  fs.mkdirSync(path.join(phrenPath, PROJECT_NAME, "reference"), { recursive: true });
+  fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "CLAUDE.md"), `# ${PROJECT_NAME}\n\nSynthetic benchmark project.\n`);
+  fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "summary.md"), `Synthetic corpus with ${size} generated memory files.\n`);
+  fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "FINDINGS.md"), "# Findings\n\n");
+  fs.writeFileSync(path.join(phrenPath, PROJECT_NAME, "tasks.md"), "# Task\n\n## Active\n\n");
 
   for (let index = 0; index < size; index++) {
-    const fullPath = memoryPath(cortexPath, index);
+    const fullPath = memoryPath(phrenPath, index);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, buildMemoryContent(index));
   }
 
-  return { cortexPath, queries: [] };
+  return { phrenPath, queries: [] };
 }
 
 function buildQuerySet(size: number, desiredCount: number): QuerySpec[] {
@@ -220,7 +220,7 @@ function buildQuerySet(size: number, desiredCount: number): QuerySpec[] {
 
 async function runMode(
   mode: "lexical" | "hybrid_gated",
-  cortexPath: string,
+  phrenPath: string,
   db: Awaited<ReturnType<typeof buildIndex>>,
   querySpec: QuerySpec,
 ): Promise<ModeRun> {
@@ -230,11 +230,11 @@ async function runMode(
   const rows = safeQuery
     ? mode === "lexical"
       ? searchDocuments(db, safeQuery, querySpec.query, keywords, PROJECT_NAME, false)
-      : await searchDocumentsAsync(db, safeQuery, querySpec.query, keywords, PROJECT_NAME, false, cortexPath)
+      : await searchDocumentsAsync(db, safeQuery, querySpec.query, keywords, PROJECT_NAME, false, phrenPath)
     : null;
   const searchMs = performance.now() - searchStart;
 
-  const ranked = rankResults(rows ?? [], "general", null, PROJECT_NAME, cortexPath, db, undefined, querySpec.query);
+  const ranked = rankResults(rows ?? [], "general", null, PROJECT_NAME, phrenPath, db, undefined, querySpec.query);
   const { selected, usedTokens } = selectSnippets(
     ranked,
     keywords || querySpec.query,
@@ -269,30 +269,30 @@ function summarizeRuns(runs: ModeRun[]) {
 }
 
 async function benchmarkSize(rootDir: string, size: number, queriesPerSize: number, keepTemp: boolean) {
-  const { cortexPath } = createSyntheticCortex(rootDir, size);
+  const { phrenPath } = createSyntheticPhren(rootDir, size);
   const queries = buildQuerySet(size, queriesPerSize);
 
   const coldStart = performance.now();
-  const coldDb = await buildIndex(cortexPath);
+  const coldDb = await buildIndex(phrenPath);
   const coldBuildMs = Number((performance.now() - coldStart).toFixed(2));
   coldDb.close();
 
   const warmStart = performance.now();
-  const db = await buildIndex(cortexPath);
+  const db = await buildIndex(phrenPath);
   const warmBuildMs = Number((performance.now() - warmStart).toFixed(2));
 
   try {
     const corpusDocs = Number(db.exec("SELECT COUNT(*) FROM docs")?.[0]?.values?.[0]?.[0] ?? 0);
     const runs: ModeRun[] = [];
     for (const querySpec of queries) {
-      runs.push(await runMode("lexical", cortexPath, db, querySpec));
-      runs.push(await runMode("hybrid_gated", cortexPath, db, querySpec));
+      runs.push(await runMode("lexical", phrenPath, db, querySpec));
+      runs.push(await runMode("hybrid_gated", phrenPath, db, querySpec));
     }
     const lexicalRuns = runs.filter((run) => run.mode === "lexical");
     const hybridRuns = runs.filter((run) => run.mode === "hybrid_gated");
     return {
       size,
-      cortexPath: keepTemp ? cortexPath : null,
+      phrenPath: keepTemp ? phrenPath : null,
       corpusDocs,
       generatedFiles: size,
       queries: queries.map((query) => query.query),
@@ -307,7 +307,7 @@ async function benchmarkSize(rootDir: string, size: number, queriesPerSize: numb
     };
   } finally {
     db.close();
-    if (!keepTemp) fs.rmSync(cortexPath, { recursive: true, force: true });
+    if (!keepTemp) fs.rmSync(phrenPath, { recursive: true, force: true });
   }
 }
 
@@ -315,7 +315,7 @@ async function main() {
   const { sizes, outputPath, keepTemp, queriesPerSize, rootDir } = parseArgs(process.argv);
   const runRoot = rootDir
     ? path.resolve(rootDir)
-    : fs.mkdtempSync(path.join(os.tmpdir(), "cortex-synthetic-bench-"));
+    : fs.mkdtempSync(path.join(os.tmpdir(), "phren-synthetic-bench-"));
   fs.mkdirSync(runRoot, { recursive: true });
 
   const sizeRuns = [];
@@ -339,8 +339,8 @@ async function main() {
       tokenBudget: DEFAULT_TOKEN_BUDGET,
       lineBudget: DEFAULT_LINE_BUDGET,
       charBudget: DEFAULT_CHAR_BUDGET,
-      hybridFeature: process.env.CORTEX_FEATURE_HYBRID_SEARCH || null,
-      embeddingApiConfigured: Boolean(process.env.CORTEX_EMBEDDING_API_URL || process.env.OLLAMA_HOST || process.env.OLLAMA_URL),
+      hybridFeature: process.env.PHREN_FEATURE_HYBRID_SEARCH || null,
+      embeddingApiConfigured: Boolean(process.env.PHREN_EMBEDDING_API_URL || process.env.OLLAMA_HOST || process.env.OLLAMA_URL),
     },
     runs: sizeRuns,
   };

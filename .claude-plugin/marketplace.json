@@ -1,19 +1,19 @@
 {
-  "name": "cortex",
+  "name": "phren",
   "owner": {
     "name": "Ala Arab"
   },
   "plugins": [
     {
-      "name": "cortex",
+      "name": "phren",
       "source": "./",
       "description": "Long-term memory for AI coding agents. Project context, learnings, task queues, memory governance. Works with Claude Code, Copilot CLI, Cursor, and Codex.",
       "version": "1.25.0",
       "author": {
         "name": "Ala Arab"
       },
-      "homepage": "https://github.com/alaarab/cortex",
-      "repository": "https://github.com/alaarab/cortex",
+      "homepage": "https://github.com/alaarab/phren",
+      "repository": "https://github.com/alaarab/phren",
       "license": "MIT",
       "keywords": ["claude", "claude-code", "mcp", "memory", "knowledge", "agentskills", "hooks"]
     }

@@ -108,20 +108,20 @@ function atomicWriteText(filePath: string, content: string): void {
 }
 export { getMachineName } from "./machine-identity.js";
 
-export function lookupProfile(cortexPath: string, machine: string): string {
-  const listed = listMachinesShared(cortexPath);
+export function lookupProfile(phrenPath: string, machine: string): string {
+  const listed = listMachinesShared(phrenPath);
   if (!listed.ok) return "";
   return listed.data[machine] || "";
 }
 
-function listProfiles(cortexPath: string): Array<{ name: string; description: string }> {
-  const listed = listProfilesShared(cortexPath);
+function listProfiles(phrenPath: string): Array<{ name: string; description: string }> {
+  const listed = listProfilesShared(phrenPath);
   if (!listed.ok) return [];
   return listed.data.map((profile) => ({ name: profile.name, description: "" }));
 }
 
-export function findProfileFile(cortexPath: string, profileName: string): string | null {
-  const profilesDir = path.join(cortexPath, "profiles");
+export function findProfileFile(phrenPath: string, profileName: string): string | null {
+  const profilesDir = path.join(phrenPath, "profiles");
   if (!fs.existsSync(profilesDir)) return null;
   for (const f of fs.readdirSync(profilesDir)) {
     if (!f.endsWith(".yaml")) continue;
@@ -147,16 +147,16 @@ function currentPackageVersion(): string | null {
   }
 }
 
-function maybeOfferStarterTemplateUpdate(cortexPath: string) {
+function maybeOfferStarterTemplateUpdate(phrenPath: string) {
   const current = currentPackageVersion();
   if (!current) return;
-  const prefsPath = installPreferencesFile(cortexPath);
+  const prefsPath = installPreferencesFile(phrenPath);
   if (!fs.existsSync(prefsPath)) return;
   try {
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as { installedVersion?: string };
     if (isVersionNewer(current, prefs.installedVersion)) {
       log(`  Starter template update available: v${prefs.installedVersion} -> v${current}`);
-      log(`  Run \`npx cortex init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+      log(`  Run \`npx phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
     }
   } catch (err: unknown) {
     debugLog(`checkStarterVersionUpdate: failed to read preferences: ${errorMessage(err)}`);
@@ -165,24 +165,24 @@ function maybeOfferStarterTemplateUpdate(cortexPath: string) {
 
 // ── Machine registration ────────────────────────────────────────────────────
 
-async function registerMachine(cortexPath: string): Promise<{ machine: string; profile: string }> {
+async function registerMachine(phrenPath: string): Promise<{ machine: string; profile: string }> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string) => new Promise<string>(r => rl.question(q, r));
 
-  log("This machine isn't registered with cortex yet.\n");
+  log("This machine isn't registered with phren yet.\n");
   const machine = (await ask("What should this machine be called? (e.g. work-desktop): ")).trim();
   if (!machine) { rl.close(); throw new Error("Machine name can't be empty."); }
 
   log("\nAvailable profiles:");
-  for (const p of listProfiles(cortexPath)) log(`  ${p.name}  (${p.description})`);
+  for (const p of listProfiles(phrenPath)) log(`  ${p.name}  (${p.description})`);
   log("");
 
   const profile = (await ask("Which profile? ")).trim();
   rl.close();
   if (!profile) throw new Error("Profile name can't be empty.");
-  if (!findProfileFile(cortexPath, profile)) throw new Error(`No profile named '${profile}' found.`);
+  if (!findProfileFile(phrenPath, profile)) throw new Error(`No profile named '${profile}' found.`);
 
-  const mapResult = setMachineProfile(cortexPath, machine, profile);
+  const mapResult = setMachineProfile(phrenPath, machine, profile);
   if (!mapResult.ok) throw new Error(mapResult.error);
   persistMachineName(machine);
 
@@ -192,19 +192,19 @@ async function registerMachine(cortexPath: string): Promise<{ machine: string; p
 
 // ── Sparse checkout ─────────────────────────────────────────────────────────
 
-function setupSparseCheckout(cortexPath: string, projects: string[]) {
+function setupSparseCheckout(phrenPath: string, projects: string[]) {
   try {
-    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
+    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] setupSparseCheckout notAGitRepo: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] setupSparseCheckout notAGitRepo: ${errorMessage(err)}\n`);
     return;
   }
 
   const alwaysInclude = ["profiles", "machines.yaml", "global", "scripts", "link.sh", "README.md", ".gitignore"];
   const paths = [...alwaysInclude, ...projects];
   try {
-    execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
-    execFileSync("git", ["pull", "--ff-only"], { cwd: cortexPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
+    execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
+    execFileSync("git", ["pull", "--ff-only"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
   } catch (err: unknown) {
     debugLog(`setupSparseCheckout: git sparse-checkout or pull failed: ${errorMessage(err)}`);
   }
@@ -212,7 +212,7 @@ function setupSparseCheckout(cortexPath: string, projects: string[]) {
 
 // ── Symlink helpers ─────────────────────────────────────────────────────────
 
-/** Add entries to .git/info/exclude so cortex-managed symlinks don't pollute git status.
+/** Add entries to .git/info/exclude so phren-managed symlinks don't pollute git status.
  *  Skips files already tracked by git to avoid hiding user-owned content. */
 function addGitExcludes(projectDir: string, entries: string[]): void {
   const gitDir = path.join(projectDir, ".git");
@@ -240,7 +240,7 @@ function addGitExcludes(projectDir: string, entries: string[]): void {
     const existingLines = new Set(existing.split("\n").map((l) => l.trim()));
     const toAdd = safe.filter((e) => !existingLines.has(e));
     if (toAdd.length === 0) return;
-    const marker = "# cortex-managed";
+    const marker = "# phren-managed";
     const needsMarker = !existingLines.has(marker);
     const suffix = (needsMarker ? `\n${marker}\n` : "\n") + toAdd.join("\n") + "\n";
     fs.appendFileSync(excludePath, suffix);
@@ -292,7 +292,7 @@ function addTokenAnnotation(filePath: string) {
   atomicWriteText(filePath, `<!-- tokens: ~${rounded} -->\n${content}`);
 }
 
-const GENERATED_AGENTS_MARKER = "<!-- cortex:generated-agents -->";
+const GENERATED_AGENTS_MARKER = "<!-- phren:generated-agents -->";
 
 function writeManagedAgentsFile(src: string, dest: string, content: string, managedRoot: string): boolean {
   try {
@@ -328,38 +328,38 @@ function writeManagedAgentsFile(src: string, dest: string, content: string, mana
 
 // ── Linking operations ──────────────────────────────────────────────────────
 
-function linkGlobal(cortexPath: string, tools: Set<string>) {
+function linkGlobal(phrenPath: string, tools: Set<string>) {
   log("  global skills -> ~/.claude/skills/");
   const skillsDir = homePath(".claude", "skills");
-  syncScopeSkillsToDir(cortexPath, "global", skillsDir);
+  syncScopeSkillsToDir(phrenPath, "global", skillsDir);
 
-  const globalClaude = path.join(cortexPath, "global", "CLAUDE.md");
+  const globalClaude = path.join(phrenPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
-    symlinkFile(globalClaude, homePath(".claude", "CLAUDE.md"), cortexPath);
+    symlinkFile(globalClaude, homePath(".claude", "CLAUDE.md"), phrenPath);
     if (tools.has("copilot")) {
       try {
         const copilotInstrDir = homePath(".github");
         fs.mkdirSync(copilotInstrDir, { recursive: true });
-        symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), cortexPath);
+        symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), phrenPath);
       } catch (err: unknown) {
-        if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkGlobal copilotInstructions: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkGlobal copilotInstructions: ${errorMessage(err)}\n`);
       }
     }
   }
 }
 
-function linkProject(cortexPath: string, project: string, tools: Set<string>) {
-  const config = readProjectConfig(cortexPath, project);
-  const ownership = getProjectOwnershipMode(cortexPath, project, config);
+function linkProject(phrenPath: string, project: string, tools: Set<string>) {
+  const config = readProjectConfig(phrenPath, project);
+  const ownership = getProjectOwnershipMode(phrenPath, project, config);
   const target = findProjectDir(project);
-  if (!target && ownership === "cortex-managed") {
+  if (!target && ownership === "phren-managed") {
     log(`  skip ${project} (not found on disk)`);
     if (isRecord(config.mcpServers)) {
       linkProjectMcpServers(project, config.mcpServers as Record<string, ProjectMcpServerEntry>);
     }
     return;
   }
-  if (ownership !== "cortex-managed") {
+  if (ownership !== "phren-managed") {
     if (target) {
       log(`  ${project} -> ${target} (${ownership}, repo mirrors disabled)`);
     } else {
@@ -376,17 +376,17 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   const excludeEntries: string[] = [];
 
   for (const f of ["CLAUDE.md", "REFERENCE.md", "FINDINGS.md"]) {
-    const src = path.join(cortexPath, project, f);
+    const src = path.join(phrenPath, project, f);
     if (fs.existsSync(src)) {
-      if (symlinkFile(src, path.join(target, f), cortexPath)) excludeEntries.push(f);
+      if (symlinkFile(src, path.join(target, f), phrenPath)) excludeEntries.push(f);
       if (f === "CLAUDE.md") {
         if (tools.has("copilot")) {
           try {
             const copilotDir = path.join(target, ".github");
             fs.mkdirSync(copilotDir, { recursive: true });
-            symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"), cortexPath);
+            symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"), phrenPath);
           } catch (err: unknown) {
-            if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject copilotInstructions: ${errorMessage(err)}\n`);
+            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject copilotInstructions: ${errorMessage(err)}\n`);
           }
         }
       }
@@ -394,40 +394,40 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
   }
 
   // CLAUDE-*.md split files
-  const projectDir = path.join(cortexPath, project);
+  const projectDir = path.join(phrenPath, project);
   if (fs.existsSync(projectDir)) {
     for (const f of fs.readdirSync(projectDir)) {
       if (/^CLAUDE-.+\.md$/.test(f)) {
-        if (symlinkFile(path.join(projectDir, f), path.join(target, f), cortexPath)) excludeEntries.push(f);
+        if (symlinkFile(path.join(projectDir, f), path.join(target, f), phrenPath)) excludeEntries.push(f);
       }
     }
   }
 
   // Token annotation on CLAUDE.md
-  const claudeFile = path.join(cortexPath, project, "CLAUDE.md");
+  const claudeFile = path.join(phrenPath, project, "CLAUDE.md");
   if (fs.existsSync(claudeFile)) {
     try { addTokenAnnotation(claudeFile); } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject tokenAnnotation: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject tokenAnnotation: ${errorMessage(err)}\n`);
     }
   }
 
   // Project-level skills
   const targetSkills = path.join(target, ".claude", "skills");
   const skillManifest = config.skills !== false
-    ? syncScopeSkillsToDir(cortexPath, project, targetSkills)
+    ? syncScopeSkillsToDir(phrenPath, project, targetSkills)
     : undefined;
 
   if (tools.has("codex") && fs.existsSync(claudeFile)) {
     try {
-      const manifest = skillManifest || syncScopeSkillsToDir(cortexPath, project, targetSkills);
+      const manifest = skillManifest || syncScopeSkillsToDir(phrenPath, project, targetSkills);
       const agentsContent = `${fs.readFileSync(claudeFile, "utf8").trimEnd()}\n\n${GENERATED_AGENTS_MARKER}\n${renderSkillInstructionsSection(manifest)}\n`;
-      if (writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, cortexPath)) excludeEntries.push("AGENTS.md");
+      if (writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, phrenPath)) excludeEntries.push("AGENTS.md");
     } catch (err: unknown) {
-      if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] linkProject agentsMd: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject agentsMd: ${errorMessage(err)}\n`);
     }
   }
 
-  // Auto-exclude cortex-managed files from git status
+  // Auto-exclude phren-managed files from git status
   if (excludeEntries.length > 0) addGitExcludes(target, excludeEntries);
 
   // Per-project MCP servers
@@ -438,7 +438,7 @@ function linkProject(cortexPath: string, project: string, tools: Set<string>) {
 
 /**
  * Merge per-project MCP servers into Claude's settings.json.
- * Keys are namespaced as "cortex__<project>__<name>" so we can identify
+ * Keys are namespaced as "phren__<project>__<name>" so we can identify
  * and clean them up without touching user-managed servers.
  */
 function linkProjectMcpServers(project: string, servers: Record<string, ProjectMcpServerEntry>): void {
@@ -449,11 +449,11 @@ function linkProjectMcpServers(project: string, servers: Record<string, ProjectM
       const mcpServers = isRecord(data.mcpServers) ? data.mcpServers : (data.mcpServers = {});
       // Remove stale entries for this project (keys we previously wrote)
       for (const key of Object.keys(mcpServers)) {
-        if (key.startsWith(`cortex__${project}__`)) delete mcpServers[key];
+        if (key.startsWith(`phren__${project}__`)) delete mcpServers[key];
       }
       // Add current entries
       for (const [name, entry] of Object.entries(servers)) {
-        const key = `cortex__${project}__${name}`;
+        const key = `phren__${project}__${name}`;
         const server: Record<string, unknown> = { command: entry.command };
         if (Array.isArray(entry.args)) server.args = entry.args;
         if (entry.env && typeof entry.env === "object") server.env = entry.env;
@@ -465,7 +465,7 @@ function linkProjectMcpServers(project: string, servers: Record<string, ProjectM
   }
 }
 
-/** Remove any cortex__<project>__* MCP entries for projects no longer in the active set. */
+/** Remove any phren__<project>__* MCP entries for projects no longer in the active set. */
 function pruneStaleProjectMcpServers(activeProjects: string[]): void {
   const settingsPath = hookConfigPath("claude");
   if (!fs.existsSync(settingsPath)) return;
@@ -474,8 +474,8 @@ function pruneStaleProjectMcpServers(activeProjects: string[]): void {
       const mcpServers = isRecord(data.mcpServers) ? data.mcpServers : undefined;
       if (!mcpServers) return;
       for (const key of Object.keys(mcpServers)) {
-        if (!key.startsWith("cortex__")) continue;
-        // Key format: cortex__<project>__<name>
+        if (!key.startsWith("phren__")) continue;
+        // Key format: phren__<project>__<name>
         const parts = key.split("__");
         if (parts.length < 3) continue;
         const project = parts[1];
@@ -492,9 +492,9 @@ function pruneStaleProjectMcpServers(activeProjects: string[]): void {
 
 // ── Main orchestrator ───────────────────────────────────────────────────────
 
-export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
-  log("cortex link\n");
-  ensureGovernanceFiles(cortexPath);
+export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
+  log("phren link\n");
+  ensureGovernanceFiles(phrenPath);
 
   // Step 1: Identify machine + profile
   let machine = opts.machine ?? getMachineName();
@@ -503,13 +503,13 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   if (opts.profile) {
     profile = opts.profile;
   } else if (opts.register) {
-    const reg = await registerMachine(cortexPath);
+    const reg = await registerMachine(phrenPath);
     machine = reg.machine;
     profile = reg.profile;
   } else {
-    profile = lookupProfile(cortexPath, machine);
+    profile = lookupProfile(phrenPath, machine);
     if (!profile) {
-      const reg = await registerMachine(cortexPath);
+      const reg = await registerMachine(phrenPath);
       machine = reg.machine;
       profile = reg.profile;
     }
@@ -519,7 +519,7 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
   persistMachineName(machine);
 
   // Step 2: Find profile file
-  const profileFile = findProfileFile(cortexPath, profile);
+  const profileFile = findProfileFile(phrenPath, profile);
   if (!profileFile) throw new Error(`Profile '${profile}' not found in profiles/.`);
 
   log(`Machine: ${machine}`);
@@ -531,7 +531,7 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   // Step 4: Sparse checkout
   log("Setting up sparse checkout...");
-  setupSparseCheckout(cortexPath, projects);
+  setupSparseCheckout(phrenPath, projects);
   log("");
 
   // Detect installed tools once
@@ -541,49 +541,49 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   // Step 5: Symlink
   log("Linking...");
-  linkGlobal(cortexPath, detectedTools);
+  linkGlobal(phrenPath, detectedTools);
   for (const p of projects) {
-    if (p !== "global") linkProject(cortexPath, p, detectedTools);
+    if (p !== "global") linkProject(phrenPath, p, detectedTools);
   }
-  // Remove stale cortex__<project>__* MCP entries for removed projects
+  // Remove stale phren__<project>__* MCP entries for removed projects
   pruneStaleProjectMcpServers(projects.filter(p => p !== "global"));
   log("");
 
   // Step 6: Configure MCP
   log("Configuring MCP...");
-  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(cortexPath);
-  const hooksEnabled = getHooksEnabledPreference(cortexPath);
-  setMcpEnabledPreference(cortexPath, mcpEnabled);
+  const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(phrenPath);
+  const hooksEnabled = getHooksEnabledPreference(phrenPath);
+  setMcpEnabledPreference(phrenPath, mcpEnabled);
   log(`  MCP mode: ${mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)"}`);
   log(`  Hooks mode: ${hooksEnabled ? "ON (active)" : "OFF (disabled)"}`);
-  maybeOfferStarterTemplateUpdate(cortexPath);
+  maybeOfferStarterTemplateUpdate(phrenPath);
   let mcpStatus = "no_settings";
-  try { mcpStatus = configureClaude(cortexPath, { mcpEnabled, hooksEnabled }) ?? "installed"; } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureClaude: ${errorMessage(err)}\n`);
+  try { mcpStatus = configureClaude(phrenPath, { mcpEnabled, hooksEnabled }) ?? "installed"; } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureClaude: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("Claude", mcpStatus);
 
   let vsStatus = "no_vscode";
-  try { vsStatus = configureVSCode(cortexPath, { mcpEnabled }) ?? "no_vscode"; } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureVSCode: ${errorMessage(err)}\n`);
+  try { vsStatus = configureVSCode(phrenPath, { mcpEnabled }) ?? "no_vscode"; } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureVSCode: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("VS Code", vsStatus);
 
   let cursorStatus = "no_cursor";
-  try { cursorStatus = configureCursorMcp(cortexPath, { mcpEnabled }) ?? "no_cursor"; } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureCursorMcp: ${errorMessage(err)}\n`);
+  try { cursorStatus = configureCursorMcp(phrenPath, { mcpEnabled }) ?? "no_cursor"; } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCursorMcp: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("Cursor", cursorStatus);
 
   let copilotStatus = "no_copilot";
-  try { copilotStatus = configureCopilotMcp(cortexPath, { mcpEnabled }) ?? "no_copilot"; } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureCopilotMcp: ${errorMessage(err)}\n`);
+  try { copilotStatus = configureCopilotMcp(phrenPath, { mcpEnabled }) ?? "no_copilot"; } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCopilotMcp: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("Copilot CLI", copilotStatus);
 
   let codexStatus = "no_codex";
-  try { codexStatus = configureCodexMcp(cortexPath, { mcpEnabled }) ?? "no_codex"; } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link configureCodexMcp: ${errorMessage(err)}\n`);
+  try { codexStatus = configureCodexMcp(phrenPath, { mcpEnabled }) ?? "no_codex"; } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCodexMcp: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("Codex", codexStatus);
   const mcpStatusForContext = [mcpStatus, vsStatus, cursorStatus, copilotStatus, codexStatus].some(
@@ -598,40 +598,40 @@ export async function runLink(cortexPath: string, opts: LinkOptions = {}) {
 
   // Register hooks for Copilot CLI, Cursor, Codex
   if (hooksEnabled) {
-    const hookedTools = configureAllHooks(cortexPath, { tools: detectedTools });
+    const hookedTools = configureAllHooks(phrenPath, { tools: detectedTools });
     if (hookedTools.length) log(`  Hooks registered: ${hookedTools.join(", ")}`);
   } else {
     log(`  Hooks registration skipped (hooks-mode is off)`);
   }
 
-  // Write cortex.SKILL.md
+  // Write phren.SKILL.md
   try {
-    writeSkillMd(cortexPath);
-    log(`  cortex.SKILL.md written (agentskills-compatible tools)`);
+    writeSkillMd(phrenPath);
+    log(`  phren.SKILL.md written (agentskills-compatible tools)`);
   } catch (err: unknown) {
-    if (process.env.CORTEX_DEBUG) process.stderr.write(`[cortex] link writeSkillMd: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link writeSkillMd: ${errorMessage(err)}\n`);
   }
   log("");
 
   // Step 7: Context file
   if (opts.task === "debugging") {
-    writeContextDebugging(machine, profile, mcpStatusForContext, projects, cortexPath);
+    writeContextDebugging(machine, profile, mcpStatusForContext, projects, phrenPath);
   } else if (opts.task === "planning") {
-    writeContextPlanning(machine, profile, mcpStatusForContext, projects, cortexPath);
+    writeContextPlanning(machine, profile, mcpStatusForContext, projects, phrenPath);
   } else if (opts.task === "clean") {
     writeContextClean(machine, profile, mcpStatusForContext, projects);
   } else {
-    writeContextDefault(machine, profile, mcpStatusForContext, projects, cortexPath);
+    writeContextDefault(machine, profile, mcpStatusForContext, projects, phrenPath);
   }
 
   // Step 8: Memory (read back native changes, then rebuild)
-  readBackNativeMemory(cortexPath, projects);
-  rebuildMemory(cortexPath, projects);
+  readBackNativeMemory(phrenPath, projects);
+  rebuildMemory(phrenPath, projects);
 
   log(`\nDone. Profile '${profile}' is active.`);
   if (opts.task) log(`Task mode: ${opts.task}`);
   log(`\nWhat's next:`);
-  log(`  Start Claude in your project directory — cortex injects context automatically.`);
-  log(`  Run cortex-discover after your first week to surface gaps in project knowledge.`);
-  log(`  Run cortex-consolidate after working across projects to find shared patterns.`);
+  log(`  Start Claude in your project directory — phren injects context automatically.`);
+  log(`  Run phren-discover after your first week to surface gaps in project knowledge.`);
+  log(`  Run phren-consolidate after working across projects to find shared patterns.`);
 }

@@ -37,7 +37,7 @@ describe("mcp-hooks project overrides", () => {
     server = makeMockServer();
 
     const ctx: McpContext = {
-      cortexPath: tmp.path,
+      phrenPath: tmp.path,
       profile: "",
       db: () => { throw new Error("unused"); },
       rebuildIndex: async () => {},

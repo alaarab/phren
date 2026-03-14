@@ -1,43 +1,43 @@
-# cortex: LLM Installation Guide
+# phren: LLM Installation Guide
 
-cortex keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks.
+phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks.
 
 ## Quick Start
 
 ```bash
-npm install -g @alaarab/cortex
-cortex init
-cortex init --dry-run
+npm install -g @alaarab/phren
+phren init
+phren init --dry-run
 ```
 
-This creates `~/.cortex`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.
+This creates `~/.phren`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.
 
 Project setup note:
-- `cortex add` is the supported enrollment path for an existing repo.
+- `phren add` is the supported enrollment path for an existing repo.
 
 To update the installed package:
 
 ```bash
-cortex update
+phren update
 ```
 
 To update the installed package and refresh shipped starter globals in one flow:
 
 ```bash
-cortex update --refresh-starter
+phren update --refresh-starter
 ```
 
-Use `cortex init --apply-starter-update` when you only want to refresh starter assets without running the full update flow.
+Use `phren init --apply-starter-update` when you only want to refresh starter assets without running the full update flow.
 
 To remove everything:
 
 ```bash
-cortex uninstall
+phren uninstall
 ```
 
 ## Maintenance Safety
 
-Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, cortex creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
+Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
 ## MCP Tools (60 across 11 modules)
 
@@ -81,7 +81,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `get_contradictions` | `project?`, `finding_text?` | List unresolved contradicted findings across one project or all projects, optionally filtered by selector. |
 | `remove_finding` | `project`, `finding` | Remove a finding by text match. Use when an insight is wrong or outdated. |
 | `remove_findings` | `project`, `findings[]` | Bulk remove multiple findings in one call. |
-| `push_changes` | `message?` | Commit and push all cortex changes. Retries with rebase on push conflicts. |
+| `push_changes` | `message?` | Commit and push all phren changes. Retries with rebase on push conflicts. |
 | `auto_extract_findings` | `context` | Extract findings from conversation context automatically. |
 
 ### Memory Quality
@@ -95,7 +95,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `add_project` | `path`, `profile?` | Bootstrap a repo or working directory into cortex and add it to the active profile. |
+| `add_project` | `path`, `profile?` | Bootstrap a repo or working directory into phren and add it to the active profile. |
 | `export_project` | `project` | Export a project's data (findings, tasks, summary) as portable JSON. |
 | `import_project` | `data` | Import project data from a previously exported JSON payload. |
 | `manage_project` | `project`, `action` | Archive or unarchive a project. |
@@ -157,7 +157,7 @@ Skill system behavior:
 | `reject_queue_item` | `project`, `item` | Reject an item from the review queue. |
 | `edit_queue_item` | `project`, `item`, `new_text` | Edit an item in the review queue before accepting. |
 
-Governance, policy, and maintenance tools are CLI-only. Use `cortex config` and `cortex maintain` commands.
+Governance, policy, and maintenance tools are CLI-only. Use `phren config` and `phren maintain` commands.
 
 ## Lifecycle Hooks and Integrations
 
@@ -166,9 +166,9 @@ Copilot CLI, Cursor, and Codex receive generated hook config files plus session 
 
 | Hook | Event | What it does |
 |------|-------|-------------|
-| `hook-session-start` | SessionStart | Pulls latest cortex changes (`git pull --rebase`), runs doctor self-heal, schedules daily maintenance. |
-| `hook-prompt` | UserPromptSubmit | Extracts keywords from the user's prompt, searches cortex, injects relevant context snippets. Checks consolidation thresholds and fires a one-time notice per session. |
-| `hook-stop` | Stop | Auto-commits and pushes `~/.cortex` changes after every agent response. |
+| `hook-session-start` | SessionStart | Pulls latest phren changes (`git pull --rebase`), runs doctor self-heal, schedules daily maintenance. |
+| `hook-prompt` | UserPromptSubmit | Extracts keywords from the user's prompt, searches phren, injects relevant context snippets. Checks consolidation thresholds and fires a one-time notice per session. |
+| `hook-stop` | Stop | Auto-commits and pushes `~/.phren` changes after every agent response. |
 | `hook-context` | SessionStart | Detects the current project from cwd and injects its CLAUDE.md and summary. |
 
 Tool integration summary:
@@ -180,15 +180,15 @@ Tool integration summary:
 Toggle MCP and hooks independently:
 
 ```bash
-cortex mcp-mode on|off|status
-cortex hooks-mode on|off|status
+phren mcp-mode on|off|status
+phren hooks-mode on|off|status
 ```
 
-When MCP is off but hooks are on, cortex still injects context via hooks (no MCP tools available to the agent). When hooks are off, the hook commands exit immediately without doing work.
+When MCP is off but hooks are on, phren still injects context via hooks (no MCP tools available to the agent). When hooks are off, the hook commands exit immediately without doing work.
 
 ## Memory Governance Pipeline
 
-cortex includes a trust filtering system that scores and ages memory entries before injection.
+phren includes a trust filtering system that scores and ages memory entries before injection.
 
 ### Decay Curve
 
@@ -202,7 +202,7 @@ Findings lose confidence as they age. The default decay multipliers:
 | 90-120 days | 0.45 | Low confidence |
 | 120+ days | 0.0 | Expired (prunable) |
 
-These values are configurable via `cortex config policy` or the `retention-policy.json` governance file.
+These values are configurable via `phren config policy` or the `retention-policy.json` governance file.
 
 ### Citation Validation
 
@@ -219,14 +219,14 @@ Entries in `CANONICAL_MEMORIES.md` are protected from pruning and decay. Use `pi
 
 ### Audit Trail
 
-All governance actions (scans, prunes, migrations, feedback) are logged to `.runtime/audit.log` with timestamps and actor information. The `CORTEX_ACTOR` env var identifies who performed the action.
+All governance actions (scans, prunes, migrations, feedback) are logged to `.runtime/audit.log` with timestamps and actor information. The `PHREN_ACTOR` env var identifies who performed the action.
 
 ### Identity and RBAC
 
 Access control is role-based (`admin`, `maintainer`, `contributor`, `viewer`):
 - shared policy: `.governance/access-control.json`
 - local actor overrides: `.runtime/access-control.local.json`
-- actor identity source: `CORTEX_ACTOR` (when trusted) or OS user identity
+- actor identity source: `PHREN_ACTOR` (when trusted) or OS user identity
 
 ### Quality Feedback Loop
 
@@ -240,7 +240,7 @@ Feedback scores feed back into the trust multiplier for future injections.
 
 ## Web UI Security
 
-`cortex web-ui` binds loopback-only (`127.0.0.1`) and generates a per-run auth token.
+`phren web-ui` binds loopback-only (`127.0.0.1`) and generates a per-run auth token.
 Mutating routes require both:
 - auth token (bearer/query/body)
 - CSRF token (single-use, TTL-bound)
@@ -252,7 +252,7 @@ The server also sets CSP and anti-framing headers.
 Telemetry is disabled by default. Enable with:
 
 ```bash
-cortex config telemetry on
+phren config telemetry on
 ```
 
 Telemetry is local-only and stored in `.runtime/telemetry.json` (tool/command/session/error counters). No external reporting is sent by default.

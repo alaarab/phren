@@ -6,12 +6,12 @@ import { isProjectHookEnabled, readProjectConfig, writeProjectConfig, writeProje
 
 describe("project-config hook preferences", () => {
   let tmp: { path: string; cleanup: () => void };
-  let cortexPath: string;
+  let phrenPath: string;
 
   beforeEach(() => {
     tmp = makeTempDir("project-config-hooks-");
-    cortexPath = tmp.path;
-    fs.mkdirSync(path.join(cortexPath, "demo"), { recursive: true });
+    phrenPath = tmp.path;
+    fs.mkdirSync(path.join(phrenPath, "demo"), { recursive: true });
   });
 
   afterEach(() => {
@@ -19,33 +19,33 @@ describe("project-config hook preferences", () => {
   });
 
   it("defaults project hook events to enabled", () => {
-    expect(isProjectHookEnabled(cortexPath, "demo", "UserPromptSubmit")).toBe(true);
-    expect(isProjectHookEnabled(cortexPath, "demo", "Stop")).toBe(true);
-    expect(isProjectHookEnabled(cortexPath, "demo", "SessionStart")).toBe(true);
-    expect(isProjectHookEnabled(cortexPath, "demo", "PostToolUse")).toBe(true);
+    expect(isProjectHookEnabled(phrenPath, "demo", "UserPromptSubmit")).toBe(true);
+    expect(isProjectHookEnabled(phrenPath, "demo", "Stop")).toBe(true);
+    expect(isProjectHookEnabled(phrenPath, "demo", "SessionStart")).toBe(true);
+    expect(isProjectHookEnabled(phrenPath, "demo", "PostToolUse")).toBe(true);
   });
 
   it("uses the base project hook toggle when an event override is absent", () => {
-    writeProjectHookConfig(cortexPath, "demo", { enabled: false });
+    writeProjectHookConfig(phrenPath, "demo", { enabled: false });
 
-    expect(isProjectHookEnabled(cortexPath, "demo", "UserPromptSubmit")).toBe(false);
-    expect(isProjectHookEnabled(cortexPath, "demo", "Stop")).toBe(false);
+    expect(isProjectHookEnabled(phrenPath, "demo", "UserPromptSubmit")).toBe(false);
+    expect(isProjectHookEnabled(phrenPath, "demo", "Stop")).toBe(false);
   });
 
   it("lets explicit event overrides win over the base project hook toggle", () => {
-    writeProjectHookConfig(cortexPath, "demo", { enabled: false });
-    writeProjectHookConfig(cortexPath, "demo", { UserPromptSubmit: true });
+    writeProjectHookConfig(phrenPath, "demo", { enabled: false });
+    writeProjectHookConfig(phrenPath, "demo", { UserPromptSubmit: true });
 
-    expect(isProjectHookEnabled(cortexPath, "demo", "UserPromptSubmit")).toBe(true);
-    expect(isProjectHookEnabled(cortexPath, "demo", "Stop")).toBe(false);
+    expect(isProjectHookEnabled(phrenPath, "demo", "UserPromptSubmit")).toBe(true);
+    expect(isProjectHookEnabled(phrenPath, "demo", "Stop")).toBe(false);
   });
 
   it("preserves sibling project config when writing hook preferences", () => {
-    writeProjectConfig(cortexPath, "demo", { ownership: "repo-managed", hooks: { Stop: false } });
+    writeProjectConfig(phrenPath, "demo", { ownership: "repo-managed", hooks: { Stop: false } });
 
-    writeProjectHookConfig(cortexPath, "demo", { enabled: false, UserPromptSubmit: true });
+    writeProjectHookConfig(phrenPath, "demo", { enabled: false, UserPromptSubmit: true });
 
-    const config = readProjectConfig(cortexPath, "demo");
+    const config = readProjectConfig(phrenPath, "demo");
     expect(config.ownership).toBe("repo-managed");
     expect(config.hooks?.enabled).toBe(false);
     expect(config.hooks?.UserPromptSubmit).toBe(true);

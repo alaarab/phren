@@ -46,7 +46,7 @@ describe("content-archive", () => {
     let tmpCleanup: () => void;
 
     beforeEach(() => {
-      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("cortex-archive-test-"));
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-archive-test-"));
     });
 
     afterEach(() => {

@@ -128,21 +128,21 @@ function resolveTaskItemMatch(items: ParsedTaskItem[], match: string): TaskRefer
 }
 
 export function resolveFindingTaskReference(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   match: string,
 ): TaskReferenceResolution {
-  const projectDir = safeProjectPath(cortexPath, project);
+  const projectDir = safeProjectPath(phrenPath, project);
   if (!projectDir) return { error: `Invalid project name: "${project}".` };
-  const taskPath = resolveTaskFilePath(cortexPath, project);
+  const taskPath = resolveTaskFilePath(phrenPath, project);
   const items = parseTaskItems(taskPath ?? path.join(projectDir, "tasks.md"));
   return resolveTaskItemMatch(items, match);
 }
 
-export function resolveAutoFindingTaskItem(cortexPath: string, project: string): string | undefined {
-  const projectDir = safeProjectPath(cortexPath, project);
+export function resolveAutoFindingTaskItem(phrenPath: string, project: string): string | undefined {
+  const projectDir = safeProjectPath(phrenPath, project);
   if (!projectDir) return undefined;
-  const taskPath = resolveTaskFilePath(cortexPath, project);
+  const taskPath = resolveTaskFilePath(phrenPath, project);
   const active = parseTaskItems(taskPath ?? path.join(projectDir, "tasks.md")).filter(
     (item) => item.section === "Active" && item.stableId,
   );
@@ -157,12 +157,12 @@ export function resolveAutoFindingTaskItem(cortexPath: string, project: string):
   return undefined;
 }
 
-function sessionsDir(cortexPath: string): string {
-  return path.join(cortexPath, ".runtime", "sessions");
+function sessionsDir(phrenPath: string): string {
+  return path.join(phrenPath, ".runtime", "sessions");
 }
 
-function listActiveSessions(cortexPath: string): SessionStateSnapshot[] {
-  const dir = sessionsDir(cortexPath);
+function listActiveSessions(phrenPath: string): SessionStateSnapshot[] {
+  const dir = sessionsDir(phrenPath);
   if (!fs.existsSync(dir)) return [];
 
   const sessions: SessionStateSnapshot[] = [];
@@ -189,14 +189,14 @@ function sessionSortValue(state: SessionStateSnapshot): number {
 }
 
 export function resolveFindingSessionId(
-  cortexPath: string,
+  phrenPath: string,
   project: string,
   explicitSessionId?: string,
 ): string | undefined {
   const trimmed = explicitSessionId?.trim();
   if (trimmed) return trimmed;
 
-  const active = listActiveSessions(cortexPath);
+  const active = listActiveSessions(phrenPath);
   if (active.length === 0) return undefined;
 
   const matchingProject = active

@@ -9,8 +9,8 @@ const PROJECT = "testapp";
 
 let tmp: { path: string; cleanup: () => void };
 
-function seedProject(cortexPath: string, project = PROJECT) {
-  const dir = path.join(cortexPath, project);
+function seedProject(phrenPath: string, project = PROJECT) {
+  const dir = path.join(phrenPath, project);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n`);
 }
@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.CORTEX_ACTOR;
+  delete process.env.PHREN_ACTOR;
   delete process.env.OPENAI_MODEL;
   tmp.cleanup();
 });
@@ -147,6 +147,7 @@ describe("finding provenance", () => {
 
   it("auto-stamps active task and active session context", () => {
     grantAdmin(tmp.path, "codex-worker");
+    process.env.PHREN_ACTOR = "codex-worker";
     writeFile(
       path.join(tmp.path, PROJECT, "tasks.md"),
       `# ${PROJECT} tasks
@@ -211,7 +212,7 @@ describe("finding provenance", () => {
     expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
   });
 
-  it("does not infer citation repo metadata from the enclosing cortex store", () => {
+  it("does not infer citation repo metadata from the enclosing phren store", () => {
     execFileSync("git", ["init"], { cwd: tmp.path, stdio: "ignore" });
     execFileSync("git", ["config", "user.name", "Vitest"], { cwd: tmp.path, stdio: "ignore" });
     execFileSync("git", ["config", "user.email", "vitest@example.com"], { cwd: tmp.path, stdio: "ignore" });
@@ -219,11 +220,11 @@ describe("finding provenance", () => {
     execFileSync("git", ["add", "."], { cwd: tmp.path, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "seed"], { cwd: tmp.path, stdio: "ignore" });
 
-    const result = addFindingToFile(tmp.path, PROJECT, "Synthesized findings should not cite the cortex store repo by default");
+    const result = addFindingToFile(tmp.path, PROJECT, "Synthesized findings should not cite the phren store repo by default");
     expect(result.ok).toBe(true);
 
     const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain("<!-- cortex:cite");
+    expect(content).toContain("<!-- phren:cite");
     expect(content).not.toContain(`"repo":"${tmp.path}"`);
     expect(content).not.toContain('"commit":');
     expect(content).not.toContain('"file":');
