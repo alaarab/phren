@@ -2045,6 +2045,13 @@ a:focus-visible, button:focus-visible {
   animation: kw-flash-cyan 5s ease-in-out infinite;
 }
 
+/* Projects — teal (workspace scope) */
+.kw-project {
+  color: #4DB6AC;
+  text-shadow: 0 0 6px rgba(77,182,172,0.3);
+  font-weight: 500;
+}
+
 /* Machines — silver (hardware identity) */
 .kw-machine {
   color: #B0BEC5;
