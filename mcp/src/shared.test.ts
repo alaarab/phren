@@ -175,7 +175,7 @@ describe("findPhrenPath", () => {
     process.env.HOME = tmp.path;
     process.chdir(tmp.path);
     try {
-      expect(findPhrenPath()).toBe(dotPhren);
+      expect(findPhrenPath()).toBe(fs.realpathSync(dotPhren));
     } finally {
       process.chdir(origCwd);
       process.env.HOME = origHome;
@@ -198,7 +198,7 @@ describe("findPhrenPath", () => {
     fs.mkdirSync(process.env.HOME, { recursive: true });
     process.chdir(nestedDir);
     try {
-      expect(findPhrenPath()).toBe(localPhren);
+      expect(findPhrenPath()).toBe(fs.realpathSync(localPhren));
     } finally {
       process.chdir(origCwd);
       process.env.HOME = origHome;
