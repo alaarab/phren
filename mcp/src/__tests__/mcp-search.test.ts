@@ -80,8 +80,8 @@ describe("mcp-search: project filter", () => {
 
   it("project-filtered search uses the shared reranker and injects canonical context", async () => {
     writeFile(
-      path.join(tmp.path, "project-a", "truths.md"),
-      "# project-a Truths\n\n- Prefer truths before ad hoc findings when working in project-a.\n"
+      path.join(tmp.path, "project-a", "CANONICAL_MEMORIES.md"),
+      "# project-a Canonical Memories\n\n- Prefer canonical memory before ad hoc findings when working in project-a.\n"
     );
     db.close();
     db = await buildIndex(tmp.path);
@@ -593,7 +593,8 @@ describe("mcp-search: lifecycle search ordering and filters", () => {
       limit: 5,
     }));
     expect(res.ok).toBe(true);
-    expect(res.data.results.length).toBeGreaterThanOrEqual(2);
+    // Inactive findings stripped from FTS index
+    expect(res.data.results.length).toBeGreaterThanOrEqual(1);
     expect(res.data.results[0].status).toBe("active");
   });
 
@@ -614,8 +615,8 @@ describe("mcp-search: lifecycle search ordering and filters", () => {
       limit: 5,
     }));
     expect(filtered.ok).toBe(true);
-    expect(filtered.data.results.length).toBeGreaterThan(0);
-    expect(filtered.data.results.every((r: any) => r.status === "stale")).toBe(true);
+    // Stale findings stripped from FTS index
+    expect(filtered.data.results.length).toBe(0);
   });
 });
 

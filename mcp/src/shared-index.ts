@@ -14,6 +14,7 @@ import {
 } from "./shared.js";
 import { getIndexPolicy, withFileLock } from "./shared-governance.js";
 import { stripTaskDoneSection } from "./shared-content.js";
+import { isInactiveFindingLine } from "./finding-lifecycle.js";
 import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
 import {
@@ -509,6 +510,10 @@ export function normalizeIndexedContent(content: string, type: string, phrenPath
   normalized = resolveImports(normalized, phrenPath);
   if (type === "task") {
     normalized = stripTaskDoneSection(normalized);
+  }
+  if (type === "findings") {
+    const lines = normalized.split("\n");
+    normalized = lines.filter(line => !isInactiveFindingLine(line)).join("\n");
   }
   if (typeof maxChars === "number" && maxChars >= 0) {
     normalized = normalized.slice(0, maxChars);

@@ -31,7 +31,6 @@ import { vectorFallback } from "./shared-search-fallback.js";
 import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { debugLog } from "./shared.js";
-import { getCorrelatedDocs } from "./query-correlation.js";
 
 // ── Scoring constants ─────────────────────────────────────────────────────────
 
@@ -54,9 +53,6 @@ const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
 const TASK_RESCUE_MIN_OVERLAP = 0.3;
 const TASK_RESCUE_OVERLAP_MARGIN = 0.12;
 const TASK_RESCUE_SCORE_MARGIN = 0.6;
-
-/** Boost applied to docs that correlate with recurring query patterns. */
-const CORRELATION_BOOST = 1.5;
 
 /** Fraction of bullets that must be low-value before applying the low-value penalty. */
 const LOW_VALUE_BULLET_FRACTION = 0.5;
@@ -754,9 +750,6 @@ export function rankResults(
   const getRecentDate = (doc: DocRow): string =>
     recentDateCache.get(doc.path || `${doc.project}/${doc.filename}`) ?? "0000-00-00";
 
-  // Query correlation: pre-warm docs that historically correlated with similar queries
-  const correlatedDocKeys = query ? new Set(getCorrelatedDocs(phrenPathLocal, query, 5)) : new Set<string>();
-
   // Precompute per-doc ranking metadata once — avoids recomputing inside sort comparator.
   const changedFiles = gitCtx?.changedFiles || new Set<string>();
   const FILE_MATCH_BOOST = 1.5;
@@ -788,8 +781,6 @@ export function rankResults(
       && queryOverlap < WEAK_CROSS_PROJECT_OVERLAP_MAX
       ? WEAK_CROSS_PROJECT_OVERLAP_PENALTY
       : 0;
-    const correlationKey = `${doc.project}/${doc.filename}`;
-    const correlationBoost = correlatedDocKeys.has(correlationKey) ? CORRELATION_BOOST : 0;
     const score = Math.round((
       intentBoost(intent, doc.type) +
       fileRel +
@@ -798,8 +789,7 @@ export function rankResults(
       qualityMult +
       entity +
       queryOverlap * queryOverlapWeight +
-      recencyBoost(doc.type, date) +
-      correlationBoost -
+      recencyBoost(doc.type, date) -
       weakCrossProjectPenalty -
       lowValuePenalty(doc.content, doc.type)
     ) * crossProjectAgeMultiplier(doc, detectedProject, date) * 10000) / 10000;
@@ -879,25 +869,6 @@ export interface SelectedSnippet {
   key: string;
 }
 
-/** Annotate snippet lines that carry contradiction metadata with visible markers. */
-export function annotateContradictions(snippet: string): string {
-  return snippet.split('\n').map(line => {
-    const conflictMatch = line.match(/<!-- conflicts_with: "(.*?)" -->/);
-    const contradictMatch = line.match(/<!-- phren:contradicts "(.*?)" -->/);
-    const statusMatch = line.match(/phren:status "contradicted"/);
-    if (conflictMatch) {
-      return line.replace(conflictMatch[0], '') + ` [CONTRADICTED — conflicts with: "${conflictMatch[1]}"]`;
-    }
-    if (contradictMatch) {
-      return line.replace(contradictMatch[0], '') + ` [CONTRADICTED — see: "${contradictMatch[1]}"]`;
-    }
-    if (statusMatch) {
-      return line + ' [CONTRADICTED]';
-    }
-    return line;
-  }).join('\n');
-}
-
 /** Mark snippet lines with stale citations (cited file missing or line content changed). */
 export function markStaleCitations(snippet: string): string {
   const lines = snippet.split("\n");
@@ -954,6 +925,19 @@ export function selectSnippets(
   const selected: SelectedSnippet[] = [];
   let usedTokens = 36;
   const queryTokens = tokenizeForOverlap(keywords);
+  const seenBullets = new Set<string>();
+
+  // For each snippet being added, hash its bullet lines and skip duplicates
+  function dedupSnippetBullets(snippet: string): string {
+    return snippet.split('\n').filter(line => {
+      if (!line.startsWith('- ')) return true; // Keep non-bullet lines (headers, etc)
+      const normalized = line.replace(/<!--.*?-->/g, '').trim().toLowerCase();
+      if (seenBullets.has(normalized)) return false;
+      seenBullets.add(normalized);
+      return true;
+    }).join('\n');
+  }
+
   for (const doc of rows) {
     let snippet = compactSnippet(extractSnippet(doc.content, keywords, 8), lineBudget, charBudget);
     if (!snippet.trim()) continue;
@@ -961,8 +945,8 @@ export function selectSnippets(
     if (TRUST_FILTERED_TYPES.has(doc.type)) {
       snippet = markStaleCitations(snippet);
     }
-    // Surface contradiction metadata as visible annotations
-    snippet = annotateContradictions(snippet);
+    snippet = dedupSnippetBullets(snippet);
+    if (!snippet.trim()) continue;
     let focusScore = queryTokens.length > 0
       ? overlapScore(queryTokens, `${doc.filename}\n${snippet}`)
       : 1;
