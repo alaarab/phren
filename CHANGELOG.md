@@ -3,6 +3,32 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.5] - 2026-03-14
+
+### Added
+- **Finding type decay**: 11 finding types (`[decision]`, `[pattern]`, `[pitfall]`, `[observation]`, `[bug]`, `[workaround]`, `[tooling]`, `[context]`, `[anti-pattern]`, `[tradeoff]`, `[architecture]`) with per-type decay rates. Decisions never decay. Observations expire in 14 days.
+- **Citation-modified check**: if a cited file changed after a finding was written, confidence drops 30%.
+- **Query correlation learning**: opt-in (`PHREN_FEATURE_QUERY_CORRELATION=1`) tracks which queries lead to useful findings and boosts recurring patterns.
+- **Auto-tagging heuristics**: findings without explicit type tags get auto-detected from content ("We decided..." becomes `[decision]`).
+- **Keyword glow on landing page**: 9 concept colors (findings, fragments, tasks, truths, skills, sessions, hooks, machines, projects).
+- **Agent carousel animation**: tool names animate across the compatibility section.
+- **VS Code extension section** on landing page.
+- **Configurability section** on landing page (hooks, sensitivity, token budget, trust/decay, sharing, storage).
+
+### Changed
+- **Renamed**: `canonical_memories.md` → `truths.md`. Pin a truth, not a canonical memory.
+- **Renamed**: `MEMORY_QUEUE.md` → `review.md`. Review queue, not memory queue.
+- **Renamed**: "entity" → "fragment" across all user-facing text, docs, and VS Code extension.
+- **Renamed**: "governance" → "config" in user-facing docs.
+- **Landing page overhaul**: new pixel-art phren assets, hero rewrite ("Claude remembers you. Phren remembers your work."), neutral voice (no "he/his"), 23 CSS contrast fixes, mobile breakpoints, WCAG accessibility.
+- **README rewrite**: concise, engaging, teaches all 6 core concepts.
+- **GitHub repo renamed**: `alaarab/cortex` → `alaarab/phren`.
+
+### Breaking
+- `canonical_memories.md` → `truths.md`. Old files are not read.
+- `MEMORY_QUEUE.md` → `review.md`. Old files are not read.
+- "entity" → "fragment" in all tool names and docs.
+
 ## [1.33.0] - 2026-03-12
 
 ### Added
