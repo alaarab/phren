@@ -2045,6 +2045,13 @@ a:focus-visible, button:focus-visible {
   animation: kw-flash-cyan 5s ease-in-out infinite;
 }
 
+/* Machines — silver (hardware identity) */
+.kw-machine {
+  color: #B0BEC5;
+  text-shadow: 0 0 6px rgba(176,190,197,0.3);
+  font-weight: 500;
+}
+
 /* Generic / fallback */
 .kw {
   color: var(--indigo);
