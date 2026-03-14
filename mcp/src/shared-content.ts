@@ -41,6 +41,8 @@ export {
 
 export {
   FINDING_LIFECYCLE_STATUSES,
+  FINDING_TYPE_DECAY,
+  extractFindingType,
   parseFindingLifecycle,
   buildLifecycleComments,
   isInactiveFindingLine,
