@@ -21,13 +21,21 @@ npx @phren/cli init
 
 That single command creates `~/.phren`, wires up MCP, installs hooks, and gives your agents a memory they can actually keep. Re-running on a new machine with an existing remote picks up right where you left off.
 
-## What phren does
+## What phren tracks
 
-- **Captures findings** from your coding sessions — bugs hit, patterns discovered, architectural decisions and their reasoning
-- **Surfaces relevant context on every prompt** via hooks, so agents build on what they already know instead of starting fresh
-- **Syncs across machines** through ordinary git push/pull — no coordination service required
-- **Works with Claude Code, Copilot, Cursor, and Codex** — tell one agent something, and the others know it next session
-- **Ships a shell and web UI** for browsing, searching, and triaging everything phren knows (`phren` or `phren web-ui`)
+- **Findings** — bugs hit, patterns discovered, decisions and their reasoning. Tagged by type (`[pattern]`, `[decision]`, `[pitfall]`, `[observation]`) with per-type decay rates
+- **Fragments** — named concepts (auth, build, React) that connect findings across projects. When you search for a topic, phren pulls in everything linked to that fragment
+- **Tasks** — work items that persist across sessions with priority, pinning, and GitHub issue linking
+- **Sessions** — conversation boundaries with summaries and checkpoints, so the next session picks up where this one left off
+- **Skills** — reusable slash commands you teach phren. Drop them in `~/.phren/global/skills/` and they work everywhere
+
+## How it works
+
+- **Surfaces relevant context on every prompt** via hooks. Agents build on what they know instead of starting fresh
+- **Trust scores decay over time** — old findings lose confidence. Decisions never decay. Observations expire in 14 days
+- **Syncs across machines** through git push/pull. No coordination service
+- **Works with Claude Code, Copilot, Cursor, and Codex** — one memory, every agent
+- **Shell and web UI** for browsing, searching, and triaging (`phren` or `phren web-ui`)
 
 ## Quick start
 
