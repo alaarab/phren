@@ -1614,6 +1614,11 @@ section {
 
   section { padding: 72px 20px; }
 
+  /* Stack hooks+config on mobile */
+  .trace-section [style*="grid-template-columns: 1fr 320px"] {
+    grid-template-columns: 1fr !important;
+  }
+
   .steps-grid {
     grid-template-columns: 1fr;
   }

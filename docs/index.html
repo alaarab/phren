@@ -142,93 +142,80 @@
     </div>
   </section>
 
-  <!-- HOOK LIFECYCLE — styled like watching the system trace -->
+  <!-- HOOKS + CONFIG — two-column: trace left, knobs right -->
   <section class="trace-section" id="hooks">
     <div class="container">
       <div class="trace-header reveal">
         <div class="section-label">Under the hood</div>
-        <h2 class="section-title">Three hooks. Zero effort.</h2>
+        <h2 class="section-title">Three hooks. Every knob yours.</h2>
       </div>
 
-      <div class="trace reveal">
-        <div class="trace-hook">
-          <div class="trace-hook-head">
-            <span class="trace-bullet trace-bullet-start"></span>
-            <span class="trace-hook-name">SessionStart</span>
-            <span class="trace-hook-when">once, on open</span>
+      <div style="display:grid;grid-template-columns:1fr 320px;gap:32px;align-items:start;" class="reveal">
+        <!-- LEFT: Hook trace -->
+        <div class="trace">
+          <div class="trace-hook">
+            <div class="trace-hook-head">
+              <span class="trace-bullet trace-bullet-start"></span>
+              <span class="trace-hook-name">SessionStart</span>
+              <span class="trace-hook-when">on open</span>
+            </div>
+            <div class="trace-steps">
+              <div class="trace-step"><span class="trace-fn">git pull</span> <span class="trace-comment">sync from remote</span></div>
+              <div class="trace-step"><span class="trace-fn">detectProject(cwd)</span> <span class="trace-comment">match to phren project</span></div>
+              <div class="trace-step"><span class="trace-fn">inject(context)</span> <span class="trace-comment">instructions enter context window</span></div>
+            </div>
           </div>
-          <div class="trace-steps">
-            <div class="trace-step"><span class="trace-fn">git pull --rebase</span> <span class="trace-comment">sync ~/.phren from remote</span></div>
-            <div class="trace-step"><span class="trace-fn">detectProject(cwd)</span> <span class="trace-comment">match working directory to a phren project</span></div>
-            <div class="trace-step"><span class="trace-fn">inject(CLAUDE.md, summary.md)</span> <span class="trace-comment">project instructions enter the context window</span></div>
-            <div class="trace-out">&#8627; your agent knows the project before you type anything</div>
+
+          <div class="trace-hook">
+            <div class="trace-hook-head">
+              <span class="trace-bullet trace-bullet-prompt"></span>
+              <span class="trace-hook-name">UserPromptSubmit</span>
+              <span class="trace-hook-when">every message</span>
+            </div>
+            <div class="trace-steps">
+              <div class="trace-step"><span class="trace-fn">extractKeywords</span> <span class="trace-comment">bigrams, stopword filter</span></div>
+              <div class="trace-step"><span class="trace-fn">fts5.search</span> <span class="trace-comment">synonyms, sub-ms lookup</span></div>
+              <div class="trace-step"><span class="trace-fn">trustFilter</span> <span class="trace-comment">decay, citation, threshold</span></div>
+              <div class="trace-step"><span class="trace-fn">inject(top3)</span> <span class="trace-comment">budget-capped context</span></div>
+            </div>
+          </div>
+
+          <div class="trace-hook">
+            <div class="trace-hook-head">
+              <span class="trace-bullet trace-bullet-stop"></span>
+              <span class="trace-hook-name">Stop</span>
+              <span class="trace-hook-when">after response</span>
+            </div>
+            <div class="trace-steps">
+              <div class="trace-step"><span class="trace-fn">git commit</span> <span class="trace-comment">save changes</span></div>
+              <div class="trace-step"><span class="trace-fn">background push</span> <span class="trace-comment">rebase on conflict</span></div>
+            </div>
           </div>
         </div>
 
-        <div class="trace-hook">
-          <div class="trace-hook-head">
-            <span class="trace-bullet trace-bullet-prompt"></span>
-            <span class="trace-hook-name">UserPromptSubmit</span>
-            <span class="trace-hook-when">every message you send</span>
+        <!-- RIGHT: Config knobs -->
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--indigo);margin-bottom:4px;">Configurable</div>
+          <div class="bento-card" style="padding:16px 18px;">
+            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Hooks</div>
+            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">Per tool, per project, or off entirely. MCP-only mode available.</p>
           </div>
-          <div class="trace-steps">
-            <div class="trace-step"><span class="trace-fn">extractKeywords(prompt)</span> <span class="trace-comment">strip stopwords, build bigrams</span></div>
-            <div class="trace-step"><span class="trace-fn">fts5.search(keywords)</span> <span class="trace-comment">synonym expansion, 20-term cap, sub-ms lookup</span></div>
-            <div class="trace-step"><span class="trace-fn">trustFilter(results)</span> <span class="trace-comment">confidence decay, citation check, policy threshold</span></div>
-            <div class="trace-step"><span class="trace-fn">inject(top3, budget=550)</span> <span class="trace-comment">best matches enter context. nothing if nothing matches.</span></div>
-            <div class="trace-out">&#8627; <span class="trace-out-example">&#9670; phren <span class="dot-sep">·</span> 3 results</span> in your status line, that's this hook reporting what it found</div>
+          <div class="bento-card" style="padding:16px 18px;">
+            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Sensitivity</div>
+            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">Minimal / conservative / balanced / aggressive.</p>
           </div>
-        </div>
-
-        <div class="trace-hook">
-          <div class="trace-hook-head">
-            <span class="trace-bullet trace-bullet-stop"></span>
-            <span class="trace-hook-name">Stop</span>
-            <span class="trace-hook-when">after every response, including subagents</span>
+          <div class="bento-card" style="padding:16px 18px;">
+            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Token budget</div>
+            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">180 for light. 550 default. 2000 for deep context.</p>
           </div>
-          <div class="trace-steps">
-            <div class="trace-step"><span class="trace-fn">git add -A ~/.phren</span> <span class="trace-comment">stage whatever changed</span></div>
-            <div class="trace-step"><span class="trace-fn">git commit</span> <span class="trace-comment">no-op if nothing changed</span></div>
-            <div class="trace-step"><span class="trace-fn">background sync worker</span> <span class="trace-comment">push later, rebase on conflict, auto-retry</span></div>
-            <div class="trace-out">&#8627; next session, any machine: SessionStart pulls it back down</div>
+          <div class="bento-card" style="padding:16px 18px;">
+            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Trust + decay</div>
+            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">TTL, confidence floor, decay curves. Pin to override.</p>
           </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CONFIGURABILITY -->
-  <section class="bento-section" id="config">
-    <div class="container">
-      <div class="bento-header reveal" style="text-align:center;">
-        <div class="section-label">Your rules, not ours</div>
-        <h2 class="section-title">Every knob is yours.</h2>
-        <p class="section-sub" style="max-width:580px;margin:0 auto;">Don't want hooks? Turn them off. Want aggressive capture? Crank it up. Every team is different. Phren adapts.</p>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:40px;" class="reveal">
-        <div class="bento-card" style="padding:24px;">
-          <div class="bento-card-title" style="font-size:14px;margin-bottom:8px;">Hooks</div>
-          <p class="bento-card-desc" style="font-size:13px;">Enable per tool. Disable globally. Skip entirely and use MCP only.</p>
-        </div>
-        <div class="bento-card" style="padding:24px;">
-          <div class="bento-card-title" style="font-size:14px;margin-bottom:8px;">Capture sensitivity</div>
-          <p class="bento-card-desc" style="font-size:13px;">Minimal, conservative, balanced, or aggressive. Control how much phren stores.</p>
-        </div>
-        <div class="bento-card" style="padding:24px;">
-          <div class="bento-card-title" style="font-size:14px;margin-bottom:8px;">Token budget</div>
-          <p class="bento-card-desc" style="font-size:13px;">Default 550. Set it to 180 for light touch or 2000 for deep context.</p>
-        </div>
-        <div class="bento-card" style="padding:24px;">
-          <div class="bento-card-title" style="font-size:14px;margin-bottom:8px;">Trust and decay</div>
-          <p class="bento-card-desc" style="font-size:13px;">Retention TTL, confidence floor, decay curves. Old info fades unless you pin it.</p>
-        </div>
-        <div class="bento-card" style="padding:24px;">
-          <div class="bento-card-title" style="font-size:14px;margin-bottom:8px;">Per-project sharing</div>
-          <p class="bento-card-desc" style="font-size:13px;">Profiles control which projects each machine sees. Teams share what matters.</p>
-        </div>
-        <div class="bento-card" style="padding:24px;">
-          <div class="bento-card-title" style="font-size:14px;margin-bottom:8px;">Storage mode</div>
-          <p class="bento-card-desc" style="font-size:13px;">Global (<code style="font-size:11px">~/.phren</code>), project-local (<code style="font-size:11px">.phren/</code>), or custom path. Your call.</p>
+          <div class="bento-card" style="padding:16px 18px;">
+            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Sharing + storage</div>
+            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">Profiles per machine. Global, project-local, or custom path.</p>
+          </div>
         </div>
       </div>
     </div>
