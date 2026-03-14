@@ -7,25 +7,33 @@
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
-const PURPLE = `${ESC}35m`;       // magenta
-const BRIGHT_PURPLE = `${ESC}95m`; // bright magenta
-const CYAN = `${ESC}96m`;          // bright cyan
+const PURPLE = `${ESC}35m`;       // magenta — body
+const BRIGHT_PURPLE = `${ESC}95m`; // bright magenta — highlights
+const CYAN = `${ESC}96m`;          // bright cyan — sparkle
 const DIM = `${ESC}2m`;
-const DARK_PURPLE = `${ESC}38;5;57m`;  // deep purple for shading
+const DARK_PURPLE = `${ESC}38;5;57m`;  // deep purple — shadow/outline
+const LIGHT_PURPLE = `${ESC}38;5;141m`; // lavender — brain highlights
+const MID_PURPLE = `${ESC}38;5;98m`;    // mid tone
+const NAVY = `${ESC}38;5;18m`;          // darkest outline
 
 /**
- * Compact phren ASCII art (~6 lines tall).
- * Uses Unicode block elements and ANSI purple/cyan coloring.
- * Designed for dark terminal backgrounds.
+ * Phren ASCII art (~11 lines tall, ~20 cols wide).
+ * Matches the pixel-art PNG: round purple brain with wrinkle texture,
+ * diamond eyes, cute smile, stubby legs, cyan sparkle.
+ * Uses Unicode half-blocks and ANSI 256-color for shading depth.
  */
 export const PHREN_ART = [
-  `${CYAN}        ✦${RESET}`,
-  `${DARK_PURPLE}   ▄${PURPLE}██████${DARK_PURPLE}▄${RESET}`,
-  `${PURPLE}  ██${BRIGHT_PURPLE}▓▓${PURPLE}██${BRIGHT_PURPLE}▓▓${PURPLE}██${RESET}`,
-  `${PURPLE}  █${DARK_PURPLE}◆${PURPLE}██${DARK_PURPLE}◆${PURPLE}███${RESET}`,
-  `${PURPLE}  ██${DIM}${PURPLE}▽${RESET}${PURPLE}████${BRIGHT_PURPLE}█${RESET}`,
-  `${DARK_PURPLE}   ▀${PURPLE}██████${DARK_PURPLE}▀${RESET}`,
-  `${DARK_PURPLE}    ██  ██${RESET}`,
+  `                  ${CYAN}✦${RESET}`,
+  `       ${NAVY}▄${DARK_PURPLE}▄▄${PURPLE}████${DARK_PURPLE}▄▄${NAVY}▄${RESET}`,
+  `     ${NAVY}▄${PURPLE}██${LIGHT_PURPLE}▓▓${PURPLE}██${LIGHT_PURPLE}▓▓${PURPLE}██${NAVY}▄${RESET}`,
+  `    ${NAVY}█${PURPLE}██${LIGHT_PURPLE}░${BRIGHT_PURPLE}▓${PURPLE}██${LIGHT_PURPLE}░${BRIGHT_PURPLE}▓${PURPLE}███${NAVY}█${RESET}`,
+  `   ${NAVY}█${PURPLE}███${MID_PURPLE}▄${PURPLE}████${MID_PURPLE}▄${PURPLE}███${NAVY}█${RESET}`,
+  `   ${NAVY}█${PURPLE}█${NAVY}◆${PURPLE}██${DARK_PURPLE}▀${PURPLE}██${NAVY}◆${PURPLE}████${NAVY}█${RESET}`,
+  `   ${NAVY}█${PURPLE}███${DIM}${PURPLE}ᵥ${RESET}${PURPLE}██████${BRIGHT_PURPLE}█${NAVY}█${RESET}`,
+  `    ${NAVY}█${PURPLE}██████████${NAVY}█${RESET}`,
+  `     ${NAVY}▀${DARK_PURPLE}▀${PURPLE}████████${DARK_PURPLE}▀${NAVY}▀${RESET}`,
+  `       ${DARK_PURPLE}██${RESET}    ${DARK_PURPLE}██${RESET}`,
+  `      ${NAVY}▀▀▀${RESET}  ${NAVY}▀▀▀${RESET}`,
 ];
 
 /** Single-line compact phren for inline use */
