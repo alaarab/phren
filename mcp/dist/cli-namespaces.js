@@ -1,16 +1,17 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { expandHomePath, getPhrenPath, getProjectDirs, homePath, hookConfigPath, readRootManifest, } from "./shared.js";
+import { expandHomePath, findProjectNameCaseInsensitive, getPhrenPath, getProjectDirs, homePath, hookConfigPath, normalizeProjectNameForCreate, readRootManifest, } from "./shared.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences } from "./init-preferences.js";
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
-import { TASK_FILE_ALIASES, addTask, completeTask, updateTask, reorderTask, pinTask } from "./data-tasks.js";
+import { TASK_FILE_ALIASES, addTask, completeTask, updateTask, reorderTask, pinTask, removeTask, workNextTask, tidyDoneTasks, linkTaskIssue, promoteTask, resolveTaskItem } from "./data-tasks.js";
+import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, resolveProjectGithubRepo } from "./tasks-github.js";
 import { PROJECT_HOOK_EVENTS, PROJECT_OWNERSHIP_MODES, isProjectHookEnabled, parseProjectOwnershipMode, readProjectConfig, writeProjectConfig, writeProjectHookConfig, } from "./project-config.js";
 import { addFinding, removeFinding } from "./core-finding.js";
-import { supersedeFinding, retractFinding } from "./finding-lifecycle.js";
+import { supersedeFinding, retractFinding, resolveFindingContradiction } from "./finding-lifecycle.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES } from "./hooks.js";
 import { runtimeFile } from "./shared.js";
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"];
@@ -566,6 +567,10 @@ export async function handleProjectsNamespace(args, profile) {
             console.log("  phren projects configure <name>   Update per-project enrollment settings");
             console.log("    flags: --ownership=<mode> --hooks=on|off");
             console.log("  phren projects remove <name>      Remove a project (asks for confirmation)");
+            console.log("  phren projects export <name>      Export project data as JSON to stdout");
+            console.log("  phren projects import <file>      Import project from a JSON file");
+            console.log("  phren projects archive <name>     Archive a project (removes from active index)");
+            console.log("  phren projects unarchive <name>   Restore an archived project");
             return;
         }
         return handleProjectsList(profile);
@@ -630,8 +635,203 @@ export async function handleProjectsNamespace(args, profile) {
         console.log(`Updated ${name}: ${updates.join(", ")}`);
         return;
     }
+    if (subcommand === "export") {
+        const name = args[1];
+        if (!name) {
+            console.error("Usage: phren projects export <name>");
+            process.exit(1);
+        }
+        if (!isValidProjectName(name)) {
+            console.error(`Invalid project name: "${name}".`);
+            process.exit(1);
+        }
+        const phrenPath = getPhrenPath();
+        const projectDir = path.join(phrenPath, name);
+        if (!fs.existsSync(projectDir)) {
+            console.error(`Project "${name}" not found.`);
+            process.exit(1);
+        }
+        const { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } = await import("./data-access.js");
+        const exported = { project: name, exportedAt: new Date().toISOString(), version: 1 };
+        const summaryPath = path.join(projectDir, "summary.md");
+        if (fs.existsSync(summaryPath))
+            exported.summary = fs.readFileSync(summaryPath, "utf8");
+        const learningsResult = readFindings(phrenPath, name);
+        if (learningsResult.ok)
+            exported.learnings = learningsResult.data;
+        const findingsPath = path.join(projectDir, "FINDINGS.md");
+        if (fs.existsSync(findingsPath))
+            exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
+        const taskResult = readTasks(phrenPath, name);
+        if (taskResult.ok) {
+            exported.task = taskResult.data.items;
+            const taskRawPath = resolveTaskFilePath(phrenPath, name);
+            if (taskRawPath && fs.existsSync(taskRawPath))
+                exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
+        }
+        const claudePath = path.join(projectDir, "CLAUDE.md");
+        if (fs.existsSync(claudePath))
+            exported.claudeMd = fs.readFileSync(claudePath, "utf8");
+        process.stdout.write(JSON.stringify(exported, null, 2) + "\n");
+        return;
+    }
+    if (subcommand === "import") {
+        const filePath = args[1];
+        if (!filePath) {
+            console.error("Usage: phren projects import <file>");
+            process.exit(1);
+        }
+        const resolvedPath = path.resolve(expandHomePath(filePath));
+        if (!fs.existsSync(resolvedPath)) {
+            console.error(`File not found: ${resolvedPath}`);
+            process.exit(1);
+        }
+        let rawData;
+        try {
+            rawData = fs.readFileSync(resolvedPath, "utf8");
+        }
+        catch (err) {
+            console.error(`Failed to read file: ${errorMessage(err)}`);
+            process.exit(1);
+        }
+        let decoded;
+        try {
+            decoded = JSON.parse(rawData);
+        }
+        catch {
+            console.error("Invalid JSON in file.");
+            process.exit(1);
+        }
+        if (!decoded || typeof decoded !== "object" || !decoded.project) {
+            console.error("Invalid import payload: missing project field.");
+            process.exit(1);
+        }
+        const { TASKS_FILENAME } = await import("./data-access.js");
+        const phrenPath = getPhrenPath();
+        const projectName = normalizeProjectNameForCreate(String(decoded.project));
+        if (!isValidProjectName(projectName)) {
+            console.error(`Invalid project name: "${decoded.project}".`);
+            process.exit(1);
+        }
+        const existingProject = findProjectNameCaseInsensitive(phrenPath, projectName);
+        if (existingProject && existingProject !== projectName) {
+            console.error(`Project "${existingProject}" already exists with different casing. Refusing to import "${projectName}".`);
+            process.exit(1);
+        }
+        const projectDir = path.join(phrenPath, projectName);
+        if (fs.existsSync(projectDir)) {
+            console.error(`Project "${projectName}" already exists. Remove it first or use the MCP tool with overwrite:true.`);
+            process.exit(1);
+        }
+        const imported = [];
+        const stagingRoot = fs.mkdtempSync(path.join(phrenPath, `.phren-import-${projectName}-`));
+        const stagedProjectDir = path.join(stagingRoot, projectName);
+        try {
+            fs.mkdirSync(stagedProjectDir, { recursive: true });
+            if (typeof decoded.summary === "string") {
+                fs.writeFileSync(path.join(stagedProjectDir, "summary.md"), decoded.summary);
+                imported.push("summary.md");
+            }
+            if (typeof decoded.claudeMd === "string") {
+                fs.writeFileSync(path.join(stagedProjectDir, "CLAUDE.md"), decoded.claudeMd);
+                imported.push("CLAUDE.md");
+            }
+            if (typeof decoded.findingsRaw === "string") {
+                fs.writeFileSync(path.join(stagedProjectDir, "FINDINGS.md"), decoded.findingsRaw);
+                imported.push("FINDINGS.md");
+            }
+            else if (Array.isArray(decoded.learnings) && decoded.learnings.length > 0) {
+                const date = new Date().toISOString().slice(0, 10);
+                const lines = [`# ${projectName} Findings`, "", `## ${date}`, ""];
+                for (const item of decoded.learnings) {
+                    if (item.text)
+                        lines.push(`- ${item.text}`);
+                }
+                lines.push("");
+                fs.writeFileSync(path.join(stagedProjectDir, "FINDINGS.md"), lines.join("\n"));
+                imported.push("FINDINGS.md");
+            }
+            if (typeof decoded.taskRaw === "string") {
+                fs.writeFileSync(path.join(stagedProjectDir, TASKS_FILENAME), decoded.taskRaw);
+                imported.push(TASKS_FILENAME);
+            }
+            fs.renameSync(stagedProjectDir, projectDir);
+            fs.rmSync(stagingRoot, { recursive: true, force: true });
+            console.log(`Imported project "${projectName}": ${imported.join(", ") || "(no files)"}`);
+        }
+        catch (err) {
+            try {
+                fs.rmSync(stagingRoot, { recursive: true, force: true });
+            }
+            catch { /* best-effort */ }
+            console.error(`Import failed: ${errorMessage(err)}`);
+            process.exit(1);
+        }
+        return;
+    }
+    if (subcommand === "archive" || subcommand === "unarchive") {
+        const name = args[1];
+        if (!name) {
+            console.error(`Usage: phren projects ${subcommand} <name>`);
+            process.exit(1);
+        }
+        if (!isValidProjectName(name)) {
+            console.error(`Invalid project name: "${name}".`);
+            process.exit(1);
+        }
+        const phrenPath = getPhrenPath();
+        const projectDir = path.join(phrenPath, name);
+        const archiveDir = path.join(phrenPath, `${name}.archived`);
+        if (subcommand === "archive") {
+            if (!fs.existsSync(projectDir)) {
+                console.error(`Project "${name}" not found.`);
+                process.exit(1);
+            }
+            if (fs.existsSync(archiveDir)) {
+                console.error(`Archive "${name}.archived" already exists. Unarchive or remove it first.`);
+                process.exit(1);
+            }
+            try {
+                fs.renameSync(projectDir, archiveDir);
+                console.log(`Archived project "${name}". Data preserved at ${archiveDir}.`);
+                console.log("Note: the search index will be updated on next search.");
+            }
+            catch (err) {
+                console.error(`Archive failed: ${errorMessage(err)}`);
+                process.exit(1);
+            }
+        }
+        else {
+            if (fs.existsSync(projectDir)) {
+                console.error(`Project "${name}" already exists as an active project.`);
+                process.exit(1);
+            }
+            if (!fs.existsSync(archiveDir)) {
+                const available = fs.readdirSync(phrenPath)
+                    .filter((e) => e.endsWith(".archived"))
+                    .map((e) => e.replace(/\.archived$/, ""));
+                if (available.length > 0) {
+                    console.error(`No archive found for "${name}". Available archives: ${available.join(", ")}`);
+                }
+                else {
+                    console.error(`No archive found for "${name}".`);
+                }
+                process.exit(1);
+            }
+            try {
+                fs.renameSync(archiveDir, projectDir);
+                console.log(`Unarchived project "${name}". It is now active again.`);
+                console.log("Note: the search index will be updated on next search.");
+            }
+            catch (err) {
+                console.error(`Unarchive failed: ${errorMessage(err)}`);
+                process.exit(1);
+            }
+        }
+        return;
+    }
     console.error(`Unknown subcommand: ${subcommand}`);
-    console.error("Usage: phren projects [list|configure|remove]");
+    console.error("Usage: phren projects [list|configure|remove|export|import|archive|unarchive]");
     process.exit(1);
 }
 function handleProjectsList(profile) {
@@ -717,6 +917,13 @@ function printTaskUsage() {
     console.log("Usage:");
     console.log('  phren task add <project> "<text>"');
     console.log('  phren task complete <project> "<text>"');
+    console.log('  phren task remove <project> "<text>"');
+    console.log('  phren task next [project]');
+    console.log('  phren task promote <project> "<text>" [--active]');
+    console.log('  phren task tidy [project] [--keep=<n>] [--dry-run]');
+    console.log('  phren task link <project> "<text>" --issue <number> [--url <url>]');
+    console.log('  phren task link <project> "<text>" --unlink');
+    console.log('  phren task create-issue <project> "<text>" [--repo <owner/name>] [--title "<title>"] [--done]');
     console.log('  phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."]');
     console.log('  phren task pin <project> "<text>"');
     console.log('  phren task reorder <project> "<text>" --rank=<n>');
@@ -843,6 +1050,231 @@ export async function handleTaskNamespace(args) {
         console.log(result.data);
         return;
     }
+    if (subcommand === "remove") {
+        const project = args[1];
+        const match = args.slice(2).join(" ");
+        if (!project || !match) {
+            console.error('Usage: phren task remove <project> "<text>"');
+            process.exit(1);
+        }
+        const result = removeTask(getPhrenPath(), project, match);
+        if (!result.ok) {
+            console.error(result.error);
+            process.exit(1);
+        }
+        console.log(result.data);
+        return;
+    }
+    if (subcommand === "next") {
+        const project = args[1];
+        if (!project) {
+            console.error("Usage: phren task next <project>");
+            process.exit(1);
+        }
+        const result = workNextTask(getPhrenPath(), project);
+        if (!result.ok) {
+            console.error(result.error);
+            process.exit(1);
+        }
+        console.log(result.data);
+        return;
+    }
+    if (subcommand === "promote") {
+        const project = args[1];
+        if (!project) {
+            printTaskUsage();
+            process.exit(1);
+        }
+        const positional = [];
+        let moveToActive = false;
+        for (const arg of args.slice(2)) {
+            if (arg === "--active") {
+                moveToActive = true;
+            }
+            else if (!arg.startsWith("--")) {
+                positional.push(arg);
+            }
+        }
+        const match = positional.join(" ");
+        if (!match) {
+            console.error('Usage: phren task promote <project> "<text>" [--active]');
+            process.exit(1);
+        }
+        const result = promoteTask(getPhrenPath(), project, match, moveToActive);
+        if (!result.ok) {
+            console.error(result.error);
+            process.exit(1);
+        }
+        console.log(`Promoted task "${result.data.line}" in ${project}${moveToActive ? " (moved to Active)" : ""}.`);
+        return;
+    }
+    if (subcommand === "tidy") {
+        const project = args[1];
+        if (!project) {
+            console.error("Usage: phren task tidy <project> [--keep=<n>] [--dry-run]");
+            process.exit(1);
+        }
+        let keep = 30;
+        let dryRun = false;
+        for (const arg of args.slice(2)) {
+            if (arg.startsWith("--keep=")) {
+                const n = Number.parseInt(arg.slice("--keep=".length), 10);
+                if (Number.isFinite(n) && n > 0)
+                    keep = n;
+            }
+            else if (arg === "--dry-run") {
+                dryRun = true;
+            }
+        }
+        const result = tidyDoneTasks(getPhrenPath(), project, keep, dryRun);
+        if (!result.ok) {
+            console.error(result.error);
+            process.exit(1);
+        }
+        console.log(result.data);
+        return;
+    }
+    if (subcommand === "link") {
+        const project = args[1];
+        if (!project) {
+            printTaskUsage();
+            process.exit(1);
+        }
+        const positional = [];
+        let issueArg;
+        let urlArg;
+        let unlink = false;
+        const rest = args.slice(2);
+        for (let i = 0; i < rest.length; i++) {
+            const arg = rest[i];
+            if (arg === "--issue" || arg === "-i") {
+                issueArg = rest[++i];
+            }
+            else if (arg.startsWith("--issue=")) {
+                issueArg = arg.slice("--issue=".length);
+            }
+            else if (arg === "--url") {
+                urlArg = rest[++i];
+            }
+            else if (arg.startsWith("--url=")) {
+                urlArg = arg.slice("--url=".length);
+            }
+            else if (arg === "--unlink") {
+                unlink = true;
+            }
+            else if (!arg.startsWith("--")) {
+                positional.push(arg);
+            }
+        }
+        const match = positional.join(" ");
+        if (!match) {
+            console.error('Usage: phren task link <project> "<text>" --issue <number>');
+            process.exit(1);
+        }
+        if (!unlink && !issueArg && !urlArg) {
+            console.error("Provide --issue <number> or --url <url> to link, or --unlink to remove the link.");
+            process.exit(1);
+        }
+        if (urlArg) {
+            const parsed = parseGithubIssueUrl(urlArg);
+            if (!parsed) {
+                console.error("--url must be a valid GitHub issue URL.");
+                process.exit(1);
+            }
+        }
+        const result = linkTaskIssue(getPhrenPath(), project, match, {
+            github_issue: issueArg,
+            github_url: urlArg,
+            unlink: unlink,
+        });
+        if (!result.ok) {
+            console.error(result.error);
+            process.exit(1);
+        }
+        if (unlink) {
+            console.log(`Removed GitHub link from ${project} task.`);
+        }
+        else {
+            console.log(`Linked ${project} task to ${result.data.githubIssue ? `#${result.data.githubIssue}` : result.data.githubUrl}.`);
+        }
+        return;
+    }
+    if (subcommand === "create-issue") {
+        const project = args[1];
+        if (!project) {
+            printTaskUsage();
+            process.exit(1);
+        }
+        const positional = [];
+        let repoArg;
+        let titleArg;
+        let markDone = false;
+        const rest = args.slice(2);
+        for (let i = 0; i < rest.length; i++) {
+            const arg = rest[i];
+            if (arg === "--repo") {
+                repoArg = rest[++i];
+            }
+            else if (arg.startsWith("--repo=")) {
+                repoArg = arg.slice("--repo=".length);
+            }
+            else if (arg === "--title") {
+                titleArg = rest[++i];
+            }
+            else if (arg.startsWith("--title=")) {
+                titleArg = arg.slice("--title=".length);
+            }
+            else if (arg === "--done") {
+                markDone = true;
+            }
+            else if (!arg.startsWith("--")) {
+                positional.push(arg);
+            }
+        }
+        const match = positional.join(" ");
+        if (!match) {
+            console.error('Usage: phren task create-issue <project> "<text>" [--repo <owner/name>] [--title "<title>"] [--done]');
+            process.exit(1);
+        }
+        const phrenPath = getPhrenPath();
+        const resolved = resolveTaskItem(phrenPath, project, match);
+        if (!resolved.ok) {
+            console.error(resolved.error);
+            process.exit(1);
+        }
+        const targetRepo = repoArg || resolveProjectGithubRepo(phrenPath, project);
+        if (!targetRepo) {
+            console.error("Could not infer a GitHub repo. Provide --repo <owner/name> or add a GitHub URL to CLAUDE.md/summary.md.");
+            process.exit(1);
+        }
+        const created = createGithubIssueForTask({
+            repo: targetRepo,
+            title: titleArg?.trim() || resolved.data.line.replace(/\s*\[(high|medium|low)\]\s*$/i, "").trim(),
+            body: buildTaskIssueBody(project, resolved.data),
+        });
+        if (!created.ok) {
+            console.error(created.error);
+            process.exit(1);
+        }
+        const linked = linkTaskIssue(phrenPath, project, resolved.data.stableId ? `bid:${resolved.data.stableId}` : resolved.data.id, {
+            github_issue: created.data.issueNumber,
+            github_url: created.data.url,
+        });
+        if (!linked.ok) {
+            console.error(linked.error);
+            process.exit(1);
+        }
+        if (markDone) {
+            const completionMatch = linked.data.stableId ? `bid:${linked.data.stableId}` : linked.data.id;
+            const completed = completeTask(phrenPath, project, completionMatch);
+            if (!completed.ok) {
+                console.error(completed.error);
+                process.exit(1);
+            }
+        }
+        console.log(`Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} task.`);
+        return;
+    }
     console.error(`Unknown task subcommand: ${subcommand}`);
     printTaskUsage();
     process.exit(1);
@@ -854,6 +1286,8 @@ function printFindingUsage() {
     console.log('  phren finding remove <project> "<text>"');
     console.log('  phren finding supersede <project> "<text>" --by "<newer guidance>"');
     console.log('  phren finding retract <project> "<text>" --reason "<reason>"');
+    console.log('  phren finding contradictions [project]');
+    console.log('  phren finding resolve <project> "<finding_text>" "<other_text>" <keep_a|keep_b|keep_both|retract_both>');
 }
 export async function handleFindingNamespace(args) {
     const subcommand = args[0];
@@ -981,6 +1415,65 @@ export async function handleFindingNamespace(args) {
             process.exit(1);
         }
         console.log(`Finding retracted: "${result.data.finding}" (reason: ${result.data.reason})`);
+        return;
+    }
+    if (subcommand === "contradictions") {
+        const project = args[1];
+        const phrenPath = getPhrenPath();
+        const RESERVED_DIRS = new Set(["global", ".runtime", ".sessions", ".governance"]);
+        const { readFindings } = await import("./data-access.js");
+        const projects = project
+            ? [project]
+            : fs.readdirSync(phrenPath, { withFileTypes: true })
+                .filter((entry) => entry.isDirectory() && !RESERVED_DIRS.has(entry.name) && isValidProjectName(entry.name))
+                .map((entry) => entry.name);
+        const contradictions = [];
+        for (const p of projects) {
+            const result = readFindings(phrenPath, p);
+            if (!result.ok)
+                continue;
+            for (const finding of result.data) {
+                if (finding.status !== "contradicted")
+                    continue;
+                contradictions.push({ project: p, id: finding.id, text: finding.text, date: finding.date, status_ref: finding.status_ref });
+            }
+        }
+        if (!contradictions.length) {
+            console.log("No unresolved contradictions found.");
+            return;
+        }
+        console.log(`${contradictions.length} unresolved contradiction(s):\n`);
+        for (const c of contradictions) {
+            console.log(`[${c.project}] ${c.date}  ${c.id}`);
+            console.log(`  ${c.text}`);
+            if (c.status_ref)
+                console.log(`  contradicts: ${c.status_ref}`);
+            console.log("");
+        }
+        return;
+    }
+    if (subcommand === "resolve") {
+        const project = args[1];
+        const findingText = args[2];
+        const otherText = args[3];
+        const resolution = args[4];
+        const validResolutions = ["keep_a", "keep_b", "keep_both", "retract_both"];
+        if (!project || !findingText || !otherText || !resolution) {
+            console.error('Usage: phren finding resolve <project> "<finding_text>" "<other_text>" <keep_a|keep_b|keep_both|retract_both>');
+            process.exit(1);
+        }
+        if (!validResolutions.includes(resolution)) {
+            console.error(`Invalid resolution "${resolution}". Valid values: ${validResolutions.join(", ")}`);
+            process.exit(1);
+        }
+        const result = resolveFindingContradiction(getPhrenPath(), project, findingText, otherText, resolution);
+        if (!result.ok) {
+            console.error(result.error);
+            process.exit(1);
+        }
+        console.log(`Resolved contradiction in "${project}" with "${resolution}".`);
+        console.log(`  finding_a: ${result.data.finding_a.text} → ${result.data.finding_a.status}`);
+        console.log(`  finding_b: ${result.data.finding_b.text} → ${result.data.finding_b.status}`);
         return;
     }
     console.error(`Unknown finding subcommand: ${subcommand}`);

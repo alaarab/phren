@@ -19,35 +19,41 @@ describe("manual-links.json persistence", () => {
   afterEach(() => tmp.cleanup());
 
   it("manual-links.json is merged into index on rebuild", async () => {
-    seedFindings(tmp.path, "myapp", "# myapp\n\n- Docker needs explicit network cleanup in finally blocks\n");
+    seedFindings(tmp.path, "myapp", "# myapp\n\n- Explicit network cleanup belongs in finally blocks\n");
     const manualLinksPath = runtimeFile(tmp.path, "manual-links.json");
     fs.mkdirSync(path.dirname(manualLinksPath), { recursive: true });
     fs.writeFileSync(manualLinksPath, JSON.stringify([
-      { entity: "docker", entityType: "library", sourceDoc: "myapp/FINDINGS.md", relType: "mentions" }
+      { entity: "kube-router", entityType: "library", sourceDoc: "myapp/FINDINGS.md", relType: "mentions" }
     ]));
 
     const db = await buildIndex(tmp.path);
 
-    const entityRows = db.exec("SELECT name FROM entities WHERE name = 'docker'");
+    const entityRows = db.exec("SELECT name FROM entities WHERE name = 'kube-router'");
     expect(entityRows[0]?.values?.length).toBeGreaterThan(0);
 
-    const linkRows = db.exec("SELECT rel_type FROM entity_links JOIN entities ON entity_links.target_id = entities.id WHERE entities.name = 'docker'");
+    const linkRows = db.exec("SELECT rel_type FROM entity_links JOIN entities ON entity_links.target_id = entities.id WHERE entities.name = 'kube-router'");
     expect(linkRows[0]?.values?.[0]?.[0]).toBe("mentions");
+    expect(JSON.parse(fs.readFileSync(manualLinksPath, "utf8"))).toEqual([
+      { entity: "kube-router", entityType: "library", sourceDoc: "myapp/FINDINGS.md", relType: "mentions" },
+    ]);
   });
 
   it("survives a second rebuild (links not lost)", async () => {
-    seedFindings(tmp.path, "proj", "# proj\n\n- Docker requires explicit network config\n");
+    seedFindings(tmp.path, "proj", "# proj\n\n- Explicit network config must be documented\n");
     const manualLinksPath = runtimeFile(tmp.path, "manual-links.json");
     fs.mkdirSync(path.dirname(manualLinksPath), { recursive: true });
     fs.writeFileSync(manualLinksPath, JSON.stringify([
-      { entity: "docker", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" }
+      { entity: "service-mesh", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" }
     ]));
 
     await buildIndex(tmp.path);
     // Second rebuild
     const db2 = await buildIndex(tmp.path);
-    const rows = db2.exec("SELECT name FROM entities WHERE name = 'docker'");
+    const rows = db2.exec("SELECT name FROM entities WHERE name = 'service-mesh'");
     expect(rows[0]?.values?.length).toBeGreaterThan(0);
+    expect(JSON.parse(fs.readFileSync(manualLinksPath, "utf8"))).toEqual([
+      { entity: "service-mesh", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
+    ]);
   });
 
   it("handles missing manual-links.json gracefully", async () => {
@@ -78,10 +84,10 @@ describe("read_graph pagination", () => {
     const manualLinksPath = path.join(phrenPath, ".runtime", "manual-links.json");
     fs.mkdirSync(path.dirname(manualLinksPath), { recursive: true });
     fs.writeFileSync(manualLinksPath, JSON.stringify([
-      { entity: "redis", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
-      { entity: "docker", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
-      { entity: "postgresql", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
-      { entity: "nginx", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
+      { entity: "redis-cache", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
+      { entity: "service-mesh", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
+      { entity: "postgres-wire", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
+      { entity: "edge-router", entityType: "library", sourceDoc: "proj/FINDINGS.md", relType: "mentions" },
     ]));
   }
 

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { debugLog, runtimeFile } from "./phren-paths.js";
-import { errorMessage, isValidProjectName } from "./utils.js";
+import { errorMessage } from "./utils.js";
 export { HOOK_TOOL_NAMES, hookConfigPath } from "./provider-adapters.js";
 export { EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS, PhrenError, phrenOk, phrenErr, forwardErr, parsePhrenErrorCode, isRecord, withDefaults, FINDING_TYPES, FINDING_TAGS, KNOWN_OBSERVATION_TAGS, DOC_TYPES, capCache, } from "./phren-core.js";
 export { ROOT_MANIFEST_FILENAME, homeDir, homePath, expandHomePath, defaultPhrenPath, rootManifestPath, readRootManifest, writeRootManifest, resolveInstallContext, findNearestPhrenPath, isProjectLocalMode, runtimeDir, tryUnlink, sessionsDir, runtimeFile, installPreferencesFile, runtimeHealthFile, shellStateFile, sessionMetricsFile, memoryScoresFile, memoryUsageLogFile, sessionMarker, debugLog, appendIndexEvent, resolveFindingsPath, findPhrenPath, ensurePhrenPath, findPhrenPathWithArg, normalizeProjectNameForCreate, findProjectNameCaseInsensitive, getProjectDirs, collectNativeMemoryFiles, computePhrenLiveStateToken, getPhrenPath, qualityMarkers, atomicWriteText, } from "./phren-paths.js";
@@ -27,15 +27,6 @@ export function isMemoryScopeVisible(itemScope, activeScope) {
 }
 export function impactLogFile(phrenPath) {
     return runtimeFile(phrenPath, "impact.jsonl");
-}
-function isProjectDirEntry(entry) {
-    return entry.isDirectory()
-        && !entry.name.startsWith(".")
-        && !entry.name.endsWith(".archived")
-        && !RESERVED_PROJECT_DIR_NAMES.has(entry.name);
-}
-function isCanonicalProjectDirName(name) {
-    return name === name.toLowerCase() && isValidProjectName(name);
 }
 export function appendAuditLog(phrenPath, event, details) {
     const logPath = runtimeFile(phrenPath, "audit.log");

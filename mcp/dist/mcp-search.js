@@ -131,7 +131,13 @@ export function register(server, ctx) {
         }),
     }, async ({ id: rawId }) => {
         // Normalize ID: decode URL encoding and normalize path separators
-        const id = normalizeMemoryId(rawId);
+        let id;
+        try {
+            id = normalizeMemoryId(rawId);
+        }
+        catch {
+            return mcpResponse({ ok: false, error: `Invalid memory ID format: "${rawId}" contains malformed URL encoding.` });
+        }
         const match = id.match(/^mem:([^/]+)\/(.+)$/);
         if (!match) {
             return mcpResponse({ ok: false, error: `Invalid memory ID format "${rawId}". Expected mem:project/path/to/file.md.` });

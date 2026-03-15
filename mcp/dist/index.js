@@ -19,6 +19,7 @@ import { register as registerSkills } from "./mcp-skills.js";
 import { register as registerHooks } from "./mcp-hooks.js";
 import { register as registerExtract } from "./mcp-extract.js";
 import { register as registerConfig } from "./mcp-config.js";
+import { mcpResponse } from "./mcp-types.js";
 import { errorMessage } from "./utils.js";
 import { runTopLevelCommand } from "./entrypoint.js";
 import { startEmbeddingWarmup } from "./startup-embedding.js";
@@ -110,7 +111,7 @@ async function main() {
                 const message = errorMessage(err);
                 if (message.includes("Write timeout") || message.includes("Write queue full")) {
                     debugLog(`Write queue timeout: ${message}`);
-                    return { ok: false, error: `Write queue timeout: ${message}`, errorCode: "TIMEOUT" };
+                    return mcpResponse({ ok: false, error: `Write queue timeout: ${message}`, errorCode: "TIMEOUT" });
                 }
                 throw err;
             }

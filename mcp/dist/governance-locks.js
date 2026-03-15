@@ -3,7 +3,7 @@ import * as path from "path";
 import { debugLog } from "./shared.js";
 // Acquire the file lock, returning true on success or throwing on timeout.
 function acquireFileLock(lockPath) {
-    const maxWait = Number.parseInt(process.env.PHREN_FILE_LOCK_MAX_WAIT_MS || process.env.PHREN_FILE_LOCK_MAX_WAIT_MS || "5000", 10) || 5000;
+    const maxWait = Number.parseInt(process.env.PHREN_FILE_LOCK_MAX_WAIT_MS || "5000", 10) || 5000;
     const pollInterval = Number.parseInt((process.env.PHREN_FILE_LOCK_POLL_MS) || "100", 10) || 100;
     const staleThreshold = Number.parseInt((process.env.PHREN_FILE_LOCK_STALE_MS) || "30000", 10) || 30000;
     const waiter = new Int32Array(new SharedArrayBuffer(4));
@@ -29,12 +29,17 @@ function acquireFileLock(lockPath) {
                         const lockContent = fs.readFileSync(lockPath, "utf8");
                         const lockPid = Number.parseInt(lockContent.split("\n")[0], 10);
                         if (Number.isFinite(lockPid) && lockPid > 0) {
-                            try {
-                                process.kill(lockPid, 0); // signal 0 = check if alive
-                                ownerDead = false; // PID is still alive, don't steal the lock
+                            if (process.platform !== 'win32') {
+                                try {
+                                    process.kill(lockPid, 0);
+                                    ownerDead = false;
+                                }
+                                catch {
+                                    ownerDead = true;
+                                }
                             }
-                            catch {
-                                ownerDead = true; // PID is dead, safe to remove
+                            else {
+                                ownerDead = true;
                             }
                         }
                     }

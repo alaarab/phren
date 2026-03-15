@@ -50,6 +50,8 @@ interface FindingNode {
   id: string;
   date: string;
   text: string;
+  type?: string;
+  confidence?: number;
   supersededBy?: string;
   supersedes?: string;
   contradicts?: string[];
@@ -70,6 +72,10 @@ interface TaskNode {
   line: string;
   section: TaskSection;
   checked: boolean;
+  priority?: string;
+  pinned?: boolean;
+  issueUrl?: string;
+  issueNumber?: number;
 }
 
 interface SkillGroupNode {
@@ -209,6 +215,8 @@ interface FindingSummary {
   id: string;
   date: string;
   text: string;
+  type?: string;
+  confidence?: number;
   supersededBy?: string;
   supersedes?: string;
   contradicts?: string[];
@@ -220,6 +228,10 @@ interface TaskSummary {
   line: string;
   section: TaskSection;
   checked: boolean;
+  priority?: string;
+  pinned?: boolean;
+  issueUrl?: string;
+  issueNumber?: number;
 }
 
 interface QueueItemSummary {
@@ -807,6 +819,8 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
           id: finding.id,
           date: finding.date,
           text: finding.text,
+          type: finding.type,
+          confidence: finding.confidence,
           supersededBy: finding.supersededBy,
           supersedes: finding.supersedes,
           contradicts: finding.contradicts,
@@ -856,6 +870,10 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
           line: task.line,
           section: task.section,
           checked: task.checked,
+          priority: task.priority,
+          pinned: task.pinned,
+          issueUrl: task.issueUrl,
+          issueNumber: task.issueNumber,
         }));
     } catch (error) {
       return [this.errorNode("Failed to load tasks", error)];
@@ -1054,6 +1072,8 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
           id: finding.id,
           date: finding.date,
           text: finding.text,
+          type: finding.type,
+          confidence: finding.confidence,
           supersededBy: finding.supersededBy,
           supersedes: finding.supersedes,
           contradicts: finding.contradicts,
@@ -1334,6 +1354,8 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         id,
         date: asString(record?.date) ?? "unknown",
         text,
+        type: asString(record?.type),
+        confidence: asNumber(record?.confidence),
         supersededBy: asString(record?.supersededBy),
         supersedes: asString(record?.supersedes),
         contradicts: contradicts?.length ? contradicts : undefined,
@@ -1365,6 +1387,10 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
           line,
           section,
           checked: asBoolean(record?.checked) ?? section === "Done",
+          priority: asString(record?.priority),
+          pinned: asBoolean(record?.pinned),
+          issueUrl: asString(record?.issueUrl),
+          issueNumber: asNumber(record?.issueNumber),
         });
       }
     }

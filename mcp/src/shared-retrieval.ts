@@ -59,8 +59,9 @@ const LOW_VALUE_BULLET_FRACTION = 0.5;
 
 // ── Intent and scoring helpers ───────────────────────────────────────────────
 
-export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "general" {
+export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "skill" | "general" {
   const p = prompt.toLowerCase();
+  if (/(^|\s)\/[a-z][a-z0-9_-]{1,63}(?=$|\s|[.,:;!?])/.test(p) || /\b(skill|swarm|lineup|slash command)\b/.test(p)) return "skill";
   if (/(bug|error|fix|broken|regression|fail|stack trace)/.test(p)) return "debug";
   if (/(review|audit|pr|pull request|nit|refactor)/.test(p)) return "review";
   if (/(build|deploy|release|ci|workflow|pipeline|test)/.test(p)) return "build";
@@ -69,6 +70,7 @@ export function detectTaskIntent(prompt: string): "debug" | "review" | "build" |
 }
 
 function intentBoost(intent: string, docType: string): number {
+  if (intent === "skill" && docType === "skill") return 4;
   if (intent === "debug" && (docType === "findings" || docType === "reference")) return 3;
   if (intent === "review" && (docType === "canonical" || docType === "changelog")) return 3;
   if (intent === "build" && (docType === "task" || docType === "reference")) return 2;
@@ -479,7 +481,7 @@ export async function searchDocumentsAsync(
     return merged.slice(0, 12);
   } catch (err: unknown) {
     // Vector search failure is non-fatal — return sync result
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
     return syncResult;
   }
 }
@@ -615,7 +617,7 @@ export async function searchKnowledgeRows(
         usedFallback = true;
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
+      if (process.env.PHREN_DEBUG) {
         process.stderr.write(`[phren] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
@@ -800,8 +802,13 @@ export function rankResults(
       && queryOverlap < WEAK_CROSS_PROJECT_OVERLAP_MAX
       ? WEAK_CROSS_PROJECT_OVERLAP_PENALTY
       : 0;
+    // Boost skills whose filename matches a query token (e.g. "swarm" matches swarm.md)
+    const skillNameBoost = doc.type === "skill" && queryTokens.length > 0
+      ? queryTokens.some((t) => doc.filename.replace(/\.md$/i, "").toLowerCase() === t) ? 4 : 0
+      : 0;
     const score = Math.round((
       intentBoost(intent, doc.type) +
+      skillNameBoost +
       fileRel +
       branchMat +
       globBoost +
@@ -917,7 +924,7 @@ export function markStaleCitations(snippet: string): string {
                 stale = true;
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
+              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
               stale = true;
             }
           }

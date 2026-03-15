@@ -134,7 +134,7 @@ let cachedPhrenPath;
 let cachedPhrenPathKey;
 export function findPhrenPath() {
     const cacheKey = [
-        ((process.env.PHREN_PATH || process.env.PHREN_PATH) ?? ""),
+        ((process.env.PHREN_PATH) ?? ""),
         process.env.HOME ?? "",
         process.env.USERPROFILE ?? "",
         process.cwd(),
@@ -142,7 +142,7 @@ export function findPhrenPath() {
     if (cachedPhrenPath !== undefined && cachedPhrenPathKey === cacheKey)
         return cachedPhrenPath;
     cachedPhrenPathKey = cacheKey;
-    const envVal = (process.env.PHREN_PATH || process.env.PHREN_PATH)?.trim();
+    const envVal = (process.env.PHREN_PATH)?.trim();
     if (envVal) {
         const resolved = path.resolve(expandHomePath(envVal));
         cachedPhrenPath = isPhrenRootCandidate(resolved) ? resolved : null;
@@ -170,7 +170,7 @@ export function ensurePhrenPath() {
     });
     cachedPhrenPath = defaultPath;
     cachedPhrenPathKey = [
-        ((process.env.PHREN_PATH || process.env.PHREN_PATH) ?? ""),
+        ((process.env.PHREN_PATH) ?? ""),
         process.env.HOME ?? "",
         process.env.USERPROFILE ?? "",
         process.cwd(),

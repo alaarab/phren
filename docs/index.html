@@ -3,11 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>phren: persistent memory for AI agents</title>
+  <title>phren: knowledge layer for AI agents</title>
   <meta name="description" content="Knowledge layer for AI agents. Claude remembers you. Phren remembers your work. Git-backed, private, works with Claude Code, Copilot, Cursor, and Codex." />
   <meta property="og:title" content="Your agents forget. Phren doesn't." />
-  <meta property="og:description" content="Knowledge layer for AI agents. Claude remembers you. Phren remembers your work. Git-backed, private, portable." />
+  <meta property="og:description" content="Knowledge layer for AI agents. Claude remembers you. Phren prepares your context. Git-backed, private, portable." />
   <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,7 +16,7 @@
   <!-- NAV -->
   <nav id="nav">
     <a href="#" class="nav-logo">
-      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated">
+      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon" id="nav-icon">
       <span class="nav-wordmark">phren</span>
     </a>
     <div class="nav-links">
@@ -25,7 +26,7 @@
       <a href="#demo" class="nav-link">Shell</a>
       <a href="#web-ui" class="nav-link">Graph</a>
       <a href="#skills" class="nav-link">Skills</a>
-      <a href="https://alaarab.github.io/phren/" class="nav-link" target="_blank" rel="noopener">Docs</a>
+      <a href="api-reference.md" class="nav-link">Docs</a>
       <a href="whitepaper.pdf" class="nav-link" target="_blank" rel="noopener">Whitepaper</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -44,28 +45,126 @@
       <img src="phren-hero.svg" alt="" width="480" height="560" style="opacity:0.18; image-rendering: pixelated">
     </div>
 
+
     <div class="hero-content">
       <div class="hero-icon-wrap">
-        <img src="phren-hero.svg" alt="phren" width="240" height="280" style="image-rendering: pixelated">
+        <div class="hero-scene" aria-label="Phren browsing through a filing cabinet">
+          <!-- Phren character — small, cute, right next to cabinet -->
+          <div class="hero-phren-actor">
+            <img src="phren-hero.svg" alt="phren" width="100" height="116" style="image-rendering: pixelated">
+            <!-- Document phren carries after picking from cabinet (synced to 16s cabinet cycle) -->
+            <svg class="hero-doc" viewBox="0 0 11 14" width="20" height="25" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <g shape-rendering="crispEdges">
+                <rect x="0" y="0" width="11" height="14" fill="#252550"/>
+                <rect x="0" y="0" width="2" height="14" fill="#FF8A90"/>
+                <rect x="3" y="3" width="6" height="1" fill="#4a4075"/>
+                <rect x="3" y="5" width="6" height="1" fill="#4a4075"/>
+                <rect x="3" y="7" width="4" height="1" fill="#3a3060"/>
+                <animate attributeName="opacity"
+                  values="0;0;0;1;1;1;0;0"
+                  keyTimes="0;0.52;0.56;0.58;0.66;0.78;0.84;1"
+                  dur="16s" repeatCount="indefinite"/>
+              </g>
+            </svg>
+          </div>
+
+          <!-- Filing cabinet with full interaction animation (16s cycle) -->
+          <svg class="hero-cabinet-inline" viewBox="0 0 90 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <g shape-rendering="crispEdges" transform="translate(4, 8) scale(7)">
+              <!-- Cabinet frame: top rim -->
+              <rect x="0" y="0" width="11" height="1" fill="#2D2255"/>
+              <!-- Drawer 1 (closed) -->
+              <rect x="0" y="1" width="11" height="1" fill="#4a4075"/>
+              <rect x="0" y="2" width="11" height="2" fill="#3a3060"/>
+              <rect x="4" y="2" width="3" height="1" fill="#7B68AE"/>
+              <!-- Divider -->
+              <rect x="0" y="4" width="11" height="1" fill="#2D2255"/>
+              <!-- Cavity interior -->
+              <rect x="1" y="5" width="9" height="4" fill="#1a1a3e"/>
+              <!-- File tabs inside -->
+              <rect x="2" y="5" width="1" height="3" fill="#00E5FF" opacity="0.85"/>
+              <rect x="4" y="5" width="1" height="3" fill="#9B8DC8" opacity="0.85"/>
+              <rect x="6" y="5" width="1" height="3" fill="#FF8A90" opacity="0.85"/>
+              <rect x="8" y="5" width="1" height="3" fill="#00E5FF" opacity="0.85"/>
+              <!-- Tab 1 highlight (phren picks first file) -->
+              <rect x="4" y="5" width="1" height="3" fill="#fff" opacity="0">
+                <animate attributeName="opacity"
+                  values="0;0;0.5;0.6;0.3;0;0;0;0;0;0;0"
+                  keyTimes="0;0.14;0.17;0.19;0.22;0.25;0.40;0.50;0.55;0.60;0.70;1"
+                  dur="16s" repeatCount="indefinite"/>
+              </rect>
+              <!-- Tab 2 highlight (phren picks second file) -->
+              <rect x="6" y="5" width="1" height="3" fill="#fff" opacity="0">
+                <animate attributeName="opacity"
+                  values="0;0;0;0;0;0;0;0.5;0.6;0.3;0;0"
+                  keyTimes="0;0.14;0.17;0.19;0.25;0.40;0.44;0.47;0.49;0.52;0.55;1"
+                  dur="16s" repeatCount="indefinite"/>
+              </rect>
+              <!-- Divider -->
+              <rect x="0" y="9" width="11" height="1" fill="#2D2255"/>
+              <!-- Drawer 3 (closed) -->
+              <rect x="0" y="10" width="11" height="1" fill="#4a4075"/>
+              <rect x="0" y="11" width="11" height="2" fill="#3a3060"/>
+              <rect x="4" y="11" width="3" height="1" fill="#7B68AE"/>
+              <!-- Bottom rim + legs -->
+              <rect x="0" y="13" width="11" height="1" fill="#2D2255"/>
+              <rect x="1" y="14" width="2" height="1" fill="#2D2255"/>
+              <rect x="8" y="14" width="2" height="1" fill="#2D2255"/>
+
+              <!-- Middle drawer face (opens twice: first browse, second pick) -->
+              <g>
+                <animateTransform attributeName="transform" type="translate"
+                  values="0,0; 0,0; 3,0; 3,0; 0,0; 0,0; 3,0; 3,0; 0,0; 0,0"
+                  keyTimes="0; 0.10; 0.15; 0.38; 0.42; 0.44; 0.48; 0.62; 0.66; 1"
+                  dur="16s" repeatCount="indefinite"/>
+                <rect x="0" y="5" width="11" height="1" fill="#4a4075"/>
+                <rect x="0" y="6" width="11" height="2" fill="#3a3060"/>
+                <rect x="4" y="6" width="3" height="1" fill="#7B68AE"/>
+                <rect x="0" y="8" width="11" height="1" fill="#3a3060"/>
+              </g>
+
+              <!-- Document 1: pulled out, read, put back -->
+              <g opacity="0">
+                <animateTransform attributeName="transform" type="translate"
+                  values="0,0; 0,0; 0,-3; 0,-6; 0,-6; 0,-3; 0,0; 0,0"
+                  keyTimes="0; 0.18; 0.22; 0.25; 0.32; 0.36; 0.38; 1"
+                  dur="16s" repeatCount="indefinite"/>
+                <animate attributeName="opacity"
+                  values="0; 0; 0.9; 1; 1; 0.9; 0; 0"
+                  keyTimes="0; 0.18; 0.22; 0.25; 0.32; 0.36; 0.38; 1"
+                  dur="16s" repeatCount="indefinite"/>
+                <rect x="3" y="3" width="5" height="6" fill="#252550"/>
+                <rect x="3" y="3" width="1" height="6" fill="#9B8DC8"/>
+                <rect x="5" y="4" width="2" height="1" fill="#4a4075"/>
+                <rect x="5" y="6" width="2" height="1" fill="#3a3060"/>
+              </g>
+
+              <!-- Document 2: pulled out, phren takes it and walks away -->
+              <g opacity="0">
+                <animateTransform attributeName="transform" type="translate"
+                  values="0,0; 0,0; 0,-3; 0,-6; 0,-7; -6,-8; -6,-8; 0,0"
+                  keyTimes="0; 0.50; 0.54; 0.56; 0.60; 0.68; 0.78; 0.82"
+                  dur="16s" repeatCount="indefinite"/>
+                <animate attributeName="opacity"
+                  values="0; 0; 0.9; 1; 1; 1; 0; 0"
+                  keyTimes="0; 0.50; 0.54; 0.56; 0.68; 0.74; 0.78; 1"
+                  dur="16s" repeatCount="indefinite"/>
+                <rect x="3" y="3" width="5" height="6" fill="#252550"/>
+                <rect x="3" y="3" width="1" height="6" fill="#FF8A90"/>
+                <rect x="5" y="4" width="2" height="1" fill="#4a4075"/>
+                <rect x="5" y="6" width="2" height="1" fill="#3a3060"/>
+              </g>
+            </g>
+          </svg>
+        </div>
       </div>
 
       <h1 class="hero-title" style="font-size:clamp(28px,4.5vw,48px);margin-bottom:12px;">Claude remembers you.<br>Phren remembers your&nbsp;work.</h1>
 
       <p class="hero-sub" style="margin-bottom:16px;">
         <span class="hero-sub-line" style="font-size:clamp(14px,1.8vw,17px);"><span class="kw-finding">Findings</span>, <span class="kw-fragment">fragments</span>, <span class="kw-task">tasks</span>, <span class="kw-memory">truths</span>, <span class="kw-skill">skills</span>, and <span class="kw-session">sessions</span> across&nbsp;<span class="kw-machine">machines</span>.</span>
-        <span class="hero-sub-line" style="color:var(--text-muted);font-size:clamp(13px,1.6vw,15px);margin-top:4px;">Private markdown.&nbsp;Git-backed.</span>
+        <span class="hero-sub-line" style="font-size:clamp(14px,1.8vw,17px);margin-top:6px;color:var(--text-dim);letter-spacing:0.02em;">Private markdown.&nbsp;Git-backed.&nbsp;No database.</span>
       </p>
-
-      <div class="hero-cta-buttons">
-        <a href="https://github.com/alaarab/phren" class="btn-primary" target="_blank" rel="noopener">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          GitHub
-        </a>
-        <a href="whitepaper.pdf" class="btn-ghost" target="_blank" rel="noopener">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          Whitepaper
-        </a>
-      </div>
 
       <div id="install" class="hero-install-tabs">
         <div class="install-tabs-container">
@@ -77,7 +176,7 @@
                   <button class="copy-btn" data-cmd="npx @phren/cli init">copy</button>
                 </div>
                 <div class="install-command-note">
-                  One command. Creates <code style="color:var(--indigo)">~/.phren</code>, wires MCP, installs hooks. Your agents get a memory they can actually keep.
+                  One command. Creates <code style="color:var(--indigo)">~/.phren</code>, wires MCP, installs hooks. Your agents get a knowledge base that actually persists.
                 </div>
                 <div class="install-path-grid" style="grid-template-columns: repeat(2, 1fr);">
                   <div class="install-path-card install-path-card-primary">
@@ -98,6 +197,17 @@
         </div>
       </div>
 
+      <div class="hero-secondary-links" style="display:flex;gap:16px;justify-content:center;margin-top:16px;font-size:13px;">
+        <a href="https://github.com/alaarab/phren" class="btn-ghost" target="_blank" rel="noopener" style="font-size:13px;padding:6px 14px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Source
+        </a>
+        <a href="whitepaper.pdf" class="btn-ghost" target="_blank" rel="noopener" style="font-size:13px;padding:6px 14px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Whitepaper
+        </a>
+      </div>
+
     </div>
   </section>
 
@@ -106,7 +216,7 @@
     <div class="container">
       <div class="how-header reveal">
         <div class="section-label">How phren works</div>
-        <h2 class="section-title">Always paying attention. Never in the way.</h2>
+        <h2 class="section-title">Prepares your context. Stays out of your way.</h2>
       </div>
       <div class="steps-grid">
         <div class="step reveal reveal-delay-1">
@@ -123,15 +233,15 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           </div>
           <div class="step-title">Follows you everywhere</div>
-          <p class="step-desc">Switch laptops mid-thought. Already there. Git syncs after every response, pulls on open. Your memory travels with you, not your machine.</p>
+          <p class="step-desc">Switch laptops mid-thought. Already there. Git syncs after every response, pulls on open. Your knowledge travels with you, not your machine.</p>
         </div>
         <div class="step reveal reveal-delay-3">
           <div class="step-num">03</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
-          <div class="step-title">Peek inside the brain anytime</div>
-          <p class="step-desc">Runs in the background. When you want to look, <code>phren</code> opens the shell. <code>phren web-ui</code> shows the full <span class="kw-memory">memory</span> graph. Always an open book.</p>
+          <div class="step-title">See everything it knows</div>
+          <p class="step-desc">Interactive shell, web UI, and VS Code sidebar. Browse <span class="kw-finding">findings</span>, <span class="kw-fragment">fragments</span>, and the full <span class="kw-memory">knowledge</span> graph. Search across projects. Nothing hidden.</p>
         </div>
       </div>
     </div>
@@ -145,7 +255,7 @@
         <h2 class="section-title">Three hooks. Every knob yours.</h2>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 320px;gap:32px;align-items:start;" class="reveal">
+      <div class="trace-layout reveal">
         <!-- LEFT: Hook trace -->
         <div class="trace">
           <div class="trace-hook">
@@ -188,30 +298,13 @@
           </div>
         </div>
 
-        <!-- RIGHT: Config knobs -->
-        <div style="display:flex;flex-direction:column;gap:12px;">
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--indigo);margin-bottom:4px;">Configurable</div>
-          <div class="bento-card" style="padding:16px 18px;">
-            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Hooks</div>
-            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">Per tool, per project, or off entirely. MCP-only mode available.</p>
-          </div>
-          <div class="bento-card" style="padding:16px 18px;">
-            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Sensitivity</div>
-            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">Minimal / conservative / balanced / aggressive.</p>
-          </div>
-          <div class="bento-card" style="padding:16px 18px;">
-            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Token budget</div>
-            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">180 for light. 550 default. 2000 for deep context.</p>
-          </div>
-          <div class="bento-card" style="padding:16px 18px;">
-            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Trust + decay</div>
-            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">TTL, confidence floor, decay curves. Pin to override.</p>
-          </div>
-          <div class="bento-card" style="padding:16px 18px;">
-            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Sharing + storage</div>
-            <p style="font-size:12px;color:var(--text-muted);line-height:1.5;font-family:sans-serif;">Profiles per machine. Global, project-local, or custom path.</p>
-          </div>
-        </div>
+      </div>
+
+      <div class="bento-card reveal" style="max-width:520px;margin:28px auto 0;padding:20px 28px;border:1px solid var(--border);border-radius:12px;background:var(--card-bg);">
+        <h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0 0 6px;">Everything is configurable.</h3>
+        <p style="font-size:13px;color:var(--text-muted);line-height:1.7;margin:0;">
+          Finding sensitivity, task mode, proactivity level, token budgets, trust decay, retention&nbsp;&mdash; all tunable per project, per user, or globally. <code style="font-size:11px;padding:2px 5px;background:var(--code-bg, rgba(127,127,127,.12));border-radius:4px;">phren config</code> from the CLI, or the MCP&nbsp;tools at runtime.
+        </p>
       </div>
     </div>
   </section>
@@ -230,7 +323,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
           <div class="bento-card-title">Packs light.</div>
-          <p class="bento-card-desc">CLAUDE.md dumps everything every time. Phren only surfaces what matches. About <span class="kw-finding">550 tokens</span> instead of the whole file. Less noise, lower cost. Tune it with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>.</p>
+          <p class="bento-card-desc">CLAUDE.md dumps everything every time. Phren searches, ranks, and surfaces only what matches. About <span class="kw-finding">550 tokens</span> instead of the whole file. Less noise, lower cost. Tune it with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>.</p>
           <div class="token-bars">
             <div class="token-bar-row">
               <div class="token-bar-label">CLAUDE.md</div>
@@ -251,7 +344,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
           </div>
           <div class="bento-card-title">One brain, many agents.</div>
-          <p class="bento-card-desc">Five agents, three machines, one phren. What one <span class="kw-session">session</span> discovers, every future session knows. Patterns solidify. Bad info fades.</p>
+          <p class="bento-card-desc">Five agents, three machines, one phren. What one <span class="kw-session">session</span> discovers, every future session already knows. Patterns solidify. Bad info fades.</p>
           <div class="bento-tag-row">
             <div class="bento-tag">laptop</div>
             <div class="bento-tag">desktop</div>
@@ -264,7 +357,7 @@
           <div class="fun-card-copy">
             <div class="fun-card-kicker">Claude &#9829; phren</div>
             <h3 class="fun-card-title">Built for each other.</h3>
-            <p class="fun-card-desc">Claude thinks. Phren remembers. When your agent arrives, phren already has the context ready.</p>
+            <p class="fun-card-desc">Claude thinks. Phren prepares. When your agent arrives, the right context is already waiting.</p>
           </div>
           <div class="fun-card-art" aria-hidden="true">
             <svg viewBox="0 0 520 320" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -275,59 +368,172 @@
                   <stop offset="100%" stop-color="#0d0d22"/>
                 </linearGradient>
                 <radialGradient id="fun-heartGlow" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stop-color="#FF8A90" stop-opacity="0.55"/>
-                  <stop offset="100%" stop-color="#FF8A90" stop-opacity="0"/>
+                  <stop offset="0%" stop-color="#FF8A90" stop-opacity="0.6"/>
+                  <stop offset="70%" stop-color="#FF6672" stop-opacity="0.15"/>
+                  <stop offset="100%" stop-color="#FF6672" stop-opacity="0"/>
                 </radialGradient>
-                <radialGradient id="fun-phrenGlow" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stop-color="#9B8DC8"/>
-                  <stop offset="45%" stop-color="#7B68AE"/>
-                  <stop offset="100%" stop-color="#2D2255"/>
+                <radialGradient id="fun-claudeGlow" cx="50%" cy="65%" r="55%">
+                  <stop offset="0%" stop-color="#D4692A" stop-opacity="0.12"/>
+                  <stop offset="100%" stop-color="#D4692A" stop-opacity="0"/>
                 </radialGradient>
-                <!-- unused gradients removed -->
-                <filter id="fun-softGlow" x="-30%" y="-30%" width="160%" height="160%">
-                  <feGaussianBlur stdDeviation="10"/>
+                <radialGradient id="fun-phrenGlow" cx="50%" cy="65%" r="55%">
+                  <stop offset="0%" stop-color="#9B8DC8" stop-opacity="0.08"/>
+                  <stop offset="100%" stop-color="#9B8DC8" stop-opacity="0"/>
+                </radialGradient>
+                <filter id="fun-softGlow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="14"/>
                 </filter>
+                <filter id="fun-heartSoftGlow" x="-60%" y="-60%" width="220%" height="220%">
+                  <feGaussianBlur stdDeviation="8"/>
+                </filter>
+                <!-- Gentle idle bob for Claude -->
+                <style>
+                  @keyframes fun-claudeBob {
+                    0%, 100% { transform: translate(88px, 96px) scale(8); }
+                    50% { transform: translate(88px, 92px) scale(8); }
+                  }
+                  @keyframes fun-heartPulse {
+                    0%, 100% { transform: translate(242px, 104px) scale(5); }
+                    50% { transform: translate(242px, 105px) scale(5.4); }
+                  }
+                  @keyframes fun-heartGlowPulse {
+                    0%, 100% { opacity: 0.5; r: 40px; }
+                    50% { opacity: 0.8; r: 48px; }
+                  }
+                  @keyframes fun-phrenBob {
+                    0%, 100% { transform: translateY(0px); }
+                    50% { transform: translateY(-4px); }
+                  }
+                  @keyframes fun-sparkle1 {
+                    0%, 100% { opacity: 0.3; }
+                    50% { opacity: 1; }
+                  }
+                  @keyframes fun-sparkle2 {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.2; }
+                  }
+                  @keyframes fun-sparkle3 {
+                    0%, 100% { opacity: 0.6; }
+                    40% { opacity: 0.1; }
+                    80% { opacity: 1; }
+                  }
+                  .fun-claude-group {
+                    animation: fun-claudeBob 3s ease-in-out infinite;
+                  }
+                  .fun-heart-group {
+                    animation: fun-heartPulse 2s ease-in-out infinite;
+                    transform-origin: 260px 140px;
+                  }
+                  .fun-heart-glow-anim {
+                    animation: fun-heartGlowPulse 2s ease-in-out infinite;
+                  }
+                  .fun-phren-group {
+                    animation: fun-phrenBob 3.4s ease-in-out infinite;
+                  }
+                  .fun-sparkle-a { animation: fun-sparkle1 2.4s ease-in-out infinite; }
+                  .fun-sparkle-b { animation: fun-sparkle2 1.8s ease-in-out infinite; }
+                  .fun-sparkle-c { animation: fun-sparkle3 2.8s ease-in-out infinite; }
+                  .fun-sparkle-d { animation: fun-sparkle1 3.2s ease-in-out infinite 0.6s; }
+                  .fun-sparkle-e { animation: fun-sparkle2 2.2s ease-in-out infinite 0.3s; }
+                  .fun-sparkle-f { animation: fun-sparkle3 2.6s ease-in-out infinite 1.0s; }
+                  .fun-sparkle-g { animation: fun-sparkle1 2.0s ease-in-out infinite 0.9s; }
+                </style>
               </defs>
-
+              <!-- Background panel -->
               <rect x="34" y="26" width="452" height="268" rx="38" fill="url(#fun-panelGlow)"/>
               <rect x="48" y="40" width="424" height="240" rx="28" stroke="#FFFFFF" stroke-opacity="0.04"/>
-              <circle cx="262" cy="122" r="46" fill="url(#fun-heartGlow)"/>
-              <ellipse cx="152" cy="236" rx="48" ry="10" fill="#0d0d22"/>
-              <ellipse cx="390" cy="236" rx="54" ry="11" fill="#0d0d22"/>
-              <ellipse cx="390" cy="237" rx="38" ry="7" fill="#9B8DC8" opacity="0.035"/>
+              <!-- Floor shadows -->
+              <ellipse cx="148" cy="238" rx="50" ry="10" fill="#0d0d22"/>
+              <ellipse cx="148" cy="238" rx="34" ry="6" fill="#D4692A" opacity="0.04"/>
+              <ellipse cx="388" cy="238" rx="54" ry="11" fill="#0d0d22"/>
+              <ellipse cx="388" cy="238" rx="38" ry="7" fill="#9B8DC8" opacity="0.035"/>
+              <!-- Claude ambient glow -->
+              <circle cx="148" cy="165" r="70" fill="url(#fun-claudeGlow)"/>
+              <!-- Phren ambient glow -->
+              <circle cx="388" cy="165" r="70" fill="url(#fun-phrenGlow)"/>
 
-              <g shape-rendering="crispEdges" transform="translate(88 80) scale(10)">
-                <rect x="2" y="0" width="6" height="2" fill="#E58B74"/>
-                <rect x="1" y="2" width="8" height="1" fill="#E58B74"/>
-                <rect x="0" y="3" width="10" height="3" fill="#E58B74"/>
-                <rect x="1" y="6" width="8" height="1" fill="#E58B74"/>
-                <rect x="2" y="7" width="1" height="3" fill="#E58B74"/>
-                <rect x="4" y="7" width="1" height="3" fill="#E58B74"/>
-                <rect x="6" y="7" width="1" height="3" fill="#E58B74"/>
-                <rect x="8" y="7" width="1" height="3" fill="#E58B74"/>
-                <rect x="2" y="4" width="1" height="1" fill="#24140E"/>
-                <rect x="7" y="4" width="1" height="1" fill="#24140E"/>
+              <!-- Heart glow (behind heart, animated) -->
+              <circle class="fun-heart-glow-anim" cx="262" cy="136" r="40" fill="url(#fun-heartGlow)"/>
+
+              <!-- ======================== -->
+              <!-- Claude pixel character   -->
+              <!-- Soft blob creature, Claude peach/coral palette -->
+              <!-- Same style as phren but warm tones -->
+              <!-- ======================== -->
+              <g class="fun-claude-group" shape-rendering="crispEdges">
+                <!-- Head — rounded blob shape -->
+                <rect x="3" y="0" width="6" height="1" fill="#E8957E"/>
+                <rect x="2" y="1" width="8" height="1" fill="#E8957E"/>
+                <rect x="1" y="2" width="10" height="1" fill="#E58B74"/>
+                <rect x="1" y="3" width="10" height="1" fill="#E58B74"/>
+                <rect x="0" y="4" width="12" height="1" fill="#E58B74"/>
+                <rect x="0" y="5" width="12" height="1" fill="#E07A68"/>
+                <rect x="0" y="6" width="12" height="1" fill="#D9706B"/>
+                <rect x="1" y="7" width="10" height="1" fill="#D9706B"/>
+                <rect x="1" y="8" width="10" height="1" fill="#CC6460"/>
+                <rect x="2" y="9" width="8" height="1" fill="#CC6460"/>
+                <!-- Forehead highlight -->
+                <rect x="4" y="1" width="4" height="1" fill="#F0A090"/>
+                <!-- Eyes — dark, friendly -->
+                <rect x="3" y="4" width="1" height="2" fill="#2A1610"/>
+                <rect x="8" y="4" width="1" height="2" fill="#2A1610"/>
+                <!-- Eye shine -->
+                <rect x="3" y="4" width="1" height="1" fill="#3D2820"/>
+                <rect x="8" y="4" width="1" height="1" fill="#3D2820"/>
+                <!-- Rosy cheeks -->
+                <rect x="1" y="6" width="2" height="1" fill="#EB9F8B"/>
+                <rect x="9" y="6" width="2" height="1" fill="#EB9F8B"/>
+                <!-- Mouth — gentle smile -->
+                <rect x="4" y="7" width="1" height="1" fill="#C05850"/>
+                <rect x="7" y="7" width="1" height="1" fill="#C05850"/>
+                <rect x="5" y="8" width="2" height="1" fill="#C05850"/>
+                <!-- Feet — little stubs -->
+                <rect x="2" y="10" width="2" height="2" fill="#CC6460"/>
+                <rect x="4" y="11" width="1" height="1" fill="#CC6460"/>
+                <rect x="7" y="11" width="1" height="1" fill="#CC6460"/>
+                <rect x="8" y="10" width="2" height="2" fill="#CC6460"/>
               </g>
 
-              <g shape-rendering="crispEdges" transform="translate(228 92) scale(9)">
-                <rect x="1" y="0" width="2" height="2" fill="#FF6672"/>
-                <rect x="5" y="0" width="2" height="2" fill="#FF6672"/>
-                <rect x="0" y="1" width="3" height="2" fill="#FF6672"/>
-                <rect x="4" y="1" width="3" height="2" fill="#FF6672"/>
-                <rect x="0" y="3" width="7" height="2" fill="#FF6672"/>
-                <rect x="1" y="5" width="5" height="2" fill="#FF6672"/>
-                <rect x="2" y="7" width="3" height="2" fill="#FF6672"/>
-                <rect x="3" y="9" width="1" height="1" fill="#FF6672"/>
+              <!-- ============ -->
+              <!-- Pixel heart  -->
+              <!-- ============ -->
+              <g class="fun-heart-group" shape-rendering="crispEdges">
+                <!-- Heart shape with highlight and shadow -->
+                <rect x="1" y="0" width="2" height="1" fill="#FF7A84"/>
+                <rect x="5" y="0" width="2" height="1" fill="#FF7A84"/>
+                <rect x="0" y="1" width="4" height="1" fill="#FF6672"/>
+                <rect x="4" y="1" width="4" height="1" fill="#FF6672"/>
+                <!-- Highlight on top-left lobe -->
+                <rect x="1" y="0" width="1" height="1" fill="#FF9AA2"/>
+                <rect x="0" y="2" width="8" height="1" fill="#FF6672"/>
+                <rect x="0" y="3" width="8" height="1" fill="#FF5A66"/>
+                <rect x="1" y="4" width="6" height="1" fill="#FF5A66"/>
+                <rect x="2" y="5" width="4" height="1" fill="#F04E5A"/>
+                <rect x="3" y="6" width="2" height="1" fill="#E8404E"/>
+                <!-- Shadow on bottom -->
+                <rect x="3" y="6" width="2" height="1" fill="#E04048"/>
               </g>
 
-              <!-- Phren pixel-art character in fun scene -->
-              <image href="phren-icon-128.svg" x="344" y="110" width="116" height="116" style="image-rendering: pixelated"/>
+              <!-- ======================== -->
+              <!-- Phren character (icon)   -->
+              <!-- ======================== -->
+              <g class="fun-phren-group">
+                <image href="phren-icon-128.svg" x="330" y="96" width="116" height="116" style="image-rendering: pixelated"/>
+              </g>
 
-              <g shape-rendering="crispEdges" transform="translate(236 58) scale(4)">
-                <rect x="2" y="0" width="1" height="1" fill="#00E5FF"/>
-                <rect x="6" y="1" width="1" height="1" fill="#00E5FF"/>
-                <rect x="0" y="4" width="1" height="1" fill="#00E5FF"/>
-                <rect x="9" y="5" width="1" height="1" fill="#00E5FF"/>
+              <!-- ========================= -->
+              <!-- Sparkle accents (7 dots)  -->
+              <!-- ========================= -->
+              <g shape-rendering="crispEdges">
+                <!-- Cyan sparkles (above heart area) -->
+                <rect class="fun-sparkle-a" x="244" y="62" width="4" height="4" rx="1" fill="#00E5FF" opacity="0.7"/>
+                <rect class="fun-sparkle-b" x="268" y="70" width="3" height="3" rx="1" fill="#00E5FF" opacity="0.5"/>
+                <rect class="fun-sparkle-c" x="236" y="78" width="3" height="3" rx="1" fill="#00E5FF" opacity="0.6"/>
+                <rect class="fun-sparkle-d" x="280" y="58" width="3" height="3" rx="1" fill="#00E5FF" opacity="0.4"/>
+                <!-- Purple sparkles (phren brand) -->
+                <rect class="fun-sparkle-e" x="254" y="54" width="3" height="3" rx="1" fill="#9B8DC8" opacity="0.6"/>
+                <rect class="fun-sparkle-f" x="274" y="82" width="4" height="4" rx="1" fill="#9B8DC8" opacity="0.5"/>
+                <rect class="fun-sparkle-g" x="240" y="88" width="3" height="3" rx="1" fill="#9B8DC8" opacity="0.4"/>
               </g>
             </svg>
           </div>
@@ -361,8 +567,8 @@
     <div class="container">
       <div class="web-ui-header reveal" style="text-align:left;max-width:100%;margin-bottom:32px">
         <div class="section-label">Phren's brain map</div>
-        <h2 class="section-title">See everything it knows.</h2>
-        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Run <code style="font-size:14px;color:var(--copper-mid)">phren web-ui</code> to open a visual map of everything it knows. <span class="kw-finding">Findings</span>, connections, quality scores, and what needs your attention.</p>
+        <h2 class="section-title">See everything it holds.</h2>
+        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Run <code style="font-size:14px;color:var(--copper-mid)">phren web-ui</code> to open a visual map of everything phren holds. <span class="kw-finding">Findings</span>, connections, quality scores, and what needs your attention.</p>
       </div>
       <div class="rui-mock reveal">
         <div class="rui-mock-chrome">
@@ -571,7 +777,10 @@
       <div class="bento-header reveal" style="text-align:center;">
         <div class="section-label">VS Code extension</div>
         <h2 class="section-title">Browse phren without leaving your editor.</h2>
-        <p class="section-sub" style="max-width:560px;margin:0 auto;">Tree view for <span class="kw-finding">findings</span>, <span class="kw-task">tasks</span>, <span class="kw-skill">skills</span>, and <span class="kw-hook">hooks</span>. Interactive <span class="kw-fragment">fragment</span> graph. Search, add, review, and push. All from the sidebar.</p>
+        <div style="margin:20px auto 0;max-width:640px;">
+          <img src="phren-graph-walk.gif" alt="Phren walking the knowledge graph" style="width:100%;border-radius:12px;border:1px solid var(--border);" loading="lazy"/>
+        </div>
+        <p class="section-sub" style="max-width:560px;margin:16px auto 0;">Tree view for <span class="kw-finding">findings</span>, <span class="kw-task">tasks</span>, <span class="kw-skill">skills</span>, and <span class="kw-hook">hooks</span>. Interactive <span class="kw-fragment">fragment</span> graph. Search, add, review, and push. All from the sidebar.</p>
       </div>
       <div style="display:flex;align-items:center;justify-content:center;gap:24px;flex-wrap:wrap;margin-top:32px;" class="reveal">
         <div class="bento-card" style="padding:20px 24px;text-align:center;flex:1;min-width:200px;max-width:280px;">
@@ -585,7 +794,9 @@
           <p style="font-size:12px;color:var(--text-muted);font-family:sans-serif;">Interactive webview. Click nodes, explore connections, edit findings in-graph.</p>
         </div>
         <div class="bento-card" style="padding:20px 24px;text-align:center;flex:1;min-width:200px;max-width:280px;">
-          <div style="font-size:24px;margin-bottom:8px;">&#128269;</div>
+          <div style="font-size:24px;margin-bottom:8px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </div>
           <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Ctrl+Shift+K</div>
           <p style="font-size:12px;color:var(--text-muted);font-family:sans-serif;">Search phren's knowledge base without leaving your editor.</p>
         </div>
@@ -598,22 +809,30 @@
     <div class="container">
       <div class="skills-header reveal">
         <div class="section-label">Phren's tricks</div>
-        <h2 class="section-title">55 MCP tools built in.<br>Skills for the bigger stuff.</h2>
+        <h2 class="section-title">66 MCP tools built in.<br>Skills for the bigger stuff.</h2>
         <p class="section-sub" style="margin-top:12px"><span class="kw">MCP tools</span> handle search, capture, review, and sync. <span class="kw-skill">Skills</span> are shortcuts for larger jobs. Optional. Drop new ones in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>.</p>
       </div>
 
       <div class="skills-grid">
-        <div class="skill-card reveal reveal-delay-2">
+        <div class="skill-card reveal reveal-delay-1">
           <div class="skill-name">/phren-init</div>
           <div class="skill-desc">Point phren at a new project. Sets up files and starts learning.</div>
         </div>
-        <div class="skill-card reveal reveal-delay-1">
+        <div class="skill-card reveal reveal-delay-2">
           <div class="skill-name">/phren-consolidate</div>
           <div class="skill-desc">Tidies up. Finds patterns, deduplicates, promotes what matters.</div>
         </div>
-        <div class="skill-card reveal" style="border-style: dashed; opacity: 0.8; grid-column: span 2;">
-          <div class="skill-name" style="color:var(--text-dim)">teach it yours</div>
-          <div class="skill-desc">Drop skills into <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code> and phren picks them up on next init.</div>
+        <div class="skill-card reveal reveal-delay-3">
+          <div class="skill-name">/phren-discover</div>
+          <div class="skill-desc">Scans a project for gaps and surfaces opportunities you missed.</div>
+        </div>
+        <div class="skill-card reveal reveal-delay-4">
+          <div class="skill-name">/phren-sync</div>
+          <div class="skill-desc">Pull phren to a new machine or push config changes back to the repo.</div>
+        </div>
+        <div class="skill-card reveal" style="border-style:dashed;opacity:0.7;">
+          <div class="skill-name" style="color:var(--text-dim)">+ your own</div>
+          <div class="skill-desc">Drop skills into <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code></div>
         </div>
       </div>
     </div>
@@ -625,7 +844,7 @@
       <div class="bento-header reveal" style="text-align:center;">
         <div class="section-label">Works everywhere</div>
         <h2 class="section-title">One brain. Every agent.</h2>
-        <p class="section-sub" style="max-width:560px;margin:0 auto;">MCP and hooks. Same <span class="kw-memory">memory</span>, same <span class="kw-finding">findings</span>, no matter which tool you're in.</p>
+        <p class="section-sub" style="max-width:560px;margin:0 auto;">MCP and hooks. Same <span class="kw-memory">knowledge</span>, same <span class="kw-finding">findings</span>, no matter which tool you're in.</p>
       </div>
       <div class="agent-carousel reveal" style="position:relative;height:52px;overflow:hidden;margin-top:40px;">
         <div class="agent-carousel-track" id="agent-carousel">
@@ -647,10 +866,61 @@
         <div class="cta-brand">
           <div class="cta-brand-copy">
             <div class="section-label">Ready?</div>
-            <h2 class="cta-title">Your <span class="kw-memory">memory</span>, your repo.</h2>
-            <p class="cta-tagline">No API calls to retrieve your data. No third party.<br><span class="kw-finding">Findings</span> tagged with <span class="kw-session">sessions</span>, linked to <span class="kw-task">tasks</span>.<br><span class="kw-memory">Memory</span> in your custody, where it belongs.</p>
+            <h2 class="cta-title">Your knowledge, your repo.</h2>
+            <p class="cta-tagline">No API calls. No third party.<br><span class="kw-finding">Findings</span> tagged with <span class="kw-session">sessions</span>, linked to <span class="kw-task">tasks</span>, surfaced before every prompt.</p>
           </div>
-          <img class="cta-icon" src="phren-website.svg" alt="phren" width="96" height="112" style="image-rendering: pixelated">
+          <div style="max-width:160px">
+            <svg viewBox="0 0 520 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="cta-panelGlow" x1="48" y1="24" x2="472" y2="296" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#161635"/>
+                  <stop offset="55%" stop-color="#12122a"/>
+                  <stop offset="100%" stop-color="#0d0d22"/>
+                </linearGradient>
+                <filter id="cta-softGlow" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="10"/>
+                </filter>
+              </defs>
+              <rect x="34" y="26" width="452" height="268" rx="38" fill="url(#cta-panelGlow)"/>
+              <rect x="48" y="40" width="424" height="240" rx="28" stroke="#FFFFFF" stroke-opacity="0.04"/>
+              <ellipse cx="152" cy="244" rx="54" ry="10" fill="#0d0d22"/>
+              <ellipse cx="380" cy="252" rx="64" ry="9" fill="#0d0d22"/>
+              <!-- Phren character -->
+              <g>
+                <image href="phren-icon-128.svg" x="80" y="124" width="108" height="108" style="image-rendering: pixelated" transform="translate(268, 0) scale(-1, 1)"/>
+              </g>
+              <!-- Bookshelf -->
+              <g transform="translate(280 56)">
+                <rect x="0" y="0" width="168" height="198" rx="5" fill="#1E1840" stroke="#2D2255" stroke-width="2"/>
+                <rect x="6" y="62" width="156" height="3" rx="1" fill="#2D2255"/>
+                <rect x="6" y="128" width="156" height="3" rx="1" fill="#2D2255"/>
+                <rect x="12" y="10" width="16" height="48" rx="2" fill="#5B4B8A"/>
+                <rect x="30" y="18" width="14" height="40" rx="2" fill="#7B68AE"/>
+                <rect x="46" y="8"  width="18" height="50" rx="2" fill="#3D2D6B"/>
+                <rect x="66" y="22" width="11" height="36" rx="2" fill="#9B8DC8"/>
+                <rect x="80" y="12" width="16" height="46" rx="2" fill="#4A3A7A"/>
+                <rect x="98" y="16" width="20" height="42" rx="2" fill="#6A58A0"/>
+                <rect x="120" y="6"  width="14" height="52" rx="2" fill="#2D2255"/>
+                <rect x="136" y="20" width="18" height="38" rx="2" fill="#5B4B8A"/>
+                <rect x="12" y="70" width="18" height="54" rx="2" fill="#7B68AE"/>
+                <rect x="32" y="72" width="14" height="52" rx="2" fill="#5B4B8A"/>
+                <rect x="48" y="68" width="18" height="56" rx="2" fill="#9B8DC8"/>
+                <rect x="68" y="74" width="13" height="50" rx="2" fill="#3D2D6B"/>
+                <rect x="84" y="70" width="18" height="54" rx="2" fill="#FF8A90"/>
+                <rect x="104" y="72" width="14" height="52" rx="2" fill="#4A3A7A"/>
+                <rect x="120" y="68" width="18" height="56" rx="2" fill="#6A58A0"/>
+                <rect x="140" y="76" width="14" height="48" rx="2" fill="#3D2D6B"/>
+                <rect x="12" y="136" width="18" height="54" rx="2" fill="#4A3A7A"/>
+                <rect x="32" y="142" width="14" height="48" rx="2" fill="#7B68AE"/>
+                <rect x="48" y="134" width="16" height="56" rx="2" fill="#2D2255"/>
+                <rect x="66" y="140" width="20" height="50" rx="2" fill="#5B4B8A"/>
+                <rect x="88" y="132" width="14" height="58" rx="2" fill="#9B8DC8"/>
+                <rect x="104" y="144" width="16" height="46" rx="2" fill="#3D2D6B"/>
+                <rect x="122" y="136" width="14" height="54" rx="2" fill="#6A58A0"/>
+                <rect x="138" y="148" width="18" height="42" rx="2" fill="#5B4B8A"/>
+              </g>
+            </svg>
+          </div>
         </div>
         <div class="cta-actions">
           <a href="#install" class="btn-primary">
@@ -676,7 +946,7 @@
       <span class="dot-sep">&#9829;</span>
       <span>made with love by phren</span>
       <span class="dot-sep">•</span>
-      <span style="opacity:0.5;font-size:11px">v0.0.4</span>
+      <span style="opacity:0.5;font-size:11px">v0.0.9</span>
     </div>
     <div class="footer-right">
       <a href="https://github.com/alaarab/phren" target="_blank" rel="noopener">GitHub</a>
@@ -700,5 +970,43 @@
   </footer>
 
   <script src="main.js"></script>
+  <script>
+    (function () {
+      var icon = document.getElementById('nav-icon');
+      if (!icon) return;
+      icon.addEventListener('click', function (e) {
+        e.preventDefault();
+        icon.classList.remove('popped');
+        void icon.offsetWidth; // reflow to restart animation
+        icon.classList.add('popped');
+        icon.addEventListener('animationend', function handler() {
+          icon.classList.remove('popped');
+          icon.removeEventListener('animationend', handler);
+        });
+      });
+    })();
+  </script>
+  <script>
+    (function() {
+      var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      function handleMotion(e) {
+        var smil = document.querySelectorAll('animate, animateTransform, animateMotion');
+        smil.forEach(function(el) {
+          if (e.matches) {
+            el.setAttribute('dur', 'indefinite');
+            el.setAttribute('repeatCount', '0');
+          } else {
+            var orig = el.getAttribute('data-orig-dur');
+            if (orig) { el.setAttribute('dur', orig); el.setAttribute('repeatCount', 'indefinite'); }
+          }
+        });
+      }
+      document.querySelectorAll('animate, animateTransform, animateMotion').forEach(function(el) {
+        if (!el.getAttribute('data-orig-dur')) el.setAttribute('data-orig-dur', el.getAttribute('dur'));
+      });
+      if (mq.matches) handleMotion(mq);
+      mq.addEventListener('change', handleMotion);
+    })();
+  </script>
 </body>
 </html>

@@ -6,6 +6,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, installPreferencesFile } from "./phren-paths.js";
 import { errorMessage } from "./utils.js";
+import { withFileLock } from "./governance-locks.js";
 import type { CustomHookEntry } from "./hooks.js";
 
 export interface InstallPreferences {
@@ -42,7 +43,7 @@ function readPreferencesFile(file: string): InstallPreferences {
   }
 }
 
-function writePreferencesFile(file: string, current: InstallPreferences, patch: Partial<InstallPreferences>) {
+function writePreferencesFileRaw(file: string, current: InstallPreferences, patch: Partial<InstallPreferences>) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmpPath = `${file}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(
@@ -60,6 +61,13 @@ function writePreferencesFile(file: string, current: InstallPreferences, patch: 
   fs.renameSync(tmpPath, file);
 }
 
+function writePreferencesFile(file: string, patch: Partial<InstallPreferences>) {
+  withFileLock(file, () => {
+    const current = readPreferencesFile(file);
+    writePreferencesFileRaw(file, current, patch);
+  });
+}
+
 export function readInstallPreferences(phrenPath: string): InstallPreferences {
   return readPreferencesFile(preferencesFile(phrenPath));
 }
@@ -69,11 +77,20 @@ export function readGovernanceInstallPreferences(phrenPath: string): InstallPref
 }
 
 export function writeInstallPreferences(phrenPath: string, patch: Partial<InstallPreferences>) {
-  writePreferencesFile(preferencesFile(phrenPath), readInstallPreferences(phrenPath), patch);
+  writePreferencesFile(preferencesFile(phrenPath), patch);
 }
 
 export function writeGovernanceInstallPreferences(phrenPath: string, patch: Partial<InstallPreferences>) {
-  writePreferencesFile(governanceInstallPreferencesFile(phrenPath), readGovernanceInstallPreferences(phrenPath), patch);
+  writePreferencesFile(governanceInstallPreferencesFile(phrenPath), patch);
+}
+
+/** Atomically read-modify-write install preferences using a patcher function. */
+export function updateInstallPreferences(phrenPath: string, patcher: (current: InstallPreferences) => Partial<InstallPreferences>): void {
+  const file = preferencesFile(phrenPath);
+  withFileLock(file, () => {
+    const current = readPreferencesFile(file);
+    writePreferencesFileRaw(file, current, patcher(current));
+  });
 }
 
 export function getMcpEnabledPreference(phrenPath: string): boolean {

@@ -25,7 +25,7 @@ describe("index invalidation: file changes trigger rebuild", () => {
     );
 
     // Global dir with shared content (imported by project files)
-    const globalDir = path.join(tmp.path, "global");
+    const globalDir = path.join(tmp.path, "global", "shared");
     fs.mkdirSync(globalDir, { recursive: true });
     writeFile(
       path.join(globalDir, "conventions.md"),
@@ -74,7 +74,7 @@ describe("index invalidation: file changes trigger rebuild", () => {
     // Write a project file that @imports the global conventions
     writeFile(
       path.join(tmp.path, "myapp", "reference.md"),
-      "# myapp reference\n\n@import conventions.md\n"
+      "# myapp reference\n\n@import shared/conventions.md\n"
     );
 
     db = await buildIndex(tmp.path);
@@ -89,7 +89,7 @@ describe("index invalidation: file changes trigger rebuild", () => {
   it("changing global file that is @imported causes content change on rebuild", async () => {
     writeFile(
       path.join(tmp.path, "myapp", "reference.md"),
-      "# myapp reference\n\n@import conventions.md\n"
+      "# myapp reference\n\n@import shared/conventions.md\n"
     );
 
     db = await buildIndex(tmp.path);
@@ -100,7 +100,7 @@ describe("index invalidation: file changes trigger rebuild", () => {
 
     // Modify global file
     writeFile(
-      path.join(tmp.path, "global", "conventions.md"),
+      path.join(tmp.path, "global", "shared", "conventions.md"),
       "# Global Conventions\n\n- Zarathustrian rule: use async I/O for all network operations\n"
     );
 

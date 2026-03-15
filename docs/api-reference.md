@@ -1,10 +1,10 @@
 # MCP API Reference
 
-Phren exposes 60 MCP tools across 11 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 66 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
-Module layout: search, tasks, findings, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction.
+Module layout: search, tasks, findings, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration.
 
 ---
 
@@ -138,7 +138,7 @@ Remove a task from a project's `tasks.md` by matching text or task ID.
 
 ### `update_task`
 
-Update a task item's priority, context, section, or linked GitHub issue.
+Update a task item's text, priority, context, section, or linked GitHub issue.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -150,6 +150,7 @@ The `updates` object accepts:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `text` | string | Replacement text for the task line. |
 | `priority` | string | New priority tag: `high`, `medium`, or `low`. |
 | `context` | string | Text to append to the Context line below the item. |
 | `replace_context` | boolean | Replace the existing `Context:` value instead of appending. |
@@ -287,6 +288,16 @@ List unresolved contradicted findings (status = `contradicted`) in one project o
 |-----------|------|----------|-------------|
 | `project` | string | no | Optional project filter. Omit to scan all projects. |
 | `finding_text` | string | no | Optional finding selector (`fid:`, exact text, or partial match). |
+
+### `edit_finding`
+
+Edit a finding in place while preserving inline metadata such as `fid` and citations.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `old_text` | string | yes | Existing finding text to match. |
+| `new_text` | string | yes | Replacement finding text. |
 
 ### `remove_finding`
 
@@ -620,39 +631,17 @@ Read recent hook/debug failures from runtime logs.
 
 ### `get_review_queue`
 
-Read review queue items for one project or all active-profile projects.
+Read review queue items for one project or all active-profile projects. The review queue is read-only.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Optional project filter. |
 
-### `approve_queue_item`
+### `doctor_fix`
 
-Approve a review queue item.
+Run doctor self-heal checks and apply fixes (missing files, broken symlinks, stale locks).
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Queue item selector text. |
-
-### `reject_queue_item`
-
-Reject a review queue item.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Queue item selector text. |
-
-### `edit_queue_item`
-
-Edit a review queue item.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Queue item selector text. |
-| `new_text` | string | yes | Replacement queue item text. |
+No parameters.
 
 ---
 
@@ -668,6 +657,64 @@ Extract candidate findings from session/transcript context for bulk capture work
 | `text` | string | yes | Source text to mine for finding candidates (max 10,000 chars). |
 | `model` | string | no | Optional Ollama model override. |
 | `dryRun` | boolean | no | If true, return extracted candidates without writing findings. |
+
+---
+
+## Configuration
+
+### `get_config`
+
+Read current governance and policy configuration (retention, workflow, access, index policies).
+
+No parameters.
+
+### `set_proactivity`
+
+Set agent proactivity level.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `level` | string | yes | Proactivity level to set. |
+
+### `set_task_mode`
+
+Set task management mode.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mode` | string | yes | Task mode to set. |
+
+### `set_finding_sensitivity`
+
+Set finding capture sensitivity.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `level` | string | yes | Finding sensitivity level to set. |
+
+### `set_retention_policy`
+
+Configure retention and decay policy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `settings` | object | yes | Retention policy settings to apply. |
+
+### `set_workflow_policy`
+
+Configure workflow approval gates.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `settings` | object | yes | Workflow policy settings to apply. |
+
+### `set_index_policy`
+
+Configure indexer include/exclude globs.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `settings` | object | yes | Index policy settings to apply. |
 
 ---
 
@@ -694,4 +741,4 @@ Extract candidate findings from session/transcript context for bulk capture work
 
 ---
 
-Governance, policy, and maintenance tools are CLI-only. See `phren config` and `phren maintain`.
+Maintenance tools (govern, prune, consolidate, extract) are CLI-only. See `phren config` and `phren maintain`.

@@ -12,6 +12,7 @@ const CATEGORY_BY_MODULE = {
     "mcp-ops": "Operations and review",
     "mcp-skills": "Skills management",
     "mcp-hooks": "Hooks management",
+    "mcp-config": "Configuration",
     "mcp-extract": "Extraction",
 };
 const MODULE_ORDER = Object.keys(CATEGORY_BY_MODULE);

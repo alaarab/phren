@@ -140,7 +140,7 @@ export class PhrenStatusBar implements vscode.Disposable {
     this.statusItem.tooltip = this.healthOk === false
       ? "Phren is unhealthy — click for Doctor"
       : `Phren: ${projectName} — click for Doctor`;
-    this.statusItem.color = this.healthOk === false ? "#f44336" : "#B8AED8";
+    this.statusItem.color = this.healthOk === false ? new vscode.ThemeColor("errorForeground") : undefined;
   }
 }
 

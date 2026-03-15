@@ -77,6 +77,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     expect(files).toContain("package.json");
     expect(files).toContain("mcp/dist/index.js");
     expect(files).toContain("mcp/dist/tool-registry.js");
+    expect(files).toContain("icon.svg");
     expect(files).not.toContain("mcp/src/index.ts");
   });
 
@@ -85,7 +86,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     const linkSkillsTs = fs.readFileSync(path.join(root, "mcp", "src", "link-skills.ts"), "utf8");
     expect(linkSkillsTs).toContain("getToolCount()");
     expect(linkSkillsTs).toContain("renderToolCatalogMarkdown()");
-    expect(getToolCount()).toBe(58);
+    expect(getToolCount()).toBe(66);
   });
 
   it.skipIf(process.platform === "win32")("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {

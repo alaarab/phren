@@ -206,19 +206,9 @@ describe.sequential("workflow integration", () => {
       expect(projectsRes.body).toContain("\"name\":\"repo-c\"");
       expect(projectsRes.body).not.toContain("\"name\":\"repo-d\"");
 
-      const csrfRes = await httpGet(address.port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
-      expect(csrfRes.status).toBe(200);
-      const csrf = JSON.parse(csrfRes.body).token as string;
-      // Queue approval was removed — verify the endpoint returns an error
-      const approveRes = await postForm(address.port, "/api/approve", {
-        _auth: authToken,
-        _csrf: csrf,
-        project: "repo-c",
-        line: "- [2026-03-09] Approve this integrated workflow memory [confidence 0.90]",
-      });
-      expect(approveRes.status).toBe(200);
-      expect(JSON.parse(approveRes.body).ok).toBe(false);
-      expect(JSON.parse(approveRes.body).error).toContain("removed");
+      const reviewRes = await httpGet(address.port, "/api/review-queue?_auth=" + encodeURIComponent(authToken));
+      expect(reviewRes.status).toBe(200);
+      expect(reviewRes.body).toContain("Approve this integrated workflow memory");
     } finally {
       await new Promise<void>((resolve) => webUi.close(() => resolve()));
       db?.close();

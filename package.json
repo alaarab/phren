@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.0.5",
+  "version": "0.0.9",
   "description": "Knowledge layer for AI agents. Claude remembers you. Phren remembers your work.",
   "type": "module",
   "bin": {
@@ -8,6 +8,7 @@
   },
   "files": [
     "mcp/dist",
+    "icon.svg",
     "starter",
     "skills"
   ],
@@ -34,7 +35,7 @@
     "vitest": "^4.0.18"
   },
   "scripts": {
-    "build": "rm -rf mcp/dist && tsc -p mcp/tsconfig.json && chmod +x mcp/dist/index.js && cp mcp/src/synonyms*.json mcp/dist/",
+    "build": "node scripts/build.mjs",
     "dev": "tsx mcp/src/index.ts",
     "lint": "eslint mcp/src/ --ignore-pattern '*.test.ts'",
     "validate-docs": "bash scripts/validate-docs.sh",

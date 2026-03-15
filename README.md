@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-Phren is a git-backed knowledge layer that gives AI agents persistent memory across sessions, projects, and machines. Findings, decisions, and patterns are captured as markdown in a repo you control — no hosted service, no vendor lock-in.
+Every time you start a new session, your AI agent forgets everything it learned. Phren fixes that — findings, decisions, and patterns persist as markdown in a git repo you control. No database, no hosted service, no vendor lock-in. Works across sessions, projects, and machines.
 </p>
 
 ---
@@ -51,8 +51,8 @@ To add a project later, run `phren add` from that directory. To browse what phre
 
 - [Documentation site](https://alaarab.github.io/phren/)
 - [Whitepaper (PDF)](https://alaarab.github.io/phren/whitepaper.pdf)
-- [Architecture](docs/architecture.md)
-- [Contributing](CONTRIBUTING.md)
+- [Architecture](docs/architecture.md) — how retrieval, governance, and persistence fit together
+- [Contributing](CONTRIBUTING.md) — how to add tools, skills, and tests
 - [Security](SECURITY.md)
 
 ---

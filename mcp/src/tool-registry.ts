@@ -21,6 +21,7 @@ const CATEGORY_BY_MODULE: Record<string, string> = {
   "mcp-ops": "Operations and review",
   "mcp-skills": "Skills management",
   "mcp-hooks": "Hooks management",
+  "mcp-config": "Configuration",
   "mcp-extract": "Extraction",
 };
 

@@ -71,12 +71,12 @@ function detectFindingProvenanceSource(explicitSource) {
         return "extract";
     if ((process.env.PHREN_HOOK_TOOL))
         return "hook";
-    if ((process.env.PHREN_ACTOR || process.env.PHREN_ACTOR)?.trim())
+    if (process.env.PHREN_ACTOR?.trim())
         return "agent";
     return "human";
 }
 function buildFindingSource(sessionId, explicitSource, scope) {
-    const actor = (process.env.PHREN_ACTOR || process.env.PHREN_ACTOR)?.trim() || undefined;
+    const actor = process.env.PHREN_ACTOR?.trim() || undefined;
     const source = {
         source: detectFindingProvenanceSource(explicitSource),
         machine: getMachineName(),
@@ -355,7 +355,7 @@ export function addFindingToFile(phrenPath, project, learning, citationInput, op
                 if (!newLines[i].startsWith("- "))
                     continue;
                 if (newLines[i].includes(prepared.finding.bullet.slice(0, 40))) {
-                    if (!newLines[i].includes("phren:supersedes") && !newLines[i].includes("phren:supersedes")) {
+                    if (!newLines[i].includes("phren:supersedes")) {
                         const supersedesFirst60 = supersedesText.slice(0, 60);
                         newLines[i] = `${newLines[i]} <!-- phren:supersedes "${supersedesFirst60}" -->`;
                     }

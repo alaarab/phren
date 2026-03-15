@@ -109,7 +109,7 @@ function hasInstallMarkers(phrenPath) {
         fs.existsSync(path.join(phrenPath, "global")));
 }
 function resolveInitPhrenPath(opts) {
-    const raw = opts._walkthroughStoragePath || (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
+    const raw = opts._walkthroughStoragePath || (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
     return path.resolve(expandHomePath(raw));
 }
 function detectRepoRootForStorage(phrenPath) {
@@ -910,6 +910,39 @@ export async function runInit(opts = {}) {
     }
     let phrenPath = resolveInitPhrenPath(opts);
     const dryRun = Boolean(opts.dryRun);
+    // Migrate ~/.cortex → ~/.phren when upgrading from the old name.
+    // Only runs when the resolved phrenPath doesn't exist yet but ~/.cortex does.
+    if (!opts._walkthroughStoragePath && !fs.existsSync(phrenPath)) {
+        const cortexPath = path.resolve(homePath(".cortex"));
+        if (cortexPath !== phrenPath && fs.existsSync(cortexPath) && hasInstallMarkers(cortexPath)) {
+            if (!dryRun) {
+                fs.renameSync(cortexPath, phrenPath);
+            }
+            console.log(`Migrated ~/.cortex → ~/.phren`);
+        }
+    }
+    // Rename stale cortex-*.md skill files left over from the rebrand.
+    // Runs on every init so users who already migrated the directory still get the fix.
+    const skillsMigrateDir = path.join(phrenPath, "global", "skills");
+    if (!dryRun && fs.existsSync(skillsMigrateDir)) {
+        for (const entry of fs.readdirSync(skillsMigrateDir)) {
+            if (!entry.endsWith(".md"))
+                continue;
+            if (entry === "cortex.md") {
+                const dest = path.join(skillsMigrateDir, "phren.md");
+                if (!fs.existsSync(dest)) {
+                    fs.renameSync(path.join(skillsMigrateDir, entry), dest);
+                }
+            }
+            else if (entry.startsWith("cortex-")) {
+                const newName = entry.replace(/^cortex-/, "phren-");
+                const dest = path.join(skillsMigrateDir, newName);
+                if (!fs.existsSync(dest)) {
+                    fs.renameSync(path.join(skillsMigrateDir, entry), dest);
+                }
+            }
+        }
+    }
     let hasExistingInstall = hasInstallMarkers(phrenPath);
     // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
     if (!hasExistingInstall && !dryRun && !opts.yes && process.stdin.isTTY && process.stdout.isTTY) {
@@ -1404,7 +1437,7 @@ export async function runInit(opts = {}) {
     log(``);
 }
 export async function runMcpMode(modeArg) {
-    const phrenPath = findPhrenPath() || (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
+    const phrenPath = findPhrenPath() || (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
     const manifest = readRootManifest(phrenPath);
     const normalizedArg = modeArg?.trim().toLowerCase();
     if (!normalizedArg || normalizedArg === "status") {
@@ -1475,7 +1508,7 @@ export async function runMcpMode(modeArg) {
     log(`Restart your agent to apply changes.`);
 }
 export async function runHooksMode(modeArg) {
-    const phrenPath = findPhrenPath() || (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
+    const phrenPath = findPhrenPath() || (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
     const manifest = readRootManifest(phrenPath);
     const normalizedArg = modeArg?.trim().toLowerCase();
     if (!normalizedArg || normalizedArg === "status") {
@@ -1633,7 +1666,7 @@ export async function runUninstall() {
     catch (err) {
         debugLog(`uninstall: cleanup failed for ${codexToml}: ${errorMessage(err)}`);
     }
-    const codexCandidates = codexJsonCandidates((process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
+    const codexCandidates = codexJsonCandidates((process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
     for (const mcpFile of codexCandidates) {
         try {
             if (removeMcpServerAtPath(mcpFile)) {
@@ -1645,7 +1678,7 @@ export async function runUninstall() {
         }
     }
     // Remove Copilot hooks file (written by configureAllHooks)
-    const copilotHooksFile = hookConfigPath("copilot", (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
+    const copilotHooksFile = hookConfigPath("copilot", (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
     try {
         if (fs.existsSync(copilotHooksFile)) {
             fs.unlinkSync(copilotHooksFile);
@@ -1656,7 +1689,7 @@ export async function runUninstall() {
         debugLog(`uninstall: cleanup failed for ${copilotHooksFile}: ${errorMessage(err)}`);
     }
     // Remove phren entries from Cursor hooks file (may contain non-phren entries)
-    const cursorHooksFile = hookConfigPath("cursor", (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
+    const cursorHooksFile = hookConfigPath("cursor", (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
     try {
         if (fs.existsSync(cursorHooksFile)) {
             const raw = JSON.parse(fs.readFileSync(cursorHooksFile, "utf8"));
@@ -1677,7 +1710,7 @@ export async function runUninstall() {
         debugLog(`uninstall: cleanup failed for ${cursorHooksFile}: ${errorMessage(err)}`);
     }
     // Remove Codex hooks file in phren path
-    const uninstallPhrenPath = (process.env.PHREN_PATH || process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
+    const uninstallPhrenPath = (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
     const codexHooksFile = hookConfigPath("codex", uninstallPhrenPath);
     try {
         if (fs.existsSync(codexHooksFile)) {

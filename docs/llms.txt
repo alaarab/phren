@@ -1,10 +1,10 @@
-phren - He remembers so your agent doesn't have to.
+phren - Your agents forget everything. Phren doesn't.
 
-Install: npm install -g @alaarab/phren && phren init
+Install: npm install -g @phren/cli && phren init
 
 Key features:
 - Automatic context injection into every prompt via lifecycle hooks
-- 60 MCP tools across 11 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, extraction)
+- 66 MCP tools across 12 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, extraction, configuration)
 - Finding lifecycle tooling (`supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`) with provenance and impact scoring
 - Session continuity via cross-session task checkpoints + `session_history`
 - Skill system with source precedence, alias-collision handling, visibility gating, and generated `skill-manifest.json`
@@ -12,9 +12,9 @@ Key features:
 - Governance identity and RBAC via `PHREN_ACTOR`, `access-control.local.json`, and role policies
 - Web UI security by default: loopback-only, auth token, CSRF, CSP
 - Telemetry is opt-in and local-only (`.runtime/telemetry.json`)
-- Interactive terminal shell with eight views (Projects, Tasks, Findings, Review Queue, Skills, Hooks, Machines/Profiles, Health)
+- Interactive terminal shell with seven views (Projects, Tasks, Findings, Review Queue, Skills, Hooks, Health)
 - Multi-agent support: Claude Code, Copilot CLI, Cursor, OpenAI Codex
 
 Docs: https://alaarab.github.io/phren/
 Full LLM reference: https://alaarab.github.io/phren/llms-full.txt
-npm: https://www.npmjs.com/package/@alaarab/phren
+npm: https://www.npmjs.com/package/@phren/cli

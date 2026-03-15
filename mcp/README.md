@@ -4,7 +4,7 @@ MCP server that indexes your personal phren and exposes it to AI agents via full
 
 On startup it walks your phren directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index.
 
-Public surface: 60 MCP tools across 11 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, extraction).
+Public surface: 66 MCP tools across 12 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
 
 Notable shipped capabilities:
 - finding lifecycle tools: `supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`
@@ -12,11 +12,16 @@ Notable shipped capabilities:
 - cross-session continuity: task checkpoints + `session_history`
 - finding impact scoring from injected-context outcomes
 - skill registry behavior: scope precedence, alias-collision handling, visibility gating, generated `skill-manifest.json`
+- lifecycle penalties: superseded 0.25×, retracted 0.1×, contradicted 0.4× confidence in retrieval
+- inactive findings stripped from FTS index (superseded/retracted findings cannot appear in search)
+- auto-tagging: findings without type tags are inferred from content at write time
+- session context diff: `session_start` reports new findings since last session
+- decay resistance: confirmed findings decay 3× slower when repeatedly useful
 
 ## Install
 
 ```bash
-npm install -g @alaarab/phren
+npm install -g @phren/cli
 phren init
 ```
 
@@ -40,7 +45,7 @@ See [docs/api-reference.md](../docs/api-reference.md) for the full API reference
 
 ## Integration model
 
-- Claude: full native lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`) + MCP
+- Claude: full native lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PostToolUse`) + MCP
 - Copilot CLI / Cursor / Codex: MCP + generated hook config + session wrapper binaries
 
 ## Governance and security highlights
@@ -54,10 +59,15 @@ See [docs/api-reference.md](../docs/api-reference.md) for the full API reference
 Full-text search across all indexed markdown files with synonym expansion.
 
 ```
-query: string     - FTS5 query (supports AND, OR, NOT, "phrase matching")
-limit?: number    - Max results, 1-20, default 5
-type?: string     - Filter: "claude", "findings", "reference", "summary", "task", "skill"
-project?: string  - Filter to a specific project
+query: string              - FTS5 query (supports AND, OR, NOT, "phrase matching")
+limit?: number             - Max results, 1-20, default 5
+type?: string              - Filter: "claude", "findings", "reference", "summary", "task", "skill"
+project?: string           - Filter to a specific project
+tag?: string               - Filter findings by type tag: decision, pitfall, pattern, tradeoff, architecture, bug
+since?: string             - Filter findings by date: "7d", "30d", "YYYY-MM", "YYYY-MM-DD"
+status?: string            - Filter by lifecycle status: active, superseded, contradicted, stale, invalid_citation, retracted
+include_history?: boolean  - Include superseded/retracted findings (default false)
+synthesize?: boolean       - Generate a synthesis paragraph from top results using an LLM
 ```
 
 ### get_project_summary

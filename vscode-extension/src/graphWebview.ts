@@ -219,8 +219,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       if (!edited || edited.trim() === originalText.trim()) return;
 
       try {
-        await client.removeFinding(projectName, originalText);
-        await client.addFinding(projectName, edited.trim());
+        await client.editFinding(projectName, originalText, edited.trim());
         vscode.window.showInformationMessage("Finding updated.");
 
         // Reload graph data so the panel reflects the change

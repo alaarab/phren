@@ -6,10 +6,8 @@ import * as path from "path";
 import * as querystring from "querystring";
 import { spawn, execFileSync } from "child_process";
 import {
-  PhrenError,
   computePhrenLiveStateToken,
   getProjectDirs,
-  type PhrenResult,
 } from "./shared.js";
 import {
   editFinding,
@@ -317,40 +315,6 @@ function readProjectQueue(phrenPath: string, profile?: string) {
     }
   }
   return items;
-}
-
-function runQueueAction(_phrenPath: string, pathname: string, _project: string, _line: string, _newText: string): PhrenResult<string> {
-  if (pathname === "/api/approve" || pathname === "/approve") return { ok: false, error: "Queue approval has been removed. Use the review queue as a read-only reference." };
-  if (pathname === "/api/reject" || pathname === "/reject") return { ok: false, error: "Queue rejection has been removed. Use the review queue as a read-only reference." };
-  if (pathname === "/api/edit" || pathname === "/edit") return { ok: false, error: "Queue editing has been removed. Use the review queue as a read-only reference." };
-  return { ok: false, error: "unknown action" };
-}
-
-function handleLegacyQueueActionResult(res: http.ServerResponse, result: PhrenResult<string>): void {
-  if (result.ok) {
-    res.writeHead(302, { location: "/" });
-    res.end();
-    return;
-  }
-
-  const code = result.code;
-  if (code === PhrenError.PERMISSION_DENIED || result.error.includes("requires maintainer/admin role")) {
-    res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
-    res.end(result.error);
-    return;
-  }
-  if (code === PhrenError.NOT_FOUND) {
-    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-    res.end(result.error);
-    return;
-  }
-  if (code === PhrenError.INVALID_PROJECT_NAME || code === PhrenError.EMPTY_INPUT) {
-    res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
-    res.end(result.error);
-    return;
-  }
-  res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-  res.end(result.error);
 }
 
 function parseTopicsPayload(raw: string): Array<{ slug: string; label: string; description: string; keywords: string[] }> | null {
@@ -1073,49 +1037,6 @@ export function createWebUiHttpServer(
       csrfTokens.set(token, Date.now());
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ ok: true, token }));
-      return;
-    }
-
-    if (req.method === "POST" && ["/api/approve", "/api/reject", "/api/edit"].includes(pathname)) {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const line = String(parsed.line || "");
-        const newText = String(parsed.new_text || "");
-        if (!project || !line || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/line" }));
-          return;
-        }
-        const result = runQueueAction(phrenPath, pathname, project, line, newText);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && ["/approve", "/reject", "/edit"].includes(pathname)) {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken)) return;
-        if (!requireCsrf(res, parsed, csrfTokens)) return;
-        const project = String(parsed.project || "");
-        const line = String(parsed.line || "");
-        const newText = String(parsed.new_text || "");
-        if (!project || !line) {
-          res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
-          res.end("Missing project/line");
-          return;
-        }
-        if (!isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
-          res.end("Invalid project name");
-          return;
-        }
-        handleLegacyQueueActionResult(res, runQueueAction(phrenPath, pathname, project, line, newText));
-      });
       return;
     }
 

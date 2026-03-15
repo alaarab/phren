@@ -28,6 +28,9 @@ Usage:
   phren hooks enable <tool>             Enable hooks for one tool
   phren hooks disable <tool>            Disable hooks for one tool
   phren status                          Health, active project, stats
+  phren review [project]               Show review queue items with date, confidence, text
+  phren consolidation-status [project] Check if findings need consolidation
+  phren session-context                Show current session state (project, duration, findings)
   phren search <query> [--project <n>] [--type <t>] [--limit <n>]
                                          Search what phren remembers
   phren add-finding <project> "..."     Tell phren what you learned
@@ -143,6 +146,9 @@ const CLI_COMMANDS = [
     "policy",
     "workflow",
     "access",
+    "review",
+    "consolidation-status",
+    "session-context",
 ];
 async function flushTopLevelOutput() {
     await Promise.all([

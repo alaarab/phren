@@ -29,6 +29,12 @@ function normalizePriority(text) {
         return undefined;
     return m[1].toLowerCase();
 }
+function stripPriorityTag(text) {
+    return text
+        .replace(/\s*\[(high|medium|low)\](?=\s*(?:\[pinned\])?\s*$)/gi, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+}
 function detectPinned(text) {
     return /\[pinned\]/i.test(text);
 }
@@ -537,11 +543,20 @@ export function updateTask(phrenPath, project, match, updates) {
             return taskItemNotFound(project, match);
         const item = parsed.data.items[found.match.section][found.match.index];
         const changes = [];
+        if (updates.text !== undefined) {
+            const nextText = updates.text.trim();
+            if (!nextText)
+                return phrenErr("Task text cannot be empty.", PhrenError.EMPTY_INPUT);
+            item.line = nextText;
+            item.priority = normalizePriority(nextText);
+            item.pinned = detectPinned(nextText) || undefined;
+            changes.push("text updated");
+        }
         if (updates.priority) {
             const priority = updates.priority.toLowerCase();
             if (["high", "medium", "low"].includes(priority)) {
                 item.priority = priority;
-                item.line = item.line.replace(/\s*\[(high|medium|low)\]\s*$/gi, "").trim();
+                item.line = stripPriorityTag(item.line);
                 item.line = `${item.line} [${item.priority}]`;
                 changes.push(`priority -> ${priority}`);
             }

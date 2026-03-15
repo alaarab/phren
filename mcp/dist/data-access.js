@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import { phrenErr, PhrenError, phrenOk, forwardErr, getProjectDirs, } from "./shared.js";
+import * as yaml from "js-yaml";
+import { phrenErr, PhrenError, phrenOk, forwardErr, getProjectDirs, isRecord, } from "./shared.js";
 import { normalizeQueueEntryText, withFileLock as withFileLockRaw, } from "./shared-governance.js";
 import { addFindingToFile, } from "./shared-content.js";
 import { isValidProjectName, queueFilePath, safeProjectPath, errorMessage } from "./utils.js";
@@ -53,6 +54,69 @@ function normalizeFindingGroupKey(item) {
 }
 function findingTimelineDate(item) {
     return item.status_updated || item.date || "0000-00-00";
+}
+function collectFindingBulletLines(lines) {
+    const bulletLines = [];
+    let inArchiveBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (isArchiveStart(line)) {
+            inArchiveBlock = true;
+            continue;
+        }
+        if (isArchiveEnd(line)) {
+            inArchiveBlock = false;
+            continue;
+        }
+        if (!line.startsWith("- "))
+            continue;
+        bulletLines.push({ line, i, archived: inArchiveBlock });
+    }
+    return bulletLines;
+}
+function findMatchingFindingBullet(bulletLines, needle, match) {
+    const fidNeedle = needle.replace(/^fid:/, "");
+    const fidMatch = /^[a-z0-9]{8}$/.test(fidNeedle)
+        ? bulletLines.filter(({ line }) => new RegExp(`<!--\\s*fid:${fidNeedle}\\s*-->`).test(line))
+        : [];
+    const exactMatches = bulletLines.filter(({ line }) => line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().toLowerCase() === needle);
+    const partialMatches = bulletLines.filter(({ line }) => line.toLowerCase().includes(needle));
+    if (fidMatch.length === 1)
+        return { kind: "found", idx: fidMatch[0].i };
+    if (exactMatches.length === 1)
+        return { kind: "found", idx: exactMatches[0].i };
+    if (exactMatches.length > 1) {
+        return { kind: "ambiguous", error: `"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.` };
+    }
+    if (partialMatches.length === 1)
+        return { kind: "found", idx: partialMatches[0].i };
+    if (partialMatches.length > 1) {
+        return { kind: "ambiguous", error: `"${match}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.` };
+    }
+    return { kind: "not_found" };
+}
+function validateAggregateQueueProfile(phrenPath, profile) {
+    if (!profile)
+        return phrenOk(undefined);
+    if (!isValidProjectName(profile)) {
+        return phrenErr(`Invalid PHREN_PROFILE value: ${profile}`, PhrenError.VALIDATION_ERROR);
+    }
+    const profilePath = path.join(phrenPath, "profiles", `${profile}.yaml`);
+    if (!fs.existsSync(profilePath)) {
+        return phrenErr(`Profile file not found: ${profilePath}`, PhrenError.FILE_NOT_FOUND);
+    }
+    let data;
+    try {
+        data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
+    }
+    catch {
+        return phrenErr(`Malformed profile YAML: ${profilePath}`, PhrenError.MALFORMED_YAML);
+    }
+    const projects = isRecord(data) ? data.projects : undefined;
+    if (!Array.isArray(projects)) {
+        return phrenErr(`Profile YAML missing valid "projects" array: ${profilePath}`, PhrenError.MALFORMED_YAML);
+    }
+    return phrenOk(undefined);
 }
 export function readFindings(phrenPath, project, opts = {}) {
     const ensured = ensureProject(phrenPath, project);
@@ -203,42 +267,29 @@ export function removeFinding(phrenPath, project, match) {
     const ensured = ensureProject(phrenPath, project);
     if (!ensured.ok)
         return forwardErr(ensured);
-    const findingsPath = path.join(ensured.data, 'FINDINGS.md');
+    const findingsPath = path.resolve(path.join(ensured.data, 'FINDINGS.md'));
+    if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
+        return phrenErr(`FINDINGS.md path escapes phren store`, PhrenError.VALIDATION_ERROR);
+    }
     const filePath = findingsPath;
     if (!fs.existsSync(filePath))
         return phrenErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :find add.`, PhrenError.FILE_NOT_FOUND);
     return withSafeLock(filePath, () => {
         const lines = fs.readFileSync(filePath, "utf8").split("\n");
         const needle = match.trim().toLowerCase();
-        const bulletLines = lines.map((line, i) => ({ line, i })).filter(({ line }) => line.startsWith("- "));
-        // 0) Stable finding ID match (fid:XXXXXXXX or just the 8-char hex)
-        const fidNeedle = needle.replace(/^fid:/, "");
-        const fidMatch = /^[a-z0-9]{8}$/.test(fidNeedle)
-            ? bulletLines.filter(({ line }) => new RegExp(`<!--\\s*fid:${fidNeedle}\\s*-->`).test(line))
-            : [];
-        // 1) Exact text match (strip bullet prefix + metadata for comparison)
-        const exactMatches = bulletLines.filter(({ line }) => line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().toLowerCase() === needle);
-        // 2) Unique partial substring match
-        const partialMatches = bulletLines.filter(({ line }) => line.toLowerCase().includes(needle));
-        let idx;
-        if (fidMatch.length === 1) {
-            idx = fidMatch[0].i;
+        const bulletLines = collectFindingBulletLines(lines);
+        const activeMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => !archived), needle, match);
+        if (activeMatch.kind === "ambiguous") {
+            return phrenErr(activeMatch.error, PhrenError.AMBIGUOUS_MATCH);
         }
-        else if (exactMatches.length === 1) {
-            idx = exactMatches[0].i;
-        }
-        else if (exactMatches.length > 1) {
-            return phrenErr(`"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
-        }
-        else if (partialMatches.length === 1) {
-            idx = partialMatches[0].i;
-        }
-        else if (partialMatches.length > 1) {
-            return phrenErr(`"${match}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
-        }
-        else {
+        if (activeMatch.kind === "not_found") {
+            const archivedMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => archived), needle, match);
+            if (archivedMatch.kind === "ambiguous" || archivedMatch.kind === "found") {
+                return phrenErr(`Finding "${match}" is archived and read-only. Restore or re-add it before mutating history.`, PhrenError.VALIDATION_ERROR);
+            }
             return phrenErr(`No finding matching "${match}" in project "${project}". Try a different search term or check :findings view.`, PhrenError.NOT_FOUND);
         }
+        const idx = activeMatch.idx;
         const removeCount = isCitationLine(lines[idx + 1] || "") ? 2 : 1;
         const matched = lines[idx];
         lines.splice(idx, removeCount);
@@ -254,39 +305,28 @@ export function editFinding(phrenPath, project, oldText, newText) {
     const newTextTrimmed = newText.trim();
     if (!newTextTrimmed)
         return phrenErr("New finding text cannot be empty.", PhrenError.EMPTY_INPUT);
-    const findingsPath = path.join(ensured.data, "FINDINGS.md");
+    const findingsPath = path.resolve(path.join(ensured.data, "FINDINGS.md"));
+    if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
+        return phrenErr(`FINDINGS.md path escapes phren store`, PhrenError.VALIDATION_ERROR);
+    }
     if (!fs.existsSync(findingsPath))
         return phrenErr(`No FINDINGS.md file found for "${project}".`, PhrenError.FILE_NOT_FOUND);
     return withSafeLock(findingsPath, () => {
         const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
         const needle = oldText.trim().toLowerCase();
-        const bulletLines = lines.map((line, i) => ({ line, i })).filter(({ line }) => line.startsWith("- "));
-        // Stable finding ID match
-        const fidNeedle = needle.replace(/^fid:/, "");
-        const fidMatch = /^[a-z0-9]{8}$/.test(fidNeedle)
-            ? bulletLines.filter(({ line }) => new RegExp(`<!--\\s*fid:${fidNeedle}\\s*-->`).test(line))
-            : [];
-        const exactMatches = bulletLines.filter(({ line }) => line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().toLowerCase() === needle);
-        const partialMatches = bulletLines.filter(({ line }) => line.toLowerCase().includes(needle));
-        let idx;
-        if (fidMatch.length === 1) {
-            idx = fidMatch[0].i;
+        const bulletLines = collectFindingBulletLines(lines);
+        const activeMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => !archived), needle, oldText);
+        if (activeMatch.kind === "ambiguous") {
+            return phrenErr(activeMatch.error, PhrenError.AMBIGUOUS_MATCH);
         }
-        else if (exactMatches.length === 1) {
-            idx = exactMatches[0].i;
-        }
-        else if (exactMatches.length > 1) {
-            return phrenErr(`"${oldText}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
-        }
-        else if (partialMatches.length === 1) {
-            idx = partialMatches[0].i;
-        }
-        else if (partialMatches.length > 1) {
-            return phrenErr(`"${oldText}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
-        }
-        else {
+        if (activeMatch.kind === "not_found") {
+            const archivedMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => archived), needle, oldText);
+            if (archivedMatch.kind === "ambiguous" || archivedMatch.kind === "found") {
+                return phrenErr(`Finding "${oldText}" is archived and read-only. Restore or re-add it before mutating history.`, PhrenError.VALIDATION_ERROR);
+            }
             return phrenErr(`No finding matching "${oldText}" in project "${project}".`, PhrenError.NOT_FOUND);
         }
+        const idx = activeMatch.idx;
         // Preserve existing metadata comment (fid, citations, etc.)
         const existing = lines[idx];
         const metaMatch = existing.match(/(<!--.*?-->)/g);
@@ -366,6 +406,9 @@ export function readReviewQueue(phrenPath, project) {
     return phrenOk(items);
 }
 export function readReviewQueueAcrossProjects(phrenPath, profile) {
+    const validation = validateAggregateQueueProfile(phrenPath, profile);
+    if (!validation.ok)
+        return validation;
     const projects = getProjectDirs(phrenPath, profile)
         .map((dir) => path.basename(dir))
         .filter((project) => project !== "global")

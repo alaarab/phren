@@ -159,9 +159,12 @@ export function register(server, ctx) {
                     data: { project, includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
                 });
             }
+            const sectionCounts = view.includedSections
+                .map((s) => `${s}: ${view.doc.items[s].length}/${doc.items[s].length}`)
+                .join(", ");
             const paginationNote = view.truncated
-                ? `\n\n_Showing ${offset ?? 0}–${(offset ?? 0) + view.totalItems} of ${view.totalUnpaged} items. Use offset/limit to page._`
-                : (offset ? `\n\n_Page offset: ${offset}. ${view.totalItems} items returned._` : "");
+                ? `\n\n_${sectionCounts} (offset ${offset ?? 0}). Use offset/limit to page._`
+                : (offset ? `\n\n_Page offset: ${offset}. ${sectionCounts}._` : "");
             return mcpResponse({
                 ok: true,
                 message: `## ${project}\n${taskMarkdown(view.doc)}${paginationNote}`,
@@ -231,7 +234,7 @@ export function register(server, ctx) {
             const { added, errors } = result.data;
             if (added.length > 0)
                 refreshTaskIndex(updateFileInIndex, phrenPath, project);
-            return mcpResponse({ ok: added.length > 0, message: `Added ${added.length} of ${items.length} tasks to ${project}`, data: { project, added, errors } });
+            return mcpResponse({ ok: added.length > 0, ...(added.length === 0 ? { error: `No tasks added: ${errors.join("; ")}` } : {}), message: `Added ${added.length} of ${items.length} tasks to ${project}`, data: { project, added, errors } });
         });
     });
     server.registerTool("complete_task", {
@@ -303,7 +306,7 @@ export function register(server, ctx) {
             }
             if (completed.length > 0)
                 refreshTaskIndex(updateFileInIndex, phrenPath, project);
-            return mcpResponse({ ok: completed.length > 0, message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
+            return mcpResponse({ ok: completed.length > 0, ...(completed.length === 0 ? { error: `No tasks completed: ${errors.join("; ")}` } : {}), message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
         });
     });
     server.registerTool("remove_task", {
@@ -326,11 +329,12 @@ export function register(server, ctx) {
     });
     server.registerTool("update_task", {
         title: "◆ phren · update task",
-        description: "Update a task's priority, context, or section by matching text.",
+        description: "Update a task's text, priority, context, section, or GitHub metadata by matching text.",
         inputSchema: z.object({
             project: z.string().describe("Project name."),
             item: z.string().describe("Partial text to match against existing tasks."),
             updates: z.object({
+                text: z.string().optional().describe("Replacement text for the task line."),
                 priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
                 context: z.string().optional().describe("Text to set on the Context: line below the task."),
                 replace_context: z.boolean().optional().describe("If true, replace the existing Context: value instead of appending."),

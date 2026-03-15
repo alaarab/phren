@@ -274,14 +274,6 @@ export async function executePalette(host, input) {
         host.setMessage("  Usage: :find add <text> | :find remove <id|match>");
         return;
     }
-    if (command === "mq") {
-        const project = host.ensureProjectSelected();
-        if (!project)
-            return;
-        const action = (parts[1] || "").toLowerCase();
-        host.setMessage("  Queue approve/reject/edit have been removed. The review queue is now read-only.");
-        return;
-    }
     if (command === "machine" && parts[1]?.toLowerCase() === "map") {
         if (parts.length < 4) {
             host.setMessage("  Usage: :machine map <hostname> <profile>");
@@ -409,7 +401,7 @@ export async function executePalette(host, input) {
                 if (queueResult.ok) {
                     const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
                     if (conflictItems.length) {
-                        lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in Review Queue`)}  (:mq approve|reject)`);
+                        lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in Review Queue`)}  (inspect in :review queue)`);
                     }
                 }
             }
@@ -473,8 +465,7 @@ function suggestCommand(input) {
     const known = [
         "help", "projects", "tasks", "task", "findings", "review queue", "machines", "health",
         "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
-        "work next", "tidy", "find add", "find remove", "mq approve", "mq reject",
-        "mq edit", "machine map", "profile add-project", "profile remove-project",
+        "work next", "tidy", "find add", "find remove", "machine map", "profile add-project", "profile remove-project",
         "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
         "undo", "diff", "conflicts", "reset",
     ];
@@ -494,7 +485,7 @@ export function completeInput(line, phrenPath, profile, state) {
         ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health",
         ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
         ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
-        ":mq approve", ":mq reject", ":mq edit", ":machine map",
+        ":machine map",
         ":profile add-project", ":profile remove-project",
         ":run fix", ":relink", ":rerun hooks", ":update", ":govern", ":consolidate",
         ":undo", ":diff", ":conflicts", ":reset", ":help",
@@ -527,15 +518,6 @@ export function completeInput(line, phrenPath, profile, state) {
             ...result.data.items.Queue,
             ...result.data.items.Done,
         ].map((item) => `:${cmd} ${item.id}`);
-    }
-    if (cmd === "mq" && ["approve", "reject", "edit"].includes((parts[1] || "").toLowerCase())) {
-        const project = state.project;
-        if (!project)
-            return [];
-        const result = readReviewQueue(phrenPath, project);
-        if (!result.ok)
-            return [];
-        return result.data.map((item) => `:mq ${parts[1].toLowerCase()} ${item.id}`);
     }
     if (cmd === "find" && (parts[1] || "").toLowerCase() === "remove") {
         const project = state.project;
@@ -640,7 +622,7 @@ async function activateSelected(host) {
             break;
         case "Review Queue":
             if (item.text) {
-                host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}  ${style.dim("[ a approve · d reject ]")}`);
+                host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}  ${style.dim("[ read-only ]")}`);
             }
             break;
         case "Skills":

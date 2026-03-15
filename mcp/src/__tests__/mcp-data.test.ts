@@ -375,7 +375,61 @@ describe("mcp-data: import rollback on rebuildIndex failure", () => {
     expect(result.error).toContain("Index rebuild failed after import");
     expect(result.errorCode).toBe("INTERNAL_ERROR");
 
-    // For a non-overwrite import there is no backup to restore, so the project dir remains
-    expect(fs.existsSync(path.join(tmp.path, "crash-test"))).toBe(true);
+    // For a non-overwrite import, the orphaned project dir is removed on rollback
+    expect(fs.existsSync(path.join(tmp.path, "crash-test"))).toBe(false);
+  });
+});
+
+describe("mcp-data: manage_project rollback on rebuildIndex failure", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+
+  function makeFailCtx(phrenPath: string): McpContext {
+    return makeCtx(phrenPath, {
+      rebuildIndex: async () => { throw new Error("index crash"); },
+    });
+  }
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-data-manage-rollback-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    tmp.cleanup();
+  });
+
+  it("archive rolls back project dir when rebuildIndex throws", async () => {
+    const projectDir = path.join(tmp.path, "myproj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# myproj");
+
+    register(server as any, makeFailCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "archive" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Index rebuild failed");
+
+    // Project dir should be restored to its original location
+    expect(fs.existsSync(projectDir)).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "myproj.archived"))).toBe(false);
+  });
+
+  it("unarchive rolls back archive dir when rebuildIndex throws", async () => {
+    const archivedDir = path.join(tmp.path, "myproj.archived");
+    fs.mkdirSync(archivedDir, { recursive: true });
+    writeFile(path.join(archivedDir, "summary.md"), "# myproj");
+
+    register(server as any, makeFailCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "unarchive" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Index rebuild failed");
+
+    // Archive dir should be restored; active project dir should not exist
+    expect(fs.existsSync(archivedDir)).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "myproj"))).toBe(false);
   });
 });

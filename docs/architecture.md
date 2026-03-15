@@ -2,7 +2,7 @@
 
 How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
 
-Current public surface: 60 MCP tools across 11 modules.
+Current public surface: 66 MCP tools across 12 modules.
 
 ## System Overview
 
@@ -27,7 +27,7 @@ Claude / Copilot / Cursor / Codex
                 v
 +---------------+---------------+
 | MCP Server (phren-mcp)       |
-| 60 tools across 11 modules    |
+| 66 tools across 12 modules    |
 +---------------+---------------+
                 |
                 v
@@ -101,7 +101,7 @@ This gives Claude full native lifecycle parity while keeping other tools synchro
 
 ## MCP Server Modules
 
-Phren MCP is split into 11 modules:
+Phren MCP is split into 12 modules:
 
 1. Search and browse
 2. Task management
@@ -114,6 +114,7 @@ Phren MCP is split into 11 modules:
 9. Skills management
 10. Hooks management
 11. Extraction
+12. Configuration
 
 Newly documented finding lifecycle tools:
 

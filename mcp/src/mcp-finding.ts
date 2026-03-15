@@ -26,7 +26,7 @@ import { runCustomHooks } from "./hooks.js";
 import { incrementSessionFindings } from "./mcp-session.js";
 import { extractFragmentNames } from "./shared-fragment-graph.js";
 import { extractFactFromFinding } from "./mcp-extract-facts.js";
-import { appendChildFinding, readFindings } from "./data-access.js";
+import { appendChildFinding, editFinding as editFindingCore, readFindings } from "./data-access.js";
 import { getActiveTaskForSession } from "./task-lifecycle.js";
 import { FINDING_PROVENANCE_SOURCES } from "./content-citation.js";
 import {
@@ -242,7 +242,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (err instanceof Error && err.message.includes("Rejected:")) {
             return mcpResponse({ ok: false, error: errorMessage(err), errorCode: "VALIDATION_ERROR" });
           }
-          throw err;
+          return mcpResponse({ ok: false, error: `Unexpected error saving finding: ${errorMessage(err)}` });
         }
       });
     }
@@ -470,6 +470,33 @@ export function register(server: McpServer, ctx: McpContext): void {
           finding_text: finding_text ?? null,
           contradictions,
         },
+      });
+    }
+  );
+
+  server.registerTool(
+    "edit_finding",
+    {
+      title: "◆ phren · edit finding",
+      description: "Edit a finding in place while preserving its metadata and history.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        old_text: z.string().describe("Existing finding text to match."),
+        new_text: z.string().describe("Replacement finding text."),
+      }),
+    },
+    async ({ project, old_text, new_text }) => {
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = editFindingCore(phrenPath, project, old_text, new_text);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+        if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+        return mcpResponse({
+          ok: true,
+          message: result.data,
+          data: { project, old_text, new_text },
+        });
       });
     }
   );

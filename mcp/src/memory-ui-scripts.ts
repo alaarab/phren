@@ -581,96 +581,7 @@ export function renderProjectReferenceEnhancementScript(authToken: string): stri
 }
 
 export function renderReviewQueueEditSyncScript(): string {
-  return `(function() {
-    function normalizeQueueText(raw) {
-      return String(raw == null ? '' : raw)
-        .replace(/\\r\\n?/g, '\\n')
-        .replace(/\\0/g, ' ')
-        .replace(/<!--[\\s\\S]*?-->/g, ' ')
-        .replace(/\\\\[nrt]/g, ' ')
-        .replace(/\\\\\"/g, '"')
-        .replace(/\\\\\\\\/g, '\\\\')
-        .replace(/\\n+/g, ' ')
-        .replace(/\\s+/g, ' ')
-        .trim();
-    }
-
-    function rebuildEditedQueueLine(line, newText) {
-      var dateMatch = String(line || '').match(/^- \\[(\\d{4}-\\d{2}-\\d{2})\\]/);
-      var confidenceMatch = String(line || '').match(/\\[confidence\\s+([01](?:\\.\\d+)?)\\]/i);
-      var normalizedText = normalizeQueueText(newText);
-      var date = dateMatch ? dateMatch[1] : new Date().toISOString().slice(0, 10);
-      var confidencePart = confidenceMatch
-        ? ' [confidence ' + Number(confidenceMatch[1]).toFixed(2) + ']'
-        : '';
-      return {
-        text: normalizedText,
-        line: '- [' + date + '] ' + normalizedText + confidencePart
-      };
-    }
-
-    function escapeHtml(text) {
-      return String(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
-
-    function syncEditedCard(card, project, nextLine, nextText) {
-      if (!card || !project || !nextLine) return;
-      card.setAttribute('data-key', project + '\\\\x00' + nextLine);
-      card.setAttribute('data-project', project);
-      var approveBtn = card.querySelector('.btn-approve');
-      if (approveBtn) {
-        approveBtn.setAttribute('data-project', project);
-        approveBtn.setAttribute('data-line', nextLine);
-      }
-      var rejectBtn = card.querySelector('.btn-reject');
-      if (rejectBtn) {
-        rejectBtn.setAttribute('data-project', project);
-        rejectBtn.setAttribute('data-line', nextLine);
-      }
-      var editForm = card.querySelector('.review-card-edit form');
-      if (editForm) {
-        editForm.setAttribute('data-project', project);
-        editForm.setAttribute('data-line', nextLine);
-      }
-      var editTextarea = card.querySelector('textarea[name="new_text"]');
-      if (editTextarea) editTextarea.value = nextText;
-    }
-
-    function maybeSyncEditedCard(card, project, line, newText, attemptsLeft) {
-      if (!card || !project) return;
-      var rebuilt = rebuildEditedQueueLine(line, newText);
-      var textEl = card.querySelector('.review-card-text');
-      var editSection = card.querySelector('.review-card-edit');
-      if (editSection && editSection.style.display === 'none') {
-        if (textEl) textEl.innerHTML = escapeHtml(rebuilt.text);
-        syncEditedCard(card, project, rebuilt.line, rebuilt.text);
-        return;
-      }
-      if (attemptsLeft > 0) {
-        setTimeout(function() {
-          maybeSyncEditedCard(card, project, line, newText, attemptsLeft - 1);
-        }, 150);
-      }
-    }
-
-    document.addEventListener('submit', function(event) {
-      var form = event.target;
-      if (!form || typeof form.getAttribute !== 'function' || typeof form.querySelector !== 'function') return;
-      if (!form.closest || !form.closest('.review-card-edit')) return;
-      var project = form.getAttribute('data-project') || '';
-      var line = form.getAttribute('data-line') || '';
-      var textarea = form.querySelector('textarea[name="new_text"]');
-      var newText = textarea ? textarea.value : '';
-      var card = form.closest('.review-card');
-      setTimeout(function() {
-        maybeSyncEditedCard(card, project, line, newText, 20);
-      }, 0);
-    }, true);
-  })();`;
+  return "";
 }
 
 export function renderTasksAndSettingsScript(authToken: string): string {
@@ -1347,9 +1258,6 @@ export function renderEventWiringScript(): string {
   var highlightBtn = document.getElementById('highlight-only-btn');
   if (highlightBtn) highlightBtn.addEventListener('click', function() { toggleHighlightOnly(this); });
 
-  var selectAllCheckbox = document.getElementById('review-select-all-checkbox');
-  if (selectAllCheckbox) selectAllCheckbox.addEventListener('change', function() { toggleSelectAll(this.checked); });
-
   // --- Graph controls ---
   var graphZoomIn = document.getElementById('graph-zoom-in');
   if (graphZoomIn) graphZoomIn.addEventListener('click', function() { graphZoom(1.2); });
@@ -1367,16 +1275,6 @@ export function renderEventWiringScript(): string {
   // --- Sessions filter ---
   var sessionsFilterProject = document.getElementById('sessions-filter-project');
   if (sessionsFilterProject) sessionsFilterProject.addEventListener('change', function() { loadSessions(); });
-
-  // --- Batch bar ---
-  var batchApproveBtn = document.getElementById('batch-approve-btn');
-  if (batchApproveBtn) batchApproveBtn.addEventListener('click', function() { batchAction('approve'); });
-  var batchRejectBtn = document.getElementById('batch-reject-btn');
-  if (batchRejectBtn) batchRejectBtn.addEventListener('click', function() { batchAction('reject'); });
-  var batchTagSelect = document.getElementById('batch-tag-select');
-  if (batchTagSelect) batchTagSelect.addEventListener('change', function() { if(this.value){batchActionByTag(this.value,'approve');this.value='';} });
-  var batchCancelBtn = document.getElementById('batch-cancel-btn');
-  if (batchCancelBtn) batchCancelBtn.addEventListener('click', function() { clearBatchSelection(); });
 
   // --- Command palette ---
   var cmdpal = document.getElementById('cmdpal');

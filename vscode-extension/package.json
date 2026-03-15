@@ -170,13 +170,33 @@
         "icon": "$(trash)"
       },
       {
-        "command": "phren.rejectQueueItem",
-        "title": "Phren: Reject Queue Item",
-        "icon": "$(trash)"
-      },
-      {
         "command": "phren.pinMemory",
         "title": "Phren: Pin Memory"
+      },
+      {
+        "command": "phren.supersedeFinding",
+        "title": "Phren: Supersede Finding",
+        "icon": "$(replace)"
+      },
+      {
+        "command": "phren.retractFinding",
+        "title": "Phren: Retract Finding",
+        "icon": "$(close)"
+      },
+      {
+        "command": "phren.resolveContradiction",
+        "title": "Phren: Resolve Contradiction",
+        "icon": "$(issues)"
+      },
+      {
+        "command": "phren.linkTaskIssue",
+        "title": "Phren: Link GitHub Issue",
+        "icon": "$(link)"
+      },
+      {
+        "command": "phren.createTaskIssue",
+        "title": "Phren: Create GitHub Issue",
+        "icon": "$(github)"
       }
     ],
     "keybindings": [
@@ -230,9 +250,29 @@
           "group": "inline"
         },
         {
-          "command": "phren.rejectQueueItem",
-          "when": "viewItem == phren.queue.item",
-          "group": "inline"
+          "command": "phren.supersedeFinding",
+          "when": "viewItem == phren.finding",
+          "group": "lifecycle"
+        },
+        {
+          "command": "phren.retractFinding",
+          "when": "viewItem == phren.finding",
+          "group": "lifecycle"
+        },
+        {
+          "command": "phren.resolveContradiction",
+          "when": "viewItem == phren.finding.contradicted",
+          "group": "lifecycle"
+        },
+        {
+          "command": "phren.linkTaskIssue",
+          "when": "viewItem == phren.task.active || viewItem == phren.task.queue",
+          "group": "github"
+        },
+        {
+          "command": "phren.createTaskIssue",
+          "when": "viewItem == phren.task.active || viewItem == phren.task.queue",
+          "group": "github"
         },
         {
           "command": "phren.openSessionOverview",

@@ -150,9 +150,12 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         fs.mkdirSync(destDir, { recursive: true });
         const existing = findLocalSkill(phrenPath, scope, safeName);
-        const dest = existing
+        const dest = path.resolve(existing
           ? existing.path
-          : path.join(destDir, `${safeName}.md`);
+          : path.join(destDir, `${safeName}.md`));
+        if (!dest.startsWith(phrenPath + path.sep) && dest !== phrenPath) {
+          return mcpResponse({ ok: false, error: "Skill path escapes phren store." });
+        }
         const existed = Boolean(existing) || fs.existsSync(dest);
 
         fs.writeFileSync(dest, content);

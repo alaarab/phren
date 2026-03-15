@@ -108,17 +108,6 @@ export function impactLogFile(phrenPath: string): string {
   return runtimeFile(phrenPath, "impact.jsonl");
 }
 
-function isProjectDirEntry(entry: fs.Dirent): boolean {
-  return entry.isDirectory()
-    && !entry.name.startsWith(".")
-    && !entry.name.endsWith(".archived")
-    && !RESERVED_PROJECT_DIR_NAMES.has(entry.name);
-}
-
-function isCanonicalProjectDirName(name: string): boolean {
-  return name === name.toLowerCase() && isValidProjectName(name);
-}
-
 export function appendAuditLog(phrenPath: string, event: string, details: string): void {
   const logPath = runtimeFile(phrenPath, "audit.log");
   const line = `[${new Date().toISOString()}] ${event} ${details}\n`;

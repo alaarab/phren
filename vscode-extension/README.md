@@ -2,109 +2,123 @@
 
 Phren inside the editor, where it belongs.
 
-This extension connects VS Code to your local Phren store and MCP server so you can inspect projects, search memory, review findings, work through tasks, and edit skills without bouncing to the terminal.
+This extension connects VS Code to your local Phren store and MCP server so you can inspect projects, search memory, review findings, work through tasks, and edit skills without leaving the editor.
 
-## What It Actually Does
+## What It Does
 
-- Adds a dedicated `Phren` view in the activity bar.
-- Lists tracked Phren projects with drill-down sections for findings, tasks, and reference docs.
-- Opens findings and reference files in read-only detail panels.
-- Lets you search Phren knowledge from VS Code and preview full results beside your editor.
-- Shows the Phren fragment graph in a webview.
-- Adds a status bar picker for the active Phren project.
-- Lets you add a finding from the editor context menu.
-- Opens skills in an editable webview so you can update and toggle them in place.
-- Opens tasks in a detail view where you can edit them or mark them done.
-- Lets you toggle Phren hooks from the sidebar.
+- Adds a dedicated **Phren** view in the activity bar.
+- Lists tracked Phren projects with drill-down sections for findings, tasks, sessions, review queue, and reference docs.
+- Shows **priority, pinned, and GitHub issue badges** on task tree items — at a glance you can see task priority (`high`/`medium`/`low`), whether a task is pinned, and which tasks are linked to a GitHub issue.
+- Shows **type and confidence badges** on finding tree items — each finding displays its type tag (`[decision]`, `[pitfall]`, etc.) and a confidence indicator when confidence is below threshold.
+- Theme-aware **status bar** that uses VS Code color tokens for seamless integration with any installed theme.
+- Fragment graph webview with **animated characters and keyboard navigation** — arrow keys move between nodes, Enter selects a node, Escape clears focus.
+- Updated **review queue viewer** with a contextual notice explaining what each queue section contains.
+- Opens findings, skills, reference files, queue items, and sessions in read-only or editable panels directly in VS Code.
+- Lets you add a finding from the editor context menu by selecting text and running **Phren: Add Finding**.
+- Syncs your Phren store (`git push`) without leaving VS Code.
 
 ## Who This Is For
 
-This extension is for people already using Phren locally.
-
-If you keep project memory, findings, tasks, and skills in Phren, this gives you a faster way to inspect and maintain that data while you work in VS Code.
+This extension is for people already using Phren locally. If you keep project memory, findings, tasks, and skills in Phren, this gives you a faster way to inspect and maintain that data while you work in VS Code.
 
 ## Requirements
 
-- A working local Phren install.
-- Access to the Phren MCP server entrypoint on disk.
-- Node.js available on your machine if the server is launched with `node`.
+- A working local Phren install (`npm install -g @phren/cli && phren init`).
+- Node.js available on your machine.
 
 ## Setup
 
-Open VS Code settings and configure the extension:
+Open VS Code settings and configure:
 
-- `phren.mcpServerPath`: absolute path to the Phren MCP server entrypoint. If left blank, the extension tries to auto-detect a global Phren install.
-- `phren.nodePath`: Node.js binary used to launch the server. Default: `node`.
-- `phren.storePath`: path to your Phren store. If left blank, the extension uses `~/.phren`.
+| Setting | Description |
+|---------|-------------|
+| `phren.mcpServerPath` | Absolute path to the Phren MCP server entrypoint (`index.js`). Leave blank to auto-detect from a global install. |
+| `phren.nodePath` | Path to the Node.js binary. Default: `node`. |
+| `phren.storePath` | Path to your Phren store. Leave blank to use `~/.phren`. |
 
 Example `phren.mcpServerPath`:
 
-```text
-/home/alaarab/.nvm/versions/node/v24.13.0/lib/node_modules/@alaarab/phren/mcp/dist/index.js
+```
+/home/you/.nvm/versions/node/v24.13.0/lib/node_modules/@phren/cli/mcp/dist/index.js
 ```
 
-Once those values are set, open the `Phren` activity bar item and the extension will load your projects, skills, hooks, and graph entrypoint.
+Once set, open the Phren activity bar item and the extension loads your projects, skills, hooks, and graph.
+
+## Commands
+
+### Command Palette (16)
+
+These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
+
+| Command | Keybinding | Description |
+|---------|-----------|-------------|
+| `Phren: Search Knowledge` | `Ctrl+Shift+K` / `Cmd+Shift+K` | Full-text search across your Phren store. Results open in a side panel. |
+| `Phren: Show Fragment Graph` | — | Open the fragment graph in a webview with animated nodes and keyboard navigation. |
+| `Phren: Refresh` | — | Reload all data from the Phren MCP server. |
+| `Phren: Add Finding` | — | Save a finding to the active project (also available in the editor context menu when text is selected). |
+| `Phren: Set Active Project` | — | Switch the active project context. |
+| `Phren: Sync` | — | Commit and push all Phren changes to remote. |
+| `Phren: Doctor` | — | Run health checks and report any issues. |
+| `Phren: Add Task` | — | Add a new task to the active project. |
+| `Phren: Pin Memory` | — | Pin a canonical memory entry that never decays. |
+| `Phren: Hooks Status` | — | Show hook enable/disable status for all registered tools. |
+| `Phren: Toggle Hooks` | — | Enable or disable all phren hooks globally. |
+| `Phren: Manage Project` | — | Archive or restore a project. |
+| `Phren: Uninstall Phren` | — | Remove Phren config and hooks from this machine. |
+| `Phren: Set This Machine's Profile` | — | Switch the active profile for this machine. |
+| `Phren: Set Machine Alias` | — | Set a friendly name for this machine in `machines.yaml`. |
+| `Phren: Open machines.yaml` | — | Open the machines config file directly. |
+
+### Sidebar and Context Menu (15)
+
+These commands fire from the Phren sidebar or editor context menu. They are not shown in the command palette by default:
+
+| Command | Where it appears | Description |
+|---------|-----------------|-------------|
+| `Phren: Open Finding` | Click on a finding in the sidebar | Open a finding in a read-only detail panel. |
+| `Phren: Open Project File` | Click on a project file | Open a project file (CLAUDE.md, summary.md, etc.) in a panel. |
+| `Phren: Open Skill` | Click on a skill in the sidebar | Open a skill in an editable webview with inline save and enable/disable. |
+| `Phren: Toggle Skill` | Skill context menu | Enable or disable a skill without deleting it. |
+| `Phren: Toggle Hook` | Hook item context menu | Toggle a specific hook from the sidebar. |
+| `Phren: Open Task` | Click on a task in the sidebar | Open a task in a detail view where you can edit it or mark it done. |
+| `Phren: Open Queue Item` | Click on a queue item | Open a review queue item in a detail panel. |
+| `Phren: Open Session Overview` | Session item inline action | Open a session overview panel showing findings and tasks from that session. |
+| `Phren: Copy Session ID` | Session item context menu | Copy the session ID to clipboard. |
+| `Phren: Filter Findings by Date` | Findings category inline action | Filter the findings list to a specific date range. |
+| `Phren: Complete Task` | Active task inline action | Mark a task as done. |
+| `Phren: Delete Task` | Task item inline action | Remove a task permanently. |
+| `Phren: Pin Task` | Active task inline action | Pin a task so it stays visible across sessions. |
+| `Phren: Update Task` | Active task inline action | Edit a task's text or priority. |
+| `Phren: Remove Finding` | Finding item inline action | Remove a finding by match. |
 
 ## Core Workflows
 
 ### Browse Phren Data
 
-The sidebar is structured around real Phren objects, not synthetic dashboards:
+The sidebar is structured around real Phren objects:
 
-- `Projects`: each project expands into `Findings`, `Task`, and `Reference`.
-- `Skills`: grouped by source so you can inspect project-local and global skills.
-- `Hooks`: current hook state by tool.
-- `Fragment Graph`: one-click entry into the graph view.
-
-### Search Knowledge
-
-Run `Phren: Search Knowledge` or use the keybinding:
-
-```text
-Ctrl+Shift+K
-```
-
-On macOS:
-
-```text
-Cmd+Shift+K
-```
-
-Search results open in a side panel with the full stored content when available.
+- **Projects**: expands into Findings (with date groups), Tasks (Queue/Active/Done), Sessions, Review Queue, and Reference.
+- **Skills**: grouped by scope — project-local and global skills shown separately.
+- **Hooks**: current hook state for each registered tool.
+- **Fragment Graph**: one-click entry into the graph view.
 
 ### Add Findings Without Leaving the Editor
 
-Select text in any editor, open the context menu, and run `Phren: Add Finding`.
-
-The finding is added to the currently active Phren project.
+Select text in any editor → right-click → **Phren: Add Finding**. The finding is added to the active project and synced on the next Stop hook.
 
 ### Work With Tasks
 
-Tasks open in a dedicated panel where you can:
-
-- inspect the task status and project
-- edit the task text
-- mark non-done tasks as complete
+Tasks in the sidebar show priority badges, a pin indicator for pinned tasks, and issue numbers for tasks linked to GitHub issues. Inline actions (complete, delete, pin, update) appear on hover. Click any task to open its detail panel.
 
 ### Edit Skills
 
-Skills open in an editor-like webview with inline save and enable/disable controls. This is useful when you want to iterate on prompt instructions without dropping into the Phren store manually.
-
-## Commands
-
-- `Phren: Search Knowledge`
-- `Phren: Show Fragment Graph`
-- `Phren: Refresh`
-- `Phren: Add Finding`
-- `Phren: Set Active Project`
-
-Some actions are also exposed contextually from the sidebar, including opening findings, opening project files, opening skills, toggling skills, toggling hooks, and opening tasks.
+Skills open in an editor-like webview with inline save and enable/disable controls — useful for iterating on prompt instructions without dropping into the Phren store manually.
 
 ## Notes
 
-- This extension is designed around a local Phren installation. It does not provision Phren for you.
-- If the sidebar appears empty, the first things to check are `phren.mcpServerPath`, `phren.nodePath`, and `phren.storePath`.
-- The extension talks to your local Phren MCP server, so behavior depends on that server being installed and reachable.
+- This extension does not provision Phren for you. It connects to an existing local install.
+- If the sidebar appears empty, check `phren.mcpServerPath`, `phren.nodePath`, and `phren.storePath` first.
+- The extension talks to your local Phren MCP server over stdio; behavior depends on that server being installed and reachable.
 
 ## Development
 

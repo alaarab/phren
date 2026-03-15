@@ -101,4 +101,24 @@ describe("mcp-skills", () => {
     expect(res.ok).toBe(true);
     expect(fs.existsSync(path.join(tmp.path, "demo", "skills", "local-review.md"))).toBe(true);
   });
+
+  it("write_skill rejects a skill name containing path traversal sequences", async () => {
+    const res = parseResult(await server.call("write_skill", {
+      name: "../../../etc/passwd",
+      scope: "demo",
+      content: "---\nname: evil\ndescription: path traversal attempt\n---\nevil\n",
+    }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid skill name");
+  });
+
+  it("write_skill rejects an invalid scope containing path traversal", async () => {
+    const res = parseResult(await server.call("write_skill", {
+      name: "myskill",
+      scope: "../escape",
+      content: "---\nname: myskill\ndescription: test\n---\nbody\n",
+    }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid scope");
+  });
 });

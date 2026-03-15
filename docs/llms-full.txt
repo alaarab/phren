@@ -1,12 +1,12 @@
 phren - Long-term memory for your AI agents.
-npm package: @alaarab/phren
+npm package: @phren/cli
 
 Quick start:
   phren init
   This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (60 across 11 modules):
+MCP Tools (66 across 12 modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?) - FTS5 search with synonym expansion
@@ -21,7 +21,7 @@ MCP Tools (60 across 11 modules):
     complete_task(project, item) - match by text, move to Done
     complete_tasks(project, items[]) - bulk complete multiple items
     remove_task(project, item) - remove a task by matching text
-    update_task(project, item, updates) - change priority, context, section, or linked GitHub issue
+    update_task(project, item, updates) - change text, priority, context, section, or linked GitHub issue
     link_task_issue(project, item, issue_number?, issue_url?, unlink?) - link or unlink an existing GitHub issue on a task item
     promote_task_to_issue(project, item, repo?, title?, body?, mark_done?) - create a GitHub issue from a task item and link it back
     pin_task(project, item) - pin a task so it stays visible across sessions
@@ -38,6 +38,7 @@ MCP Tools (60 across 11 modules):
     retract_finding(project, finding_text, reason) - retract a finding with reason metadata
     resolve_contradiction(project, finding_text, finding_text_other, resolution) - resolve contradiction lifecycle state
     get_contradictions(project?, finding_text?) - list unresolved contradicted findings
+    edit_finding(project, old_text, new_text) - edit a finding in place while preserving inline metadata
     remove_finding(project, finding) - remove by matching text
     remove_findings(project, findings[]) - bulk remove multiple findings
     push_changes(message?) - commit and push all phren changes
@@ -91,13 +92,20 @@ MCP Tools (60 across 11 modules):
     get_consolidation_status(project?) - check if findings need consolidation
     health_check() - run doctor checks and return results
     list_hook_errors() - show recent hook errors and failures
-    get_review_queue(project?) - read items waiting for review
-    approve_queue_item(project, item) - approve an item from the review queue
-    reject_queue_item(project, item) - reject an item from the review queue
-    edit_queue_item(project, item, new_text) - edit an item in the review queue before accepting
+    get_review_queue(project?) - read items waiting for review (review queue is read-only)
+    doctor_fix() - run doctor self-heal checks and apply fixes automatically
 
   Finding extraction:
     auto_extract_findings(context) - extract findings from conversation context automatically
+
+  Configuration:
+    get_config() - read current governance and policy configuration
+    set_proactivity(level) - set agent proactivity level
+    set_task_mode(mode) - set task management mode (auto, manual, off)
+    set_finding_sensitivity(level) - set finding capture sensitivity (minimal, conservative, balanced, aggressive)
+    set_retention_policy(settings) - configure retention and decay policy
+    set_workflow_policy(settings) - configure workflow approval gates
+    set_index_policy(settings) - configure indexer include/exclude globs
 
 CLI Commands:
 
@@ -163,7 +171,7 @@ Key File Locations:
   ~/.phren/<project>/reference/topics/ - machine-managed topic docs for archived findings
   ~/.phren/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
   ~/.phren/<project>/tasks.md        - task queue across sessions
-  ~/.phren/<project>/review.md - items pending human review
+  ~/.phren/<project>/review.md               - items pending human review
   ~/.phren/.runtime/                 - audit.log, search history, caches
   ~/.phren/.runtime/access-control.local.json - local RBAC role augmentation
   ~/.phren/.runtime/telemetry.json   - opt-in local telemetry counters
@@ -174,15 +182,33 @@ Key File Locations:
 
 Finding Tags:
 
-  Findings can be tagged with one of six types:
-    [decision]     architectural choice with rationale
-    [pitfall]      bug or failure mode to avoid
-    [pattern]      reusable approach that works well
-    [tradeoff]     deliberate compromise
-    [architecture] structural design note
-    [bug]          confirmed defect or failure
+  Findings can be tagged with one of eleven types:
+    [decision]      architectural choice with rationale — never decays
+    [pattern]       reusable approach that works well
+    [pitfall]       bug or failure mode to avoid
+    [observation]   time-bounded note — expires in 14 days
+    [bug]           confirmed defect or failure
+    [workaround]    temporary fix or hack
+    [tooling]       tool or dependency note
+    [context]       situational note about current state
+    [anti-pattern]  approach to avoid and why
+    [tradeoff]      deliberate compromise with rationale
+    [architecture]  structural design note
   Use findingType param in add_finding, or prefix manually: "- [pitfall] ..."
   Tags are filterable in search_knowledge via the tag parameter.
+  Auto-tagging: findings without an explicit tag are auto-detected from content
+    ("We decided..." → [decision], "Watch out for..." → [pitfall], etc.).
+
+Retrieval Behavior:
+
+  Lifecycle penalties: superseded findings 0.25×, retracted 0.1×, contradicted 0.4× confidence
+  Inactive findings (superseded/retracted) are stripped from the FTS index entirely
+  Decay resistance: confirmed findings decay 3× slower when repeatedly useful
+  Session context diff: session_start reports count of new findings since last session
+  Snippet dedup: findings appearing in both project and global files are injected once
+  Session momentum: hot topics get up to 30% more token budget as work progresses
+  Auto-tagging: findings without type tags are inferred from content at write time
+  Fragment expansion: related fragment docs are included when a finding links to a fragment
 
 Agent Support:
 

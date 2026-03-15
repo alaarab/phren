@@ -14,7 +14,7 @@ import { readCustomHooks } from "./hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "./provider-adapters.js";
 import { getAllSkills } from "./skill-registry.js";
 import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "./data-tasks.js";
-import { buildIndex, queryRows } from "./shared-index.js";
+import { buildIndex, queryDocBySourceKey, queryRows } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import { readProjectTopics, classifyTopicForText } from "./project-topics.js";
 import { entryScoreKey } from "./governance-scores.js";
@@ -352,10 +352,9 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     );
     const refRows = queryRows(
       db,
-      `SELECT e.id, el.source_doc, d.content, d.filename
+      `SELECT e.id, el.source_doc
        FROM entities e
        JOIN entity_links el ON el.target_id = e.id
-       LEFT JOIN docs d ON d.source_key = el.source_doc
        WHERE e.type != 'document'`,
       [],
     );
@@ -371,8 +370,9 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         if (seenEntityDoc.has(entityDocKey)) continue;
         seenEntityDoc.add(entityDocKey);
         const project = projectFromSourceDoc(doc);
-        const content = typeof row[2] === "string" ? row[2] : "";
-        const filename = typeof row[3] === "string" ? row[3] : "";
+        const docRow = queryDocBySourceKey(db, phrenPath, doc);
+        const content = docRow?.content ?? "";
+        const filename = docRow?.filename ?? "";
         const scoreKey = project && filename && content ? entryScoreKey(project, filename, content) : undefined;
         const refs = refsByEntity.get(entityId) ?? [];
         refs.push({ doc, project, scoreKey });
@@ -518,7 +518,7 @@ export function collectProjectsForUI(phrenPath: string, profile?: string): Proje
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] memory-ui filterByProfile: ${errorMessage(err)}\n`);
+    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] memory-ui filterByProfile: ${errorMessage(err)}\n`);
   }
 
   const results: ProjectInfo[] = [];
@@ -535,7 +535,7 @@ export function collectProjectsForUI(phrenPath: string, profile?: string): Proje
     let findingCount = 0;
     if (fs.existsSync(findingsPath)) {
       const content = fs.readFileSync(findingsPath, "utf8");
-      findingCount = (content.match(/^- \[/gm) || []).length;
+      findingCount = (content.match(/^- /gm) || []).length;
     }
 
     const sparkline: number[] = new Array(8).fill(0);
