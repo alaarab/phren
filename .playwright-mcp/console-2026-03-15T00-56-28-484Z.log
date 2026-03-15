@@ -1,2 +1,0 @@
-[     104ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:3500/?_auth=863d6e02-24b8-4441-941a-7524076e09d1:0
-[     141ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3500/favicon.ico:0

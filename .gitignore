@@ -16,3 +16,4 @@ docs/wp*.png
 .runtime/
 .sessions/
 video/
+.playwright-mcp/

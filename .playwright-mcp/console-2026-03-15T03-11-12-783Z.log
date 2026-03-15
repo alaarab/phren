@@ -1,3 +1,0 @@
-[     162ms] [ERROR] Failed to load resource: net::ERR_CERT_AUTHORITY_INVALID @ https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap:0
-[     166ms] [ERROR] Failed to load resource: net::ERR_CERT_AUTHORITY_INVALID @ https://cdn.jsdelivr.net/npm/marked@12/marked.min.js:0
-[     255ms] Unexpected string
