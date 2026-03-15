@@ -1,19 +1,33 @@
+# OS
 .DS_Store
-*.local.yaml
+
+# Dependencies
 node_modules/
-mcp/dist/
 mcp/node_modules/
-node_modules
-coverage/
-.github/copilot-instructions.md
-AGENTS.md
-LEARNINGS.md
-docs/wp*.png
-.benchmarks/
-.claude/
-/FINDINGS.md
+
+# Build output
+mcp/dist/
+vscode-extension/out/
 *.vsix
+
+# Test & benchmarks
+coverage/
+.benchmarks/
+docs/benchmark-*.json
+
+# Runtime / ephemeral
 .runtime/
 .sessions/
-video/
 .playwright-mcp/
+video/
+
+# Agent / tool generated
+.claude/
+AGENTS.md
+LEARNINGS.md
+/FINDINGS.md
+.github/copilot-instructions.md
+
+# User config
+*.local.yaml
+docs/wp*.png
