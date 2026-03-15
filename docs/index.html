@@ -35,9 +35,11 @@
     </div>
   </nav>
 
+  <!-- Full-page floating network background -->
+  <canvas id="hero-canvas"></canvas>
+
   <!-- HERO -->
   <section class="hero">
-    <canvas id="hero-canvas"></canvas>
     <div class="hero-glow"></div>
 
     <!-- Phren character background -->
@@ -252,7 +254,7 @@
     <div class="container">
       <div class="trace-header reveal">
         <div class="section-label">Under the hood</div>
-        <h2 class="section-title">Three hooks. Every knob yours.</h2>
+        <h2 class="section-title">Three hooks.</h2>
       </div>
 
       <div class="trace-layout reveal">
@@ -383,8 +385,8 @@
                 <!-- Gentle idle bob for Claude -->
                 <style>
                   @keyframes fun-claudeBob {
-                    0%, 100% { transform: translate(108px, 100px) scale(8); }
-                    50% { transform: translate(108px, 96px) scale(8); }
+                    0%, 100% { transform: translate(114px, 128px) scale(10); }
+                    50% { transform: translate(114px, 124px) scale(10); }
                   }
                   @keyframes fun-heartPulse {
                     0%, 100% { transform: translate(242px, 104px) scale(5); }
@@ -450,23 +452,25 @@
               <circle class="fun-heart-glow-anim" cx="262" cy="136" r="40" fill="url(#fun-heartGlow)"/>
 
               <!-- ======================== -->
-              <!-- Claude Code mascot       -->
-              <!-- Pixel-mapped from terminal screenshot -->
+              <!-- Claw'd — Claude's crab mascot -->
+              <!-- One solid connected shape, no gaps -->
               <!-- ======================== -->
               <g class="fun-claude-group" shape-rendering="crispEdges">
-                <!-- HEAD — 5w × 5h, light pink -->
-                <rect x="3" y="0" width="5" height="5" fill="#E0A0A0"/>
-                <!-- EYES — 1x1 dark blocks, row 2 -->
-                <rect x="4" y="2" width="1" height="1" fill="#442222"/>
-                <rect x="6" y="2" width="1" height="1" fill="#442222"/>
-                <!-- ARMS — 1x1 nubs, one each side, at row 3 (mid-head) -->
-                <rect x="2" y="3" width="1" height="1" fill="#D89090"/>
-                <rect x="8" y="3" width="1" height="1" fill="#D89090"/>
-                <!-- BODY — 7w × 4h, slightly darker pink, wider than head -->
-                <rect x="2" y="5" width="7" height="4" fill="#D89090"/>
-                <!-- LEGS — 2w each, 1px gap, 2h -->
-                <rect x="3" y="9" width="2" height="2" fill="#D08080"/>
-                <rect x="6" y="9" width="2" height="2" fill="#D08080"/>
+                <!-- HEAD — 5w × 4h -->
+                <rect x="2" y="0" width="5" height="4" fill="#E8A0A0"/>
+                <!-- CLAWS — 1w × 1h nubs on each side -->
+                <rect x="1" y="2" width="1" height="1" fill="#E0A0A0"/>
+                <rect x="7" y="2" width="1" height="1" fill="#E0A0A0"/>
+                <!-- BODY — 7w × 2h, slightly wider, connected -->
+                <rect x="1" y="4" width="7" height="2" fill="#D89090"/>
+                <!-- 4 LEGS — spaced out -->
+                <rect x="1" y="6" width="1" height="1" fill="#D08888"/>
+                <rect x="3" y="6" width="1" height="1" fill="#D08888"/>
+                <rect x="5" y="6" width="1" height="1" fill="#D08888"/>
+                <rect x="7" y="6" width="1" height="1" fill="#D08888"/>
+                <!-- EYES -->
+                <rect x="3" y="1" width="1" height="1" fill="#442222"/>
+                <rect x="5" y="1" width="1" height="1" fill="#442222"/>
               </g>
 
               <!-- ============ -->
@@ -493,7 +497,7 @@
               <!-- Phren character (icon)   -->
               <!-- ======================== -->
               <g class="fun-phren-group">
-                <image href="phren-icon-128.svg" x="310" y="100" width="116" height="116" style="image-rendering: pixelated"/>
+                <image href="phren-icon-128.svg" x="310" y="108" width="116" height="116" style="image-rendering: pixelated"/>
               </g>
 
               <!-- ========================= -->
