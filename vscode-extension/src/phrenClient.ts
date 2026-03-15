@@ -211,8 +211,12 @@ export class PhrenClient {
     return this.callTool("pin_task", { project, item });
   }
 
-  async pinMemory(project: string, text: string): Promise<unknown> {
-    return this.callTool("pin_memory", { project, text });
+  async pinMemory(project: string, memory: string): Promise<unknown> {
+    return this.callTool("pin_memory", { project, memory });
+  }
+
+  async editFinding(project: string, oldText: string, newText: string): Promise<unknown> {
+    return this.callTool("edit_finding", { project, old_text: oldText, new_text: newText });
   }
 
   async removeFinding(project: string, text: string): Promise<unknown> {
@@ -221,18 +225,6 @@ export class PhrenClient {
 
   async getReviewQueue(project?: string): Promise<unknown> {
     return this.callTool("get_review_queue", project ? { project } : {});
-  }
-
-  async approveQueueItem(project: string, item: string): Promise<unknown> {
-    return this.callTool("approve_queue_item", { project, item });
-  }
-
-  async rejectQueueItem(project: string, item: string): Promise<unknown> {
-    return this.callTool("reject_queue_item", { project, item });
-  }
-
-  async editQueueItem(project: string, item: string, newText: string): Promise<unknown> {
-    return this.callTool("edit_queue_item", { project, item, new_text: newText });
   }
 
   async searchFragments(query: string, project?: string): Promise<unknown> {
@@ -285,6 +277,53 @@ export class PhrenClient {
     const args: Record<string, unknown> = {};
     if (summary) args.summary = summary;
     return this.callTool("session_end", args);
+  }
+
+  async supersedeFinding(project: string, finding_text: string, superseded_by: string): Promise<unknown> {
+    return this.callTool("supersede_finding", { project, finding_text, superseded_by });
+  }
+
+  async retractFinding(project: string, finding_text: string, reason: string): Promise<unknown> {
+    return this.callTool("retract_finding", { project, finding_text, reason });
+  }
+
+  async resolveContradiction(
+    project: string,
+    finding_text: string,
+    finding_text_other: string,
+    resolution: string,
+  ): Promise<unknown> {
+    return this.callTool("resolve_contradiction", { project, finding_text, finding_text_other, resolution });
+  }
+
+  async linkTaskIssue(
+    project: string,
+    item: string,
+    issue_number?: number,
+    issue_url?: string,
+    unlink?: boolean,
+  ): Promise<unknown> {
+    const args: Record<string, unknown> = { project, item };
+    if (issue_number !== undefined) args.issue_number = issue_number;
+    if (issue_url) args.issue_url = issue_url;
+    if (unlink) args.unlink = unlink;
+    return this.callTool("link_task_issue", args);
+  }
+
+  async promoteTaskToIssue(
+    project: string,
+    item: string,
+    repo?: string,
+    title?: string,
+    body?: string,
+    mark_done?: boolean,
+  ): Promise<unknown> {
+    const args: Record<string, unknown> = { project, item };
+    if (repo) args.repo = repo;
+    if (title) args.title = title;
+    if (body) args.body = body;
+    if (mark_done !== undefined) args.mark_done = mark_done;
+    return this.callTool("promote_task_to_issue", args);
   }
 
   async dispose(): Promise<void> {

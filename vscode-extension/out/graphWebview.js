@@ -69,10 +69,36 @@ function loadGraphScript() {
     }
     return "";
 }
+/* ── Phren inline SVG for webview embedding ─────────────── */
+const PHREN_INLINE_SVG_SMALL = `<svg width="64" height="64" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="pb" cx="48%" cy="42%" r="50%">
+      <stop offset="0%" stop-color="#9B8DC8"/>
+      <stop offset="40%" stop-color="#7B68AE"/>
+      <stop offset="85%" stop-color="#5B4B8A"/>
+      <stop offset="100%" stop-color="#2D2255"/>
+    </radialGradient>
+  </defs>
+  <path d="M 28 60 C 26 44, 32 28, 46 22 C 52 18, 60 16, 68 18 C 78 20, 86 28, 90 38 C 96 50, 94 66, 88 76 C 82 86, 74 94, 62 96 C 48 98, 36 92, 30 80 C 24 72, 24 66, 28 60 Z" fill="url(#pb)"/>
+  <path d="M 36 38 C 46 34, 60 36, 72 32 C 78 30, 84 34, 88 38" stroke="#5B4B8A" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.5"/>
+  <path d="M 30 52 C 42 48, 56 50, 68 46 C 78 44, 84 48, 90 52" stroke="#5B4B8A" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.4"/>
+  <path d="M 42 68 L 46 63 L 50 68 L 46 73 Z" fill="#1a1a2e"/>
+  <path d="M 56 68 L 61 62 L 66 68 L 61 74 Z" fill="#1a1a2e"/>
+  <rect x="43" y="64" width="2.5" height="2.5" rx="0.5" fill="#FFF" opacity="0.8"/>
+  <rect x="57.5" y="63" width="2.5" height="2.5" rx="0.5" fill="#FFF" opacity="0.8"/>
+  <path d="M 48 78 L 51 81 L 54 78" stroke="#2D2255" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="38" y="96" width="11" height="14" rx="2" fill="#3D3270"/>
+  <rect x="57" y="96" width="11" height="14" rx="2" fill="#3D3270"/>
+  <g transform="translate(96, 14)">
+    <polygon points="0,-8 2,0 0,8 -2,0" fill="#00E5FF"/>
+    <polygon points="-8,0 0,-2 8,0 0,2" fill="#00E5FF"/>
+    <circle cx="0" cy="0" r="1.5" fill="#FFF" opacity="0.9"/>
+  </g>
+</svg>`;
 /* ── Main entry ──────────────────────────────────────────── */
 async function showGraphWebview(client, context) {
     const panel = vscode.window.createWebviewPanel("phren.fragmentGraph", "Phren Fragment Graph", vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] });
-    panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "phren.svg"));
+    panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "icon.svg"));
     panel.webview.html = renderLoadingHtml(panel.webview);
     let graphData;
     try {
@@ -124,8 +150,7 @@ async function showGraphWebview(client, context) {
             if (!edited || edited.trim() === originalText.trim())
                 return;
             try {
-                await client.removeFinding(projectName, originalText);
-                await client.addFinding(projectName, edited.trim());
+                await client.editFinding(projectName, originalText, edited.trim());
                 vscode.window.showInformationMessage("Finding updated.");
                 // Reload graph data so the panel reflects the change
                 graphData = await loadGraphData(client);
@@ -189,7 +214,7 @@ async function loadGraphData(client) {
             subtype: "project",
             text: summary.summary,
             radius: Math.min(14 + Math.sqrt(findings.length + tasks.length) * 1.5, 30),
-            color: "#7c3aed",
+            color: "#7B68AE",
         });
         // Finding nodes
         for (const finding of findings) {
@@ -204,7 +229,7 @@ async function loadGraphData(client) {
                 subtype: finding.topicSlug,
                 text: finding.text,
                 radius: 8,
-                color: "#f4a261", // placeholder; actual color determined by graph engine from topic slug
+                color: "#5B4B8A", // placeholder; actual color determined by graph engine from topic slug
                 date: finding.date,
                 stableId: finding.stableId,
                 topicSlug: finding.topicSlug,
@@ -222,7 +247,7 @@ async function loadGraphData(client) {
             const taskScoreKey = buildScoreKey(projectName, "tasks.md", task.line);
             const taskScore = scoreLookup.get(taskScoreKey);
             const sectionLower = task.section.toLowerCase();
-            const taskColorMap = { active: "#10b981", queue: "#eab308", done: "#6b7280" };
+            const taskColorMap = { active: "#10b981", queue: "#00E5FF", done: "#6b7280" };
             nodes.push({
                 id: taskId,
                 kind: "task",
@@ -231,7 +256,7 @@ async function loadGraphData(client) {
                 subtype: sectionLower,
                 text: task.line,
                 radius: 7,
-                color: taskColorMap[sectionLower] || "#eab308",
+                color: taskColorMap[sectionLower] || "#00E5FF",
                 section: task.section,
                 priority: task.priority,
                 scoreKey: taskScoreKey,
@@ -264,7 +289,7 @@ async function loadGraphData(client) {
             subtype: entity.type,
             text: `${entity.name} (${entity.type}) - ${entity.refCount} refs`,
             radius: Math.min(6 + entity.refCount, 16),
-            color: "#06b6d4",
+            color: "#00E5FF",
             refCount: entity.refCount,
             entityType: entity.type,
             connectedProjects: uniqueConnected,
@@ -529,9 +554,19 @@ function renderLoadingHtml(webview) {
   <title>Phren Fragment Graph</title>
   <style>
     body { margin:0; display:grid; place-items:center; min-height:100vh; color:var(--vscode-foreground); font-family:sans-serif; }
+    .loading-container { text-align:center; }
+    .loading-container svg { margin-bottom:16px; }
+    .loading-text { font-size:14px; opacity:0.7; }
+    @keyframes phren-bob { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-4px); } }
+    .phren-loading { animation:phren-bob 1.2s ease-in-out infinite; }
   </style>
 </head>
-<body><div>Loading fragment graph...</div></body>
+<body>
+  <div class="loading-container">
+    <div class="phren-loading">${PHREN_INLINE_SVG_SMALL}</div>
+    <div class="loading-text">Loading fragment graph...</div>
+  </div>
+</body>
 </html>`;
 }
 function renderErrorHtml(webview, errorMessage) {
@@ -548,7 +583,7 @@ function renderErrorHtml(webview, errorMessage) {
     .panel { max-width:720px; border:1px solid; border-radius:10px; padding:16px; }
   </style>
 </head>
-<body><div class="panel">Failed to render fragment graph: ${escapeHtml(errorMessage)}</div></body>
+<body><div class="panel"><div style="text-align:center;margin-bottom:12px">${PHREN_INLINE_SVG_SMALL}</div>Failed to render fragment graph: ${escapeHtml(errorMessage)}</div></body>
 </html>`;
 }
 function renderGraphHtml(webview, payload) {
@@ -633,6 +668,7 @@ function renderGraphHtml(webview, payload) {
       </div>
     </section>
     <aside class="graph-detail-panel" id="graph-detail-panel">
+      <div style="text-align:center;margin-bottom:12px;opacity:0.6">${PHREN_INLINE_SVG_SMALL}</div>
       <h2>Details</h2>
       <div id="graph-detail-meta">Click a bubble to inspect it.</div>
       <div id="graph-detail-body"><p class="text-muted" style="margin:0">Use the graph filters, then click a project or finding bubble to pin its details here.</p></div>
@@ -723,7 +759,7 @@ ${graphScript}
   } else {
     var fallback = document.getElementById('graph-canvas');
     if (fallback && fallback.parentElement) {
-      fallback.parentElement.innerHTML = '<p style="padding:24px;color:var(--vscode-errorForeground,#f44)">Graph engine not available. Ensure the phren MCP server is built (npm run build in phren root).</p>';
+      fallback.parentElement.innerHTML = '<p style="padding:24px;color:var(--vscode-errorForeground,#f44)">Graph engine not available. Ensure the phren MCP server is built (npm run build in project root).</p>';
     }
   }
 

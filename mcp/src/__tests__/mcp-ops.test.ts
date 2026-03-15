@@ -222,6 +222,26 @@ describe("mcp-ops: get_review_queue", () => {
     expect(res.data.items).toHaveLength(2);
     expect(res.data.items.map((item: { project: string }) => item.project).sort()).toEqual(["alpha", "bravo"]);
   });
+
+  it("returns an error when aggregate review queue profile is malformed", async () => {
+    fs.mkdirSync(path.join(tmp.path, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(tmp.path, "profiles", "broken.yaml"), "name: broken\nprojects: nope\n");
+
+    const brokenServer = makeMockServer();
+    const brokenCtx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "broken",
+      db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(brokenServer as any, brokenCtx);
+
+    const res = parseResult(await brokenServer.call("get_review_queue", {}));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("projects");
+  });
 });
 
 // ── health_check ─────────────────────────────────────────────────────────────

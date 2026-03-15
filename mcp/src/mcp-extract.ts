@@ -143,6 +143,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         return mcpResponse({
           ok: added.length > 0,
+          ...(added.length === 0 ? { error: `All ${findings.length} finding(s) were skipped (duplicates or errors).` } : {}),
           message: `Extracted ${findings.length} finding(s): ${added.length} added, ${allSkipped.length} skipped (duplicates or errors).`,
           data: { project, extracted: findings, added, skipped: allSkipped, dryRun: false },
         });

@@ -39,7 +39,7 @@ const child_process_1 = require("child_process");
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const PACKAGE_NAMES = ["@alaarab/phren", "phren"];
+const PACKAGE_NAMES = ["@phren/cli", "phren", "@phren/cli", "phren"];
 const MCP_ENTRYPOINT_RELATIVE_PATH = path.join("mcp", "dist", "index.js");
 function resolveRuntimeConfig(config) {
     const nodePath = normalizeCommandPath(config.get("nodePath", "node")) ?? "node";
@@ -66,7 +66,7 @@ function pathExists(targetPath) {
 }
 function detectMcpServerPath() {
     const candidates = new Set();
-    const envCandidate = normalizeConfiguredPath(process.env.PHREN_MCP_SERVER_PATH);
+    const envCandidate = normalizeConfiguredPath(process.env.PHREN_MCP_SERVER_PATH ?? process.env.PHREN_MCP_SERVER_PATH);
     if (envCandidate) {
         candidates.add(envCandidate);
     }
@@ -76,7 +76,7 @@ function detectMcpServerPath() {
             candidates.add(path.join(globalNodeModules, packageName, MCP_ENTRYPOINT_RELATIVE_PATH));
         }
     }
-    const phrenBinaryPath = runCommand("which", ["phren"]);
+    const phrenBinaryPath = runCommand("which", ["phren"]) ?? runCommand("which", ["phren"]);
     if (phrenBinaryPath) {
         const resolvedBinaryPath = safeRealpath(phrenBinaryPath);
         const prefixPath = path.resolve(path.dirname(resolvedBinaryPath), "..");

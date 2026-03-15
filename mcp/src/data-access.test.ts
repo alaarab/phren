@@ -24,6 +24,7 @@ import {
   readFindings,
   readFindingHistory,
   addFinding,
+  editFinding,
   removeFinding,
   TASKS_FILENAME,
 } from "./data-access.js";
@@ -299,6 +300,21 @@ describe("task mutation helpers", () => {
     expect(moved).toBeDefined();
     expect(moved?.priority).toBe("high");
     expect(moved?.context).toContain("burst traffic");
+  });
+
+  it("updateTask replaces task text and refreshes derived metadata", () => {
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const msg = updateTask(tmpDir, PROJECT, "Add rate limiting", {
+      text: "Throttle API bursts [pinned] [low]",
+    });
+    expect(resultMsg(msg)).toContain("text updated");
+
+    const after = resolveTaskItem(tmpDir, PROJECT, "Throttle API bursts");
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.line).toBe("Throttle API bursts [low] [pinned]");
+    expect(after.data.priority).toBe("low");
+    expect(after.data.pinned).toBe(true);
   });
 
   it("updateTask links and unlinks GitHub issue metadata", () => {
@@ -659,6 +675,73 @@ describe("removeFinding", () => {
     expect(msg.ok).toBe(false);
     if (!msg.ok) expect(msg.code).toBe(PhrenError.FILE_NOT_FOUND);
   });
+
+  it("refuses to remove archived findings", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      [
+        "# testproject FINDINGS",
+        "",
+        "## 2026-03-01",
+        "",
+        "- Active finding",
+        "",
+        "<!-- phren:archive:start -->",
+        "## Archived 2026-02-01",
+        "",
+        "- Archived finding",
+        "<!-- phren:archive:end -->",
+        "",
+      ].join("\n"),
+    );
+
+    const msg = removeFinding(tmpDir, PROJECT, "Archived finding");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.VALIDATION_ERROR);
+
+    const content = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
+    expect(content).toContain("- Archived finding");
+  });
+});
+
+describe("editFinding", () => {
+  it("updates an active finding in place", () => {
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), SAMPLE_FINDINGS);
+    const msg = editFinding(tmpDir, PROJECT, "WAL mode", "SQLite WAL mode prevents reader blocking");
+    expect(msg.ok).toBe(true);
+
+    const content = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
+    expect(content).toContain("SQLite WAL mode prevents reader blocking");
+    expect(content).not.toContain("WAL mode reduces writer contention");
+  });
+
+  it("refuses to edit archived findings", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      [
+        "# testproject FINDINGS",
+        "",
+        "## 2026-03-01",
+        "",
+        "- Active finding",
+        "",
+        "<!-- phren:archive:start -->",
+        "## Archived 2026-02-01",
+        "",
+        "- Archived finding <!-- fid:deadbeef -->",
+        "<!-- phren:archive:end -->",
+        "",
+      ].join("\n"),
+    );
+
+    const msg = editFinding(tmpDir, PROJECT, "Archived finding", "Edited archived finding");
+    expect(msg.ok).toBe(false);
+    if (!msg.ok) expect(msg.code).toBe(PhrenError.VALIDATION_ERROR);
+
+    const content = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
+    expect(content).toContain("- Archived finding <!-- fid:deadbeef -->");
+    expect(content).not.toContain("Edited archived finding");
+  });
 });
 
 describe("review queue helpers", () => {
@@ -717,6 +800,15 @@ describe("review queue helpers", () => {
     expect(result.data.every((item) => item.project === PROJECT || item.project === "bravo")).toBe(true);
     expect(result.data.filter((item) => item.section === "Review")).toHaveLength(2);
     expect(result.data.some((item) => item.project === "bravo" && item.section === "Conflicts")).toBe(true);
+  });
+
+  it("returns an error when aggregate queue profile is malformed", () => {
+    fs.mkdirSync(path.join(tmpDir, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "profiles", "broken.yaml"), "name: broken\nprojects: nope\n");
+
+    const result = readReviewQueueAcrossProjects(tmpDir, "broken");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(PhrenError.MALFORMED_YAML);
   });
 
 });
@@ -1069,6 +1161,41 @@ describe("structured error codes in data-access", () => {
       if (!result.ok) expect(result.code).toBe(PhrenError.FILE_NOT_FOUND);
     } finally {
       tmp.cleanup();
+    }
+  });
+});
+
+// ── Path-escape guards ─────────────────────────────────────────────────────
+
+describe("path-escape guards", () => {
+  it("addFinding rejects a project name containing path traversal", () => {
+    const result = addFinding(tmpDir, "../escape", "some finding");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(PhrenError.INVALID_PROJECT_NAME);
+  });
+
+  it("removeFinding rejects a project name containing path traversal", () => {
+    const result = removeFinding(tmpDir, "../escape", "some finding");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(PhrenError.INVALID_PROJECT_NAME);
+  });
+
+  it("removeFinding blocks a symlinked project dir that resolves outside phrenPath", () => {
+    // Create a target directory outside phrenPath
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-escape-"));
+    try {
+      const findings = path.join(outsideDir, "FINDINGS.md");
+      fs.writeFileSync(findings, "# escape Findings\n\n## 2026-01-01\n\n- secret\n");
+
+      // Create a symlink inside phrenPath pointing to outside dir
+      const symlinkPath = path.join(tmpDir, "symlinked");
+      fs.symlinkSync(outsideDir, symlinkPath);
+
+      const result = removeFinding(tmpDir, "symlinked", "secret");
+      // safeProjectPath detects the symlink escape and blocks it
+      expect(result.ok).toBe(false);
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
     }
   });
 });

@@ -32,11 +32,11 @@ export const mcpManifest = {
         "graph.visualize": { implemented: false, reason: "MCP returns data only; visualization is client-side" },
         "graph.link_findings": { implemented: true, handler: "index.ts:link_findings" },
         // Config
-        "config.proactivity": { implemented: false, reason: "No MCP tool for proactivity config" },
-        "config.task_mode": { implemented: false, reason: "No MCP tool for workflow policy" },
-        "config.retention": { implemented: false, reason: "Config tools are CLI-only" },
-        "config.workflow": { implemented: false, reason: "Config tools are CLI-only" },
-        "config.index": { implemented: false, reason: "Config tools are CLI-only" },
+        "config.proactivity": { implemented: true, handler: "index.ts:get_config, set_proactivity" },
+        "config.task_mode": { implemented: true, handler: "index.ts:get_config, set_task_mode" },
+        "config.retention": { implemented: true, handler: "index.ts:get_config, set_retention_policy" },
+        "config.workflow": { implemented: true, handler: "index.ts:get_config, set_workflow_policy, set_finding_sensitivity" },
+        "config.index": { implemented: true, handler: "index.ts:get_config, set_index_policy" },
         // Health / Sync / Session
         "health.check": { implemented: true, handler: "index.ts:health_check" },
         "health.doctor_fix": { implemented: true, handler: "index.ts:doctor_fix" },

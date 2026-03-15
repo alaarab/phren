@@ -162,15 +162,15 @@ export function removeMcpServerAtPath(filePath) {
     return removed;
 }
 export function isPhrenCommand(command) {
-    // Detect PHREN_PATH= or legacy PHREN_PATH= env var prefix (present in all lifecycle hook commands)
-    if (/\b(?:PHREN_PATH|PHREN_PATH)=/.test(command))
+    // Detect PHREN_PATH= env var prefix (present in all lifecycle hook commands)
+    if (/\bPHREN_PATH=/.test(command))
         return true;
-    // Detect npx phren/phren package references
-    if (command.includes("phren") || command.includes("phren"))
+    // Detect npx phren package references
+    if (command.includes("phren"))
         return true;
-    // Detect bare "phren" or "phren" executable segment
+    // Detect bare "phren" executable segment
     const segments = command.split(/[/\\\s]+/);
-    if (segments.some(seg => seg === "phren" || seg.startsWith("phren@") || seg === "phren" || seg.startsWith("phren@")))
+    if (segments.some(seg => seg === "phren" || seg.startsWith("phren@")))
         return true;
     // Also match commands that include hook subcommands (used when installed via absolute path)
     const HOOK_MARKERS = ["hook-prompt", "hook-stop", "hook-session-start", "hook-tool"];

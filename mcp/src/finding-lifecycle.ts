@@ -8,6 +8,8 @@ import { withFileLock } from "./governance-locks.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import {
   METADATA_REGEX,
+  isArchiveEnd,
+  isArchiveStart,
   parseCreatedDate as parseCreatedDateMeta,
   parseStatusField,
   parseStatus,
@@ -137,6 +139,12 @@ interface MatchedFinding {
   stableId?: string;
 }
 
+interface FindingBulletLine {
+  archived: boolean;
+  index: number;
+  line: string;
+}
+
 export type ContradictionResolution = "keep_a" | "keep_b" | "keep_both" | "retract_both";
 
 function findingTextFromLine(line: string): string {
@@ -154,6 +162,53 @@ function normalizeFindingText(value: string): string {
 
 function removeRelationComments(line: string): string {
   return stripRelationMetadata(line);
+}
+
+function collectFindingBulletLines(lines: string[]): FindingBulletLine[] {
+  const bulletLines: FindingBulletLine[] = [];
+  let inArchiveBlock = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (isArchiveStart(line)) {
+      inArchiveBlock = true;
+      continue;
+    }
+    if (isArchiveEnd(line)) {
+      inArchiveBlock = false;
+      continue;
+    }
+    if (!line.startsWith("- ")) continue;
+    bulletLines.push({ line, index: i, archived: inArchiveBlock });
+  }
+  return bulletLines;
+}
+
+function selectMatchingFinding(
+  bulletLines: FindingBulletLine[],
+  needle: string,
+  match: string,
+): PhrenResult<FindingBulletLine | null> {
+  const fidNeedle = needle.replace(/^fid:/, "");
+  const fidMatches = /^[a-z0-9]{8}$/.test(fidNeedle)
+    ? bulletLines.filter(({ line }) => new RegExp(`<!--\\s*fid:${fidNeedle}\\s*-->`, "i").test(line))
+    : [];
+
+  const exactMatches = bulletLines.filter(({ line }) => normalizeFindingText(line) === needle);
+  const partialMatches = bulletLines.filter(({ line }) => {
+    const clean = normalizeFindingText(line);
+    return clean.includes(needle) || line.toLowerCase().includes(needle);
+  });
+
+  if (fidMatches.length === 1) return phrenOk(fidMatches[0]);
+  if (exactMatches.length === 1) return phrenOk(exactMatches[0]);
+  if (exactMatches.length > 1) {
+    return phrenErr(`"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
+  }
+  if (partialMatches.length === 1) return phrenOk(partialMatches[0]);
+  if (partialMatches.length > 1) {
+    return phrenErr(`"${match}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
+  }
+  return phrenOk(null);
 }
 
 function applyLifecycle(
@@ -182,35 +237,25 @@ function matchFinding(lines: string[], match: string): PhrenResult<MatchedFindin
   if (!needleRaw) return phrenErr("Finding text cannot be empty.", PhrenError.EMPTY_INPUT);
   const needle = normalizeFindingText(needleRaw);
 
-  const bulletLines = lines
-    .map((line, index) => ({ line, index }))
-    .filter(({ line }) => line.startsWith("- "));
-
-  const fidNeedle = needle.replace(/^fid:/, "");
-  const fidMatches = /^[a-z0-9]{8}$/.test(fidNeedle)
-    ? bulletLines.filter(({ line }) => new RegExp(`<!--\\s*fid:${fidNeedle}\\s*-->`, "i").test(line))
-    : [];
-
-  const exactMatches = bulletLines.filter(({ line }) => normalizeFindingText(line) === needle);
-  const partialMatches = bulletLines.filter(({ line }) => {
-    const clean = normalizeFindingText(line);
-    return clean.includes(needle) || line.toLowerCase().includes(needle);
-  });
-
-  let selected: { line: string; index: number } | undefined;
-  if (fidMatches.length === 1) {
-    selected = fidMatches[0];
-  } else if (exactMatches.length === 1) {
-    selected = exactMatches[0];
-  } else if (exactMatches.length > 1) {
-    return phrenErr(`"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
-  } else if (partialMatches.length === 1) {
-    selected = partialMatches[0];
-  } else if (partialMatches.length > 1) {
-    return phrenErr(`"${match}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.`, PhrenError.AMBIGUOUS_MATCH);
-  }
+  const bulletLines = collectFindingBulletLines(lines);
+  const activeMatch = selectMatchingFinding(bulletLines.filter(({ archived }) => !archived), needle, match);
+  if (!activeMatch.ok) return activeMatch;
+  const selected = activeMatch.data;
 
   if (!selected) {
+    const archivedMatch = selectMatchingFinding(bulletLines.filter(({ archived }) => archived), needle, match);
+    if (!archivedMatch.ok) {
+      return phrenErr(
+        `Finding "${match}" is archived and read-only. Restore or re-add it before mutating history.`,
+        PhrenError.VALIDATION_ERROR,
+      );
+    }
+    if (archivedMatch.data) {
+      return phrenErr(
+        `Finding "${match}" is archived and read-only. Restore or re-add it before mutating history.`,
+        PhrenError.VALIDATION_ERROR,
+      );
+    }
     return phrenErr(`No finding matching "${match}".`, PhrenError.NOT_FOUND);
   }
 

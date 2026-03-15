@@ -103,20 +103,20 @@ ${TASK_UI_STYLES}
       <dl>
         <dt>What is the Review Queue?</dt>
         <dd>Fragments flagged by governance for human review. Items accumulate here when <code>phren maintain govern</code> is run.</dd>
-        <dt>What does Approve do?</dt>
-        <dd>Keeps the memory and marks it as reviewed. It stays in your project findings.</dd>
-        <dt>What does Reject do?</dt>
-        <dd>Permanently removes the memory from your project.</dd>
+        <dt>Can I approve, reject, or edit items here?</dt>
+        <dd>No. The web UI review queue is read-only and exists for inspection only.</dd>
+        <dt>How do I clear items?</dt>
+        <dd>Use maintenance flows such as <code>phren maintain prune</code>, or update the underlying findings/tasks directly.</dd>
         <dt>Is this automatic?</dt>
-        <dd>No. Agents do not auto-approve. You review each item manually.</dd>
+        <dd>No. Agents do not auto-accept review-queue items.</dd>
         <dt>How do items get here?</dt>
         <dd><code>phren maintain govern</code> flags stale or low-confidence fragments for review.</dd>
-        <dt>How to clear the queue faster?</dt>
+        <dt>How to reduce noise?</dt>
         <dd>Run <code>phren maintain prune</code> to auto-remove expired items without manual review.</dd>
       </dl>
     </details>
 
-    <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Fragments flagged for review. Approve to keep, reject to discard.</p>
+    <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Fragments flagged for review. Inspect them here; the web UI does not mutate queue items.</p>
 
     <div id="review-summary-banner" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center"></div>
 
@@ -136,15 +136,7 @@ ${TASK_UI_STYLES}
 
     <div id="review-kbd-hints" style="font-size:var(--text-xs);color:var(--muted);margin-bottom:12px;display:none;gap:16px;flex-wrap:wrap">
       <span><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
-      <span><kbd>a</kbd> approve</span>
-      <span><kbd>r</kbd> reject</span>
-      <span><kbd>e</kbd> edit</span>
     </div>
-
-    <label class="review-select-all" id="review-select-all" style="display:none">
-      <input type="checkbox" id="review-select-all-checkbox" />
-      Select all
-    </label>
 
     <div class="review-cards" id="review-cards-list">
       <div class="review-cards-loading" style="text-align:center;padding:40px;color:var(--muted)">Loading...</div>
@@ -295,21 +287,6 @@ ${TASK_UI_STYLES}
       </section>
     </div>
   </div>
-</div>
-
-<div class="batch-bar" id="batch-bar">
-  <span class="batch-bar-count" id="batch-count">0 selected</span>
-  <button class="btn btn-sm btn-approve" id="batch-approve-btn">Approve All</button>
-  <button class="btn btn-sm btn-reject" id="batch-reject-btn">Reject All</button>
-  <select class="btn btn-sm" id="batch-tag-select" style="cursor:pointer">
-    <option value="">Approve by tag...</option>
-    <option value="decision">[decision]</option>
-    <option value="pitfall">[pitfall]</option>
-    <option value="pattern">[pattern]</option>
-    <option value="fix">[fix]</option>
-    <option value="warning">[warning]</option>
-  </select>
-  <button class="btn btn-sm" id="batch-cancel-btn">Cancel</button>
 </div>
 
 <div class="toast-container" id="toast-container"></div>

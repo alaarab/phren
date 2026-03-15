@@ -1,16 +1,19 @@
 import * as fs from "fs";
-import { runtimeFile, getPhrenPath } from "./shared.js";
+import * as path from "path";
+import { runtimeFile, getPhrenPath, getProjectDirs } from "./shared.js";
 import { recordFeedback, flushEntryScores, getWorkflowPolicy, } from "./shared-governance.js";
 import { upsertCanonical } from "./shared-content.js";
-import { errorMessage } from "./utils.js";
+import { errorMessage, isValidProjectName } from "./utils.js";
 import { addFinding as addFindingCore } from "./core-finding.js";
 import { runDoctor } from "./link.js";
 import { startWebUi } from "./memory-ui.js";
 import { startShell } from "./shell.js";
 import { runPhrenUpdate } from "./update.js";
-import { readRuntimeHealth } from "./data-access.js";
+import { readRuntimeHealth, readReviewQueue, readReviewQueueAcrossProjects } from "./data-access.js";
 import { runSearch, runFragmentSearch, parseFragmentSearchArgs, runRelatedDocs, parseRelatedDocsArgs } from "./cli-search.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
+import { listAllSessions } from "./mcp-session.js";
 export async function handleSearch(opts, profile) {
     const result = await runSearch(opts, getPhrenPath(), profile);
     if (result.lines.length > 0) {
@@ -299,4 +302,111 @@ export async function handleUpdate(args) {
     if (!result.ok) {
         process.exitCode = 1;
     }
+}
+export async function handleReview(args) {
+    const phrenPath = getPhrenPath();
+    const profile = resolveRuntimeProfile(phrenPath);
+    const project = args[0] && !args[0].startsWith("-") ? args[0] : undefined;
+    if (project) {
+        if (!isValidProjectName(project)) {
+            console.error(`Invalid project name: "${project}".`);
+            process.exit(1);
+        }
+        const result = readReviewQueue(phrenPath, project);
+        if (!result.ok) {
+            console.error(result.error ?? "Failed to read review queue.");
+            process.exit(1);
+        }
+        const items = result.data;
+        if (items.length === 0) {
+            console.log(`No items in review queue for "${project}".`);
+            return;
+        }
+        console.log(`Review queue: ${project} (${items.length} item(s))\n`);
+        for (const item of items) {
+            const conf = item.confidence !== undefined ? ` [conf: ${item.confidence.toFixed(2)}]` : "";
+            const risky = item.risky ? " ⚠" : "";
+            console.log(`  [${item.section}] ${item.date}  ${item.text}${conf}${risky}`);
+        }
+    }
+    else {
+        const result = readReviewQueueAcrossProjects(phrenPath, profile);
+        if (!result.ok) {
+            console.error(result.error ?? "Failed to read review queue.");
+            process.exit(1);
+        }
+        const items = result.data;
+        if (items.length === 0) {
+            console.log("No items in review queue.");
+            return;
+        }
+        console.log(`Review queue: ${items.length} item(s) across all projects\n`);
+        let lastProject = "";
+        for (const item of items) {
+            if (item.project !== lastProject) {
+                console.log(`\n## ${item.project}`);
+                lastProject = item.project;
+            }
+            const conf = item.confidence !== undefined ? ` [conf: ${item.confidence.toFixed(2)}]` : "";
+            const risky = item.risky ? " ⚠" : "";
+            console.log(`  [${item.section}] ${item.date}  ${item.text}${conf}${risky}`);
+        }
+    }
+}
+export async function handleConsolidationStatus(args) {
+    const phrenPath = getPhrenPath();
+    const profile = resolveRuntimeProfile(phrenPath);
+    const project = args[0] && !args[0].startsWith("-") ? args[0] : undefined;
+    const projectDirs = project
+        ? (() => {
+            if (!isValidProjectName(project))
+                return null;
+            const dir = path.join(phrenPath, project);
+            return fs.existsSync(dir) ? [dir] : [];
+        })()
+        : getProjectDirs(phrenPath, profile);
+    if (projectDirs === null) {
+        console.error(`Invalid project name: "${project}".`);
+        process.exit(1);
+    }
+    if (project && projectDirs.length === 0) {
+        console.error(`Project "${project}" not found.`);
+        process.exit(1);
+    }
+    const results = [];
+    for (const dir of projectDirs) {
+        const status = getProjectConsolidationStatus(dir);
+        if (!status)
+            continue;
+        results.push({ ...status, threshold: CONSOLIDATION_ENTRY_THRESHOLD });
+    }
+    if (results.length === 0) {
+        console.log("No FINDINGS.md files found.");
+        return;
+    }
+    console.log("Consolidation status:\n");
+    for (const r of results) {
+        const last = r.lastConsolidated ? r.lastConsolidated : "never consolidated";
+        const rec = r.recommended ? "  → consolidation recommended" : "";
+        console.log(`  ${r.project}: ${r.entriesSince}/${r.threshold} entries since ${last}${rec}`);
+    }
+}
+export function handleSessionContext() {
+    const phrenPath = getPhrenPath();
+    const sessions = listAllSessions(phrenPath, 10);
+    const active = sessions.find((s) => s.status === "active");
+    if (!active) {
+        console.log("No active session. Call session_start (or use hooks) to begin a session.");
+        return;
+    }
+    console.log(`Session:         ${active.sessionId.slice(0, 8)}`);
+    console.log(`Project:         ${active.project ?? "none"}`);
+    if (active.agentScope)
+        console.log(`Agent scope:     ${active.agentScope}`);
+    console.log(`Started:         ${active.startedAt.slice(0, 16).replace("T", " ")}`);
+    console.log(`Duration:        ~${active.durationMins ?? 0} min`);
+    console.log(`Findings added:  ${active.findingsAdded}`);
+    console.log(`Tasks completed: ${active.tasksCompleted}`);
+    if (active.summary)
+        console.log(`Prior summary:   ${active.summary}`);
 }

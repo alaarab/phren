@@ -244,12 +244,12 @@ describe("PhrenShell", () => {
     if (findings.ok) expect(findings.data.some((entry) => entry.text.includes("Shell can write findings"))).toBe(false);
   });
 
-  it("queue triage commands return read-only messages", async () => {
+  it("removed queue triage commands are not recognized", async () => {
     const shell = createShell(dir);
     await shell.handleInput(":open demo");
     await shell.handleInput(":mq approve M1");
     const output = await shell.render();
-    expect(output).toContain("removed");
+    expect(output).toContain("Unknown:");
   });
 
   it("renders health dashboard and supports remediation commands", async () => {

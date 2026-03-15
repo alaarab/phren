@@ -17,21 +17,12 @@ import {
   type ProactivityLevel,
 } from "./proactivity.js";
 import {
-  governanceInstallPreferencesFile,
   readGovernanceInstallPreferences,
   writeGovernanceInstallPreferences,
 } from "./init-preferences.js";
 import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function normalizeProactivityLevel(raw: string | undefined): ProactivityLevel | undefined {
-  if (!raw) return undefined;
-  const normalized = raw.trim().toLowerCase();
-  return PROACTIVITY_LEVELS.includes(normalized as ProactivityLevel)
-    ? (normalized as ProactivityLevel)
-    : undefined;
-}
 
 function proactivitySnapshot(phrenPath: string) {
   const prefs = readGovernanceInstallPreferences(phrenPath);

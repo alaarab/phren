@@ -12,7 +12,7 @@ import { errorMessage } from "./utils.js";
 import { beginUserFragmentBuildCache, endUserFragmentBuildCache, extractAndLinkFragments, ensureGlobalEntitiesTable, } from "./shared-fragment-graph.js";
 import { bootstrapSqlJs } from "./shared-sqljs.js";
 import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "./project-config.js";
-import { buildSourceDocKey, queryDocRows, queryRows, } from "./index-query.js";
+import { buildSourceDocKey, queryDocBySourceKey, queryDocRows, } from "./index-query.js";
 import { classifyTopicForText, readProjectTopics, } from "./project-topics.js";
 export { porterStem } from "./shared-stemmer.js";
 export { cosineFallback } from "./shared-search-fallback.js";
@@ -102,6 +102,11 @@ export function classifyFile(filename, relPath) {
 }
 const IMPORT_RE = /^@import\s+(.+)$/gm;
 const MAX_IMPORT_DEPTH = 5;
+const IMPORT_ROOT_PREFIX = "shared/";
+function isAllowedImportPath(importPath) {
+    const normalized = importPath.replace(/\\/g, "/");
+    return normalized.startsWith(IMPORT_ROOT_PREFIX) && normalized.toLowerCase().endsWith(".md");
+}
 /**
  * Internal recursive helper for resolveImports. Tracks `seen` (cycle detection) and `depth` (runaway
  * recursion guard) — callers should never pass these; use the public `resolveImports` instead.
@@ -111,6 +116,9 @@ function _resolveImportsRecursive(content, phrenPath, seen, depth) {
         return content;
     return content.replace(IMPORT_RE, (_match, importPath) => {
         const trimmed = importPath.trim();
+        if (!isAllowedImportPath(trimmed)) {
+            return "<!-- @import blocked: only shared/*.md allowed -->";
+        }
         const globalRoot = path.resolve(phrenPath, "global");
         const resolved = path.join(globalRoot, trimmed);
         // Use lexical resolution first for the prefix check
@@ -787,8 +795,8 @@ function mergeManualLinks(db, phrenPath) {
         for (const link of manualLinks) {
             try {
                 // Validate: skip manual links whose sourceDoc no longer exists in the index
-                const docCheck = queryRows(db, "SELECT 1 FROM docs WHERE source_key = ? LIMIT 1", [link.sourceDoc]);
-                if (!docCheck || docCheck.length === 0) {
+                const docCheck = queryDocBySourceKey(db, phrenPath, link.sourceDoc);
+                if (!docCheck) {
                     if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG))
                         process.stderr.write(`[phren] manualLinks: pruning stale link to "${link.sourceDoc}"\n`);
                     pruned = true;

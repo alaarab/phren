@@ -5,14 +5,6 @@ import { PROACTIVITY_LEVELS, getProactivityLevel, getProactivityLevelForFindings
 import { readGovernanceInstallPreferences, writeGovernanceInstallPreferences, } from "./init-preferences.js";
 import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
 // ── Helpers ─────────────────────────────────────────────────────────────────
-function normalizeProactivityLevel(raw) {
-    if (!raw)
-        return undefined;
-    const normalized = raw.trim().toLowerCase();
-    return PROACTIVITY_LEVELS.includes(normalized)
-        ? normalized
-        : undefined;
-}
 function proactivitySnapshot(phrenPath) {
     const prefs = readGovernanceInstallPreferences(phrenPath);
     return {

@@ -4,6 +4,8 @@ import * as path from "path";
 import { makeTempDir, grantAdmin, resultMsg } from "../test-helpers.js";
 import { addFindingToFile, addFindingsToFile } from "../shared-content.js";
 import { removeFinding, readFindings } from "../data-access.js";
+import { register } from "../mcp-finding.js";
+import type { McpContext } from "../mcp-types.js";
 
 const PROJECT = "myapp";
 
@@ -30,6 +32,26 @@ const SAMPLE_FINDINGS = `# myapp Findings
 
 - vitest needs pool: "forks" when testing native addons
 `;
+
+type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
+
+function makeMockServer() {
+  const tools = new Map<string, ToolHandler>();
+  return {
+    registerTool(name: string, _meta: unknown, handler: ToolHandler) {
+      tools.set(name, handler);
+    },
+    call(name: string, args: Record<string, unknown>) {
+      const handler = tools.get(name);
+      if (!handler) throw new Error(`Tool "${name}" not registered`);
+      return handler(args);
+    },
+  };
+}
+
+function parseResult(res: { content: { type: string; text: string }[] }) {
+  return JSON.parse(res.content[0].text);
+}
 
 beforeEach(() => {
   tmp = makeTempDir("mcp-finding-test-");
@@ -99,6 +121,33 @@ describe("remove_finding MCP tool", () => {
   it("returns error when FINDINGS.md does not exist", () => {
     const msg = removeFinding(tmp.path, PROJECT, "anything");
     expect(msg.ok).toBe(false);
+  });
+});
+
+describe("edit_finding MCP tool", () => {
+  it("edits a finding in place through the registered MCP tool", async () => {
+    fs.writeFileSync(findingsPath(), SAMPLE_FINDINGS);
+    const server = makeMockServer();
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "",
+      db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+
+    const res = parseResult(await server.call("edit_finding", {
+      project: PROJECT,
+      old_text: "WAL mode",
+      new_text: "SQLite WAL mode prevents reader blocking",
+    }));
+    expect(res.ok).toBe(true);
+
+    const content = fs.readFileSync(findingsPath(), "utf8");
+    expect(content).toContain("SQLite WAL mode prevents reader blocking");
+    expect(content).not.toContain("SQLite WAL mode is required for concurrent readers");
   });
 });
 

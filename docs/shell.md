@@ -32,9 +32,9 @@ Finding lifecycle states (for example superseded/retracted/contradicted) and pro
 
 ### Review Queue (`m`)
 
-Shows pending review items from `review.md`. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date. Triage items with `:mq approve`, `:mq reject`, or `:mq edit`.
+Shows pending review items from `review.md`. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date. The shell review queue is read-only and is meant for inspection.
 
-If you move from shell to browser triage (`phren web-ui`), the UI runs loopback-only and enforces auth + CSRF on mutations.
+If you move from shell to the browser view (`phren web-ui`), the UI also stays read-only for queue items while still enforcing loopback-only auth and CSRF on the routes that mutate other project data.
 
 ### Skills (`s`)
 
@@ -116,13 +116,9 @@ All palette commands start with `:`. You can also type them without the colon pr
 | `:find add <text>` | Append a finding to the selected project |
 | `:find remove <id\|match>` | Remove a finding by ID or text match |
 
-### Review Queue Triage
+### Review Queue
 
-| Command | Description |
-|---------|-------------|
-| `:mq approve <id\|match>` | Approve a queued memory item (promotes to FINDINGS.md) |
-| `:mq reject <id\|match>` | Reject a queued memory item (removes it) |
-| `:mq edit <id\|match> <text>` | Edit a queued memory item's text |
+The shell exposes the review queue for inspection only. Queue mutation commands were removed, so use maintenance flows such as `phren maintain prune` or update the underlying findings directly instead.
 
 ### Infrastructure
 

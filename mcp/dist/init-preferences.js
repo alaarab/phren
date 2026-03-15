@@ -6,6 +6,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, installPreferencesFile } from "./phren-paths.js";
 import { errorMessage } from "./utils.js";
+import { withFileLock } from "./governance-locks.js";
 function preferencesFile(phrenPath) {
     return installPreferencesFile(phrenPath);
 }
@@ -24,7 +25,7 @@ function readPreferencesFile(file) {
         return {};
     }
 }
-function writePreferencesFile(file, current, patch) {
+function writePreferencesFileRaw(file, current, patch) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmpPath = `${file}.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpPath, JSON.stringify({
@@ -34,6 +35,12 @@ function writePreferencesFile(file, current, patch) {
     }, null, 2) + "\n");
     fs.renameSync(tmpPath, file);
 }
+function writePreferencesFile(file, patch) {
+    withFileLock(file, () => {
+        const current = readPreferencesFile(file);
+        writePreferencesFileRaw(file, current, patch);
+    });
+}
 export function readInstallPreferences(phrenPath) {
     return readPreferencesFile(preferencesFile(phrenPath));
 }
@@ -41,10 +48,18 @@ export function readGovernanceInstallPreferences(phrenPath) {
     return readPreferencesFile(governanceInstallPreferencesFile(phrenPath));
 }
 export function writeInstallPreferences(phrenPath, patch) {
-    writePreferencesFile(preferencesFile(phrenPath), readInstallPreferences(phrenPath), patch);
+    writePreferencesFile(preferencesFile(phrenPath), patch);
 }
 export function writeGovernanceInstallPreferences(phrenPath, patch) {
-    writePreferencesFile(governanceInstallPreferencesFile(phrenPath), readGovernanceInstallPreferences(phrenPath), patch);
+    writePreferencesFile(governanceInstallPreferencesFile(phrenPath), patch);
+}
+/** Atomically read-modify-write install preferences using a patcher function. */
+export function updateInstallPreferences(phrenPath, patcher) {
+    const file = preferencesFile(phrenPath);
+    withFileLock(file, () => {
+        const current = readPreferencesFile(file);
+        writePreferencesFileRaw(file, current, patcher(current));
+    });
 }
 export function getMcpEnabledPreference(phrenPath) {
     const prefs = readInstallPreferences(phrenPath);

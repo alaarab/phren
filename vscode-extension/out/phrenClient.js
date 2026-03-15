@@ -71,11 +71,33 @@ class PhrenClient {
     async disableSkill(name, project) {
         return this.callTool("disable_skill", project ? { name, project } : { name });
     }
-    async listHooks() {
-        return this.callTool("list_hooks", {});
+    async listHooks(project) {
+        return this.callTool("list_hooks", project ? { project } : {});
     }
-    async toggleHooks(enabled, tool) {
-        return this.callTool("toggle_hooks", tool ? { enabled, tool } : { enabled });
+    async toggleHooks(enabled, tool, project, event) {
+        const args = { enabled };
+        if (tool)
+            args.tool = tool;
+        if (project)
+            args.project = project;
+        if (event)
+            args.event = event;
+        return this.callTool("toggle_hooks", args);
+    }
+    async addCustomHook(event, command, timeout) {
+        const args = { event, command };
+        if (timeout !== undefined)
+            args.timeout = timeout;
+        return this.callTool("add_custom_hook", args);
+    }
+    async removeCustomHook(event, command) {
+        const args = { event };
+        if (command)
+            args.command = command;
+        return this.callTool("remove_custom_hook", args);
+    }
+    async listHookErrors() {
+        return this.callTool("list_hook_errors", {});
     }
     async memoryFeedback(key, feedback) {
         return this.callTool("memory_feedback", { key, feedback });
@@ -92,8 +114,14 @@ class PhrenClient {
     async removeTask(project, item) {
         return this.callTool("remove_task", { project, item });
     }
-    async pinMemory(project, text) {
-        return this.callTool("pin_memory", { project, text });
+    async pinTask(project, item) {
+        return this.callTool("pin_task", { project, item });
+    }
+    async pinMemory(project, memory) {
+        return this.callTool("pin_memory", { project, memory });
+    }
+    async editFinding(project, oldText, newText) {
+        return this.callTool("edit_finding", { project, old_text: oldText, new_text: newText });
     }
     async removeFinding(project, text) {
         return this.callTool("remove_finding", { project, finding: text });
@@ -101,14 +129,17 @@ class PhrenClient {
     async getReviewQueue(project) {
         return this.callTool("get_review_queue", project ? { project } : {});
     }
-    async approveQueueItem(project, item) {
-        return this.callTool("approve_queue_item", { project, item });
+    async searchFragments(query, project) {
+        const args = { query };
+        if (project)
+            args.project = project;
+        return this.callTool("search_fragments", args);
     }
-    async rejectQueueItem(project, item) {
-        return this.callTool("reject_queue_item", { project, item });
-    }
-    async editQueueItem(project, item, newText) {
-        return this.callTool("edit_queue_item", { project, item, new_text: newText });
+    async getRelatedDocs(entity, project) {
+        const args = { entity };
+        if (project)
+            args.project = project;
+        return this.callTool("get_related_docs", args);
     }
     async readGraph(project) {
         const args = {};
@@ -116,8 +147,8 @@ class PhrenClient {
             args.project = project;
         return this.callTool("read_graph", args);
     }
-    async crossProjectEntities() {
-        return this.callTool("cross_project_entities", {});
+    async crossProjectFragments() {
+        return this.callTool("cross_project_fragments", {});
     }
     async pushChanges(message) {
         const args = {};
@@ -130,6 +161,52 @@ class PhrenClient {
     }
     async healthCheck() {
         return this.callTool("health_check", {});
+    }
+    async doctorFix() {
+        return this.callTool("doctor_fix", {});
+    }
+    async sessionStart(project) {
+        const args = {};
+        if (project)
+            args.project = project;
+        return this.callTool("session_start", args);
+    }
+    async sessionEnd(summary) {
+        const args = {};
+        if (summary)
+            args.summary = summary;
+        return this.callTool("session_end", args);
+    }
+    async supersedeFinding(project, finding_text, superseded_by) {
+        return this.callTool("supersede_finding", { project, finding_text, superseded_by });
+    }
+    async retractFinding(project, finding_text, reason) {
+        return this.callTool("retract_finding", { project, finding_text, reason });
+    }
+    async resolveContradiction(project, finding_text, finding_text_other, resolution) {
+        return this.callTool("resolve_contradiction", { project, finding_text, finding_text_other, resolution });
+    }
+    async linkTaskIssue(project, item, issue_number, issue_url, unlink) {
+        const args = { project, item };
+        if (issue_number !== undefined)
+            args.issue_number = issue_number;
+        if (issue_url)
+            args.issue_url = issue_url;
+        if (unlink)
+            args.unlink = unlink;
+        return this.callTool("link_task_issue", args);
+    }
+    async promoteTaskToIssue(project, item, repo, title, body, mark_done) {
+        const args = { project, item };
+        if (repo)
+            args.repo = repo;
+        if (title)
+            args.title = title;
+        if (body)
+            args.body = body;
+        if (mark_done !== undefined)
+            args.mark_done = mark_done;
+        return this.callTool("promote_task_to_issue", args);
     }
     async dispose() {
         if (this.disposed) {

@@ -7,7 +7,7 @@ export interface McpContext {
   db: () => SqlJsDatabase;
   rebuildIndex: () => Promise<void>;
   updateFileInIndex: (filePath: string) => void;
-  withWriteQueue: <T>(fn: () => Promise<T>) => Promise<T>;
+  withWriteQueue: <T>(fn: () => Promise<T>) => Promise<T | { content: { type: "text"; text: string }[] }>;
 }
 
 export type RegisterFn = (server: McpServer, ctx: McpContext) => void;

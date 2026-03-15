@@ -279,14 +279,6 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     return;
   }
 
-  if (command === "mq") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    const action = (parts[1] || "").toLowerCase();
-    host.setMessage("  Queue approve/reject/edit have been removed. The review queue is now read-only.");
-    return;
-  }
-
   if (command === "machine" && parts[1]?.toLowerCase() === "map") {
     if (parts.length < 4) { host.setMessage("  Usage: :machine map <hostname> <profile>"); return; }
     host.setMessage(`  ${resultMsg(setMachineProfile(host.phrenPath, parts[2], parts[3]))}`);
@@ -411,9 +403,9 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       if (project) {
         const queueResult = readReviewQueue(host.phrenPath, project);
         if (queueResult.ok) {
-          const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
+        const conflictItems = queueResult.data.filter((q) => q.section === "Conflicts");
           if (conflictItems.length) {
-            lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in Review Queue`)}  (:mq approve|reject)`);
+            lines.push(`  ${style.yellow(`${conflictItems.length} conflict(s) in Review Queue`)}  (inspect in :review queue)`);
           }
         }
       }
@@ -477,8 +469,7 @@ function suggestCommand(input: string): string | undefined {
   const known = [
     "help", "projects", "tasks", "task", "findings", "review queue", "machines", "health",
     "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
-    "work next", "tidy", "find add", "find remove", "mq approve", "mq reject",
-    "mq edit", "machine map", "profile add-project", "profile remove-project",
+    "work next", "tidy", "find add", "find remove", "machine map", "profile add-project", "profile remove-project",
     "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
     "undo", "diff", "conflicts", "reset",
   ];
@@ -496,7 +487,7 @@ export function completeInput(line: string, phrenPath: string, profile: string, 
     ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health",
     ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
     ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
-    ":mq approve", ":mq reject", ":mq edit", ":machine map",
+    ":machine map",
     ":profile add-project", ":profile remove-project",
     ":run fix", ":relink", ":rerun hooks", ":update", ":govern", ":consolidate",
     ":undo", ":diff", ":conflicts", ":reset", ":help",
@@ -529,14 +520,6 @@ export function completeInput(line: string, phrenPath: string, profile: string, 
       ...result.data.items.Queue,
       ...result.data.items.Done,
     ].map((item) => `:${cmd} ${item.id}`);
-  }
-
-  if (cmd === "mq" && ["approve", "reject", "edit"].includes((parts[1] || "").toLowerCase())) {
-    const project = state.project;
-    if (!project) return [];
-    const result = readReviewQueue(phrenPath, project);
-    if (!result.ok) return [];
-    return result.data.map((item) => `:mq ${parts[1].toLowerCase()} ${item.id}`);
   }
 
   if (cmd === "find" && (parts[1] || "").toLowerCase() === "remove") {
@@ -631,7 +614,7 @@ async function activateSelected(host: NavigationHost): Promise<void> {
       if (item.text) { host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}`); }
       break;
     case "Review Queue":
-      if (item.text) { host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}  ${style.dim("[ a approve · d reject ]")}`); }
+      if (item.text) { host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}  ${style.dim("[ read-only ]")}`); }
       break;
     case "Skills":
       if (item.name) { host.setMessage(`  ${style.bold(item.name)}  ${style.dim(item.text ?? "")}`); }

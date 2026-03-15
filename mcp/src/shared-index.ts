@@ -27,8 +27,8 @@ import { bootstrapSqlJs } from "./shared-sqljs.js";
 import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "./project-config.js";
 import {
   buildSourceDocKey,
+  queryDocBySourceKey,
   queryDocRows,
-  queryRows,
   type SqlJsDatabase,
 } from "./index-query.js";
 import {
@@ -139,6 +139,12 @@ export function classifyFile(filename: string, relPath: string): string {
 
 const IMPORT_RE = /^@import\s+(.+)$/gm;
 const MAX_IMPORT_DEPTH = 5;
+const IMPORT_ROOT_PREFIX = "shared/";
+
+function isAllowedImportPath(importPath: string): boolean {
+  const normalized = importPath.replace(/\\/g, "/");
+  return normalized.startsWith(IMPORT_ROOT_PREFIX) && normalized.toLowerCase().endsWith(".md");
+}
 
 /**
  * Internal recursive helper for resolveImports. Tracks `seen` (cycle detection) and `depth` (runaway
@@ -154,6 +160,9 @@ function _resolveImportsRecursive(
 
   return content.replace(IMPORT_RE, (_match, importPath: string) => {
     const trimmed = importPath.trim();
+    if (!isAllowedImportPath(trimmed)) {
+      return "<!-- @import blocked: only shared/*.md allowed -->";
+    }
     const globalRoot = path.resolve(phrenPath, "global");
     const resolved = path.join(globalRoot, trimmed);
     // Use lexical resolution first for the prefix check
@@ -817,8 +826,8 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
     for (const link of manualLinks) {
       try {
         // Validate: skip manual links whose sourceDoc no longer exists in the index
-        const docCheck = queryRows(db, "SELECT 1 FROM docs WHERE source_key = ? LIMIT 1", [link.sourceDoc]);
-        if (!docCheck || docCheck.length === 0) {
+        const docCheck = queryDocBySourceKey(db, phrenPath, link.sourceDoc);
+        if (!docCheck) {
           if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks: pruning stale link to "${link.sourceDoc}"\n`);
           pruned = true;
           continue;

@@ -132,20 +132,20 @@ describe.sequential("web-ui auth token protection", () => {
     tmpCleanup();
   });
 
-  it("returns 401 when auth token is missing from POST", async () => {
-    const res = await postForm(port, "/approve", {
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+  it("returns 401 when auth token is missing from protected POST routes", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      tool: "claude",
+      enabled: "true",
     });
     expect(res.status).toBe(401);
     expect(res.body).toContain("Unauthorized");
   });
 
   it("returns 401 when auth token is wrong", async () => {
-    const res = await postForm(port, "/approve", {
+    const res = await postForm(port, "/api/hook-toggle", {
       _auth: "wrong-token",
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
     expect(res.status).toBe(401);
     expect(res.body).toContain("Unauthorized");
@@ -498,19 +498,19 @@ describe.sequential("web-ui combined CSRF + auth", () => {
     const token = [...csrfTokens.keys()][0];
 
     // Missing auth -> 401
-    const noAuth = await postForm(port, "/reject", {
+    const noAuth = await postForm(port, "/api/hook-toggle", {
       _csrf: token,
-      project: "demo",
-      line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
+      tool: "claude",
+      enabled: "true",
     });
     expect(noAuth.status).toBe(401);
   });
 
   it("rejects when auth is correct but CSRF is missing", async () => {
-    const res = await postForm(port, "/approve", {
+    const res = await postForm(port, "/api/hook-toggle", {
       _auth: authToken,
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
     expect(res.status).toBe(403);
     expect(res.body).toContain("CSRF");
@@ -529,7 +529,7 @@ describe.sequential("web-ui combined CSRF + auth", () => {
   });
 });
 
-describe.sequential("web-ui missing project/line validation", () => {
+describe.sequential("web-ui removed review queue mutation routes", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -561,20 +561,21 @@ describe.sequential("web-ui missing project/line validation", () => {
     tmpCleanup();
   });
 
-  it("returns 400 when project is missing", async () => {
-    const res = await postForm(port, "/approve", {
-      line: "- [2026-03-05] something",
-    });
-    expect(res.status).toBe(400);
-    expect(res.body).toContain("Missing project/line");
-  });
-
-  it("returns 400 when line is missing", async () => {
+  it("returns 404 for removed legacy form routes", async () => {
     const res = await postForm(port, "/approve", {
       project: "demo",
+      line: "- [2026-03-05] something",
     });
-    expect(res.status).toBe(400);
-    expect(res.body).toContain("Missing project/line");
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for removed JSON review queue mutation routes", async () => {
+    const res = await postForm(port, "/api/edit", {
+      project: "demo",
+      line: "- [2026-03-05] something",
+      new_text: "updated",
+    });
+    expect(res.status).toBe(404);
   });
 
   it("returns 404 for POST to unknown route", async () => {
@@ -591,8 +592,8 @@ describe.sequential("web-ui missing project/line validation", () => {
     expect(res.body).toContain("phren");
     expect(res.body).toContain("Review");
     expect(res.body).toContain("Graph");
-    expect(res.body).toContain("Approve");
-    expect(res.body).toContain("Reject");
+    expect(res.body).toContain("Read-only in web UI");
+    expect(res.body).not.toContain('data-ui-action="reviewAction"');
   });
 
   it("GET / page shows no items when queue is empty", async () => {
@@ -1090,7 +1091,7 @@ describe.sequential("web-ui hook-toggle auth protection (Q13)", () => {
   });
 });
 
-describe.sequential("web-ui JSON API auth for approve/reject/edit (Q13)", () => {
+describe.sequential("web-ui JSON API auth and removed queue routes", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -1126,29 +1127,37 @@ describe.sequential("web-ui JSON API auth for approve/reject/edit (Q13)", () => 
     tmpCleanup();
   });
 
-  it("POST /api/approve returns 401 without auth", async () => {
+  it("POST /api/hook-toggle returns 401 without auth", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      tool: "claude",
+      enabled: "true",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/approve returns 404", async () => {
     const res = await postForm(port, "/api/approve", {
       project: "demo",
       line: "- [2026-03-05] Keep this memory [confidence 0.90]",
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
   });
 
-  it("POST /api/reject returns 401 without auth", async () => {
+  it("POST /api/reject returns 404", async () => {
     const res = await postForm(port, "/api/reject", {
       project: "demo",
       line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
   });
 
-  it("POST /api/edit returns 401 without auth", async () => {
+  it("POST /api/edit returns 404", async () => {
     const res = await postForm(port, "/api/edit", {
       project: "demo",
       line: "- [2026-03-05] Keep this memory [confidence 0.90]",
       new_text: "updated text",
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
   });
 
   it("POST /api/hook-toggle succeeds with correct auth", async () => {
@@ -1176,21 +1185,7 @@ describe.sequential("web-ui JSON API auth for approve/reject/edit (Q13)", () => 
     expect(JSON.parse(res.body).error).toContain("CSRF");
   });
 
-  it("POST /api/reject returns 400 for invalid project names", async () => {
-    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
-    expect(csrfRes.status).toBe(200);
-    const csrf = JSON.parse(csrfRes.body).token as string;
-    const res = await postForm(port, "/api/reject", {
-      _auth: authToken,
-      _csrf: csrf,
-      project: "../escape",
-      line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
-    });
-    expect(res.status).toBe(400);
-    expect(JSON.parse(res.body).error).toContain("Missing or invalid");
-  });
-
-  it("POST /api/edit returns 400 when project or line is missing", async () => {
+  it("removed JSON review queue routes stay absent even with auth and CSRF", async () => {
     const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
     expect(csrfRes.status).toBe(200);
     const csrf = JSON.parse(csrfRes.body).token as string;
@@ -1198,9 +1193,9 @@ describe.sequential("web-ui JSON API auth for approve/reject/edit (Q13)", () => 
       _auth: authToken,
       _csrf: csrf,
       project: "demo",
+      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
       new_text: "Updated workflow-safe memory",
     });
-    expect(res.status).toBe(400);
-    expect(JSON.parse(res.body).error).toContain("Missing or invalid");
+    expect(res.status).toBe(404);
   });
 });

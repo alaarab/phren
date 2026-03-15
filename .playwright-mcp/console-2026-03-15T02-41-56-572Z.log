@@ -1,0 +1,4 @@
+[     128ms] [ERROR] Failed to load resource: net::ERR_CERT_AUTHORITY_INVALID @ https://cdn.jsdelivr.net/npm/marked@12/marked.min.js:0
+[     131ms] [ERROR] Failed to load resource: net::ERR_CERT_AUTHORITY_INVALID @ https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap:0
+[     223ms] Unexpected string
+[     232ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:3500/favicon.ico:0

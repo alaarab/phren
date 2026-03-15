@@ -12,22 +12,12 @@ import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "./project-co
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { getMachineName } from "./machine-identity.js";
 
-import type { PhrenResult } from "./shared.js";
-import type { McpToolResult } from "./mcp-types.js";
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
 
-/** Translate a PhrenResult<string> into a standard McpToolResult shape. */
-function phrenResultToMcp(result: PhrenResult<string>): McpToolResult {
-  if (result.ok) {
-    return { ok: true, message: result.data };
-  }
-  return { ok: false, error: result.error, errorCode: result.code };
-}
-
 export function register(server: McpServer, ctx: McpContext): void {
-  const { phrenPath, profile, withWriteQueue, updateFileInIndex } = ctx;
+  const { phrenPath, profile, withWriteQueue } = ctx;
 
-  // ── get_consolidation_status ───────────────────────────────────────────────
+  // ── add_project ────────────────────────────────────────────────────────────
 
   server.registerTool(
     "add_project",
@@ -264,11 +254,13 @@ export function register(server: McpServer, ctx: McpContext): void {
       const { runDoctor } = await import("./link-doctor.js");
       const result = await runDoctor(phrenPath, true, check_data ?? false);
       const lines = result.checks.map((c) => `${c.ok ? "ok" : "FAIL"} ${c.name}: ${c.detail}`);
+      const failCount = result.checks.filter((c) => !c.ok).length;
       return mcpResponse({
         ok: result.ok,
+        ...(result.ok ? {} : { error: `${failCount} check(s) could not be auto-fixed: ${lines.filter((l) => l.startsWith("FAIL")).join("; ")}` }),
         message: result.ok
           ? `Doctor fix complete: all ${result.checks.length} checks passed`
-          : `Doctor fix complete: ${result.checks.filter((c) => !c.ok).length} issue(s) remain`,
+          : `Doctor fix complete: ${failCount} issue(s) remain`,
         data: {
           machine: result.machine,
           profile: result.profile,

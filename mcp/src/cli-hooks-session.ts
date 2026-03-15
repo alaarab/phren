@@ -939,12 +939,15 @@ export async function handleHookStop() {
     return;
   }
 
-  // Exclude sensitive files from staging: .env files and private keys should
-  // never be committed to the phren git repository.
-  const add = await runBestEffortGit(
-    ["add", "-A", "--", ":(exclude).env", ":(exclude)**/.env", ":(exclude)*.pem", ":(exclude)*.key"],
-    phrenPath
-  );
+  // Stage all changes first, then unstage any sensitive files that slipped
+  // through. Using pathspec exclusions with `git add -A` can fail when
+  // excluded paths are also gitignored (git treats the pathspec as an error).
+  let add = await runBestEffortGit(["add", "-A"], phrenPath);
+  if (add.ok) {
+    // Belt-and-suspenders: unstage sensitive files that .gitignore should
+    // already block. Failures here are non-fatal (files may not exist).
+    await runBestEffortGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key"], phrenPath);
+  }
   let commitMsg = "auto-save phren";
   if (add.ok) {
     const diff = await runBestEffortGit(["diff", "--cached", "--stat", "--no-color"], phrenPath);

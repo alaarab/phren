@@ -57,7 +57,7 @@ All thresholds are configurable via `phren config policy`.
 phren web-ui
 ```
 
-Opens a browser-based interface at `localhost:3499` (configurable with `--port`). From there you can approve, reject, or edit entries in the review queue and inspect project memory without starting an agent session.
+Opens a browser-based interface at `localhost:3499` (configurable with `--port`). The review queue is read-only there: use it to inspect flagged entries and inspect project memory without starting an agent session.
 
 You can filter by machine, model, and project. Useful when you're running agents across multiple machines and want to triage what each one produced.
 
@@ -76,7 +76,7 @@ From that tab you can:
 
 If a project has never customized topics, the UI shows a starter-topics banner. Saving topics in the UI writes `topic-config.json` and creates the matching topic docs immediately so they are visible before the next archive cycle.
 
-The terminal shell (`phren`, then press `m`) covers the same workflow if you prefer staying in the terminal.
+The terminal shell (`phren`, then press `m`) exposes the same review queue for inspection if you prefer staying in the terminal.
 
 Security defaults for `phren web-ui`:
 - loopback-only bind (`127.0.0.1`)
@@ -146,7 +146,7 @@ Project setup note:
 
 ## Does phren require MCP?
 
-No. MCP is recommended — it gives agents 60 tools across 11 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended — it gives agents 66 tools across 12 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
 phren init --mcp off

@@ -215,7 +215,14 @@ export function register(server, ctx) {
             }
             catch (indexError) {
                 // Index rebuild failed — restore backup if we replaced the project dir
-                if (overwrite) {
+                if (!overwrite) {
+                    // Non-overwrite case: no backup to restore — remove the orphaned project dir
+                    try {
+                        fs.rmSync(projectDir, { recursive: true });
+                    }
+                    catch { /* best-effort */ }
+                }
+                else {
                     // Find the backup dir that was created earlier
                     try {
                         for (const entry of fs.readdirSync(phrenPath)) {
@@ -287,7 +294,13 @@ export function register(server, ctx) {
                     return mcpResponse({ ok: false, error: `Archive "${project}.archived" already exists. Unarchive or remove it first.` });
                 }
                 fs.renameSync(projectDir, archiveDir);
-                await rebuildIndex();
+                try {
+                    await rebuildIndex();
+                }
+                catch (err) {
+                    fs.renameSync(archiveDir, projectDir);
+                    return mcpResponse({ ok: false, error: `Index rebuild failed after archive rename, rolled back: ${err instanceof Error ? err.message : String(err)}` });
+                }
                 return mcpResponse({
                     ok: true,
                     message: `Archived project "${project}". Data preserved at ${archiveDir}.`,
@@ -304,7 +317,13 @@ export function register(server, ctx) {
                 return mcpResponse({ ok: false, error: `No archive found for "${project}".`, data: { availableArchives: available } });
             }
             fs.renameSync(archiveDir, projectDir);
-            await rebuildIndex();
+            try {
+                await rebuildIndex();
+            }
+            catch (err) {
+                fs.renameSync(projectDir, archiveDir);
+                return mcpResponse({ ok: false, error: `Index rebuild failed after unarchive rename, rolled back: ${err instanceof Error ? err.message : String(err)}` });
+            }
             return mcpResponse({
                 ok: true,
                 message: `Unarchived project "${project}". It is now active again.`,

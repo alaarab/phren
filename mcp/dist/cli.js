@@ -9,7 +9,7 @@ import { handleConfig, handleIndexPolicy, handleRetentionPolicy, handleWorkflowP
 import { parseSearchArgs } from "./cli-search.js";
 import { handleDetectSkills, handleFindingNamespace, handleHooksNamespace, handleProjectsNamespace, handleSkillsNamespace, handleSkillList, handleTaskNamespace, } from "./cli-namespaces.js";
 import { handleTaskView, handleSessionsView, handleQuickstart, handleDebugInjection, handleInspectIndex, } from "./cli-ops.js";
-import { handleAddFinding, handleDoctor, handleFragmentSearch, handleMemoryUi, handlePinCanonical, handleQualityFeedback, handleRelatedDocs, handleSearch, handleShell, handleStatus, handleUpdate, } from "./cli-actions.js";
+import { handleAddFinding, handleDoctor, handleFragmentSearch, handleMemoryUi, handlePinCanonical, handleQualityFeedback, handleRelatedDocs, handleReview, handleConsolidationStatus, handleSessionContext, handleSearch, handleShell, handleStatus, handleUpdate, } from "./cli-actions.js";
 import { handleGraphNamespace } from "./cli-graph.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 // ── CLI router ───────────────────────────────────────────────────────────────
@@ -101,6 +101,12 @@ export async function runCliCommand(command, args) {
             return handleDetectSkills(args, getProfile());
         case "graph":
             return handleGraphNamespace(args);
+        case "review":
+            return handleReview(args);
+        case "consolidation-status":
+            return handleConsolidationStatus(args);
+        case "session-context":
+            return handleSessionContext();
         default:
             console.error(`Unknown command: ${command}`);
             process.exit(1);

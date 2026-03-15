@@ -52,3 +52,21 @@ describe("project-config hook preferences", () => {
     expect(config.hooks?.Stop).toBe(false);
   });
 });
+
+describe("project-config path-escape guard", () => {
+  let tmp: { path: string; cleanup: () => void };
+
+  beforeEach(() => {
+    tmp = makeTempDir("project-config-escape-");
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("writeProjectConfig throws when project name traverses outside phrenPath", () => {
+    expect(() => writeProjectConfig(tmp.path, "../escape", { ownership: "detached" })).toThrow(
+      "Project config path escapes phren store"
+    );
+  });
+});

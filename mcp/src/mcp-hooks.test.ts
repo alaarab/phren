@@ -73,6 +73,7 @@ describe("mcp-hooks project overrides", () => {
   });
 
   it("list_hooks returns effective project event status when a project is requested", async () => {
+
     await server.call("toggle_hooks", { project: "demo", enabled: false });
     await server.call("toggle_hooks", { project: "demo", event: "UserPromptSubmit", enabled: true });
 
@@ -85,5 +86,65 @@ describe("mcp-hooks project overrides", () => {
     expect(events.UserPromptSubmit).toBe(true);
     expect(events.Stop).toBe(false);
     expect(events.SessionStart).toBe(false);
+  });
+});
+
+describe("mcp-hooks SSRF blocklist", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-hooks-ssrf-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "",
+      db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  const blockedWebhooks = [
+    ["IPv6 loopback ::1", "http://[::1]/evil"],
+    ["IPv6 link-local fe80", "http://[fe80::1]/x"],
+    ["IPv6 ULA fc00", "http://[fc00::1]/x"],
+    ["IPv6 ULA fd00", "http://[fd00::1]/x"],
+    ["IPv4-mapped IPv6 ::ffff:127.0.0.1", "http://[::ffff:127.0.0.1]/x"],
+    ["decimal-encoded 127.0.0.1 (2130706433)", "http://2130706433/"],
+    ["hex-encoded 0x7f000001", "http://0x7f000001/"],
+    ["localhost", "http://localhost/hook"],
+    ["127.x.x.x", "http://127.0.0.1/hook"],
+    ["10.x.x.x private", "http://10.0.0.1/hook"],
+    ["192.168.x.x private", "http://192.168.1.1/hook"],
+    [".local mDNS", "http://mybox.local/hook"],
+  ];
+
+  for (const [label, webhook] of blockedWebhooks) {
+    it(`blocks ${label}`, async () => {
+      const res = parseResult(
+        await server.call("add_custom_hook", { event: "Stop", webhook })
+      );
+      expect(res.ok).toBe(false);
+      expect(res.error).toMatch(/private|loopback|blocked|ssrf/i);
+    });
+  }
+
+  it("allows a public HTTPS webhook URL", async () => {
+    const res = parseResult(
+      await server.call("add_custom_hook", {
+        event: "Stop",
+        webhook: "https://hooks.example.com/phren",
+      })
+    );
+    expect(res.ok).toBe(true);
   });
 });

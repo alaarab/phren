@@ -3,6 +3,81 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.8] - 2026-03-15
+
+### Fixed
+- **Complete cortex→phren rebrand cleanup**: removed all remaining cortex references from code, data markers, citation paths, skill names, and documentation
+- Add skill file rename migration to `phren init` — renames `cortex-*.md` → `phren-*.md` in global/skills/
+- Fix `cortex:auto-topic` markers across all topic reference files → `phren:auto-topic`
+- Fix stale skill names in AGENTS.md and documentation.html (`/cortex-*` → `/phren-*`)
+- Clean stale runtime caches referencing old cortex paths
+
+## [0.0.7] - 2026-03-15
+
+### Security
+- **Symlink escape fix (data-access)**: `safeProjectPath` now resolves symlinks before checking containment, closing a traversal bypass via symlinked dirs inside the phren store.
+- **Symlink escape fix (hooks)**: hook config read/write paths are validated after symlink resolution to prevent escape via symlinked config files.
+- **Symlink escape fix (skills)**: skill file paths are resolved and re-checked against the store root before any read or write.
+- **SSRF bypass fix on webhook validation**: blocked IPv6 literals, decimal/hex integer IPs, IPv4-mapped IPv6 (`::ffff:...`), and `.local`/`.internal` hostnames that could bypass the private-address blocklist.
+- **Read-modify-write race fix on preference/config files**: preference and governance config writes now hold a file lock for the full read-modify-write cycle, preventing concurrent agents from clobbering each other's writes.
+- **Windows lock liveness**: file lock release now guards `process.kill(pid, 0)` with a try/catch so stale locks are correctly reclaimed on Windows where the syscall throws instead of returning false.
+
+### Fixed
+- **Session artifact paths**: session marker and noticed-file paths used wrong subdirectory in several hooks; corrected to use `runtimeFile`/`sessionMarker` helpers consistently.
+- **Unclosed `<phren-notice>` tag**: hook-prompt injected an opening tag without a closing tag when consolidation notice was appended; now properly wrapped.
+- **Finding count regex**: consolidation threshold detection regex failed to count findings preceded by multi-space indentation; updated to match any leading whitespace.
+- **Duplicate condition in `parseProjectOwnershipMode`**: two branches tested the same string literal; second branch now tests the correct ownership mode value.
+- **Unhandled exception in `add_finding`**: `findingSensitivity` guard could throw when policy file was absent; wrapped in try/catch with graceful fallback.
+- **Unhandled exception in `manage_project` rollback**: directory rename rollback threw on Windows paths with trailing separators; normalized before rollback.
+- **Missing error fields in `ok:false` responses**: four tools (`toggle_hooks`, `set_index_policy`, `set_workflow_policy`, `set_retention_policy`) returned bare strings instead of `{ ok, error }`; corrected to structured response.
+- **`URIError` crash in `get_memory_detail`**: decoding a malformed `mem:` URI threw uncaught `URIError`; now caught and returned as a structured error response.
+- **Session diff wrong filename and cumulative count**: `session_start` diff read `FINDINGS.md` with wrong case on case-sensitive filesystems and accumulated counts across calls; fixed filename lookup and reset count per call.
+- **`remove_custom_hook` empty string deleting all hooks**: passing `command: ""` matched every hook entry; empty string is now treated as "no command filter" only when the parameter is omitted, not when explicitly empty.
+- **`session_start` reading from Queue instead of Active**: active task injection pulled from the Queue section; corrected to read the Active section.
+- **Pagination range math in `get_tasks`**: off-by-one in slice bounds caused the last item of a page to be omitted; corrected upper bound.
+- **Sync false positive**: `git add` with a pathspec pattern conflicted with `.gitignore` entries and reported a non-zero exit as a sync failure; now uses `--ignore-errors` and filters output.
+- **`import_project` orphan dir on non-overwrite failure**: if import was aborted because the project already existed, the partially created directory was left on disk; now cleaned up on early exit.
+- **Unclosed `<phren-error>` tag**: error injection in hook-prompt left an unclosed tag when the error was the last injected block.
+- **`remove_custom_hook` silent `ok:true` when nothing removed**: tool returned success even when no hook matched the filter; now returns `ok:false` with a descriptive message when `removed === 0`.
+- **`writeProjectHookConfig` stale read outside lock**: function read the config file before acquiring the write lock, creating a TOCTOU window; read moved inside the lock.
+- **`toggle_hooks` inconsistent write pattern**: some branches wrote directly to the config object while others rebuilt it from scratch, causing partial updates; normalized to a single consistent write path.
+
+### Added
+- **Graph explorer: keyboard navigation**: arrow keys cycle through edges from the current node; Enter walks to the selected neighbor.
+- **Graph explorer: phren character walk animation**: phren walks to nodes with ease-in-out motion, bounces on arrival, bobs while idle, and leaves a trail that fades.
+- **Graph explorer: correct spawn position**: phren character now spawns at the initial focused node position rather than the canvas origin; render loop kept alive between navigations.
+- **Graph engine API**: `walkTo(nodeId)`, `onNodeSelect(cb)`, `getNodeAt(x, y)`, and `getCurrentNode()` exposed for host integration (VS Code extension, web UI).
+- **`~/.cortex` migration path**: `phren init` detects a legacy `~/.cortex` directory and offers a non-destructive migration to `~/.phren`.
+- **`documentation.html`**: full 1500-line documentation site with 9 sections (Getting Started, Concepts, Configuration, CLI Reference, Skills, Hooks, Multi-machine, MCP Tools, Graph Engine API), sticky sidebar, scroll-spy active state, and floating mobile TOC.
+
+### Changed
+- **Docs site hero**: CTA restructured; "Private markdown. Git-backed. No database." promoted to hero subtitle. "How it works" step 3 rewritten for clarity.
+- **Docs site layout**: agent carousel replaced with static grid; skills grid expanded; hero filing cabinet animation added (phren interacts with cabinet).
+- **Docs site bookshelf animation**: personality pass — confused tilt on idle, reading glow, happy wiggle on completion.
+- **Docs site nav icon**: breathing idle animation, wobble on hover, pop on click.
+- **Docs site character direction**: phren faces right in all three placement contexts (hero, how-it-works, footer).
+- **Web UI color palette**: amber CSS tokens applied across all web UI surfaces.
+- **VS Code task tree**: priority, pinned, and GitHub issue badges shown inline on task tree items.
+- **VS Code finding tree**: type tag and confidence badges shown inline on finding tree items.
+- **VS Code status bar**: colors now use VS Code theme tokens (`--vscode-statusBar-*`) instead of hardcoded values.
+- **VS Code queue viewer**: notice reframed with contextual description of each queue section.
+- **Docs site CSS**: `--card-bg` variable defined, `reveal-delay-4` added, dead rules removed, `agent-card` class extracted, SMIL animations respect `prefers-reduced-motion`.
+- **`documentation.html` mobile nav**: floating TOC button with drawer overlay for small viewports.
+
+### Docs
+- **Full parity audit**: MCP tool count synced to 65 across `mcp/README.md`, `docs/llms.txt`, `docs/llms-full.txt`, `docs/llms-install.md`, `docs/architecture.md`, `docs/faq.md`, `AGENTS.md` (7 files).
+- **README rewrite**: problem-first description; inline descriptions added to Architecture and Contributing links.
+- **VS Code extension README**: expanded from 5 commands to all 31 commands, split into Command Palette (16) and Sidebar/Context Menu (15) tables; new feature callouts added.
+- **Graph Engine API section**: added to `documentation.html` after MCP Tools with all 5 methods, keyboard nav reference, and code example.
+- **9 accuracy corrections**: `--ownership` valid values, "three" → "four" lifecycle points, `PostToolUse` added to Claude hooks lists, `search_knowledge` expanded from 4 to 9 params, "memory queue" → "review queue" in `AGENTS.md`, `mcp/README.md` references `documentation.html`, "insight" → "unit of knowledge" in Concepts.
+- **New retrieval behaviors documented** in `docs/llms-full.txt`, `docs/llms-install.md`, and `mcp/README.md`: lifecycle penalties, FTS stripping, decay resistance, auto-tagging, session context diff, snippet dedup, session momentum.
+
+### Internal
+- **23 new tests**: path escape guards (symlink traversal, null byte, separator injection), SSRF blocklist (IPv6, decimal/hex IPs, mapped addresses), `manage_project` rollback cleanup, bulk task error field shape.
+- **1825 total tests, all passing.**
+- **Dead code removed**: unused exports in `shared.ts`, `mcp-config.ts`, `mcp-ops.ts`, and `mcp-memory.ts` pruned.
+- **Unsafe cast removed**: `withWriteQueue` in `index.ts` now uses a proper type assertion instead of `as any`.
+
 ## [0.0.5] - 2026-03-14
 
 ### Added
@@ -20,6 +95,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Renamed**: `MEMORY_QUEUE.md` → `review.md`. Review queue, not memory queue.
 - **Renamed**: "entity" → "fragment" across all user-facing text, docs, and VS Code extension.
 - **Renamed**: "governance" → "config" in user-facing docs.
+- **Review queue is read-only**: removed stale approve/reject/edit actions from VS Code and current docs so all surfaces match MCP/web/shell behavior.
 - **Landing page overhaul**: new pixel-art phren assets, hero rewrite ("Claude remembers you. Phren remembers your work."), neutral voice (no "he/his"), 23 CSS contrast fixes, mobile breakpoints, WCAG accessibility.
 - **README rewrite**: concise, engaging, teaches all 6 core concepts.
 - **GitHub repo renamed**: `alaarab/cortex` → `alaarab/phren`.

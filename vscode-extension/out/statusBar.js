@@ -139,8 +139,12 @@ class PhrenStatusBar {
     }
     render() {
         const projectName = this.activeProjectName ?? "No project";
-        const badge = this.healthOk === true ? " [ok]" : this.healthOk === false ? " [!]" : "";
-        this.statusItem.text = `$(database) Phren: ${projectName}${badge}`;
+        const healthIcon = this.healthOk === true ? "$(pass-filled)" : this.healthOk === false ? "$(error)" : "$(loading~spin)";
+        this.statusItem.text = `$(hubot) ${projectName} ${healthIcon}`;
+        this.statusItem.tooltip = this.healthOk === false
+            ? "Phren is unhealthy — click for Doctor"
+            : `Phren: ${projectName} — click for Doctor`;
+        this.statusItem.color = this.healthOk === false ? new vscode.ThemeColor("errorForeground") : undefined;
     }
 }
 exports.PhrenStatusBar = PhrenStatusBar;

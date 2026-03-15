@@ -50,7 +50,10 @@ export function renderGraphScript() {
     trailPoints: [],       /* fading trail behind movement */
     initialized: false,
     waypoints: [],         /* edge-walk waypoints [{x,y}] */
-    waypointIdx: 0         /* current waypoint index */
+    waypointIdx: 0,        /* current waypoint index */
+    tripDist: 0,           /* total distance of current trip (for ease-in-out) */
+    tripProgress: 0,       /* distance traveled so far this trip */
+    targetNodeId: null     /* id of destination node (set in phrenMoveTo) */
   };
 
   /* ── phren sprite image ─────────────────────────────────────────────── */
@@ -74,6 +77,18 @@ export function renderGraphScript() {
     phren.targetX = phren.x;
     phren.targetY = phren.y;
     phren.initialized = true;
+    /* set initial current node to nearest visible node */
+    var _initNearest = null, _initNearestD = Infinity;
+    for (var _ni = 0; _ni < nodes.length; _ni++) {
+      var _nnd = nodes[_ni];
+      var _ndx = _nnd.x - phren.x, _ndy = _nnd.y - phren.y;
+      var _ndd = _ndx * _ndx + _ndy * _ndy;
+      if (_ndd < _initNearestD) { _initNearestD = _ndd; _initNearest = _nnd; }
+    }
+    if (_initNearest) {
+      phrenCurrentNodeId = _initNearest.id;
+      phrenRefreshAdjacentLinks();
+    }
   }
 
   /* find shortest edge path from nearest node to target node via BFS */
@@ -140,11 +155,29 @@ export function renderGraphScript() {
     phren.moving = true;
     phren.arriving = false;
     phren.trailPoints = [{ x: phren.x, y: phren.y, age: 0 }];
+    /* record trip distance for ease-in-out interpolation */
+    var tdx = x - phren.x, tdy = y - phren.y;
+    phren.tripDist = Math.sqrt(tdx * tdx + tdy * tdy);
+    phren.tripProgress = 0;
     /* try edge-walking if a target node is given */
     phren.waypoints = targetNode ? phrenFindEdgePath(targetNode) : [];
     phren.waypointIdx = 0;
+    phren.targetNodeId = targetNode ? targetNode.id : null;
     /* ensure animation loop is running so phren movement renders */
     if (!animFrame) animFrame = requestAnimationFrame(tick);
+  }
+
+  function phrenRefreshAdjacentLinks() {
+    phrenAdjacentLinks = [];
+    if (!phrenCurrentNodeId) return;
+    for (var i = 0; i < visibleLinks.length; i++) {
+      var lk = visibleLinks[i];
+      var sid = lk._source ? lk._source.id : (lk.source && typeof lk.source === 'object' ? lk.source.id : lk.source);
+      var tid = lk._target ? lk._target.id : (lk.target && typeof lk.target === 'object' ? lk.target.id : lk.target);
+      if (sid === phrenCurrentNodeId || tid === phrenCurrentNodeId) {
+        phrenAdjacentLinks.push(lk);
+      }
+    }
   }
 
   function phrenUpdate(dt) {
@@ -172,25 +205,35 @@ export function renderGraphScript() {
           phren.moving = false;
           phren.arriving = true;
           phren.arriveTimer = 0;
+          /* update keyboard-nav current node */
+          if (phren.targetNodeId) {
+            phrenCurrentNodeId = phren.targetNodeId;
+            phrenSelectedEdgeIdx = -1;
+            phrenRefreshAdjacentLinks();
+          }
         }
       } else {
-        /* ease-out movement — fast start, gentle arrival */
-        var speed = Math.max(3, dist * 0.08);
+        /* ease-in-out via sine curve over the full trip distance */
+        var t = phren.tripDist > 0 ? Math.min(1, phren.tripProgress / phren.tripDist) : 1;
+        var easeInOut = 0.5 - 0.5 * Math.cos(Math.PI * t);
+        var baseSpeed = Math.max(3, phren.tripDist * 0.12);
+        var speed = Math.max(1.5, baseSpeed * (0.15 + 0.85 * easeInOut));
         phren.x += (dx / dist) * speed;
         phren.y += (dy / dist) * speed;
-        /* record trail */
+        phren.tripProgress += speed;
+        /* record trail — longer buffer for gradual fade */
         phren.trailPoints.push({ x: phren.x, y: phren.y, age: 0 });
-        if (phren.trailPoints.length > 30) phren.trailPoints.shift();
+        if (phren.trailPoints.length > 50) phren.trailPoints.shift();
       }
     }
     if (phren.arriving) {
       phren.arriveTimer += dt;
-      if (phren.arriveTimer > 0.8) phren.arriving = false;
+      if (phren.arriveTimer > 1.0) phren.arriving = false;
     }
-    /* age trail points */
+    /* age trail points — 2s lifetime for a longer, gradual fade */
     for (var i = phren.trailPoints.length - 1; i >= 0; i--) {
       phren.trailPoints[i].age += dt;
-      if (phren.trailPoints[i].age > 1.0) phren.trailPoints.splice(i, 1);
+      if (phren.trailPoints[i].age > 2.0) phren.trailPoints.splice(i, 1);
     }
   }
 
@@ -199,15 +242,16 @@ export function renderGraphScript() {
     var px = phren.x, py = phren.y;
     var s = 1 / scale; /* unit size in graph coords */
 
-    /* trail — purple tinted */
+    /* trail — purple tinted, 2s fade for a longer gradual tail */
     if (phren.trailPoints.length > 1) {
       for (var i = 1; i < phren.trailPoints.length; i++) {
         var pt = phren.trailPoints[i];
         var prev = phren.trailPoints[i - 1];
-        var alpha = Math.max(0, 0.35 * (1 - pt.age / 1.0));
+        var fadeT = 1 - pt.age / 2.0;
+        var alpha = Math.max(0, 0.38 * fadeT * fadeT); /* quadratic for softer tail */
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(123,104,174,' + alpha + ')';
-        ctx.lineWidth = (2.5 * (1 - pt.age / 1.0)) * s;
+        ctx.lineWidth = (3.0 * fadeT) * s;
         ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(pt.x, pt.y);
         ctx.stroke();
@@ -215,8 +259,8 @@ export function renderGraphScript() {
     }
 
     /* ambient glow — purple (behind sprite) */
-    var glowR = (20 + 3 * Math.sin(phren.idlePhase * 2.1)) * s;
-    var glowAlpha = phren.arriving ? 0.4 : 0.15 + 0.05 * Math.sin(phren.idlePhase * 2.1);
+    var glowR = (52 + 8 * Math.sin(phren.idlePhase * 2.1)) * s;
+    var glowAlpha = phren.arriving ? 0.5 : 0.2 + 0.07 * Math.sin(phren.idlePhase * 2.1);
     ctx.beginPath();
     ctx.arc(px, py, glowR, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(123,104,174,' + glowAlpha + ')';
@@ -225,22 +269,39 @@ export function renderGraphScript() {
     /* sprite rendering */
     if (phrenImgReady) {
       ctx.save();
-      /* fixed 48px size in screen pixels, scale up to 56px on arrival flash */
-      var spriteScreenSize = 48;
+      /* fixed 128px size in screen pixels, scale up to 148px on arrival flash */
+      var spriteScreenSize = 128;
       if (phren.arriving && phren.arriveTimer < 0.4) {
-        spriteScreenSize = 48 + 8 * (1 - phren.arriveTimer / 0.4);
+        spriteScreenSize = 128 + 20 * (1 - phren.arriveTimer / 0.4);
       }
       var spriteSize = spriteScreenSize * s; /* convert to graph coords */
-      /* bob up/down 2-3px when moving (sine wave) */
-      var bobOffset = phren.moving ? Math.sin(phren.idlePhase * 8) * 2.5 * s : 0;
+      /* bob up/down when walking — sine wave synced to walk progress */
+      var walkPhase = phren.tripDist > 0
+        ? (phren.tripProgress / phren.tripDist) * Math.PI * 6
+        : phren.idlePhase * 8;
+      var bobOffset = phren.moving ? Math.sin(walkPhase) * 2.5 * s : 0;
+      /* bounce on arrival — damped overshoot then settle */
+      var bounceOffset = (phren.arriving && phren.arriveTimer < 0.55)
+        ? -3 * Math.sin(phren.arriveTimer * Math.PI * 4.5) * Math.exp(-phren.arriveTimer * 8) * s
+        : 0;
+      /* idle breathing — gentle scale pulse (3s loop) when resting */
+      var idleScale = (!phren.moving && !phren.arriving)
+        ? 1.0 + 0.02 * Math.sin(phren.idlePhase * (2 * Math.PI / 3))
+        : 1.0;
+      var totalYOffset = bobOffset + bounceOffset;
       /* crisp pixel art — no smoothing */
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(phrenImg, px - spriteSize / 2, py - spriteSize / 2 + bobOffset, spriteSize, spriteSize);
+      if (idleScale !== 1.0) {
+        ctx.translate(px, py);
+        ctx.scale(idleScale, idleScale);
+        ctx.translate(-px, -py);
+      }
+      ctx.drawImage(phrenImg, px - spriteSize / 2, py - spriteSize / 2 + totalYOffset, spriteSize, spriteSize);
       /* arrival flash: cyan glow ring */
-      if (phren.arriving && phren.arriveTimer < 0.5) {
-        var ringAlpha = 0.6 * (1 - phren.arriveTimer / 0.5);
+      if (phren.arriving && phren.arriveTimer < 0.6) {
+        var ringAlpha = 0.6 * (1 - phren.arriveTimer / 0.6);
         ctx.beginPath();
-        ctx.arc(px, py + bobOffset, spriteSize * 0.55, 0, Math.PI * 2);
+        ctx.arc(px, py + totalYOffset, spriteSize * 0.55, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(0,229,255,' + ringAlpha + ')';
         ctx.lineWidth = 2 * s;
         ctx.shadowColor = 'rgba(0,229,255,' + (ringAlpha * 0.5) + ')';
@@ -296,11 +357,15 @@ export function renderGraphScript() {
   var alpha = 1.0;
   var animFrame = null;
   var canvas, ctx, tooltip;
+  var _nodeSelectCb = null; /* external callback for node selection */
   var pulseT = 0;
   var _tooltipNode = null, _tooltipTimer = null;
   var _prevVisibleCount = 0;
   var focusedNodeIndex = -1;
   var liveRegion = null;
+  var phrenCurrentNodeId = null;   /* id of node phren is currently at */
+  var phrenSelectedEdgeIdx = -1;   /* index into phrenAdjacentLinks (-1 = none) */
+  var phrenAdjacentLinks = [];     /* edges connected to current node */
 
   /* ── helpers ────────────────────────────────────────────────────────── */
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -932,6 +997,44 @@ export function renderGraphScript() {
     }
     ctx.lineWidth = baseEdgeWidth;
 
+    /* 1b. selected edge highlight for phren keyboard navigation */
+    if (phrenSelectedEdgeIdx >= 0 && phrenSelectedEdgeIdx < phrenAdjacentLinks.length) {
+      var selLk = phrenAdjacentLinks[phrenSelectedEdgeIdx];
+      if (selLk._source && selLk._target) {
+        var selSid = selLk._source.id;
+        var selDest = (selSid === phrenCurrentNodeId) ? selLk._target : selLk._source;
+        ctx.save();
+        /* glow edge */
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(0,229,255,0.85)';
+        ctx.lineWidth = 2.5 / scale;
+        ctx.shadowColor = 'rgba(0,229,255,0.45)';
+        ctx.shadowBlur = 10 / scale;
+        ctx.moveTo(selLk._source.x, selLk._source.y);
+        ctx.lineTo(selLk._target.x, selLk._target.y);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        /* destination label near edge midpoint */
+        var selMx = (selLk._source.x + selLk._target.x) / 2;
+        var selMy = (selLk._source.y + selLk._target.y) / 2;
+        var selLbl = (selDest.label || selDest.id || '').slice(0, 32);
+        if (selLbl) {
+          var selFs = Math.max(10, Math.round(11 / scale));
+          ctx.font = '600 ' + selFs + 'px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          var selTw = ctx.measureText(selLbl).width;
+          var selPad = 5 / scale;
+          var selBh = selFs + 2 * selPad;
+          ctx.fillStyle = 'rgba(10,12,30,0.88)';
+          ctx.fillRect(selMx - selTw / 2 - selPad, selMy - selBh - 4 / scale, selTw + 2 * selPad, selBh);
+          ctx.fillStyle = 'rgba(0,229,255,1)';
+          ctx.fillText(selLbl, selMx, selMy - 4 / scale);
+        }
+        ctx.restore();
+      }
+    }
+
     /* 2. health rings with dash patterns + text labels (WCAG 1.4.1) */
     for (var i = 0; i < nodes.length; i++) {
       var nd = nodes[i];
@@ -1106,6 +1209,7 @@ export function renderGraphScript() {
 
   /* ── hit testing ────────────────────────────────────────────────────── */
   function hitTest(mx, my) {
+    /* mx/my must be CSS pixels (same as e.clientX - rect.left from mouse events) */
     var gx = (mx - panX) / scale;
     var gy = (my - panY) / scale;
     var closest = null, closestDist = Infinity;
@@ -1128,6 +1232,13 @@ export function renderGraphScript() {
     /* phren moves toward the selected node, following graph edges when possible */
     if (node && typeof node.x === 'number' && typeof node.y === 'number') {
       phrenMoveTo(node.x, node.y, node);
+    }
+    /* fire external callback so VS Code extension can react to selection */
+    if (_nodeSelectCb && node) {
+      var rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+      var cx = node.x * scale + panX + rect.left;
+      var cy = node.y * scale + panY + rect.top;
+      try { _nodeSelectCb(node, cx, cy); } catch(e) { /* swallow callback errors */ }
     }
     var metaEl = document.getElementById('graph-detail-meta');
     var bodyEl = document.getElementById('graph-detail-body');
@@ -1413,7 +1524,20 @@ export function renderGraphScript() {
           render();
           break;
         case 'Enter':
-          if (focusedNodeIndex >= 0 && focusedNodeIndex < visibleNodes.length) {
+        case ' ':
+          e.preventDefault();
+          if (phrenSelectedEdgeIdx >= 0 && phrenSelectedEdgeIdx < phrenAdjacentLinks.length) {
+            /* walk phren along selected edge */
+            var wLk = phrenAdjacentLinks[phrenSelectedEdgeIdx];
+            var wSid = wLk._source ? wLk._source.id : null;
+            var wDest = (wLk._source && wLk._target)
+              ? (wSid === phrenCurrentNodeId ? wLk._target : wLk._source)
+              : null;
+            if (wDest) {
+              phrenMoveTo(wDest.x, wDest.y, wDest);
+              announce('Walking to ' + (wDest.label || wDest.id || ''));
+            }
+          } else if (e.key === 'Enter' && focusedNodeIndex >= 0 && focusedNodeIndex < visibleNodes.length) {
             var sn = visibleNodes[focusedNodeIndex];
             renderGraphDetails(sn);
             announceNode(sn);
@@ -1423,7 +1547,10 @@ export function renderGraphScript() {
           }
           break;
         case 'Escape':
-          if (selectedNode) {
+          if (phrenSelectedEdgeIdx >= 0) {
+            phrenSelectedEdgeIdx = -1;
+            render();
+          } else if (selectedNode) {
             var prevFocus = focusedNodeIndex;
             renderGraphDetails(null);
             focusedNodeIndex = prevFocus;
@@ -1436,12 +1563,22 @@ export function renderGraphScript() {
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          panX += PAN_STEP;
+          if (phrenAdjacentLinks.length > 0) {
+            phrenSelectedEdgeIdx = phrenSelectedEdgeIdx < 0
+              ? phrenAdjacentLinks.length - 1
+              : (phrenSelectedEdgeIdx - 1 + phrenAdjacentLinks.length) % phrenAdjacentLinks.length;
+          } else {
+            panX += PAN_STEP;
+          }
           render();
           break;
         case 'ArrowRight':
           e.preventDefault();
-          panX -= PAN_STEP;
+          if (phrenAdjacentLinks.length > 0) {
+            phrenSelectedEdgeIdx = (phrenSelectedEdgeIdx + 1) % phrenAdjacentLinks.length;
+          } else {
+            panX -= PAN_STEP;
+          }
           render();
           break;
         case 'ArrowUp':
@@ -1678,7 +1815,8 @@ export function renderGraphScript() {
     lastTickTime = timestamp;
     simulate();
     render();
-    if (alpha > 0 || dragging) {
+    var phrenStillActive = phren.moving || phren.arriving || phren.trailPoints.length > 0;
+    if (alpha > 0 || dragging || phrenStillActive) {
       animFrame = requestAnimationFrame(tick);
     } else {
       animFrame = null;
@@ -1897,12 +2035,43 @@ export function renderGraphScript() {
       }
 
       applyFilters();
-      phrenInit(visibleNodes);
       buildFilterBar();
       initPositions();
+      phrenInit(visibleNodes);  /* must run after initPositions so node coords are valid */
       setupInteraction();
       startSimulation();
       announceGraphSummary();
+    },
+    /** Register a callback fired when the user selects a node. */
+    onNodeSelect: function(cb) { _nodeSelectCb = cb; },
+    /** Hit-test at CSS screen coordinates (same units as e.clientX/clientY minus canvas rect).
+     *  Note: pass CSS pixels, NOT canvas.width/height (which are native/DPR-scaled). */
+    getNodeAt: function(x, y) { return hitTest(x, y); },
+    /** Returns the node id where phren is currently located, or null. */
+    getCurrentNode: function() { return phrenCurrentNodeId; },
+    /** Programmatically move the phren character to a node (by id). */
+    walkTo: function(nodeId) {
+      for (var i = 0; i < visibleNodes.length; i++) {
+        if (visibleNodes[i].id === nodeId) {
+          phrenMoveTo(visibleNodes[i].x, visibleNodes[i].y, visibleNodes[i]);
+          return true;
+        }
+      }
+      return false;
+    },
+    /** Set the camera view: zoom level and center on a node by id. */
+    setView: function(nodeId, newScale) {
+      if (newScale != null) scale = clamp(newScale, 0.05, 10);
+      for (var i = 0; i < visibleNodes.length; i++) {
+        if (visibleNodes[i].id === nodeId) {
+          panX = W / 2 - visibleNodes[i].x * scale;
+          panY = H / 2 - visibleNodes[i].y * scale;
+          render();
+          return true;
+        }
+      }
+      render();
+      return false;
     }
   };
 })();

@@ -102,6 +102,31 @@ describe("mcp-finding lifecycle tools", () => {
     expect(content).toContain('<!-- phren:status_reason "security policy updated" -->');
   });
 
+  it("rejects archived findings for lifecycle mutations", async () => {
+    writeFindings(tmp.path, [
+      "- Active finding <!-- fid:1111aaaa -->",
+      "",
+      "<!-- phren:archive:start -->",
+      "## Archived 2026-03-01",
+      "",
+      "- Archived finding <!-- fid:deadbeef -->",
+      "<!-- phren:archive:end -->",
+    ]);
+
+    const res = parseResult(await server.call("supersede_finding", {
+      project: "demo",
+      finding_text: "fid:deadbeef",
+      superseded_by: "Replacement",
+    }));
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("archived and read-only");
+
+    const content = fs.readFileSync(path.join(tmp.path, "demo", "FINDINGS.md"), "utf8");
+    expect(content).toContain("- Archived finding <!-- fid:deadbeef -->");
+    expect(content).not.toContain("Replacement");
+  });
+
   it("resolve_contradiction applies requested resolution", async () => {
     writeFindings(tmp.path, [
       "- Always use feature flags <!-- fid:1111aaaa -->",

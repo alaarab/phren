@@ -449,7 +449,7 @@ export async function handleHookPrompt() {
         parts.push(`Findings ready for consolidation:`);
         parts.push(notices.join("\n"));
         parts.push(`Run phren-consolidate when ready.`);
-        parts.push(`<phren-notice>`);
+        parts.push(`</phren-notice>`);
       }
 
       if (noticeFile) {
@@ -469,7 +469,7 @@ export async function handleHookPrompt() {
     console.log(parts.join("\n"));
   } catch (err: unknown) {
     const msg = errorMessage(err);
-    process.stdout.write(`\n<phren-error>phren hook failed: ${msg}. Check ~/.phren/.runtime/debug.log for details.<phren-error>\n`);
+    process.stdout.write(`\n<phren-error>phren hook failed: ${msg}. Check ~/.phren/.runtime/debug.log for details.</phren-error>\n`);
     debugLog(`hook-prompt error: ${msg}`);
     process.exit(0);
   }

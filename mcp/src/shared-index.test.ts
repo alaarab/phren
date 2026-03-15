@@ -46,14 +46,14 @@ function makeProject(phrenDir: string, name: string, files: Record<string, strin
 beforeEach(() => {
   delete process.env.PHREN_PATH;
   delete process.env.PHREN_PROFILE;
-  delete (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG);
+  delete process.env.PHREN_DEBUG;
   delete process.env.PROJECTS_DIR;
 });
 
 afterEach(() => {
   delete process.env.PHREN_PATH;
   delete process.env.PHREN_PROFILE;
-  delete (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG);
+  delete process.env.PHREN_DEBUG;
   delete process.env.PHREN_ACTOR;
   delete process.env.PROJECTS_DIR;
   if (tmpCleanup) {
@@ -91,8 +91,8 @@ describe("porterStem", () => {
 describe("resolveImports", () => {
   it("replaces @import with file contents", () => {
     const phren = makePhren();
-    writeFile(path.join(phren, "global", "shared.md"), "shared content here");
-    const content = "before\n@import shared.md\nafter";
+    writeFile(path.join(phren, "global", "shared", "shared.md"), "shared content here");
+    const content = "before\n@import shared/shared.md\nafter";
     const result = resolveImports(content, phren);
     expect(result).toContain("shared content here");
     expect(result).toContain("before");
@@ -101,16 +101,16 @@ describe("resolveImports", () => {
 
   it("handles missing import file gracefully", () => {
     const phren = makePhren();
-    const content = "@import nonexistent.md";
+    const content = "@import shared/nonexistent.md";
     const result = resolveImports(content, phren);
-    expect(result).toContain("<!-- @import not found: nonexistent.md -->");
+    expect(result).toContain("<!-- @import not found: shared/nonexistent.md -->");
   });
 
   it("detects circular imports", () => {
     const phren = makePhren();
-    writeFile(path.join(phren, "global", "a.md"), "@import b.md");
-    writeFile(path.join(phren, "global", "b.md"), "@import a.md");
-    const content = "@import a.md";
+    writeFile(path.join(phren, "global", "shared", "a.md"), "@import shared/b.md");
+    writeFile(path.join(phren, "global", "shared", "b.md"), "@import shared/a.md");
+    const content = "@import shared/a.md";
     const result = resolveImports(content, phren);
     expect(result).toContain("<!-- @import cycle:");
   });
@@ -119,17 +119,17 @@ describe("resolveImports", () => {
     const phren = makePhren();
     const content = "@import ../../etc/passwd";
     const result = resolveImports(content, phren);
-    expect(result).toContain("<!-- @import blocked: path traversal -->");
+    expect(result).toContain("<!-- @import blocked: only shared/*.md allowed -->");
   });
 
   it("respects max import depth", () => {
     const phren = makePhren();
     // Create a chain of imports deeper than MAX_IMPORT_DEPTH (5)
     for (let i = 0; i < 7; i++) {
-      const nextImport = i < 6 ? `@import level${i + 1}.md` : "leaf content";
-      writeFile(path.join(phren, "global", `level${i}.md`), nextImport);
+      const nextImport = i < 6 ? `@import shared/level${i + 1}.md` : "leaf content";
+      writeFile(path.join(phren, "global", "shared", `level${i}.md`), nextImport);
     }
-    const content = "@import level0.md";
+    const content = "@import shared/level0.md";
     const result = resolveImports(content, phren);
     // At depth 5, imports stop being resolved
     expect(result).not.toContain("leaf content");
@@ -144,9 +144,9 @@ describe("resolveImports", () => {
 
   it("resolves nested imports", () => {
     const phren = makePhren();
-    writeFile(path.join(phren, "global", "outer.md"), "outer\n@import inner.md");
-    writeFile(path.join(phren, "global", "inner.md"), "inner content");
-    const content = "@import outer.md";
+    writeFile(path.join(phren, "global", "shared", "outer.md"), "outer\n@import shared/inner.md");
+    writeFile(path.join(phren, "global", "shared", "inner.md"), "inner content");
+    const content = "@import shared/outer.md";
     const result = resolveImports(content, phren);
     expect(result).toContain("outer");
     expect(result).toContain("inner content");
@@ -154,16 +154,23 @@ describe("resolveImports", () => {
 
   it("accepts imports when the phren root itself is reached through a symlink", () => {
     const phren = makePhren();
-    writeFile(path.join(phren, "global", "shared.md"), "shared content through symlink");
+    writeFile(path.join(phren, "global", "shared", "shared.md"), "shared content through symlink");
     const linkedPhren = path.join(os.tmpdir(), `phren-index-link-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     fs.symlinkSync(phren, linkedPhren, process.platform === "win32" ? "junction" : "dir");
     try {
-      const result = resolveImports("@import shared.md", linkedPhren);
+      const result = resolveImports("@import shared/shared.md", linkedPhren);
       expect(result).toContain("shared content through symlink");
       expect(result).not.toContain("blocked: symlink traversal");
     } finally {
       fs.rmSync(linkedPhren, { force: true, recursive: true });
     }
+  });
+
+  it("blocks imports outside the documented shared/*.md scope", () => {
+    const phren = makePhren();
+    writeFile(path.join(phren, "global", "config.json"), "{\"unsafe\":true}");
+    expect(resolveImports("@import config.json", phren)).toContain("<!-- @import blocked: only shared/*.md allowed -->");
+    expect(resolveImports("@import private/secret.md", phren)).toContain("<!-- @import blocked: only shared/*.md allowed -->");
   });
 });
 
@@ -381,9 +388,9 @@ describe("buildIndex", () => {
   it("resolves @import directives during indexing", async () => {
     const phren = makePhren();
     grantAdmin(phren);
-    writeFile(path.join(phren, "global", "shared-snippet.md"), "imported snippet about testing");
+    writeFile(path.join(phren, "global", "shared", "shared-snippet.md"), "imported snippet about testing");
     makeProject(phren, "proj", {
-      "CLAUDE.md": "# Config\n@import shared-snippet.md",
+      "CLAUDE.md": "# Config\n@import shared/shared-snippet.md",
     });
     const db = await buildIndex(phren);
     const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["imported"]);

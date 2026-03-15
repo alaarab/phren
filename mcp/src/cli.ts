@@ -71,6 +71,9 @@ import {
   handlePinCanonical,
   handleQualityFeedback,
   handleRelatedDocs,
+  handleReview,
+  handleConsolidationStatus,
+  handleSessionContext,
   handleSearch,
   handleShell,
   handleStatus,
@@ -171,6 +174,12 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleDetectSkills(args, getProfile());
     case "graph":
       return handleGraphNamespace(args);
+    case "review":
+      return handleReview(args);
+    case "consolidation-status":
+      return handleConsolidationStatus(args);
+    case "session-context":
+      return handleSessionContext();
     default:
       console.error(`Unknown command: ${command}`);
       process.exit(1);

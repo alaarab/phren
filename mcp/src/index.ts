@@ -28,6 +28,7 @@ import { register as registerHooks } from "./mcp-hooks.js";
 import { register as registerExtract } from "./mcp-extract.js";
 import { register as registerConfig } from "./mcp-config.js";
 import type { McpContext } from "./mcp-types.js";
+import { mcpResponse } from "./mcp-types.js";
 import { errorMessage } from "./utils.js";
 import { runTopLevelCommand } from "./entrypoint.js";
 import { startEmbeddingWarmup } from "./startup-embedding.js";
@@ -98,7 +99,7 @@ async function main() {
     indexReady = true;
     runCustomHooks(phrenPath, "post-index");
   }
-  async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T> {
+  async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T | { content: { type: "text"; text: string }[] }> {
     if (writeQueueDepth >= MAX_QUEUE_DEPTH) {
       throw new Error(`Write queue full (${MAX_QUEUE_DEPTH} items). Try again shortly.`);
     }
@@ -113,7 +114,7 @@ async function main() {
         const message = errorMessage(err);
         if (message.includes("Write timeout") || message.includes("Write queue full")) {
           debugLog(`Write queue timeout: ${message}`);
-          return { ok: false, error: `Write queue timeout: ${message}`, errorCode: "TIMEOUT" } as T;
+          return mcpResponse({ ok: false, error: `Write queue timeout: ${message}`, errorCode: "TIMEOUT" });
         }
         throw err;
       } finally {

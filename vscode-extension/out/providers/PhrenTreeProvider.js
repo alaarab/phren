@@ -164,7 +164,7 @@ class PhrenTreeProvider {
         switch (element.kind) {
             case "rootSection": {
                 const labels = { projects: "Projects", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Fragment Graph", manage: "Manage" };
-                const icons = { projects: "folder-library", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
+                const icons = { projects: "hubot", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
                 const label = labels[element.section] ?? element.section;
                 if (element.section === "graph") {
                     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
@@ -345,6 +345,26 @@ class PhrenTreeProvider {
                     title: "Toggle Hook",
                     arguments: [element.tool, element.enabled],
                 };
+                return item;
+            }
+            case "customHook": {
+                const item = new vscode.TreeItem(element.event, vscode.TreeItemCollapsibleState.None);
+                const prefix = element.isWebhook ? "[webhook] " : "";
+                item.description = `${prefix}${element.target}`;
+                item.tooltip = `Custom hook: ${element.event}\n${prefix}${element.target}${element.timeout ? `\nTimeout: ${element.timeout}ms` : ""}`;
+                item.iconPath = themeIcon("zap");
+                item.id = `phren.customHook.${element.event}.${element.target.slice(0, 20)}`;
+                item.contextValue = "phren.customHookItem";
+                return item;
+            }
+            case "hookError": {
+                const item = new vscode.TreeItem(element.event, vscode.TreeItemCollapsibleState.None);
+                const ts = element.timestamp.slice(0, 19).replace("T", " ");
+                item.description = `${ts} - ${element.message.slice(0, 60)}`;
+                item.tooltip = `${element.timestamp}\n${element.event}: ${element.message}`;
+                item.iconPath = themeIcon("warning");
+                item.id = `phren.hookError.${element.timestamp}`;
+                item.contextValue = "phren.hookErrorItem";
                 return item;
             }
             case "referenceFile": {
@@ -536,6 +556,8 @@ class PhrenTreeProvider {
                 id: finding.id,
                 date: finding.date,
                 text: finding.text,
+                type: finding.type,
+                confidence: finding.confidence,
                 supersededBy: finding.supersededBy,
                 supersedes: finding.supersedes,
                 contradicts: finding.contradicts,
@@ -583,6 +605,10 @@ class PhrenTreeProvider {
                 line: task.line,
                 section: task.section,
                 checked: task.checked,
+                priority: task.priority,
+                pinned: task.pinned,
+                issueUrl: task.issueUrl,
+                issueNumber: task.issueNumber,
             }));
         }
         catch (error) {
@@ -773,6 +799,8 @@ class PhrenTreeProvider {
                     id: finding.id,
                     date: finding.date,
                     text: finding.text,
+                    type: finding.type,
+                    confidence: finding.confidence,
                     supersededBy: finding.supersededBy,
                     supersedes: finding.supersedes,
                     contradicts: finding.contradicts,
@@ -883,6 +911,42 @@ class PhrenTreeProvider {
                 }
                 const enabled = asBoolean(record?.enabled) ?? false;
                 nodes.push({ kind: "hook", tool, enabled });
+            }
+            // Custom hooks
+            const customHooks = asArray(data?.customHooks);
+            for (const entry of customHooks) {
+                const record = asRecord(entry);
+                if (!record)
+                    continue;
+                const event = asString(record.event);
+                if (!event)
+                    continue;
+                const isWebhook = typeof record.webhook === "string";
+                const target = asString(isWebhook ? record.webhook : record.command) ?? "";
+                const timeout = typeof record.timeout === "number" ? record.timeout : undefined;
+                nodes.push({ kind: "customHook", event, target, isWebhook, timeout });
+            }
+            // Hook errors summary
+            try {
+                const errRaw = await this.client.listHookErrors();
+                const errData = responseData(errRaw);
+                const errors = asArray(errData?.errors);
+                if (errors.length > 0) {
+                    for (const err of errors.slice(-5)) {
+                        const rec = asRecord(err);
+                        if (!rec)
+                            continue;
+                        nodes.push({
+                            kind: "hookError",
+                            timestamp: asString(rec.timestamp) ?? "",
+                            event: asString(rec.event) ?? "",
+                            message: asString(rec.message) ?? "",
+                        });
+                    }
+                }
+            }
+            catch {
+                // Hook errors are optional; ignore failures
             }
             return nodes;
         }
@@ -1001,6 +1065,8 @@ class PhrenTreeProvider {
                 id,
                 date: asString(record?.date) ?? "unknown",
                 text,
+                type: asString(record?.type),
+                confidence: asNumber(record?.confidence),
                 supersededBy: asString(record?.supersededBy),
                 supersedes: asString(record?.supersedes),
                 contradicts: contradicts?.length ? contradicts : undefined,
@@ -1028,6 +1094,10 @@ class PhrenTreeProvider {
                     line,
                     section,
                     checked: asBoolean(record?.checked) ?? section === "Done",
+                    priority: asString(record?.priority),
+                    pinned: asBoolean(record?.pinned),
+                    issueUrl: asString(record?.issueUrl),
+                    issueNumber: asNumber(record?.issueNumber),
                 });
             }
         }
@@ -1257,12 +1327,15 @@ function formatSessionTimeLabel(startedAt) {
         minute: "2-digit",
     });
 }
-function themeIcon(id) {
+function themeIcon(id, color) {
     if (id === "folder") {
         return vscode.ThemeIcon.Folder;
     }
     if (id === "file") {
         return vscode.ThemeIcon.File;
+    }
+    if (color) {
+        return new vscode.ThemeIcon(id, new vscode.ThemeColor(color));
     }
     return new vscode.ThemeIcon(id);
 }

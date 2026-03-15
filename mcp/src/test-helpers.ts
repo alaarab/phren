@@ -101,17 +101,70 @@ export function resultMsg(r: PhrenResult<unknown>): string {
 
 export const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
 export const REPO_ROOT = path.resolve(__dirname, "../..");
+const CLI_BUILD_LOCK = path.join(REPO_ROOT, ".vitest-cli-build.lock");
+const CLI_BUILD_WAIT = new Int32Array(new SharedArrayBuffer(4));
+
+function npmExec(): string {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
 
 /**
- * Formerly built the CLI on first call. Now a no-op: the vitest globalSetup
- * (`test-global-setup.ts`) ensures mcp/dist is present before any fork starts,
- * eliminating the race where one fork's `rm -rf mcp/dist` would cause another
- * fork's fs.existsSync check to fail and trigger a redundant concurrent build.
- *
- * Kept as a function so call sites don't need to change.
+ * Ensure the built CLI entry exists before spawning subprocess-based integration
+ * tests. globalSetup handles the common case, while this guard repairs a missing
+ * artifact mid-run under a file lock so parallel workers do not stampede.
  */
 export function ensureCliBuilt(): void {
-  // no-op — build is guaranteed by globalSetup before any worker spawns
+  if (fs.existsSync(CLI_PATH)) return;
+
+  const staleMs = 120_000;
+  const pollMs = 100;
+  const maxWaitMs = 180_000;
+  let waited = 0;
+  let hasLock = false;
+
+  while (!hasLock && waited <= maxWaitMs) {
+    try {
+      fs.writeFileSync(CLI_BUILD_LOCK, `${process.pid}\n${Date.now()}`, { flag: "wx" });
+      hasLock = true;
+      break;
+    } catch {
+      if (fs.existsSync(CLI_PATH)) return;
+      try {
+        const stat = fs.statSync(CLI_BUILD_LOCK);
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          fs.unlinkSync(CLI_BUILD_LOCK);
+          continue;
+        }
+      } catch {
+        // Lock disappeared between stat attempts; retry.
+      }
+      Atomics.wait(CLI_BUILD_WAIT, 0, 0, pollMs);
+      waited += pollMs;
+    }
+  }
+
+  if (!hasLock) {
+    if (fs.existsSync(CLI_PATH)) return;
+    throw new Error(`Timed out waiting for CLI build artifact: ${CLI_PATH}`);
+  }
+
+  try {
+    if (!fs.existsSync(CLI_PATH)) {
+      execFileSync(npmExec(), ["run", "build"], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: process.platform === "win32",
+        timeout: 180_000,
+      });
+    }
+  } finally {
+    try {
+      fs.unlinkSync(CLI_BUILD_LOCK);
+    } catch {
+      // Another waiter may have already cleaned up a stale lock path.
+    }
+  }
 }
 
 export interface CliResult {

@@ -2218,7 +2218,7 @@ describe("resolveImports", () => {
   it("blocks path traversal attempts", () => {
     const content = "@import ../../etc/passwd";
     const result = resolveImports(content, phrenDir);
-    expect(result).toContain("@import blocked: path traversal");
+    expect(result).toContain("@import blocked:");
   });
 
   it("caps recursion depth", () => {

@@ -45,11 +45,13 @@ describe("feature flag bootstrap", () => {
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
   const origDedup = process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+  const origPhrenPath = process.env.PHREN_PATH;
 
   beforeEach(() => {
     tmp = makeTempDir("feature-flags-");
     process.env.HOME = tmp.path;
     process.env.USERPROFILE = tmp.path;
+    delete process.env.PHREN_PATH;
     delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
     fs.mkdirSync(path.join(tmp.path, ".phren"), { recursive: true });
     resetPhrenDotEnvBootstrapForTests();
@@ -60,6 +62,8 @@ describe("feature flag bootstrap", () => {
     else process.env.HOME = origHome;
     if (origUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = origUserProfile;
+    if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+    else process.env.PHREN_PATH = origPhrenPath;
     if (origDedup === undefined) delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
     else process.env.PHREN_FEATURE_SEMANTIC_DEDUP = origDedup;
     resetPhrenDotEnvBootstrapForTests();

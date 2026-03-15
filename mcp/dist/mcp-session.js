@@ -294,7 +294,7 @@ export function getSessionArtifacts(phrenPath, sessionId, project) {
     const shortId = sessionId.slice(0, 8);
     try {
         const projectDirs = getProjectDirs(phrenPath);
-        const targetProjects = project ? [project] : projectDirs;
+        const targetProjects = project ? [project] : projectDirs.map((d) => path.basename(d));
         for (const proj of targetProjects) {
             // Findings with matching sessionId
             const findingsResult = readFindings(phrenPath, proj);
@@ -364,15 +364,16 @@ export function computeSessionDiff(phrenPath, project, lastSessionEnd) {
                 superseded++;
         }
     }
-    // Count completed tasks since last session
-    const tasksPath = path.join(projectDir, "TASKS.md");
+    // Count tasks completed since last session by checking Done items with recent activity dates
     let tasksCompleted = 0;
-    if (fs.existsSync(tasksPath)) {
-        const taskContent = fs.readFileSync(tasksPath, "utf8");
-        const doneMatch = taskContent.match(/## Done[\s\S]*/);
-        if (doneMatch) {
-            const doneLines = doneMatch[0].split("\n").filter(l => l.startsWith("- "));
-            tasksCompleted = doneLines.length;
+    const tasksResult = readTasks(phrenPath, project);
+    if (tasksResult.ok) {
+        for (const item of tasksResult.data.items.Done) {
+            // lastActivity is updated on completion; fall back to createdAt
+            const itemDate = item.lastActivity?.slice(0, 10) ?? item.createdAt?.slice(0, 10);
+            if (itemDate && itemDate >= cutoff) {
+                tasksCompleted++;
+            }
         }
     }
     return { newFindings, superseded, tasksCompleted };
@@ -443,12 +444,12 @@ export function register(server, ctx) {
             try {
                 const tasks = readTasks(phrenPath, activeProject);
                 if (tasks.ok) {
-                    const queueItems = tasks.data.items.Queue
+                    const activeItems = tasks.data.items.Active
                         .filter((entry) => isMemoryScopeVisible(normalizeMemoryScope(entry.scope), activeScope))
                         .slice(0, 5)
                         .map((entry) => `- [ ] ${entry.line}`);
-                    if (queueItems.length > 0) {
-                        parts.push(`## Active task (${activeProject})\n${queueItems.join("\n")}`);
+                    if (activeItems.length > 0) {
+                        parts.push(`## Active task (${activeProject})\n${activeItems.join("\n")}`);
                     }
                 }
             }

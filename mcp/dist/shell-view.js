@@ -57,7 +57,6 @@ function renderBottomBar(state, navMode, inputCtx, inputBuf) {
             add: "add task",
             "learn-add": "add finding",
             "skill-add": "new skill name",
-            "mq-edit": "edit Review Queue item",
         };
         const label = labels[inputCtx] || inputCtx;
         return `${sep}\n  ${style.boldCyan(label + " ›")} ${inputBuf}${style.cyan("█")}`;
@@ -66,7 +65,7 @@ function renderBottomBar(state, navMode, inputCtx, inputBuf) {
         Projects: [`${k("↵")} ${d("open project")}`, `${k("i")} ${d("intro mode")}`],
         Tasks: [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
         Findings: [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
-        "Review Queue": [`${k("a")} ${d("keep")}`, `${k("d")} ${d("discard")}`, `${k("e")} ${d("edit")}`],
+        "Review Queue": [`${k("↵")} ${d("inspect")}`],
         Skills: [`${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
         Hooks: [`${k("a")} ${d("enable")}`, `${k("d")} ${d("disable")}`],
         Health: [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],

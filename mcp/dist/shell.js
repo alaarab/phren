@@ -162,11 +162,6 @@ export class PhrenShell {
                 this.setMessage(`  Created skill "${name}" — edit ${dest}`);
                 break;
             }
-            case "mq-edit": {
-                this.setMessage("  Queue editing has been removed. The review queue is now read-only.");
-                this.inputMqId = "";
-                break;
-            }
         }
     }
     // ── Raw key handling ───────────────────────────────────────────────────

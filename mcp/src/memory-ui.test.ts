@@ -116,39 +116,35 @@ describe.sequential("web-ui server", () => {
     tmpCleanup();
   });
 
-  it("queue operations return error since they were removed", async () => {
+  it("removed queue mutation routes return 404", async () => {
     const reviewLine = "- [2026-03-05] Keep this memory [confidence 0.90]";
 
     const approveRes = await postForm(port, "/approve", {
       project: "demo",
       line: reviewLine,
     });
-    expect(approveRes.status).toBe(500);
-    expect(approveRes.body).toContain("removed");
+    expect(approveRes.status).toBe(404);
 
     const rejectRes = await postForm(port, "/reject", {
       project: "demo",
       line: reviewLine,
     });
-    expect(rejectRes.status).toBe(500);
-    expect(rejectRes.body).toContain("removed");
+    expect(rejectRes.status).toBe(404);
 
     const editRes = await postForm(port, "/edit", {
       project: "demo",
       line: reviewLine,
       new_text: "updated",
     });
-    expect(editRes.status).toBe(500);
-    expect(editRes.body).toContain("removed");
+    expect(editRes.status).toBe(404);
   });
 
-  it("returns 400 for invalid project name", async () => {
+  it("removed routes stay absent regardless of payload shape", async () => {
     const res = await postForm(port, "/approve", {
       project: "../escape",
       line: "- [2026-03-05] anything",
     });
-    expect(res.status).toBe(400);
-    expect(res.body).toContain("Invalid project name");
+    expect(res.status).toBe(404);
   });
 
   it("returns 404 for unknown GET route", async () => {
@@ -225,7 +221,7 @@ describe.sequential("web-ui server", () => {
           method: "POST",
           host: "127.0.0.1",
           port,
-          path: "/approve",
+          path: "/api/hook-toggle",
           headers: {
             "content-type": "application/x-www-form-urlencoded",
             "content-length": Buffer.byteLength(bigPayload),
@@ -318,20 +314,20 @@ describe.sequential("web-ui CSRF protection", () => {
     expect(res.status).toBe(200);
   });
 
-  it("POST /approve without CSRF token returns 403", async () => {
-    const res = await postForm(port, "/approve", {
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+  it("POST /api/hook-toggle without CSRF token returns 403", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      tool: "claude",
+      enabled: "true",
     });
     expect(res.status).toBe(403);
     expect(res.body).toContain("CSRF");
   });
 
-  it("POST /approve with invalid CSRF token returns 403", async () => {
-    const res = await postForm(port, "/approve", {
+  it("POST /api/hook-toggle with invalid CSRF token returns 403", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
       _csrf: "bogus-token",
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      tool: "claude",
+      enabled: "true",
     });
     expect(res.status).toBe(403);
     expect(res.body).toContain("CSRF");
@@ -381,19 +377,22 @@ describe("web-ui HTML rendering", () => {
     }
   });
 
-  it("uses safe review-queue handlers and escaped plain-text rendering for queue items", () => {
+  it("renders the review queue as read-only and escapes queue item text", () => {
     const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-review-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
-      expect(body).toContain("window.reviewActionFromEl = function(btn, action)");
-      expect(body).toContain("window.reviewEditSubmitFromEl = function(e, form)");
-      expect(body).toContain('data-ui-action="reviewAction" data-review-type="approve"');
-      expect(body).toContain('data-ui-action="reviewAction" data-review-type="reject"');
-      expect(body).toContain('data-ui-action="reviewEditSubmit"');
+      expect(body).toContain("Read-only in web UI. Inspect flagged fragments here, then resolve them through maintenance or direct finding updates.");
       expect(body).toContain("var cardText = esc(item.text);");
-      expect(body).toContain("'<div class=\"review-card-text\">' + cardText + '</div>'");
-      expect(body).toContain("textEl.innerHTML = esc(newText).replace(/\\n/g, '<br>');");
+      expect(body).toContain("textEl.innerHTML = esc(item.text).replace(/\\n/g, '<br>');");
+      expect(body).not.toContain("window.reviewActionFromEl = function(btn, action)");
+      expect(body).not.toContain("window.reviewEditSubmitFromEl = function(e, form)");
+      expect(body).not.toContain('data-ui-action="reviewAction" data-review-type="approve"');
+      expect(body).not.toContain('data-ui-action="reviewAction" data-review-type="reject"');
+      expect(body).not.toContain('data-ui-action="reviewEditSubmit"');
+      expect(body).not.toContain("/api/approve");
+      expect(body).not.toContain("/api/reject");
+      expect(body).not.toContain("/api/edit");
       expect(body).not.toContain("marked.parse(item.text)");
       expect(body).not.toContain("JSON.stringify(item.line)");
     } finally {

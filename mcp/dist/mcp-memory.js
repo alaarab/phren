@@ -41,7 +41,6 @@ export function register(server, ctx) {
             flushEntryScores(phrenPath);
             const feedbackWeights = {
                 helpful: 1.0,
-                not_helpful: -0.3,
                 reprompt: -0.5,
                 regression: -1.0,
             };

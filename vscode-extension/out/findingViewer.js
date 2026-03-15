@@ -44,10 +44,11 @@ function showFindingDetail(client, finding, onRefresh) {
         onMessage: async (msg) => {
             if (msg.type === "save" && typeof msg.newText === "string") {
                 try {
-                    // Remove old, add new
-                    await client.removeFinding(finding.projectName, finding.text);
-                    await client.addFinding(finding.projectName, msg.newText);
-                    finding.text = msg.newText;
+                    const nextText = msg.newText.trim();
+                    if (!nextText || nextText === finding.text.trim())
+                        return;
+                    await client.editFinding(finding.projectName, finding.text, nextText);
+                    finding.text = nextText;
                     vscode.window.showInformationMessage(`Finding "${finding.id}" updated.`);
                     onRefresh();
                 }
@@ -59,6 +60,60 @@ function showFindingDetail(client, finding, onRefresh) {
                 try {
                     await client.removeFinding(finding.projectName, finding.text);
                     vscode.window.showInformationMessage(`Finding "${finding.id}" removed.`);
+                    onRefresh();
+                }
+                catch (e) {
+                    vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+            }
+            if (msg.type === "supersede") {
+                const replacementText = await vscode.window.showInputBox({
+                    prompt: "Enter the replacement finding text",
+                    placeHolder: "New finding that supersedes this one",
+                });
+                if (!replacementText?.trim())
+                    return;
+                try {
+                    await client.supersedeFinding(finding.projectName, finding.text, replacementText.trim());
+                    vscode.window.showInformationMessage(`Finding "${finding.id}" superseded.`);
+                    onRefresh();
+                }
+                catch (e) {
+                    vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+            }
+            if (msg.type === "retract") {
+                const reason = await vscode.window.showInputBox({
+                    prompt: "Enter reason for retracting this finding",
+                    placeHolder: "e.g. no longer accurate, superseded by new approach",
+                });
+                if (!reason?.trim())
+                    return;
+                try {
+                    await client.retractFinding(finding.projectName, finding.text, reason.trim());
+                    vscode.window.showInformationMessage(`Finding "${finding.id}" retracted.`);
+                    onRefresh();
+                }
+                catch (e) {
+                    vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+            }
+            if (msg.type === "resolveContradiction") {
+                const otherText = await vscode.window.showInputBox({
+                    prompt: "Enter the contradicting finding text",
+                    placeHolder: "The other finding this one contradicts",
+                });
+                if (!otherText?.trim())
+                    return;
+                const resolution = await vscode.window.showInputBox({
+                    prompt: "Enter resolution",
+                    placeHolder: "How to resolve this contradiction",
+                });
+                if (!resolution?.trim())
+                    return;
+                try {
+                    await client.resolveContradiction(finding.projectName, finding.text, otherText.trim(), resolution.trim());
+                    vscode.window.showInformationMessage(`Contradiction resolved.`);
                     onRefresh();
                 }
                 catch (e) {
@@ -92,11 +147,16 @@ function renderFindingHtml(finding) {
 <body>
   <h1>Finding ${esc(finding.id)}</h1>
   <span class="badge">${esc(finding.projectName)}</span>
+  ${finding.type ? `<span class="badge" style="background:#2a7acc">${esc(finding.type)}</span>` : ""}
+  ${finding.confidence !== undefined ? `<span class="badge" style="background:${finding.confidence >= 70 ? '#388a34' : '#7B68AE'}">${Math.round(finding.confidence)}% confidence</span>` : ""}
   <span class="date">${esc(finding.date)}</span>
   <div class="toolbar">
     <button id="btnEdit" class="btn-primary" onclick="startEdit()">Edit</button>
     <button id="btnSave" class="btn-primary hidden" onclick="save()">Save</button>
     <button id="btnCancel" class="btn-secondary hidden" onclick="cancelEdit()">Cancel</button>
+    <button class="btn-secondary" onclick="supersede()">Supersede</button>
+    <button class="btn-secondary" onclick="retract()">Retract</button>
+    ${finding.contradicted ? '<button class="btn-secondary" onclick="resolveContradiction()">Resolve Contradiction</button>' : ""}
     <button class="btn-danger" onclick="del()">Delete</button>
   </div>
   <div id="viewMode" class="content-view">${esc(finding.text)}</div>
@@ -128,6 +188,15 @@ function renderFindingHtml(finding) {
       if (confirm("Delete this finding?")) {
         vscode.postMessage({ type: "delete" });
       }
+    }
+    function supersede() {
+      vscode.postMessage({ type: "supersede" });
+    }
+    function retract() {
+      vscode.postMessage({ type: "retract" });
+    }
+    function resolveContradiction() {
+      vscode.postMessage({ type: "resolveContradiction" });
     }
   </script>
 </body>

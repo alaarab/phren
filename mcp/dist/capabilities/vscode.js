@@ -12,9 +12,9 @@ export const vscodeManifest = {
         "task.add": { implemented: true, handler: "extension.ts:phren.addTask" },
         "task.complete": { implemented: true, handler: "extension.ts:phren.completeTask" },
         "task.remove": { implemented: true, handler: "extension.ts:phren.removeTask" },
-        "task.update": { implemented: false, reason: "No VS Code command for task field updates" },
+        "task.update": { implemented: true, handler: "extension.ts:phren.updateTask, taskViewer.ts:save" },
         "task.list": { implemented: true, handler: "PhrenTreeProvider.ts:tasks section" },
-        "task.pin": { implemented: false, reason: "No VS Code command for task pinning" },
+        "task.pin": { implemented: true, handler: "extension.ts:phren.pinTask" },
         "task.github_link": { implemented: false, reason: "GitHub link/promote is MCP-only" },
         // Hook management
         "hook.list": { implemented: true, handler: "extension.ts:phren.hooksStatus" },
@@ -47,7 +47,7 @@ export const vscodeManifest = {
         "skill.list": { implemented: true, handler: "PhrenTreeProvider.ts:skills section" },
         "skill.read": { implemented: true, handler: "skillEditor.ts:showSkillEditor" },
         "skill.enable": { implemented: true, handler: "extension.ts:phren.toggleSkill" },
-        "skill.write": { implemented: false, reason: "No VS Code command for skill write" },
+        "skill.write": { implemented: true, handler: "skillEditor.ts:showSkillEditor" },
         // Project management
         "project.list": { implemented: true, handler: "PhrenTreeProvider.ts:projects section" },
         "project.manage": { implemented: true, handler: "extension.ts:phren.manageProject" },

@@ -67,9 +67,50 @@ function showTaskDetail(client, task, onRefresh) {
             }
             if (msg.type === "save" && typeof msg.text === "string") {
                 try {
-                    await client.updateTask(task.projectName, task.line, { item: msg.text });
-                    task.line = msg.text;
+                    const nextText = msg.text.trim();
+                    if (!nextText)
+                        return;
+                    await client.updateTask(task.projectName, task.line, { text: nextText });
+                    task.line = nextText;
                     vscode.window.showInformationMessage(`Task "${task.id}" updated.`);
+                    onRefresh();
+                }
+                catch (e) {
+                    vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+            }
+            if (msg.type === "linkIssue") {
+                const input = await vscode.window.showInputBox({
+                    prompt: "Enter GitHub issue number or URL",
+                    placeHolder: "123 or https://github.com/owner/repo/issues/123",
+                });
+                if (!input?.trim())
+                    return;
+                const trimmed = input.trim();
+                const numMatch = trimmed.match(/^(\d+)$/);
+                try {
+                    if (numMatch) {
+                        await client.linkTaskIssue(task.projectName, task.line, parseInt(numMatch[1], 10));
+                    }
+                    else {
+                        await client.linkTaskIssue(task.projectName, task.line, undefined, trimmed);
+                    }
+                    vscode.window.showInformationMessage(`Issue linked to task "${task.id}".`);
+                    onRefresh();
+                }
+                catch (e) {
+                    vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+            }
+            if (msg.type === "createIssue") {
+                try {
+                    const raw = await client.promoteTaskToIssue(task.projectName, task.line);
+                    const data = raw?.data;
+                    const issueUrl = typeof data?.issue_url === "string" ? data.issue_url : undefined;
+                    vscode.window.showInformationMessage(`GitHub issue created for task "${task.id}".`);
+                    if (issueUrl) {
+                        await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
+                    }
                     onRefresh();
                 }
                 catch (e) {
@@ -80,7 +121,7 @@ function showTaskDetail(client, task, onRefresh) {
     });
 }
 function renderTaskHtml(task) {
-    const sectionColor = { Active: "#388a34", Queue: "#c89b2a", Done: "#666" };
+    const sectionColor = { Active: "#388a34", Queue: "#7B68AE", Done: "#666" };
     const color = sectionColor[task.section] ?? "#888";
     return `<!DOCTYPE html>
 <html>
@@ -106,12 +147,17 @@ function renderTaskHtml(task) {
   <h1>Task ${esc(task.id)}</h1>
   <span class="badge" style="background:${color}">${esc(task.section)}</span>
   <span class="badge badge-project">${esc(task.projectName)}</span>
+  ${task.priority ? `<span class="badge" style="background:${task.priority === "high" ? "#c33" : task.priority === "medium" ? "#b8860b" : "#666"}">${esc(task.priority)}</span>` : ""}
+  ${task.pinned ? '<span class="badge" style="background:#7B68AE">&#x1F4CC; pinned</span>' : ""}
+  ${task.issueUrl ? `<a href="${esc(task.issueUrl)}" style="font-size:12px;color:var(--vscode-textLink-foreground)">#${task.issueNumber ?? "issue"}</a>` : ""}
   <div class="status">${task.checked ? "&#9745; Complete" : "&#9744; Incomplete"}</div>
   <div class="toolbar">
     <button id="btnEdit" class="btn-primary" onclick="startEdit()">Edit</button>
     <button id="btnSave" class="btn-primary hidden" onclick="save()">Save</button>
     <button id="btnCancel" class="btn-secondary hidden" onclick="cancelEdit()">Cancel</button>
     ${task.section !== "Done" ? '<button class="btn-secondary" onclick="complete()">Mark Done</button>' : ""}
+    <button class="btn-secondary" onclick="linkIssue()">${task.issueUrl ? "Update Issue Link" : "Link Issue"}</button>
+    <button class="btn-secondary" onclick="createIssue()">Create Issue</button>
     <button class="btn-secondary" onclick="removeTask()">Delete</button>
   </div>
   <div id="viewMode" class="content-view">${esc(task.line)}</div>
@@ -144,6 +190,12 @@ function renderTaskHtml(task) {
     }
     function removeTask() {
       vscode.postMessage({ type: "delete" });
+    }
+    function linkIssue() {
+      vscode.postMessage({ type: "linkIssue" });
+    }
+    function createIssue() {
+      vscode.postMessage({ type: "createIssue" });
     }
   </script>
 </body>

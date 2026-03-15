@@ -3,7 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
+import { readInstallPreferences, writeInstallPreferences, updateInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry } from "./hooks.js";
 import { hookConfigPath } from "./shared.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig, writeProjectHookConfig } from "./project-config.js";
@@ -196,17 +196,16 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!normalized) {
           return mcpResponse({ ok: false, error: `Invalid tool "${tool}". Use: ${HOOK_TOOLS.join(", ")}` });
         }
-        const prefs = readInstallPreferences(phrenPath);
-        writeInstallPreferences(phrenPath, {
+        updateInstallPreferences(phrenPath, (prefs) => ({
           hookTools: {
             ...(prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {}),
             [normalized]: enabled,
           },
-        } satisfies Partial<InstallPreferences>);
+        } satisfies Partial<InstallPreferences>));
         return mcpResponse({ ok: true, message: `${enabled ? "Enabled" : "Disabled"} hooks for ${normalized}.`, data: { tool: normalized, enabled } });
       }
 
-      writeInstallPreferences(phrenPath, { hooksEnabled: enabled });
+      updateInstallPreferences(phrenPath, () => ({ hooksEnabled: enabled }));
       return mcpResponse({ ok: true, message: `${enabled ? "Enabled" : "Disabled"} hooks globally.`, data: { global: true, enabled } });
     }
   );
@@ -245,12 +244,26 @@ export function register(server: McpServer, ctx: McpContext): void {
           const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
           const ssrfBlocked =
             h === "localhost" ||
-            h === "::1" ||
+            // IPv4 private/loopback ranges
             /^127\./.test(h) ||
             /^10\./.test(h) ||
             /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
             /^192\.168\./.test(h) ||
             /^169\.254\./.test(h) ||
+            // IPv6 loopback
+            h === "::1" ||
+            // IPv6 ULA (fc00::/7 covers fc:: and fd::)
+            h.startsWith("fc") ||
+            h.startsWith("fd") ||
+            // IPv6 link-local (fe80::/10)
+            h.startsWith("fe80:") ||
+            // IPv4-mapped IPv6 (::ffff:10.x.x.x, ::ffff:127.x.x.x, etc.)
+            /^::ffff:/i.test(h) ||
+            // Raw numeric IPv4 forms not normalized by all URL parsers:
+            // decimal (2130706433), hex (0x7f000001), octal (0177.0.0.1 prefix)
+            /^(0x[0-9a-f]+|0\d+)$/i.test(h) ||
+            // Pure decimal integer that encodes an IPv4 address (8+ digits covers 0.0.0.0+)
+            /^\d{8,10}$/.test(h) ||
             h.endsWith(".local") ||
             h.endsWith(".internal");
           if (ssrfBlocked) {
@@ -267,10 +280,13 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       return ctx.withWriteQueue(async () => {
-        const prefs = readInstallPreferences(phrenPath);
-        const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
-        writeInstallPreferences(phrenPath, { ...prefs, customHooks: [...existing, newHook] });
-        return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${"webhook" in newHook ? "[webhook] " : ""}${getHookTarget(newHook)}`, data: { hook: newHook, total: existing.length + 1 } });
+        let totalAfter = 0;
+        updateInstallPreferences(phrenPath, (prefs) => {
+          const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
+          totalAfter = existing.length + 1;
+          return { customHooks: [...existing, newHook] };
+        });
+        return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${"webhook" in newHook ? "[webhook] " : ""}${getHookTarget(newHook)}`, data: { hook: newHook, total: totalAfter } });
       });
     }
   );
@@ -289,17 +305,19 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ event, command }) => {
       return ctx.withWriteQueue(async () => {
-        const prefs = readInstallPreferences(phrenPath);
-        const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
-        const remaining = existing.filter(h => h.event !== event || (command && !getHookTarget(h).includes(command)));
-        const removed = existing.length - remaining.length;
-
+        let removed = 0;
+        let remainingCount = 0;
+        updateInstallPreferences(phrenPath, (prefs) => {
+          const existing: CustomHookEntry[] = Array.isArray(prefs.customHooks) ? prefs.customHooks : [];
+          const remaining = existing.filter(h => h.event !== event || (command != null && !getHookTarget(h).includes(command)));
+          removed = existing.length - remaining.length;
+          remainingCount = remaining.length;
+          return { customHooks: remaining };
+        });
         if (removed === 0) {
           return mcpResponse({ ok: false, error: `No custom hooks matched event="${event}"${command ? ` command containing "${command}"` : ""}.` });
         }
-
-        writeInstallPreferences(phrenPath, { ...prefs, customHooks: remaining });
-        return mcpResponse({ ok: true, message: `Removed ${removed} custom hook(s) for "${event}".`, data: { removed, remaining: remaining.length } });
+        return mcpResponse({ ok: true, message: `Removed ${removed} custom hook(s) for "${event}".`, data: { removed, remaining: remainingCount } });
       });
     }
   );

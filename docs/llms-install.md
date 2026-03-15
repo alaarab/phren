@@ -5,7 +5,7 @@ phren keeps project memory portable across sessions and machines. It runs as an 
 ## Quick Start
 
 ```bash
-npm install -g @alaarab/phren
+npm install -g @phren/cli
 phren init
 phren init --dry-run
 ```
@@ -39,13 +39,13 @@ phren uninstall
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (64)
+## MCP Tools (66)
 
 ### Search and Browse
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `search_knowledge` | `query`, `type?`, `limit?`, `project?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. |
+| `search_knowledge` | `query`, `type?`, `limit?`, `project?`, `tag?`, `since?`, `status?`, `include_history?`, `synthesize?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. Filter by tag, date, or lifecycle status. |
 | `get_memory_detail` | `id` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
 | `get_project_summary` | `name` | Returns a project's summary card, CLAUDE.md path, and list of indexed files. |
 | `list_projects` | (none) | Lists all projects in the active profile with doc badges and brief descriptions. |
@@ -61,7 +61,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `complete_task` | `project`, `item` | Move a task to Done by text match. |
 | `complete_tasks` | `project`, `items[]` | Bulk complete multiple items in one call. |
 | `remove_task` | `project`, `item` | Remove a task by matching text. |
-| `update_task` | `project`, `item`, `updates` | Update an item's priority, context, section, or linked GitHub issue. |
+| `update_task` | `project`, `item`, `updates` | Update an item's text, priority, context, section, or linked GitHub issue. |
 | `link_task_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a task item. |
 | `promote_task_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a task item and write the link back. |
 | `pin_task` | `project`, `item` | Pin a task so it stays visible across sessions. |
@@ -79,6 +79,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `retract_finding` | `project`, `finding_text`, `reason` | Retract a finding and store lifecycle reason metadata. |
 | `resolve_contradiction` | `project`, `finding_text`, `finding_text_other`, `resolution` | Resolve contradiction status between two findings (`keep_a`, `keep_b`, `keep_both`, `retract_both`). |
 | `get_contradictions` | `project?`, `finding_text?` | List unresolved contradicted findings across one project or all projects, optionally filtered by selector. |
+| `edit_finding` | `project`, `old_text`, `new_text` | Edit a finding in place while preserving inline metadata such as `fid` and citations. |
 | `remove_finding` | `project`, `finding` | Remove a finding by text match. Use when an insight is wrong or outdated. |
 | `remove_findings` | `project`, `findings[]` | Bulk remove multiple findings in one call. |
 | `push_changes` | `message?` | Commit and push all phren changes. Retries with rebase on push conflicts. |
@@ -152,12 +153,22 @@ Skill system behavior:
 | `get_consolidation_status` | `project?` | Check if findings need consolidation. |
 | `health_check` | (none) | Run doctor checks and return results. |
 | `list_hook_errors` | (none) | Show recent hook errors and failures. |
-| `get_review_queue` | `project?` | Read items waiting for review. |
-| `approve_queue_item` | `project`, `item` | Approve an item from the review queue. |
-| `reject_queue_item` | `project`, `item` | Reject an item from the review queue. |
-| `edit_queue_item` | `project`, `item`, `new_text` | Edit an item in the review queue before accepting. |
+| `get_review_queue` | `project?` | Read items waiting for review. The review queue is read-only. |
+| `doctor_fix` | (none) | Run doctor self-heal checks and apply fixes automatically. |
 
-Governance, policy, and maintenance tools are CLI-only. Use `phren config` and `phren maintain` commands.
+### Configuration
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `get_config` | (none) | Read current governance and policy configuration. |
+| `set_proactivity` | `level` | Set agent proactivity level. |
+| `set_task_mode` | `mode` | Set task management mode (`auto`, `manual`, `off`). |
+| `set_finding_sensitivity` | `level` | Set finding capture sensitivity (`minimal`, `conservative`, `balanced`, `aggressive`). |
+| `set_retention_policy` | `settings` | Configure retention and decay policy. |
+| `set_workflow_policy` | `settings` | Configure workflow approval gates. |
+| `set_index_policy` | `settings` | Configure indexer include/exclude globs. |
+
+Maintenance tools are CLI-only. Use `phren config` and `phren maintain` commands.
 
 ## Lifecycle Hooks and Integrations
 
@@ -172,7 +183,7 @@ Copilot CLI, Cursor, and Codex receive generated hook config files plus session 
 | `hook-context` | SessionStart | Detects the current project from cwd and injects its CLAUDE.md and summary. |
 
 Tool integration summary:
-- Claude: full lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`) + MCP
+- Claude: full lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PostToolUse`) + MCP
 - Copilot/Cursor/Codex: MCP + wrapper-driven lifecycle + generated per-tool hook config
 
 ## Modes
@@ -212,6 +223,41 @@ Findings can include source citations (`file:line@commit`). The trust filter val
 
 Finding lifecycle metadata is stored inline and updated by lifecycle tools (`supersede_finding`, `retract_finding`, `resolve_contradiction`).
 Impact scoring tracks which finding IDs were injected into context and marks successful outcomes when session tasks are completed, boosting retrieval priority for repeatedly useful findings.
+
+Lifecycle state also applies retrieval penalties so stale or invalid findings rank lower:
+- Superseded findings: 0.25× confidence multiplier
+- Retracted findings: 0.1× confidence multiplier
+- Contradicted (unresolved) findings: 0.4× confidence multiplier
+
+Inactive findings (superseded, retracted) are also stripped from the FTS index so they cannot appear in search results at all.
+
+### Decay Resistance
+
+Findings that have been repeatedly confirmed or injected into productive sessions accumulate a decay-resistance boost, causing them to decay 3× slower than the default curve.
+
+### Auto-Tagging
+
+Findings without an explicit type tag are auto-detected from content at write time:
+- "We decided..." → `[decision]`
+- "Watch out for..." or "gotcha:..." → `[pitfall]`
+- "Pattern:..." or "always ... before..." → `[pattern]`
+- "Bug in..." or "crashes when..." → `[bug]`
+- "Workaround:..." or "temporary fix" → `[workaround]`
+- "Currently..." or "as of..." → `[context]`
+
+Auto-tagged findings can be corrected by using `findingType` in `add_finding` or by manually editing the type prefix.
+
+### Session Context Diff
+
+On `session_start`, phren reports how many new findings were added since the previous session, giving the agent a quick summary of what changed between sessions without re-reading the full findings file.
+
+### Snippet Deduplication
+
+When the same bullet appears in both a project findings file and the global findings file, phren injects it only once to avoid redundant context.
+
+### Session Momentum
+
+Topics that are frequently queried within a session get up to 30% more of the token budget for context injection, keeping hot topics well-represented as work progresses.
 
 ### Truth Locks
 

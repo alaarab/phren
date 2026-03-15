@@ -1,8 +1,8 @@
-import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { spawn, spawnSync } from "child_process";
+import * as vscode from "vscode";
 import { PhrenClient } from "./phrenClient";
 import { PhrenTreeProvider } from "./providers/PhrenTreeProvider";
 import { showSearchQuickPick } from "./searchQuickPick";
@@ -154,7 +154,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const openFindingDisposable = vscode.commands.registerCommand(
     "phren.openFinding",
-    (finding: { projectName: string; id: string; date: string; text: string }) => {
+    (finding: { projectName: string; id: string; date: string; text: string; type?: string; confidence?: number }) => {
       showFindingDetail(phrenClient, finding, refreshTree);
     },
   );
@@ -220,7 +220,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const openTaskDisposable = vscode.commands.registerCommand(
     "phren.openTask",
-    (task: { projectName: string; id: string; line: string; section: string; checked: boolean }) => {
+    (task: { projectName: string; id: string; line: string; section: string; checked: boolean; priority?: string; pinned?: boolean; issueUrl?: string; issueNumber?: number }) => {
       showTaskDetail(phrenClient, task, refreshTree);
     },
   );
@@ -455,31 +455,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
-  const rejectQueueItemDisposable = vscode.commands.registerCommand(
-    "phren.rejectQueueItem",
-    async (item?: QueueItemData) => {
-      if (!item) {
-        await vscode.window.showWarningMessage("Reject Queue Item is available from the Phren explorer context menu.");
-        return;
-      }
-
-      const confirmed = await vscode.window.showWarningMessage(
-        `Reject queue item "${item.id}"?`,
-        { modal: true, detail: item.text },
-        "Reject",
-      );
-      if (confirmed !== "Reject") return;
-
-      try {
-        await phrenClient.rejectQueueItem(item.projectName, item.text);
-        treeDataProvider.refresh();
-        await vscode.window.showInformationMessage(`Queue item "${item.id}" rejected.`);
-      } catch (error) {
-        await vscode.window.showErrorMessage(`Failed to reject queue item: ${toErrorMessage(error)}`);
-      }
-    },
-  );
-
   // --- Pin Memory command ---
   const pinMemoryDisposable = vscode.commands.registerCommand("phren.pinMemory", async () => {
     let project = statusBar.getActiveProjectName();
@@ -512,6 +487,132 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await vscode.window.showErrorMessage(`Failed to pin memory: ${toErrorMessage(error)}`);
     }
   });
+
+  // --- Supersede Finding command ---
+  const supersedeFindingDisposable = vscode.commands.registerCommand(
+    "phren.supersedeFinding",
+    async (finding?: { projectName: string; id: string; text: string }) => {
+      if (!finding) {
+        await vscode.window.showWarningMessage("Supersede Finding is available from the Phren explorer context menu.");
+        return;
+      }
+      const replacementText = await vscode.window.showInputBox({
+        prompt: "Enter the replacement finding text",
+        placeHolder: "New finding that supersedes this one",
+      });
+      if (!replacementText?.trim()) return;
+      try {
+        await phrenClient.supersedeFinding(finding.projectName, finding.text, replacementText.trim());
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage(`Finding "${finding.id}" superseded.`);
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to supersede finding: ${toErrorMessage(error)}`);
+      }
+    },
+  );
+
+  // --- Retract Finding command ---
+  const retractFindingDisposable = vscode.commands.registerCommand(
+    "phren.retractFinding",
+    async (finding?: { projectName: string; id: string; text: string }) => {
+      if (!finding) {
+        await vscode.window.showWarningMessage("Retract Finding is available from the Phren explorer context menu.");
+        return;
+      }
+      const reason = await vscode.window.showInputBox({
+        prompt: "Enter reason for retracting this finding",
+        placeHolder: "e.g. no longer accurate, superseded by new approach",
+      });
+      if (!reason?.trim()) return;
+      try {
+        await phrenClient.retractFinding(finding.projectName, finding.text, reason.trim());
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage(`Finding "${finding.id}" retracted.`);
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to retract finding: ${toErrorMessage(error)}`);
+      }
+    },
+  );
+
+  // --- Resolve Contradiction command ---
+  const resolveContradictionDisposable = vscode.commands.registerCommand(
+    "phren.resolveContradiction",
+    async (finding?: { projectName: string; id: string; text: string }) => {
+      if (!finding) {
+        await vscode.window.showWarningMessage("Resolve Contradiction is available from the Phren explorer context menu.");
+        return;
+      }
+      const otherText = await vscode.window.showInputBox({
+        prompt: "Enter the contradicting finding text",
+        placeHolder: "The other finding this one contradicts",
+      });
+      if (!otherText?.trim()) return;
+      const resolution = await vscode.window.showInputBox({
+        prompt: "Enter resolution",
+        placeHolder: "How to resolve this contradiction",
+      });
+      if (!resolution?.trim()) return;
+      try {
+        await phrenClient.resolveContradiction(finding.projectName, finding.text, otherText.trim(), resolution.trim());
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage("Contradiction resolved.");
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to resolve contradiction: ${toErrorMessage(error)}`);
+      }
+    },
+  );
+
+  // --- Link Task Issue command ---
+  const linkTaskIssueDisposable = vscode.commands.registerCommand(
+    "phren.linkTaskIssue",
+    async (task?: { projectName: string; id: string; line: string }) => {
+      if (!task) {
+        await vscode.window.showWarningMessage("Link Issue is available from the Phren explorer context menu.");
+        return;
+      }
+      const input = await vscode.window.showInputBox({
+        prompt: "Enter GitHub issue number or URL",
+        placeHolder: "123 or https://github.com/owner/repo/issues/123",
+      });
+      if (!input?.trim()) return;
+      const trimmed = input.trim();
+      const numMatch = trimmed.match(/^(\d+)$/);
+      try {
+        if (numMatch) {
+          await phrenClient.linkTaskIssue(task.projectName, task.line, parseInt(numMatch[1], 10));
+        } else {
+          await phrenClient.linkTaskIssue(task.projectName, task.line, undefined, trimmed);
+        }
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage(`Issue linked to task "${task.id}".`);
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to link issue: ${toErrorMessage(error)}`);
+      }
+    },
+  );
+
+  // --- Create Task Issue command ---
+  const createTaskIssueDisposable = vscode.commands.registerCommand(
+    "phren.createTaskIssue",
+    async (task?: { projectName: string; id: string; line: string }) => {
+      if (!task) {
+        await vscode.window.showWarningMessage("Create Issue is available from the Phren explorer context menu.");
+        return;
+      }
+      try {
+        const raw = await phrenClient.promoteTaskToIssue(task.projectName, task.line);
+        const data = (raw as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+        const issueUrl = typeof data?.issue_url === "string" ? data.issue_url : undefined;
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage(`GitHub issue created for task "${task.id}".`);
+        if (issueUrl) {
+          await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
+        }
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to create issue: ${toErrorMessage(error)}`);
+      }
+    },
+  );
 
   const syncDisposable = vscode.commands.registerCommand("phren.sync", async () => {
     try {
@@ -1035,8 +1136,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     pinTaskDisposable,
     updateTaskDisposable,
     removeFindingDisposable,
-    rejectQueueItemDisposable,
     pinMemoryDisposable,
+    supersedeFindingDisposable,
+    retractFindingDisposable,
+    resolveContradictionDisposable,
+    linkTaskIssueDisposable,
+    createTaskIssueDisposable,
   );
 
   // --- Sync VS Code settings to phren preference files ---

@@ -105,6 +105,49 @@ describe("finding-lifecycle", () => {
     expect(content).toContain('<!-- phren:status_reason "superseded_by" -->');
   });
 
+  it("refuses to mutate archived findings", () => {
+    fs.writeFileSync(
+      findingsPath(tmp.path),
+      [
+        "# demo Findings",
+        "",
+        "## 2026-03-12",
+        "",
+        "- Active finding <!-- fid:aaaabbbb -->",
+        "",
+        "<!-- phren:archive:start -->",
+        "## Archived 2026-03-01",
+        "",
+        "- Archived finding <!-- fid:deadbeef -->",
+        "<!-- phren:archive:end -->",
+        "",
+      ].join("\n"),
+    );
+
+    const supersede = supersedeFinding(tmp.path, PROJECT, "fid:deadbeef", "replacement");
+    expect(supersede.ok).toBe(false);
+    if (!supersede.ok) expect(supersede.code).toBe("VALIDATION_ERROR");
+
+    const retract = retractFinding(tmp.path, PROJECT, "fid:deadbeef", "bad history");
+    expect(retract.ok).toBe(false);
+    if (!retract.ok) expect(retract.code).toBe("VALIDATION_ERROR");
+
+    const contradiction = resolveFindingContradiction(
+      tmp.path,
+      PROJECT,
+      "fid:aaaabbbb",
+      "fid:deadbeef",
+      "keep_a",
+    );
+    expect(contradiction.ok).toBe(false);
+    if (!contradiction.ok) expect(contradiction.code).toBe("VALIDATION_ERROR");
+
+    const content = fs.readFileSync(findingsPath(tmp.path), "utf8");
+    expect(content).toContain("- Archived finding <!-- fid:deadbeef -->");
+    expect(content).not.toContain("phren:superseded_by");
+    expect(content).not.toContain('phren:status "retracted"');
+  });
+
   it("retractFinding writes retracted lifecycle metadata", () => {
     fs.writeFileSync(
       findingsPath(tmp.path),

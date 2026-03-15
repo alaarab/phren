@@ -1735,6 +1735,16 @@ describe("detectTaskIntent", () => {
   it("returns general for ambiguous prompts", () => {
     expect(detectTaskIntent("hello")).toBe("general");
   });
+
+  it("detects explicit slash-command and skill phrasing as skill intent", () => {
+    expect(detectTaskIntent("use /swarm to coordinate agents")).toBe("skill");
+    expect(detectTaskIntent("open the lineup skill")).toBe("skill");
+  });
+
+  it("does not treat filesystem or URL paths as skill intent", () => {
+    expect(detectTaskIntent("inspect /home/alaarab/phren/mcp/src/shared-retrieval.ts")).toBe("general");
+    expect(detectTaskIntent("call /api/health and inspect the response")).toBe("general");
+  });
 });
 
 describe("selectSnippets", () => {
