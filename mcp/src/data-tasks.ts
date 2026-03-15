@@ -602,6 +602,30 @@ export function removeTask(phrenPath: string, project: string, match: string): P
   });
 }
 
+export function removeTasks(phrenPath: string, project: string, matches: string[]): PhrenResult<{ removed: string[]; errors: string[] }> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+
+  return withSafeLock(bPath, () => {
+    const parsed = readTasks(phrenPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+
+    const removed: string[] = [];
+    const errors: string[] = [];
+    for (const match of matches) {
+      const found = findItemByMatch(parsed.data, match);
+      if (found.error || !found.match) {
+        errors.push(match);
+        continue;
+      }
+      const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
+      removed.push(item.line);
+    }
+    writeTaskDoc(parsed.data);
+    return phrenOk({ removed, errors });
+  });
+}
+
 export function updateTask(
   phrenPath: string,
   project: string,
