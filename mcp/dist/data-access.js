@@ -8,7 +8,7 @@ import { isValidProjectName, queueFilePath, safeProjectPath, errorMessage } from
 import { parseCitationComment, parseSourceComment, } from "./content-citation.js";
 import { parseFindingLifecycle, } from "./finding-lifecycle.js";
 import { METADATA_REGEX, isCitationLine, isArchiveStart, isArchiveEnd, parseFindingId, parseAllContradictions, stripComments, } from "./content-metadata.js";
-export { readTasks, readTasksAcrossProjects, resolveTaskItem, addTask, addTasks, completeTasks, completeTask, removeTask, updateTask, linkTaskIssue, pinTask, unpinTask, workNextTask, tidyDoneTasks, taskMarkdown, appendChildFinding, promoteTask, TASKS_FILENAME, TASK_FILE_ALIASES, canonicalTaskFilePath, resolveTaskFilePath, isTaskFileName, } from "./data-tasks.js";
+export { readTasks, readTasksAcrossProjects, resolveTaskItem, addTask, addTasks, completeTasks, completeTask, removeTask, removeTasks, updateTask, linkTaskIssue, pinTask, unpinTask, workNextTask, tidyDoneTasks, taskMarkdown, appendChildFinding, promoteTask, TASKS_FILENAME, TASK_FILE_ALIASES, canonicalTaskFilePath, resolveTaskFilePath, isTaskFileName, } from "./data-tasks.js";
 export { addProjectToProfile, listMachines, listProfiles, listProjectCards, removeProjectFromProfile, setMachineProfile, } from "./profile-store.js";
 export { loadShellState, readRuntimeHealth, resetShellState, saveShellState, } from "./shell-state-store.js";
 function withSafeLock(filePath, fn) {

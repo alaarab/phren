@@ -3,7 +3,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName } from "./utils.js";
-import { addTask as addTaskStore, addTasks as addTasksBatch, taskMarkdown, completeTask as completeTaskStore, completeTasks as completeTasksBatch, removeTask as removeTaskStore, linkTaskIssue, pinTask, workNextTask, tidyDoneTasks, readTasks, readTasksAcrossProjects, resolveTaskItem, TASKS_FILENAME, updateTask as updateTaskStore, promoteTask, } from "./data-access.js";
+import { addTask as addTaskStore, addTasks as addTasksBatch, taskMarkdown, completeTask as completeTaskStore, completeTasks as completeTasksBatch, removeTask as removeTaskStore, removeTasks as removeTasksBatch, linkTaskIssue, pinTask, workNextTask, tidyDoneTasks, readTasks, readTasksAcrossProjects, resolveTaskItem, TASKS_FILENAME, updateTask as updateTaskStore, promoteTask, } from "./data-access.js";
 import { applyGravity } from "./data-tasks.js";
 import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, resolveProjectGithubRepo, } from "./tasks-github.js";
 import { clearTaskCheckpoint } from "./session-checkpoints.js";
@@ -325,6 +325,26 @@ export function register(server, ctx) {
                 return mcpResponse({ ok: false, error: result.error });
             refreshTaskIndex(updateFileInIndex, phrenPath, project);
             return mcpResponse({ ok: true, message: result.data, data: { project, item } });
+        });
+    });
+    server.registerTool("remove_tasks", {
+        title: "◆ phren · remove tasks (bulk)",
+        description: "Remove multiple tasks in one call. Pass an array of partial item texts or IDs.",
+        inputSchema: z.object({
+            project: z.string().describe("Project name."),
+            items: z.array(z.string()).describe("List of partial item texts or IDs to remove."),
+        }),
+    }, async ({ project, items }) => {
+        if (!isValidProjectName(project))
+            return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        return withWriteQueue(async () => {
+            const result = removeTasksBatch(phrenPath, project, items);
+            if (!result.ok)
+                return mcpResponse({ ok: false, error: result.error });
+            const { removed, errors } = result.data;
+            if (removed.length > 0)
+                refreshTaskIndex(updateFileInIndex, phrenPath, project);
+            return mcpResponse({ ok: removed.length > 0, ...(removed.length === 0 ? { error: `No tasks removed: ${errors.join("; ")}` } : {}), message: `Removed ${removed.length}/${items.length} items`, data: { project, removed, errors } });
         });
     });
     server.registerTool("update_task", {

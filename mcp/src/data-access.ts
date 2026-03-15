@@ -49,6 +49,7 @@ export {
   completeTasks,
   completeTask,
   removeTask,
+  removeTasks,
   updateTask,
   linkTaskIssue,
   pinTask,
