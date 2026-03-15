@@ -4,7 +4,7 @@ import { getRegisteredTools, getToolCount, renderToolCatalogMarkdown } from "./t
 describe("tool registry", () => {
   it("extracts the live MCP tool inventory from registerTool calls", () => {
     const tools = getRegisteredTools();
-    expect(tools.length).toBe(66);
+    expect(tools.length).toBe(67);
     expect(tools.some((tool) => tool.name === "edit_finding")).toBe(true);
     expect(tools.some((tool) => tool.name === "get_config")).toBe(true);
     expect(tools.some((tool) => tool.name === "link_task_issue")).toBe(true);
@@ -13,7 +13,7 @@ describe("tool registry", () => {
   });
 
   it("renders grouped markdown for phren.SKILL.md", () => {
-    expect(getToolCount()).toBe(66);
+    expect(getToolCount()).toBe(67);
     const markdown = renderToolCatalogMarkdown();
     expect(markdown).toContain("**Search and browse:**");
     expect(markdown).toContain("**Configuration:**");
