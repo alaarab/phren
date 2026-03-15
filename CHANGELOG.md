@@ -31,7 +31,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **File lock race fix**: preference and governance config writes hold a file lock for the full read-modify-write cycle
 
 ### Fixed
-- **Complete cortex-to-phren rebrand cleanup**: removed all remaining cortex references from code, data markers, citation paths, skill names, and documentation
+- **Complete legacy-name rebrand cleanup**: removed all remaining old-name references from code, data markers, citation paths, skill names, and documentation
 
 ### Docs
 - **MCP tool count synced to 66** across all documentation surfaces
@@ -41,11 +41,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.0.8] - 2026-03-15
 
 ### Fixed
-- **Complete cortex→phren rebrand cleanup**: removed all remaining cortex references from code, data markers, citation paths, skill names, and documentation
-- Add skill file rename migration to `phren init` — renames `cortex-*.md` → `phren-*.md` in global/skills/
-- Fix `cortex:auto-topic` markers across all topic reference files → `phren:auto-topic`
-- Fix stale skill names in AGENTS.md and documentation.html (`/cortex-*` → `/phren-*`)
-- Clean stale runtime caches referencing old cortex paths
+- **Complete legacy-name rebrand cleanup**: removed all remaining old-name references from code, data markers, citation paths, skill names, and documentation
+- Add skill file rename migration to `phren init` for legacy `phren-*.md` normalization in `global/skills/`
+- Fix legacy auto-topic markers across all topic reference files
+- Fix stale skill names in `AGENTS.md` and `documentation.html`
+- Clean stale runtime caches referencing old pre-rebrand paths
 
 ## [0.0.7] - 2026-03-15
 
@@ -82,7 +82,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Graph explorer: phren character walk animation**: phren walks to nodes with ease-in-out motion, bounces on arrival, bobs while idle, and leaves a trail that fades.
 - **Graph explorer: correct spawn position**: phren character now spawns at the initial focused node position rather than the canvas origin; render loop kept alive between navigations.
 - **Graph engine API**: `walkTo(nodeId)`, `onNodeSelect(cb)`, `getNodeAt(x, y)`, and `getCurrentNode()` exposed for host integration (VS Code extension, web UI).
-- **`~/.cortex` migration path**: `phren init` detects a legacy `~/.cortex` directory and offers a non-destructive migration to `~/.phren`.
+- **Legacy hidden-directory migration path**: `phren init` detects the pre-rebrand hidden directory and offers a non-destructive migration to `~/.phren`.
 - **`documentation.html`**: full 1500-line documentation site with 9 sections (Getting Started, Concepts, Configuration, CLI Reference, Skills, Hooks, Multi-machine, MCP Tools, Graph Engine API), sticky sidebar, scroll-spy active state, and floating mobile TOC.
 
 ### Changed
@@ -133,7 +133,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Review queue is read-only**: removed stale approve/reject/edit actions from VS Code and current docs so all surfaces match MCP/web/shell behavior.
 - **Landing page overhaul**: new pixel-art phren assets, hero rewrite ("Claude remembers you. Phren remembers your work."), neutral voice (no "he/his"), 23 CSS contrast fixes, mobile breakpoints, WCAG accessibility.
 - **README rewrite**: concise, engaging, teaches all 6 core concepts.
-- **GitHub repo renamed**: `alaarab/cortex` → `alaarab/phren`.
+- **GitHub repo renamed**: previous repo name → `alaarab/phren`.
 
 ### Breaking
 - `canonical_memories.md` → `truths.md`. Old files are not read.

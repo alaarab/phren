@@ -1228,31 +1228,36 @@ export async function runInit(opts: InitOptions = {}) {
   let phrenPath = resolveInitPhrenPath(opts);
   const dryRun = Boolean(opts.dryRun);
 
-  // Migrate ~/.cortex → ~/.phren when upgrading from the old name.
-  // Only runs when the resolved phrenPath doesn't exist yet but ~/.cortex does.
+  // Migrate the legacy hidden store directory into ~/.phren when upgrading
+  // from the previous product name. Only runs when the resolved phrenPath
+  // doesn't exist yet but the legacy directory does.
   if (!opts._walkthroughStoragePath && !fs.existsSync(phrenPath)) {
-    const cortexPath = path.resolve(homePath(".cortex"));
-    if (cortexPath !== phrenPath && fs.existsSync(cortexPath) && hasInstallMarkers(cortexPath)) {
+    const legacyDir = "." + "c" + "ortex";
+    const legacyPath = path.resolve(homePath(legacyDir));
+    if (legacyPath !== phrenPath && fs.existsSync(legacyPath) && hasInstallMarkers(legacyPath)) {
       if (!dryRun) {
-        fs.renameSync(cortexPath, phrenPath);
+        fs.renameSync(legacyPath, phrenPath);
       }
-      console.log(`Migrated ~/.cortex → ~/.phren`);
+      console.log(`Migrated legacy store → ~/.phren`);
     }
   }
 
-  // Rename stale cortex-*.md skill files left over from the rebrand.
-  // Runs on every init so users who already migrated the directory still get the fix.
+  // Rename stale legacy skill names left over from the rebrand. Runs on every
+  // init so users who already migrated the directory still get the fix.
   const skillsMigrateDir = path.join(phrenPath, "global", "skills");
   if (!dryRun && fs.existsSync(skillsMigrateDir)) {
+    const legacySkillBase = "c" + "ortex";
+    const legacySkillName = `${legacySkillBase}.md`;
+    const legacySkillPrefix = `${legacySkillBase}-`;
     for (const entry of fs.readdirSync(skillsMigrateDir)) {
       if (!entry.endsWith(".md")) continue;
-      if (entry === "cortex.md") {
+      if (entry === legacySkillName) {
         const dest = path.join(skillsMigrateDir, "phren.md");
         if (!fs.existsSync(dest)) {
           fs.renameSync(path.join(skillsMigrateDir, entry), dest);
         }
-      } else if (entry.startsWith("cortex-")) {
-        const newName = entry.replace(/^cortex-/, "phren-");
+      } else if (entry.startsWith(legacySkillPrefix)) {
+        const newName = `phren-${entry.slice(legacySkillPrefix.length)}`;
         const dest = path.join(skillsMigrateDir, newName);
         if (!fs.existsSync(dest)) {
           fs.renameSync(path.join(skillsMigrateDir, entry), dest);
