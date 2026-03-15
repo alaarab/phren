@@ -116,14 +116,15 @@ Phren MCP is split into 12 modules:
 11. Extraction
 12. Configuration
 
-Newly documented finding lifecycle tools:
+Finding lifecycle and editing tools:
 
 - `supersede_finding`
 - `retract_finding`
 - `resolve_contradiction`
 - `get_contradictions`
+- `edit_finding`
 
-Newly documented session continuity tool:
+Session continuity tool:
 
 - `session_history`
 

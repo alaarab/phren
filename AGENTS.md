@@ -23,7 +23,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 | `mcp/src/data-access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
 | `mcp/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
 | `mcp/src/status.ts` | `phren status`: health, project, stats overview |
-| `skills/` | Phren slash commands: sync, init, discover, consolidate, profiles |
+| `skills/` | Phren slash commands: sync, init, discover, consolidate, profiles, docs |
 | `starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
 | `starter/templates/` | Project templates: python-project, monorepo, library, frontend |
 | `docs/index.html` | GitHub Pages site |
@@ -40,7 +40,7 @@ npm publish        # publish to npm (needs OTP)
 
 ## Current Version
 
-0.0.8
+0.0.9
 
 ## MCP Tools (66)
 
@@ -138,20 +138,47 @@ Maintenance tools are CLI-only (see `phren config` and `phren maintain`).
 
 ```bash
 phren                                 Interactive shell
+phren quickstart                      Quick setup: init + project scaffold
 phren search <query> [--project <n>]  Search knowledge base
 phren search --history                Show recent searches
 phren search --from-history <n>       Re-run search #n from history
 phren add-finding <project> "..."     Save an insight
 phren pin <project> "..."             Pin canonical memory
-phren task                         Cross-project task view
+phren tasks                           Cross-project task view
 phren sessions [session-id]           Session history; drill into a session
+phren review [project]                Show review queue items
+phren consolidation-status [project]  Check if findings need consolidation
+phren session-context                 Show current session state
 phren skill-list                      List installed skills (alias for skills list)
-phren doctor [--fix]                  Health check and self-heal
-phren web-ui [--port=3499]             Memory web UI
+phren detect-skills [--import]        Find untracked skills in ~/.claude/skills/
+phren doctor [--fix] [--agents]       Health check and self-heal
+phren web-ui [--port=3499]            Memory web UI
 phren status                          Health, project, stats
 phren verify                          Post-init verification checks
 phren uninstall                       Remove phren config and hooks
-phren update                          Update to latest version
+phren update [--refresh-starter]      Update to latest version
+phren graph [--project <n>]           Show fragment knowledge graph
+phren graph link <project> "finding" "fragment"
+                                       Link a finding to a fragment manually
+
+phren task add <project> "..."                  Add a task
+phren task complete <project> "..."             Complete a task by text match
+phren task remove <project> "..."               Remove a task
+phren task update <project> "..." [--priority=high|medium|low] [--section=Active|Queue|Done]
+phren task next [project]                       Pick next highest-priority task
+phren task promote <project> "..." [--active]   Promote to higher priority
+phren task pin <project> "..."                  Pin a task across sessions
+phren task tidy [project] [--keep=<n>]          Archive completed tasks
+phren task link <project> "..." --issue <n>     Link GitHub issue to task
+phren task create-issue <project> "..." [--repo <owner/name>] [--done]
+phren task reorder <project> "..." --rank=<n>   Reorder within section
+
+phren finding add <project> "..."               Add a finding
+phren finding remove <project> "..."            Remove a finding
+phren finding supersede <project> "..." --by "..."  Mark superseded
+phren finding retract <project> "..." --reason "..."  Retract with reason
+phren finding contradictions [project]          List contradicted findings
+phren finding resolve <project> "..." "..." <keep_a|keep_b|keep_both|retract_both>
 
 phren add [path] [--ownership <mode>]            Add current or specified directory as a project
 phren projects list                              List all projects
@@ -162,18 +189,30 @@ phren hooks-mode [on|off|status]                 Toggle hook execution
 
 phren skills list                            List all installed skills
 phren skills add <project> <path>            Add a skill to a project
+phren skills show <name> [--project <name>]  Show skill content
+phren skills edit <name> [--project <name>]  Edit skill in $EDITOR
+phren skills resolve <project|global>        Print resolved skill manifest
+phren skills doctor <project|global>         Diagnose skill visibility
+phren skills sync <project|global>           Regenerate skill mirror
 phren skills enable <project|global> <name>  Enable a disabled skill without rewriting it
 phren skills disable <project|global> <name> Disable a skill without deleting it
 phren skills remove <project> <name>         Remove a skill from a project
 
 phren hooks list [--project <name>]   Show hook enable/disable status per tool and optional project overrides
+phren hooks show <tool>               Show hook config for a tool
+phren hooks edit <tool>               Edit hook config in $EDITOR
 phren hooks enable <tool>             Enable hooks for tool (claude/copilot/cursor/codex)
 phren hooks disable <tool>            Disable hooks for tool
+phren hooks add-custom <event> <cmd>  Add a custom integration hook
+phren hooks remove-custom <event>     Remove custom hooks by event
+phren hooks errors [--limit <n>]      Show recent hook errors
 
 phren config policy [get|set ...]     Retention, TTL, confidence, decay
 phren config workflow [get|set ...]   Approval gates, risky thresholds
 phren config access [get|set ...]     Role-based permissions
 phren config index [get|set ...]      Indexer include/exclude globs
+phren config synonyms [list|add|remove] ...  Manage learned synonyms
+phren config project-ownership [mode] Default ownership for new projects
 phren config telemetry [on|off]       Opt-in usage telemetry
 phren config machines                 Registered machines
 phren config profiles                 Profiles and projects

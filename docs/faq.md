@@ -100,11 +100,12 @@ In practice, well-configured agents save findings automatically as they work. Yo
 
 ## How do finding lifecycle and contradictions work?
 
-Findings now have explicit lifecycle operations:
+Findings have explicit lifecycle and editing operations:
 - `supersede_finding`: mark older guidance replaced by newer guidance
 - `retract_finding`: invalidate a finding with a reason
 - `resolve_contradiction`: resolve status between conflicting findings
 - `get_contradictions`: list unresolved contradicted findings
+- `edit_finding`: edit a finding in place while preserving inline metadata (lifecycle state, citations, timestamps)
 
 Lifecycle metadata stays attached to finding entries, so history remains auditable instead of being silently deleted.
 

@@ -15,6 +15,8 @@ This extension connects VS Code to your local Phren store and MCP server so you 
 - Updated **review queue viewer** with a contextual notice explaining what each queue section contains.
 - Opens findings, skills, reference files, queue items, and sessions in read-only or editable panels directly in VS Code.
 - Lets you add a finding from the editor context menu by selecting text and running **Phren: Add Finding**.
+- **Finding lifecycle commands**: supersede, retract, and resolve contradictions between findings directly from the sidebar.
+- **GitHub issue integration**: link tasks to existing issues or create new issues from tasks, all from the sidebar.
 - Syncs your Phren store (`git push`) without leaving VS Code.
 
 ## Who This Is For
@@ -48,6 +50,7 @@ Once set, open the Phren activity bar item and the extension loads your projects
 
 ### Command Palette (16)
 
+
 These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
 
 | Command | Keybinding | Description |
@@ -69,7 +72,7 @@ These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
 | `Phren: Set Machine Alias` | — | Set a friendly name for this machine in `machines.yaml`. |
 | `Phren: Open machines.yaml` | — | Open the machines config file directly. |
 
-### Sidebar and Context Menu (15)
+### Sidebar and Context Menu (20)
 
 These commands fire from the Phren sidebar or editor context menu. They are not shown in the command palette by default:
 
@@ -90,6 +93,11 @@ These commands fire from the Phren sidebar or editor context menu. They are not 
 | `Phren: Pin Task` | Active task inline action | Pin a task so it stays visible across sessions. |
 | `Phren: Update Task` | Active task inline action | Edit a task's text or priority. |
 | `Phren: Remove Finding` | Finding item inline action | Remove a finding by match. |
+| `Phren: Supersede Finding` | Finding item context menu | Mark a finding as superseded by a newer one. |
+| `Phren: Retract Finding` | Finding item context menu | Retract a finding with a reason. |
+| `Phren: Resolve Contradiction` | Finding item context menu | Resolve a contradiction between two conflicting findings. |
+| `Phren: Link GitHub Issue` | Task item inline action | Link or unlink an existing GitHub issue on a task. |
+| `Phren: Create GitHub Issue` | Task item inline action | Create a GitHub issue from a task item and link it back. |
 
 ## Core Workflows
 
