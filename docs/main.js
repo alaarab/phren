@@ -11,8 +11,8 @@ window.addEventListener('scroll', () => {
   let W, H, nodes, raf;
 
   function resize() {
-    W = canvas.width = canvas.offsetWidth;
-    H = canvas.height = canvas.offsetHeight;
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
   }
 
   function mkNode() {
