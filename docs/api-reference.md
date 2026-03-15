@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 66 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 67 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -135,6 +135,15 @@ Remove a task from a project's `tasks.md` by matching text or task ID.
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `item` | string | yes | Exact/partial task text, or task ID like `A1`, `Q3`, `D2`. |
+
+### `remove_tasks`
+
+Remove multiple tasks in one call. Pass an array of partial item texts or IDs.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `items` | string[] | yes | List of partial item texts or IDs to remove. |
 
 ### `update_task`
 
