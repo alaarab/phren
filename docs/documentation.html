@@ -896,10 +896,34 @@ phren search --from-history 3</code></pre>
         <p>Show active and queued tasks across all projects.</p>
         <pre><code>phren tasks</code></pre>
 
+        <h3 class="doc-h3"><code>phren task</code></h3>
+        <p>Task subcommand namespace for per-project task operations.</p>
+        <pre><code>phren task &lt;subcommand&gt; [args]</code></pre>
+
+        <h3 class="doc-h3"><code>phren finding</code></h3>
+        <p>Finding subcommand namespace for per-project finding operations.</p>
+        <pre><code>phren finding &lt;subcommand&gt; [args]</code></pre>
+
         <h3 class="doc-h3"><code>phren sessions</code></h3>
         <p>View session history or drill into a specific session to see its findings and tasks.</p>
         <pre><code>phren sessions
 phren sessions abc12345</code></pre>
+
+        <h3 class="doc-h3"><code>phren review</code></h3>
+        <p>Show review queue items with date, confidence, and text.</p>
+        <pre><code>phren review [project]</code></pre>
+
+        <h3 class="doc-h3"><code>phren consolidation-status</code></h3>
+        <p>Check if findings need consolidation for a project or all projects.</p>
+        <pre><code>phren consolidation-status [project]</code></pre>
+
+        <h3 class="doc-h3"><code>phren session-context</code></h3>
+        <p>Show current session state: project, duration, and findings added so far.</p>
+        <pre><code>phren session-context</code></pre>
+
+        <h3 class="doc-h3"><code>phren quickstart</code></h3>
+        <p>Quick setup: runs init and scaffolds a project in one step.</p>
+        <pre><code>phren quickstart</code></pre>
 
         <!-- PROJECTS -->
         <h2 class="doc-h2">Projects</h2>
@@ -944,13 +968,18 @@ phren projects remove old-project</code></pre>
               <tr><td><code>enable &lt;project|global&gt; &lt;name&gt;</code></td><td>Enable a disabled skill without rewriting it</td></tr>
               <tr><td><code>disable &lt;project|global&gt; &lt;name&gt;</code></td><td>Disable a skill without deleting it</td></tr>
               <tr><td><code>remove &lt;project&gt; &lt;name&gt;</code></td><td>Remove a skill file</td></tr>
+              <tr><td><code>resolve &lt;project|global&gt;</code></td><td>Print the resolved skill manifest for one scope</td></tr>
+              <tr><td><code>doctor &lt;project|global&gt;</code></td><td>Diagnose resolved skill visibility and mirror state</td></tr>
+              <tr><td><code>sync &lt;project|global&gt;</code></td><td>Regenerate the resolved mirror for one scope</td></tr>
             </tbody>
           </table>
         </div>
         <pre><code>phren skills list
 phren skills add my-project /path/to/skill.md
 phren skills enable global my-skill
-phren skills disable my-project old-skill</code></pre>
+phren skills disable my-project old-skill
+phren skills resolve global
+phren skills doctor my-project</code></pre>
 
         <h3 class="doc-h3"><code>phren detect-skills</code></h3>
         <p>Scan the environment for installed tools and auto-detect applicable skills.</p>
@@ -993,13 +1022,17 @@ phren hooks-mode on|off|status</code></pre>
               <tr><td><code>telemetry [on|off]</code></td><td>Opt-in usage telemetry (stored locally only)</td></tr>
               <tr><td><code>machines</code></td><td>Registered machine list</td></tr>
               <tr><td><code>profiles</code></td><td>Profiles and linked projects</td></tr>
+              <tr><td><code>synonyms [list|add|remove]</code></td><td>Manage project learned synonyms</td></tr>
+              <tr><td><code>project-ownership [mode]</code></td><td>Default ownership for future project enrollments</td></tr>
             </tbody>
           </table>
         </div>
         <pre><code>phren config policy get
 phren config workflow set taskMode=auto
 phren config telemetry on
-phren config index set includeGlobs="**/*.md"</code></pre>
+phren config index set includeGlobs="**/*.md"
+phren config synonyms list
+phren config project-ownership detached</code></pre>
 
         <!-- MAINTENANCE -->
         <h2 class="doc-h2">Maintenance</h2>
@@ -1037,9 +1070,10 @@ phren inspect-index        # Inspect FTS5 index contents</code></pre>
 
         <!-- FRAGMENT GRAPH -->
         <h2 class="doc-h2">Fragment graph</h2>
-        <pre><code>phren search-fragments &lt;name&gt;      # Search named fragments in the knowledge graph
-phren related-docs &lt;fragment-name&gt; # Find docs that reference a named fragment
-phren graph &lt;subcommand&gt;           # Subcommand namespace for graph operations</code></pre>
+        <pre><code>phren search-fragments &lt;name&gt;               # Search named fragments in the knowledge graph
+phren related-docs &lt;fragment-name&gt;          # Find docs that reference a named fragment
+phren graph [--project &lt;n&gt;] [--limit &lt;n&gt;]  # Show the fragment knowledge graph
+phren graph link &lt;project&gt; "finding" "fragment"  # Link a finding to a fragment manually</code></pre>
 
         <!-- SHELL AND WEB UI -->
         <h2 class="doc-h2">Shell and web UI</h2>
@@ -1363,7 +1397,7 @@ push_changes("sync: manual push from home machine")</code></pre>
       <!-- ============================================================ -->
       <section class="doc-section" id="mcp-tools">
         <h1 class="doc-section-title">MCP Tools</h1>
-        <p class="doc-section-subtitle">65 tools across 12 modules. All return <code>{ ok, message, data?, error? }</code>.</p>
+        <p class="doc-section-subtitle">66 tools across 12 modules. All return <code>{ ok, message, data?, error? }</code>.</p>
 
         <!-- SEARCH -->
         <div class="tool-group">
@@ -1384,7 +1418,7 @@ push_changes("sync: manual push from home machine")</code></pre>
           <div class="tool-row"><span class="tool-name">complete_task</span><span class="tool-desc">Move a task to Done by text match. Clears the checkpoint file for that task.</span></div>
           <div class="tool-row"><span class="tool-name">complete_tasks</span><span class="tool-desc">Bulk complete multiple tasks in one call.</span></div>
           <div class="tool-row"><span class="tool-name">remove_task</span><span class="tool-desc">Remove a task by matching text or task ID.</span></div>
-          <div class="tool-row"><span class="tool-name">update_task</span><span class="tool-desc">Update a task's priority, context, section, or linked GitHub issue.</span></div>
+          <div class="tool-row"><span class="tool-name">update_task</span><span class="tool-desc">Update a task's text, priority, context, section, or linked GitHub issue.</span></div>
           <div class="tool-row"><span class="tool-name">link_task_issue</span><span class="tool-desc">Link or unlink an existing GitHub issue on a task item.</span></div>
           <div class="tool-row"><span class="tool-name">promote_task_to_issue</span><span class="tool-desc">Create a GitHub issue from a task item and write the link back into the task.</span></div>
           <div class="tool-row"><span class="tool-name">pin_task</span><span class="tool-desc">Pin a task so it floats to the top of its section and stays visible across sessions.</span></div>
@@ -1395,13 +1429,14 @@ push_changes("sync: manual push from home machine")</code></pre>
 
         <!-- FINDINGS -->
         <div class="tool-group">
-          <p class="tool-group-title">Finding capture (10 tools)</p>
+          <p class="tool-group-title">Finding capture (11 tools)</p>
           <div class="tool-row"><span class="tool-name">add_finding</span><span class="tool-desc">Append an insight to FINDINGS.md. Optional: <code>citation</code> (file/line/repo/commit/task_item), <code>findingType</code> (decision/pitfall/pattern/…), <code>source</code> (human/agent/hook/extract/consolidation/unknown), <code>sessionId</code>. Returns potential duplicates via Jaccard similarity for the agent to evaluate — no extra API call.</span></div>
           <div class="tool-row"><span class="tool-name">add_findings</span><span class="tool-desc">Bulk add multiple findings in one call.</span></div>
           <div class="tool-row"><span class="tool-name">supersede_finding</span><span class="tool-desc">Mark a finding as superseded by a newer one. Superseded findings score 0.25x in retrieval and are stripped from the FTS index.</span></div>
           <div class="tool-row"><span class="tool-name">retract_finding</span><span class="tool-desc">Retract a finding with a reason. Retracted findings score 0.1x in retrieval and are stripped from the FTS index.</span></div>
           <div class="tool-row"><span class="tool-name">resolve_contradiction</span><span class="tool-desc">Resolve a contradiction between two findings: keep_a, keep_b, keep_both, or retract_both.</span></div>
           <div class="tool-row"><span class="tool-name">get_contradictions</span><span class="tool-desc">List unresolved contradicted findings, optionally filtered by project or finding text.</span></div>
+          <div class="tool-row"><span class="tool-name">edit_finding</span><span class="tool-desc">Edit a finding in place while preserving inline metadata (lifecycle state, citations, timestamps).</span></div>
           <div class="tool-row"><span class="tool-name">remove_finding</span><span class="tool-desc">Remove a finding by text match.</span></div>
           <div class="tool-row"><span class="tool-name">remove_findings</span><span class="tool-desc">Bulk remove multiple findings in one call.</span></div>
           <div class="tool-row"><span class="tool-name">push_changes</span><span class="tool-desc">Commit and push all phren changes. Retries with rebase on push conflicts.</span></div>

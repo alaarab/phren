@@ -9,13 +9,14 @@ Quick start:
 MCP Tools (66 across 12 modules):
 
   Search and browse:
-    search_knowledge(query, type?, limit?, project?) - FTS5 search with synonym expansion
+    search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
     get_memory_detail(id) - fetch full content of a memory by id (e.g. mem:project/filename)
     get_project_summary(name) - project summary card and file list
-    list_projects() - all projects in active profile
+    list_projects(page?, page_size?) - all projects in active profile with pagination
+    get_findings(project, limit?, include_superseded?, include_history?, status?) - read recent findings without a search query
 
   Task management:
-    get_tasks(project?, id?, item?) - read task, or fetch a single item by ID or text
+    get_tasks(project?, id?, item?, status?, limit?, done_limit?, offset?, summary?) - read tasks with pagination, summary mode, and section filtering
     add_task(project, item) - add task to Queue section
     add_tasks(project, items[]) - bulk add multiple tasks
     complete_task(project, item) - match by text, move to Done
@@ -25,9 +26,9 @@ MCP Tools (66 across 12 modules):
     link_task_issue(project, item, issue_number?, issue_url?, unlink?) - link or unlink an existing GitHub issue on a task item
     promote_task_to_issue(project, item, repo?, title?, body?, mark_done?) - create a GitHub issue from a task item and link it back
     pin_task(project, item) - pin a task so it stays visible across sessions
-    work_next_task(project?) - pick the next highest-priority task to work on
-    promote_task(project, item) - promote a task to a higher priority section
-    tidy_done_tasks(project?) - archive completed tasks to keep the list clean
+    work_next_task(project) - pick the next highest-priority task to work on
+    promote_task(project, item, move_to_active?) - promote a task to a higher priority section
+    tidy_done_tasks(project, keep?, dry_run?) - archive completed tasks to keep the list clean
 
   Finding capture:
     add_finding(project, finding, citation?: {file?, line?, repo?, commit?, task_item?}, findingType?, sessionId?, source?) - append finding with optional citation/type/provenance
@@ -44,11 +45,11 @@ MCP Tools (66 across 12 modules):
     push_changes(message?) - commit and push all phren changes
 
   Fragment graph:
-    search_fragments(name) - find fragments and their related docs
-    get_related_docs(fragment) - get docs linked to a named fragment
-    read_graph(project?) - read the fragment graph for a project or all projects
-    link_findings(project, finding_text, fragment, relation?) - manually link a finding to a fragment
-    cross_project_fragments() - find fragments shared across multiple projects
+    search_fragments(query, project?, limit?) - find fragments and their related docs
+    get_related_docs(entity, project?, limit?) - get docs linked to a named fragment
+    read_graph(project?, limit?, offset?) - read the fragment graph with pagination
+    link_findings(project, finding_text, entity, relation?, entity_type?) - manually link a finding to a fragment
+    cross_project_fragments(entity, exclude_project?, limit?) - find fragments shared across multiple projects
 
   Session management (for agents without hooks):
     session_start(project?, connectionId?) - mark session start, retrieve prior session context + checkpoints, return sessionId
@@ -61,7 +62,7 @@ MCP Tools (66 across 12 modules):
     memory_feedback(key, feedback) - record helpful/reprompt/regression outcomes
 
   Data management:
-    add_project(path, profile?) - bootstrap a repo or working directory into phren and add it to the active profile
+    add_project(path, profile?, ownership?) - bootstrap a repo or working directory into phren and add it to the active profile
     export_project(project) - export project data as portable JSON
     import_project(data) - import project from exported JSON
     manage_project(project, action) - archive or unarchive a project
@@ -82,26 +83,23 @@ MCP Tools (66 across 12 modules):
   Hooks management:
     list_hooks(project?) - show hook status for all tools + custom hooks + config paths, optionally including project overrides
     toggle_hooks(enabled, tool?, project?, event?) - enable/disable hooks globally, per tool, or per tracked project/event
-    add_custom_hook(event, command, timeout?) - add a custom integration hook
+    add_custom_hook(event, command?, webhook?, secret?, timeout?) - add a custom integration hook (command or webhook)
     remove_custom_hook(event, command?) - remove custom hooks by event/command match
-
-  Finding retrieval:
-    get_findings(project, limit?) - read recent findings without a search query
 
   Health and review:
     get_consolidation_status(project?) - check if findings need consolidation
     health_check() - run doctor checks and return results
-    list_hook_errors() - show recent hook errors and failures
+    list_hook_errors(limit?) - show recent hook errors and failures
     get_review_queue(project?) - read items waiting for review (review queue is read-only)
-    doctor_fix() - run doctor self-heal checks and apply fixes automatically
+    doctor_fix(check_data?) - run doctor self-heal checks and apply fixes automatically
 
   Finding extraction:
-    auto_extract_findings(context) - extract findings from conversation context automatically
+    auto_extract_findings(project, text, model?, dryRun?) - extract findings from text (max 10000 chars)
 
   Configuration:
-    get_config() - read current governance and policy configuration
-    set_proactivity(level) - set agent proactivity level
-    set_task_mode(mode) - set task management mode (auto, manual, off)
+    get_config(domain?) - read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, or all)
+    set_proactivity(level, scope?) - set agent proactivity level (high/medium/low) with optional scope (base/findings/tasks)
+    set_task_mode(mode) - set task management mode (off, manual, suggest, auto)
     set_finding_sensitivity(level) - set finding capture sensitivity (minimal, conservative, balanced, aggressive)
     set_retention_policy(settings) - configure retention and decay policy
     set_workflow_policy(settings) - configure workflow approval gates
@@ -109,33 +107,114 @@ MCP Tools (66 across 12 modules):
 
 CLI Commands:
 
-  phren                               - interactive shell (TTY default)
-  phren shell                         - explicit shell mode
-  phren search <query>                - FTS5 search with synonym expansion
-  phren add-finding <project> "..."   - append a finding from the terminal
-  phren pin <project> "..."           - pin a finding
-  phren tasks                      - cross-project task view
-  phren skill-list                    - list installed skills
-  phren doctor [--fix] [--agents]     - health checks with optional self-heal
-  phren web-ui [--port=3499]          - lightweight memory web UI
-  phren status                        - health, active project, stats
-  phren update [--refresh-starter]    - update package; optionally refresh starter globals
-  phren verify                        - post-init verification
+  Interactive:
+    phren                               - interactive shell (TTY default)
+    phren shell                         - explicit shell mode
+    phren quickstart                    - quick setup: init + project scaffold
 
-  phren config policy get|set ...     - retention, TTL, decay, confidence
-  phren config workflow get|set ...   - approval workflow settings
-  phren config access get|set ...     - role-based permissions
-  phren config index get|set ...      - indexer include/exclude globs
-  phren config machines               - registered machines
-  phren config profiles               - profiles and projects
+  Search and discovery:
+    phren search <query> [--project <n>] [--type <t>] [--limit <n>] - FTS5 search
+    phren search --history              - show recent searches
+    phren search --from-history <n>     - re-run search #n
+    phren search-fragments <query>      - search fragments (libraries/tools/concepts)
+    phren related-docs <entity>         - find docs linked to a fragment
+    phren graph [--project <n>] [--limit <n>] - show fragment knowledge graph
+    phren graph link <project> "finding" "fragment" - link finding to fragment
 
-  phren maintain govern [project]     - queue stale/conflicting memories
-  phren maintain prune [project]      - delete expired entries
-  phren maintain consolidate [project]- deduplicate FINDINGS.md
-  phren maintain extract [project]    - mine git and GitHub signals
+  Finding management:
+    phren add-finding <project> "..."   - append a finding
+    phren pin <project> "..."           - pin a truth (canonical memory)
+    phren review [project]              - show review queue items
+    phren consolidation-status [project]- check if findings need consolidation
+    phren finding add <project> "<text>"         - add finding
+    phren finding remove <project> "<text>"      - remove finding
+    phren finding list <project>                 - list findings
+    phren finding supersede <project> "<text>" --by "<newer>" - mark superseded
+    phren finding retract <project> "<text>" --reason "<reason>" - retract
+    phren finding contradictions [project]       - list contradicted findings
+    phren finding resolve <project> "<a>" "<b>" <keep_a|keep_b|keep_both|retract_both> - resolve contradiction
 
-  phren mcp-mode on|off|status        - toggle MCP integration
-  phren hooks-mode on|off|status      - toggle hook execution
+  Task management:
+    phren tasks                         - cross-project task view
+    phren task add <project> "<text>"   - add task
+    phren task complete <project> "<text>" - move task to done
+    phren task remove <project> "<text>"  - remove task
+    phren task next <project>           - pick highest-priority task
+    phren task promote <project> "<text>" [--active] - promote priority
+    phren task tidy <project> [--keep=<n>] [--dry-run] - archive completed
+    phren task link <project> "<text>" --issue <number> - link to GitHub issue
+    phren task link <project> "<text>" --unlink  - remove GitHub link
+    phren task create-issue <project> "<text>" [--repo <owner/name>] [--done] - create GitHub issue from task
+    phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] - update metadata
+    phren task pin <project> "<text>"   - pin task to stay visible
+
+  Skills management:
+    phren skills list [--project <name>]  - list installed skills
+    phren skills show <name>              - show skill content
+    phren skills edit <name>              - edit skill in $EDITOR
+    phren skills add <project> <path>     - link/copy skill into project
+    phren skills enable <project|global> <name>  - enable disabled skill
+    phren skills disable <project|global> <name> - disable skill
+    phren skills remove <project> <name>  - remove project skill
+    phren skills resolve <project|global> - print resolved skill manifest
+    phren skills doctor <project|global>  - diagnose skill visibility
+    phren skills sync <project|global>    - regenerate resolved mirror
+    phren skill-list                      - alias for skills list
+    phren detect-skills [--import]        - find untracked skills
+
+  Hooks management:
+    phren hooks list [--project <name>]   - show hook status
+    phren hooks show <tool>               - show hook config
+    phren hooks edit <tool>               - edit hook config
+    phren hooks enable <tool>             - enable hooks for tool
+    phren hooks disable <tool>            - disable hooks for tool
+    phren hooks add-custom <event> <command> - add custom hook
+    phren hooks remove-custom <event> [<command>] - remove custom hooks
+    phren hooks errors [--limit <n>]      - show recent hook errors
+
+  Project management:
+    phren add [path] [--ownership <mode>] - add directory as project
+    phren projects list                   - list all projects
+    phren projects configure <name> [--ownership <mode>] [--hooks on|off] - update settings
+    phren projects remove <name>          - remove project
+    phren projects export <name>          - export project as JSON
+    phren projects import <data>          - import project from JSON
+    phren projects archive <name>         - archive project
+    phren projects unarchive <name>       - restore archived project
+
+  Configuration:
+    phren config policy get|set ...       - retention, TTL, decay, confidence
+    phren config workflow get|set ...     - approval workflow settings
+    phren config access get|set ...       - role-based permissions
+    phren config index get|set ...        - indexer include/exclude globs
+    phren config synonyms [list|add|remove] - manage learned synonyms
+    phren config project-ownership [mode] - default ownership for new projects
+    phren config telemetry [on|off]       - opt-in usage telemetry
+    phren config machines                 - registered machines
+    phren config profiles                 - profiles and projects
+
+  Maintenance:
+    phren maintain govern [project]       - queue stale/conflicting memories
+    phren maintain prune [project]        - delete expired entries
+    phren maintain consolidate [project]  - deduplicate FINDINGS.md
+    phren maintain extract [project]      - mine git and GitHub signals
+
+  Debugging and status:
+    phren status                          - health, active project, stats
+    phren doctor [--fix] [--check-data] [--agents] [--parity] - health check
+    phren debug-injection --prompt "..."  - preview hook-prompt injection
+    phren inspect-index [--project <n>]   - inspect FTS index contents
+    phren sessions [session-id]           - session history; drill into session
+    phren session-context                 - show current session state
+    phren quality-feedback --key=<k> --type=helpful|reprompt|regression - record memory feedback
+    phren web-ui [--port=3499] [--no-open]- lightweight memory web UI
+    phren verify                          - post-init verification
+    phren update [--refresh-starter]      - update package
+    phren uninstall                       - remove phren config and hooks
+
+  Modes:
+    phren mcp-mode on|off|status          - toggle MCP integration
+    phren hooks-mode on|off|status        - toggle hook execution
 
 Environment Variables:
 
@@ -158,6 +237,24 @@ Environment Variables:
   PHREN_FEATURE_SEMANTIC_DEDUP  - set 1 to enable LLM-based paraphrase dedup
   PHREN_FEATURE_SEMANTIC_CONFLICT - set 1 to enable LLM-based contradiction detection
   PHREN_FEATURE_AUTO_CAPTURE    - set 1 to extract insights from conversation transcripts at session end
+  PHREN_FEATURE_HYBRID_SEARCH   - TF-IDF cosine fallback (default: on, set 0 to disable)
+  PHREN_FEATURE_PROGRESSIVE_DISCLOSURE - compact memory index injection (set 1 to enable)
+  PHREN_FEATURE_GIT_CONTEXT_FILTER - git-context file relevance boost (set 'true' to enable)
+  PHREN_MAX_INJECT_TOKENS       - hard cap on total injected tokens (default: 2000)
+  PHREN_TASK_PRIORITY            - priorities to inject: high,medium,low (default: high,medium)
+  PHREN_MEMORY_TTL_DAYS          - override memory TTL for trust filtering
+  PHREN_OLLAMA_URL               - Ollama base URL (default: http://localhost:11434, set 'off' to disable)
+  PHREN_EMBEDDING_MODEL          - embedding model (default: nomic-embed-text)
+  PHREN_EXTRACT_MODEL            - Ollama model for extraction (default: llama3.2)
+  PHREN_CONSOLIDATION_CAP        - max total findings before forced consolidation (default: 150)
+  PHREN_HOOK_TIMEOUT_MS          - timeout for hook subprocess execution (default: 14000)
+  PHREN_SLOW_FS_WARN_MS          - warn when FS operations exceed threshold (default: 3000)
+  PHREN_FILE_LOCK_MAX_WAIT_MS    - max file lock wait time (default: 5000)
+  PHREN_AUTOCAPTURE_COOLDOWN_MS  - min ms between auto-capture runs (default: 30000)
+  PHREN_AUTOCAPTURE_SESSION_CAP  - max findings auto-captured per session (default: 10)
+  PHREN_GH_PR_LIMIT              - max PRs fetched per extraction (default: 40)
+  PHREN_GH_TIMEOUT_MS            - GitHub API timeout (default: 10000)
+  PHREN_MEMORY_EXTRACT_WINDOW_DAYS - look-back window for extraction (default: 30)
 
 Key File Locations:
 

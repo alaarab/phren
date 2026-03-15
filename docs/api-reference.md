@@ -412,7 +412,7 @@ Get docs linked to a named fragment.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `fragment` | string | yes | Fragment name to look up related documents for. |
+| `entity` | string | yes | Fragment name to look up related documents for. |
 | `project` | string | no | Optional project filter. |
 | `limit` | number | no | Max docs to return (default 10). |
 
@@ -434,9 +434,9 @@ Manually link a finding to a fragment. The link persists to `manual-links.json` 
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding_text` | string | yes | Text of the finding to link. |
-| `fragment` | string | yes | Fragment name to link to. |
+| `entity` | string | yes | Fragment name to link to (e.g. "Redis", "Docker"). |
 | `relation` | string | no | Relationship type (e.g. "mentions", "implements"). |
-| `fragment_type` | string | no | Fragment type label (for example `library`, `service`, `concept`, `architecture`). Defaults to `fragment`. |
+| `entity_type` | string | no | Fragment type label (for example `library`, `service`, `concept`, `architecture`). Defaults to `fragment`. |
 
 ### `cross_project_fragments`
 
@@ -444,7 +444,7 @@ Find fragments that appear in multiple projects. Useful for discovering shared p
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `fragment` | string | yes | Fragment name to search for (partial match). |
+| `entity` | string | yes | Fragment name to search for (partial match). |
 | `exclude_project` | string | no | Exclude one project from the result set. |
 | `limit` | number | no | Max results (default 20). |
 
@@ -641,7 +641,9 @@ Read review queue items for one project or all active-profile projects. The revi
 
 Run doctor self-heal checks and apply fixes (missing files, broken symlinks, stale locks).
 
-No parameters.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `check_data` | boolean | no | Also validate data files (findings, tasks) for structural issues. |
 
 ---
 
@@ -666,7 +668,9 @@ Extract candidate findings from session/transcript context for bulk capture work
 
 Read current governance and policy configuration (retention, workflow, access, index policies).
 
-No parameters.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `domain` | enum | no | Config domain to read: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, or `all` (default). |
 
 ### `set_proactivity`
 
@@ -674,7 +678,8 @@ Set agent proactivity level.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `level` | string | yes | Proactivity level to set. |
+| `level` | enum | yes | Proactivity level: `high`, `medium`, or `low`. |
+| `scope` | enum | no | Which scope to set: `base` (default), `findings`, or `tasks`. |
 
 ### `set_task_mode`
 
@@ -682,7 +687,7 @@ Set task management mode.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `mode` | string | yes | Task mode to set. |
+| `mode` | enum | yes | Task mode: `off`, `manual`, `suggest`, or `auto`. |
 
 ### `set_finding_sensitivity`
 
@@ -690,7 +695,7 @@ Set finding capture sensitivity.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `level` | string | yes | Finding sensitivity level to set. |
+| `level` | enum | yes | Sensitivity level: `minimal`, `conservative`, `balanced`, or `aggressive`. |
 
 ### `set_retention_policy`
 
@@ -698,7 +703,11 @@ Configure retention and decay policy.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `settings` | object | yes | Retention policy settings to apply. |
+| `ttlDays` | number | no | Days before a finding is considered for expiry (min 1). |
+| `retentionDays` | number | no | Hard retention limit in days (min 1). |
+| `autoAcceptThreshold` | number | no | Score threshold (0-1) for auto-accepting extracted memories. |
+| `minInjectConfidence` | number | no | Minimum confidence (0-1) to inject into context. |
+| `decay` | object | no | Decay multipliers: `{ d30?, d60?, d90?, d120? }` (each 0-1). |
 
 ### `set_workflow_policy`
 
@@ -706,7 +715,10 @@ Configure workflow approval gates.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `settings` | object | yes | Workflow policy settings to apply. |
+| `lowConfidenceThreshold` | number | no | Confidence below which findings are flagged (0-1). |
+| `riskySections` | string[] | no | Sections considered risky: `Review`, `Stale`, `Conflicts`. |
+| `taskMode` | enum | no | Task automation mode: `off`, `manual`, `suggest`, `auto`. |
+| `findingSensitivity` | enum | no | Capture level: `minimal`, `conservative`, `balanced`, `aggressive`. |
 
 ### `set_index_policy`
 
@@ -714,7 +726,9 @@ Configure indexer include/exclude globs.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `settings` | object | yes | Index policy settings to apply. |
+| `includeGlobs` | string[] | no | Glob patterns to include in the index. |
+| `excludeGlobs` | string[] | no | Glob patterns to exclude from the index. |
+| `includeHidden` | boolean | no | Whether to index hidden files. |
 
 ---
 

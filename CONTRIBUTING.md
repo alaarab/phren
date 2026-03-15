@@ -23,14 +23,14 @@ The build compiles TypeScript from `mcp/src/` into `mcp/dist/` and marks the ent
 
 | Path | What it does |
 |------|-------------|
-| `mcp/src/index.ts` | CLI routing + MCP server bootstrap (65 public tools across 12 modules) |
+| `mcp/src/index.ts` | CLI routing + MCP server bootstrap (66 public tools across 12 modules) |
 | `mcp/src/shared.ts` | Shared path/runtime helpers and core exports |
 | `mcp/src/cli.ts` | CLI subcommands (search, doctor, shell, etc.) |
 | `mcp/src/utils.ts` | FTS5 sanitization, synonym expansion, keyword extraction |
 | `mcp/src/init.ts` | `npx phren init`: configures MCP + hooks |
 | `mcp/src/link.ts` | Profile sync, symlinks, hooks, context |
 | `mcp/src/data-access.ts` | Task CRUD, machine/profile listing, learning management |
-| `mcp/src/mcp-*.ts` | MCP module handlers (search/tasks/findings/memory/data/graph/session/ops/skills/hooks/extract/config) |
+| `mcp/src/mcp-*.ts` | MCP tool modules (search/tasks/finding/memory/data/graph/session/ops/skills/hooks/extract/config) |
 | `mcp/src/skill-registry.ts` | Skill precedence, alias collision handling, visibility gating, manifest generation |
 | `mcp/src/governance-policy.ts` | RBAC, policy files, actor resolution (`PHREN_ACTOR` + local access control) |
 | `mcp/src/memory-ui-server.ts` | Web UI server, auth/CSRF/CSP/loopback security model |

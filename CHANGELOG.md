@@ -3,6 +3,41 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.9] - 2026-03-14
+
+### Added
+- **CLI task namespace**: `phren task add|complete|remove|update|next|promote|pin|tidy|link|create-issue|reorder` for full task management from the command line
+- **CLI finding namespace**: `phren finding add|remove|supersede|retract|contradictions|resolve` for finding lifecycle management from the command line
+- **CLI review command**: `phren review [project]` shows review queue items with date, confidence, and text
+- **CLI consolidation-status**: `phren consolidation-status [project]` checks if findings need consolidation
+- **CLI session-context**: `phren session-context` shows current session state (project, duration, findings added)
+- **CLI graph namespace**: `phren graph [--project <n>]` and `phren graph link` for viewing and linking the fragment knowledge graph
+- **CLI detect-skills**: `phren detect-skills [--import]` finds untracked skills in `~/.claude/skills/`
+- **CLI config synonyms**: `phren config synonyms [list|add|remove]` manages project learned synonyms
+- **CLI config project-ownership**: `phren config project-ownership [mode]` sets default ownership for new projects
+- **CLI quickstart**: `phren quickstart` for quick init + project scaffold in one step
+- **`edit_finding` MCP tool**: edit a finding in place while preserving inline metadata
+- **`set_finding_sensitivity` MCP tool**: configure finding capture sensitivity level
+- **`/docs` skill**: update and verify all phren documentation surfaces after code changes
+- **Graph keyboard navigation**: arrow keys cycle through edges from the current node; Enter walks to the selected neighbor
+- **Graph walk animation**: phren character walks to nodes with ease-in-out motion, bounces on arrival, bobs while idle, and leaves a fading trail
+- **Graph engine API**: `walkTo(nodeId)`, `onNodeSelect(cb)`, `getNodeAt(x, y)`, `setView(options)`, and `getCurrentNode()` exposed for host integration
+- **VS Code finding lifecycle**: type tag and confidence badges shown inline on finding tree items
+- **VS Code GitHub task integration**: priority, pinned, and GitHub issue badges shown inline on task tree items
+
+### Security
+- **Symlink escape fix**: `safeProjectPath`, hook config paths, and skill file paths now resolve symlinks before checking containment
+- **SSRF bypass fix**: blocked IPv6 literals, decimal/hex integer IPs, IPv4-mapped IPv6, and `.local`/`.internal` hostnames in webhook validation
+- **File lock race fix**: preference and governance config writes hold a file lock for the full read-modify-write cycle
+
+### Fixed
+- **Complete cortex-to-phren rebrand cleanup**: removed all remaining cortex references from code, data markers, citation paths, skill names, and documentation
+
+### Docs
+- **MCP tool count synced to 66** across all documentation surfaces
+- **CLI commands section expanded** with task, finding, graph, review, and config namespaces
+- **Skills listing updated** to include `/docs` skill
+
 ## [0.0.8] - 2026-03-15
 
 ### Fixed
