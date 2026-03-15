@@ -59,8 +59,9 @@ const LOW_VALUE_BULLET_FRACTION = 0.5;
 
 // ── Intent and scoring helpers ───────────────────────────────────────────────
 
-export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "general" {
+export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "skill" | "general" {
   const p = prompt.toLowerCase();
+  if (/(?:^|\s)\/(?!(?:home|usr|var|tmp|etc|opt|api|mnt)\b)[a-z][\w-]*\b/.test(p) || /\bskill\b/.test(p)) return "skill";
   if (/(bug|error|fix|broken|regression|fail|stack trace)/.test(p)) return "debug";
   if (/(review|audit|pr|pull request|nit|refactor)/.test(p)) return "review";
   if (/(build|deploy|release|ci|workflow|pipeline|test)/.test(p)) return "build";
