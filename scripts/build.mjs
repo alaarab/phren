@@ -57,6 +57,7 @@ try {
   execFileSync(tscExec(), ["-p", path.join(mcpRoot, "tsconfig.json"), "--outDir", tempRoot], {
     cwd: repoRoot,
     stdio: "inherit",
+    shell: process.platform === "win32",
   });
   copySupplementalAssets(tempRoot);
   const entryPath = path.join(tempRoot, "index.js");
